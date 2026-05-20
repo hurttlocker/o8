@@ -347,21 +347,27 @@ export function useWorkspaceTerminalController(
       mode: 'single',
       singleRuntime: runtime,
     };
-    setTabs((previous) => [...previous, newTab]);
+    const nextTabs = [...tabsRef.current, newTab];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
     setActiveTabIdFromUser(newTab.id);
     return newTab.id;
   }, [setActiveTabIdFromUser]);
 
   const spawnChatTab = useCallback((): string => {
     const newTab = createDefaultChatTab();
-    setTabs((previous) => [...previous, newTab]);
+    const nextTabs = [...tabsRef.current, newTab];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
     setActiveTabIdFromUser(newTab.id);
     return newTab.id;
   }, [createDefaultChatTab, setActiveTabIdFromUser]);
 
   const spawnOrchestratorTab = useCallback((): string => {
     const newTab = createDefaultOrchestratorTab();
-    setTabs((previous) => [...previous, newTab]);
+    const nextTabs = [...tabsRef.current, newTab];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
     setActiveTabIdFromUser(newTab.id);
     return newTab.id;
   }, [createDefaultOrchestratorTab, setActiveTabIdFromUser]);
@@ -650,11 +656,15 @@ export function useWorkspaceTerminalController(
     const result = computeLlmChatSession(options, tabsRef.current, activeTabId);
     if (result.updatedTabId) {
       const injection = buildLlmInjection(options);
-      setTabs((previous) => previous.map((tab) => (
+      const nextTabs = tabsRef.current.map((tab) => (
         tab.id === result.updatedTabId ? { ...tab, label: options.label ?? tab.label, llmDraftInjection: injection ?? tab.llmDraftInjection } : tab
-      )));
+      ));
+      tabsRef.current = nextTabs;
+      setTabs(nextTabs);
     } else if (result.newTab) {
-      setTabs((previous) => [result.newTab!, ...previous]);
+      const nextTabs = [result.newTab, ...tabsRef.current];
+      tabsRef.current = nextTabs;
+      setTabs(nextTabs);
     }
     setActiveTabIdFromUser(result.activeTabId);
     return result.activeTabId;
@@ -684,6 +694,21 @@ export function useWorkspaceTerminalController(
 
   const handleCloseTabRef = useRef<(tabId: string) => void>(() => undefined);
 
+  const openWorkspaceTerminalTab = useCallback((agentId: string, repo?: RegisteredRepo): string => {
+    // Pass the current tabs so `Terminal N` numbering picks the next free slot.
+    const result = computeNewTerminalTab(agentId, repo, tabsRef.current);
+    if (!result.newTab) return '';
+    if (result.cliCommand) {
+      pendingCliCommands.current.set(result.newTab.id, result.cliCommand);
+    }
+    const nextTabs = [result.newTab, ...tabsRef.current];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
+    setActiveTabIdFromUser(result.activeTabId);
+    requestTerminalForTab(result.newTab.id, result.cliCommand ?? undefined);
+    return result.activeTabId;
+  }, [requestTerminalForTab, setActiveTabIdFromUser]);
+
   useImperativeHandle(ref, () => buildTerminalTabHandle({
     tabsRef,
     panelRefs,
@@ -706,11 +731,13 @@ export function useWorkspaceTerminalController(
     handleSessionCreated,
     openWorkspaceCliChatSession,
     openWorkspaceLlmChatSession,
+    openWorkspaceOrchestratorTab: spawnOrchestratorTab,
+    openWorkspaceTerminalTab,
     openWorkspaceInspectorTab,
     persistTabsNow,
     sendTerminalDetach,
     closeTabById: (tabId: string) => handleCloseTabRef.current(tabId),
-  }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, persistTabsNow, preferredRepo, sendTerminalDetach, setActiveTabIdFromUser, stateScope]);
+  }), [activeTabId, handleSessionCreated, onOpenRepoDiff, onPreviewDetected, openWorkspaceCliChatSession, openWorkspaceInspectorTab, openWorkspaceLlmChatSession, openWorkspaceTerminalTab, persistTabsNow, preferredRepo, sendTerminalDetach, setActiveTabIdFromUser, spawnOrchestratorTab, stateScope]);
 
   const handleRegisterRepo = useCallback((localPath: string) => {
     fetch('/api/panel/repos', {
@@ -721,16 +748,8 @@ export function useWorkspaceTerminalController(
   }, []);
 
   const handleNewTab = useCallback((agentId: string, repo?: RegisteredRepo) => {
-    // Pass the current tabs so `Terminal N` numbering picks the next free slot.
-    const result = computeNewTerminalTab(agentId, repo, tabsRef.current);
-    if (!result.newTab) return;
-    if (result.cliCommand) {
-      pendingCliCommands.current.set(result.newTab.id, result.cliCommand);
-    }
-    setTabs((previous) => [result.newTab!, ...previous]);
-    setActiveTabIdFromUser(result.activeTabId);
-    requestTerminalForTab(result.newTab.id, result.cliCommand ?? undefined);
-  }, [requestTerminalForTab, setActiveTabIdFromUser]);
+    openWorkspaceTerminalTab(agentId, repo);
+  }, [openWorkspaceTerminalTab]);
 
   const handleNewChatTab = useCallback((runtime: Exclude<WorkspaceChatRuntime, 'chat'>, repo?: RegisteredRepo) => {
     const newTab = buildNewChatTab(runtime, repo);
@@ -740,11 +759,10 @@ export function useWorkspaceTerminalController(
 
   const handleNewLLMChatTab = useCallback((repo?: RegisteredRepo) => {
     const newTab = buildNewLlmChatTab(repo ?? preferredRepo ?? undefined);
-    setTabs((previous) => {
-      const nextTabs = [...previous, newTab];
-      persistTabsNow(nextTabs, newTab.id);
-      return nextTabs;
-    });
+    const nextTabs = [...tabsRef.current, newTab];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
+    persistTabsNow(nextTabs, newTab.id);
     setActiveTabIdFromUser(newTab.id);
   }, [persistTabsNow, preferredRepo, setActiveTabIdFromUser]);
 
@@ -781,6 +799,15 @@ export function useWorkspaceTerminalController(
   const handleUpdateLinkedIssue = useCallback((tabId: string, linkedIssue: TerminalTab['linkedIssue']) => {
     setTabs((previous) => previous.map((tab) => (
       tab.id === tabId ? { ...tab, linkedIssue } : tab
+    )));
+  }, []);
+
+  // Operator-initiated rename — keeps the workspace tab's label in
+  // sync with a chat-history PATCH so the header strip reflects the
+  // new title without waiting for a remount.
+  const handleUpdateTabLabel = useCallback((tabId: string, label: string) => {
+    setTabs((previous) => previous.map((tab) => (
+      tab.id === tabId ? { ...tab, label } : tab
     )));
   }, []);
 
@@ -943,7 +970,11 @@ export function useWorkspaceTerminalController(
     const newTab = buildHistoryChatTab(currentTab, historyTabId, title, historyRepo);
     const previous = tabsRef.current;
     const nextTabs = previous.some((tab) => tab.id === historyTabId)
-      ? previous
+      ? previous.map((tab) => (
+          tab.id === historyTabId
+            ? { ...tab, label: title, repo: newTab.repo ?? tab.repo }
+            : tab
+        ))
       : [...previous, newTab];
     tabsRef.current = nextTabs;
     setTabs(nextTabs);
@@ -978,6 +1009,7 @@ export function useWorkspaceTerminalController(
     handleUpdateChatSessionKey,
     handleUpdateLinkedIssue,
     handleUpdateLlmSummary,
+    handleUpdateTabLabel,
     isDragging,
     launchRequestKey,
     panelRefs,
