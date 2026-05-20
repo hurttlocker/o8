@@ -172,59 +172,100 @@ function WorkspaceTerminalPanelsBase({
       ))}
 
       {visibleTabs.length === 0 ? (
-        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 24, paddingBottom: 24, paddingLeft: 24, paddingRight: 24 }}>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12, textAlign: 'center', maxWidth: 320 }}>
-            <div
-              style={{
-                width: 40,
-                height: 40,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: 12,
-                background: 'rgba(148, 163, 184, 0.08)',
-                color: 'var(--t-text-muted)',
-              }}
-            >
-              <TerminalIcon size={18} />
-            </div>
-            <div style={{ color: 'var(--t-text-muted)', fontSize: 14, fontWeight: 600 }}>
-              Workspace surface idle
-            </div>
-            <div style={{ color: 'var(--t-text-muted)', fontSize: 12, lineHeight: 1.5 }}>
-              Open a terminal, chat, or canvas in this workspace. The shell can stay active in the background even when no terminal tab is open.
-            </div>
-            <button
-              type="button"
-              onClick={onLaunchWorkspace}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: 8,
-                minHeight: 32,
-                paddingTop: 0,
-                paddingBottom: 0,
-                paddingLeft: 12,
-                paddingRight: 12,
-                borderRadius: 9,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: 'rgba(37, 99, 235, 0.3)',
-                background: 'rgba(37, 99, 235, 0.1)',
-                color: '#2563eb',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              <TerminalIcon size={14} />
-              Launch workspace
-            </button>
-          </div>
-        </div>
+        <EmptyWorkspaceCTA />
       ) : null}
     </div>
+  );
+}
+
+/** Centered three-way CTA for the empty workspace state. Operator
+ *  dogfood noted the old "Launch workspace" button was opaque — what
+ *  is a workspace? Spelling out Orchestrator / Chat / Terminal gives
+ *  a first-time user the actual mental model.
+ *
+ *  Each card dispatches o8:request-spawn-tab — the same event the
+ *  global header play button uses — so spawn lands in this workspace. */
+function EmptyWorkspaceCTA() {
+  const spawn = (kind: 'orchestrator' | 'chat' | 'terminal') => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind } }));
+  };
+  return (
+    <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingTop: 24, paddingBottom: 24, paddingLeft: 24, paddingRight: 24 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, textAlign: 'center', maxWidth: 560 }}>
+        <div style={{ color: 'var(--t-text)', fontSize: 18, fontWeight: 600, letterSpacing: '-0.01em' }}>
+          Start a new session
+        </div>
+        <div style={{ color: 'var(--t-text-muted)', fontSize: 12.5, lineHeight: 1.55, maxWidth: 440 }}>
+          Pick how you want to work. You can switch between sessions and spawn more from the play button in the header.
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, minmax(140px, 1fr))', gap: 10, marginTop: 8 }}>
+          <EmptyWorkspaceCard
+            label="Orchestrator"
+            hint="Plan & dispatch with Claude"
+            onClick={() => spawn('orchestrator')}
+          />
+          <EmptyWorkspaceCard
+            label="Chat"
+            hint="Direct LLM conversation"
+            onClick={() => spawn('chat')}
+          />
+          <EmptyWorkspaceCard
+            label="Terminal"
+            hint="Plain shell, no chat"
+            onClick={() => spawn('terminal')}
+          />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function EmptyWorkspaceCard({
+  label,
+  hint,
+  onClick,
+}: {
+  label: string;
+  hint: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 4,
+        padding: 14,
+        borderRadius: 10,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--t-divider)',
+        background: 'transparent',
+        cursor: 'pointer',
+        textAlign: 'left',
+        fontFamily: 'var(--font-sans-system)',
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'var(--t-hover)';
+        e.currentTarget.style.borderColor = 'var(--t-accent-border, rgba(37, 99, 235, 0.3))';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent';
+        e.currentTarget.style.borderColor = 'var(--t-divider)';
+      }}
+    >
+      <span style={{ color: 'var(--t-text)', fontSize: 12.5, fontWeight: 600, letterSpacing: '-0.005em' }}>
+        {label}
+      </span>
+      <span style={{ color: 'var(--t-text-muted)', fontSize: 11, lineHeight: 1.4 }}>
+        {hint}
+      </span>
+    </button>
   );
 }
 

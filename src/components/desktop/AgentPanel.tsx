@@ -8,10 +8,11 @@ import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
 import { ChatsTab } from './repo-focus/tabs/ChatsTab';
 import { useLeftPanelProjectFocus } from './repo-focus/useLeftPanelProjectFocus';
 import { toRepoFocusRepo, type RepoFocusRepo } from './repo-focus/types';
+import { AddRepoDialog } from './repo-registry/AddRepoDialog';
 import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
 import { useProjects, type ProjectRecord } from './repo-registry/useProjects';
-import { ChevronDown, Cpu, Folder, Plus, Search, Sparkles, Zap, type LucideIcon } from './lucide-shims';
+import { ChevronDown, Folder, MessageSquare, Play, Plus, Search, Sparkles, Terminal, Zap, type LucideIcon } from './lucide-shims';
 import { repoSlugFromRemote } from './canvas-utils';
 import {
   AgentPanelEmptyState,
@@ -22,9 +23,9 @@ import {
 } from './agent-panel';
 
 const PROJECT_HISTORY_SECTIONS = ['orchestrator', 'chat'] as const;
-const ORCHESTRATOR_HISTORY_SECTIONS = ['orchestrator'] as const;
-
-type MiniRailMode = 'agents' | 'orchestrator';
+const MINI_FLAT_BUTTON_BG = 'transparent';
+const MINI_FLAT_HOVER_BG = 'var(--t-hover)';
+const MINI_ROW_DIVIDER = '1px solid color-mix(in srgb, var(--t-divider-subtle) 62%, transparent)';
 
 function repoFocusRepoFromPath(localPath: string): RepoFocusRepo {
   const name = (localPath.split('/').filter(Boolean).pop() ?? localPath) || 'repo';
@@ -52,6 +53,11 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onSelectPR,
     onReviewPR,
     onSelectRepo,
+    onFocusAssistantTab,
+    onCreateWorkspaceOrchestrator,
+    onCreateWorkspaceChat,
+    onCreateWorkspaceTerminal,
+    onRepoAdded,
     onRepoRemoved,
     onOpenSpecInWorkspace,
     orchestratorPackets = [],
@@ -102,7 +108,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   });
   const leftPanelFocus = liftedLeftPanelFocus ?? localLeftPanelFocus;
   const focusActive = leftPanelFocus.active;
-  const [miniRailMode, setMiniRailMode] = useState<MiniRailMode>('agents');
   const [projectsMenuOpen, setProjectsMenuOpen] = useState(false);
   const registeredRepoByPath = useMemo(() => new Map(registeredRepos.map((repo) => [repo.localPath, repo])), [registeredRepos]);
   const activeProjectRepoSet = useMemo(() => {
@@ -132,15 +137,35 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     }
     onSelectRepo?.(repo.id);
   }, [activeProjectId, leftPanelFocus, onSelectRepo]);
-  const miniRailSections = miniRailMode === 'orchestrator'
-    ? ORCHESTRATOR_HISTORY_SECTIONS
-    : PROJECT_HISTORY_SECTIONS;
   const effectiveTitlebarSpacerHeight = Math.min(titlebarSpacerHeight, 10);
-  const handleMiniCreate = useCallback(() => undefined, []);
+  const handleCreateOrchestrator = useCallback(() => {
+    onCreateWorkspaceOrchestrator?.();
+  }, [onCreateWorkspaceOrchestrator]);
+  const handleCreateChat = useCallback(() => {
+    if (onCreateWorkspaceChat) {
+      onCreateWorkspaceChat();
+      return;
+    }
+    onFocusAssistantTab?.();
+  }, [onCreateWorkspaceChat, onFocusAssistantTab]);
+  const handleCreateTerminal = useCallback(() => {
+    onCreateWorkspaceTerminal?.();
+  }, [onCreateWorkspaceTerminal]);
+  const [addRepoDialogOpen, setAddRepoDialogOpen] = useState(false);
+  const handledAddRepoIntentNonceRef = useRef<number | null>(null);
   const handleOpenProjectManagement = useCallback(() => {
     setProjectsMenuOpen(false);
     onOpenProjectManagement?.();
   }, [onOpenProjectManagement]);
+  const handleOpenAddRepoDialog = useCallback(() => {
+    setProjectsMenuOpen(false);
+    setAddRepoDialogOpen(true);
+  }, []);
+  const handleRepoAdded = useCallback(async (repo: RepoRegistryEntry) => {
+    await projects.refresh();
+    await onRepoAdded?.(repo);
+    onSelectRepo?.(repo.id);
+  }, [onRepoAdded, onSelectRepo, projects]);
   const handleMiniProjectSelect = useCallback((project: ProjectRecord) => {
     setProjectsMenuOpen(false);
     void projects.switchActive(project.id);
@@ -154,6 +179,24 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     leftPanelFocus.setSelectedRepoPath(repoPath);
     onSelectRepo?.(repo?.id ?? repoPath);
   }, [leftPanelFocus, onSelectRepo, projects, registeredRepoByPath]);
+
+  useEffect(() => {
+    const nonce = addRepoIntent?.nonce ?? null;
+    if (nonce === null || handledAddRepoIntentNonceRef.current === nonce) return;
+    handledAddRepoIntentNonceRef.current = nonce;
+    window.setTimeout(handleOpenAddRepoDialog, 0);
+  }, [addRepoIntent?.nonce, handleOpenAddRepoDialog]);
+
+  const addRepoDialog = (
+    <AddRepoDialog
+      open={addRepoDialogOpen}
+      projects={projects.ledger?.projects ?? []}
+      activeProjectId={projects.ledger?.activeProjectId ?? null}
+      onClose={() => setAddRepoDialogOpen(false)}
+      onRepoAdded={handleRepoAdded}
+      onProjectsChanged={projects.refresh}
+    />
+  );
 
   // When focus is active, the column itself widened — render the focus
   // surface inline so it occupies the whole AgentPanel column and keeps
@@ -196,6 +239,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           onOpenHistoryChat={onOpenHistoryChat}
           onOpenSpecInWorkspace={onOpenSpecInWorkspace}
         />
+        {addRepoDialog}
       </div>
     );
   }
@@ -223,10 +267,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
 
       {projects.activeProject ? (
         <MiniAgentPanelHeader
-          activeMode={miniRailMode}
-          primaryLabel={miniRailMode === 'orchestrator' ? 'New task' : 'New session'}
-          onModeChange={setMiniRailMode}
-          onCreatePrimary={handleMiniCreate}
+          onCreateOrchestrator={handleCreateOrchestrator}
+          onCreateChat={handleCreateChat}
+          onCreateTerminal={handleCreateTerminal}
           onSearch={onOpenCommandPalette}
           projects={projects.ledger?.projects ?? []}
           activeProjectId={projects.ledger?.activeProjectId ?? null}
@@ -236,6 +279,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           onProjectSelect={handleMiniProjectSelect}
           onRepoSelect={handleMiniRepoSelect}
           onManageProjects={handleOpenProjectManagement}
+          onAddRepo={handleOpenAddRepoDialog}
         />
       ) : null}
 
@@ -352,8 +396,8 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             variant="mini"
             limit={8}
             hideWhenEmpty
-            sectionLabel={miniRailMode === 'orchestrator' ? 'Orchestrator' : 'Recent'}
-            sections={miniRailSections}
+            sectionLabel={null}
+            sections={PROJECT_HISTORY_SECTIONS}
             showLiveSessions={false}
             groupMode="flat"
             showKindInMeta
@@ -378,15 +422,15 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             widens). Nothing else to render here. */}
 
       </div>
+      {addRepoDialog}
     </div>
   );
 });
 
 function MiniAgentPanelHeader({
-  activeMode,
-  primaryLabel,
-  onModeChange,
-  onCreatePrimary,
+  onCreateOrchestrator,
+  onCreateChat,
+  onCreateTerminal,
   onSearch,
   projects,
   activeProjectId,
@@ -396,11 +440,11 @@ function MiniAgentPanelHeader({
   onProjectSelect,
   onRepoSelect,
   onManageProjects,
+  onAddRepo,
 }: {
-  activeMode: MiniRailMode;
-  primaryLabel: string;
-  onModeChange: (mode: MiniRailMode) => void;
-  onCreatePrimary: () => void;
+  onCreateOrchestrator?: () => void;
+  onCreateChat?: () => void;
+  onCreateTerminal?: () => void;
   onSearch?: () => void;
   projects: ProjectRecord[];
   activeProjectId: string | null;
@@ -410,101 +454,74 @@ function MiniAgentPanelHeader({
   onProjectSelect: (project: ProjectRecord) => void;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
   onManageProjects: () => void;
+  onAddRepo: () => void;
 }) {
-  const modes: Array<{ id: MiniRailMode; label: string; icon: LucideIcon }> = [
-    { id: 'agents', label: 'Agents', icon: Cpu },
-    { id: 'orchestrator', label: 'Orchestrator', icon: Sparkles },
-  ];
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
+  const runSessionAction = useCallback((action?: () => void) => {
+    setSessionMenuOpen(false);
+    action?.();
+  }, []);
 
   return (
     <div
       style={{
         flexShrink: 0,
-        paddingTop: 6,
-        paddingRight: 12,
-        paddingBottom: 7,
-        paddingLeft: 12,
+        paddingTop: 3,
+        paddingRight: 0,
+        paddingBottom: 5,
+        paddingLeft: 0,
         borderBottom: '1px solid var(--t-divider-subtle)',
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      <div
-        role="tablist"
-        aria-label="Agent panel mode"
-        style={{
-          height: 28,
-          display: 'grid',
-          gridTemplateColumns: '0.86fr 1.34fr',
-          alignItems: 'center',
-          gap: 2,
-          padding: 2,
-          borderRadius: 9,
-          background: 'color-mix(in srgb, var(--t-input-bg) 72%, transparent)',
-          border: '1px solid color-mix(in srgb, var(--t-divider-subtle) 72%, transparent)',
-        }}
-      >
-        {modes.map(({ id, label, icon: Icon }) => {
-          const active = id === activeMode;
-          return (
-            <button
-              key={id}
-              type="button"
-              role="tab"
-              aria-selected={active}
-              onClick={() => onModeChange(id)}
-              style={{
-                minWidth: 0,
-                height: 24,
-                borderRadius: 7,
-                border: '1px solid transparent',
-                background: active ? 'var(--t-hover)' : 'transparent',
-                boxShadow: 'none',
-                color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
-                cursor: 'pointer',
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                gap: active ? 5 : 4,
-                fontFamily: 'var(--font-sans-system)',
-                fontSize: 10.5,
-                lineHeight: '13px',
-                fontWeight: active ? 620 : 500,
-                letterSpacing: 0,
-                whiteSpace: 'nowrap',
-                transition: 'background 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
-              }}
-              onMouseEnter={(event) => {
-                if (!active) event.currentTarget.style.background = 'var(--t-hover)';
-              }}
-              onMouseLeave={(event) => {
-                if (!active) event.currentTarget.style.background = 'transparent';
-              }}
-            >
-              <Icon size={12} strokeWidth={2} />
-              <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
-            </button>
-          );
-        })}
-      </div>
-
-      <div style={{ marginTop: 7, display: 'flex', flexDirection: 'column', gap: 1 }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
         <MiniAgentPanelAction
-          icon={Plus}
-          label={primaryLabel}
-          onClick={onCreatePrimary}
+          icon={Play}
+          label="New session"
+          active={sessionMenuOpen}
+          disclosure
+          onClick={() => {
+            onProjectsOpenChange(false);
+            setSessionMenuOpen((open) => !open);
+          }}
         />
+        {sessionMenuOpen ? (
+          <MiniSessionMenu
+            onCreateOrchestrator={() => runSessionAction(onCreateOrchestrator)}
+            onCreateChat={() => runSessionAction(onCreateChat)}
+            onCreateTerminal={() => runSessionAction(onCreateTerminal)}
+          />
+        ) : null}
         <MiniAgentPanelAction
           icon={Search}
           label="Search"
-          onClick={onSearch}
+          onClick={() => {
+            setSessionMenuOpen(false);
+            onSearch?.();
+          }}
           disabled={!onSearch}
+        />
+        <MiniAgentPanelAction
+          icon={Zap}
+          label="Automations"
+          onClick={() => {
+            setSessionMenuOpen(false);
+            // Dashboard listens for this and flips activeNavSection to 'automations'.
+            // Same pattern as o8:open-inbox-tab keeps AgentPanel decoupled.
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('o8:open-automations'));
+            }
+          }}
         />
         <MiniAgentPanelAction
           icon={Folder}
           label="Projects"
           active={projectsOpen}
           disclosure
-          onClick={() => onProjectsOpenChange(!projectsOpen)}
+          onClick={() => {
+            setSessionMenuOpen(false);
+            onProjectsOpenChange(!projectsOpen);
+          }}
         />
         {projectsOpen ? (
           <MiniProjectsMenu
@@ -514,22 +531,151 @@ function MiniAgentPanelHeader({
             onProjectSelect={onProjectSelect}
             onRepoSelect={onRepoSelect}
             onManageProjects={onManageProjects}
+            onAddRepo={onAddRepo}
           />
         ) : null}
-        <MiniAgentPanelAction
-          icon={Zap}
-          label="Automations"
-          onClick={() => {
-            // Dashboard listens for this and flips activeNavSection to 'automations'.
-            // Same pattern as o8:open-inbox-tab — keeps AgentPanel decoupled from
-            // dashboard state. Borrowed Codex placement from a community member's video.
-            if (typeof window !== 'undefined') {
-              window.dispatchEvent(new CustomEvent('o8:open-automations'));
-            }
-          }}
-        />
       </div>
     </div>
+  );
+}
+
+function MiniSessionMenu({
+  onCreateOrchestrator,
+  onCreateChat,
+  onCreateTerminal,
+}: {
+  onCreateOrchestrator: () => void;
+  onCreateChat: () => void;
+  onCreateTerminal: () => void;
+}) {
+  return (
+    <div
+      style={{
+        marginTop: 0,
+        marginRight: 0,
+        marginBottom: 2,
+        marginLeft: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 0,
+        borderRadius: 0,
+        border: 0,
+        background: 'transparent',
+        overflow: 'visible',
+      }}
+    >
+      <MiniSessionMenuItem
+        icon={Sparkles}
+        title="Orchestrator"
+        subtitle="Fleet by default"
+        onClick={onCreateOrchestrator}
+      />
+      <MiniSessionMenuItem
+        icon={MessageSquare}
+        title="Chat"
+        subtitle="Direct LLM conversation"
+        onClick={onCreateChat}
+      />
+      <MiniSessionMenuItem
+        icon={Terminal}
+        title="Terminal"
+        subtitle="Plain shell"
+        onClick={onCreateTerminal}
+        last
+      />
+    </div>
+  );
+}
+
+function MiniSessionMenuItem({
+  icon: Icon,
+  title,
+  subtitle,
+  last = false,
+  onClick,
+}: {
+  icon: LucideIcon;
+  title: string;
+  subtitle: string;
+  last?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        width: '100%',
+        borderWidth: 0,
+        borderBottom: last ? 0 : MINI_ROW_DIVIDER,
+        borderRadius: 0,
+        background: MINI_FLAT_BUTTON_BG,
+        color: 'var(--t-text)',
+        cursor: 'pointer',
+        outline: 'none',
+        display: 'grid',
+        gridTemplateColumns: '21px minmax(0, 1fr)',
+        gap: 8,
+        alignItems: 'center',
+        paddingTop: 7,
+        paddingRight: 18,
+        paddingBottom: 7,
+        paddingLeft: 18,
+        textAlign: 'left',
+        fontFamily: 'var(--font-sans-system)',
+        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+      }}
+      onMouseEnter={(event) => {
+        event.currentTarget.style.background = MINI_FLAT_HOVER_BG;
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = MINI_FLAT_BUTTON_BG;
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 21,
+          height: 21,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--t-accent)',
+        }}
+      >
+        <Icon size={14} strokeWidth={1.9} />
+      </span>
+      <span style={{ minWidth: 0 }}>
+        <span
+          style={{
+            display: 'block',
+            fontSize: 12,
+            lineHeight: '15px',
+            fontWeight: 520,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {title}
+        </span>
+        <span
+          style={{
+            display: 'block',
+            marginTop: 1,
+            fontSize: 10.5,
+            lineHeight: '13px',
+            fontWeight: 400,
+            color: 'var(--t-text-muted)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {subtitle}
+        </span>
+      </span>
+    </button>
   );
 }
 
@@ -555,28 +701,30 @@ function MiniAgentPanelAction({
       disabled={disabled}
       style={{
         width: '100%',
-        minHeight: 29,
+        minHeight: 27,
         borderWidth: 0,
-        borderRadius: 7,
-        background: active ? 'var(--t-hover)' : 'transparent',
+        borderBottom: 0,
+        borderRadius: 0,
+        background: active ? MINI_FLAT_BUTTON_BG : 'transparent',
         color: disabled ? 'var(--t-text-faint)' : 'var(--t-text)',
         cursor: disabled ? 'default' : 'pointer',
+        outline: 'none',
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        paddingTop: 4,
-        paddingRight: 7,
-        paddingBottom: 4,
-        paddingLeft: 7,
+        paddingTop: 3,
+        paddingRight: 18,
+        paddingBottom: 3,
+        paddingLeft: 18,
         textAlign: 'left',
         fontFamily: 'var(--font-sans-system)',
         transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(event) => {
-        if (!disabled) event.currentTarget.style.background = 'var(--t-hover)';
+        if (!disabled) event.currentTarget.style.background = MINI_FLAT_HOVER_BG;
       }}
       onMouseLeave={(event) => {
-        if (!disabled) event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent';
+        if (!disabled) event.currentTarget.style.background = active ? MINI_FLAT_BUTTON_BG : 'transparent';
       }}
     >
       <span
@@ -591,15 +739,15 @@ function MiniAgentPanelAction({
           flexShrink: 0,
         }}
       >
-        <Icon size={15} strokeWidth={2} />
+        <Icon size={14} strokeWidth={2} />
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
           style={{
             display: 'block',
-            fontSize: 13,
-            lineHeight: '16px',
-            fontWeight: 520,
+            fontSize: 12.5,
+            lineHeight: '15px',
+            fontWeight: 500,
             letterSpacing: 0,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -633,6 +781,7 @@ function MiniProjectsMenu({
   onProjectSelect,
   onRepoSelect,
   onManageProjects,
+  onAddRepo,
 }: {
   projects: ProjectRecord[];
   activeProjectId: string | null;
@@ -640,6 +789,7 @@ function MiniProjectsMenu({
   onProjectSelect: (project: ProjectRecord) => void;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
   onManageProjects: () => void;
+  onAddRepo: () => void;
 }) {
   const [hoveredRepo, setHoveredRepo] = useState<{ repo: RepoRegistryEntry; rect: DOMRect } | null>(null);
   const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -667,12 +817,12 @@ function MiniProjectsMenu({
   return (
     <div
       style={{
-        marginTop: 2,
+        marginTop: 0,
         marginBottom: 3,
         paddingTop: 3,
-        paddingRight: 2,
+        paddingRight: 0,
         paddingBottom: 3,
-        paddingLeft: 2,
+        paddingLeft: 0,
         maxHeight: 188,
         overflowY: 'auto',
         scrollbarWidth: 'none',
@@ -686,7 +836,7 @@ function MiniProjectsMenu({
           const active = project.id === activeProjectId;
           const visibleRepoPaths = project.repoPaths.filter((repoPath) => registeredRepoByPath.has(repoPath));
           return (
-            <div key={project.id} style={{ paddingTop: 2, paddingBottom: 2 }}>
+            <div key={project.id} style={{ paddingTop: 1, paddingBottom: 1 }}>
               <button
                 type="button"
                 onClick={() => onProjectSelect(project)}
@@ -694,7 +844,7 @@ function MiniProjectsMenu({
                   width: '100%',
                   minHeight: 25,
                   borderWidth: 0,
-                  borderRadius: 6,
+                  borderRadius: 0,
                   background: active ? 'var(--t-hover)' : 'transparent',
                   color: 'var(--t-text)',
                   cursor: 'pointer',
@@ -702,15 +852,23 @@ function MiniProjectsMenu({
                   alignItems: 'center',
                   gap: 7,
                   paddingTop: 3,
-                  paddingRight: 7,
+                  paddingRight: 18,
                   paddingBottom: 3,
-                  paddingLeft: 7,
+                  paddingLeft: 18,
                   textAlign: 'left',
                   fontFamily: 'var(--font-sans-system)',
                   transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
-                onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
-                onMouseLeave={(event) => { event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent'; }}
+                onMouseEnter={(event) => {
+                  event.currentTarget.style.background = 'var(--t-hover)';
+                  const chevron = event.currentTarget.querySelector<HTMLElement>('.o8-project-row-chevron');
+                  if (chevron) chevron.style.opacity = '1';
+                }}
+                onMouseLeave={(event) => {
+                  event.currentTarget.style.background = active ? 'var(--t-hover)' : 'transparent';
+                  const chevron = event.currentTarget.querySelector<HTMLElement>('.o8-project-row-chevron');
+                  if (chevron) chevron.style.opacity = '0';
+                }}
               >
                 <span
                   aria-hidden
@@ -748,9 +906,34 @@ function MiniProjectsMenu({
                 >
                   {visibleRepoPaths.length}
                 </span>
+                {/* Hover-reveal "open" chevron — operator dogfood noted
+                    the project row click affordance wasn't obvious. The
+                    actual click already opens the LeftPanelProjectFocus
+                    drawer; this just telegraphs that clicking does
+                    something. */}
+                <svg
+                  className="o8-project-row-chevron"
+                  width={11}
+                  height={11}
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  aria-hidden
+                  style={{
+                    color: 'var(--t-text-faint)',
+                    opacity: 0,
+                    transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <path d="m9 6 6 6-6 6" />
+                </svg>
               </button>
               {visibleRepoPaths.length > 0 ? (
-                <div style={{ paddingLeft: 19, paddingTop: 1, display: 'flex', flexDirection: 'column' }}>
+                <div style={{ paddingTop: 1, display: 'flex', flexDirection: 'column' }}>
                   {visibleRepoPaths.map((repoPath) => {
                     const repo = registeredRepoByPath.get(repoPath);
                     const label = repo?.name ?? repoFocusRepoFromPath(repoPath).name;
@@ -764,7 +947,7 @@ function MiniProjectsMenu({
                           width: '100%',
                           minHeight: 22,
                           borderWidth: 0,
-                          borderRadius: 5,
+                          borderRadius: 0,
                           background: 'transparent',
                           color: 'var(--t-text-muted)',
                           cursor: 'pointer',
@@ -772,9 +955,9 @@ function MiniProjectsMenu({
                           alignItems: 'center',
                           gap: 6,
                           paddingTop: 2,
-                          paddingRight: 7,
+                          paddingRight: 18,
                           paddingBottom: 2,
-                          paddingLeft: 7,
+                          paddingLeft: 30,
                           textAlign: 'left',
                           fontFamily: 'var(--font-sans-system)',
                           transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -832,22 +1015,61 @@ function MiniProjectsMenu({
       )}
       <button
         type="button"
+        onClick={onAddRepo}
+        style={{
+          width: '100%',
+          minHeight: 25,
+          marginTop: 3,
+          borderWidth: 0,
+          borderRadius: 0,
+          background: 'transparent',
+          color: 'var(--t-text-muted)',
+          cursor: 'pointer',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          paddingTop: 3,
+          paddingRight: 18,
+          paddingBottom: 3,
+          paddingLeft: 30,
+          textAlign: 'left',
+          fontFamily: 'var(--font-sans-system)',
+          fontSize: 11.5,
+          lineHeight: '15px',
+          fontWeight: 560,
+          letterSpacing: 0,
+          transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+        onMouseEnter={(event) => {
+          event.currentTarget.style.background = 'var(--t-hover)';
+          event.currentTarget.style.color = 'var(--t-text)';
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.background = 'transparent';
+          event.currentTarget.style.color = 'var(--t-text-muted)';
+        }}
+      >
+        <Plus size={12} strokeWidth={2} />
+        Add repo...
+      </button>
+      <button
+        type="button"
         onClick={onManageProjects}
         style={{
           width: '100%',
           minHeight: 25,
           marginTop: 3,
           borderWidth: 0,
-          borderRadius: 6,
+          borderRadius: 0,
           background: 'transparent',
           color: 'var(--t-text-muted)',
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           paddingTop: 3,
-          paddingRight: 7,
+          paddingRight: 18,
           paddingBottom: 3,
-          paddingLeft: 19,
+          paddingLeft: 30,
           textAlign: 'left',
           fontFamily: 'var(--font-sans-system)',
           fontSize: 11.5,
