@@ -5,12 +5,10 @@ import { forwardRef, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { RotateCcw } from '../lucide-shims';
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
-import { TabBar } from '@/components/desktop/workspace-terminal/TabBar';
 import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
 import { WorkspaceSpawnProvider, type WorkspaceSpawnHandlers } from '@/components/desktop/workspace-terminal/spawn-context';
-import { useTabBarVisibility } from '@/components/desktop/workspace-terminal/useTabBarVisibility';
 import { workspaceConversationHeaderLabel } from '@/components/desktop/workspace-terminal/utils';
 import type { TerminalTabHandle, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
 
@@ -24,29 +22,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       spawnOrchestratorTab: controller.spawnOrchestratorTab,
       updateTabMode: controller.handleUpdateTabMode,
     }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnOrchestratorTab, controller.spawnSingleRuntimeTab]);
-    // Drop the primary mode tabs (Orchestrator + Chat) from the top
-    // tab bar — they duplicate the left-rail nav. Only "real" workspace
-    // tabs (spawned Codex sessions / terminals / canvas) appear here.
-    const topBarTabs = useMemo(
-      () => controller.visibleTabs.filter((tab) => tab.kind !== 'orchestrator' && tab.kind !== 'llm-chat'),
-      [controller.visibleTabs],
-    );
-    const { widthAllowsTabs } = useTabBarVisibility();
-    // The TabBar component ALWAYS renders to host the per-workspace
-    // header controls (play / launch picker + close-split tile button).
-    // Its tab-list portion is gated separately: tabs only show below
-    // the viewport breakpoint AND when we have non-primary tabs to
-    // surface. Above the breakpoint, the strip is just controls.
-    const showTabList = widthAllowsTabs && topBarTabs.length > 0;
-    // The per-workspace TabBar (lower strip) carries play + close-tile
-    // controls and the per-pane title. It's redundant when there's only
-    // one workspace — the global column header already hosts the title
-    // and the left rail handles new-session spawn. Show it ONLY when:
-    //   - the user has split the workspace (canCloseTile === true), so
-    //     each pane needs its own title + close-tile + play affordance, OR
-    //   - the narrow-viewport tab list needs to render somewhere
-    const isSplitPane = props.canCloseTile === true;
-    const showTabBar = isSplitPane || showTabList;
     const activeTab = controller.activeTab;
     // workspaceConversationHeaderLabel only knows chat-shaped tabs
     // (orchestrator / llm-chat / single-runtime chat). For terminals
@@ -335,24 +310,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
               </motion.button>
             </div>
           </motion.div>
-        ) : null}
-
-        {showTabBar ? (
-          <TabBar
-            tabs={topBarTabs}
-            activeTabId={controller.effectiveActiveTabId}
-            launchRequestKey={controller.launchRequestKey}
-            onSelectTab={controller.handleSelectTab}
-            onCloseTab={controller.handleCloseTab}
-            onNewTab={controller.handleNewTab}
-            onNewLLMChatTab={controller.handleNewLLMChatTab}
-            scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
-            canCloseTile={props.canCloseTile}
-            onCloseTile={props.onCloseTile}
-            onReorderTabs={controller.handleReorderTabs}
-            showTabList={showTabList}
-            headerLabel={conversationHeaderLabel}
-          />
         ) : null}
 
         <WorkspaceTerminalPanels
