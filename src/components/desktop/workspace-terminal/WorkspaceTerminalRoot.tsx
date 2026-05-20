@@ -131,6 +131,22 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       };
     }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsForBroadcast]);
 
+    // Listen for chat-history rename so the workspace tab's label
+    // refreshes in sync with the chat-history PATCH. The header strip
+    // reads tab.label via workspaceConversationHeaderLabel — without
+    // this update the renamed title would lag until a remount.
+    const handleUpdateTabLabel = controller.handleUpdateTabLabel;
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      const onRename = (event: Event) => {
+        const detail = (event as CustomEvent<{ tabId?: string; title?: string }>).detail;
+        if (!detail?.tabId || typeof detail.title !== 'string') return;
+        handleUpdateTabLabel(detail.tabId, detail.title);
+      };
+      window.addEventListener('o8:chat-history-updated', onRename as EventListener);
+      return () => window.removeEventListener('o8:chat-history-updated', onRename as EventListener);
+    }, [handleUpdateTabLabel]);
+
     // Listen for header pill clicks. In single mode (no split) we
     // accept events that omit workspaceId; in split mode each pane
     // claims only events carrying its own workspaceId. Lets two
