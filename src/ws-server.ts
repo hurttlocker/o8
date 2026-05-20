@@ -110,6 +110,7 @@ import {
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
+import { bootAutomationsScheduler } from './lib/automations/scheduler';
 import type {
   LaneLifecycleEventPayload,
   RealtimeBatchMessage,
@@ -4498,6 +4499,7 @@ async function bootstrapWsServer() {
     });
 
     bootCompactorScheduler();
+    bootAutomationsScheduler();
 
     void (async () => {
       try {

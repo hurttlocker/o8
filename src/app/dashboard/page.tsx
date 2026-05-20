@@ -125,6 +125,7 @@ markDashboardScriptStart();
    first-render on cold launch. */
 const LazySettingsPage = lazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })));
 const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage').then(m => ({ default: m.AnalyticsPage })));
+const LazyAutomationsPage = lazy(() => import('@/components/desktop/AutomationsPage').then(m => ({ default: m.AutomationsPage })));
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
 const LazyCommandPalette = lazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })));
 const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })));
@@ -2883,7 +2884,15 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection !== 'analytics' && (
+        {activeNavSection === 'automations' && (
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading automations…</div>}>
+              <LazyAutomationsPage currentOwner="operator" />
+            </Suspense>
+          </div>
+        )}
+
+        {activeNavSection !== 'analytics' && activeNavSection !== 'automations' && (
           <OrchestratorDataProvider
             agents={parsedAgents}
             missionState={thoughtsMissionState}

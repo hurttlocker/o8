@@ -129,6 +129,9 @@ const GATED_PREFIXES = [
   // Projects model (epic #899) — leaks repo names and operator-curated
   // groupings. Loopback-only with bearer-token fallback for LAN clients.
   '/api/projects',
+  // Automations (Superset borrow) — reads + writes scheduled agent runs.
+  // Owner emails, prompts, and dispatch can all leak; gate loopback-only.
+  '/api/automations',
   // o8.md spec surface — reads/writes a repo-local file. Repo path is
   // operator-trusted; we don't expose this cross-origin without a token.
   '/api/repo-spec',

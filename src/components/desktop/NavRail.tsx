@@ -14,6 +14,7 @@ import {
   UsersThree,
   ChartBar,
   Bell,
+  Lightning,
 } from '@phosphor-icons/react';
 import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 
@@ -21,6 +22,7 @@ import type { Icon as PhosphorIcon } from '@phosphor-icons/react';
 
 export type NavSection =
   | 'agents'
+  | 'automations'
   | 'analytics'
   | 'settings';
 
@@ -45,6 +47,7 @@ const RAIL_WIDTH = 44;
 
 const NAV_ITEMS: NavItem[] = [
   { id: 'agents', label: 'Agents', icon: UsersThree },
+  { id: 'automations', label: 'Automations', icon: Lightning },
   { id: 'analytics', label: 'Analytics', icon: ChartBar },
 ];
 
@@ -536,6 +539,7 @@ export function NavRail({
             useTauri={inTauri}
             onPrefetch={
               item.id === 'analytics' ? () => { import('@/components/desktop/AnalyticsPage'); }
+              : item.id === 'automations' ? () => { import('@/components/desktop/AutomationsPage'); }
               : undefined
             }
           />
