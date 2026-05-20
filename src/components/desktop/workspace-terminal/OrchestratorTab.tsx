@@ -75,6 +75,31 @@ function permissionStorageKey(tabId: string): string {
   return `cortex-ide:orchestrator-permission:tab:${tabId}`;
 }
 
+/** Global last-active orchestrator thread id — restored on tab mount
+ *  when no explicit initialThreadId is provided. Lets a dev reload
+ *  drop the operator back into the same chat they were last using
+ *  (e.g. their renamed "O8.v1" dogfood thread). */
+const LAST_ORCHESTRATOR_THREAD_KEY = 'o8:last-orchestrator-thread-id';
+
+function readLastOrchestratorThreadId(): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    return window.localStorage.getItem(LAST_ORCHESTRATOR_THREAD_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function writeLastOrchestratorThreadId(threadId: string | null): void {
+  if (typeof window === 'undefined') return;
+  try {
+    if (threadId) window.localStorage.setItem(LAST_ORCHESTRATOR_THREAD_KEY, threadId);
+    else window.localStorage.removeItem(LAST_ORCHESTRATOR_THREAD_KEY);
+  } catch {
+    // ignore
+  }
+}
+
 function readStoredPermissionMode(tabId: string): ThoughtsChatPermissionMode {
   if (typeof window === 'undefined') return 'full';
   try {
@@ -263,6 +288,35 @@ function OrchestratorTabInner({
       detail: { tabId, threadId: chatChromeState.threadId },
     }));
   }, [active, tabId, chatChromeState.threadId]);
+
+  // Persist the last-active orchestrator thread id globally so dev
+  // reloads (and prod first-launch with default tabs) drop the
+  // operator back into their last conversation instead of a fresh
+  // empty orchestrator. Only persists while the tab is active so
+  // background tabs don't fight each other on multi-pane layouts.
+  useEffect(() => {
+    if (!active) return;
+    if (chatChromeState.threadId) writeLastOrchestratorThreadId(chatChromeState.threadId);
+  }, [active, chatChromeState.threadId]);
+
+  // On mount, if no explicit initialThreadId was passed (which is the
+  // case for default Orchestrator tabs spawned on first launch / reload),
+  // restore the last-active thread from localStorage and load it once.
+  const restoredThreadRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    if (initialThreadId) return; // explicit thread wins
+    if (restoredThreadRef.current) return; // restore only once per mount
+    const restored = readLastOrchestratorThreadId();
+    if (!restored) return;
+    restoredThreadRef.current = restored;
+    // Defer one tick so ThoughtsChatPanel's handle is attached before
+    // we call loadThread — mirrors the initialThreadId path below.
+    const timer = window.setTimeout(() => {
+      chatPanelRef.current?.loadThread(restored);
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [active, initialThreadId]);
 
   useEffect(() => {
     if (!active) return;
