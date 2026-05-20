@@ -325,7 +325,18 @@ function OrchestratorTabInner({
   // setting it pre-emptively used to break under React StrictMode's
   // double-effect (the cleanup cancelled the first timer, but the ref
   // was already flagged so the second effect bailed → no restore).
+  //
+  // `isRestoringThread` gates the empty-state vs shimmer swap below:
+  // true from the moment we know we're going to restore until the
+  // chat panel has actually loaded the messages (hasMessages flips).
   const restoredThreadRef = useRef<string | null>(null);
+  const [isRestoringThread, setIsRestoringThread] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    // Only orchestrator tabs in default mode (no explicit initialThreadId)
+    // participate in the restore path.
+    if (initialThreadId) return false;
+    return Boolean(readLastOrchestratorThreadId());
+  });
   useEffect(() => {
     if (!active) return;
     if (initialThreadId) return; // explicit thread wins
@@ -352,6 +363,21 @@ function OrchestratorTabInner({
       window.clearTimeout(timer);
     };
   }, [active, initialThreadId]);
+
+  // Drop the restoring flag once messages arrive (hasMessages flips
+  // true). Also bail out if the restore has been running for ~3s —
+  // covers the edge case where chat-history has no messages (empty
+  // restore target) so hasMessages would never flip and the shimmer
+  // would sit forever.
+  useEffect(() => {
+    if (!isRestoringThread) return;
+    if (chatChromeState.hasMessages) {
+      setIsRestoringThread(false);
+      return;
+    }
+    const fallback = window.setTimeout(() => setIsRestoringThread(false), 3000);
+    return () => window.clearTimeout(fallback);
+  }, [isRestoringThread, chatChromeState.hasMessages]);
 
   useEffect(() => {
     if (!active) return;
@@ -552,6 +578,19 @@ function OrchestratorTabInner({
     [greeting, runtimeLabel, handleQuickAction],
   );
 
+  // Restoring shimmer — swaps in for the "Good morning" empty state
+  // while we're loading the last-active thread from localStorage. Keeps
+  // the operator from seeing a confusing empty greeting that immediately
+  // gets replaced with a real conversation.
+  const restoringShimmerNode = useMemo(
+    () => (
+      <ThreadRestoreShimmer />
+    ),
+    [],
+  );
+
+  const emptyOrShimmerNode = isRestoringThread ? restoringShimmerNode : emptyStateNode;
+
   const hasMessages = chatChromeState.hasMessages;
 
   const thoughtsBodyBackground = 'linear-gradient(180deg, var(--t-glass-muted) 0%, rgba(0, 0, 0, 0) 100%)';
@@ -606,7 +645,7 @@ function OrchestratorTabInner({
       permissionMode={permissionMode}
       onTogglePermission={handleTogglePermission}
       repoLabel={repoLabel}
-      emptyStateOverride={emptyStateNode}
+      emptyStateOverride={emptyOrShimmerNode}
       showInlineExport={false}
       lockedMode={lockedMode}
       initialMode={initialMode}
@@ -759,6 +798,54 @@ function OrchestratorTabInner({
           onClose={sessionTiles.closePillContextMenu}
         />
       ) : null}
+    </div>
+  );
+}
+
+/** Loading placeholder that swaps in for OrchestratorEmptyState while
+ *  the last-active thread is rehydrating from localStorage. Three thin
+ *  bars + a thicker one mimic the shape of an arriving conversation
+ *  without claiming any specific content. The shimmer sweep matches
+ *  the SessionTimeline pattern so motion vocabulary stays consistent. */
+function ThreadRestoreShimmer() {
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'stretch',
+        justifyContent: 'flex-start',
+        gap: 12,
+        paddingTop: 64,
+        paddingLeft: 'max(8vw, 80px)',
+        paddingRight: 'max(8vw, 80px)',
+      }}
+      aria-label="Restoring conversation"
+      aria-live="polite"
+    >
+      <style>{`
+        @keyframes o8RestoreShimmer {
+          0%   { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+      `}</style>
+      {[68, 84, 52, 76].map((widthPct, i) => (
+        <div
+          key={i}
+          style={{
+            alignSelf: i % 2 === 0 ? 'flex-start' : 'flex-end',
+            width: `${widthPct}%`,
+            maxWidth: 520,
+            height: i === 1 ? 64 : 16,
+            borderRadius: i === 1 ? 14 : 6,
+            background: 'linear-gradient(90deg, var(--t-bg-card, rgba(255,255,255,0.04)) 0%, var(--t-hover, rgba(255,255,255,0.12)) 50%, var(--t-bg-card, rgba(255,255,255,0.04)) 100%)',
+            backgroundSize: '200% 100%',
+            animation: 'o8RestoreShimmer 1.8s linear infinite',
+          }}
+        />
+      ))}
     </div>
   );
 }
