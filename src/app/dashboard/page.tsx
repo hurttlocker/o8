@@ -261,10 +261,18 @@ function DashboardInner() {
   // them all here so splits don't overwrite each other. The top header
   // label only renders when there's exactly one active workspace; with
   // multiple, each split's own lower TabBar carries its own title.
+  type WorkspaceTabSummary = {
+    id: string;
+    label: string;
+    kind: string;
+    runtime: string | null;
+    packetStatus: string | null;
+  };
   type WorkspaceActivePayload = {
     label: string | null;
     tabId: string | null;
     kind: string | null;
+    tabs: WorkspaceTabSummary[];
   };
   const [workspaceActiveMap, setWorkspaceActiveMap] = useState<Map<string, WorkspaceActivePayload>>(() => new Map());
   useEffect(() => {
@@ -287,6 +295,9 @@ function DashboardInner() {
             label: detail?.label ?? null,
             tabId: detail?.tabId ?? null,
             kind: detail?.kind ?? null,
+            tabs: Array.isArray((detail as { tabs?: WorkspaceTabSummary[] })?.tabs)
+              ? (detail as { tabs?: WorkspaceTabSummary[] }).tabs ?? []
+              : [],
           });
         }
         return next;
@@ -297,14 +308,14 @@ function DashboardInner() {
   }, []);
 
   const workspaceHeaderActive = useMemo<WorkspaceActivePayload>(() => {
-    // Single workspace mounted → show its label in the global header.
-    // Multiple mounted (splits) → leave the global header label null;
-    // each split's lower TabBar carries its own title.
+    // Single workspace mounted → show its label / pill strip in the global
+    // header. Multiple mounted (splits) → leave the global header empty;
+    // each split's lower TabBar carries its own state.
     if (workspaceActiveMap.size === 1) {
       const [only] = workspaceActiveMap.values();
       return only;
     }
-    return { label: null, tabId: null, kind: null };
+    return { label: null, tabId: null, kind: null, tabs: [] };
   }, [workspaceActiveMap]);
 
   // `…` menu handlers. Only orchestrator + llm-chat tabs back to
@@ -3063,6 +3074,8 @@ function DashboardInner() {
           rightPanelOpen={showRightPanelColumn}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
           headerLabel={workspaceHeaderActive.label}
+          headerTabs={workspaceHeaderActive.tabs}
+          headerActiveTabId={workspaceHeaderActive.tabId}
           onTitleRename={titleMenuActive ? handleTitleRename : undefined}
           onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}
           onTitleShare={titleMenuActive ? handleTitleShare : undefined}
