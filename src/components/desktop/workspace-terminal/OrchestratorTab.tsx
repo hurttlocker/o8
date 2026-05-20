@@ -289,6 +289,32 @@ function OrchestratorTabInner({
     }));
   }, [active, tabId, chatChromeState.threadId]);
 
+  // When the loaded thread changes, fetch the chat-history record and
+  // sync its title into the workspace tab's label so the header strip
+  // reads the operator's chosen name (e.g. "o8.v1") instead of the
+  // default "Orchestrator". Mirrors what handleTitleRenameSubmit does
+  // after a rename, but reactive to thread switches + reload restores.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!active) return;
+    const threadId = chatChromeState.threadId;
+    if (!threadId) return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`);
+        if (!res.ok || cancelled) return;
+        const data = await res.json();
+        const title = typeof data?.title === 'string' && data.title.trim() ? data.title.trim() : null;
+        if (cancelled || !title) return;
+        window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
+          detail: { tabId, threadId, title },
+        }));
+      } catch { /* silent */ }
+    })();
+    return () => { cancelled = true; };
+  }, [active, tabId, chatChromeState.threadId]);
+
   // Persist the last-active orchestrator thread id globally so dev
   // reloads drop the operator back into their last conversation. Only
   // persists when the active thread HAS messages — without this guard
