@@ -542,54 +542,6 @@ export function InputButtons({
         </>
       ) : null}
 
-      {/* Enhance */}
-      {preEnhanceInput !== null ? (
-        <button
-          type="button"
-          onClick={onUndoEnhance}
-          title="Undo enhancement"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 22,
-            height: 22,
-            borderRadius: 6,
-            borderWidth: 0,
-            background: 'rgba(239, 68, 68, 0.1)',
-            color: '#ef4444',
-            cursor: 'pointer',
-            fontSize: 11,
-            fontWeight: 600,
-          }}
-        >
-          ↩
-        </button>
-      ) : (
-        <button
-          type="button"
-          onClick={onEnhance}
-          disabled={!input.trim() || enhancing}
-          title="Enhance with AI"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 22,
-            height: 22,
-            borderRadius: 6,
-            borderWidth: 0,
-            background: 'transparent',
-            color: enhancing ? '#93c5fd' : input.trim() ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
-            cursor: input.trim() && !enhancing ? 'pointer' : 'default',
-            transition: 'color 120ms',
-            animation: enhancing ? 'spin 1.5s ease-in-out infinite' : 'none',
-          }}
-        >
-          <SparklesIcon />
-        </button>
-      )}
-
       {/* Permission toggle — always rendered, icon-only */}
       <button
         type="button"
@@ -658,20 +610,17 @@ function SendPill({
   onSubmit: () => void;
   onStop?: () => void;
 }) {
+  // Compact icon-only button — operator-pinned visual, matches the reference
+  // pill set (voice / pause / stop). Single button: play when idle+armed,
+  // pause when working (clicking it stops the orchestrator if onStop is
+  // wired, otherwise it's a passive indicator).
   const canStop = working && Boolean(onStop);
   const interactive = canStop || (!working && canSubmit);
-  const stateColor = working ? '#FF5A1F' : canSubmit ? '#2563eb' : 'var(--t-text-faint)';
-  const borderColor = working
-    ? 'rgba(255, 90, 31, 0.32)'
-    : canSubmit
-      ? 'rgba(37, 99, 235, 0.32)'
-      : 'var(--t-border)';
-  const background = working
-    ? 'rgba(255, 90, 31, 0.08)'
-    : canSubmit
-      ? 'rgba(37, 99, 235, 0.06)'
-      : 'transparent';
-  const label = working ? (canStop ? 'stop' : 'working') : 'send';
+  const accent = '#2563eb';
+  const background = !interactive
+    ? 'transparent'
+    : accent;
+  const iconColor = interactive ? '#ffffff' : 'var(--t-text-faint)';
   const title = working
     ? (canStop ? 'Stop orchestrator' : 'Orchestrator working…')
     : canSubmit ? 'Send (Enter)' : 'Type to send';
@@ -684,57 +633,42 @@ function SendPill({
       title={title}
       aria-label={title}
       style={{
-        position: 'relative',
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 8,
-        height: 26,
-        paddingLeft: 10,
-        paddingRight: 10,
-        borderRadius: 8,
-        borderWidth: 1,
+        justifyContent: 'center',
+        width: 32,
+        height: 32,
+        paddingTop: 0,
+        paddingRight: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        borderRadius: 10,
+        borderWidth: interactive ? 0 : 1,
         borderStyle: 'solid',
-        borderColor,
+        borderColor: 'var(--t-border)',
         background,
-        color: stateColor,
+        color: iconColor,
         cursor: interactive ? 'pointer' : 'default',
-        minWidth: 0,
-        fontSize: 11.5,
-        fontWeight: 500,
-        letterSpacing: '0.01em',
-        whiteSpace: 'nowrap',
-        fontVariantNumeric: 'tabular-nums',
-        fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
         flexShrink: 0,
-        transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
+        opacity: working && !canStop ? 0.7 : 1,
+        animation: working ? 'sendpill-pulse 1.6s ease-in-out infinite' : 'none',
       }}
     >
-      {/* status dot — pulses during working */}
-      <span
-        aria-hidden="true"
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: 999,
-          flexShrink: 0,
-          background: stateColor,
-          animation: working ? 'sendpill-pulse 1.6s ease-in-out infinite' : 'none',
-          transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-      />
-      <span style={{ color: stateColor }}>{label}</span>
-      {/* glyph — up-arrow when send/armed, small square when stop */}
-      {canStop ? (
-        <svg width={9} height={9} viewBox="0 0 24 24" style={{ display: 'block', flexShrink: 0 }}>
-          <rect x="6" y="6" width="12" height="12" rx="1.5" fill={stateColor} />
+      {working ? (
+        // Pause glyph — two vertical bars. Click stops (canStop) or shows
+        // "working" indicator otherwise.
+        <svg width={13} height={13} viewBox="0 0 16 16" fill={iconColor} style={{ display: 'block' }}>
+          <rect x="4" y="3" width="3" height="10" rx="1" />
+          <rect x="9" y="3" width="3" height="10" rx="1" />
         </svg>
-      ) : working ? null : (
-        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-          <path d="M12 19V5" stroke={stateColor} />
-          <path d="m5 12 7-7 7 7" stroke={stateColor} />
+      ) : (
+        // Play glyph — right-pointing triangle.
+        <svg width={13} height={13} viewBox="0 0 16 16" fill={iconColor} style={{ display: 'block' }}>
+          <path d="M5 3l8 5-8 5V3z" />
         </svg>
       )}
-      <style>{`@keyframes sendpill-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
+      <style>{`@keyframes sendpill-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
     </button>
   );
 }
