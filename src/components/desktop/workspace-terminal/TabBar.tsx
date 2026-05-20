@@ -5,7 +5,6 @@ import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace
 import {
   PhosphorCaretLeft,
   PhosphorCaretRight,
-  PhosphorSplitVertical,
   PhosphorXBold,
   PhosphorXCircle,
 } from '@/components/desktop/workspace-terminal/icons';
@@ -15,18 +14,21 @@ import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/de
 import { chromeNeoSurface, chromeNeoHoverSurface } from '@/components/desktop/chrome/ChromeButton';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { compactPacketLabel } from '@/lib/workspace-terminal/compact-packet-label';
+import { packetStateColorScheme, type PacketStateKey } from '@/lib/packet-state-colors';
+import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 
-const LATEST_DISPATCH_BG = 'rgba(255, 90, 31, 0.08)';
-const LATEST_DISPATCH_BORDER = 'rgba(255, 90, 31, 0.22)';
-const LATEST_DISPATCH_TEXT = '#FF5A1F';
-
-// Terminal-state coloring for dispatched packets that have shipped. The
-// orange "latest dispatch" pill yields to green on `released` so a quick
-// glance at the tab strip reads as "this work is in / this work is done"
-// without having to expand the packet.
-const MERGED_DISPATCH_BG = 'rgba(22, 163, 74, 0.08)';
-const MERGED_DISPATCH_BORDER = 'rgba(22, 163, 74, 0.28)';
-const MERGED_DISPATCH_TEXT = '#15803d';
+// State-coloring for dispatched packet tabs. Now sources colors from
+// the shared packetStateColorScheme so tab + left-rail surfaces stay
+// in sync — extending from the old 2-state (latest/merged) treatment
+// to all 5 states (running / review / merged / failed / neutral).
+function tabStateKey(status: OrchestratorPacketStatus | null | undefined, isLatestDispatch: boolean): PacketStateKey {
+  if (!status) return isLatestDispatch ? 'review' : 'neutral';
+  if (status === 'released') return 'merged';
+  if (status === 'failed' || status === 'blocked') return 'failed';
+  if (status === 'awaiting_review' || isLatestDispatch) return 'review';
+  if (status === 'running' || status === 'launching') return 'running';
+  return 'neutral';
+}
 const TAB_BAR_HEIGHT = 38;
 const TAB_GAP = 4;
 const TAB_TOP_RADIUS = 15;
@@ -51,8 +53,6 @@ interface TabBarProps {
   onNewTab: (agentId: string, repo?: RegisteredRepo) => void;
   onNewLLMChatTab: (repo?: RegisteredRepo) => void;
   scopedRepo?: RegisteredRepo | null;
-  onSplitVertical?: () => void;
-  onSplitHorizontal?: () => void;
   canCloseTile?: boolean;
   onCloseTile?: () => void;
   onReorderTabs?: (draggedTabId: string, dropTargetTabId: string) => void;
@@ -67,8 +67,6 @@ export const TabBar = memo(function TabBar({
   onNewTab,
   onNewLLMChatTab,
   scopedRepo,
-  onSplitVertical,
-  onSplitHorizontal,
   canCloseTile,
   onCloseTile,
   onReorderTabs,
@@ -257,34 +255,29 @@ export const TabBar = memo(function TabBar({
 
             const neoSurface = chromeNeoSurface(isActive);
             const isFlashing = flashTabId === tab.id;
-            const isPlainActive = isActive && !isLatestDispatch && !isMergedDispatch;
-            const baseBoxShadow = isMergedDispatch
-              ? `inset 0 0 0 1px ${MERGED_DISPATCH_BORDER}`
-              : isLatestDispatch
-                ? `inset 0 0 0 1px ${LATEST_DISPATCH_BORDER}`
-                : (isPlainActive
-                  ? 'inset 0 1px 0 rgba(255, 255, 255, 0.18)'
-                  : neoSurface.boxShadow);
-            const tabBackground = isMergedDispatch
-              ? MERGED_DISPATCH_BG
-              : isLatestDispatch
-                ? LATEST_DISPATCH_BG
-                : (isActive
-                  ? 'var(--t-panel)'
-                  : neoSurface.background);
+            const stateKey = tabStateKey(tab.orchestrationPacket?.status, isLatestDispatch);
+            const stateScheme = packetStateColorScheme(stateKey);
+            const hasStateColor = stateKey !== 'neutral';
+            const isPlainActive = isActive && !hasStateColor;
+            const baseBoxShadow = hasStateColor
+              ? `inset 0 0 0 1px ${stateScheme.tabBorder}`
+              : (isPlainActive
+                ? 'inset 0 1px 0 rgba(255, 255, 255, 0.18)'
+                : neoSurface.boxShadow);
+            const tabBackground = hasStateColor
+              ? stateScheme.tabBg
+              : (isActive
+                ? 'var(--t-panel)'
+                : neoSurface.background);
             const tabBoxShadow = isFlashing
               ? `${baseBoxShadow}, 0 0 0 2px var(--t-accent-soft, rgba(37, 99, 235, 0.22)), 0 6px 18px rgba(37, 99, 235, 0.28)`
               : baseBoxShadow;
-            const tabTextColor = isMergedDispatch
-              ? MERGED_DISPATCH_TEXT
-              : isLatestDispatch
-                ? LATEST_DISPATCH_TEXT
-                : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)');
-            const tabBorderColor = isMergedDispatch
-              ? MERGED_DISPATCH_BORDER
-              : isLatestDispatch
-                ? LATEST_DISPATCH_BORDER
-                : 'var(--t-divider-subtle)';
+            const tabTextColor = hasStateColor
+              ? stateScheme.tabText
+              : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)');
+            const tabBorderColor = hasStateColor
+              ? stateScheme.tabBorder
+              : 'var(--t-divider-subtle)';
             return (
               <button
                 type="button"
@@ -464,7 +457,7 @@ export const TabBar = memo(function TabBar({
         onNewLLMChatTab={onNewLLMChatTab}
       />
 
-      {onSplitVertical || onSplitHorizontal || (canCloseTile && onCloseTile) ? (
+      {canCloseTile && onCloseTile ? (
         <div
           style={{
             display: 'flex',
@@ -475,32 +468,17 @@ export const TabBar = memo(function TabBar({
             flexShrink: 0,
           }}
         >
-          {onSplitVertical ? (
-            <button
-              type="button"
-              onClick={onSplitVertical}
-              aria-label="Split vertically"
-              style={chromeButtonStyle}
-              onMouseEnter={hoverChromeOn}
-              onMouseLeave={hoverChromeOff}
-            >
-              <span aria-hidden="true" style={chromeButtonHitZoneStyle} />
-              <PhosphorSplitVertical size={14} />
-            </button>
-          ) : null}
-          {canCloseTile && onCloseTile ? (
-            <button
-              type="button"
-              onClick={onCloseTile}
-              aria-label="Close tile"
-              style={chromeButtonStyle}
-              onMouseEnter={closeHoverOn}
-              onMouseLeave={closeHoverOff}
-            >
-              <span aria-hidden="true" style={chromeButtonHitZoneStyle} />
-              <PhosphorXCircle size={14} />
-            </button>
-          ) : null}
+          <button
+            type="button"
+            onClick={onCloseTile}
+            aria-label="Close tile"
+            style={chromeButtonStyle}
+            onMouseEnter={closeHoverOn}
+            onMouseLeave={closeHoverOff}
+          >
+            <span aria-hidden="true" style={chromeButtonHitZoneStyle} />
+            <PhosphorXCircle size={14} />
+          </button>
         </div>
       ) : null}
     </div>
@@ -535,16 +513,6 @@ const chromeButtonHitZoneStyle = {
   transform: 'translate(-50%, -50%)',
   background: 'transparent',
 } as const;
-
-function hoverChromeOn(event: MouseEvent<HTMLButtonElement>) {
-  event.currentTarget.style.background = 'var(--t-hover)';
-  event.currentTarget.style.color = 'var(--t-text)';
-}
-
-function hoverChromeOff(event: MouseEvent<HTMLButtonElement>) {
-  event.currentTarget.style.background = 'transparent';
-  event.currentTarget.style.color = 'var(--t-text-muted)';
-}
 
 function closeHoverOn(event: MouseEvent<HTMLButtonElement>) {
   event.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)';
