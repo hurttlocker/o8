@@ -296,21 +296,27 @@ function OrchestratorTabInner({
   // after a rename, but reactive to thread switches + reload restores.
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (!active) return;
     const threadId = chatChromeState.threadId;
     if (!threadId) return;
     let cancelled = false;
     (async () => {
       try {
+        // eslint-disable-next-line no-console
+        console.log('[orchestrator-title-sync] fetching', { tabId, threadId, active });
         const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const title = typeof data?.title === 'string' && data.title.trim() ? data.title.trim() : null;
+        // eslint-disable-next-line no-console
+        console.log('[orchestrator-title-sync] result', { tabId, threadId, title });
         if (cancelled || !title) return;
         window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
           detail: { tabId, threadId, title },
         }));
-      } catch { /* silent */ }
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.log('[orchestrator-title-sync] error', err);
+      }
     })();
     return () => { cancelled = true; };
   }, [active, tabId, chatChromeState.threadId]);
