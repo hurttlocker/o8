@@ -25,6 +25,10 @@ import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models'
 import { ChatOpenRouterPicker } from '@/components/desktop/orchestrator/ChatOpenRouterPicker';
 import { useWorkspaceSpawn } from '@/components/desktop/workspace-terminal/spawn-context';
 import {
+  readLastOrchestratorThreadId,
+  writeLastOrchestratorThread,
+} from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
+import {
   OrchestratorEmptyState,
   timeOfDayGreeting,
 } from '@/components/desktop/OrchestratorEmptyState';
@@ -75,30 +79,9 @@ function permissionStorageKey(tabId: string): string {
   return `cortex-ide:orchestrator-permission:tab:${tabId}`;
 }
 
-/** Global last-active orchestrator thread id — restored on tab mount
- *  when no explicit initialThreadId is provided. Lets a dev reload
- *  drop the operator back into the same chat they were last using
- *  (e.g. their renamed "O8.v1" dogfood thread). */
-const LAST_ORCHESTRATOR_THREAD_KEY = 'o8:last-orchestrator-thread-id';
-
-function readLastOrchestratorThreadId(): string | null {
-  if (typeof window === 'undefined') return null;
-  try {
-    return window.localStorage.getItem(LAST_ORCHESTRATOR_THREAD_KEY);
-  } catch {
-    return null;
-  }
-}
-
-function writeLastOrchestratorThreadId(threadId: string | null): void {
-  if (typeof window === 'undefined') return;
-  try {
-    if (threadId) window.localStorage.setItem(LAST_ORCHESTRATOR_THREAD_KEY, threadId);
-    else window.localStorage.removeItem(LAST_ORCHESTRATOR_THREAD_KEY);
-  } catch {
-    // ignore
-  }
-}
+// Persistence helpers for the cross-reload thread restore live in a
+// shared module so the workspace controller can read the same values
+// at tab-creation time (pre-set tab.label) without re-implementing.
 
 function readStoredPermissionMode(tabId: string): ThoughtsChatPermissionMode {
   if (typeof window === 'undefined') return 'full';
@@ -306,6 +289,10 @@ function OrchestratorTabInner({
         const data = await res.json();
         const title = typeof data?.title === 'string' && data.title.trim() ? data.title.trim() : null;
         if (cancelled || !title) return;
+        // Persist the title alongside the threadId so the next reload
+        // can pre-set tab.label at tab-creation time (no "Orchestrator"
+        // flash before the chat-history fetch completes).
+        if (active) writeLastOrchestratorThread(threadId, title);
         window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
           detail: { tabId, threadId, title },
         }));
@@ -323,7 +310,12 @@ function OrchestratorTabInner({
   useEffect(() => {
     if (!active) return;
     if (!chatChromeState.hasMessages) return;
-    if (chatChromeState.threadId) writeLastOrchestratorThreadId(chatChromeState.threadId);
+    if (chatChromeState.threadId) {
+      // Don't clear the title here — only the threadId update fires this
+      // effect. The title-sync effect above handles the (threadId, title)
+      // tuple write. Pass `undefined` to leave the stored title alone.
+      writeLastOrchestratorThread(chatChromeState.threadId);
+    }
   }, [active, chatChromeState.threadId, chatChromeState.hasMessages]);
 
   // On mount, if no explicit initialThreadId was passed (which is the
