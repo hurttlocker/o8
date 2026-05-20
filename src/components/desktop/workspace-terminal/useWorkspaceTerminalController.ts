@@ -28,6 +28,7 @@ import {
 } from '@/components/desktop/workspace-terminal/utils';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { buildTerminalTabHandle } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
+import { readLastOrchestratorThreadTitle } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import { canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, resetControllerRefs, shouldSkipRestoreKeyChange } from '@/components/desktop/workspace-terminal/terminal-restore';
 import {
   buildChatSessionSnapshots,
@@ -317,16 +318,24 @@ export function useWorkspaceTerminalController(
     chatModelId: 'o8-default',
   }), []);
 
-  const createDefaultOrchestratorTab = useCallback((): TerminalTab => ({
-    id: createWorkspaceTabId('orchestrator'),
-    label: 'Orchestrator',
-    kind: 'orchestrator',
-    tmuxSession: null,
-    repo: preferredRepoRef.current ?? undefined,
-    createdAt: Date.now(),
-    lastActivity: Date.now(),
-    mode: 'fleet',
-  }), []);
+  const createDefaultOrchestratorTab = useCallback((): TerminalTab => {
+    // Pre-set tab.label from the saved last-active orchestrator title
+    // when one exists in localStorage. Without this the header reads
+    // "Orchestrator" for 1-2s on cold reload before the title-sync
+    // effect fetches chat-history and dispatches the rename event.
+    // Falls back to 'Orchestrator' default when no saved title.
+    const savedTitle = readLastOrchestratorThreadTitle();
+    return {
+      id: createWorkspaceTabId('orchestrator'),
+      label: savedTitle ?? 'Orchestrator',
+      kind: 'orchestrator',
+      tmuxSession: null,
+      repo: preferredRepoRef.current ?? undefined,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+      mode: 'fleet',
+    };
+  }, []);
 
   // Fresh workspace = Orchestrator first, Chat ready but not focused. The
   // orchestrator stays the command center while the left rail's Chat row has
