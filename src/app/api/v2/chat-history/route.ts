@@ -152,25 +152,38 @@ export async function PATCH(request: NextRequest) {
   const body = await request.json().catch(() => null);
   if (!body?.tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
 
+  ensureDir();
   const filePath = safePath(body.tabId);
+
+  // Upsert — if the chat hasn't been saved yet (no messages have flowed
+  // through POST), create a metadata-only record. Lets the operator
+  // rename / archive / pin a fresh chat without having to send a message
+  // first.
+  let data: Record<string, unknown>;
   try {
-    const data = JSON.parse(readFileSync(filePath, 'utf-8'));
-    if (body.starred !== undefined) data.starred = body.starred;
-    if (body.pinned !== undefined) data.pinned = body.pinned;
-    if (body.title !== undefined) data.title = body.title;
-    if (body.planText !== undefined) data.planText = normalizePlanText(body.planText) ?? null;
-    if (body.repoName !== undefined) data.repoName = body.repoName;
-    if (body.repoPath !== undefined) data.repoPath = body.repoPath;
-    if (body.repoBranch !== undefined) data.repoBranch = body.repoBranch;
-    if (body.remoteUrl !== undefined) data.remoteUrl = body.remoteUrl;
-    if (body.backend !== undefined) data.backend = normalizeBackend(body.backend) ?? null;
-    if (body.agent !== undefined) data.agent = normalizeAgent(body.agent) ?? null;
-    if (body.archivedAt !== undefined) data.archivedAt = normalizeNullableDate(body.archivedAt) ?? null;
-    writeFileSync(filePath, JSON.stringify(data));
-    return NextResponse.json({ ok: true });
+    data = JSON.parse(readFileSync(filePath, 'utf-8'));
   } catch {
-    return NextResponse.json({ error: 'Not found' }, { status: 404 });
+    data = {
+      messages: [],
+      savedAt: new Date().toISOString(),
+      starred: false,
+    };
   }
+
+  if (body.starred !== undefined) data.starred = body.starred;
+  if (body.pinned !== undefined) data.pinned = body.pinned;
+  if (body.title !== undefined) data.title = body.title;
+  if (body.planText !== undefined) data.planText = normalizePlanText(body.planText) ?? null;
+  if (body.repoName !== undefined) data.repoName = body.repoName;
+  if (body.repoPath !== undefined) data.repoPath = body.repoPath;
+  if (body.repoBranch !== undefined) data.repoBranch = body.repoBranch;
+  if (body.remoteUrl !== undefined) data.remoteUrl = body.remoteUrl;
+  if (body.backend !== undefined) data.backend = normalizeBackend(body.backend) ?? null;
+  if (body.agent !== undefined) data.agent = normalizeAgent(body.agent) ?? null;
+  if (body.archivedAt !== undefined) data.archivedAt = normalizeNullableDate(body.archivedAt) ?? null;
+
+  writeFileSync(filePath, JSON.stringify(data));
+  return NextResponse.json({ ok: true });
 }
 
 export async function DELETE(request: NextRequest) {
