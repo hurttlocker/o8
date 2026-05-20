@@ -14,7 +14,10 @@ interface ColumnHeaderStripProps {
   left?: ReactNode;
   center?: ReactNode;
   right?: ReactNode;
-  /** Strip height in px — matches the legacy 44px TitleBar by default. */
+  /** Strip height in px. Tightened from the legacy 44px to 36px to
+   *  match Codex / Claude's leaner title-bar density. Override on any
+   *  consumer that needs the old 44px (e.g. when re-introducing the
+   *  Apple-HIG-mandated touch target). */
   height?: number;
   /** When true the strip acts as a Tauri window-drag region. */
   drag?: boolean;
@@ -25,7 +28,7 @@ export function ColumnHeaderStrip({
   left,
   center,
   right,
-  height = 44,
+  height = 36,
   drag = false,
   style,
 }: ColumnHeaderStripProps) {

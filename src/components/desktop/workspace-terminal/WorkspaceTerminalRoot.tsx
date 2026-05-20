@@ -42,21 +42,27 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       ? workspaceConversationHeaderLabel(controller.activeTab)
       : null;
 
-    // Broadcast the active-tab label so the column-level header strip
-    // (WorkspaceHeaderStrip) can mirror Codex / Claude and put the
-    // conversation title in the title bar itself. Cleared on unmount so
-    // closing a workspace tile clears any stale title from the chrome.
+    // Broadcast the active-tab label + tabId + kind so the column-level
+    // header strip (WorkspaceHeaderStrip) can mirror Codex / Claude and
+    // put the conversation title in the title bar itself, plus drive the
+    // `…` menu actions (rename / archive / share). Cleared on unmount.
+    const activeTabId = controller.activeTab?.id ?? null;
+    const activeTabKind = controller.activeTab?.kind ?? null;
     useEffect(() => {
       if (typeof window === 'undefined') return;
       window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
-        detail: { label: conversationHeaderLabel },
+        detail: {
+          label: conversationHeaderLabel,
+          tabId: activeTabId,
+          kind: activeTabKind,
+        },
       }));
       return () => {
         window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
-          detail: { label: null },
+          detail: { label: null, tabId: null, kind: null },
         }));
       };
-    }, [conversationHeaderLabel]);
+    }, [conversationHeaderLabel, activeTabId, activeTabKind]);
 
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
