@@ -38,8 +38,22 @@ interface WorkspaceHeaderStripProps {
   onToggleRightPanel?: () => void;
   /** Active workspace tab title rendered in the center slot. Codex / Claude
    *  put the conversation name in the title bar itself instead of a
-   *  separate strip below. Supports "repo / chat" split styling. */
+   *  separate strip below. Supports "repo / chat" split styling. Used
+   *  when there's exactly one open tab. */
   headerLabel?: string | null;
+  /** Full visible-tab list for the single workspace. When length > 1
+   *  the center slot morphs from "title" to a horizontal pill strip
+   *  (Codex pattern). When length <= 1 we fall back to headerLabel. */
+  headerTabs?: Array<{
+    id: string;
+    label: string;
+    kind: string;
+    runtime: string | null;
+    packetStatus: string | null;
+  }>;
+  /** Active tab id from the headerTabs list — drives which pill renders
+   *  as filled. */
+  headerActiveTabId?: string | null;
   /** Optional action callbacks for the `…` menu next to the title.
    *  Items only render when the corresponding callback is provided —
    *  the menu hides entirely when none are set. */
@@ -71,9 +85,15 @@ export function WorkspaceHeaderStrip({
   onSpawnOrchestrator,
   onSpawnChat,
   onSpawnTerminal,
+  headerTabs,
+  headerActiveTabId,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
-  const hasTitleMenu = headerLabel && (onTitleRename || onTitleArchive || onTitleShare);
+  const tabs = headerTabs ?? [];
+  // 2+ tabs → pill strip, no title (each pill carries its own label).
+  // 1 or 0 → render the title + `…` menu as before.
+  const usePillStrip = tabs.length > 1;
+  const hasTitleMenu = !usePillStrip && headerLabel && (onTitleRename || onTitleArchive || onTitleShare);
   const hasPlayButton = Boolean(onSpawnOrchestrator || onSpawnChat || onSpawnTerminal);
   return (
     <ColumnHeaderStrip
@@ -91,7 +111,9 @@ export function WorkspaceHeaderStrip({
           ) : null}
         </>
       }
-      center={headerLabel ? (
+      center={usePillStrip ? (
+        <HeaderPillStrip tabs={tabs} activeTabId={headerActiveTabId ?? null} />
+      ) : headerLabel ? (
         <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
           <HeaderLabelText label={headerLabel} />
           {hasTitleMenu ? (
@@ -140,6 +162,230 @@ export function WorkspaceHeaderStrip({
       }
     />
   );
+}
+
+/** Codex-style pill strip — renders in the WorkspaceHeaderStrip's
+ *  center slot when 2+ tabs are open. Active pill is a filled dark
+ *  rounded rect; inactive pills are icon + label only. Horizontal
+ *  scroll when overflowing. Click → dispatches a window event the
+ *  workspace listens for. */
+function HeaderPillStrip({
+  tabs,
+  activeTabId,
+}: {
+  tabs: Array<{
+    id: string;
+    label: string;
+    kind: string;
+    runtime: string | null;
+    packetStatus: string | null;
+  }>;
+  activeTabId: string | null;
+}) {
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+  // Truncate to one word when the strip is crowded — Codex feel: at 5+
+  // tabs each pill compacts to just its first significant word.
+  const crowded = tabs.length >= 5;
+
+  const handleSelect = useCallback((tabId: string) => {
+    window.dispatchEvent(new CustomEvent('o8:request-select-tab', { detail: { tabId } }));
+  }, []);
+  const handleClose = useCallback((tabId: string) => {
+    window.dispatchEvent(new CustomEvent('o8:request-close-tab', { detail: { tabId } }));
+  }, []);
+
+  return (
+    <div
+      ref={scrollRef}
+      data-no-drag
+      style={{
+        flex: 1,
+        minWidth: 0,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 2,
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        scrollbarWidth: 'none',
+        paddingLeft: 6,
+        paddingRight: 6,
+      }}
+    >
+      {tabs.map((tab) => (
+        <HeaderPill
+          key={tab.id}
+          tab={tab}
+          active={tab.id === activeTabId}
+          crowded={crowded}
+          onSelect={handleSelect}
+          onClose={handleClose}
+        />
+      ))}
+    </div>
+  );
+}
+
+function HeaderPill({
+  tab,
+  active,
+  crowded,
+  onSelect,
+  onClose,
+}: {
+  tab: {
+    id: string;
+    label: string;
+    kind: string;
+    runtime: string | null;
+    packetStatus: string | null;
+  };
+  active: boolean;
+  crowded: boolean;
+  onSelect: (tabId: string) => void;
+  onClose: (tabId: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const display = crowded ? firstSignificantWord(tab.label) : tab.label;
+  return (
+    <div
+      data-no-drag
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      onContextMenu={(event) => {
+        // Right-click → context menu hook. Real menu lands in a later
+        // phase; for now we just suppress the native menu so the host
+        // is ready for the wired version.
+        event.preventDefault();
+        window.dispatchEvent(new CustomEvent('o8:request-pill-menu', {
+          detail: { tabId: tab.id, x: event.clientX, y: event.clientY },
+        }));
+      }}
+      style={{
+        position: 'relative',
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        height: 26,
+        paddingLeft: 10,
+        paddingRight: hovered && !active ? 6 : 10,
+        borderRadius: 7,
+        background: active
+          ? 'var(--t-input-bg)'
+          : hovered
+            ? 'var(--t-hover)'
+            : 'transparent',
+        color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+        fontFamily: 'var(--font-sans-system)',
+        fontSize: 11.5,
+        fontWeight: active ? 560 : 500,
+        letterSpacing: '-0.005em',
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+      onClick={() => onSelect(tab.id)}
+    >
+      <span style={{ display: 'inline-flex', flexShrink: 0 }}>
+        <PillRuntimeGlyph kind={tab.kind} runtime={tab.runtime} />
+      </span>
+      <span
+        style={{
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          maxWidth: crowded ? 80 : 140,
+        }}
+      >
+        {display}
+      </span>
+      {hovered ? (
+        <button
+          type="button"
+          onClick={(event) => {
+            event.stopPropagation();
+            onClose(tab.id);
+          }}
+          aria-label="Close tab"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 14,
+            height: 14,
+            borderRadius: 4,
+            borderWidth: 0,
+            background: 'transparent',
+            color: 'var(--t-text-muted)',
+            cursor: 'pointer',
+            padding: 0,
+            flexShrink: 0,
+          }}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.background = 'var(--t-input-bg)';
+            event.currentTarget.style.color = 'var(--t-text)';
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.background = 'transparent';
+            event.currentTarget.style.color = 'var(--t-text-muted)';
+          }}
+        >
+          <svg width={9} height={9} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
+function PillRuntimeGlyph({ kind, runtime }: { kind: string; runtime: string | null }) {
+  // Single-color minimal glyph so the pill stays Codex-flat. The full
+  // brand-colored runtime icons (CodexIcon / ClaudeIcon / GeminiIcon /
+  // OpenCodeIcon) sit too heavily in a crowded strip. If we want to
+  // reintroduce them, the swap point is here.
+  const color = 'currentColor';
+  if (kind === 'terminal') {
+    return (
+      <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="m4 17 6-6-6-6" />
+        <line x1="12" x2="20" y1="19" y2="19" />
+      </svg>
+    );
+  }
+  if (kind === 'canvas') {
+    return (
+      <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect width="18" height="18" x="3" y="3" rx="2" />
+        <path d="M3 9h18" />
+      </svg>
+    );
+  }
+  if (kind === 'orchestrator') {
+    return (
+      <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="12" cy="6" r="2" />
+        <circle cx="6" cy="18" r="2" />
+        <circle cx="18" cy="18" r="2" />
+        <path d="M12 8v4M12 12l-6 4M12 12l6 4" />
+      </svg>
+    );
+  }
+  // llm-chat or single-runtime chat
+  return (
+    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+    </svg>
+  );
+}
+
+function firstSignificantWord(label: string): string {
+  if (!label) return '';
+  // Split on " / " first (repo / title pattern) — keep the title side.
+  const slash = label.indexOf(' / ');
+  const tail = slash >= 0 ? label.slice(slash + 3) : label;
+  const words = tail.trim().split(/\s+/);
+  return words[0] ?? '';
 }
 
 /** Header ▶ play button — mirrors the WorkspaceLaunchPicker dropdown
