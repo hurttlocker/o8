@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * DesktopStatusBar — 28px chrome strip pinned to the bottom of the dashboard.
+ * DesktopStatusBar — compact chrome strip pinned to the bottom of the dashboard.
  *
- * Mirrors the TitleBar pattern at the top (transparent background, neomorphic
- * buttons) but lives at the foot of the flex column.
+ * Mirrors the compact TitleBar controls at the top but lives at the foot of
+ * the flex column.
  *
  *   [⚙] [🟢 N]  [+]                                  [⎇ branch-name]
  *     settings ports addRepo                         current branch
@@ -41,12 +41,19 @@ interface DesktopStatusBarProps {
   /** Open the full-screen mobile-pairing QR view (a canvas tab). */
   onOpenMobilePairing: () => void;
   onPortPreview?: (port: number, url: string, repo?: string) => void;
+  /** Contextual bottom-panel (terminal) toggle. Moved from the column
+   *  header per operator request — sits in the status bar's center
+   *  column next to the branch label. */
+  bottomPanelVisible?: boolean;
+  onToggleBottomPanel?: () => void;
 }
 
 function DesktopStatusBarBase({
   branchName,
   repoName,
   repoRemoteUrl = null,
+  bottomPanelVisible = false,
+  onToggleBottomPanel,
   leftColumnWidth,
   rightColumnWidth,
   compact = false,
@@ -109,6 +116,7 @@ function DesktopStatusBarBase({
         background: 'transparent',
         borderTopWidth: 0,
         fontFamily: 'var(--font-sans-system)',
+        boxSizing: 'border-box',
       }}
     >
       <div
@@ -120,16 +128,18 @@ function DesktopStatusBarBase({
           gap: 6,
           paddingLeft: 12,
           paddingRight: 12,
+          overflow: 'hidden',
+          transform: 'translateY(-8px)',
         }}
       >
         <div ref={settingsButtonRef} style={{ display: 'flex', alignItems: 'center' }}>
           <ChromeButton
-            icon={<GearSix size={14} weight="bold" color="var(--t-text)" />}
+            icon={<GearSix size={15} weight="bold" color="var(--t-text)" />}
             label="Settings"
             active={settingsDrawerOpen}
             onClick={toggleSettingsDrawer}
-            size={22}
-            radius={6}
+            size={28}
+            radius={8}
           />
         </div>
         <SettingsQuickDrawer
@@ -141,18 +151,18 @@ function DesktopStatusBarBase({
         {!compact ? (
           <>
             <ChromeButton
-              icon={<Smartphone size={14} />}
+              icon={<Smartphone size={15} />}
               label="Pair mobile device"
               onClick={onOpenMobilePairing}
-              size={22}
-              radius={6}
+              size={28}
+              radius={8}
             />
             <ChromeButton
-              icon={<FolderPlus size={14} weight="bold" color="var(--t-text)" />}
+              icon={<FolderPlus size={15} weight="bold" color="var(--t-text)" />}
               label="Add repository"
               onClick={onAddRepo}
-              size={22}
-              radius={6}
+              size={28}
+              radius={8}
             />
             <FooterPorts onPortPreview={onPortPreview} />
             <SupervisorInboxBadge />
@@ -167,6 +177,7 @@ function DesktopStatusBarBase({
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
+          gap: 6,
         }}
       >
         <MergeActionCluster
@@ -174,6 +185,12 @@ function DesktopStatusBarBase({
           repoName={repoName}
           repoRemoteUrl={repoRemoteUrl}
         />
+        {onToggleBottomPanel ? (
+          <StatusTerminalToggle
+            active={bottomPanelVisible}
+            onClick={onToggleBottomPanel}
+          />
+        ) : null}
       </div>
 
       <div
@@ -194,3 +211,40 @@ function DesktopStatusBarBase({
 }
 
 export const DesktopStatusBar = memo(DesktopStatusBarBase);
+
+/** Terminal toggle pill that lives alongside the branch label in the
+ *  status bar's center column. Chrome-less by design — just the icon,
+ *  hover tints the background. Operator wanted it down here next to
+ *  "main" rather than floating mid-workspace. */
+function StatusTerminalToggle({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-label="Toggle terminal"
+      title="Toggle terminal"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        borderWidth: 0,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        color: active ? 'var(--t-accent)' : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        padding: 0,
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+    >
+      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="m4 17 6-6-6-6" />
+        <line x1="12" x2="20" y1="19" y2="19" />
+      </svg>
+    </button>
+  );
+}
