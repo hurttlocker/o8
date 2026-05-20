@@ -38,6 +38,15 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // the viewport breakpoint AND when we have non-primary tabs to
     // surface. Above the breakpoint, the strip is just controls.
     const showTabList = widthAllowsTabs && topBarTabs.length > 0;
+    // The per-workspace TabBar (lower strip) carries play + close-tile
+    // controls and the per-pane title. It's redundant when there's only
+    // one workspace — the global column header already hosts the title
+    // and the left rail handles new-session spawn. Show it ONLY when:
+    //   - the user has split the workspace (canCloseTile === true), so
+    //     each pane needs its own title + close-tile + play affordance, OR
+    //   - the narrow-viewport tab list needs to render somewhere
+    const isSplitPane = props.canCloseTile === true;
+    const showTabBar = isSplitPane || showTabList;
     const activeTab = controller.activeTab;
     // workspaceConversationHeaderLabel only knows chat-shaped tabs
     // (orchestrator / llm-chat / single-runtime chat). For terminals
@@ -266,21 +275,23 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           </motion.div>
         ) : null}
 
-        <TabBar
-          tabs={topBarTabs}
-          activeTabId={controller.effectiveActiveTabId}
-          launchRequestKey={controller.launchRequestKey}
-          onSelectTab={controller.handleSelectTab}
-          onCloseTab={controller.handleCloseTab}
-          onNewTab={controller.handleNewTab}
-          onNewLLMChatTab={controller.handleNewLLMChatTab}
-          scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
-          canCloseTile={props.canCloseTile}
-          onCloseTile={props.onCloseTile}
-          onReorderTabs={controller.handleReorderTabs}
-          showTabList={showTabList}
-          headerLabel={conversationHeaderLabel}
-        />
+        {showTabBar ? (
+          <TabBar
+            tabs={topBarTabs}
+            activeTabId={controller.effectiveActiveTabId}
+            launchRequestKey={controller.launchRequestKey}
+            onSelectTab={controller.handleSelectTab}
+            onCloseTab={controller.handleCloseTab}
+            onNewTab={controller.handleNewTab}
+            onNewLLMChatTab={controller.handleNewLLMChatTab}
+            scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
+            canCloseTile={props.canCloseTile}
+            onCloseTile={props.onCloseTile}
+            onReorderTabs={controller.handleReorderTabs}
+            showTabList={showTabList}
+            headerLabel={conversationHeaderLabel}
+          />
+        ) : null}
 
         <WorkspaceTerminalPanels
           visibleTabs={controller.visibleTabs}
