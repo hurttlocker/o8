@@ -179,8 +179,56 @@ async function readPanelContext({
   surface: ScratchSurface;
   selection: string;
 }): Promise<ScratchContext> {
-  if (!repoPath || !selectedFile) {
+  if (!repoPath) {
     return { surface, selection };
+  }
+
+  // No file selected → fall back to a workspace-wide change digest so the
+  // cheap model isn't flying blind. Pulls the same snapshot ReviewPanel
+  // renders (branch, ahead/behind, diffstat, changed-file list, recent
+  // commits). Tools available in the scratch-chat API let the model drill
+  // into individual file diffs if it needs the actual hunks.
+  if (!selectedFile) {
+    try {
+      const params = new URLSearchParams({ workspace: repoPath });
+      const response = await fetch(`/api/review/workspace?${params.toString()}`);
+      const snap = await response.json().catch(() => ({})) as {
+        branch?: string;
+        ahead?: number;
+        behind?: number;
+        dirty?: boolean;
+        diffStat?: string;
+        changedFiles?: Array<{ path?: string; status?: string; additions?: number; deletions?: number }>;
+        recentCommits?: string[];
+        error?: string;
+      };
+      if (snap.error) {
+        return { repoPath, surface, selection, content: `Workspace snapshot unavailable: ${snap.error}` };
+      }
+      const fileSummary = (snap.changedFiles ?? [])
+        .slice(0, 60)
+        .map((f) => {
+          const stat = f.additions !== undefined && f.deletions !== undefined
+            ? ` +${f.additions} -${f.deletions}`
+            : '';
+          return `  ${f.status ?? '?'} ${f.path ?? '?'}${stat}`;
+        })
+        .join('\n');
+      const commits = (snap.recentCommits ?? []).slice(0, 8).join('\n');
+      const lines = [
+        `Branch: ${snap.branch ?? '(unknown)'}`,
+        `Ahead/behind: ${snap.ahead ?? 0} / ${snap.behind ?? 0}${snap.dirty ? ' · dirty' : ''}`,
+        '',
+        `Diffstat:\n${snap.diffStat || '(no changes)'}`,
+        '',
+        fileSummary ? `Changed files (${snap.changedFiles?.length ?? 0}):\n${fileSummary}` : 'No changed files.',
+        commits ? `\nRecent commits:\n${commits}` : '',
+      ].filter(Boolean).join('\n');
+      return { repoPath, surface, selection, content: lines };
+    } catch (err) {
+      const reason = err instanceof Error ? err.message : 'Workspace snapshot fetch failed.';
+      return { repoPath, surface, selection, content: reason };
+    }
   }
 
   if (surface === 'diff') {
@@ -304,7 +352,11 @@ export function O8ScratchChat({
   // hydration in readPanelContext already short-circuits on null selectedFile).
   const disabled = !repoPath;
 
-  const scopeLabel = useMemo(() => compactPath(selectedFile), [selectedFile]);
+  const scopeLabel = useMemo(() => {
+    if (selectedFile) return compactPath(selectedFile);
+    if (repoPath) return 'All changes';
+    return 'No repo';
+  }, [repoPath, selectedFile]);
 
   const syncPanelPosition = useCallback(() => {
     const rect = buttonRef.current?.getBoundingClientRect();
@@ -593,7 +645,9 @@ export function O8ScratchChat({
           <div ref={scrollRef} className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: expanded ? 300 : 170, maxHeight: expanded ? 560 : 380, overflow: 'auto', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12 }}>
             {messages.length === 0 ? (
               <div style={{ borderRadius: 14, border: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-subtle)', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, color: 'var(--t-text-muted)', fontSize: 12, lineHeight: '18px' }}>
-                Ask about the current file or diff. This is read-only; edits go through the orchestrator.
+                {selectedFile
+                  ? 'Ask about the current file or diff. This is read-only; edits go through the orchestrator.'
+                  : 'Ask about the workspace changes (branch, diffstat, recent commits). This is read-only; edits go through the orchestrator.'}
               </div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
@@ -645,7 +699,7 @@ export function O8ScratchChat({
                   void send();
                 }
               }}
-              placeholder="Ask about this file or diff..."
+              placeholder={selectedFile ? 'Ask about this file or diff...' : 'Ask about the workspace changes...'}
               rows={3}
               style={{
                 width: '100%',
