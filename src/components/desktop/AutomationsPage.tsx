@@ -5,11 +5,11 @@
  *
  * Mounted from dashboard/page.tsx when activeNavSection === 'automations'.
  * Fetches /api/automations, renders Mine | Team table rows, and provides
- * the "New automation" modal + per-row Run button. Cron triggers run on
- * the server scheduler (P1 task #27).
+ * the New/Edit modal + per-row Toggle / Edit / Run / Delete. Cron triggers
+ * run on the server scheduler in lib/automations/scheduler.ts.
  *
- * Design borrow: Superset's Automations surface. Locked spec in
- * [[borrow_conductor_steer_queue]] sibling memory + /preview/automations.
+ * Design borrow: Superset's Automations surface ([[borrow_codex_walkthrough]]
+ * + [[borrow_conductor_steer_queue]] sibling).
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
@@ -34,8 +34,16 @@ interface AutomationRow {
   lastRunAt: number | null;
   lastRunStatus: RunStatus;
   lastLaneId: string | null;
+  lastErrorMessage: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+interface RegisteredRepo {
+  id: string;
+  name: string;
+  localPath: string;
+  defaultBranch: string;
 }
 
 const MS_MINUTE = 60_000;
@@ -47,6 +55,7 @@ function formatRelative(ms: number | null, fallback: string): string {
   const delta = ms - Date.now();
   if (delta < 0) {
     const ago = Math.abs(delta);
+    if (ago < MS_MINUTE) return 'just now';
     if (ago < MS_HOUR) return `${Math.max(1, Math.floor(ago / MS_MINUTE))}m ago`;
     if (ago < MS_DAY) return `${Math.floor(ago / MS_HOUR)}h ago`;
     return `${Math.floor(ago / MS_DAY)}d ago`;
@@ -71,21 +80,25 @@ function formatRelative(ms: number | null, fallback: string): string {
   return `${d.toLocaleDateString([], { month: 'short', day: 'numeric' })} · ${timeStr}`;
 }
 
-function StatusDot({ status }: { status: RunStatus }) {
+function StatusDot({ status, title }: { status: RunStatus; title?: string }) {
   const color =
     status === 'ok' ? '#22c55e'
       : status === 'running' ? '#3b82f6'
       : status === 'error' ? '#ef4444'
       : 'var(--t-text-faint, #94a3b8)';
   return (
-    <span style={{
-      display: 'inline-block',
-      width: 8,
-      height: 8,
-      borderRadius: 999,
-      background: color,
-      flexShrink: 0,
-    }} />
+    <span
+      title={title}
+      style={{
+        display: 'inline-block',
+        width: 8,
+        height: 8,
+        borderRadius: 999,
+        background: color,
+        flexShrink: 0,
+        cursor: title ? 'help' : 'default',
+      }}
+    />
   );
 }
 
@@ -157,7 +170,7 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   );
 }
 
-interface NewAutomationFormState {
+interface AutomationFormState {
   name: string;
   prompt: string;
   runtime: string;
@@ -167,65 +180,101 @@ interface NewAutomationFormState {
   cronExpr: string;
 }
 
-function NewAutomationModal({
-  open,
-  defaultOwner,
-  onClose,
-  onCreated,
-}: {
-  open: boolean;
-  defaultOwner: string;
-  onClose: () => void;
-  onCreated: (row: AutomationRow) => void;
-}) {
-  const [form, setForm] = useState<NewAutomationFormState>({
+function emptyForm(repos: RegisteredRepo[]): AutomationFormState {
+  // Sensible defaults — pick the first registered repo so the dropdown isn't blank.
+  const first = repos[0];
+  return {
     name: '',
     prompt: '',
     runtime: 'codex',
-    repoPath: '',
-    branch: 'main',
+    repoPath: first?.localPath ?? '',
+    branch: first?.defaultBranch ?? 'main',
     triggerKind: 'cron',
     cronExpr: '0 9 * * *',
-  });
+  };
+}
+
+function formFromRow(row: AutomationRow): AutomationFormState {
+  return {
+    name: row.name,
+    prompt: row.prompt,
+    runtime: row.runtime,
+    repoPath: row.repoPath,
+    branch: row.branch,
+    triggerKind: row.triggerKind,
+    cronExpr: row.cronExpr ?? '0 9 * * *',
+  };
+}
+
+function AutomationModal({
+  open,
+  initial,
+  repos,
+  defaultOwner,
+  onClose,
+  onPersisted,
+}: {
+  open: boolean;
+  initial: AutomationRow | null;
+  repos: RegisteredRepo[];
+  defaultOwner: string;
+  onClose: () => void;
+  onPersisted: (row: AutomationRow) => void;
+}) {
+  const editing = initial !== null;
+  const [form, setForm] = useState<AutomationFormState>(() =>
+    initial ? formFromRow(initial) : emptyForm(repos),
+  );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // When `initial` flips (Create → Edit on a different row), reset the form.
+  // Guarded behind `open` so closing the modal doesn't clobber the form mid-fade.
+  useEffect(() => {
+    if (!open) return;
+    setForm(initial ? formFromRow(initial) : emptyForm(repos));
+    setError(null);
+  }, [open, initial, repos]);
+
   if (!open) return null;
 
-  const update = (patch: Partial<NewAutomationFormState>) => setForm((prev) => ({ ...prev, ...patch }));
+  const update = (patch: Partial<AutomationFormState>) => setForm((prev) => ({ ...prev, ...patch }));
 
   const submit = async () => {
     setError(null);
     if (!form.name.trim()) { setError('Name is required.'); return; }
     if (!form.prompt.trim()) { setError('Prompt is required.'); return; }
-    if (!form.repoPath.trim()) { setError('Repo path is required.'); return; }
+    if (!form.repoPath.trim()) { setError('Repo is required.'); return; }
     setSubmitting(true);
     try {
-      const response = await fetch('/api/automations', {
-        method: 'POST',
+      const payload = {
+        ...(editing ? {} : { owner: defaultOwner }),
+        name: form.name.trim(),
+        prompt: form.prompt.trim(),
+        runtime: form.runtime,
+        repoPath: form.repoPath.trim(),
+        branch: form.branch.trim() || 'main',
+        triggerKind: form.triggerKind,
+        cronExpr: form.triggerKind === 'cron' ? form.cronExpr.trim() : null,
+      };
+      const url = editing ? `/api/automations/${initial!.id}` : '/api/automations';
+      const method = editing ? 'PATCH' : 'POST';
+      const response = await fetch(url, {
+        method,
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: form.name.trim(),
-          owner: defaultOwner,
-          prompt: form.prompt.trim(),
-          runtime: form.runtime,
-          repoPath: form.repoPath.trim(),
-          branch: form.branch.trim() || 'main',
-          triggerKind: form.triggerKind,
-          cronExpr: form.triggerKind === 'cron' ? form.cronExpr.trim() : null,
-        }),
+        body: JSON.stringify(payload),
       });
       const data = await response.json() as { automation?: AutomationRow; error?: string };
       if (!response.ok || !data.automation) {
-        setError(data.error ?? `Create failed (${response.status})`);
+        setError(data.error ?? `${editing ? 'Save' : 'Create'} failed (${response.status})`);
         setSubmitting(false);
         return;
       }
-      onCreated(data.automation);
+      onPersisted(data.automation);
       onClose();
       setSubmitting(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Create failed.');
+      setError(err instanceof Error ? err.message : `${editing ? 'Save' : 'Create'} failed.`);
       setSubmitting(false);
     }
   };
@@ -268,7 +317,7 @@ function NewAutomationModal({
           fontSize: 15,
           fontWeight: 600,
         }}>
-          New automation
+          {editing ? 'Edit automation' : 'New automation'}
         </div>
         <div style={{
           flex: 1,
@@ -320,14 +369,37 @@ function NewAutomationModal({
               />
             </Field>
           </div>
-          <Field label="Repo path">
-            <input
-              type="text"
-              placeholder="/Users/you/your-repo"
-              value={form.repoPath}
-              onChange={(e) => update({ repoPath: e.target.value })}
-              style={{ ...inputStyle, fontFamily: 'var(--font-mono-system, ui-monospace)' }}
-            />
+          <Field label="Repo">
+            {repos.length > 0 ? (
+              <select
+                value={form.repoPath}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  const match = repos.find((r) => r.localPath === next);
+                  // Default the branch to the picked repo's default if the user
+                  // hasn't typed something custom yet.
+                  update({
+                    repoPath: next,
+                    branch: form.branch === 'main' && match ? match.defaultBranch : form.branch,
+                  });
+                }}
+                style={{ ...inputStyle, fontFamily: 'var(--font-sans-system)' }}
+              >
+                {repos.map((repo) => (
+                  <option key={repo.id} value={repo.localPath}>
+                    {repo.name} ({repo.localPath})
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type="text"
+                placeholder="/Users/you/your-repo"
+                value={form.repoPath}
+                onChange={(e) => update({ repoPath: e.target.value })}
+                style={{ ...inputStyle, fontFamily: 'var(--font-mono-system, ui-monospace)' }}
+              />
+            )}
           </Field>
           <Field label="Trigger">
             <div style={{ display: 'flex', gap: 6 }}>
@@ -390,7 +462,7 @@ function NewAutomationModal({
         }}>
           <button type="button" onClick={onClose} disabled={submitting} style={{ ...ghostButton, opacity: submitting ? 0.5 : 1 }}>Cancel</button>
           <button type="button" onClick={submit} disabled={submitting} style={{ ...primaryButton, opacity: submitting ? 0.7 : 1 }}>
-            {submitting ? 'Creating…' : 'Create'}
+            {submitting ? (editing ? 'Saving…' : 'Creating…') : (editing ? 'Save' : 'Create')}
           </button>
         </div>
       </div>
@@ -463,19 +535,73 @@ function compactPath(path: string): string {
   return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
 }
 
+const rowIconButtonStyle: React.CSSProperties = {
+  width: 26,
+  height: 26,
+  padding: 0,
+  borderWidth: 0,
+  borderRadius: 6,
+  background: 'transparent',
+  color: 'var(--t-text-muted)',
+  cursor: 'pointer',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+};
+
 function RowActions({
   row,
+  onToggle,
+  onEdit,
   onRun,
   onDelete,
 }: {
   row: AutomationRow;
+  onToggle: (id: string, next: boolean) => Promise<void>;
+  onEdit: (row: AutomationRow) => void;
   onRun: (id: string) => Promise<void>;
   onDelete: (id: string) => Promise<void>;
 }) {
-  const [busy, setBusy] = useState<'run' | 'delete' | null>(null);
+  const [busy, setBusy] = useState<'toggle' | 'run' | 'delete' | null>(null);
   const running = row.lastRunStatus === 'running' || busy === 'run';
   return (
-    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+    <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, justifyContent: 'flex-end' }}>
+      <button
+        type="button"
+        title={row.enabled ? 'Pause this automation' : 'Resume this automation'}
+        disabled={busy === 'toggle'}
+        onClick={async () => {
+          setBusy('toggle');
+          try { await onToggle(row.id, !row.enabled); } finally { setBusy(null); }
+        }}
+        style={{
+          ...rowIconButtonStyle,
+          color: row.enabled ? 'var(--t-text-muted)' : 'var(--t-accent, #2563eb)',
+        }}
+      >
+        {row.enabled ? (
+          // Pause icon (two vertical bars)
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+            <rect x="4" y="3" width="3" height="10" rx="1" />
+            <rect x="9" y="3" width="3" height="10" rx="1" />
+          </svg>
+        ) : (
+          // Play icon (triangle)
+          <svg width="12" height="12" viewBox="0 0 16 16" fill="currentColor">
+            <path d="M4 3l9 5-9 5V3z" />
+          </svg>
+        )}
+      </button>
+      <button
+        type="button"
+        title="Edit"
+        onClick={() => onEdit(row)}
+        style={rowIconButtonStyle}
+      >
+        <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+          <path d="M11 2l3 3-9 9H2v-3z" />
+        </svg>
+      </button>
       <button
         type="button"
         title={running ? 'Already running' : 'Run now'}
@@ -519,19 +645,7 @@ function RowActions({
           setBusy('delete');
           try { await onDelete(row.id); } finally { setBusy(null); }
         }}
-        style={{
-          width: 26,
-          height: 26,
-          padding: 0,
-          borderWidth: 0,
-          borderRadius: 6,
-          background: 'transparent',
-          color: 'var(--t-text-muted)',
-          cursor: 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
+        style={rowIconButtonStyle}
       >
         <svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
           <path d="M3 5h10" />
@@ -545,10 +659,12 @@ function RowActions({
 
 export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
   const [rows, setRows] = useState<AutomationRow[]>([]);
+  const [repos, setRepos] = useState<RegisteredRepo[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [scope, setScope] = useState<Scope>('mine');
   const [modalOpen, setModalOpen] = useState(false);
+  const [editingRow, setEditingRow] = useState<AutomationRow | null>(null);
 
   const fetchRows = useCallback(async () => {
     try {
@@ -569,12 +685,24 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
     }
   }, []);
 
+  const fetchRepos = useCallback(async () => {
+    try {
+      const response = await fetch('/api/panel/repos');
+      const data = await response.json() as { repos?: RegisteredRepo[] };
+      setRepos(data.repos ?? []);
+    } catch {
+      // Repos dropdown is a nicety; fall back to free-text input if fetch fails.
+      setRepos([]);
+    }
+  }, []);
+
   useEffect(() => {
     void fetchRows();
-  }, [fetchRows]);
+    void fetchRepos();
+  }, [fetchRows, fetchRepos]);
 
-  // Refresh every 15s while the page is visible so cron-fire status updates
-  // bubble up without a manual reload. Pause when scope=team (P1 placeholder).
+  // Refresh every 15s while the Mine tab is visible so cron-fire status
+  // updates bubble up without a manual reload.
   useEffect(() => {
     if (scope !== 'mine') return;
     const id = window.setInterval(() => { void fetchRows(); }, 15_000);
@@ -584,26 +712,67 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
   const mineRows = useMemo(() => rows.filter((r) => r.owner === currentOwner), [rows, currentOwner]);
   const teamRows = useMemo(() => rows.filter((r) => r.owner !== currentOwner), [rows, currentOwner]);
   const visibleRows = scope === 'mine' ? mineRows : teamRows;
-  const activeCount = useMemo(() => mineRows.filter((r) => r.enabled && r.lastRunStatus !== 'idle').length, [mineRows]);
+  const activeCount = useMemo(
+    () => mineRows.filter((r) => r.enabled && r.lastRunStatus !== 'idle').length,
+    [mineRows],
+  );
 
-  const handleCreated = (row: AutomationRow) => {
-    setRows((prev) => [row, ...prev]);
+  const handlePersisted = (row: AutomationRow) => {
+    setRows((prev) => {
+      const idx = prev.findIndex((r) => r.id === row.id);
+      if (idx < 0) return [row, ...prev];
+      const next = prev.slice();
+      next[idx] = row;
+      return next;
+    });
   };
 
+  const handleEdit = useCallback((row: AutomationRow) => {
+    setEditingRow(row);
+    setModalOpen(true);
+  }, []);
+
+  const handleNewClick = useCallback(() => {
+    setEditingRow(null);
+    setModalOpen(true);
+  }, []);
+
+  const handleToggle = useCallback(async (id: string, next: boolean) => {
+    // Optimistic flip; revert on error.
+    setRows((prev) => prev.map((r) => r.id === id ? { ...r, enabled: next } : r));
+    try {
+      const response = await fetch(`/api/automations/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled: next }),
+      });
+      if (!response.ok) {
+        setRows((prev) => prev.map((r) => r.id === id ? { ...r, enabled: !next } : r));
+      } else {
+        const data = await response.json() as { automation?: AutomationRow };
+        if (data.automation) handlePersisted(data.automation);
+      }
+    } catch {
+      setRows((prev) => prev.map((r) => r.id === id ? { ...r, enabled: !next } : r));
+    }
+  }, []);
+
   const handleRun = useCallback(async (id: string) => {
-    // Optimistic: bump local status to running.
     setRows((prev) => prev.map((r) => r.id === id ? { ...r, lastRunStatus: 'running', lastRunAt: Date.now() } : r));
     try {
       const response = await fetch(`/api/automations/${id}/run`, { method: 'POST' });
       const data = await response.json() as { ok?: boolean; note?: string; laneId?: string };
       if (!response.ok || data.ok === false) {
-        setRows((prev) => prev.map((r) => r.id === id ? { ...r, lastRunStatus: 'error' } : r));
+        setRows((prev) => prev.map((r) => r.id === id
+          ? { ...r, lastRunStatus: 'error', lastErrorMessage: data.note ?? 'run failed' }
+          : r));
         return;
       }
-      // Refresh to get authoritative state (lastLaneId, nextRunAt).
       void fetchRows();
-    } catch {
-      setRows((prev) => prev.map((r) => r.id === id ? { ...r, lastRunStatus: 'error' } : r));
+    } catch (err) {
+      setRows((prev) => prev.map((r) => r.id === id
+        ? { ...r, lastRunStatus: 'error', lastErrorMessage: err instanceof Error ? err.message : 'run failed' }
+        : r));
     }
   }, [fetchRows]);
 
@@ -612,10 +781,13 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
     try {
       await fetch(`/api/automations/${id}`, { method: 'DELETE' });
     } catch {
-      // Re-fetch on failure to recover the row.
       void fetchRows();
     }
   }, [fetchRows]);
+
+  // 8-column grid: status / name / owner / project / workspace / next-run / last-run / actions.
+  // 130px on actions to fit Pause/Edit/Run/Delete with room for the labeled Run pill.
+  const gridTemplateColumns = '24px 1.5fr 1.3fr 0.8fr 1.1fr 1fr 0.9fr 150px';
 
   return (
     <div style={{
@@ -656,7 +828,7 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
         </div>
         <button
           type="button"
-          onClick={() => setModalOpen(true)}
+          onClick={handleNewClick}
           style={{
             height: 30,
             paddingTop: 0,
@@ -699,10 +871,9 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
         background: 'var(--t-bg-card)',
         overflow: 'hidden',
       }}>
-        {/* Header row */}
         <div style={{
           display: 'grid',
-          gridTemplateColumns: '24px 1.6fr 1.4fr 1fr 1.2fr 1fr 90px',
+          gridTemplateColumns,
           gap: 0,
           paddingTop: 10,
           paddingRight: 14,
@@ -722,10 +893,10 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
           <span>Project</span>
           <span>Workspace</span>
           <span>Next run</span>
+          <span>Last run</span>
           <span style={{ textAlign: 'right' }}>Actions</span>
         </div>
 
-        {/* Data rows */}
         {loading ? (
           <div style={{ padding: 24, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
             Loading…
@@ -743,44 +914,54 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
             No automations yet. Click <strong style={{ color: 'var(--t-text)' }}>New automation</strong> to create one.
           </div>
         ) : (
-          visibleRows.map((row) => (
-            <div
-              key={row.id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: '24px 1.6fr 1.4fr 1fr 1.2fr 1fr 90px',
-                gap: 0,
-                alignItems: 'center',
-                paddingTop: 10,
-                paddingRight: 14,
-                paddingBottom: 10,
-                paddingLeft: 14,
-                borderBottom: '1px solid var(--t-divider)',
-                fontSize: 13,
-                color: 'var(--t-text)',
-              }}
-            >
-              <StatusDot status={row.lastRunStatus} />
-              <span title={row.prompt} style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {row.name}
-              </span>
-              <span style={{ color: 'var(--t-text-muted)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {row.owner}
-              </span>
-              <span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>
-                {row.projectId ?? '—'}
-              </span>
-              <span title={`${row.repoPath} · ${row.branch}`} style={{ color: 'var(--t-text-muted)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {compactPath(row.repoPath)} · {row.branch}
-              </span>
-              <span style={{ color: 'var(--t-text-muted)', fontSize: 12, fontFamily: 'var(--font-mono-system, ui-monospace)' }}>
-                {row.triggerKind === 'manual' ? 'manual' : formatRelative(row.nextRunAt, 'pending')}
-              </span>
-              <span style={{ textAlign: 'right' }}>
-                <RowActions row={row} onRun={handleRun} onDelete={handleDelete} />
-              </span>
-            </div>
-          ))
+          visibleRows.map((row) => {
+            const dotTooltip = row.lastRunStatus === 'error' && row.lastErrorMessage
+              ? `Error: ${row.lastErrorMessage}`
+              : row.lastRunStatus === 'error' ? 'Errored — no message captured'
+              : row.lastRunStatus === 'running' ? 'Running now'
+              : row.lastRunStatus === 'ok' ? 'Last run succeeded'
+              : row.enabled ? 'Idle' : 'Paused';
+            return (
+              <div
+                key={row.id}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns,
+                  gap: 0,
+                  alignItems: 'center',
+                  paddingTop: 10,
+                  paddingRight: 14,
+                  paddingBottom: 10,
+                  paddingLeft: 14,
+                  borderBottom: '1px solid var(--t-divider)',
+                  fontSize: 13,
+                  color: 'var(--t-text)',
+                  opacity: row.enabled ? 1 : 0.55,
+                }}
+              >
+                <StatusDot status={row.lastRunStatus} title={dotTooltip} />
+                <span title={row.prompt} style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {row.name}
+                </span>
+                <span style={{ color: 'var(--t-text-muted)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {row.owner}
+                </span>
+                <span style={{ color: 'var(--t-text-muted)', fontSize: 12 }}>
+                  {row.projectId ?? '—'}
+                </span>
+                <span title={`${row.repoPath} · ${row.branch}`} style={{ color: 'var(--t-text-muted)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {compactPath(row.repoPath)} · {row.branch}
+                </span>
+                <span style={{ color: 'var(--t-text-muted)', fontSize: 12, fontFamily: 'var(--font-mono-system, ui-monospace)' }}>
+                  {row.triggerKind === 'manual' ? 'manual' : !row.enabled ? 'paused' : formatRelative(row.nextRunAt, 'pending')}
+                </span>
+                <span style={{ color: 'var(--t-text-muted)', fontSize: 12, fontFamily: 'var(--font-mono-system, ui-monospace)' }}>
+                  {formatRelative(row.lastRunAt, '—')}
+                </span>
+                <RowActions row={row} onToggle={handleToggle} onEdit={handleEdit} onRun={handleRun} onDelete={handleDelete} />
+              </div>
+            );
+          })
         )}
       </div>
 
@@ -806,11 +987,13 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
         </code>
       </div>
 
-      <NewAutomationModal
+      <AutomationModal
         open={modalOpen}
+        initial={editingRow}
+        repos={repos}
         defaultOwner={currentOwner}
-        onClose={() => setModalOpen(false)}
-        onCreated={handleCreated}
+        onClose={() => { setModalOpen(false); setEditingRow(null); }}
+        onPersisted={handlePersisted}
       />
     </div>
   );
