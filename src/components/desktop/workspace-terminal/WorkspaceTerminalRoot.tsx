@@ -211,43 +211,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           </motion.div>
         ) : null}
 
-        {conversationHeaderLabel ? (
-          <div
-            title={conversationHeaderLabel}
-            style={{
-              minHeight: 34,
-              display: 'flex',
-              alignItems: 'center',
-              gap: 7,
-              paddingTop: 0,
-              paddingRight: 12,
-              paddingBottom: 0,
-              paddingLeft: 14,
-              borderBottom: '0.5px solid var(--t-divider-subtle)',
-              background: 'var(--t-panel)',
-              color: 'var(--t-text-secondary)',
-              fontFamily: 'var(--font-sans-system)',
-              fontSize: 12,
-              lineHeight: '16px',
-              fontWeight: 400,
-              letterSpacing: 0,
-              flexShrink: 0,
-              minWidth: 0,
-            }}
-          >
-            <span
-              style={{
-                minWidth: 0,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <ConversationHeaderText label={conversationHeaderLabel} />
-            </span>
-          </div>
-        ) : null}
-
         <TabBar
           tabs={topBarTabs}
           activeTabId={controller.effectiveActiveTabId}
@@ -261,6 +224,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onCloseTile={props.onCloseTile}
           onReorderTabs={controller.handleReorderTabs}
           showTabList={showTabList}
+          headerLabel={conversationHeaderLabel}
         />
 
         <WorkspaceTerminalPanels
@@ -295,21 +259,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     );
   },
 );
-
-function ConversationHeaderText({ label }: { label: string }) {
-  const separator = ' / ';
-  const separatorIndex = label.indexOf(separator);
-  if (separatorIndex < 0) return <>{label}</>;
-  const repo = label.slice(0, separatorIndex);
-  const title = label.slice(separatorIndex + separator.length);
-  return (
-    <>
-      <span style={{ color: 'var(--t-text)', fontWeight: 500 }}>{repo}</span>
-      <span style={{ color: 'var(--t-text-faint)', fontWeight: 400 }}> / </span>
-      <span style={{ color: 'var(--t-text-secondary)', fontWeight: 400 }}>{title}</span>
-    </>
-  );
-}
 
 function WorkspaceReconnectDot() {
   return (
