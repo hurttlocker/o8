@@ -37,6 +37,7 @@ function rowFromDb(row: typeof automations.$inferSelect) {
     prompt: row.prompt, triggerKind: row.triggerKind, cronExpr: row.cronExpr,
     enabled: row.enabled, nextRunAt: row.nextRunAt, lastRunAt: row.lastRunAt,
     lastRunStatus: row.lastRunStatus, lastLaneId: row.lastLaneId,
+    lastErrorMessage: row.lastErrorMessage,
     createdAt: row.createdAt, updatedAt: row.updatedAt,
   };
 }

@@ -635,6 +635,8 @@ export const automations = sqliteTable('automations', {
   }).notNull().default('idle'),
   /** Last run's lane id (for click-through to transcript). */
   lastLaneId: text('last_lane_id'),
+  /** Human-readable error from the last failed run; null when ok or never run. */
+  lastErrorMessage: text('last_error_message'),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
   updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
 }, (table) => ({

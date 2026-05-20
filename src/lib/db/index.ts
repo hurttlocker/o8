@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 23;
+const DB_SCHEMA_VERSION = 24;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -157,6 +157,9 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // Schema v23 — `automations` table (Superset-style scheduled agent runs).
   // CREATE TABLE IF NOT EXISTS, so safe on every boot; indexes follow.
   ensureAutomationsTable(sqlite);
+  // Schema v24 — `automations.last_error_message` so the UI can surface WHY a
+  // failed run errored (not just the boolean status). Idempotent column-add.
+  ensureAutomationsErrorColumn(sqlite);
 }
 
 function ensureAutomationsTable(sqlite: Database.Database): void {
@@ -185,6 +188,12 @@ function ensureAutomationsTable(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_automations_enabled_next_run
       ON automations(enabled, next_run_at);
   `);
+}
+
+function ensureAutomationsErrorColumn(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'automations', 'last_error_message')) {
+    sqlite.exec('ALTER TABLE automations ADD COLUMN last_error_message TEXT');
+  }
 }
 
 /**
