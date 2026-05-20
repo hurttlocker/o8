@@ -1,8 +1,8 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useState, type CSSProperties, type MouseEvent } from 'react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
-import { Archive, CheckCircle2, ChevronDown, ChevronRight, RotateCcw, Star, Trash2 } from '../../lucide-shims';
+import { CheckCircle2, ChevronDown, ChevronRight, Folder } from '../../lucide-shims';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession, RepoFocusRepo } from '../types';
@@ -35,6 +35,18 @@ interface ChatHistoryItem {
   archivedAt?: string | null;
 }
 
+interface ArchivedLaneRow {
+  id: string;
+  label: string;
+  repoPath: string;
+  branch: string;
+  baseBranch: string;
+  runtime: 'codex' | 'claude-code' | 'gemini' | 'opencode';
+  sessionKey: string | null;
+  updatedAt: string;
+  status?: string;
+}
+
 interface ChatsTabProps {
   repos: RepoFocusRepo[];
   selectedRepo?: RepoFocusRepo | null;
@@ -51,6 +63,13 @@ interface ChatsTabProps {
   groupMode?: 'sections' | 'flat';
   showKindInMeta?: boolean;
   packets?: OrchestratorPacket[];
+}
+
+interface HistoryActionMenuState {
+  item: ChatHistoryItem;
+  archived: boolean;
+  x: number;
+  y: number;
 }
 
 type HistoryToneKey = 'neutral' | 'activity' | 'running' | 'review' | 'merged' | 'failed' | 'active';
@@ -130,6 +149,12 @@ const HISTORY_ROW_TONES: Record<HistoryToneKey, HistoryRowTone> = {
 
 type HistoryGroupKey = 'chat' | 'orchestrator' | 'merged' | 'archived';
 
+interface RepoHistoryGroup {
+  key: string;
+  label: string;
+  items: ChatHistoryItem[];
+}
+
 function shimmerTextStyle(base = 'var(--t-text)', flare = 'var(--t-accent)'): CSSProperties {
   return {
     backgroundImage: `linear-gradient(110deg, ${base} 0%, ${base} 34%, ${flare} 50%, ${base} 66%, ${base} 100%)`,
@@ -154,6 +179,11 @@ function historyRepoLabel(item: ChatHistoryItem): string {
   const savedName = (item.repoName ?? '').trim();
   if (savedName && savedName.toLowerCase() !== 'current project') return savedName;
   return pathDisplayName(item.repoPath) || savedName || 'project';
+}
+
+function historyRepoGroupLabel(item: ChatHistoryItem, repos: RepoFocusRepo[]): string {
+  const matchedRepo = repos.find((repo) => historyBelongsToRepo(item, repo));
+  return matchedRepo?.name ?? historyRepoLabel(item);
 }
 
 function normalizeRemoteUrl(value: string | null | undefined): string {
@@ -320,11 +350,12 @@ export function ChatsTab({
   sections = ['chat', 'orchestrator'],
   showLiveSessions = true,
   groupMode = 'sections',
-  showKindInMeta = false,
   packets = [],
 }: ChatsTabProps) {
   const [historyItems, setHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [archivedHistoryItems, setArchivedHistoryItems] = useState<ChatHistoryItem[]>([]);
+  const [archivedLanes, setArchivedLanes] = useState<ArchivedLaneRow[]>([]);
+  const [archivedLanesExpanded, setArchivedLanesExpanded] = useState<Set<string>>(() => new Set());
   const [loading, setLoading] = useState(true);
   const [busyHistoryIds, setBusyHistoryIds] = useState<Set<string>>(() => new Set());
   const [collapsedGroups, setCollapsedGroups] = useState<Record<HistoryGroupKey, boolean>>({
@@ -333,6 +364,7 @@ export function ChatsTab({
     merged: false,
     archived: true,
   });
+  const [historyActionMenu, setHistoryActionMenu] = useState<HistoryActionMenuState | null>(null);
 
   const fetchHistory = useCallback(async (cancelled?: () => boolean) => {
     setLoading(true);
@@ -366,6 +398,28 @@ export function ChatsTab({
       cancelled = true;
     };
   }, [fetchHistory]);
+
+  // Archived agent sessions (Codex / lanes table) — only fetched in the
+  // compact left-rail variant where they render inline under each repo.
+  // The project drawer's Chats tab leaves these to its Agents tab.
+  useEffect(() => {
+    if (variant !== 'mini') return;
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch('/api/lanes?active=false', { cache: 'no-store' });
+        if (!res.ok || cancelled) return;
+        const data = await res.json() as { lanes?: ArchivedLaneRow[] };
+        const archived = (data.lanes ?? [])
+          .filter((l) => l.status === 'archived')
+          .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+        if (!cancelled) setArchivedLanes(archived);
+      } catch {
+        // silent — best-effort
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [variant]);
 
   const withHistoryBusy = useCallback(async (tabId: string, action: () => Promise<void>) => {
     setBusyHistoryIds((prev) => new Set(prev).add(tabId));
@@ -465,6 +519,50 @@ export function ChatsTab({
     if (!Number.isFinite(remainingHistorySlots)) return visibleFlatHistory;
     return visibleFlatHistory.slice(0, Math.max(0, remainingHistorySlots));
   }, [remainingHistorySlots, visibleFlatHistory]);
+  const flatHistoryRepoGroups = useMemo<RepoHistoryGroup[]>(() => {
+    const groups = new Map<string, RepoHistoryGroup>();
+    for (const item of flatHistoryItems) {
+      const label = historyRepoGroupLabel(item, targetRepos);
+      const key = label.toLowerCase();
+      const existing = groups.get(key);
+      if (existing) {
+        existing.items.push(item);
+      } else {
+        groups.set(key, { key, label, items: [item] });
+      }
+    }
+    return [...groups.values()];
+  }, [flatHistoryItems, targetRepos]);
+
+  // Group archived lanes by the same repo-label key used by
+  // flatHistoryRepoGroups so we can render them inline under each repo.
+  const archivedLanesByRepoKey = useMemo(() => {
+    const map = new Map<string, ArchivedLaneRow[]>();
+    if (variant !== 'mini' || archivedLanes.length === 0) return map;
+    const repoNameByPath = new Map<string, string>();
+    for (const repo of targetRepos) {
+      repoNameByPath.set(normalizeRepoPath(repo.localPath), repo.name);
+    }
+    for (const lane of archivedLanes) {
+      const laneRepoPath = normalizeRepoPath(lane.repoPath);
+      const repoName = repoNameByPath.get(laneRepoPath);
+      if (!repoName) continue;
+      const key = repoName.toLowerCase();
+      const bucket = map.get(key);
+      if (bucket) bucket.push(lane);
+      else map.set(key, [lane]);
+    }
+    return map;
+  }, [archivedLanes, targetRepos, variant]);
+
+  const toggleArchivedLanes = useCallback((repoKey: string) => {
+    setArchivedLanesExpanded((current) => {
+      const next = new Set(current);
+      if (next.has(repoKey)) next.delete(repoKey);
+      else next.add(repoKey);
+      return next;
+    });
+  }, []);
   const historyGroups = useMemo(() => {
     const sourceGroups = [
       { key: 'orchestrator' as const, label: 'Orchestrator', items: visibleOrchestratorHistory },
@@ -535,28 +633,68 @@ export function ChatsTab({
 
       {groupMode === 'flat' && flatHistoryItems.length > 0 ? (
         <div>
-          {sectionLabel ? (
-            <SectionLabel
-              label={sectionLabel}
-              compact={compact}
-            />
-          ) : null}
-          {flatHistoryItems.map((item) => (
-            <HistoryChatRow
-              key={item.tabId}
-              item={item}
-              compact={compact}
-              disabled={!onOpenHistoryChat}
-              active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-              showKindInMeta={showKindInMeta}
-              tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-              onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
-              onArchive={() => void archiveHistoryItem(item)}
-              onDelete={() => deleteHistoryItem(item)}
-              onTogglePin={() => void togglePinnedHistoryItem(item)}
-              busy={busyHistoryIds.has(item.tabId)}
-            />
-          ))}
+          {compact ? (
+            flatHistoryRepoGroups.map((group) => {
+              const repoArchivedLanes = archivedLanesByRepoKey.get(group.key) ?? [];
+              const archivedExpanded = archivedLanesExpanded.has(group.key);
+              return (
+                <div key={group.key}>
+                  <RepoGroupLabel label={group.label} />
+                  {group.items.map((item) => (
+                    <HistoryChatRow
+                      key={item.tabId}
+                      item={item}
+                      compact={compact}
+                      disabled={!onOpenHistoryChat}
+                      active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
+                      tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                      onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                      onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
+                    />
+                  ))}
+                  {repoArchivedLanes.length > 0 ? (
+                    <>
+                      <SectionLabel
+                        label="Archived"
+                        compact={compact}
+                        count={repoArchivedLanes.length}
+                        collapsed={!archivedExpanded}
+                        onToggle={() => toggleArchivedLanes(group.key)}
+                      />
+                      {archivedExpanded ? repoArchivedLanes.map((lane) => (
+                        <ArchivedLaneCompactRow
+                          key={lane.id}
+                          lane={lane}
+                          onSelectSession={onSelectSession}
+                        />
+                      )) : null}
+                    </>
+                  ) : null}
+                </div>
+              );
+            })
+          ) : (
+            <>
+              {sectionLabel ? (
+                <SectionLabel
+                  label={sectionLabel}
+                  compact={compact}
+                />
+              ) : null}
+              {flatHistoryItems.map((item) => (
+                <HistoryChatRow
+                  key={item.tabId}
+                  item={item}
+                  compact={compact}
+                  disabled={!onOpenHistoryChat}
+                  active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
+                  tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
+                  onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                  onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
+                />
+              ))}
+            </>
+          )}
         </div>
       ) : null}
 
@@ -594,13 +732,9 @@ export function ChatsTab({
                 compact={compact}
                 disabled={!onOpenHistoryChat}
                 active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                showKindInMeta={showKindInMeta}
                 tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
                 onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
-                onArchive={() => void archiveHistoryItem(item)}
-                onDelete={() => deleteHistoryItem(item)}
-                onTogglePin={() => void togglePinnedHistoryItem(item)}
-                busy={busyHistoryIds.has(item.tabId)}
+                onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
               />
             ))
           )}
@@ -624,14 +758,9 @@ export function ChatsTab({
                 compact={compact}
                 disabled={!onOpenHistoryChat}
                 active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
-                showKindInMeta={showKindInMeta}
                 tone={HISTORY_ROW_TONES.neutral}
-                archived
                 onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
-                onArchive={() => void restoreHistoryItem(item)}
-                onDelete={() => deleteHistoryItem(item)}
-                onTogglePin={() => void togglePinnedHistoryItem(item)}
-                busy={busyHistoryIds.has(item.tabId)}
+                onOpenMenu={(event) => setHistoryActionMenu({ item, archived: true, x: event.clientX, y: event.clientY })}
               />
             ))
           )}
@@ -656,6 +785,30 @@ export function ChatsTab({
             {loading ? 'Saved conversations will appear here.' : 'New and saved chats for this project will collect here.'}
           </div>
         </div>
+      ) : null}
+      {historyActionMenu ? (
+        <HistoryActionMenu
+          state={historyActionMenu}
+          busy={busyHistoryIds.has(historyActionMenu.item.tabId)}
+          canOpen={Boolean(onOpenHistoryChat)}
+          onClose={() => setHistoryActionMenu(null)}
+          onOpen={() => {
+            onOpenHistoryChat?.(
+              historyActionMenu.item.tabId,
+              historyActionMenu.item.title,
+              historyRepoContext(historyActionMenu.item),
+            );
+          }}
+          onTogglePin={() => { void togglePinnedHistoryItem(historyActionMenu.item); }}
+          onArchive={() => {
+            if (historyActionMenu.archived) {
+              void restoreHistoryItem(historyActionMenu.item);
+            } else {
+              void archiveHistoryItem(historyActionMenu.item);
+            }
+          }}
+          onDelete={() => deleteHistoryItem(historyActionMenu.item)}
+        />
       ) : null}
     </div>
   );
@@ -749,6 +902,133 @@ function SectionLabel({
   );
 }
 
+function RepoGroupLabel({ label }: { label: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        minHeight: 22,
+        paddingTop: 7,
+        paddingRight: 10,
+        paddingBottom: 3,
+        paddingLeft: 10,
+        color: 'var(--t-text-secondary)',
+        fontFamily: REPO_FOCUS_FONT,
+      }}
+    >
+      <Folder size={12} strokeWidth={1.9} color="var(--t-text-faint)" />
+      <span
+        style={{
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontSize: 11,
+          lineHeight: '14px',
+          fontWeight: 500,
+          letterSpacing: 0,
+        }}
+      >
+        {label}
+      </span>
+    </div>
+  );
+}
+
+function ArchivedLaneCompactRow({
+  lane,
+  onSelectSession,
+}: {
+  lane: ArchivedLaneRow;
+  onSelectSession?: (sessionKey: string) => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const disabled = !lane.sessionKey || !onSelectSession;
+  return (
+    <div
+      role="button"
+      tabIndex={disabled ? -1 : 0}
+      onClick={() => {
+        if (disabled || !lane.sessionKey) return;
+        onSelectSession?.(lane.sessionKey);
+      }}
+      onKeyDown={(event) => {
+        if (disabled || !lane.sessionKey) return;
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        event.preventDefault();
+        onSelectSession?.(lane.sessionKey);
+      }}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-disabled={disabled}
+      style={{
+        width: '100%',
+        minHeight: 31,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        borderBottomWidth: 1,
+        borderBottomStyle: 'solid',
+        borderBottomColor: 'var(--t-divider-subtle)',
+        background: hovered && !disabled ? 'var(--t-hover)' : 'transparent',
+        color: 'var(--t-text)',
+        cursor: disabled ? 'default' : 'pointer',
+        opacity: disabled ? 0.6 : 1,
+        textAlign: 'left',
+        outline: 'none',
+        fontFamily: REPO_FOCUS_FONT,
+        paddingTop: 2,
+        paddingRight: 10,
+        paddingBottom: 2,
+        paddingLeft: 10,
+        transition: 'background 180ms ease',
+      }}
+    >
+      <span
+        aria-hidden
+        style={{
+          width: 16,
+          height: 16,
+          borderRadius: 5,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          color: 'var(--t-text-muted)',
+        }}
+      >
+        {lane.runtime === 'claude-code' ? (
+          <ClaudeIcon size={12} />
+        ) : lane.runtime === 'gemini' ? (
+          <GeminiIcon size={12} />
+        ) : lane.runtime === 'opencode' ? (
+          <OpenCodeIcon size={12} />
+        ) : (
+          <CodexIcon size={12} />
+        )}
+      </span>
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          fontSize: 11.5,
+          fontWeight: 500,
+          letterSpacing: '-0.005em',
+          lineHeight: 1.3,
+          color: 'var(--t-text-muted)',
+        }}
+      >
+        {lane.label}
+      </span>
+    </div>
+  );
+}
+
 function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacket; compact: boolean }) {
   const releasedAt = packetTimestamp(packet);
   const meta = releasedAt
@@ -759,10 +1039,10 @@ function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacket; comp
       title={packet.title}
       style={{
         width: '100%',
-        minHeight: compact ? 36 : 42,
+        minHeight: compact ? 31 : 42,
         display: 'flex',
         alignItems: 'center',
-        gap: compact ? 7 : 8,
+        gap: compact ? 6 : 8,
         borderBottomWidth: 1,
         borderBottomStyle: 'solid',
         borderBottomColor: 'var(--t-divider-subtle)',
@@ -770,18 +1050,18 @@ function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacket; comp
         color: 'var(--t-text)',
         textAlign: 'left',
         fontFamily: REPO_FOCUS_FONT,
-        paddingTop: compact ? 4 : 5,
+        paddingTop: compact ? 2 : 5,
         paddingRight: compact ? 10 : 12,
-        paddingBottom: compact ? 4 : 5,
+        paddingBottom: compact ? 2 : 5,
         paddingLeft: compact ? 10 : 12,
       }}
     >
       <span
         aria-hidden
         style={{
-          width: compact ? 18 : 20,
-          height: compact ? 18 : 20,
-          borderRadius: 6,
+          width: compact ? 16 : 20,
+          height: compact ? 16 : 20,
+          borderRadius: compact ? 5 : 6,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -824,46 +1104,188 @@ function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacket; comp
   );
 }
 
+function HistoryActionMenu({
+  state,
+  busy,
+  canOpen,
+  onClose,
+  onOpen,
+  onTogglePin,
+  onArchive,
+  onDelete,
+}: {
+  state: HistoryActionMenuState;
+  busy: boolean;
+  canOpen: boolean;
+  onClose: () => void;
+  onOpen: () => void;
+  onTogglePin: () => void;
+  onArchive: () => void;
+  onDelete: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const menuWidth = 190;
+  const menuHeight = 180;
+  const panelRect = typeof document === 'undefined'
+    ? null
+    : document.querySelector('[data-o8-agent-panel="true"]')?.getBoundingClientRect() ?? null;
+  const viewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight;
+  const boundaryLeft = panelRect?.left ?? 0;
+  const boundaryRight = panelRect?.right ?? viewportWidth;
+  const boundaryTop = panelRect?.top ?? 0;
+  const boundaryBottom = panelRect?.bottom ?? viewportHeight;
+  const minLeft = boundaryLeft + 8;
+  const maxLeft = Math.max(minLeft, boundaryRight - menuWidth - 8);
+  const left = Math.min(Math.max(state.x, minLeft), maxLeft);
+  const minTop = boundaryTop + 8;
+  const maxTop = Math.max(minTop, boundaryBottom - menuHeight - 8);
+  const top = Math.min(Math.max(state.y, minTop), maxTop);
+
+  const run = (action: () => void) => {
+    onClose();
+    action();
+  };
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close chat action menu"
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 58,
+          border: 0,
+          background: 'transparent',
+          cursor: 'default',
+        }}
+      />
+      <div
+        data-o8-history-action-menu="true"
+        style={{
+          position: 'fixed',
+          left,
+          top,
+          zIndex: 59,
+          width: menuWidth,
+          borderRadius: 13,
+          border: '1px solid var(--t-divider-subtle)',
+          background: 'color-mix(in srgb, var(--t-bg-elevated, #ffffff) 86%, transparent)',
+          boxShadow: '0 18px 48px rgba(15, 23, 42, 0.12)',
+          backdropFilter: 'blur(18px) saturate(145%)',
+          WebkitBackdropFilter: 'blur(18px) saturate(145%)',
+          padding: 7,
+          color: 'var(--t-text)',
+          fontFamily: REPO_FOCUS_FONT,
+        }}
+      >
+        <div style={{ padding: '4px 7px 7px' }}>
+          <div style={{ fontSize: 11.25, lineHeight: '15px', fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {state.item.title}
+          </div>
+          <div style={{ marginTop: 1, color: 'var(--t-text-faint)', fontSize: 10, lineHeight: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {historyRepoLabel(state.item)} - {historyKindLabel(state.item)}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <HistoryMenuRow label="Open chat" disabled={!canOpen || busy} onClick={() => run(onOpen)} />
+          <HistoryMenuRow label={state.item.pinned ? 'Unpin' : 'Pin'} disabled={busy} onClick={() => run(onTogglePin)} />
+          <HistoryMenuRow label={state.archived ? 'Restore' : 'Archive'} disabled={busy} onClick={() => run(onArchive)} />
+          <HistoryMenuRow label="Delete" danger disabled={busy} onClick={() => run(onDelete)} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function HistoryMenuRow({
+  label,
+  danger = false,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  danger?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      style={{
+        width: '100%',
+        minHeight: 29,
+        borderRadius: 9,
+        border: 0,
+        background: 'transparent',
+        color: disabled ? 'var(--t-text-faint)' : danger ? '#dc2626' : 'var(--t-text-muted)',
+        cursor: disabled ? 'default' : 'pointer',
+        textAlign: 'left',
+        paddingTop: 0,
+        paddingRight: 9,
+        paddingBottom: 0,
+        paddingLeft: 9,
+        fontFamily: REPO_FOCUS_FONT,
+        fontSize: 11.25,
+        lineHeight: '15px',
+        fontWeight: danger ? 620 : 560,
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+      onMouseEnter={(event) => {
+        if (disabled) return;
+        event.currentTarget.style.background = 'var(--t-hover)';
+        event.currentTarget.style.color = danger ? '#dc2626' : 'var(--t-text)';
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = 'transparent';
+        event.currentTarget.style.color = disabled ? 'var(--t-text-faint)' : danger ? '#dc2626' : 'var(--t-text-muted)';
+      }}
+    >
+      {label}
+    </button>
+  );
+}
+
 function HistoryChatRow({
   item,
   active,
   disabled,
   compact,
-  showKindInMeta = false,
   tone,
-  archived = false,
-  busy = false,
   onOpen,
-  onArchive,
-  onDelete,
-  onTogglePin,
+  onOpenMenu,
 }: {
   item: ChatHistoryItem;
   active: boolean;
   disabled: boolean;
   compact: boolean;
-  showKindInMeta?: boolean;
   tone?: HistoryRowTone | null;
-  archived?: boolean;
-  busy?: boolean;
   onOpen: () => void;
-  onArchive?: () => void;
-  onDelete?: () => void;
-  onTogglePin?: () => void;
+  onOpenMenu?: (event: MouseEvent<HTMLDivElement>) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const rowTone = active
     ? HISTORY_ROW_TONES.active
     : (tone ?? (historySection(item) === 'orchestrator' ? HISTORY_ROW_TONES.activity : HISTORY_ROW_TONES.neutral));
-  const metaParts = [
-    { text: historyRepoLabel(item), status: false },
-    showKindInMeta ? { text: historyKindLabel(item), status: false } : null,
+  const metaParts = compact ? [] : [
     rowTone.label ? { text: rowTone.label, status: true } : null,
-    { text: item.messageCount > 0 ? `${item.messageCount} msg${item.messageCount === 1 ? '' : 's'}` : 'empty', status: false },
     { text: formatElapsedAgo(item.modifiedAt), status: false },
   ].filter((part): part is { text: string; status: boolean } => Boolean(part?.text));
   const shimmerStatus = rowTone.key === 'running' || rowTone.key === 'review';
-  const showActions = hovered || item.pinned || busy;
 
   return (
     <div
@@ -880,27 +1302,30 @@ function HistoryChatRow({
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onOpenMenu?.(event);
+      }}
       aria-disabled={disabled}
-      title={item.title}
       style={{
         width: '100%',
-        minHeight: compact ? 36 : 42,
+        minHeight: compact ? 31 : 42,
         display: 'flex',
         alignItems: 'center',
-        gap: compact ? 7 : 8,
+        gap: compact ? 6 : 8,
         borderBottomWidth: 1,
         borderBottomStyle: 'solid',
         borderBottomColor: rowTone.border,
-        background: rowTone.background,
+        background: active ? rowTone.background : hovered ? 'var(--t-hover)' : rowTone.background,
         color: 'var(--t-text)',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.72 : 1,
         textAlign: 'left',
         outline: 'none',
         fontFamily: REPO_FOCUS_FONT,
-        paddingTop: compact ? 4 : 5,
-        paddingRight: compact ? 7 : 9,
-        paddingBottom: compact ? 4 : 5,
+        paddingTop: compact ? 2 : 5,
+        paddingRight: compact ? 10 : 12,
+        paddingBottom: compact ? 2 : 5,
         paddingLeft: compact ? 10 : 12,
         transition: 'background 180ms ease, opacity 180ms ease',
       }}
@@ -908,9 +1333,9 @@ function HistoryChatRow({
       <span
         aria-hidden
         style={{
-          width: compact ? 18 : 20,
-          height: compact ? 18 : 20,
-          borderRadius: 6,
+          width: compact ? 16 : 20,
+          height: compact ? 16 : 20,
+          borderRadius: compact ? 5 : 6,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -919,16 +1344,16 @@ function HistoryChatRow({
           color: rowTone.iconColor,
         }}
       >
-        <RuntimeHistoryIcon item={item} size={compact ? 13 : 14} />
+        <RuntimeHistoryIcon item={item} size={compact ? 11 : 14} />
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
           className={active ? 'o8-text-shimmer' : undefined}
           style={{
             display: 'block',
-            fontSize: compact ? 11.25 : 12,
-            lineHeight: compact ? '15px' : '16px',
-            fontWeight: 500,
+            fontSize: compact ? 10.75 : 12,
+            lineHeight: compact ? '13px' : '16px',
+            fontWeight: 400,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -937,119 +1362,38 @@ function HistoryChatRow({
         >
           {item.title}
         </span>
-        <span
-          style={{
-            display: 'block',
-            marginTop: 1,
-            color: 'var(--t-text-faint)',
-            fontSize: compact ? 9.75 : 10.25,
-            lineHeight: compact ? '12px' : '13px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {metaParts.map((part, index) => (
-            <span key={`${part.text}-${index}`}>
-              {index > 0 ? <span>{' · '}</span> : null}
-              <span
-                className={part.status && shimmerStatus ? 'o8-text-shimmer' : undefined}
-                style={part.status ? {
-                  color: rowTone.iconColor,
-                  fontWeight: 650,
-                  ...(shimmerStatus ? shimmerTextStyle(rowTone.iconColor, 'var(--t-text)') : {}),
-                } : undefined}
-              >
-                {part.text}
+        {metaParts.length > 0 ? (
+          <span
+            style={{
+              display: 'block',
+              marginTop: 1,
+              color: 'var(--t-text-faint)',
+              fontSize: compact ? 9.75 : 10.25,
+              lineHeight: compact ? '12px' : '13px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {metaParts.map((part, index) => (
+              <span key={`${part.text}-${index}`}>
+                {index > 0 ? <span>{' · '}</span> : null}
+                <span
+                  className={part.status && shimmerStatus ? 'o8-text-shimmer' : undefined}
+                  style={part.status ? {
+                    color: rowTone.iconColor,
+                    fontWeight: 650,
+                    ...(shimmerStatus ? shimmerTextStyle(rowTone.iconColor, 'var(--t-text)') : {}),
+                  } : undefined}
+                >
+                  {part.text}
+                </span>
               </span>
-            </span>
-          ))}
-        </span>
-      </span>
-      <span
-        aria-hidden={!showActions}
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 3,
-          flexShrink: 0,
-          opacity: showActions ? 1 : 0,
-          pointerEvents: showActions ? 'auto' : 'none',
-          transition: 'opacity 160ms ease',
-        }}
-      >
-        <HistoryRowAction
-          title={item.pinned ? 'Unpin chat' : 'Pin chat'}
-          busy={busy}
-          active={item.pinned}
-          onClick={onTogglePin}
-        >
-          <Star size={compact ? 11 : 12} fill={item.pinned ? 'currentColor' : 'none'} />
-        </HistoryRowAction>
-        <HistoryRowAction
-          title={archived ? 'Restore chat' : 'Archive chat'}
-          busy={busy}
-          onClick={onArchive}
-        >
-          {archived ? <RotateCcw size={compact ? 11 : 12} /> : <Archive size={compact ? 11 : 12} />}
-        </HistoryRowAction>
-        <HistoryRowAction
-          title="Delete chat"
-          busy={busy}
-          danger
-          onClick={onDelete}
-        >
-          <Trash2 size={compact ? 11 : 12} />
-        </HistoryRowAction>
+            ))}
+          </span>
+        ) : null}
       </span>
     </div>
-  );
-}
-
-function HistoryRowAction({
-  title,
-  busy,
-  active = false,
-  danger = false,
-  onClick,
-  children,
-}: {
-  title: string;
-  busy: boolean;
-  active?: boolean;
-  danger?: boolean;
-  onClick?: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      title={title}
-      disabled={busy || !onClick}
-      onClick={(event) => {
-        event.stopPropagation();
-        onClick?.();
-      }}
-      style={{
-        width: 20,
-        height: 20,
-        borderRadius: 7,
-        borderWidth: 0,
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        background: active
-          ? 'color-mix(in srgb, var(--t-accent) 14%, transparent)'
-          : 'transparent',
-        color: danger ? '#ef4444' : active ? 'var(--t-accent)' : 'var(--t-text-faint)',
-        cursor: busy || !onClick ? 'default' : 'pointer',
-        opacity: busy ? 0.5 : 1,
-        fontFamily: REPO_FOCUS_FONT,
-        padding: 0,
-      }}
-    >
-      {children}
-    </button>
   );
 }
 
@@ -1118,7 +1462,7 @@ function CompactSessionRow({
         <RuntimeHistoryIcon item={runtimeItem} size={13} />
       </span>
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: 11.25, lineHeight: '15px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ display: 'block', fontSize: 11.25, lineHeight: '15px', fontWeight: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {session.name || session.runtime || 'Agent'}
         </span>
         <span style={{ display: 'block', marginTop: 1, color: 'var(--t-text-faint)', fontSize: 9.75, lineHeight: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
