@@ -54,6 +54,15 @@ interface WorkspaceHeaderStripProps {
   /** Active tab id from the headerTabs list — drives which pill renders
    *  as filled. */
   headerActiveTabId?: string | null;
+  /** Side-by-side pill strips for splits — when populated (2+ entries)
+   *  the center slot renders two pill rows separated by a small vertical
+   *  divider, one per split workspace. Replaces headerLabel + headerTabs
+   *  in this mode. */
+  splitHeaderWorkspaces?: Array<{
+    workspaceId: string;
+    tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
+    activeTabId: string | null;
+  }> | null;
   /** Optional action callbacks for the `…` menu next to the title.
    *  Items only render when the corresponding callback is provided —
    *  the menu hides entirely when none are set. */
@@ -93,13 +102,15 @@ export function WorkspaceHeaderStrip({
   onPlayContextMenu,
   headerTabs,
   headerActiveTabId,
+  splitHeaderWorkspaces,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
   const tabs = headerTabs ?? [];
-  // 2+ tabs → pill strip, no title (each pill carries its own label).
-  // 1 or 0 → render the title + `…` menu as before.
-  const usePillStrip = tabs.length > 1;
-  const hasTitleMenu = !usePillStrip && headerLabel && (onTitleRename || onTitleArchive || onTitleShare);
+  const isSplit = Boolean(splitHeaderWorkspaces && splitHeaderWorkspaces.length >= 2);
+  // Split mode → side-by-side pill strips. Single 2+ tabs → pill strip.
+  // Single 1 or 0 tabs → title + `…` menu.
+  const usePillStrip = !isSplit && tabs.length > 1;
+  const hasTitleMenu = !isSplit && !usePillStrip && headerLabel && (onTitleRename || onTitleArchive || onTitleShare);
   const hasPlayButton = Boolean(onSpawnOrchestrator || onSpawnChat || onSpawnTerminal);
   return (
     <ColumnHeaderStrip
@@ -117,7 +128,9 @@ export function WorkspaceHeaderStrip({
           ) : null}
         </>
       }
-      center={usePillStrip ? (
+      center={isSplit && splitHeaderWorkspaces ? (
+        <SplitHeaderPillStrips workspaces={splitHeaderWorkspaces} />
+      ) : usePillStrip ? (
         <HeaderPillStrip tabs={tabs} activeTabId={headerActiveTabId ?? null} />
       ) : headerLabel ? (
         <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
@@ -171,6 +184,45 @@ export function WorkspaceHeaderStrip({
   );
 }
 
+/** Split-mode header — two HeaderPillStrips side by side, with a small
+ *  vertical divider between them mirroring the visual split below.
+ *  Each strip dispatches with its own workspaceId so the right
+ *  WorkspaceTerminalRoot claims the click. */
+function SplitHeaderPillStrips({
+  workspaces,
+}: {
+  workspaces: Array<{
+    workspaceId: string;
+    tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
+    activeTabId: string | null;
+  }>;
+}) {
+  return (
+    <div data-no-drag style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
+      {workspaces.map((workspace, index) => (
+        <div
+          key={workspace.workspaceId}
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            alignItems: 'center',
+            borderLeftWidth: index === 0 ? 0 : 1,
+            borderLeftStyle: 'solid',
+            borderLeftColor: 'var(--t-divider)',
+          }}
+        >
+          <HeaderPillStrip
+            tabs={workspace.tabs}
+            activeTabId={workspace.activeTabId}
+            workspaceId={workspace.workspaceId}
+          />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 /** Codex-style pill strip — renders in the WorkspaceHeaderStrip's
  *  center slot when 2+ tabs are open. Active pill is a filled dark
  *  rounded rect; inactive pills are icon + label only. Horizontal
@@ -179,6 +231,7 @@ export function WorkspaceHeaderStrip({
 function HeaderPillStrip({
   tabs,
   activeTabId,
+  workspaceId,
 }: {
   tabs: Array<{
     id: string;
@@ -188,6 +241,10 @@ function HeaderPillStrip({
     packetStatus: string | null;
   }>;
   activeTabId: string | null;
+  /** When set, pill events include this id so the matching
+   *  WorkspaceTerminalRoot can claim them. Lets two strips coexist
+   *  in split mode without selecting on the wrong pane. */
+  workspaceId?: string | null;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Truncate to one word when the strip is crowded — Codex feel: at 5+
@@ -195,11 +252,11 @@ function HeaderPillStrip({
   const crowded = tabs.length >= 5;
 
   const handleSelect = useCallback((tabId: string) => {
-    window.dispatchEvent(new CustomEvent('o8:request-select-tab', { detail: { tabId } }));
-  }, []);
+    window.dispatchEvent(new CustomEvent('o8:request-select-tab', { detail: { tabId, workspaceId: workspaceId ?? null } }));
+  }, [workspaceId]);
   const handleClose = useCallback((tabId: string) => {
-    window.dispatchEvent(new CustomEvent('o8:request-close-tab', { detail: { tabId } }));
-  }, []);
+    window.dispatchEvent(new CustomEvent('o8:request-close-tab', { detail: { tabId, workspaceId: workspaceId ?? null } }));
+  }, [workspaceId]);
 
   return (
     <div

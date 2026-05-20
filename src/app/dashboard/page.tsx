@@ -351,14 +351,26 @@ function DashboardInner() {
   }, []);
 
   const workspaceHeaderActive = useMemo<WorkspaceActivePayload>(() => {
-    // Single workspace mounted → show its label / pill strip in the global
-    // header. Multiple mounted (splits) → leave the global header empty;
-    // each split's lower TabBar carries its own state.
+    // Single workspace mounted → its label / pill strip drives the
+    // global header. Multiple mounted (splits) → fall back to empty
+    // (the split header path below renders both panes side by side).
     if (workspaceActiveMap.size === 1) {
       const [only] = workspaceActiveMap.values();
       return only;
     }
     return { label: null, tabId: null, kind: null, tabs: [] };
+  }, [workspaceActiveMap]);
+
+  // Side-by-side header pills for splits — both workspaces' tabs land
+  // in the global header with a divider between them, mirroring the
+  // visual split below. Only populated when split (2+ workspaces).
+  const splitHeaderWorkspaces = useMemo(() => {
+    if (workspaceActiveMap.size < 2) return null;
+    return Array.from(workspaceActiveMap.entries()).map(([workspaceId, payload]) => ({
+      workspaceId,
+      tabs: payload.tabs,
+      activeTabId: payload.tabId,
+    }));
   }, [workspaceActiveMap]);
 
   // `…` menu handlers. Only orchestrator + llm-chat tabs back to
@@ -3120,6 +3132,7 @@ function DashboardInner() {
           headerLabel={workspaceHeaderActive.label}
           headerTabs={workspaceHeaderActive.tabs}
           headerActiveTabId={workspaceHeaderActive.tabId}
+          splitHeaderWorkspaces={splitHeaderWorkspaces}
           onTitleRename={titleMenuActive ? handleTitleRename : undefined}
           onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}
           onTitleShare={titleMenuActive ? handleTitleShare : undefined}
