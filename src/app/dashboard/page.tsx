@@ -168,6 +168,49 @@ const COMPACT_SHELL_MEDIA_QUERY = '(max-width: 980px)';
 const O8_ACTIVE_TAB_STORAGE_KEY = 'o8ActiveTab';
 const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'activity';
 
+/** Floating terminal toggle sitting at the bottom-center of the
+ *  workspace card. Moved here from the column header per operator
+ *  request — "put the terminal button down under the input where main
+ *  is like centered below the composer first that will free up the
+ *  header". No background, just the icon; active state tints it. */
+function BottomCenterTerminalToggle({ active, onClick }: { active: boolean; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-label="Toggle terminal"
+      title="Toggle terminal"
+      style={{
+        position: 'absolute',
+        bottom: 8,
+        left: '50%',
+        transform: 'translateX(-50%)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 28,
+        height: 28,
+        borderRadius: 8,
+        borderWidth: 0,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        color: active ? 'var(--t-accent)' : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        padding: 0,
+        zIndex: 30,
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+    >
+      <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="m4 17 6-6-6-6" />
+        <line x1="12" x2="20" y1="19" y2="19" />
+      </svg>
+    </button>
+  );
+}
+
 function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
   if (!raw) return null;
   if (raw === 'files' || raw === 'diff' || raw === 'changes') return 'workspace';
@@ -3072,8 +3115,6 @@ function DashboardInner() {
           leadingInset={!showSidebarColumn}
           sidebarVisible={sidebarVisible}
           onToggleSidebar={!showSidebarColumn && !compactShell ? () => setSidebarVisible(v => !v) : undefined}
-          bottomPanelVisible={bottomPanelVisible}
-          onToggleBottomPanel={toggleContextualPanelTile}
           rightPanelOpen={showRightPanelColumn}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
           headerLabel={workspaceHeaderActive.label}
@@ -3157,6 +3198,15 @@ function DashboardInner() {
             </Suspense>
           </SettingsOverlay>
         )}
+
+        {/* Bottom-center floating terminal toggle — pulled out of the
+            column header so the chrome stays light. Sits below the
+            composer in the workspace card with no background, just the
+            icon. */}
+        <BottomCenterTerminalToggle
+          active={bottomPanelVisible}
+          onClick={toggleContextualPanelTile}
+        />
         </div>
       </div>
 
