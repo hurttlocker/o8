@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 22;
+const DB_SCHEMA_VERSION = 23;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -154,6 +154,37 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // default). The column-add backfill in `ensureSessionOutcomeColumns` only
   // fires once when the column is created; this runs every boot.
   backfillSessionOutcomeValidFrom(sqlite);
+  // Schema v23 — `automations` table (Superset-style scheduled agent runs).
+  // CREATE TABLE IF NOT EXISTS, so safe on every boot; indexes follow.
+  ensureAutomationsTable(sqlite);
+}
+
+function ensureAutomationsTable(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS automations (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      owner TEXT NOT NULL,
+      project_id TEXT,
+      repo_path TEXT NOT NULL,
+      branch TEXT NOT NULL DEFAULT 'main',
+      runtime TEXT NOT NULL,
+      prompt TEXT NOT NULL,
+      trigger_kind TEXT NOT NULL DEFAULT 'manual',
+      cron_expr TEXT,
+      enabled INTEGER NOT NULL DEFAULT 1,
+      next_run_at INTEGER,
+      last_run_at INTEGER,
+      last_run_status TEXT NOT NULL DEFAULT 'idle',
+      last_lane_id TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_automations_owner_created
+      ON automations(owner, created_at);
+    CREATE INDEX IF NOT EXISTS idx_automations_enabled_next_run
+      ON automations(enabled, next_run_at);
+  `);
 }
 
 /**
