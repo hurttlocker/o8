@@ -419,9 +419,18 @@ export async function upsertProjectLedgerRecord(input: {
 }
 
 /**
- * Reconcile the active project's repoPaths with the global repo registry.
- * If new repos appear in the global registry that aren't in any project, they
- * land in the active project so they remain visible.
+ * Reconcile the panel ledger's view of repoPaths with the global registry.
+ *
+ * Historical behavior: orphan repos (in registry, not in any project) got
+ * auto-added to the active project. That fought explicit project-membership
+ * management — removing a repo from a project caused it to be re-added on
+ * the next API read. Now we only strip dead paths (paths no longer in the
+ * registry) and leave orphans alone. New repos must be added to projects
+ * explicitly at the add-repo callsite.
+ *
+ * Since `getProjectsLedger()` already lives-derives repoPaths from SQLite,
+ * the file-write here is mostly a no-op unless the activeProjectId or a
+ * project unique to the JSON ledger needed dead-path cleanup.
  */
 export async function reconcileProjectsWithRegistry(): Promise<ProjectsLedger> {
   const ledger = await getProjectsLedger();
@@ -435,42 +444,26 @@ export async function reconcileProjectsWithRegistry(): Promise<ProjectsLedger> {
     return ledger;
   }
   const knownPaths = new Set(registry.repos.map((entry) => normalizeRepoPath(entry.path)));
-  const claimed = new Set<string>();
-  for (const project of ledger.projects) {
-    for (const repoPath of project.repoPaths) claimed.add(repoPath);
-  }
-  const orphans = [...knownPaths].filter((p) => !claimed.has(p));
-  if (orphans.length === 0) {
-    // Strip stale paths that no longer exist in the registry from each project.
-    let mutated = false;
-    const projects = ledger.projects.map((project) => {
-      const filtered = project.repoPaths.filter((p) => knownPaths.has(p));
-      if (filtered.length !== project.repoPaths.length) {
-        mutated = true;
-        return { ...project, repoPaths: filtered };
-      }
-      return project;
-    });
-    if (mutated) {
-      const next = preferConcreteActiveProject({ ...ledger, projects });
-      await writeLedger(next);
-      return next;
-    }
-    const normalizedActive = preferConcreteActiveProject(ledger);
-    if (normalizedActive.activeProjectId !== ledger.activeProjectId) {
-      await writeLedger(normalizedActive);
-      return normalizedActive;
-    }
-    return ledger;
-  }
+  // Strip stale paths that no longer exist in the registry from each project.
+  // No more orphan-add — orphans stay orphans until explicit project assignment.
+  let mutated = false;
   const projects = ledger.projects.map((project) => {
-    if (project.id !== ledger.activeProjectId) {
-      return { ...project, repoPaths: project.repoPaths.filter((p) => knownPaths.has(p)) };
+    const filtered = project.repoPaths.filter((p) => knownPaths.has(p));
+    if (filtered.length !== project.repoPaths.length) {
+      mutated = true;
+      return { ...project, repoPaths: filtered };
     }
-    const merged = Array.from(new Set([...project.repoPaths.filter((p) => knownPaths.has(p)), ...orphans]));
-    return { ...project, repoPaths: merged };
+    return project;
   });
-  const next = preferConcreteActiveProject({ ...ledger, projects });
-  await writeLedger(next);
-  return next;
+  if (mutated) {
+    const next = preferConcreteActiveProject({ ...ledger, projects });
+    await writeLedger(next);
+    return next;
+  }
+  const normalizedActive = preferConcreteActiveProject(ledger);
+  if (normalizedActive.activeProjectId !== ledger.activeProjectId) {
+    await writeLedger(normalizedActive);
+    return normalizedActive;
+  }
+  return ledger;
 }
