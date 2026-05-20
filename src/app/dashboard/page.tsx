@@ -339,6 +339,18 @@ function DashboardInner() {
     }));
   }, [workspaceHeaderActive.tabId]);
 
+  // Single-workspace spawn shortcut. Dispatches a window event the
+  // (only) WorkspaceTerminalRoot listens for to call its spawn handlers.
+  // Only meaningful when there's a single workspace; with splits each
+  // pane's own lower TabBar carries the play button.
+  const isSingleWorkspace = workspaceActiveMap.size === 1;
+  const dispatchSpawn = useCallback((kind: 'orchestrator' | 'chat' | 'terminal') => {
+    window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind } }));
+  }, []);
+  const handleSpawnOrchestrator = useCallback(() => dispatchSpawn('orchestrator'), [dispatchSpawn]);
+  const handleSpawnChat = useCallback(() => dispatchSpawn('chat'), [dispatchSpawn]);
+  const handleSpawnTerminal = useCallback(() => dispatchSpawn('terminal'), [dispatchSpawn]);
+
   const handleTitleShare = useCallback(async () => {
     const tabId = workspaceHeaderActive.tabId;
     if (!tabId) return;
@@ -3054,6 +3066,9 @@ function DashboardInner() {
           onTitleRename={titleMenuActive ? handleTitleRename : undefined}
           onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}
           onTitleShare={titleMenuActive ? handleTitleShare : undefined}
+          onSpawnOrchestrator={isSingleWorkspace ? handleSpawnOrchestrator : undefined}
+          onSpawnChat={isSingleWorkspace ? handleSpawnChat : undefined}
+          onSpawnTerminal={isSingleWorkspace ? handleSpawnTerminal : undefined}
         />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />

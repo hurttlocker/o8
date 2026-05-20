@@ -46,6 +46,13 @@ interface WorkspaceHeaderStripProps {
   onTitleRename?: () => void;
   onTitleArchive?: () => void;
   onTitleShare?: () => void;
+  /** Single-workspace spawn shortcut — when in single mode the global
+   *  header carries the ▶ play button (the per-pane lower TabBar that
+   *  used to host it is hidden). Each spawn callback gates its menu
+   *  item. May come off — operator wants to feel it out first. */
+  onSpawnOrchestrator?: () => void;
+  onSpawnChat?: () => void;
+  onSpawnTerminal?: () => void;
 }
 
 export function WorkspaceHeaderStrip({
@@ -61,9 +68,13 @@ export function WorkspaceHeaderStrip({
   onTitleRename,
   onTitleArchive,
   onTitleShare,
+  onSpawnOrchestrator,
+  onSpawnChat,
+  onSpawnTerminal,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
   const hasTitleMenu = headerLabel && (onTitleRename || onTitleArchive || onTitleShare);
+  const hasPlayButton = Boolean(onSpawnOrchestrator || onSpawnChat || onSpawnTerminal);
   return (
     <ColumnHeaderStrip
       drag
@@ -93,8 +104,15 @@ export function WorkspaceHeaderStrip({
         </div>
       ) : null}
       right={
-        onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
+        hasPlayButton || onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
           <>
+            {hasPlayButton ? (
+              <HeaderPlayButton
+                onSpawnOrchestrator={onSpawnOrchestrator}
+                onSpawnChat={onSpawnChat}
+                onSpawnTerminal={onSpawnTerminal}
+              />
+            ) : null}
             {onToggleBottomPanel ? (
               <TitleBarButton
                 icon={<IconTerminal />}
@@ -121,6 +139,110 @@ export function WorkspaceHeaderStrip({
         ) : null
       }
     />
+  );
+}
+
+/** Header ▶ play button — mirrors the WorkspaceLaunchPicker dropdown
+ *  but lives in the global column header instead of the lower per-pane
+ *  TabBar. Used only in single-workspace mode; when the operator splits,
+ *  each pane's own lower TabBar carries the spawn button instead. */
+function HeaderPlayButton({
+  onSpawnOrchestrator,
+  onSpawnChat,
+  onSpawnTerminal,
+}: {
+  onSpawnOrchestrator?: () => void;
+  onSpawnChat?: () => void;
+  onSpawnTerminal?: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const wrapperRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDocDown = (event: MouseEvent) => {
+      if (!wrapperRef.current) return;
+      if (!wrapperRef.current.contains(event.target as Node)) setOpen(false);
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    window.addEventListener('mousedown', onDocDown);
+    window.addEventListener('keydown', onKey);
+    return () => {
+      window.removeEventListener('mousedown', onDocDown);
+      window.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  const pick = useCallback((handler?: () => void) => () => {
+    setOpen(false);
+    handler?.();
+  }, []);
+
+  return (
+    <div ref={wrapperRef} data-no-drag style={{ position: 'relative', flexShrink: 0 }}>
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        aria-label="New tab"
+        title="New tab"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          borderRadius: 6,
+          borderWidth: 0,
+          background: open || hovered ? 'var(--t-hover)' : 'transparent',
+          color: 'var(--t-accent)',
+          cursor: 'pointer',
+          padding: 0,
+          transition: 'background 120ms ease',
+        }}
+      >
+        <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+          <path d="M8 5v14l11-7z" />
+        </svg>
+      </button>
+      {open ? (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            top: '100%',
+            right: 0,
+            marginTop: 4,
+            minWidth: 220,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider)',
+            background: 'var(--t-panel)',
+            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+            paddingTop: 4,
+            paddingBottom: 4,
+            zIndex: 100,
+            overflow: 'hidden',
+            fontFamily: 'var(--font-sans-system)',
+          }}
+        >
+          {onSpawnOrchestrator ? (
+            <TitleMenuItem label="Orchestrator" onClick={pick(onSpawnOrchestrator)} />
+          ) : null}
+          {onSpawnChat ? (
+            <TitleMenuItem label="Chat" onClick={pick(onSpawnChat)} />
+          ) : null}
+          {onSpawnTerminal ? (
+            <TitleMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} />
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
