@@ -7,6 +7,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { broadcastProjectsUpdated } from '@/components/desktop/repo-registry/useProjects';
 import {
   fingerprintOrgSuggestion,
   parseGithubOrg,
@@ -172,6 +173,10 @@ export function useProjectsData(): ProjectsDataState {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Failed to create project.');
       await refresh();
+      // Broadcast so the left-rail useProjects hook drops its cache and
+      // refetches. Without this the panel ledger reads stale even though
+      // SQLite + ledger file on disk are correct.
+      broadcastProjectsUpdated();
     } finally {
       setBusyKey(null);
     }
@@ -230,6 +235,10 @@ export function useProjectsData(): ProjectsDataState {
         if (!mainRes.ok) throw new Error(mainData.error ?? 'Failed to update main repo.');
       }
       await refresh();
+      // Broadcast so the left-rail useProjects hook drops its cache and
+      // refetches. Without this the panel ledger reads stale even though
+      // SQLite + ledger file on disk are correct.
+      broadcastProjectsUpdated();
     } finally {
       setBusyKey(null);
     }
@@ -244,6 +253,7 @@ export function useProjectsData(): ProjectsDataState {
         throw new Error(data.error ?? 'Failed to delete project.');
       }
       await refresh();
+      broadcastProjectsUpdated();
     } catch (err) {
       setTopError(err instanceof Error ? err.message : 'Failed to delete project.');
     } finally {
@@ -308,6 +318,7 @@ export function useProjectsData(): ProjectsDataState {
       const data = (await res.json().catch(() => ({}))) as { error?: string };
       if (!res.ok) throw new Error(data.error ?? 'Failed to create project from suggestion.');
       await refresh();
+      broadcastProjectsUpdated();
     } catch (err) {
       setTopError(err instanceof Error ? err.message : 'Failed to create project.');
     } finally {

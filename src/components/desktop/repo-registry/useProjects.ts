@@ -4,10 +4,14 @@ import { useCallback, useEffect, useState } from 'react';
 
 /** Window-level broadcast so every useProjects instance refreshes after any
  *  mutation (the palette + the AgentPanel + any future surface). Lets us
- *  skip lifting state to a single context without going stale. */
-const PROJECTS_UPDATED_EVENT = 'o8:projects-updated';
+ *  skip lifting state to a single context without going stale.
+ *
+ *  Exported so the Settings → Projects hook can fire the same event after
+ *  its own mutations (create / edit / delete) — otherwise the left-rail
+ *  cache lags until the next mount. */
+export const PROJECTS_UPDATED_EVENT = 'o8:projects-updated';
 
-function broadcastProjectsUpdated() {
+export function broadcastProjectsUpdated() {
   if (typeof window === 'undefined') return;
   window.dispatchEvent(new CustomEvent(PROJECTS_UPDATED_EVENT));
 }
