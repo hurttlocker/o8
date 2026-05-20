@@ -840,7 +840,10 @@ function ThreadRestoreShimmer() {
             maxWidth: 520,
             height: i === 1 ? 64 : 16,
             borderRadius: i === 1 ? 14 : 6,
-            background: 'linear-gradient(90deg, var(--t-bg-card, rgba(255,255,255,0.04)) 0%, var(--t-hover, rgba(255,255,255,0.12)) 50%, var(--t-bg-card, rgba(255,255,255,0.04)) 100%)',
+            // Fixed slate rgba — the previous `var(--t-bg-card)` / `var(--t-hover)`
+            // resolved to near-transparent in light mode, making the bars
+            // invisible. These constants read on both light and midnight.
+            background: 'linear-gradient(90deg, rgba(15, 23, 42, 0.06) 0%, rgba(15, 23, 42, 0.14) 50%, rgba(15, 23, 42, 0.06) 100%)',
             backgroundSize: '200% 100%',
             animation: 'o8RestoreShimmer 1.8s linear infinite',
           }}
