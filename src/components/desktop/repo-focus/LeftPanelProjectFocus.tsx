@@ -7,10 +7,10 @@ import { RepoHeader } from './RepoHeader';
 import { RepoTabs } from './RepoTabs';
 import { AgentsTab } from './tabs/AgentsTab';
 import { ChatsTab } from './tabs/ChatsTab';
+import { ControlRoomTab } from './tabs/ControlRoomTab';
 import { ContextTab } from './tabs/ContextTab';
 import { MissionTab } from './tabs/MissionTab';
 import { SpecTab } from './tabs/SpecTab';
-import { FilesTab } from './tabs/FilesTab';
 import type { RepoFocusDataProps, RepoFocusRepo, RepoFocusTabId } from './types';
 import type { ProjectRecord } from '../repo-registry/useProjects';
 import { normalizeRepoPath, packetBelongsToRepo, REPO_FOCUS_FONT } from './utils';
@@ -24,20 +24,20 @@ interface LeftPanelProjectFocusProps extends RepoFocusDataProps {
 }
 
 const PROJECTWIDE_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
+  { id: 'control', label: 'Control' },
   { id: 'chats', label: 'Chats' },
-  { id: 'agents', label: 'Packets' },
+  { id: 'agents', label: 'Agents' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
-  { id: 'files', label: 'Files' },
 ];
 
 const REPO_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
+  { id: 'control', label: 'Control' },
   { id: 'chats', label: 'Chats' },
-  { id: 'agents', label: 'Packets' },
+  { id: 'agents', label: 'Agents' },
   { id: 'context', label: 'Context' },
   { id: 'mission', label: 'Mission' },
   { id: 'spec', label: 'o8.md' },
-  { id: 'files', label: 'Files' },
 ];
 
 export function LeftPanelProjectFocus({
@@ -52,7 +52,6 @@ export function LeftPanelProjectFocus({
   activeSessionKey,
   onSelectSession,
   onOpenHistoryChat,
-  onSelectFile,
   onOpenSpecInWorkspace,
 }: LeftPanelProjectFocusProps) {
   const selectedRepo = useMemo<RepoFocusRepo | null>(() => {
@@ -62,9 +61,9 @@ export function LeftPanelProjectFocus({
   }, [repos, selectedRepoPath]);
 
   const tabsForMode = selectedRepo ? REPO_TABS : PROJECTWIDE_TABS;
-  const [activeTab, setActiveTab] = useState<RepoFocusTabId>('chats');
+  const [activeTab, setActiveTab] = useState<RepoFocusTabId>('control');
 
-  const visibleActiveTab = tabsForMode.some((tab) => tab.id === activeTab) ? activeTab : 'chats';
+  const visibleActiveTab = tabsForMode.some((tab) => tab.id === activeTab) ? activeTab : 'control';
 
   // ESC closes the entire panel — same as the prior repo-focus panel.
   useEffect(() => {
@@ -152,7 +151,20 @@ export function LeftPanelProjectFocus({
 
       <RepoTabs activeTab={visibleActiveTab} onTabChange={setActiveTab} tabs={tabsForMode} />
 
-      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', scrollbarWidth: 'none' }}>
+      <div
+        className="cortex-scroll-fade-y cortex-themed-scroll"
+        style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', scrollbarWidth: 'none' }}
+      >
+        {visibleActiveTab === 'control' ? (
+          <ControlRoomTab
+            project={project}
+            repos={repos}
+            selectedRepo={selectedRepo}
+            ideWorkspaceSessions={ideWorkspaceSessions}
+            activeSessionKey={activeSessionKey}
+            onSelectSession={onSelectSession}
+          />
+        ) : null}
         {visibleActiveTab === 'chats' ? (
           <ChatsTab
             repos={repos}
@@ -165,13 +177,20 @@ export function LeftPanelProjectFocus({
           />
         ) : null}
         {visibleActiveTab === 'agents' ? (
-          <AgentsTab
-            repoPath={selectedRepo?.localPath ?? ''}
-            packets={visiblePackets}
-            ideWorkspaceSessions={ideWorkspaceSessions}
-            activeSessionKey={activeSessionKey}
-            onSelectSession={onSelectSession}
-          />
+          selectedRepo ? (
+            <AgentsTab
+              repoPath={selectedRepo.localPath}
+              packets={visiblePackets}
+              ideWorkspaceSessions={ideWorkspaceSessions}
+              activeSessionKey={activeSessionKey}
+              onSelectSession={onSelectSession}
+            />
+          ) : (
+            <PickARepoEmpty
+              tabName="Agents"
+              hint="Live + archived agent sessions are anchored to one repo at a time."
+            />
+          )
         ) : null}
         {visibleActiveTab === 'context' ? (
           selectedRepo ? (
@@ -192,19 +211,6 @@ export function LeftPanelProjectFocus({
         ) : null}
         {visibleActiveTab === 'spec' && selectedRepo ? (
           <SpecTab repo={selectedRepo} onOpenInWorkspace={onOpenSpecInWorkspace} />
-        ) : null}
-        {visibleActiveTab === 'files' ? (
-          selectedRepo ? (
-            <FilesTab
-              repo={selectedRepo}
-              onSelectFile={(repoPath, filePath) => onSelectFile?.(filePath, repoPath)}
-            />
-          ) : (
-            <PickARepoEmpty
-              tabName="Files"
-              hint="The file tree is per repo."
-            />
-          )
         ) : null}
       </div>
     </div>
