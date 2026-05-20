@@ -330,34 +330,36 @@ function OrchestratorTabInner({
   // On mount, if no explicit initialThreadId was passed (which is the
   // case for default Orchestrator tabs spawned on first launch / reload),
   // restore the last-active thread from localStorage and load it once.
-  // The restore must happen even when the panel has already minted a
-  // fresh empty placeholder — loadThread() will replace it with the
-  // saved conversation. Retry briefly so we don't lose the race with
-  // the handle attachment.
+  // The guard ref is set ONLY AFTER loadThread runs successfully —
+  // setting it pre-emptively used to break under React StrictMode's
+  // double-effect (the cleanup cancelled the first timer, but the ref
+  // was already flagged so the second effect bailed → no restore).
   const restoredThreadRef = useRef<string | null>(null);
   useEffect(() => {
     if (!active) return;
     if (initialThreadId) return; // explicit thread wins
-    if (restoredThreadRef.current) return; // restore only once per mount
     const restored = readLastOrchestratorThreadId();
     if (!restored) return;
-    restoredThreadRef.current = restored;
-    // Retry up to 1s for chatPanelRef to attach — the handle is set
-    // when ThoughtsChatPanel mounts, but its useEffect that mints the
-    // initial placeholder also runs in the same React tick. Polling
-    // gives us robustness without coupling to internal lifecycle order.
+    if (restoredThreadRef.current === restored) return; // already loaded
+    let cancelled = false;
     let attempts = 0;
     const tryLoad = () => {
+      if (cancelled) return;
+      if (restoredThreadRef.current === restored) return;
       const handle = chatPanelRef.current;
       if (handle) {
         handle.loadThread(restored);
+        restoredThreadRef.current = restored;
         return;
       }
       attempts += 1;
-      if (attempts < 20) window.setTimeout(tryLoad, 50);
+      if (attempts < 40) window.setTimeout(tryLoad, 50);
     };
     const timer = window.setTimeout(tryLoad, 0);
-    return () => window.clearTimeout(timer);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
   }, [active, initialThreadId]);
 
   useEffect(() => {
