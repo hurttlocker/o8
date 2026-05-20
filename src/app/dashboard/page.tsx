@@ -255,6 +255,21 @@ function DashboardInner() {
   } = session;
 
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
+
+  // Active-workspace conversation title — broadcast by WorkspaceTerminalRoot
+  // via 'o8:workspace-active-label' so it can render in the top header strip
+  // (Codex / Claude pattern). One label across the whole workspace column;
+  // when splits exist the most-recent broadcaster wins (good enough for now,
+  // refine when split focus tracking exists).
+  const [workspaceHeaderLabel, setWorkspaceHeaderLabel] = useState<string | null>(null);
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ label?: string | null }>).detail;
+      setWorkspaceHeaderLabel(detail?.label ?? null);
+    };
+    window.addEventListener('o8:workspace-active-label', handler as EventListener);
+    return () => window.removeEventListener('o8:workspace-active-label', handler as EventListener);
+  }, []);
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
   const settingsPanelRef = useRef<HTMLDivElement>(null);
   const [workspaceLifecycleRecords, setWorkspaceLifecycleRecords] = useState<WorkspaceLifecycleRecordView[]>([]);
@@ -662,9 +677,7 @@ function DashboardInner() {
           ?? snapshot.tabs.find((tab) => tab.kind === 'llm-chat' && tab.id !== historyTabId)
           ?? snapshot.tabs.find((tab) => tab.kind === 'llm-chat')
           ?? null;
-        const tabId = primaryConversationTab && target.handle.focusTab(primaryConversationTab.id)
-          ? primaryConversationTab.id
-          : target.handle.openHistoryChat(historyTabId, title, repo);
+        const tabId = target.handle.openHistoryChat(primaryConversationTab?.id ?? historyTabId, title, repo);
         if (tabId) {
           window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
           const loadThread = () => {
@@ -1291,6 +1304,19 @@ function DashboardInner() {
     }
   }, [globalRepoEntries, handleSelectRegisteredRepo]);
 
+  const handleRepoAddedFromPanel = useCallback(async (repo: RepoRegistryEntry) => {
+    const repos = await loadRegisteredRepos();
+    const selected = repos.find((entry) => entry.id === repo.id) ?? repo;
+    setGlobalRepoId(selected.id);
+    setGlobalRepoBranch(selected.defaultBranch || 'main');
+    setO8RepoPathOverride(selected.localPath);
+    setO8SelectedFile(null);
+    setO8SelectedFileRepoPath(null);
+    if (typeof window !== 'undefined') {
+      sessionStorage.setItem('cortex-global-repo-id', selected.id);
+    }
+  }, [loadRegisteredRepos, setGlobalRepoBranch, setGlobalRepoId]);
+
   // ── Routing callbacks for AgentPanel ──
   // Open the wide O8 panel pinned to a specific repo path + tab. Callers
   // that need review mode pass `workspace`; otherwise the panel lands on
@@ -1319,6 +1345,73 @@ function DashboardInner() {
 
     })();
   }, [waitForWorkspaceTerminalTarget]);
+
+  const flashWorkspaceTab = useCallback((tabId: string) => {
+    if (!tabId) return;
+    window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
+  }, []);
+
+  const handleCreateWorkspaceOrchestrator = useCallback(() => {
+    void (async () => {
+      try {
+        const target = await waitForWorkspaceTerminalTarget({
+          preferredTileId: activeTileId,
+          fallbackToAnyExisting: true,
+        });
+        setActiveTileId(target.tileId);
+        flashWorkspaceTab(target.handle.openOrchestratorTab());
+      } catch {
+        // Workspace may still be mounting; the click is best-effort.
+      }
+    })();
+  }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget]);
+
+  const handleCreateWorkspaceChat = useCallback(() => {
+    void (async () => {
+      try {
+        const target = await waitForWorkspaceTerminalTarget({
+          repoPath: workspaceTerminalPreferredRepo?.localPath ?? null,
+          preferredTileId: activeTileId,
+          fallbackToAnyExisting: true,
+        });
+        setActiveTileId(target.tileId);
+        flashWorkspaceTab(target.handle.openLlmChatSession({
+          repo: workspaceTerminalPreferredRepo ?? undefined,
+          label: 'Chat',
+          createNew: true,
+        }));
+      } catch {
+        // Workspace may still be mounting; the click is best-effort.
+      }
+    })();
+  }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
+
+  const handleCreateWorkspaceTerminal = useCallback(() => {
+    void (async () => {
+      try {
+        const target = await waitForWorkspaceTerminalTarget({
+          repoPath: workspaceTerminalPreferredRepo?.localPath ?? null,
+          preferredTileId: activeTileId,
+          fallbackToAnyExisting: true,
+        });
+        setActiveTileId(target.tileId);
+        flashWorkspaceTab(target.handle.openTerminalTab(workspaceTerminalPreferredRepo ?? undefined));
+      } catch {
+        // Workspace may still be mounting; the click is best-effort.
+      }
+    })();
+  }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
+
+  const handleSplitWorkspaceFromHeader = useCallback(() => {
+    const activeNode = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
+    const activeWorkspaceLeaf = activeNode?.type === 'leaf' && activeNode.content.kind === 'terminal'
+      ? activeNode
+      : null;
+    const fallbackWorkspaceLeaf = findLeafByContentKind(tileLayout.root, 'terminal');
+    const targetLeaf = activeWorkspaceLeaf ?? fallbackWorkspaceLeaf;
+    if (!targetLeaf) return;
+    handleSplitTile(targetLeaf.id, 'vertical');
+  }, [activeTileId, handleSplitTile, tileLayout.root]);
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     setRightPanelKind('review');
@@ -2775,6 +2868,9 @@ function DashboardInner() {
                 window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
               }
             }}
+            onCreateWorkspaceOrchestrator={handleCreateWorkspaceOrchestrator}
+            onCreateWorkspaceChat={handleCreateWorkspaceChat}
+            onCreateWorkspaceTerminal={handleCreateWorkspaceTerminal}
             onOpenCommandPalette={handlePaletteOpen}
             onOpenProjectManagement={() => handleOpenSettingsTab('projects')}
             selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
@@ -2787,6 +2883,7 @@ function DashboardInner() {
             onSelectCommit={handleSelectCommit}
             onSelectPR={handleSelectPR}
             onReviewPR={handleReviewPR}
+            onRepoAdded={handleRepoAddedFromPanel}
             onRepoRemoved={handleRepoRemoved}
             onOpenSpecInWorkspace={handleOpenSpecInWorkspace}
             onExpandWorkspace={handleExpandWorkspace}
@@ -2856,16 +2953,12 @@ function DashboardInner() {
           leadingInset={!showSidebarColumn}
           sidebarVisible={sidebarVisible}
           onToggleSidebar={!showSidebarColumn && !compactShell ? () => setSidebarVisible(v => !v) : undefined}
-          isAgentsSectionActive={activeNavSection === 'agents'}
-          onOpenAgents={compactShell ? undefined : () => {
-            setActiveNavSection('agents');
-            if (!chatVisible) setChatVisible(true);
-            setRightPanelMode('chat');
-          }}
           bottomPanelVisible={bottomPanelVisible}
           onToggleBottomPanel={toggleContextualPanelTile}
+          onSplitWorkspacePanel={handleSplitWorkspaceFromHeader}
           rightPanelOpen={showRightPanelColumn}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
+          headerLabel={workspaceHeaderLabel}
         />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
@@ -3097,7 +3190,7 @@ function DashboardInner() {
                         onSelectedPacketChange={setSelectedPacketId}
             onOpenO8Panel={handleOpenO8Panel}
                       >
-                        <ReviewPanel repoPath={currentO8RepoPath} />
+                        <ReviewPanel repoPath={currentO8RepoPath} selectedFile={scopedO8SelectedFile} />
                       </OrchestratorDataProvider>
                     </Suspense>
                   </motion.div>

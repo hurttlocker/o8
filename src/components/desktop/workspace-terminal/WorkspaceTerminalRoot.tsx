@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/refs -- useWorkspaceTerminalController returns render state and stable refs through one controller object. */
 
-import { forwardRef, useMemo } from 'react';
+import { forwardRef, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
 import { RotateCcw } from '../lucide-shims';
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
@@ -38,9 +38,25 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // the viewport breakpoint AND when we have non-primary tabs to
     // surface. Above the breakpoint, the strip is just controls.
     const showTabList = widthAllowsTabs && topBarTabs.length > 0;
-    const conversationHeaderLabel = !showTabList && controller.activeTab
+    const conversationHeaderLabel = controller.activeTab
       ? workspaceConversationHeaderLabel(controller.activeTab)
       : null;
+
+    // Broadcast the active-tab label so the column-level header strip
+    // (WorkspaceHeaderStrip) can mirror Codex / Claude and put the
+    // conversation title in the title bar itself. Cleared on unmount so
+    // closing a workspace tile clears any stale title from the chrome.
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
+        detail: { label: conversationHeaderLabel },
+      }));
+      return () => {
+        window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
+          detail: { label: null },
+        }));
+      };
+    }, [conversationHeaderLabel]);
 
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
@@ -224,7 +240,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onCloseTile={props.onCloseTile}
           onReorderTabs={controller.handleReorderTabs}
           showTabList={showTabList}
-          headerLabel={conversationHeaderLabel}
         />
 
         <WorkspaceTerminalPanels
