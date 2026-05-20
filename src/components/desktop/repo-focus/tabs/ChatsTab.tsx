@@ -399,6 +399,15 @@ export function ChatsTab({
     };
   }, [fetchHistory]);
 
+  // Refetch when chat-history mutates (rename / archive / share via the
+  // header title menu). Without this listener the left rail keeps the
+  // pre-mutation snapshot until the next mount.
+  useEffect(() => {
+    const handler = () => { void fetchHistory(); };
+    window.addEventListener('o8:chat-history-updated', handler as EventListener);
+    return () => window.removeEventListener('o8:chat-history-updated', handler as EventListener);
+  }, [fetchHistory]);
+
   // Archived agent sessions (Codex / lanes table) — only fetched in the
   // compact left-rail variant where they render inline under each repo.
   // The project drawer's Chats tab leaves these to its Agents tab.
