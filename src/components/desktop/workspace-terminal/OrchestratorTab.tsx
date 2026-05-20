@@ -301,22 +301,15 @@ function OrchestratorTabInner({
     let cancelled = false;
     (async () => {
       try {
-        // eslint-disable-next-line no-console
-        console.log('[orchestrator-title-sync] fetching', { tabId, threadId, active });
         const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`);
         if (!res.ok || cancelled) return;
         const data = await res.json();
         const title = typeof data?.title === 'string' && data.title.trim() ? data.title.trim() : null;
-        // eslint-disable-next-line no-console
-        console.log('[orchestrator-title-sync] result', { tabId, threadId, title });
         if (cancelled || !title) return;
         window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
           detail: { tabId, threadId, title },
         }));
-      } catch (err) {
-        // eslint-disable-next-line no-console
-        console.log('[orchestrator-title-sync] error', err);
-      }
+      } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
   }, [active, tabId, chatChromeState.threadId]);

@@ -95,15 +95,22 @@ function DesktopStatusBarBase({
   }, [settingsDrawerOpen, syncSettingsAnchor]);
 
   // Dev preview override for MergeActionCluster — operator cycles through
-  // the merge-pill states from main without needing a real PR. Persists
-  // per-session in localStorage so reload doesn't drop the chosen state.
+  // the merge-pill states from main without needing a real PR. Initial
+  // state MUST be 'auto' to match SSR; we read localStorage AFTER mount
+  // in an effect to avoid a hydration mismatch that regenerates the
+  // entire React tree (which silently breaks unrelated surfaces like
+  // the left rail's chat list).
   const PREVIEW_STORAGE_KEY = 'o8:merge-preview-variant';
   const PREVIEW_CYCLE: MergePreviewVariant[] = ['auto', 'idle', 'open', 'view-pending', 'view-fail', 'merge-ready'];
-  const [mergePreview, setMergePreview] = useState<MergePreviewVariant>(() => {
-    if (typeof window === 'undefined') return 'auto';
+  const [mergePreview, setMergePreview] = useState<MergePreviewVariant>('auto');
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
     const stored = window.localStorage.getItem(PREVIEW_STORAGE_KEY);
-    return PREVIEW_CYCLE.includes(stored as MergePreviewVariant) ? (stored as MergePreviewVariant) : 'auto';
-  });
+    if (stored && PREVIEW_CYCLE.includes(stored as MergePreviewVariant)) {
+      setMergePreview(stored as MergePreviewVariant);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const cycleMergePreview = useCallback(() => {
     setMergePreview((current) => {
       const idx = PREVIEW_CYCLE.indexOf(current);
