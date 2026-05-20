@@ -67,6 +67,30 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       return repoName ? `${repoName} / ${kindLabel}` : kindLabel;
     })();
 
+    // Listen for global-header spawn requests when this is the sole
+    // workspace (single mode). The global header's ▶ button dispatches
+    // 'o8:request-spawn-tab' with { kind } and we route to the matching
+    // controller handler. Split panes ignore — each split carries its
+    // own lower TabBar play button.
+    const handleNewTab = controller.handleNewTab;
+    const handleNewLLMChatTab = controller.handleNewLLMChatTab;
+    const spawnOrchestratorTab = controller.spawnOrchestratorTab;
+    const activeRepo = controller.activeRepo;
+    const preferredRepo = props.preferredRepo;
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      if (props.canCloseTile === true) return; // split panes skip
+      const onRequest = (event: Event) => {
+        const kind = (event as CustomEvent<{ kind?: string }>).detail?.kind;
+        const repo = preferredRepo ?? activeRepo ?? undefined;
+        if (kind === 'orchestrator') spawnOrchestratorTab?.();
+        else if (kind === 'chat') handleNewLLMChatTab(repo ?? undefined);
+        else if (kind === 'terminal') handleNewTab('shell', repo ?? undefined);
+      };
+      window.addEventListener('o8:request-spawn-tab', onRequest as EventListener);
+      return () => window.removeEventListener('o8:request-spawn-tab', onRequest as EventListener);
+    }, [props.canCloseTile, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, activeRepo, preferredRepo]);
+
     // Stable workspace instance id so the dashboard can track this
     // pane's active label separately from its siblings (splits). Without
     // this each WorkspaceTerminalRoot mount would overwrite the others'
