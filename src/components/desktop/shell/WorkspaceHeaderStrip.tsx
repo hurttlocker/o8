@@ -2,19 +2,17 @@
 
 /**
  * WorkspaceHeaderStrip — header strip for the center workspace column.
- * Hosts the Agents "home" control and the terminal toggle. When the left
- * column is collapsed this strip becomes the leftmost one, so it can also
- * carry the macOS traffic-light inset + the sidebar toggle. Part of epic #1089.
+ * Hosts workspace chrome like the terminal toggle. When the left column is
+ * collapsed this strip becomes the leftmost one, so it can also carry the
+ * macOS traffic-light inset + the sidebar toggle. Part of epic #1089.
  *
  * Each control renders only when its handler prop is provided — that lets
  * the dashboard gate compact mode / sidebar-collapsed state from the call site.
  */
 
-import { motion } from 'framer-motion';
-import { UsersThree } from '@phosphor-icons/react';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
-import { IconPanelLeft, IconTerminal } from '../title-bar/icons';
+import { IconColumns, IconPanelLeft, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 
 interface WorkspaceHeaderStripProps {
@@ -23,12 +21,11 @@ interface WorkspaceHeaderStripProps {
   /** Sidebar toggle — shown only when a handler is provided (left column collapsed). */
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
-  /** Agents "home" control — shown only when a handler is provided. */
-  isAgentsSectionActive?: boolean;
-  onOpenAgents?: () => void;
   /** Terminal toggle — shown only when a handler is provided. */
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
+  /** Split the active workspace tile into a second pane. */
+  onSplitWorkspacePanel?: () => void;
   /**
    * O8 panel re-open toggle. Rendered as the rightmost icon ONLY when the
    * panel is collapsed — when it's open, the toggle in PanelHeaderStrip is
@@ -38,18 +35,22 @@ interface WorkspaceHeaderStripProps {
    */
   rightPanelOpen?: boolean;
   onToggleRightPanel?: () => void;
+  /** Active workspace tab title rendered in the center slot. Codex / Claude
+   *  put the conversation name in the title bar itself instead of a
+   *  separate strip below. Supports "repo / chat" split styling. */
+  headerLabel?: string | null;
 }
 
 export function WorkspaceHeaderStrip({
   leadingInset = false,
   sidebarVisible = true,
   onToggleSidebar,
-  isAgentsSectionActive = false,
-  onOpenAgents,
   bottomPanelVisible = true,
   onToggleBottomPanel,
+  onSplitWorkspacePanel,
   rightPanelOpen = false,
   onToggleRightPanel,
+  headerLabel,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
   return (
@@ -66,35 +67,11 @@ export function WorkspaceHeaderStrip({
               active={sidebarVisible}
             />
           ) : null}
-          {onOpenAgents ? (
-            <TitleBarButton
-              icon={
-                <motion.span
-                  variants={{
-                    rest: { opacity: 1 },
-                    hover: { opacity: 1 },
-                    active: { opacity: 1 },
-                  }}
-                  transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
-                  style={{ display: 'inline-flex' }}
-                >
-                  <UsersThree
-                    size={16}
-                    weight={isAgentsSectionActive ? 'fill' : 'bold'}
-                    color={isAgentsSectionActive ? 'var(--t-brand-orange, #FF5A1F)' : 'currentColor'}
-                  />
-                </motion.span>
-              }
-              label="Agents"
-              onClick={onOpenAgents}
-              active={isAgentsSectionActive}
-              accent="orange"
-            />
-          ) : null}
         </>
       }
+      center={headerLabel ? <HeaderLabelText label={headerLabel} /> : null}
       right={
-        onToggleBottomPanel || showRightPanelFallbackToggle ? (
+        onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
           <>
             {onToggleBottomPanel ? (
               <TitleBarButton
@@ -102,6 +79,13 @@ export function WorkspaceHeaderStrip({
                 label="Toggle terminal"
                 onClick={onToggleBottomPanel}
                 active={bottomPanelVisible}
+              />
+            ) : null}
+            {onSplitWorkspacePanel ? (
+              <TitleBarButton
+                icon={<IconColumns />}
+                label="Split workspace"
+                onClick={onSplitWorkspacePanel}
               />
             ) : null}
             {showRightPanelFallbackToggle ? (
@@ -115,5 +99,54 @@ export function WorkspaceHeaderStrip({
         ) : null
       }
     />
+  );
+}
+
+// Codex-style "<repo> / <chat title>" split: repo gets emphasis, the
+// separator is faint, the title is muted. Matches HeaderLabelText in
+// TabBar.tsx — kept duplicated rather than shared since this strip
+// renders at the column-shell layer (no workspace-terminal import).
+function HeaderLabelText({ label }: { label: string }) {
+  const separator = ' / ';
+  const separatorIndex = label.indexOf(separator);
+  if (separatorIndex < 0) {
+    return (
+      <span
+        title={label}
+        style={{
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          color: 'var(--t-text)',
+          fontWeight: 500,
+          fontSize: 12,
+          letterSpacing: 0,
+          fontFamily: 'var(--font-sans-system)',
+        }}
+      >
+        {label}
+      </span>
+    );
+  }
+  const repo = label.slice(0, separatorIndex);
+  const title = label.slice(separatorIndex + separator.length);
+  return (
+    <span
+      title={label}
+      style={{
+        minWidth: 0,
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        whiteSpace: 'nowrap',
+        fontSize: 12,
+        fontFamily: 'var(--font-sans-system)',
+        letterSpacing: 0,
+      }}
+    >
+      <span style={{ color: 'var(--t-text)', fontWeight: 500 }}>{repo}</span>
+      <span style={{ color: 'var(--t-text-faint)', fontWeight: 400 }}> / </span>
+      <span style={{ color: 'var(--t-text-secondary)', fontWeight: 400 }}>{title}</span>
+    </span>
   );
 }
