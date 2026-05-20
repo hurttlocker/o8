@@ -82,10 +82,16 @@ export async function GET(request: NextRequest) {
         const archivedAt = typeof data.archivedAt === 'string' && data.archivedAt.trim()
           ? data.archivedAt
           : null;
-        const staleEmptyThread = isEmpty && Date.now() - stat.mtime.getTime() > 24 * 60 * 60 * 1000;
+        // Hide empty threads from the list unconditionally — the upfront
+        // placeholder-mint pattern (#597) creates one file per opened
+        // orchestrator/chat tab, even before the operator types. Those
+        // threads are noise in the left rail until they have content.
+        // Pinned / starred empties stay visible (operator explicitly cared).
+        const explicitlyKept = data.pinned === true || data.starred === true;
+        if (isEmpty && !explicitlyKept) continue;
         if (onlyArchived) {
           if (!archivedAt) continue;
-        } else if (!includeArchived && (archivedAt || staleEmptyThread)) {
+        } else if (!includeArchived && archivedAt) {
           continue;
         }
 
