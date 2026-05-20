@@ -50,6 +50,7 @@ function rowFromDb(row: typeof automations.$inferSelect) {
     lastRunAt: row.lastRunAt,
     lastRunStatus: row.lastRunStatus,
     lastLaneId: row.lastLaneId,
+    lastErrorMessage: row.lastErrorMessage,
     createdAt: row.createdAt,
     updatedAt: row.updatedAt,
   };

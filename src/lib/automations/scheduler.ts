@@ -89,6 +89,7 @@ async function tickAutomations(): Promise<void> {
       lastRunStatus: status,
       lastLaneId: resultLaneId ?? row.lastLaneId,
       nextRunAt,
+      lastErrorMessage: status === 'ok' ? null : (note ?? 'cron run failed'),
     }).where(eq(automations.id, row.id)).run();
 
     if (status === 'error') {

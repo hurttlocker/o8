@@ -45,6 +45,9 @@ export async function POST(_request: Request, ctx: { params: Promise<{ id: strin
     lastRunStatus: finalStatus,
     lastLaneId: result.laneId ?? row.lastLaneId,
     nextRunAt,
+    // Persist the note when it errored so the UI can surface a tooltip;
+    // clear it on a clean run so a one-off failure doesn't haunt the row.
+    lastErrorMessage: result.ok ? null : (result.note ?? 'run failed'),
   }).where(eq(automations.id, id)).run();
 
   if (!result.ok) {
