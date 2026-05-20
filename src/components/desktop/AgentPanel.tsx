@@ -1,16 +1,18 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-unused-vars -- AgentPanel keeps a stable prop surface during the refactor */
 
-import { memo, useCallback, useMemo, useState, type CSSProperties } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
 import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
 import { ChatsTab } from './repo-focus/tabs/ChatsTab';
 import { useLeftPanelProjectFocus } from './repo-focus/useLeftPanelProjectFocus';
 import { toRepoFocusRepo, type RepoFocusRepo } from './repo-focus/types';
-import { ProjectsBottomBar } from './repo-registry/ProjectsBottomBar';
+import { RepoStatusHover } from './repo-registry/RepoStatusHover';
+import type { RepoRegistryEntry } from './repo-registry/shared';
 import { useProjects, type ProjectRecord } from './repo-registry/useProjects';
-import { ChevronDown, Cpu, Folder, Plus, Search, Sparkles, type LucideIcon } from './lucide-shims';
+import { ChevronDown, Cpu, Folder, Plus, Search, Sparkles, Zap, type LucideIcon } from './lucide-shims';
+import { repoSlugFromRemote } from './canvas-utils';
 import {
   AgentPanelEmptyState,
   SidebarSection,
@@ -86,10 +88,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onSelectSession,
     onAgentsUpdate: props.onAgentsUpdate,
   });
-  // Projects ledger — the bottom-bar dot switcher + the project name header
-  // above the repo list. The ledger groups repos and the active project's
-  // repoPaths drive what shows in the registry list. First-run defaults to
-  // a single "o8" project containing every existing repo.
+  // Projects ledger groups repos and drives the compact Projects dropdown.
+  // The old footer dot switcher is retired so project navigation lives in
+  // one place instead of competing with the bottom utility buttons.
   const projects = useProjects();
 
   // Prefer the lifted focus state when the dashboard supplies it, so column
@@ -111,9 +112,9 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   const activeProjectReposForChats = useMemo(() => {
     const projectPaths = projects.activeProject?.repoPaths ?? [];
     if (projectPaths.length > 0) {
-      return projectPaths.map((repoPath) => {
+      return projectPaths.flatMap((repoPath) => {
         const registeredRepo = registeredRepoByPath.get(repoPath);
-        return registeredRepo ? toRepoFocusRepo(registeredRepo) : repoFocusRepoFromPath(repoPath);
+        return registeredRepo ? [toRepoFocusRepo(registeredRepo)] : [];
       });
     }
     return registeredRepos
@@ -134,6 +135,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   const miniRailSections = miniRailMode === 'orchestrator'
     ? ORCHESTRATOR_HISTORY_SECTIONS
     : PROJECT_HISTORY_SECTIONS;
+  const effectiveTitlebarSpacerHeight = Math.min(titlebarSpacerHeight, 10);
   const handleMiniCreate = useCallback(() => undefined, []);
   const handleOpenProjectManagement = useCallback(() => {
     setProjectsMenuOpen(false);
@@ -160,6 +162,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     return (
       <div
         suppressHydrationWarning
+        data-o8-agent-panel="true"
         style={{
           height: '100%',
           display: 'flex',
@@ -174,7 +177,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
         <div
           suppressHydrationWarning
           style={{
-            height: titlebarSpacerHeight,
+            height: effectiveTitlebarSpacerHeight,
             flexShrink: 0,
             WebkitAppRegion: 'drag' as unknown as string,
           } as CSSProperties}
@@ -191,7 +194,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           activeSessionKey={activeSessionKey}
           onSelectSession={onSelectSession}
           onOpenHistoryChat={onOpenHistoryChat}
-          onSelectFile={props.onSelectFile}
           onOpenSpecInWorkspace={onOpenSpecInWorkspace}
         />
       </div>
@@ -201,6 +203,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
   return (
     <div
       suppressHydrationWarning
+      data-o8-agent-panel="true"
       style={{
         height: '100%',
         display: 'flex',
@@ -212,7 +215,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       <div
         suppressHydrationWarning
         style={{
-          height: titlebarSpacerHeight,
+          height: effectiveTitlebarSpacerHeight,
           flexShrink: 0,
           WebkitAppRegion: 'drag' as unknown as string,
         } as CSSProperties}
@@ -245,7 +248,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
           WebkitOverflowScrolling: 'touch',
-          paddingTop: titlebarSpacerHeight > 10 ? 2 : 0,
+          paddingTop: effectiveTitlebarSpacerHeight > 10 ? 2 : 0,
           paddingBottom: 18,
           display: 'flex',
           flexDirection: 'column',
@@ -375,21 +378,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             widens). Nothing else to render here. */}
 
       </div>
-
-      {projects.ledger ? (
-        <ProjectsBottomBar
-          projects={projects.ledger.projects}
-          activeProjectId={projects.ledger.activeProjectId}
-          onSwitch={(projectId) => { void projects.switchActive(projectId); }}
-          onCreate={projects.createProject}
-          onRename={projects.renameProject}
-          onDelete={projects.deleteProject}
-          onSetColor={projects.setProjectColor}
-          onDropRepoOnProject={async (repoPath, targetId) => {
-            await projects.moveRepoToProject(repoPath, targetId);
-          }}
-        />
-      ) : null}
     </div>
   );
 });
@@ -416,7 +404,7 @@ function MiniAgentPanelHeader({
   onSearch?: () => void;
   projects: ProjectRecord[];
   activeProjectId: string | null;
-  registeredRepoByPath: Map<string, { id: string; name: string; localPath: string }>;
+  registeredRepoByPath: Map<string, RepoRegistryEntry>;
   projectsOpen: boolean;
   onProjectsOpenChange: (open: boolean) => void;
   onProjectSelect: (project: ProjectRecord) => void;
@@ -528,6 +516,18 @@ function MiniAgentPanelHeader({
             onManageProjects={onManageProjects}
           />
         ) : null}
+        <MiniAgentPanelAction
+          icon={Zap}
+          label="Automations"
+          onClick={() => {
+            // Dashboard listens for this and flips activeNavSection to 'automations'.
+            // Same pattern as o8:open-inbox-tab — keeps AgentPanel decoupled from
+            // dashboard state. Borrowed Codex placement from a community member's video.
+            if (typeof window !== 'undefined') {
+              window.dispatchEvent(new CustomEvent('o8:open-automations'));
+            }
+          }}
+        />
       </div>
     </div>
   );
@@ -636,11 +636,34 @@ function MiniProjectsMenu({
 }: {
   projects: ProjectRecord[];
   activeProjectId: string | null;
-  registeredRepoByPath: Map<string, { id: string; name: string; localPath: string }>;
+  registeredRepoByPath: Map<string, RepoRegistryEntry>;
   onProjectSelect: (project: ProjectRecord) => void;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
   onManageProjects: () => void;
 }) {
+  const [hoveredRepo, setHoveredRepo] = useState<{ repo: RepoRegistryEntry; rect: DOMRect } | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const visibleProjects = useMemo(() => {
+    const hasConcreteProject = projects.some((project) => project.id !== 'default');
+    return hasConcreteProject ? projects.filter((project) => project.id !== 'default') : projects;
+  }, [projects]);
+
+  const clearCloseTimer = useCallback(() => {
+    if (!closeTimerRef.current) return;
+    clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  }, []);
+
+  const closeRepoHover = useCallback(() => {
+    clearCloseTimer();
+    closeTimerRef.current = setTimeout(() => {
+      setHoveredRepo(null);
+      closeTimerRef.current = null;
+    }, 120);
+  }, [clearCloseTimer]);
+
+  useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
+
   return (
     <div
       style={{
@@ -658,9 +681,10 @@ function MiniProjectsMenu({
       } as CSSProperties}
       className="hide-scrollbar"
     >
-      {projects.length > 0 ? (
-        projects.map((project) => {
+      {visibleProjects.length > 0 ? (
+        visibleProjects.map((project) => {
           const active = project.id === activeProjectId;
+          const visibleRepoPaths = project.repoPaths.filter((repoPath) => registeredRepoByPath.has(repoPath));
           return (
             <div key={project.id} style={{ paddingTop: 2, paddingBottom: 2 }}>
               <button
@@ -722,12 +746,12 @@ function MiniProjectsMenu({
                     flexShrink: 0,
                   }}
                 >
-                  {project.repoPaths.length}
+                  {visibleRepoPaths.length}
                 </span>
               </button>
-              {project.repoPaths.length > 0 ? (
+              {visibleRepoPaths.length > 0 ? (
                 <div style={{ paddingLeft: 19, paddingTop: 1, display: 'flex', flexDirection: 'column' }}>
-                  {project.repoPaths.map((repoPath) => {
+                  {visibleRepoPaths.map((repoPath) => {
                     const repo = registeredRepoByPath.get(repoPath);
                     const label = repo?.name ?? repoFocusRepoFromPath(repoPath).name;
                     return (
@@ -735,7 +759,7 @@ function MiniProjectsMenu({
                         key={`${project.id}:${repoPath}`}
                         type="button"
                         onClick={() => onRepoSelect(project, repoPath)}
-                        title={repoPath}
+                        aria-label={`${label} repository`}
                         style={{
                           width: '100%',
                           minHeight: 22,
@@ -756,10 +780,15 @@ function MiniProjectsMenu({
                           transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                         }}
                         onMouseEnter={(event) => {
+                          if (repo) {
+                            clearCloseTimer();
+                            setHoveredRepo({ repo, rect: event.currentTarget.getBoundingClientRect() });
+                          }
                           event.currentTarget.style.background = 'var(--t-hover)';
                           event.currentTarget.style.color = 'var(--t-text)';
                         }}
                         onMouseLeave={(event) => {
+                          closeRepoHover();
                           event.currentTarget.style.background = 'transparent';
                           event.currentTarget.style.color = 'var(--t-text-muted)';
                         }}
@@ -838,6 +867,16 @@ function MiniProjectsMenu({
       >
         Manage projects
       </button>
+      {hoveredRepo ? (
+        <RepoStatusHover
+          repo={hoveredRepo.repo}
+          anchorRect={hoveredRepo.rect}
+          agents={[]}
+          githubSlug={repoSlugFromRemote(hoveredRepo.repo.remoteUrl)}
+          onMouseEnter={clearCloseTimer}
+          onMouseLeave={closeRepoHover}
+        />
+      ) : null}
     </div>
   );
 }
@@ -915,7 +954,7 @@ function ProjectRepoContext({
               key={repo.localPath}
               type="button"
               onClick={() => onSelectRepo(repo)}
-              title={[`Open ${repo.name}`, repo.readiness?.summary].filter(Boolean).join(' · ')}
+              aria-label={`Open ${repo.name}`}
               style={{
                 minWidth: 0,
                 maxWidth: '100%',
