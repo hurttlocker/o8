@@ -3070,7 +3070,6 @@ function DashboardInner() {
           onToggleSidebar={!showSidebarColumn && !compactShell ? () => setSidebarVisible(v => !v) : undefined}
           bottomPanelVisible={bottomPanelVisible}
           onToggleBottomPanel={toggleContextualPanelTile}
-          onSplitWorkspacePanel={handleSplitWorkspaceFromHeader}
           rightPanelOpen={showRightPanelColumn}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
           headerLabel={workspaceHeaderActive.label}
@@ -3082,6 +3081,7 @@ function DashboardInner() {
           onSpawnOrchestrator={isSingleWorkspace ? handleSpawnOrchestrator : undefined}
           onSpawnChat={isSingleWorkspace ? handleSpawnChat : undefined}
           onSpawnTerminal={isSingleWorkspace ? handleSpawnTerminal : undefined}
+          onPlayContextMenu={isSingleWorkspace ? handleSplitWorkspaceFromHeader : undefined}
         />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
