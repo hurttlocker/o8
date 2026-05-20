@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/refs -- useWorkspaceTerminalController returns render state and stable refs through one controller object. */
 
-import { forwardRef, useEffect, useMemo } from 'react';
+import { forwardRef, useEffect, useMemo, useRef } from 'react';
 import { motion } from 'framer-motion';
 import { RotateCcw } from '../lucide-shims';
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
@@ -58,16 +58,27 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       return repoName ? `${repoName} / ${kindLabel}` : kindLabel;
     })();
 
-    // Broadcast the active-tab label + tabId + kind so the column-level
-    // header strip (WorkspaceHeaderStrip) can mirror Codex / Claude and
-    // put the conversation title in the title bar itself, plus drive the
-    // `…` menu actions (rename / archive / share). Cleared on unmount.
+    // Stable workspace instance id so the dashboard can track this
+    // pane's active label separately from its siblings (splits). Without
+    // this each WorkspaceTerminalRoot mount would overwrite the others'
+    // titles in the global header.
+    const workspaceIdRef = useRef<string>('');
+    if (!workspaceIdRef.current) {
+      workspaceIdRef.current = `ws-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
+    }
+    const workspaceInstanceId = workspaceIdRef.current;
+
+    // Broadcast the active-tab label + tabId + kind + workspaceId so the
+    // dashboard can route the title to the column-level header strip
+    // (one workspace) or hide it on splits (more than one), and drive
+    // the `…` menu actions when applicable.
     const activeTabId = controller.activeTab?.id ?? null;
     const activeTabKind = controller.activeTab?.kind ?? null;
     useEffect(() => {
       if (typeof window === 'undefined') return;
       window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
         detail: {
+          workspaceId: workspaceInstanceId,
           label: conversationHeaderLabel,
           tabId: activeTabId,
           kind: activeTabKind,
@@ -75,10 +86,16 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       }));
       return () => {
         window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
-          detail: { label: null, tabId: null, kind: null },
+          detail: {
+            workspaceId: workspaceInstanceId,
+            label: null,
+            tabId: null,
+            kind: null,
+            removed: true,
+          },
         }));
       };
-    }, [conversationHeaderLabel, activeTabId, activeTabKind]);
+    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId]);
 
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
@@ -262,6 +279,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onCloseTile={props.onCloseTile}
           onReorderTabs={controller.handleReorderTabs}
           showTabList={showTabList}
+          headerLabel={conversationHeaderLabel}
         />
 
         <WorkspaceTerminalPanels

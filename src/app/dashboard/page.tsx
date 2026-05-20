@@ -256,32 +256,56 @@ function DashboardInner() {
 
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
 
-  // Active-workspace conversation title + tabId + kind — broadcast by
-  // WorkspaceTerminalRoot via 'o8:workspace-active-label' so the top
-  // header strip can show the title (Codex / Claude pattern) and drive
-  // the `…` menu actions. When splits exist the most-recent broadcaster
-  // wins for now; refine when split focus tracking exists.
-  const [workspaceHeaderActive, setWorkspaceHeaderActive] = useState<{
+  // Active-workspace map — each WorkspaceTerminalRoot broadcasts via
+  // 'o8:workspace-active-label' with its stable workspaceId. We track
+  // them all here so splits don't overwrite each other. The top header
+  // label only renders when there's exactly one active workspace; with
+  // multiple, each split's own lower TabBar carries its own title.
+  type WorkspaceActivePayload = {
     label: string | null;
     tabId: string | null;
     kind: string | null;
-  }>({ label: null, tabId: null, kind: null });
+  };
+  const [workspaceActiveMap, setWorkspaceActiveMap] = useState<Map<string, WorkspaceActivePayload>>(() => new Map());
   useEffect(() => {
     const handler = (event: Event) => {
       const detail = (event as CustomEvent<{
+        workspaceId?: string;
         label?: string | null;
         tabId?: string | null;
         kind?: string | null;
+        removed?: boolean;
       }>).detail;
-      setWorkspaceHeaderActive({
-        label: detail?.label ?? null,
-        tabId: detail?.tabId ?? null,
-        kind: detail?.kind ?? null,
+      const id = detail?.workspaceId;
+      if (!id) return;
+      setWorkspaceActiveMap((current) => {
+        const next = new Map(current);
+        if (detail?.removed) {
+          next.delete(id);
+        } else {
+          next.set(id, {
+            label: detail?.label ?? null,
+            tabId: detail?.tabId ?? null,
+            kind: detail?.kind ?? null,
+          });
+        }
+        return next;
       });
     };
     window.addEventListener('o8:workspace-active-label', handler as EventListener);
     return () => window.removeEventListener('o8:workspace-active-label', handler as EventListener);
   }, []);
+
+  const workspaceHeaderActive = useMemo<WorkspaceActivePayload>(() => {
+    // Single workspace mounted → show its label in the global header.
+    // Multiple mounted (splits) → leave the global header label null;
+    // each split's lower TabBar carries its own title.
+    if (workspaceActiveMap.size === 1) {
+      const [only] = workspaceActiveMap.values();
+      return only;
+    }
+    return { label: null, tabId: null, kind: null };
+  }, [workspaceActiveMap]);
 
   // `…` menu handlers. Only orchestrator + llm-chat tabs back to
   // /api/v2/chat-history, so we gate by kind. Other tab kinds (CLI
