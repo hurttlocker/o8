@@ -10,6 +10,8 @@ import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/wor
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
 import { WorkspaceSpawnProvider, type WorkspaceSpawnHandlers } from '@/components/desktop/workspace-terminal/spawn-context';
+import { useTabBarVisibility } from '@/components/desktop/workspace-terminal/useTabBarVisibility';
+import { workspaceConversationHeaderLabel } from '@/components/desktop/workspace-terminal/utils';
 import type { TerminalTabHandle, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
 
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
@@ -22,9 +24,21 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       spawnOrchestratorTab: controller.spawnOrchestratorTab,
       updateTabMode: controller.handleUpdateTabMode,
     }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnOrchestratorTab, controller.spawnSingleRuntimeTab]);
-    const conversationTabsOnly = controller.visibleTabs.length > 0
-      && controller.visibleTabs.every((tab) => tab.kind === 'orchestrator' || tab.kind === 'llm-chat');
-    const showTabBar = props.conversationNavigation !== 'sidebar' || !conversationTabsOnly;
+    // Drop the primary mode tabs (Orchestrator + Chat) from the top
+    // tab bar — they duplicate the left-rail nav. Only "real" workspace
+    // tabs (spawned Codex sessions / terminals / canvas) appear here.
+    const topBarTabs = useMemo(
+      () => controller.visibleTabs.filter((tab) => tab.kind !== 'orchestrator' && tab.kind !== 'llm-chat'),
+      [controller.visibleTabs],
+    );
+    const { widthAllowsTabs } = useTabBarVisibility();
+    // Top tab bar only renders when (a) the viewport is narrow AND
+    // (b) there's at least one non-primary tab to show. Above the
+    // breakpoint the left rail fully serves nav.
+    const showTabBar = widthAllowsTabs && topBarTabs.length > 0;
+    const conversationHeaderLabel = !showTabBar && controller.activeTab
+      ? workspaceConversationHeaderLabel(controller.activeTab)
+      : null;
 
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
@@ -195,9 +209,46 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           </motion.div>
         ) : null}
 
+        {conversationHeaderLabel ? (
+          <div
+            title={conversationHeaderLabel}
+            style={{
+              minHeight: 34,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              paddingTop: 0,
+              paddingRight: 12,
+              paddingBottom: 0,
+              paddingLeft: 14,
+              borderBottom: '0.5px solid var(--t-divider-subtle)',
+              background: 'var(--t-panel)',
+              color: 'var(--t-text-secondary)',
+              fontFamily: 'var(--font-sans-system)',
+              fontSize: 12,
+              lineHeight: '16px',
+              fontWeight: 400,
+              letterSpacing: 0,
+              flexShrink: 0,
+              minWidth: 0,
+            }}
+          >
+            <span
+              style={{
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              <ConversationHeaderText label={conversationHeaderLabel} />
+            </span>
+          </div>
+        ) : null}
+
         {showTabBar ? (
           <TabBar
-            tabs={controller.visibleTabs}
+            tabs={topBarTabs}
             activeTabId={controller.effectiveActiveTabId}
             launchRequestKey={controller.launchRequestKey}
             onSelectTab={controller.handleSelectTab}
@@ -205,8 +256,6 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
             onNewTab={controller.handleNewTab}
             onNewLLMChatTab={controller.handleNewLLMChatTab}
             scopedRepo={props.preferredRepo ?? controller.activeRepo ?? null}
-            onSplitVertical={props.onSplitVertical}
-            onSplitHorizontal={props.onSplitHorizontal}
             canCloseTile={props.canCloseTile}
             onCloseTile={props.onCloseTile}
             onReorderTabs={controller.handleReorderTabs}
@@ -245,6 +294,21 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     );
   },
 );
+
+function ConversationHeaderText({ label }: { label: string }) {
+  const separator = ' / ';
+  const separatorIndex = label.indexOf(separator);
+  if (separatorIndex < 0) return <>{label}</>;
+  const repo = label.slice(0, separatorIndex);
+  const title = label.slice(separatorIndex + separator.length);
+  return (
+    <>
+      <span style={{ color: 'var(--t-text)', fontWeight: 500 }}>{repo}</span>
+      <span style={{ color: 'var(--t-text-faint)', fontWeight: 400 }}> / </span>
+      <span style={{ color: 'var(--t-text-secondary)', fontWeight: 400 }}>{title}</span>
+    </>
+  );
+}
 
 function WorkspaceReconnectDot() {
   return (
