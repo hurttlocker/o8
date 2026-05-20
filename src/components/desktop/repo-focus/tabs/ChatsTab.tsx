@@ -468,10 +468,23 @@ export function ChatsTab({
   const deleteHistoryItem = useCallback((item: ChatHistoryItem) => {
     const confirmed = window.confirm(`Delete "${item.title}" from chat history?`);
     if (!confirmed) return;
-    void withHistoryBusy(item.tabId, async () => {
-      const response = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(item.tabId)}`, { method: 'DELETE' });
-      if (!response.ok) throw new Error('Unable to delete chat history');
-    });
+    void (async () => {
+      try {
+        await withHistoryBusy(item.tabId, async () => {
+          const response = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(item.tabId)}`, { method: 'DELETE' });
+          if (!response.ok) {
+            // Parse the API error message so we can surface it to the operator
+            // (file lock, permission, ENOENT race — server now logs + 500s
+            // instead of silently 200-OK'ing failed unlinks).
+            const payload = await response.json().catch(() => null) as { error?: string } | null;
+            throw new Error(payload?.error ?? `Delete failed (${response.status})`);
+          }
+        });
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Delete failed';
+        window.alert(`Couldn't delete "${item.title}":\n\n${message}\n\nTry again — if Codex was busy on this thread the file may have been locked.`);
+      }
+    })();
   }, [withHistoryBusy]);
 
   const targetRepos = useMemo(() => (

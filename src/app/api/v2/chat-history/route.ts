@@ -191,8 +191,19 @@ export async function DELETE(request: NextRequest) {
   if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
 
   const filePath = safePath(tabId);
+  if (!existsSync(filePath)) {
+    // Idempotent — already gone is still a success.
+    return NextResponse.json({ ok: true });
+  }
   try {
-    if (existsSync(filePath)) unlinkSync(filePath);
-  } catch { /* ignore */ }
-  return NextResponse.json({ ok: true });
+    unlinkSync(filePath);
+    return NextResponse.json({ ok: true });
+  } catch (error) {
+    // Surface the actual failure so the client can show a toast and
+    // skip the optimistic UI removal. Silent-catch + 200 OK used to
+    // make the deleted item reappear after the next list refetch.
+    const message = error instanceof Error ? error.message : 'unlink failed';
+    console.error('[chat-history] DELETE failed', { tabId, message });
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
+  }
 }
