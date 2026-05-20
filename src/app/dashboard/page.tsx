@@ -171,10 +171,10 @@ const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'activity';
 function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
   if (!raw) return null;
   if (raw === 'files' || raw === 'diff' || raw === 'changes') return 'workspace';
+  if (raw === 'prs') return 'activity';
   if (
     raw === 'workspace'
     || raw === 'browser'
-    || raw === 'prs'
     || raw === 'activity'
     || raw === 'inbox'
     || raw === 'spec'
@@ -256,20 +256,88 @@ function DashboardInner() {
 
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
 
-  // Active-workspace conversation title — broadcast by WorkspaceTerminalRoot
-  // via 'o8:workspace-active-label' so it can render in the top header strip
-  // (Codex / Claude pattern). One label across the whole workspace column;
-  // when splits exist the most-recent broadcaster wins (good enough for now,
-  // refine when split focus tracking exists).
-  const [workspaceHeaderLabel, setWorkspaceHeaderLabel] = useState<string | null>(null);
+  // Active-workspace conversation title + tabId + kind — broadcast by
+  // WorkspaceTerminalRoot via 'o8:workspace-active-label' so the top
+  // header strip can show the title (Codex / Claude pattern) and drive
+  // the `…` menu actions. When splits exist the most-recent broadcaster
+  // wins for now; refine when split focus tracking exists.
+  const [workspaceHeaderActive, setWorkspaceHeaderActive] = useState<{
+    label: string | null;
+    tabId: string | null;
+    kind: string | null;
+  }>({ label: null, tabId: null, kind: null });
   useEffect(() => {
     const handler = (event: Event) => {
-      const detail = (event as CustomEvent<{ label?: string | null }>).detail;
-      setWorkspaceHeaderLabel(detail?.label ?? null);
+      const detail = (event as CustomEvent<{
+        label?: string | null;
+        tabId?: string | null;
+        kind?: string | null;
+      }>).detail;
+      setWorkspaceHeaderActive({
+        label: detail?.label ?? null,
+        tabId: detail?.tabId ?? null,
+        kind: detail?.kind ?? null,
+      });
     };
     window.addEventListener('o8:workspace-active-label', handler as EventListener);
     return () => window.removeEventListener('o8:workspace-active-label', handler as EventListener);
   }, []);
+
+  // `…` menu handlers. Only orchestrator + llm-chat tabs back to
+  // /api/v2/chat-history, so we gate by kind. Other tab kinds (CLI
+  // sessions, terminals, canvas) skip the menu entirely.
+  const titleMenuActive = (workspaceHeaderActive.kind === 'orchestrator'
+    || workspaceHeaderActive.kind === 'llm-chat')
+    && Boolean(workspaceHeaderActive.tabId);
+
+  const handleTitleArchive = useCallback(async () => {
+    const tabId = workspaceHeaderActive.tabId;
+    if (!tabId) return;
+    try {
+      await fetch('/api/v2/chat-history', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tabId, archivedAt: new Date().toISOString() }),
+      });
+    } catch {
+      // silent — operator will see staleness on next refresh
+    }
+  }, [workspaceHeaderActive.tabId]);
+
+  const handleTitleRename = useCallback(() => {
+    // Forward to whoever owns the active workspace UI. ThoughtsChatPanel
+    // can wire this to its existing rename flow; for now this dispatches
+    // the event and lets that side-channel handle the actual inline editor.
+    const tabId = workspaceHeaderActive.tabId;
+    if (!tabId) return;
+    window.dispatchEvent(new CustomEvent('o8:workspace-rename-active', {
+      detail: { tabId },
+    }));
+  }, [workspaceHeaderActive.tabId]);
+
+  const handleTitleShare = useCallback(async () => {
+    const tabId = workspaceHeaderActive.tabId;
+    if (!tabId) return;
+    try {
+      const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`);
+      if (!res.ok) return;
+      const data = await res.json();
+      const messages = Array.isArray(data?.messages) ? data.messages : [];
+      const title = data?.title ?? workspaceHeaderActive.label ?? 'Conversation';
+      const lines: string[] = [`# ${title}`, ''];
+      for (const msg of messages) {
+        const role = msg?.role ?? 'note';
+        const content = typeof msg?.content === 'string' ? msg.content : JSON.stringify(msg?.content ?? '');
+        lines.push(`**${role}**`, '', content, '');
+      }
+      const markdown = lines.join('\n');
+      if (typeof navigator !== 'undefined' && navigator.clipboard) {
+        await navigator.clipboard.writeText(markdown);
+      }
+    } catch {
+      // silent
+    }
+  }, [workspaceHeaderActive.label, workspaceHeaderActive.tabId]);
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
   const settingsPanelRef = useRef<HTMLDivElement>(null);
   const [workspaceLifecycleRecords, setWorkspaceLifecycleRecords] = useState<WorkspaceLifecycleRecordView[]>([]);
@@ -1323,7 +1391,7 @@ function DashboardInner() {
   // the operator briefing pulse.
   const handleOpenO8Panel = useCallback((options: { repoPath?: string | null; tab?: O8Tab }) => {
     if (options.repoPath) setO8RepoPathOverride(options.repoPath);
-    setO8ActiveTab(options.tab ?? DEFAULT_O8_ACTIVE_TAB);
+    setO8ActiveTab(normalizeO8ActiveTab(options.tab) ?? DEFAULT_O8_ACTIVE_TAB);
     setRightPanelKind('o8');
     setChatVisible(true);
   }, []);
@@ -1469,11 +1537,11 @@ function DashboardInner() {
   }, [openCanvasTab]);
 
   const handleReviewPR = useCallback((prNumber: number, repo?: string) => {
-    // Open O8 panel to PRs tab — prNumber 0 means show the list
+    // PRs now live under Activity — prNumber 0 means show the Activity feed.
     setO8CommitSha(null);
     setO8CommitRepoPath(null);
     setO8CommitRepoSlug(null);
-    setO8ActiveTab('prs');
+    setO8ActiveTab('activity');
     setO8PrNumber(prNumber || null);
     setO8PrRepo(repo ?? null);
     setRightPanelKind('o8');
@@ -1487,8 +1555,8 @@ function DashboardInner() {
 
   // Bridge for transcript PR-link clicks. LLMMarkdown intercepts GitHub
   // PR URLs and dispatches `o8:open-pr` instead of opening the browser;
-  // the listener routes through handleReviewPR so the right panel pops
-  // open at the new PrPanel.
+  // the listener routes through handleReviewPR so the right panel opens
+  // Activity with the inline PrPanel detail.
   useEffect(() => {
     const handleOpenPr = (event: Event) => {
       const detail = (event as CustomEvent<{ prNumber?: number; repo?: string }>).detail;
@@ -1569,7 +1637,7 @@ function DashboardInner() {
   }, [openCanvasTab, waitForWorkspaceTerminalTarget]);
 
   const openApprovalsDiscoverySurface = useCallback(() => {
-    // Approvals surface lives on the O8 panel's PRs tab now — no more
+    // Approvals surface lives under the O8 panel's Activity tab now — no more
     // dedicated Review tab or NavRail shield button. The only remaining
     // caller is an onboarding coachmark CTA.
     handleReviewPR(0);
@@ -2958,7 +3026,10 @@ function DashboardInner() {
           onSplitWorkspacePanel={handleSplitWorkspaceFromHeader}
           rightPanelOpen={showRightPanelColumn}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
-          headerLabel={workspaceHeaderLabel}
+          headerLabel={workspaceHeaderActive.label}
+          onTitleRename={titleMenuActive ? handleTitleRename : undefined}
+          onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}
+          onTitleShare={titleMenuActive ? handleTitleShare : undefined}
         />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
