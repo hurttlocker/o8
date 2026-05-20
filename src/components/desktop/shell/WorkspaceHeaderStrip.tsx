@@ -65,8 +65,11 @@ interface WorkspaceHeaderStripProps {
   }> | null;
   /** Optional action callbacks for the `…` menu next to the title.
    *  Items only render when the corresponding callback is provided —
-   *  the menu hides entirely when none are set. */
-  onTitleRename?: () => void;
+   *  the menu hides entirely when none are set. Rename specifically
+   *  is an *async submit* — clicking "Rename" flips the header label
+   *  into an inline input; on Enter/blur we call this callback with
+   *  the new value and it returns a promise the caller can throw on. */
+  onTitleRenameSubmit?: (newTitle: string) => Promise<void>;
   onTitleArchive?: () => void;
   onTitleShare?: () => void;
   /** Single-workspace spawn shortcut — when in single mode the global
@@ -93,7 +96,7 @@ export function WorkspaceHeaderStrip({
   rightPanelOpen = false,
   onToggleRightPanel,
   headerLabel,
-  onTitleRename,
+  onTitleRenameSubmit,
   onTitleArchive,
   onTitleShare,
   onSpawnOrchestrator,
@@ -110,7 +113,8 @@ export function WorkspaceHeaderStrip({
   // Split mode → side-by-side pill strips. Single 2+ tabs → pill strip.
   // Single 1 or 0 tabs → title + `…` menu.
   const usePillStrip = !isSplit && tabs.length > 1;
-  const hasTitleMenu = !isSplit && !usePillStrip && headerLabel && (onTitleRename || onTitleArchive || onTitleShare);
+  const hasTitleMenu = !isSplit && !usePillStrip && headerLabel && (onTitleRenameSubmit || onTitleArchive || onTitleShare);
+  const [renameMode, setRenameMode] = useState(false);
   const hasPlayButton = Boolean(onSpawnOrchestrator || onSpawnChat || onSpawnTerminal);
   return (
     <ColumnHeaderStrip
@@ -134,14 +138,27 @@ export function WorkspaceHeaderStrip({
         <HeaderPillStrip tabs={tabs} activeTabId={headerActiveTabId ?? null} />
       ) : headerLabel ? (
         <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
-          <HeaderLabelText label={headerLabel} />
-          {hasTitleMenu ? (
-            <TitleMenuButton
-              onRename={onTitleRename}
-              onArchive={onTitleArchive}
-              onShare={onTitleShare}
+          {renameMode && onTitleRenameSubmit ? (
+            <HeaderLabelRenameInput
+              initial={headerLabel}
+              onSubmit={async (next) => {
+                setRenameMode(false);
+                await onTitleRenameSubmit(next);
+              }}
+              onCancel={() => setRenameMode(false)}
             />
-          ) : null}
+          ) : (
+            <>
+              <HeaderLabelText label={headerLabel} />
+              {hasTitleMenu ? (
+                <TitleMenuButton
+                  onRename={onTitleRenameSubmit ? () => setRenameMode(true) : undefined}
+                  onArchive={onTitleArchive}
+                  onShare={onTitleShare}
+                />
+              ) : null}
+            </>
+          )}
         </div>
       ) : null}
       right={
@@ -755,6 +772,112 @@ function TitleMenuItem({ label, onClick }: { label: string; onClick: () => void 
     >
       {label}
     </button>
+  );
+}
+
+/** Inline rename editor — replaces HeaderLabelText when the operator
+ *  picks "Rename" from the title `…` menu. The input is pre-filled
+ *  with the title-half of the label ("repo / title" → "title") so the
+ *  operator edits just the conversation name, not the repo prefix. */
+function HeaderLabelRenameInput({
+  initial,
+  onSubmit,
+  onCancel,
+}: {
+  initial: string;
+  onSubmit: (next: string) => Promise<void>;
+  onCancel: () => void;
+}) {
+  // Split "repo / title" → keep repo as static prefix, edit the title half.
+  const separator = ' / ';
+  const sepIdx = initial.indexOf(separator);
+  const repoPrefix = sepIdx >= 0 ? initial.slice(0, sepIdx) : null;
+  const initialTitle = sepIdx >= 0 ? initial.slice(sepIdx + separator.length) : initial;
+
+  const [draft, setDraft] = useState(initialTitle);
+  const [busy, setBusy] = useState(false);
+  const inputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+    inputRef.current?.select();
+  }, []);
+
+  const commit = async () => {
+    const trimmed = draft.trim();
+    if (!trimmed || trimmed === initialTitle) {
+      onCancel();
+      return;
+    }
+    setBusy(true);
+    try {
+      await onSubmit(trimmed);
+    } catch {
+      // best-effort — rename PATCH failed; fall back to the displayed label.
+      // The caller already exited rename mode in its own handler.
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <span
+      data-no-drag
+      style={{
+        display: 'inline-flex',
+        alignItems: 'baseline',
+        gap: 0,
+        minWidth: 0,
+        fontSize: 12,
+        fontFamily: 'var(--font-sans-system)',
+        letterSpacing: 0,
+      }}
+    >
+      {repoPrefix ? (
+        <>
+          <span style={{ color: 'var(--t-text)', fontWeight: 500 }}>{repoPrefix}</span>
+          <span style={{ color: 'var(--t-text-faint)', fontWeight: 400 }}>{separator}</span>
+        </>
+      ) : null}
+      <input
+        ref={inputRef}
+        type="text"
+        value={draft}
+        disabled={busy}
+        onChange={(event) => setDraft(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === 'Enter') {
+            event.preventDefault();
+            void commit();
+          } else if (event.key === 'Escape') {
+            event.preventDefault();
+            onCancel();
+          }
+        }}
+        onBlur={() => { void commit(); }}
+        style={{
+          display: 'inline-block',
+          minWidth: 80,
+          maxWidth: 320,
+          width: `${Math.max(8, draft.length + 1)}ch`,
+          paddingTop: 2,
+          paddingBottom: 2,
+          paddingLeft: 6,
+          paddingRight: 6,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'var(--t-accent-border, rgba(37, 99, 235, 0.3))',
+          borderRadius: 6,
+          background: 'var(--t-input-bg)',
+          color: 'var(--t-text-secondary)',
+          fontSize: 12,
+          fontWeight: 400,
+          fontFamily: 'var(--font-sans-system)',
+          letterSpacing: 0,
+          outline: 'none',
+        }}
+      />
+    </span>
   );
 }
 

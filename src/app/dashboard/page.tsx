@@ -394,14 +394,25 @@ function DashboardInner() {
     }
   }, [workspaceHeaderActive.tabId]);
 
-  const handleTitleRename = useCallback(() => {
-    // Forward to whoever owns the active workspace UI. ThoughtsChatPanel
-    // can wire this to its existing rename flow; for now this dispatches
-    // the event and lets that side-channel handle the actual inline editor.
+  const handleTitleRenameSubmit = useCallback(async (newTitle: string) => {
+    // The header strip flipped its label into an inline input and the
+    // operator committed a new value. PATCH the chat-history record
+    // and broadcast a generic chat-history-updated nudge so other
+    // surfaces (left rail Chats tab, archived strip) refetch.
     const tabId = workspaceHeaderActive.tabId;
-    if (!tabId) return;
-    window.dispatchEvent(new CustomEvent('o8:workspace-rename-active', {
-      detail: { tabId },
+    const trimmed = newTitle.trim();
+    if (!tabId || !trimmed) return;
+    const res = await fetch('/api/v2/chat-history', {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tabId, title: trimmed }),
+    });
+    if (!res.ok) throw new Error('rename failed');
+    // Surfaces that show the chat title need to refetch — fire both a
+    // generic chat-history update event and the workspace-active-label
+    // refresh so the global header strip picks up the new title.
+    window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
+      detail: { tabId, title: trimmed },
     }));
   }, [workspaceHeaderActive.tabId]);
 
@@ -3133,7 +3144,7 @@ function DashboardInner() {
           headerTabs={workspaceHeaderActive.tabs}
           headerActiveTabId={workspaceHeaderActive.tabId}
           splitHeaderWorkspaces={splitHeaderWorkspaces}
-          onTitleRename={titleMenuActive ? handleTitleRename : undefined}
+          onTitleRenameSubmit={titleMenuActive ? handleTitleRenameSubmit : undefined}
           onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}
           onTitleShare={titleMenuActive ? handleTitleShare : undefined}
           onSpawnOrchestrator={isSingleWorkspace ? handleSpawnOrchestrator : undefined}
