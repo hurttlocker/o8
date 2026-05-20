@@ -290,18 +290,24 @@ function OrchestratorTabInner({
   }, [active, tabId, chatChromeState.threadId]);
 
   // Persist the last-active orchestrator thread id globally so dev
-  // reloads (and prod first-launch with default tabs) drop the
-  // operator back into their last conversation instead of a fresh
-  // empty orchestrator. Only persists while the tab is active so
-  // background tabs don't fight each other on multi-pane layouts.
+  // reloads drop the operator back into their last conversation. Only
+  // persists when the active thread HAS messages — without this guard
+  // the placeholder-mint pattern (#597) would overwrite the saved id
+  // with a fresh empty thread the moment a new tab mounted, defeating
+  // the whole point of the restore.
   useEffect(() => {
     if (!active) return;
+    if (!chatChromeState.hasMessages) return;
     if (chatChromeState.threadId) writeLastOrchestratorThreadId(chatChromeState.threadId);
-  }, [active, chatChromeState.threadId]);
+  }, [active, chatChromeState.threadId, chatChromeState.hasMessages]);
 
   // On mount, if no explicit initialThreadId was passed (which is the
   // case for default Orchestrator tabs spawned on first launch / reload),
   // restore the last-active thread from localStorage and load it once.
+  // The restore must happen even when the panel has already minted a
+  // fresh empty placeholder — loadThread() will replace it with the
+  // saved conversation. Retry briefly so we don't lose the race with
+  // the handle attachment.
   const restoredThreadRef = useRef<string | null>(null);
   useEffect(() => {
     if (!active) return;
@@ -310,11 +316,21 @@ function OrchestratorTabInner({
     const restored = readLastOrchestratorThreadId();
     if (!restored) return;
     restoredThreadRef.current = restored;
-    // Defer one tick so ThoughtsChatPanel's handle is attached before
-    // we call loadThread — mirrors the initialThreadId path below.
-    const timer = window.setTimeout(() => {
-      chatPanelRef.current?.loadThread(restored);
-    }, 0);
+    // Retry up to 1s for chatPanelRef to attach — the handle is set
+    // when ThoughtsChatPanel mounts, but its useEffect that mints the
+    // initial placeholder also runs in the same React tick. Polling
+    // gives us robustness without coupling to internal lifecycle order.
+    let attempts = 0;
+    const tryLoad = () => {
+      const handle = chatPanelRef.current;
+      if (handle) {
+        handle.loadThread(restored);
+        return;
+      }
+      attempts += 1;
+      if (attempts < 20) window.setTimeout(tryLoad, 50);
+    };
+    const timer = window.setTimeout(tryLoad, 0);
     return () => window.clearTimeout(timer);
   }, [active, initialThreadId]);
 
