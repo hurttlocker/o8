@@ -1,11 +1,22 @@
 /**
- * Orchestrator session — runs Claude Code in non-interactive mode with
- * structured JSON output. Each message spawns a short-lived process:
+ * Orchestrator session — runs Claude Code via the interactive stream-json
+ * REPL path so turns bill the user's **Claude Code MAX subscription pool**
+ * (the same pool `claude` in Terminal eats from), NOT the Agent SDK pool
+ * that's gated by Anthropic's June-15 cap. Spawn pattern:
  *
- *   claude -p "message" --output-format stream-json --dangerously-skip-permissions
+ *   claude --input-format stream-json --output-format stream-json \
+ *          --verbose --include-partial-messages \
+ *          [--permission-mode plan | --dangerously-skip-permissions] \
+ *          --mcp-config <path> --model <name> [--resume <id>]
  *
- * Conversation context persists via `--resume SESSION_ID` on follow-up
- * messages. This avoids all TUI/ANSI parsing issues.
+ * Each turn writes a single JSON message to the process's stdin and then
+ * closes stdin to signal completion; claude streams events to stdout and
+ * exits cleanly when the turn is done. Conversation context persists via
+ * `--resume SESSION_ID` on follow-up messages.
+ *
+ * Subscription-billed. NO `-p` flag — that's the Agent SDK path which is
+ * capped. See [[claude_code_interactive_repl_pivot]] +
+ * [[session_may14_sdk_pricing_pivot]] memories for the why.
  */
 
 import { createHash } from 'node:crypto';
@@ -466,9 +477,13 @@ export async function sendToOrchestrator(
     xhigh: 'xhigh',
   } as const;
 
+  // Interactive REPL flags — `--input-format stream-json` puts claude into
+  // the subscription-billed REPL path (no `-p`). We pass the actual message
+  // via stdin (JSON-encoded) below, then close stdin to signal turn end.
   const args: string[] = [
-    '-p', message,
+    '--input-format', 'stream-json',
     '--output-format', 'stream-json',
+    '--include-partial-messages',
     ...(permissionMode === 'plan'
       ? ['--permission-mode', 'plan']
       : ['--dangerously-skip-permissions']),
@@ -497,14 +512,32 @@ export async function sendToOrchestrator(
         NO_COLOR: '1',
         O8_MANAGED_SESSION: '1',
       },
-      // We pass the full prompt via the `-p` CLI flag, not via stdin.
-      // Leaving stdin on 'pipe' causes Claude Code to wait 3s for input
-      // that never arrives, then warn "no stdin data received in 3s,
-      // proceeding without it" and drop the warning into the transcript.
-      // Ignore stdin so the CLI knows there's nothing to read.
-      stdio: ['ignore', 'pipe', 'pipe'],
+      // Interactive REPL mode — stdin must be writable so we can pipe the
+      // user's message in as a JSON event (no `-p` flag). Closing stdin
+      // after the write signals end-of-input and claude exits cleanly when
+      // the turn completes.
+      stdio: ['pipe', 'pipe', 'pipe'],
     });
     session.proc = proc;
+
+    // Write the message as a single JSON event then close stdin. Format
+    // matches what interactive-session.ts uses for the chat tab — same CLI
+    // contract.
+    const payload = `${JSON.stringify({
+      type: 'user',
+      message: {
+        role: 'user',
+        content: message,
+      },
+    })}\n`;
+    try {
+      proc.stdin?.write(payload, 'utf8');
+      proc.stdin?.end();
+    } catch (error) {
+      // stdin write failures will surface via the proc 'error' / 'exit'
+      // handlers further down. Log here so the cause is visible in dev.
+      console.warn(`[orchestrator-session] stdin write failed for ${session.sessionName}:`, error);
+    }
 
     // #457 — Process timeout: kill the claude process if it hangs
     const processTimeout = setTimeout(() => {
