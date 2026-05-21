@@ -89,36 +89,47 @@ API:
 
 - `GET /api/tasks` is implemented.
 - `GET /api/tasks/:id` is implemented.
-- `POST /api/tasks` is next.
+- `POST /api/tasks` is implemented.
 - `POST /api/tasks/:id/claim` is implemented.
 - `POST /api/tasks/:id/dispatch` is implemented.
 - `POST /api/tasks/:id/block` is implemented.
 - `POST /api/tasks/:id/report` is implemented.
+- `POST /api/tasks/:id/archive` is implemented for stale cleanup/prune.
+- `POST /api/tasks/:id/prune` is implemented for terminal Done / archived cleanup.
 
 CLI:
 
 - `o8 task list` is implemented.
+- `o8 task create --title "..." [--summary "..."] [--repo <path>] [--worker heavy_worker]` is implemented.
 - `o8 task brief <id>` is implemented.
 - `o8 task claim <id>` is implemented.
 - `o8 task dispatch <id> [--message "..."] [--model "..."] [--worker heavy_worker] [--provider kimi] [--runtime gemini]` is implemented.
 - `o8 task block <id> --reason "..." [--code needs_clarification]` is implemented.
 - `o8 task report <id> [--event progress] [--message "..."]` is implemented.
+- `o8 task archive <id> [--reason "..."]` is implemented for stale cleanup/prune.
+- `o8 task prune <id> [--reason "..."]` is implemented for terminal Done / archived cleanup.
 
 MCP:
 
 - `o8_task_list` is implemented.
 - `o8_task_brief` is implemented.
-- `o8_task_create`
+- `o8_task_create` is implemented.
 - `o8_task_claim` is implemented.
 - `o8_task_dispatch` is implemented.
 - `o8_task_block` is implemented.
 - `o8_task_report` is implemented.
+- `o8_task_archive` is implemented.
+- `o8_task_prune` is implemented.
 
 Acceptance:
 
 - Dashboard, mobile, CLI, and MCP all read the same task pool.
 - Creating or dispatching a task creates/updates a packet, not a second model.
 - Claiming a packet binds it to a lane, which prevents scheduler double-dispatch.
+- Archiving a stale task removes it from active ready/running/review/blocked
+  pools while preserving history in Done / archived.
+- Pruning a done task removes genuinely terminal rows from the visible pool by
+  deleting both the terminal packet row and any terminal lane row behind it.
 - Reporting blocked work appends lane/packet events.
 - Non-blocking reports update the lane last-event label so the pool does not
   look stale after a progress update.

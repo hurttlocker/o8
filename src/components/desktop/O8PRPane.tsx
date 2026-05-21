@@ -1,4 +1,5 @@
 'use client';
+/* eslint-disable react-hooks/set-state-in-effect -- this pane syncs external PR selection and loading state from effects */
 
 /**
  * O8PRPane — Pull request surface for the o8 right panel.
@@ -29,6 +30,7 @@ interface PRSummary {
 interface O8PRPaneProps {
   prNumber?: number | null;
   repo?: string | null;
+  repoPath?: string | null;
 }
 
 const ADD_SOFT = '#91c99d';
@@ -158,7 +160,7 @@ function PRListItem({ pr, onClick }: { pr: PRSummary; onClick: () => void }) {
   );
 }
 
-export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
+export function O8PRPane({ prNumber, repo, repoPath }: O8PRPaneProps) {
   const [prList, setPrList] = useState<PRSummary[]>([]);
   const [prListLoading, setPrListLoading] = useState(false);
   const [selectedPr, setSelectedPr] = useState<number | null>(prNumber ?? null);
@@ -185,7 +187,7 @@ export function O8PRPane({ prNumber, repo }: O8PRPaneProps) {
   }, []);
 
   if (selectedPr) {
-    return <PrPanel prNumber={selectedPr} repoSlug={repo ?? null} onClose={handleClose} />;
+    return <PrPanel prNumber={selectedPr} repoSlug={repo ?? null} repoPath={repoPath ?? null} onClose={handleClose} />;
   }
 
   return (

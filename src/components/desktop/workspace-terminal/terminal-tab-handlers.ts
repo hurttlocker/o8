@@ -300,7 +300,7 @@ export function buildHistoryChatTab(
   const now = Date.now();
   return {
     id: historyTabId,
-    label: title.slice(0, 20) + (title.length > 20 ? '...' : ''),
+    label: title,
     kind: 'llm-chat',
     tmuxSession: null,
     repo: historyRepo?.localPath || historyRepo?.name

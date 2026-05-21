@@ -57,6 +57,7 @@ const BINARY_EXTENSIONS = new Set([
 
 type ScratchRole = 'user' | 'assistant';
 type ScratchSurface = 'file' | 'diff';
+type ScratchTriggerPlacement = 'floating' | 'review-toolbar';
 
 interface ScratchMessage {
   id: string;
@@ -270,26 +271,35 @@ function HeaderButton({
   active,
   disabled,
   onOpen,
+  placement = 'floating',
 }: {
   active: boolean;
   disabled: boolean;
   onOpen: () => void;
+  placement?: ScratchTriggerPlacement;
 }) {
+  const toolbar = placement === 'review-toolbar';
+  const size = toolbar ? 28 : 32;
+  const inactiveBackground = toolbar ? 'transparent' : 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))';
+  const activeBackground = toolbar ? 'var(--t-chrome-btn-active-bg, var(--t-hover))' : 'var(--t-accent-soft, rgba(37, 99, 235, 0.1))';
+  const inactiveBorder = toolbar ? 'none' : '1px solid var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))';
+  const activeBorder = toolbar ? 'none' : '1px solid var(--t-accent-border, rgba(37, 99, 235, 0.26))';
+
   return (
     <button
       type="button"
-      title={disabled ? 'Select a file to ask o8' : 'Ask o8 about this file (Cmd+E)'}
+      title={disabled ? 'Select a repo to ask o8' : 'Ask o8 (Cmd+E)'}
       aria-label="Ask o8"
       aria-disabled={disabled}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onOpen}
       style={{
-        width: 32,
-        height: 32,
+        width: size,
+        height: size,
         padding: 0,
-        border: active ? '1px solid var(--t-accent-border, rgba(37, 99, 235, 0.26))' : '1px solid var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))',
-        borderRadius: 10,
-        background: active ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.1))' : 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))',
+        border: active ? activeBorder : inactiveBorder,
+        borderRadius: toolbar ? 8 : 10,
+        background: active ? activeBackground : inactiveBackground,
         color: active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE,
         cursor: disabled ? 'default' : 'pointer',
         display: 'inline-flex',
@@ -301,19 +311,19 @@ function HeaderButton({
         position: 'relative',
         WebkitTapHighlightColor: 'transparent',
         opacity: disabled ? 0.62 : 1,
-        boxShadow: active ? '0 0 0 3px rgba(96, 165, 250, 0.14)' : 'inset 0 1px 0 rgba(255, 255, 255, 0.28)',
+        boxShadow: toolbar ? 'none' : (active ? '0 0 0 3px rgba(96, 165, 250, 0.14)' : 'inset 0 1px 0 rgba(255, 255, 255, 0.28)'),
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
       onMouseEnter={(event) => {
         if (!active && !disabled) {
-          event.currentTarget.style.background = 'var(--t-accent-soft, rgba(37, 99, 235, 0.1))';
-          event.currentTarget.style.borderColor = 'var(--t-accent-border, rgba(37, 99, 235, 0.26))';
+          event.currentTarget.style.background = toolbar ? 'var(--t-hover)' : 'var(--t-accent-soft, rgba(37, 99, 235, 0.1))';
+          event.currentTarget.style.borderColor = toolbar ? 'transparent' : 'var(--t-accent-border, rgba(37, 99, 235, 0.26))';
         }
       }}
       onMouseLeave={(event) => {
         if (!active) {
-          event.currentTarget.style.background = 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))';
-          event.currentTarget.style.borderColor = 'var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))';
+          event.currentTarget.style.background = inactiveBackground;
+          event.currentTarget.style.borderColor = toolbar ? 'transparent' : 'var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))';
         }
       }}
     >
@@ -326,10 +336,12 @@ export function O8ScratchChat({
   repoPath,
   selectedFile,
   surface,
+  placement = 'floating',
 }: {
   repoPath?: string | null;
   selectedFile: string | null;
   surface: ScratchSurface;
+  placement?: ScratchTriggerPlacement;
 }) {
   const data = useOrchestratorData();
   const buttonRef = useRef<HTMLDivElement>(null);
@@ -574,7 +586,7 @@ export function O8ScratchChat({
   return (
     <>
       <div ref={buttonRef} style={{ display: 'inline-flex', flexShrink: 0 }}>
-        <HeaderButton active={open} disabled={disabled && !open} onOpen={togglePanel} />
+        <HeaderButton active={open} disabled={disabled && !open} onOpen={togglePanel} placement={placement} />
       </div>
       {open ? (
         <div

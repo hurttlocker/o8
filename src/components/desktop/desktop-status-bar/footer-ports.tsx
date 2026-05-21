@@ -164,6 +164,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
 
   const ariaLabel = `${total} active port${total === 1 ? '' : 's'}`;
   const allPorts = groups.flatMap((g) => g.ports.map((p) => ({ port: p, repo: g.repo })));
+  const compactTotal = total > 99 ? '99+' : String(total);
 
   return (
     <div
@@ -180,11 +181,11 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          minWidth: 24,
-          height: 18,
-          paddingLeft: 6,
-          paddingRight: 6,
-          borderRadius: 6,
+          minWidth: 42,
+          height: 28,
+          paddingLeft: 8,
+          paddingRight: 8,
+          borderRadius: 8,
           borderWidth: 0,
           background: 'rgba(34,197,94,0.1)',
           color: '#16a34a',
@@ -192,11 +193,13 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
           fontWeight: 700,
           fontFamily: '"SF Mono", ui-monospace, monospace',
           cursor: 'pointer',
+          lineHeight: 1,
+          whiteSpace: 'nowrap',
           transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
         onClick={() => setOpen((v) => !v)}
       >
-        {total} port{total === 1 ? '' : 's'}
+        {compactTotal}
       </button>
       {open && typeof document !== 'undefined' ? createPortal(
         <div
@@ -205,7 +208,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
           onMouseLeave={scheduleHide}
           style={{
             position: 'fixed',
-            bottom: 36, // above the 28px status bar + small gap
+            bottom: 48,
             left: popoverLeft,
             minWidth: 200,
             padding: 6,

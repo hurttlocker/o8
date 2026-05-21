@@ -554,6 +554,11 @@ function DashboardInner() {
   const [o8SelectedFile, setO8SelectedFile] = useState<string | null>(null);
   const [o8SelectedFileRepoPath, setO8SelectedFileRepoPath] = useState<string | null>(null);
   const [o8RepoPathOverride, setO8RepoPathOverride] = useState<string | null>(null);
+  // Right-panel repo scope: true = "All repos" aggregate across the active
+  // project, false = focused on currentO8RepoPath. Shared by the Workspace +
+  // Activity selectors and driven by the left switcher (project pick → all,
+  // repo pick → that repo).
+  const [o8AllRepos, setO8AllRepos] = useState(false);
   const [o8CommitSha, setO8CommitSha] = useState<string | null>(null);
   const [o8CommitRepoPath, setO8CommitRepoPath] = useState<string | null>(null);
   const [o8CommitRepoSlug, setO8CommitRepoSlug] = useState<string | null>(null);
@@ -760,6 +765,10 @@ function DashboardInner() {
     sidebarVisible,
   });
   const currentO8RepoPath = o8CommitRepoPath ?? o8RepoPathOverride ?? globalRepoEntry?.localPath ?? null;
+  // Mirror for the project-switch guard effect — lets it read the focused repo
+  // without re-subscribing (and without clobbering an explicit repo pick).
+  const currentO8RepoPathRef = useRef<string | null>(null);
+  currentO8RepoPathRef.current = currentO8RepoPath;
   const scopedO8SelectedFile = o8SelectedFileRepoPath === currentO8RepoPath ? o8SelectedFile : null;
 
   // Scope the right-panel surfaces (Activity / PRs / GitHub) to the ACTIVE
@@ -776,11 +785,13 @@ function DashboardInner() {
     return scoped.length > 0 ? scoped : globalRepoEntries;
   }, [dashboardProjects.ledger, globalRepoEntries]);
 
-  // When the active PROJECT changes (clicking a different project in the
-  // switcher), switch the WHOLE app's current repo to that project's primary
-  // repo — the O8 panel follows, and a newly spawned orchestrator defaults to
-  // it (both key off the global repo). Clicking a repo WITHIN a project doesn't
-  // change activeProjectId, so per-repo navigation inside a project is kept.
+  // When the active PROJECT changes, keep the right panel coherent. Repo
+  // membership is exclusive to one project, so after a project switch the
+  // previously-focused repo no longer belongs here. A pure project pick →
+  // default to the project's primary repo (so a freshly spawned orchestrator +
+  // commit surfaces have a valid target) AND show the "All repos" aggregate.
+  // If a specific repo was just picked on the left (focused repo IS in the new
+  // project, set synchronously before this fires) → keep it, no All-repos.
   const lastActiveProjectRef = useRef<string | null>(null);
   useEffect(() => {
     const ledger = dashboardProjects.ledger;
@@ -790,13 +801,19 @@ function DashboardInner() {
     lastActiveProjectRef.current = activeId;
     if (isFirst) return; // don't override the repo chosen on initial load
     const project = ledger?.projects.find((p) => p.id === activeId);
+    const projectPaths = new Set((project?.repoPaths ?? []).map((p) => p.replace(/\/+$/, '')));
+    const focused = currentO8RepoPathRef.current?.replace(/\/+$/, '') ?? null;
+    if (focused && projectPaths.has(focused)) return; // explicit repo pick → keep it
     const primaryPath = project?.repoPaths?.[0];
-    if (!primaryPath) return;
-    const entry = globalRepoEntries.find((repo) => repo.localPath === primaryPath);
-    if (!entry) return;
-    setGlobalRepoId(entry.id);
-    setO8RepoPathOverride(primaryPath);
-    setO8CommitRepoPath(null);
+    if (primaryPath) {
+      const entry = globalRepoEntries.find((repo) => repo.localPath === primaryPath);
+      if (entry) {
+        setGlobalRepoId(entry.id);
+        setO8RepoPathOverride(primaryPath);
+        setO8CommitRepoPath(null);
+      }
+    }
+    setO8AllRepos(true);
   }, [dashboardProjects.ledger, globalRepoEntries, setGlobalRepoId]);
 
   const handleO8SelectedFileChange = useCallback((filePath: string) => {
@@ -1573,6 +1590,7 @@ function DashboardInner() {
   // ── Repo alignment — click repo name → align whole app ──
   const handleAlignToRepo = useCallback((repoId: string) => {
     void handleSelectRegisteredRepo(repoId);
+    setO8AllRepos(false); // picking a specific repo exits the All-repos aggregate
     const targetRepo = globalRepoEntries.find((r) => r.id === repoId);
     if (targetRepo) {
       setO8RepoPathOverride(targetRepo.localPath);
@@ -2360,9 +2378,15 @@ function DashboardInner() {
   const handleSelectO8RepoPath = useCallback((repoPath: string) => {
     handleClearCommit();
     setO8RepoPathOverride(repoPath);
+    setO8AllRepos(false); // a concrete repo pick (selector / overview row) exits All-repos
     setO8SelectedFile(null);
     setO8SelectedFileRepoPath(null);
   }, [handleClearCommit]);
+
+  // "All repos" — the shared O8RepoSelector and the left project pick route here.
+  const handleSelectO8AllRepos = useCallback(() => {
+    setO8AllRepos(true);
+  }, []);
 
   // ── Left drag handle ──
   const startLeftDrag = useCallback((e: React.MouseEvent) => {
@@ -3481,6 +3505,8 @@ function DashboardInner() {
                           repoPath={currentO8RepoPath}
                           registeredRepos={activeProjectRepoEntries}
                           onRepoPathChange={handleSelectO8RepoPath}
+                          allRepos={o8AllRepos}
+                          onSelectAllRepos={handleSelectO8AllRepos}
                           previews={workspacePreviews}
                           activeTab={o8ActiveTab}
                           selectedFile={scopedO8SelectedFile}

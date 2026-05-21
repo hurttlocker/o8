@@ -474,6 +474,7 @@ export function updateLane(
 // already avoids the double-fire at source, this stops any future caller
 // from accidentally re-opening a closed lane.
 const TERMINAL_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set(['failed', 'completed', 'archived']);
+const SILENT_EXIT_EVENT_PREFIX = 'silent_exit_';
 
 export function derivePacketType(lane: Pick<Lane, 'label'>) {
   return lane.label.trim().split(/\s+/)[0]?.toLowerCase() || 'unknown';
@@ -687,6 +688,12 @@ export function reconcileLanesWithSessions(
         if (lane.status === 'awaiting_orchestrator') {
           continue;
         }
+        if (
+          lane.status === 'awaiting_input'
+          && lane.lastEventLabel?.startsWith(SILENT_EXIT_EVENT_PREFIX)
+        ) {
+          continue;
+        }
 
         const nextValues: Partial<typeof lanes.$inferInsert> = {};
         let lifecycleTimestamp: string | null = null;
@@ -820,6 +827,30 @@ export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lan
   }
 
   return updated;
+}
+
+export function deleteLane(laneId: string): Lane | null {
+  const lane = getLane(laneId);
+  if (!lane) {
+    return null;
+  }
+
+  getSqlite().transaction(() => {
+    getSqlite()
+      .prepare('DELETE FROM worker_events WHERE worker_run_id IN (SELECT id FROM worker_runs WHERE lane_id = ?)')
+      .run(laneId);
+    getSqlite().prepare('DELETE FROM worker_runs WHERE lane_id = ?').run(laneId);
+    getSqlite().prepare('DELETE FROM lane_events WHERE lane_id = ?').run(laneId);
+    getSqlite().prepare('DELETE FROM lanes WHERE id = ?').run(laneId);
+  })();
+
+  if (lane.worktreePath) {
+    void cleanupLaneWorktree(lane).catch((error) => {
+      console.error(`[lane-worktree] Cleanup failed while pruning ${lane.id}: ${error instanceof Error ? error.message : String(error)}`);
+    });
+  }
+
+  return lane;
 }
 
 export function archiveCompletedLanes(): number {

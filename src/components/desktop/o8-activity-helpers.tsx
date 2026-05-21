@@ -428,11 +428,41 @@ function DetailPill({ label, color }: { label: string; color: string }) {
   );
 }
 
+function DetailActionButton({ label, onClick }: { label: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        alignSelf: 'flex-start',
+        minHeight: 26,
+        border: '1px solid var(--t-divider-subtle)',
+        borderRadius: 8,
+        background: 'var(--t-bg-card)',
+        color: 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        fontFamily: 'var(--font-sans-system)',
+        fontSize: 11,
+        fontWeight: 650,
+        paddingTop: 0,
+        paddingRight: 9,
+        paddingBottom: 0,
+        paddingLeft: 9,
+      }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'var(--t-bg-card)'; }}
+    >
+      {label}
+    </button>
+  );
+}
+
 export function renderExpandedDetail(
   item: ActivityItem,
   prDetails: Record<string, PRExpandDetail>,
   ciDetails: Record<string, CIExpandDetail>,
   key: string,
+  actions?: { onOpenPr?: (item: Extract<ActivityItem, { kind: 'pr' }>) => void },
 ): React.ReactNode {
   if (item.kind === 'commit') {
     return (
@@ -485,6 +515,9 @@ export function renderExpandedDetail(
           <span style={{ color: 'var(--t-text-faint)' }}> on </span>
           <span style={{ color: 'var(--t-text-secondary)' }}>{item.branch}</span>
         </div>
+        {actions?.onOpenPr ? (
+          <DetailActionButton label="Open PR details" onClick={() => actions.onOpenPr?.(item)} />
+        ) : null}
       </div>
     );
   }

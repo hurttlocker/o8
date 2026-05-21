@@ -1,6 +1,6 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, type ReactNode } from 'react';
 import { ExternalLink, GitBranch, X } from '../lucide-shims';
 
 const MONO_FONT = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
@@ -33,6 +33,7 @@ interface PrPanelHeaderProps {
   baseRefName?: string | null;
   headRefName?: string | null;
   url?: string | null;
+  actions?: ReactNode;
   onClose: () => void;
 }
 
@@ -42,6 +43,7 @@ export const PrPanelHeader = memo(function PrPanelHeader({
   baseRefName,
   headRefName,
   url,
+  actions,
   onClose,
 }: PrPanelHeaderProps) {
   const pill = statePill(state);
@@ -129,6 +131,7 @@ export const PrPanelHeader = memo(function PrPanelHeader({
           {baseRefName || 'main'}
         </span>
         <div style={{ flex: 1 }} />
+        {actions}
         {url ? (
           <a
             href={url}

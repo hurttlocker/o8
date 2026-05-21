@@ -210,6 +210,12 @@ function sessionBelongsToRepo(session: IdeWorkspaceSession, repo: RepoFocusRepo)
   return Boolean(workspace && (workspace === repo.name.toLowerCase() || workspace === pathBasename(repo.localPath)));
 }
 
+function isAutomationSession(session: IdeWorkspaceSession): boolean {
+  return session.sessionKind === 'automation'
+    || session.runtimeSurface?.sourceLabel === 'Automation run'
+    || session.squadId === 'automation';
+}
+
 function historyRepoContext(item: ChatHistoryItem): SavedChatRepoContext | null {
   if (!item.repoName && !item.repoPath && !item.repoBranch && !item.remoteUrl) return null;
   return {
@@ -555,7 +561,7 @@ export function ChatsTab({
   ), [ideWorkspaceSessions, targetRepos, visibleHistoryIds]);
 
   const compact = variant === 'mini';
-  const shownSessions = showLiveSessions ? visibleSessions : [];
+  const shownSessions = showLiveSessions ? visibleSessions : visibleSessions.filter(isAutomationSession);
   const displayedSessions = limit ? shownSessions.slice(0, Math.min(shownSessions.length, limit)) : shownSessions;
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
   const flatHistoryItems = useMemo(() => {
@@ -1691,6 +1697,10 @@ function CompactSessionRow({
   session: IdeWorkspaceSession;
   onSelectSession?: (sessionKey: string) => void;
 }) {
+  const automation = isAutomationSession(session);
+  const metaLabel = automation
+    ? `${session.branch || 'workspace'} · automation · ${session.status}`
+    : `${session.branch || 'workspace'} · ${formatElapsed(session.lastActivityAt ?? session.lastEventAt)} idle`;
   const runtimeItem: ChatHistoryItem = {
     tabId: session.sessionKey,
     title: session.name,
@@ -1753,7 +1763,7 @@ function CompactSessionRow({
           {session.name || session.runtime || 'Agent'}
         </span>
         <span style={{ display: 'block', marginTop: 1, color: 'var(--t-text-faint)', fontSize: 9.75, lineHeight: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {session.branch || 'workspace'} · {formatElapsed(session.lastActivityAt ?? session.lastEventAt)} idle
+          {metaLabel}
         </span>
       </span>
     </button>

@@ -9,7 +9,7 @@ interface RepoAnchorsRowProps {
   onSelect: (repoPath: string | null) => void;
 }
 
-const CHIP_HEIGHT = 28;
+const CHIP_HEIGHT = 24;
 
 export function RepoAnchorsRow({ repos, selectedRepoPath, onSelect }: RepoAnchorsRowProps) {
   const selected = selectedRepoPath ? normalizeRepoPath(selectedRepoPath) : '';
@@ -26,9 +26,9 @@ export function RepoAnchorsRow({ repos, selectedRepoPath, onSelect }: RepoAnchor
         display: 'flex',
         alignItems: 'center',
         gap: 6,
-        paddingTop: 2,
+        paddingTop: 0,
         paddingRight: 12,
-        paddingBottom: 8,
+        paddingBottom: 6,
         paddingLeft: 10,
         overflowX: 'auto',
         scrollbarWidth: 'none',
@@ -39,8 +39,8 @@ export function RepoAnchorsRow({ repos, selectedRepoPath, onSelect }: RepoAnchor
         type="button"
         role="tab"
         aria-selected={!selected}
+        aria-label="Project-wide view"
         onClick={() => onSelect(null)}
-        title="Project-wide view"
         style={chipStyle(!selected)}
         onMouseEnter={(e) => {
           if (selected) e.currentTarget.style.borderColor = 'var(--t-border)';
@@ -69,8 +69,8 @@ export function RepoAnchorsRow({ repos, selectedRepoPath, onSelect }: RepoAnchor
             type="button"
             role="tab"
             aria-selected={isActive}
+            aria-label={`${repo.name} repository`}
             onClick={() => onSelect(isActive ? null : repo.localPath)}
-            title={repo.localPath}
             style={chipStyle(isActive)}
             onMouseEnter={(e) => {
               if (!isActive) e.currentTarget.style.borderColor = 'var(--t-border)';
@@ -79,26 +79,28 @@ export function RepoAnchorsRow({ repos, selectedRepoPath, onSelect }: RepoAnchor
               if (!isActive) e.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
             }}
           >
-            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 160 }}>
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 128 }}>
               {repo.name}
             </span>
-            <span
-              style={{
-                fontFamily: REPO_FOCUS_MONO,
-                fontSize: 9.5,
-                color: isActive ? 'var(--t-accent)' : 'var(--t-text-faint)',
-                paddingTop: 1,
-                paddingRight: 5,
-                paddingBottom: 1,
-                paddingLeft: 5,
-                borderRadius: 6,
-                background: isActive ? 'var(--t-accent-soft)' : 'var(--t-input-bg)',
-                whiteSpace: 'nowrap',
-                flexShrink: 0,
-              }}
-            >
-              {currentBranch(repo)}
-            </span>
+            {isActive ? (
+              <span
+                style={{
+                  fontFamily: REPO_FOCUS_MONO,
+                  fontSize: 9,
+                  color: 'var(--t-accent)',
+                  paddingTop: 1,
+                  paddingRight: 5,
+                  paddingBottom: 1,
+                  paddingLeft: 5,
+                  borderRadius: 6,
+                  background: 'var(--t-accent-soft)',
+                  whiteSpace: 'nowrap',
+                  flexShrink: 0,
+                }}
+              >
+                {currentBranch(repo)}
+              </span>
+            ) : null}
           </button>
         );
       })}
@@ -110,10 +112,10 @@ function chipStyle(active: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     height: CHIP_HEIGHT,
     paddingTop: 0,
-    paddingRight: 8,
+    paddingRight: 9,
     paddingBottom: 0,
     paddingLeft: 10,
     borderWidth: 1,
@@ -124,7 +126,7 @@ function chipStyle(active: boolean): React.CSSProperties {
     color: active ? 'var(--t-accent)' : 'var(--t-text)',
     cursor: 'pointer',
     flexShrink: 0,
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: 500,
     letterSpacing: '-0.005em',
     transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',

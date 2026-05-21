@@ -158,6 +158,7 @@ function ensureSupervisorInboxSchema(sqlite: Database.Database): void {
     CREATE TABLE IF NOT EXISTS supervisor_inbox (
       id TEXT PRIMARY KEY,
       project_id TEXT,
+      incident_key TEXT,
       repo_path TEXT NOT NULL,
       packet_id TEXT,
       kind TEXT NOT NULL,
@@ -165,6 +166,8 @@ function ensureSupervisorInboxSchema(sqlite: Database.Database): void {
       status TEXT NOT NULL DEFAULT 'pending',
       heal_attempt_count INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT,
+      repeat_count INTEGER NOT NULL DEFAULT 1,
       resolved_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_status_created
@@ -188,9 +191,34 @@ function ensureSupervisorInboxSchema(sqlite: Database.Database): void {
   ensureColumn(
     sqlite,
     'supervisor_inbox',
+    'incident_key',
+    `ALTER TABLE supervisor_inbox ADD COLUMN incident_key TEXT`,
+  );
+  ensureColumn(
+    sqlite,
+    'supervisor_inbox',
     'heal_attempt_count',
     `ALTER TABLE supervisor_inbox ADD COLUMN heal_attempt_count INTEGER NOT NULL DEFAULT 0`,
   );
+  ensureColumn(
+    sqlite,
+    'supervisor_inbox',
+    'last_seen_at',
+    `ALTER TABLE supervisor_inbox ADD COLUMN last_seen_at TEXT`,
+  );
+  ensureColumn(
+    sqlite,
+    'supervisor_inbox',
+    'repeat_count',
+    `ALTER TABLE supervisor_inbox ADD COLUMN repeat_count INTEGER NOT NULL DEFAULT 1`,
+  );
+  sqlite.prepare(
+    "UPDATE supervisor_inbox SET last_seen_at = created_at WHERE last_seen_at IS NULL OR last_seen_at = ''",
+  ).run();
+  sqlite.prepare(
+    'UPDATE supervisor_inbox SET repeat_count = 1 WHERE repeat_count IS NULL OR repeat_count < 1',
+  ).run();
+  sqlite.exec('CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_incident_status ON supervisor_inbox(incident_key, status)');
 }
 
 function parseGiveUpReason(stdout: string, stderr: string): string | null {
