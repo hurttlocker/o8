@@ -191,6 +191,21 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, path: specPath });
     }
 
+    if (action === 'review') {
+      // Headless one-shot review: an LLM turn reads the notes and returns
+      // annotations we splice in here. Never touches the orchestrator session,
+      // so it never surfaces in the chat — it just lands on the rail.
+      const { runSpecReview } = await import('@/lib/o8md/spec-review');
+      const { updated, result } = await runSpecReview(repoPath, current);
+      if (updated !== current) {
+        if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
+          return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+        }
+        writeFileSync(specPath, updated, 'utf-8');
+      }
+      return NextResponse.json({ ok: true, ...result, path: specPath });
+    }
+
     return NextResponse.json({ ok: false, error: `unknown action: ${action ?? '(none)'}` }, { status: 400 });
   } catch (err) {
     // Parser-domain failure (target not found, raw close delimiter, missing
