@@ -30,7 +30,7 @@ export function RightPanelMorphButton({
     <motion.button
       type="button"
       aria-label={label}
-      title={label}
+      title={`${label} (⌘⌥B)`}
       onClick={handleClick}
       initial={false}
       style={{
