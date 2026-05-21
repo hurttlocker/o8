@@ -57,9 +57,10 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
-  // Per-user note styling for the o8.md rail. noteHue=null → brand orange.
+  // Per-user note styling for the o8.md rail. customColor=null → brand orange;
+  // else any CSS color string (a rainbow hue OR a neutral swatch incl. black).
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [noteHue, setNoteHue] = useState<number | null>(null);
+  const [customColor, setCustomColor] = useState<string | null>(null);
   const orchestratorData = useOrchestratorData();
   // Click-first review trigger: hand the orchestrator the doc + ask it to
   // annotate via the o8_spec_* tools. (Auto-review-on-pause comes later.)
@@ -88,22 +89,24 @@ Voice: a sharp teammate scribbling in the margin — keep each note to 1-2 short
     return () => window.clearInterval(timer);
   }, []);
 
-  // Load the saved note color (hue) once on mount.
+  // Load the saved note color once on mount.
   useEffect(() => {
     try {
-      const raw = window.localStorage.getItem('o8:spec:note-hue');
-      if (raw != null && raw !== '') setNoteHue(Number(raw));
+      const raw = window.localStorage.getItem('o8:spec:note-color');
+      if (raw != null && raw !== '') setCustomColor(raw);
     } catch { /* ignore */ }
   }, []);
 
-  const setHue = useCallback((h: number) => {
-    const v = Math.max(0, Math.min(360, Math.round(h)));
-    setNoteHue(v);
-    try { window.localStorage.setItem('o8:spec:note-hue', String(v)); } catch { /* ignore */ }
+  const pickColor = useCallback((c: string) => {
+    setCustomColor(c);
+    try { window.localStorage.setItem('o8:spec:note-color', c); } catch { /* ignore */ }
   }, []);
-  const resetHue = useCallback(() => {
-    setNoteHue(null);
-    try { window.localStorage.removeItem('o8:spec:note-hue'); } catch { /* ignore */ }
+  const pickHue = useCallback((h: number) => {
+    pickColor(`hsl(${Math.max(0, Math.min(360, Math.round(h)))}, 80%, 55%)`);
+  }, [pickColor]);
+  const resetColor = useCallback(() => {
+    setCustomColor(null);
+    try { window.localStorage.removeItem('o8:spec:note-color'); } catch { /* ignore */ }
   }, []);
 
   useEffect(() => {
@@ -227,10 +230,14 @@ Voice: a sharp teammate scribbling in the margin — keep each note to 1-2 short
   // translucent vibrancy), no re-binding.
   const { surface, paletteId } = useTheme();
   const isLight = paletteId === 'light';
-  // Note accent: brand orange by default, else the chosen hue. The anchor
-  // highlight tracks the same hue at low opacity so the pairing stays cohesive.
-  const noteColor = noteHue == null ? 'var(--t-brand-orange, #FF5A1F)' : `hsl(${noteHue}, 80%, 55%)`;
-  const noteHilite = noteHue == null ? 'rgba(232, 150, 40, 0.20)' : `hsla(${noteHue}, 80%, 55%, 0.20)`;
+  // Note accent: brand orange by default, else the chosen color (rainbow hue or
+  // a neutral incl. black). The anchor highlight tracks it at low opacity via
+  // color-mix so the pairing stays cohesive for any color.
+  const noteColor = customColor ?? 'var(--t-brand-orange, #FF5A1F)';
+  const noteHilite = customColor == null ? 'rgba(232, 150, 40, 0.20)' : `color-mix(in srgb, ${customColor} 22%, transparent)`;
+  // Rainbow thumb position — only meaningful for a hue color (default sits near
+  // orange ≈ 16); null when a neutral swatch is active so the thumb hides.
+  const hueThumb = customColor == null ? 16 : (/^hsl\(\s*\d+\s*,\s*80%/.test(customColor) ? Number(/^hsl\(\s*(\d+)/.exec(customColor)?.[1] ?? '16') : null);
   const contentRebinds = surface === 'solid'
     ? {
         ['--t-text' as unknown as string]: 'var(--t-chat-surface-text)',
@@ -316,21 +323,37 @@ Voice: a sharp teammate scribbling in the margin — keep each note to 1-2 short
               }}>
                 <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: isLight ? '#8a93a3' : '#9aa3b2', marginBottom: 10 }}>Note color</div>
                 <div
-                  onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); setHue(((e.clientX - r.left) / r.width) * 360); }}
-                  onPointerMove={(e) => { if (e.buttons === 1) { const r = e.currentTarget.getBoundingClientRect(); setHue(((e.clientX - r.left) / r.width) * 360); } }}
+                  onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); pickHue(((e.clientX - r.left) / r.width) * 360); }}
+                  onPointerMove={(e) => { if (e.buttons === 1) { const r = e.currentTarget.getBoundingClientRect(); pickHue(((e.clientX - r.left) / r.width) * 360); } }}
                   style={{
                     position: 'relative', height: 16, borderRadius: 8, cursor: 'pointer', touchAction: 'none',
                     background: 'linear-gradient(to right, hsl(0, 80%, 55%), hsl(60, 80%, 55%), hsl(120, 80%, 55%), hsl(180, 80%, 55%), hsl(240, 80%, 55%), hsl(300, 80%, 55%), hsl(360, 80%, 55%))',
                   }}
                 >
-                  <div style={{ position: 'absolute', left: `${((noteHue ?? 16) / 360) * 100}%`, top: -3, marginLeft: -6, width: 12, height: 22, borderRadius: 5, background: noteColor, border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.4)' }} />
+                  {hueThumb != null ? (
+                    <div style={{ position: 'absolute', left: `${(hueThumb / 360) * 100}%`, top: -3, marginLeft: -6, width: 12, height: 22, borderRadius: 5, background: noteColor, border: '2px solid #fff', boxShadow: '0 1px 3px rgba(0, 0, 0, 0.4)' }} />
+                  ) : null}
+                </div>
+                <div style={{ display: 'flex', gap: 7, marginTop: 10 }}>
+                  {['#000000', '#52525b', '#9ca3af', '#d1d5db', '#ffffff'].map((c) => {
+                    const active = (customColor || '').toLowerCase() === c;
+                    return (
+                      <button
+                        key={c}
+                        type="button"
+                        aria-label={`Note color ${c}`}
+                        onClick={() => pickColor(c)}
+                        style={{ width: 22, height: 22, borderRadius: 6, padding: 0, cursor: 'pointer', background: c, border: active ? '2px solid #2563eb' : '1px solid rgba(128, 128, 128, 0.4)' }}
+                      />
+                    );
+                  })}
                 </div>
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-                    <span style={{ width: 14, height: 14, borderRadius: 4, background: noteColor, flexShrink: 0 }} />
-                    <span style={{ fontSize: 11, color: isLight ? '#5b6475' : '#9aa3b2' }}>{noteHue == null ? 'Default' : `Hue ${noteHue}°`}</span>
+                    <span style={{ width: 14, height: 14, borderRadius: 4, background: noteColor, flexShrink: 0, border: '1px solid rgba(128, 128, 128, 0.4)' }} />
+                    <span style={{ fontSize: 11, color: isLight ? '#5b6475' : '#9aa3b2' }}>{customColor == null ? 'Default' : 'Custom'}</span>
                   </div>
-                  <button type="button" onClick={resetHue} style={{ cursor: 'pointer', background: 'transparent', border: 'none', paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0, fontSize: 11, fontWeight: 600, color: isLight ? '#2563eb' : '#8ab4ff' }}>Reset</button>
+                  <button type="button" onClick={resetColor} style={{ cursor: 'pointer', background: 'transparent', border: 'none', paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0, fontSize: 11, fontWeight: 600, color: isLight ? '#2563eb' : '#8ab4ff' }}>Reset</button>
                 </div>
               </div>
             </>
