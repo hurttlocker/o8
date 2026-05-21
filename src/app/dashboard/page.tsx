@@ -128,6 +128,7 @@ const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage'
 const LazyAutomationsPage = lazy(() => import('@/components/desktop/AutomationsPage').then(m => ({ default: m.AutomationsPage })));
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
 const LazyCommandPalette = lazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })));
+const LazyKeyboardShortcutsOverlay = lazy(() => import('@/components/desktop/KeyboardShortcutsOverlay').then(m => ({ default: m.KeyboardShortcutsOverlay })));
 const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })));
 const LazyO8Panel = lazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })));
 // #888/#895 — packet-mode right panel (Spec / Agent Overview / Changes).
@@ -645,6 +646,7 @@ function DashboardInner() {
   // contentEditable so existing native shortcuts (Cmd+K text-link in
   // markdown editors, etc.) don't break.
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const dashboardProjects = useProjects();
 
   const {
@@ -991,6 +993,36 @@ function DashboardInner() {
       event.preventDefault();
       event.stopPropagation();
       setCommandPaletteOpen((current) => !current);
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
+  // ── ⌘/ (and bare `?`) opens the keyboard-shortcuts reference overlay ──
+  // ⌘/ is the macOS-convention "show shortcuts" binding; `?` is a fallback
+  // that only fires when the user isn't typing into a field. Both skip
+  // editable targets so they don't hijack literal `/` or `?` input.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      const isSlash = (event.metaKey || event.ctrlKey)
+        && !event.altKey
+        && !event.shiftKey
+        && event.key === '/';
+      const isQuestion = !event.metaKey && !event.ctrlKey && !event.altKey && event.key === '?';
+      if (!isSlash && !isQuestion) return;
+
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName;
+      const isEditable = Boolean(
+        target?.isContentEditable
+          || tagName === 'INPUT'
+          || tagName === 'TEXTAREA'
+          || tagName === 'SELECT',
+      );
+      if (isEditable) return;
+
+      event.preventDefault();
+      setShortcutsOpen((current) => !current);
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
@@ -2808,6 +2840,17 @@ function DashboardInner() {
         </Suspense>
       ) : null}
 
+      {/* Keyboard-shortcuts reference. Opened on ⌘/ or `?`, and from the
+          status-bar `?` button. Only mounts the chunk once requested. */}
+      {shortcutsOpen ? (
+        <Suspense fallback={null}>
+          <LazyKeyboardShortcutsOverlay
+            open={shortcutsOpen}
+            onClose={() => setShortcutsOpen(false)}
+          />
+        </Suspense>
+      ) : null}
+
       {/* CommandPalette is opened on Cmd+K. The dashboard owns the hotkey
           listener (above) so the palette chunk only needs to be present
           once the user opens it. */}
@@ -3429,6 +3472,7 @@ function DashboardInner() {
         compact={compactShell}
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
+        onOpenShortcuts={() => setShortcutsOpen(true)}
         leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
         rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
         onOpenSettings={toggleSettingsOverlay}

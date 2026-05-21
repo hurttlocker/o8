@@ -443,7 +443,7 @@ function HeaderPill({
           onClose(tab.id);
         }}
         aria-label={hovered ? `Close ${tab.label || 'tab'}` : undefined}
-        title={hovered ? 'Close tab' : undefined}
+        title={hovered ? 'Close tab (⌘W)' : undefined}
         tabIndex={hovered ? 0 : -1}
         style={{
           display: 'inline-flex',
