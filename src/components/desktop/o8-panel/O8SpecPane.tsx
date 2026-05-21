@@ -4,6 +4,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { O8SpecEditor } from './O8SpecEditor';
+import { TitleBarButton } from '../title-bar/TitleBarButton';
+import { useOrchestratorData } from '../orchestrator-data-context';
 
 interface O8SpecPaneProps {
   repoPath?: string | null;
@@ -55,6 +57,16 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
   const [savedAt, setSavedAt] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [now, setNow] = useState(0);
+  const orchestratorData = useOrchestratorData();
+  // Click-first review trigger: hand the orchestrator the doc + ask it to
+  // annotate via the o8_spec_* tools. (Auto-review-on-pause comes later.)
+  const requestReview = useCallback(() => {
+    if (!repoPath || !orchestratorData?.onAcceptDirectiveProposal) return;
+    orchestratorData.onAcceptDirectiveProposal({
+      id: `spec-review-${Date.now()}`,
+      text: `Please review the o8.md for this repo (${repoPath}) and leave inline comments on anything worth flagging — typos, unclear bits, decisions to revisit. Use the o8_spec_comment / o8_spec_suggest tools to annotate; do not rewrite my prose.`,
+    });
+  }, [repoPath, orchestratorData]);
   const debounceRef = useRef<number | null>(null);
 
   useEffect(() => {
@@ -205,6 +217,15 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
             Shared with agents · {status}
           </div>
         </div>
+        <TitleBarButton
+          label="Ask o8 to review"
+          onClick={requestReview}
+          icon={(
+            <svg width={15} height={15} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <path d="M12 2.4l1.7 6.4 6.4 1.7-6.4 1.7L12 18.6l-1.7-6.4L3.9 10.5l6.4-1.7z" />
+            </svg>
+          )}
+        />
         <div
           aria-label={`Notes diff ${diffStats.additions} additions, ${diffStats.deletions} deletions`}
           style={{
