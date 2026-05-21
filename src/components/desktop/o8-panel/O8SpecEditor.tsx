@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EditorState, StateField, Annotation, type Extension, type Range } from '@codemirror/state';
+import { EditorState, StateField, StateEffect, Annotation, type Extension, type Range } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
@@ -29,6 +29,27 @@ import { extractRoughdraftReviewIndex } from '@/lib/o8md/rfm';
 const HAND = "'Caveat', ui-rounded, cursive";
 const PROSE = "'Inter', system-ui, sans-serif";
 const RAIL_W = 220;
+
+// A block spacer that reserves vertical room in the prose so a margin note can
+// sit beside its anchor without colliding with the note above it. Injected
+// "only when needed" by recompute()'s placement walk.
+class SpacerWidget extends WidgetType {
+  constructor(readonly h: number) { super(); }
+  eq(o: SpacerWidget) { return o.h === this.h; }
+  toDOM() { const d = document.createElement('div'); d.style.height = `${this.h}px`; d.setAttribute('aria-hidden', 'true'); return d; }
+  get estimatedHeight() { return this.h; }
+  ignoreEvent() { return true; }
+}
+const setSpacers = StateEffect.define<DecorationSet>();
+const spacerField = StateField.define<DecorationSet>({
+  create: () => Decoration.none,
+  update: (deco, tr) => {
+    let d = deco.map(tr.changes);
+    for (const e of tr.effects) if (e.is(setSpacers)) d = e.value;
+    return d;
+  },
+  provide: (f) => EditorView.decorations.from(f),
+});
 
 interface O8SpecEditorProps {
   value: string;
@@ -196,6 +217,7 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
     try { return typeof document !== 'undefined' && !!document.fonts && document.fonts.check("18px 'Caveat'"); } catch { return false; }
   });
 
+  const spacersRef = useRef<{ pos: number; height: number }[]>([]);
   const recompute = useCallback(() => {
     const view = viewRef.current; const wrap = wrapRef.current;
     if (!view || !wrap) return;
@@ -205,30 +227,61 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
     for (const it of idx.items) {
       if (it.kind === 'reply' && it.parentId) (repliesByParent[it.parentId] ||= []).push({ author: it.author, text: it.text });
     }
+    // Anchor each note at its marker's NATURAL y. coordsAtPos includes any
+    // spacers we've already injected above it, so subtract those back out for a
+    // spacer-free baseline — this keeps the reserve math below stable (the
+    // baseline never depends on the spacers it produces, so it can't oscillate).
+    const spacers = spacersRef.current;
+    const spacerAbove = (offset: number) => {
+      let h = 0;
+      for (const s of spacers) if (s.pos <= offset) h += s.height;
+      return h;
+    };
     const layouts: NoteLayout[] = idx.items
       .filter((i) => i.kind === 'comment' || i.kind === 'suggestion')
       .map((i) => {
         let top = 0;
-        try { const c = view.coordsAtPos(i.offset); if (c) top = Math.max(0, c.top - wrapTop); } catch { /* off-screen */ }
+        try { const c = view.coordsAtPos(i.offset); if (c) top = Math.max(0, c.top - wrapTop - spacerAbove(i.offset)); } catch { /* off-screen */ }
         return {
           id: i.id, kind: i.kind, author: i.author, text: i.text, suggestionKind: i.suggestionKind,
           originalText: i.originalText, replacementText: i.replacementText, status: i.status,
           offset: i.offset, endOffset: i.endOffset, replies: repliesByParent[i.id] ?? [], top,
         };
       });
-    // Collision avoidance: notes anchored to the same/near line would stack at
-    // the same Y. Sort by line, then push each down past the previous one's
-    // estimated bottom so they never overlap (drifts from the exact line, but
-    // stays ordered + readable).
+    // "Only when needed": where a note would collide with the one above it,
+    // reserve prose room with a block spacer at its anchor line and let the note
+    // sit beside its anchor — instead of drifting the note down off its line.
     layouts.sort((a, b) => a.top - b.top);
-    let lastBottom = -1e9;
+    const GAP = 16;
+    const nextSpacers: { pos: number; height: number }[] = [];
+    let pushDown = 0;
+    let placedBottom = -1e9;
     for (const n of layouts) {
       const lines = Math.max(1, Math.ceil((n.text?.length ?? 0) / 24));
       const est = 22 + lines * 20 + n.replies.length * 20 + (n.kind === 'suggestion' ? 26 : 0);
-      if (n.top < lastBottom + 14) n.top = lastBottom + 14;
-      lastBottom = n.top + est;
+      let top = n.top + pushDown;
+      const deficit = Math.round(placedBottom + GAP - top);
+      if (deficit > 0) {
+        const pos = view.state.doc.lineAt(n.offset).from;
+        const existing = nextSpacers.find((s) => s.pos === pos);
+        if (existing) existing.height += deficit; else nextSpacers.push({ pos, height: deficit });
+        pushDown += deficit;
+        top += deficit;
+      }
+      n.top = top;
+      placedBottom = top + est;
     }
     setNotes(layouts);
+    // Re-apply spacers only when they actually changed (pos-sorted for a stable
+    // compare), so the resulting geometry update can't trigger an endless
+    // recompute → dispatch loop.
+    nextSpacers.sort((a, b) => a.pos - b.pos);
+    const same = nextSpacers.length === spacers.length
+      && nextSpacers.every((s, k) => spacers[k] && spacers[k].pos === s.pos && spacers[k].height === s.height);
+    if (!same) {
+      spacersRef.current = nextSpacers;
+      view.dispatch({ effects: setSpacers.of(Decoration.set(nextSpacers.map((s) => Decoration.widget({ widget: new SpacerWidget(s.height), block: true, side: -1 }).range(s.pos)), true)) });
+    }
   }, []);
   const recomputeRef = useRef(recompute);
   recomputeRef.current = recompute;
@@ -255,6 +308,7 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
       markdown(),
       syntaxHighlighting(mdHighlight),
       reviewField,
+      spacerField,
       editorTheme,
       EditorView.lineWrapping,
       EditorView.updateListener.of((u) => {
