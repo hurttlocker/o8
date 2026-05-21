@@ -311,7 +311,7 @@ function StatusTerminalToggle({ active, onClick }: { active: boolean; onClick: (
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       aria-label="Toggle terminal"
-      title="Toggle terminal"
+      title="Toggle terminal (⌘J)"
       style={{
         display: 'inline-flex',
         alignItems: 'center',

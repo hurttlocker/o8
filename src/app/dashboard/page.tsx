@@ -2795,6 +2795,54 @@ function DashboardInner() {
     };
   }, [openMobilePairing, handleOpenSettingsTab]);
 
+  // ── Power-user chrome shortcuts ──
+  // macOS / VS Code conventions, each mapped to a real existing action:
+  //   ⌘T new tab · ⌘, settings · ⌘B left sidebar · ⌘⌥B right panel · ⌘J terminal
+  // Allowed even while typing — these are app-chrome toggles, none emit text,
+  // and power users expect them to fire mid-compose (matches VS Code). Placed
+  // here (not with the other hotkey effects above) so toggleSettingsOverlay is
+  // already defined — referencing it earlier would hit its const TDZ.
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey)) return;
+      // ⌘⌥B — toggle right panel. Calls the same handler as the header
+      // button so the panel kind + commit context stay in lockstep. Option
+      // remaps event.key on macOS (⌥B → '∫'), so match the physical key via
+      // event.code. Other Option combos (⌘⌥← / →, handled elsewhere) fall
+      // through untouched.
+      if (event.altKey) {
+        if (event.code === 'KeyB' && !event.shiftKey) {
+          event.preventDefault();
+          handleToggleO8Panel();
+        }
+        return;
+      }
+      if (event.shiftKey) return;
+      switch (event.key.toLowerCase()) {
+        case 't':
+          event.preventDefault();
+          dispatchSpawn('orchestrator');
+          break;
+        case 'b':
+          event.preventDefault();
+          setSidebarVisible((v) => !v);
+          break;
+        case 'j':
+          event.preventDefault();
+          toggleContextualPanelTile();
+          break;
+        case ',':
+          event.preventDefault();
+          toggleSettingsOverlay();
+          break;
+        default:
+          break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [dispatchSpawn, setSidebarVisible, handleToggleO8Panel, toggleContextualPanelTile, toggleSettingsOverlay]);
+
   const showSidebarColumn = sidebarVisible && !compactShell;
   const showRightPanelColumn = chatVisible && !compactShell;
   const workspaceInset = compactShell ? 2 : 4;

@@ -16,12 +16,15 @@ export function TitleBarButton({
   onClick,
   active,
   accent,
+  title,
 }: {
   icon: React.ReactNode;
   label: string;
   onClick?: () => void;
   active?: boolean;
   accent?: 'orange';
+  /** Tooltip override — defaults to `label`. Use to add a keybind hint. */
+  title?: string;
 }) {
   const activeColor = accent === 'orange'
     ? 'var(--t-brand-orange, #FF5A1F)'
@@ -30,7 +33,7 @@ export function TitleBarButton({
     <motion.button
       type="button"
       aria-label={label}
-      title={label}
+      title={title ?? label}
       onClick={onClick}
       initial={false}
       animate={active ? 'active' : 'rest'}

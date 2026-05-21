@@ -126,6 +126,7 @@ export function WorkspaceHeaderStrip({
             <TitleBarButton
               icon={<IconPanelLeft />}
               label="Toggle sidebar"
+              title="Toggle sidebar (⌘B)"
               onClick={onToggleSidebar}
               active={sidebarVisible}
             />
@@ -594,7 +595,7 @@ function HeaderPlayButton({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        title={onContextMenu ? 'New tab · right-click to split' : 'New tab'}
+        title={onContextMenu ? 'New tab (⌘T) · right-click to split' : 'New tab (⌘T)'}
         style={{
           display: 'inline-flex',
           alignItems: 'center',

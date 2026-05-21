@@ -85,6 +85,9 @@ interface ChromeButtonProps {
   badge?: number;
   size?: number;
   radius?: number;
+  /** Tooltip override — defaults to `label`. Pass this to surface a keybind
+   *  hint (e.g. "Settings (⌘,)") in the title without bloating aria-label. */
+  title?: string;
   /** Cancel the Tauri drag region so the button is clickable in the title bar. */
   noDrag?: boolean;
 }
@@ -97,6 +100,7 @@ export function ChromeButton({
   badge,
   size = 32,
   radius = 10,
+  title,
   noDrag = false,
 }: ChromeButtonProps) {
   return (
@@ -105,7 +109,7 @@ export function ChromeButton({
       onClick={onClick}
       aria-label={label}
       aria-current={active ? 'page' : undefined}
-      title={label}
+      title={title ?? label}
       style={{
         display: 'flex',
         alignItems: 'center',

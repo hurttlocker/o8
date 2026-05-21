@@ -50,9 +50,18 @@ const SECTIONS: ShortcutSection[] = [
     ],
   },
   {
-    title: 'Workspace',
+    title: 'Tabs',
     rows: [
+      { label: 'New tab', chords: [['⌘', 'T']] },
       { label: 'Close active tab', chords: [['⌘', 'W']] },
+    ],
+  },
+  {
+    title: 'Panels',
+    rows: [
+      { label: 'Toggle left sidebar', chords: [['⌘', 'B']] },
+      { label: 'Toggle right panel', chords: [['⌘', '⌥', 'B']] },
+      { label: 'Toggle terminal', chords: [['⌘', 'J']] },
     ],
   },
   {
@@ -71,6 +80,7 @@ const SECTIONS: ShortcutSection[] = [
   {
     title: 'General',
     rows: [
+      { label: 'Open settings', chords: [['⌘', ',']] },
       { label: 'Show this help', chords: [['⌘', '/']] },
       { label: 'Dismiss / close', chords: [['Esc']] },
     ],
