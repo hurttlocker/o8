@@ -1,6 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { existsSync, readFileSync, writeFileSync, mkdirSync, statSync } from 'node:fs';
 import { join, dirname } from 'node:path';
+import {
+  extractRoughdraftReviewIndex,
+  validateRoughdraftMarkdown,
+  appendRoughdraftReply,
+  markRoughdraftResolved,
+} from '@/lib/o8md/rfm';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -52,11 +58,18 @@ export async function GET(request: NextRequest) {
   if (!specPath) {
     return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
-  if (!existsSync(specPath)) {
-    return NextResponse.json({ ok: true, content: DEFAULT_TEMPLATE, exists: false, path: specPath });
+  const exists = existsSync(specPath);
+  const content = exists ? readFileSync(specPath, 'utf-8') : DEFAULT_TEMPLATE;
+
+  // Review-aware views (RFM parser). `view` absent = raw content (back-compat).
+  const view = request.nextUrl.searchParams.get('view');
+  if (view === 'index') {
+    return NextResponse.json({ ok: true, index: extractRoughdraftReviewIndex(content), exists, path: specPath });
   }
-  const content = readFileSync(specPath, 'utf-8');
-  return NextResponse.json({ ok: true, content, exists: true, path: specPath });
+  if (view === 'validate') {
+    return NextResponse.json({ ok: true, validation: validateRoughdraftMarkdown(content), exists, path: specPath });
+  }
+  return NextResponse.json({ ok: true, content, exists, path: specPath });
 }
 
 export async function PUT(request: NextRequest) {
@@ -76,4 +89,65 @@ export async function PUT(request: NextRequest) {
   mkdirSync(dirname(specPath), { recursive: true });
   writeFileSync(specPath, content, 'utf-8');
   return NextResponse.json({ ok: true, path: specPath, bytes: Buffer.byteLength(content, 'utf-8') });
+}
+
+// POST ?action=reply|resolve — review mutations via the vendored RFM parser.
+// These are the AGENT-safe writes (annotation only); full-content authoring
+// stays on PUT, which is the operator's panel path. Per the o8 inversion, agent
+// replies default to author "AI" (the parser's default), so the operator's prose
+// is never overwritten — only annotated. The parser throws on not-found / unsafe
+// input, so every mutation is wrapped and returned as a structured error.
+export async function POST(request: NextRequest) {
+  const repoPath = request.nextUrl.searchParams.get('repoPath') ?? '';
+  const specPath = resolveSpecPath(repoPath);
+  if (!specPath) {
+    return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
+  }
+  const action = request.nextUrl.searchParams.get('action');
+  const body = (await request.json().catch(() => null)) as Record<string, unknown> | null;
+  const current = existsSync(specPath) ? readFileSync(specPath, 'utf-8') : DEFAULT_TEMPLATE;
+
+  try {
+    if (action === 'reply') {
+      const parentId = typeof body?.parentId === 'string' ? body.parentId : null;
+      const message = typeof body?.message === 'string' ? body.message : null;
+      if (!parentId || !message) {
+        return NextResponse.json({ ok: false, error: 'parentId and message are required' }, { status: 400 });
+      }
+      const author = typeof body?.author === 'string' ? body.author : undefined;
+      const beforeIds = new Set(extractRoughdraftReviewIndex(current).items.map((i) => i.id));
+      const updated = appendRoughdraftReply(current, {
+        parentId,
+        message,
+        ...(author !== undefined ? { author } : {}),
+      });
+      if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
+        return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+      }
+      writeFileSync(specPath, updated, 'utf-8');
+      const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
+      return NextResponse.json({ ok: true, id: newId, path: specPath });
+    }
+
+    if (action === 'resolve') {
+      const targetId = typeof body?.targetId === 'string' ? body.targetId : null;
+      if (!targetId) {
+        return NextResponse.json({ ok: false, error: 'targetId is required' }, { status: 400 });
+      }
+      const summary = typeof body?.summary === 'string' ? body.summary : undefined;
+      const updated = markRoughdraftResolved(current, {
+        targetId,
+        ...(summary !== undefined ? { summary } : {}),
+      });
+      writeFileSync(specPath, updated, 'utf-8');
+      return NextResponse.json({ ok: true, path: specPath });
+    }
+
+    return NextResponse.json({ ok: false, error: `unknown action: ${action ?? '(none)'}` }, { status: 400 });
+  } catch (err) {
+    return NextResponse.json(
+      { ok: false, error: err instanceof Error ? err.message : 'review mutation failed' },
+      { status: 400 },
+    );
+  }
 }
