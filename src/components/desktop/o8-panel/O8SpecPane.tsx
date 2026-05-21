@@ -71,10 +71,14 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
 3. Comment ONLY where there's something real to say — bar: "would this change what I do or know?" Skip proofreading and the obvious; a few sharp notes beat a wall. Best notes: a stale item that already shipped ("landed in v0.1.151 — can cross off"), a decision worth revisiting, a buried question, something that contradicts a recent commit.
 4. Anchor each note to an exact phrase from the doc. Use o8_spec_comment for a pointer/thought; o8_spec_suggest for a concrete edit (add/del/sub).
 
-Voice: a sharp teammate reading over my shoulder — short, specific, real. Don't rewrite my prose. Pass repoPath="${repoPath}" to every o8_spec_* call.`,
+Voice: a sharp teammate scribbling in the margin — keep each note to 1-2 short sentences, terse. No paragraphs, no preamble. Don't rewrite my prose. Pass repoPath="${repoPath}" to every o8_spec_* call.`,
     });
   }, [repoPath, orchestratorData]);
   const debounceRef = useRef<number | null>(null);
+  // Last content we know o8.md holds on disk. Lets a background poll adopt the
+  // orchestrator's annotations without a manual reload — and never clobber the
+  // operator's unsaved edits (we only swap when local === last-saved).
+  const serverContentRef = useRef('');
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 5_000);
@@ -105,6 +109,7 @@ Voice: a sharp teammate reading over my shoulder — short, specific, real. Don'
         if (data?.ok && typeof data.content === 'string') {
           setContent(data.content);
           setLoadedContent(data.content);
+          serverContentRef.current = data.content;
         } else {
           setLoadedContent('');
           setError(data?.error || 'Failed to load notes');
@@ -130,7 +135,7 @@ Voice: a sharp teammate reading over my shoulder — short, specific, real. Don'
     })
       .then((res) => res.json())
       .then((data) => {
-        if (data?.ok) setSavedAt(Date.now());
+        if (data?.ok) { setSavedAt(Date.now()); serverContentRef.current = next; }
         else setError(data?.error || 'Save failed');
       })
       .catch((err) => {
@@ -150,6 +155,35 @@ Voice: a sharp teammate reading over my shoulder — short, specific, real. Don'
     }, SAVE_DEBOUNCE_MS) as unknown as number;
   }, [persist]);
 
+  // Adopt external writes to o8.md (the orchestrator's annotations) without a
+  // manual reload. Read-only against the server — never writes back — and only
+  // swaps in new content when local === last-saved (no unsaved edits), so it
+  // can never clobber the operator mid-thought. This is also the panel-side
+  // seed for the eventual one-shot review lane (loading state + fade-in).
+  const pollStateRef = useRef({ repoPath, content, loading, savePending });
+  pollStateRef.current = { repoPath, content, loading, savePending };
+  useEffect(() => {
+    if (!repoPath) return;
+    const id = window.setInterval(() => {
+      const s = pollStateRef.current;
+      if (!s.repoPath || s.loading || s.savePending) return;
+      if (s.content !== serverContentRef.current) return; // unsaved local edits — leave them be
+      if (typeof document !== 'undefined' && document.hidden) return;
+      fetch(`/api/repo-spec?repoPath=${encodeURIComponent(s.repoPath)}`)
+        .then((res) => res.json())
+        .then((data) => {
+          const next = data?.ok && typeof data.content === 'string' ? data.content : null;
+          if (next == null || next === serverContentRef.current) return;
+          const cur = pollStateRef.current;
+          if (cur.savePending || cur.content !== serverContentRef.current) return; // raced a local edit
+          serverContentRef.current = next;
+          setContent(next);
+          setLoadedContent(next);
+        })
+        .catch(() => { /* transient */ });
+    }, 4000);
+    return () => window.clearInterval(id);
+  }, [repoPath]);
 
   useEffect(() => () => {
     if (debounceRef.current) window.clearTimeout(debounceRef.current);

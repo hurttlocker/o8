@@ -186,6 +186,15 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
   const [notes, setNotes] = useState<NoteLayout[]>([]);
+  // Caveat is a webfont. Until it loads the rail paints in a fallback (wider,
+  // taller) font — wrong glyphs AND the char-count collision estimate (tuned
+  // for Caveat's compact metrics) under-counts height, so notes overlap. A
+  // webfont load fires no CM geometry event, so nothing retriggers the rail and
+  // it stays broken until a reload (where Caveat is already cached). Gate the
+  // rail on the font so notes only ever paint in Caveat.
+  const [fontReady, setFontReady] = useState<boolean>(() => {
+    try { return typeof document !== 'undefined' && !!document.fonts && document.fonts.check("18px 'Caveat'"); } catch { return false; }
+  });
 
   const recompute = useCallback(() => {
     const view = viewRef.current; const wrap = wrapRef.current;
@@ -271,6 +280,18 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Reveal + recompute the rail once Caveat lands (or immediately if cached).
+  useEffect(() => {
+    if (fontReady) return;
+    let cancelled = false;
+    const done = () => { if (!cancelled) { setFontReady(true); recomputeRef.current(); } };
+    try {
+      if (typeof document !== 'undefined' && document.fonts) document.fonts.load("18px 'Caveat'").then(done, done);
+      else done();
+    } catch { done(); }
+    return () => { cancelled = true; };
+  }, [fontReady]);
+
   useEffect(() => {
     const view = viewRef.current;
     if (!view) return;
@@ -328,7 +349,7 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
         <div ref={hostRef} style={{ flex: 1, minWidth: 0 }} />
         <div style={{ width: RAIL_W, flexShrink: 0 }} />
       </div>
-      {notes.map((n) => (
+      {fontReady && notes.map((n) => (
         <div key={n.id} style={{ position: 'absolute', top: n.top, right: 0, width: RAIL_W - 16, paddingLeft: 14 }}>
           <MarginNote note={n} onResolve={resolveSuggestion} onResolveComment={resolveComment} onReply={replyToComment} />
         </div>
