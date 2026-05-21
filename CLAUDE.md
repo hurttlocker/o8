@@ -141,7 +141,7 @@ Global Next middleware runs in Node runtime and gates these prefixes on loopback
 ### MCP servers (`src/lib/mcp/`)
 
 Two stdio MCP servers expose o8 to Claude Desktop / Claude Code:
-- `operator-mcp-server.ts` — user-facing tools: `o8_status`, `o8_send`, `o8_approve`, `o8_reject`, `o8_history`, `create_mission`, `dispatch_mission`, `get_mission_status`, `submit_review`, `approve_and_merge`, `reset_packet`, `retry_packet`, plus the `o8_view_*` webview control tools
+- `operator-mcp-server.ts` — user-facing tools: `o8_status`, `o8_send`, `o8_approve`, `o8_reject`, `o8_history`, `create_mission`, `dispatch_mission`, `get_mission_status`, `submit_review`, `approve_and_merge`, `reset_packet`, `retry_packet`, the `o8_view_*` webview control tools, plus the `o8_spec_*` o8.md review tools (`o8_spec_read`, `o8_spec_review_index`, `o8_spec_pending_feedback`, `o8_spec_validate`, `o8_spec_comment`, `o8_spec_reply`, `o8_spec_resolve` — handlers in `operator-handlers/spec.ts`, all thin calls to `/api/repo-spec`). These let external Claude read + annotate a repo's `o8.md`; per the review inversion the operator authors o8.md and agents only annotate, so no overwrite tool is exposed. Mirrored by the `o8 spec …` CLI group (see AGENTS.md).
 - `cortex-mcp-server.ts` — internal tools spawned by orchestrator Claude Code sessions (fleet/issues/PRs/approvals/agents)
 
 #### Webview control tools (`o8_view_*`)

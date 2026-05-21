@@ -28,10 +28,12 @@ import { runPacketReport } from './commands/packet/report.js';
 import { runPacketReview } from './commands/packet/review.js';
 import { runPacketScope } from './commands/packet/scope.js';
 import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
+import { runSpec } from './commands/spec.js';
 import {
   runTaskBlock,
   runTaskBrief,
   runTaskClaim,
+  runTaskCreate,
   runTaskDispatch,
   runTaskList,
   runTaskReport,
@@ -89,6 +91,7 @@ commands:
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   task list            current task pool grouped by ready/running/review/etc.
+  task create          add a project-backed task to the ready pool
   task brief <id>      project-backed task brief for a packet or lane
   task claim <id>      bind/reserve a task to a lane
   task dispatch <id>   launch the claimed task through Codex-only routing
@@ -145,6 +148,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     }
     case 'task': {
       if (secondary === 'list') return runTaskList(args.mode, args.rest);
+      if (secondary === 'create') return runTaskCreate(args.mode, args.rest);
       if (secondary === 'brief') return runTaskBrief(args.mode, args.rest);
       if (secondary === 'claim') return runTaskClaim(args.mode, args.rest);
       if (secondary === 'dispatch') return runTaskDispatch(args.mode, args.rest);
@@ -162,6 +166,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'runtime-drift') return runPacketRuntimeDrift(args.mode);
       throw unknownSubcommandError('packet', secondary);
     }
+    case 'spec':
+      return runSpec(args.mode, secondary, args.rest);
     default:
       throw new CliError(
         'unknown_command',

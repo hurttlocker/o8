@@ -167,9 +167,12 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: false, error: `unknown action: ${action ?? '(none)'}` }, { status: 400 });
   } catch (err) {
+    // Parser-domain failure (target not found, raw close delimiter, missing
+    // metadata): the request was well-formed but can't be applied. 422 so the
+    // CLI surfaces the detail message; MCP reads the body regardless of status.
     return NextResponse.json(
       { ok: false, error: err instanceof Error ? err.message : 'review mutation failed' },
-      { status: 400 },
+      { status: 422 },
     );
   }
 }
