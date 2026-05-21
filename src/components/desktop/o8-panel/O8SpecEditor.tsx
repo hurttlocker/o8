@@ -59,6 +59,23 @@ class ArrowWidget extends WidgetType {
   get estimatedHeight(): number { return -1; }
 }
 
+// interactive task checkbox — hides `- [ ] ` / `- [x] `, shows a clickable glyph
+class CheckWidget extends WidgetType {
+  constructor(readonly checked: boolean, readonly pos: number) { super(); }
+  eq(o: CheckWidget): boolean { return o.checked === this.checked && o.pos === this.pos; }
+  toDOM(view: EditorView): HTMLElement {
+    const span = document.createElement('span');
+    span.textContent = this.checked ? '☑ ' : '☐ ';
+    span.style.cssText = `cursor: pointer; user-select: none; color: ${this.checked ? 'var(--o8ed-add)' : 'var(--o8ed-ink-faint)'};`;
+    span.onmousedown = (e) => {
+      e.preventDefault();
+      view.dispatch({ changes: { from: this.pos + 3, to: this.pos + 4, insert: this.checked ? ' ' : 'x' } });
+    };
+    return span;
+  }
+  get estimatedHeight(): number { return -1; }
+}
+
 const HIDE = Decoration.replace({});
 const ARROW = Decoration.replace({ widget: new ArrowWidget() });
 const DOT = Decoration.widget({ widget: new DotWidget(), side: 1 });
@@ -96,6 +113,10 @@ function buildDeco(text: string): DecorationSet {
     const newStart = oldEnd + 2; const newEnd = newStart + m[2].length;
     push(start, oldStart, HIDE); push(oldStart, oldEnd, SUBOLD_MARK); push(oldEnd, newStart, ARROW);
     push(newStart, newEnd, SUBNEW_MARK); push(newEnd, start + m[0].length, HIDE);
+  }
+  for (const m of text.matchAll(/^( *)- \[([ xX])\] /gm)) {
+    const from = m.index! + m[1].length;
+    push(from, from + m[0].length - m[1].length, Decoration.replace({ widget: new CheckWidget(m[2].toLowerCase() === 'x', from) }));
   }
   for (const m of text.matchAll(/^(#{1,6})\s+/gm)) push(m.index!, m.index! + m[0].length, HIDE);
   return Decoration.set(out, true);
