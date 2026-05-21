@@ -10,7 +10,7 @@
  * the dashboard gate compact mode / sidebar-collapsed state from the call site.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
 import { IconColumns, IconPanelLeft, IconTerminal } from '../title-bar/icons';
@@ -553,6 +553,7 @@ function HeaderPlayButton({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const menuId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -590,6 +591,9 @@ function HeaderPlayButton({
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-label={ariaSuffix ? `New tab (${ariaSuffix})` : 'New tab'}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
         title={onContextMenu ? 'New tab · right-click to split' : 'New tab'}
         style={{
           display: 'inline-flex',
@@ -610,39 +614,42 @@ function HeaderPlayButton({
           <path d="M8 5v14l11-7z" />
         </svg>
       </button>
-      {open ? (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute',
-            top: '100%',
-            right: 0,
-            marginTop: 4,
-            minWidth: 220,
-            borderRadius: 10,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            background: 'var(--t-panel)',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
-            paddingTop: 4,
-            paddingBottom: 4,
-            zIndex: 100,
-            overflow: 'hidden',
-            fontFamily: 'var(--font-sans-system)',
-          }}
-        >
-          {onSpawnOrchestrator ? (
-            <TitleMenuItem label="Orchestrator" onClick={pick(onSpawnOrchestrator)} />
-          ) : null}
-          {onSpawnChat ? (
-            <TitleMenuItem label="Chat" onClick={pick(onSpawnChat)} />
-          ) : null}
-          {onSpawnTerminal ? (
-            <TitleMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} />
-          ) : null}
-        </div>
-      ) : null}
+      {/* Always-mounted menu (display toggles) — agents can enumerate
+          the spawn options from the DOM without opening first. */}
+      <div
+        id={menuId}
+        role="menu"
+        aria-label={ariaSuffix ? `New tab options (${ariaSuffix})` : 'New tab options'}
+        style={{
+          display: open ? 'block' : 'none',
+          position: 'absolute',
+          top: '100%',
+          right: 0,
+          marginTop: 4,
+          minWidth: 220,
+          borderRadius: 10,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'var(--t-divider)',
+          background: 'var(--t-panel)',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+          paddingTop: 4,
+          paddingBottom: 4,
+          zIndex: 100,
+          overflow: 'hidden',
+          fontFamily: 'var(--font-sans-system)',
+        }}
+      >
+        {onSpawnOrchestrator ? (
+          <TitleMenuItem label="Orchestrator" onClick={pick(onSpawnOrchestrator)} />
+        ) : null}
+        {onSpawnChat ? (
+          <TitleMenuItem label="Chat" onClick={pick(onSpawnChat)} />
+        ) : null}
+        {onSpawnTerminal ? (
+          <TitleMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} />
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -663,6 +670,7 @@ function TitleMenuButton({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const menuId = useId();
 
   // Outside-click closes the menu.
   useEffect(() => {
@@ -695,6 +703,9 @@ function TitleMenuButton({
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-label="Conversation actions"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -716,38 +727,42 @@ function TitleMenuButton({
           <circle cx="19" cy="12" r="1.2" />
         </svg>
       </button>
-      {open ? (
-        <div
-          role="menu"
-          style={{
-            position: 'absolute',
-            top: '100%',
-            left: 0,
-            marginTop: 4,
-            minWidth: 168,
-            borderRadius: 8,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            background: 'var(--t-panel)',
-            boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
-            paddingTop: 4,
-            paddingBottom: 4,
-            zIndex: 100,
-            fontFamily: 'var(--font-sans-system)',
-          }}
-        >
-          {onRename ? (
-            <TitleMenuItem label="Rename" onClick={handlePick(onRename)} />
-          ) : null}
-          {onArchive ? (
-            <TitleMenuItem label="Archive" onClick={handlePick(onArchive)} />
-          ) : null}
-          {onShare ? (
-            <TitleMenuItem label="Share session" onClick={handlePick(onShare)} />
-          ) : null}
-        </div>
-      ) : null}
+      {/* Menu is always mounted (display toggles) so agents / a11y
+          tooling can enumerate the available actions from the DOM
+          without first clicking to open. */}
+      <div
+        id={menuId}
+        role="menu"
+        aria-label="Conversation actions"
+        style={{
+          display: open ? 'block' : 'none',
+          position: 'absolute',
+          top: '100%',
+          left: 0,
+          marginTop: 4,
+          minWidth: 168,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'var(--t-divider)',
+          background: 'var(--t-panel)',
+          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
+          paddingTop: 4,
+          paddingBottom: 4,
+          zIndex: 100,
+          fontFamily: 'var(--font-sans-system)',
+        }}
+      >
+        {onRename ? (
+          <TitleMenuItem label="Rename" onClick={handlePick(onRename)} />
+        ) : null}
+        {onArchive ? (
+          <TitleMenuItem label="Archive" onClick={handlePick(onArchive)} />
+        ) : null}
+        {onShare ? (
+          <TitleMenuItem label="Share session" onClick={handlePick(onShare)} />
+        ) : null}
+      </div>
     </div>
   );
 }
