@@ -39,12 +39,44 @@ import {
 import { repoSlugFromRemote } from './canvas-utils';
 import { useOrchestratorData } from './orchestrator-data-context';
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
+import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
+import { PrPanel } from './pr-panel/PrPanel';
 import { DirectiveProposalRow } from './thoughts/DirectiveProposalRow';
 import { useDirectiveProposals } from './thoughts/mission-panel/useDirectiveProposals';
 import type { DirectiveProposalCandidate } from './thoughts/directive-proposal-types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 
 const PROPOSALS_OPEN_KEY = 'o8:activity:proposals-open';
+const PROPOSALS_SEEN_KEY = 'o8:activity:proposals-seen';
+
+/** Operator-seen proposal ids. Persisted so the "new" emphasis clears across
+ *  reloads once reviewed. Always read in an effect, never in render, to avoid
+ *  an SSR/CSR hydration mismatch (see the MergePreviewCycler regression). */
+function readSeenProposalIds(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(PROPOSALS_SEEN_KEY);
+    if (!raw) return new Set();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed)
+      ? new Set(parsed.filter((x): x is string => typeof x === 'string'))
+      : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function markProposalsSeen(ids: string[]) {
+  if (ids.length === 0) return;
+  try {
+    const merged = readSeenProposalIds();
+    for (const id of ids) merged.add(id);
+    // Cap so the list can't grow unbounded as proposals churn over time.
+    const capped = Array.from(merged).slice(-200);
+    window.localStorage.setItem(PROPOSALS_SEEN_KEY, JSON.stringify(capped));
+  } catch {
+    // ignore
+  }
+}
 
 const FILTER_TABS_WITH_PACKETS = [
   ...FILTER_TABS,
@@ -61,19 +93,23 @@ function parseTs(value?: string | null): number | null {
 // ── Component ──
 
 interface O8ActivityPaneProps {
+  repoPath?: string | null;
   repoSlug?: string | null;
   registeredRepos?: RepoRegistryEntry[];
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
-  onSelectPR?: (prNumber: number, repo?: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
+  selectedPrNumber?: number | null;
+  selectedPrRepo?: string | null;
 }
 
 export const O8ActivityPane = memo(function O8ActivityPane({
+  repoPath,
   repoSlug,
   registeredRepos: registeredRepoEntries = [],
   onSelectCommit,
-  onSelectPR,
   onSelectIssue,
+  selectedPrNumber,
+  selectedPrRepo,
 }: O8ActivityPaneProps) {
   const [data, setData] = useState<RepoActivityData>(EMPTY_DATA);
   const [loading, setLoading] = useState(true);
@@ -83,6 +119,18 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [proposalsOpen, setProposalsOpen] = useState(false);
+  // Frozen-per-mount set of proposal ids the operator had already seen.
+  // Empty on the server / first paint (hydration-safe), filled in an effect.
+  const [seenProposalSnapshot, setSeenProposalSnapshot] = useState<Set<string>>(() => new Set());
+  const proposalAutoOpenedRef = useRef(false);
+  const persistedSeenSigRef = useRef('');
+  const [selectedPr, setSelectedPr] = useState<{ number: number; repo: string | null } | null>(() => (
+    selectedPrNumber ? { number: selectedPrNumber, repo: selectedPrRepo ?? repoSlug ?? null } : null
+  ));
+
+  useEffect(() => {
+    setSelectedPr(selectedPrNumber ? { number: selectedPrNumber, repo: selectedPrRepo ?? repoSlug ?? null } : null);
+  }, [repoSlug, selectedPrNumber, selectedPrRepo]);
 
   // Hydrate the proposals open/closed pref after mount so SSR doesn't
   // hydrate-mismatch. Default = collapsed; the row is recommendations,
@@ -90,6 +138,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   useEffect(() => {
     try {
       setProposalsOpen(window.localStorage.getItem(PROPOSALS_OPEN_KEY) === '1');
+      setSeenProposalSnapshot(readSeenProposalIds());
     } catch {
       // ignore
     }
@@ -134,6 +183,35 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     retryNonce: 0,
     onAccept: handleAcceptDirectiveProposal,
   });
+
+  // #9 — unread / actionable hierarchy. Proposals not in the frozen seen
+  // snapshot read as "new": accent dot + border on the row, accent header,
+  // and a one-time auto-open so they aren't buried. We persist "seen" once
+  // the section is open (clears the emphasis on the NEXT load) but keep the
+  // snapshot frozen this session so opening doesn't make "N new" vanish
+  // while the operator is still looking.
+  const newProposalIds = useMemo(
+    () => new Set(proposals.filter((p) => !seenProposalSnapshot.has(p.id)).map((p) => p.id)),
+    [proposals, seenProposalSnapshot],
+  );
+  const unreadProposalCount = newProposalIds.size;
+
+  useEffect(() => {
+    if (proposalAutoOpenedRef.current || unreadProposalCount === 0) return;
+    proposalAutoOpenedRef.current = true;
+    setProposalsOpen(true);
+  }, [unreadProposalCount]);
+
+  useEffect(() => {
+    if (!proposalsOpen || proposals.length === 0) return;
+    // Persist only when the proposal set changes — the hook may hand us a
+    // fresh array reference each render, and we don't want a localStorage
+    // write on every one.
+    const sig = proposals.map((p) => p.id).sort().join('|');
+    if (persistedSeenSigRef.current === sig) return;
+    persistedSeenSigRef.current = sig;
+    markProposalsSeen(proposals.map((p) => p.id));
+  }, [proposalsOpen, proposals]);
 
   const registeredRepos = useMemo(() => {
     const slugs = registeredRepoEntries
@@ -290,7 +368,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     if (item.kind === 'commit') {
       onSelectCommit?.(item.hash, item.repo ? { repo: item.repo } : undefined);
     } else if (item.kind === 'pr') {
-      onSelectPR?.(item.number, item.repo);
+      setSelectedPr({ number: item.number, repo: item.repo ?? null });
     } else if (item.kind === 'issue') {
       if (onSelectIssue) {
         onSelectIssue(item.number, item.repo);
@@ -300,7 +378,18 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     } else if (item.kind === 'ci') {
       window.open(`https://github.com/${item.repo}/actions/runs/${item.id}`, '_blank', 'noopener,noreferrer');
     }
-  }, [onSelectCommit, onSelectPR, onSelectIssue]);
+  }, [onSelectCommit, onSelectIssue]);
+
+  if (selectedPr) {
+    return (
+      <PrPanel
+        prNumber={selectedPr.number}
+        repoSlug={selectedPr.repo ?? repoSlug ?? null}
+        repoPath={repoPath ?? null}
+        onClose={() => setSelectedPr(null)}
+      />
+    );
+  }
 
   return (
     <div style={{
@@ -319,126 +408,134 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         flexShrink: 0,
       }}>
         {/* Repo selector */}
-        <div style={{ position: 'relative', marginBottom: 8 }}>
-          <button
-            type="button"
-            onClick={() => setRepoPickerOpen((v) => !v)}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 5,
-              minHeight: 28,
-              paddingTop: 0,
-              paddingRight: 10,
-              paddingBottom: 0,
-              paddingLeft: 8,
-              borderRadius: 8,
-              border: '0.5px solid var(--t-divider-subtle)',
-              background: 'var(--t-panel)',
-              cursor: 'pointer',
-              fontFamily: 'var(--font-sans-system)',
-              fontSize: 11,
-              fontWeight: 600,
-              color: 'var(--t-text)',
-              letterSpacing: '-0.01em',
-            }}
-          >
-            <span style={{
-              width: 18,
-              height: 18,
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              borderRadius: 999,
-              background: ACTIVITY_COLORS.accentBg,
-              color: ACTIVITY_COLORS.accent,
-            }}>
-              <IconFolder size={11} color={ACTIVITY_COLORS.accent} />
-            </span>
-            {repoLabel}
-            <IconChevronDown size={10} color="var(--t-text-muted)" />
-          </button>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+            <button
+              type="button"
+              onClick={() => setRepoPickerOpen((v) => !v)}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 5,
+                minHeight: 28,
+                paddingTop: 0,
+                paddingRight: 10,
+                paddingBottom: 0,
+                paddingLeft: 8,
+                borderRadius: 8,
+                border: '0.5px solid var(--t-divider-subtle)',
+                background: 'var(--t-panel)',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-sans-system)',
+                fontSize: 11,
+                fontWeight: 600,
+                color: 'var(--t-text)',
+                letterSpacing: '-0.01em',
+              }}
+            >
+              <span style={{
+                width: 18,
+                height: 18,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                borderRadius: 999,
+                background: ACTIVITY_COLORS.accentBg,
+                color: ACTIVITY_COLORS.accent,
+              }}>
+                <IconFolder size={11} color={ACTIVITY_COLORS.accent} />
+              </span>
+              {repoLabel}
+              <IconChevronDown size={10} color="var(--t-text-muted)" />
+            </button>
 
-          {repoPickerOpen ? (
-            <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{
-              position: 'absolute',
-              top: 32,
-              left: 0,
-              right: 0,
-              zIndex: 20,
-              borderRadius: 12,
-              border: '1px solid var(--t-panel-border)',
-              background: 'var(--t-panel-solid)',
-              boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
-              maxHeight: 200,
-              overflowY: 'auto',
-            }}>
-              <button
-                type="button"
-                onClick={() => { setRepoOverride(ALL_REPOS_KEY); setRepoPickerOpen(false); }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 8,
-                  width: '100%',
-                  paddingTop: 7,
-                  paddingRight: 12,
-                  paddingBottom: 7,
-                  paddingLeft: 12,
-                  border: 'none',
-                  borderBottom: '1px solid var(--t-divider-subtle)',
-                  background: isAllRepos ? ACTIVITY_COLORS.accentBg : 'transparent',
-                  color: isAllRepos ? ACTIVITY_COLORS.accent : 'var(--t-text)',
-                  fontSize: 12,
-                  fontWeight: 600,
-                  cursor: 'pointer',
-                  fontFamily: 'var(--font-sans-system)',
-                  textAlign: 'left',
-                }}
-              >
-                All repos
-              </button>
-              {repoOptions.map((slug) => {
-                const selected = slug === effectiveRepo && !isAllRepos;
-                return (
-                  <button
-                    key={slug}
-                    type="button"
-                    onClick={() => { setRepoOverride(slug); setRepoPickerOpen(false); }}
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 8,
-                      width: '100%',
-                      paddingTop: 7,
-                      paddingRight: 12,
-                      paddingBottom: 7,
-                      paddingLeft: 12,
-                      border: 'none',
-                      background: selected ? ACTIVITY_COLORS.accentBg : 'transparent',
-                      color: selected ? ACTIVITY_COLORS.accent : 'var(--t-text)',
-                      fontSize: 12,
-                      fontWeight: selected ? 600 : 400,
-                      cursor: 'pointer',
-                      fontFamily: 'var(--font-sans-system)',
-                      textAlign: 'left',
-                    }}
-                  >
-                    <IconFolder size={12} color={selected ? ACTIVITY_COLORS.accent : 'var(--t-text-muted)'} />
-                    {shortRepoLabel(slug)}
-                    <span style={{
-                      marginLeft: 'auto',
-                      fontSize: 12,
-                      color: 'var(--t-text-faint)',
-                      fontFamily: 'var(--font-sans-system)',
-                    }}>
-                      {slug.split('/')[0]}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          ) : null}
+            {repoPickerOpen ? (
+              <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{
+                position: 'absolute',
+                top: 32,
+                left: 0,
+                right: 0,
+                zIndex: 20,
+                borderRadius: 12,
+                border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-panel-solid)',
+                boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
+                maxHeight: 200,
+                overflowY: 'auto',
+              }}>
+                <button
+                  type="button"
+                  onClick={() => { setRepoOverride(ALL_REPOS_KEY); setRepoPickerOpen(false); }}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    width: '100%',
+                    paddingTop: 7,
+                    paddingRight: 12,
+                    paddingBottom: 7,
+                    paddingLeft: 12,
+                    border: 'none',
+                    borderBottom: '1px solid var(--t-divider-subtle)',
+                    background: isAllRepos ? ACTIVITY_COLORS.accentBg : 'transparent',
+                    color: isAllRepos ? ACTIVITY_COLORS.accent : 'var(--t-text)',
+                    fontSize: 12,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                    fontFamily: 'var(--font-sans-system)',
+                    textAlign: 'left',
+                  }}
+                >
+                  All repos
+                </button>
+                {repoOptions.map((slug) => {
+                  const selected = slug === effectiveRepo && !isAllRepos;
+                  return (
+                    <button
+                      key={slug}
+                      type="button"
+                      onClick={() => { setRepoOverride(slug); setRepoPickerOpen(false); }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        width: '100%',
+                        paddingTop: 7,
+                        paddingRight: 12,
+                        paddingBottom: 7,
+                        paddingLeft: 12,
+                        border: 'none',
+                        background: selected ? ACTIVITY_COLORS.accentBg : 'transparent',
+                        color: selected ? ACTIVITY_COLORS.accent : 'var(--t-text)',
+                        fontSize: 12,
+                        fontWeight: selected ? 600 : 400,
+                        cursor: 'pointer',
+                        fontFamily: 'var(--font-sans-system)',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <IconFolder size={12} color={selected ? ACTIVITY_COLORS.accent : 'var(--t-text-muted)'} />
+                      {shortRepoLabel(slug)}
+                      <span style={{
+                        marginLeft: 'auto',
+                        fontSize: 12,
+                        color: 'var(--t-text-faint)',
+                        fontFamily: 'var(--font-sans-system)',
+                      }}>
+                        {slug.split('/')[0]}
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            ) : null}
+          </div>
+          <O8ScratchChat
+            repoPath={repoPath ?? null}
+            selectedFile={null}
+            surface="diff"
+            placement="review-toolbar"
+          />
         </div>
 
         {/* Filter pills */}
@@ -507,10 +604,10 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         overflowY: 'auto',
         overflowX: 'hidden',
       }}>
-        {/* #746 — auto-directive proposals pin above the timeline so they
-            read as recommendations (system → operator), distinct from the
-            chronological feed. Collapsible (default closed) so the section
-            doesn't visually dominate when several proposals are queued. */}
+        {/* #746 / #9 — directive proposals pin above the timeline as
+            recommendations (system → operator), distinct from the feed.
+            Unseen ("new") proposals get accent emphasis + a one-time
+            auto-open; once reviewed they stay listed but read calmly. */}
         {proposals.length > 0 ? (
           <div style={{ paddingTop: 8, paddingRight: 12, paddingLeft: 12 }}>
             <button
@@ -527,14 +624,16 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                 paddingLeft: 8,
                 borderRadius: 8,
                 borderWidth: 0,
-                background: proposalsOpen ? ACTIVITY_COLORS.attentionBg : 'transparent',
+                background: unreadProposalCount > 0
+                  ? 'var(--t-accent-soft)'
+                  : proposalsOpen ? 'var(--t-hover)' : 'transparent',
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontFamily: 'var(--font-sans-system)',
                 transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
               }}
-              onMouseEnter={(e) => { if (!proposalsOpen) e.currentTarget.style.background = ACTIVITY_COLORS.attentionBg; }}
-              onMouseLeave={(e) => { if (!proposalsOpen) e.currentTarget.style.background = 'transparent'; }}
+              onMouseEnter={(e) => { if (unreadProposalCount === 0 && !proposalsOpen) e.currentTarget.style.background = 'var(--t-hover)'; }}
+              onMouseLeave={(e) => { if (unreadProposalCount === 0 && !proposalsOpen) e.currentTarget.style.background = 'transparent'; }}
               aria-expanded={proposalsOpen}
               title={proposalsOpen ? 'Hide proposed directives' : 'Show proposed directives'}
             >
@@ -545,7 +644,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   display: 'inline-flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  color: 'var(--t-text-faint)',
+                  color: unreadProposalCount > 0 ? 'var(--t-accent)' : 'var(--t-text-faint)',
                   transition: 'transform 150ms cubic-bezier(0.22, 1, 0.36, 1)',
                   transform: proposalsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
                   flexShrink: 0,
@@ -559,30 +658,51 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   fontWeight: 600,
                   textTransform: 'uppercase',
                   letterSpacing: '0.06em',
-                  color: 'var(--t-text-muted)',
+                  color: unreadProposalCount > 0 ? 'var(--t-accent)' : 'var(--t-text-muted)',
                   flex: 1,
                   minWidth: 0,
                 }}
               >
                 Proposed directives
               </span>
-              <span
-                title="Surfaced when the same fix-pattern appears 3+ times in the last 14 days"
-                style={{
-                  paddingTop: 1,
-                  paddingRight: 6,
-                  paddingBottom: 1,
-                  paddingLeft: 6,
-                  borderRadius: 999,
-                  background: ACTIVITY_COLORS.attentionBg,
-                  color: ACTIVITY_COLORS.attention,
-                  fontSize: 11,
-                  fontWeight: 600,
-                  flexShrink: 0,
-                }}
-              >
-                {proposals.length}
-              </span>
+              {unreadProposalCount > 0 ? (
+                <span
+                  title="New proposals you haven't reviewed yet"
+                  style={{
+                    paddingTop: 1,
+                    paddingRight: 7,
+                    paddingBottom: 1,
+                    paddingLeft: 7,
+                    borderRadius: 999,
+                    background: 'var(--t-accent)',
+                    color: '#fff',
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    letterSpacing: '0.01em',
+                    flexShrink: 0,
+                  }}
+                >
+                  {unreadProposalCount} new
+                </span>
+              ) : (
+                <span
+                  title="Surfaced when the same fix-pattern appears 3+ times in the last 14 days"
+                  style={{
+                    paddingTop: 1,
+                    paddingRight: 6,
+                    paddingBottom: 1,
+                    paddingLeft: 6,
+                    borderRadius: 999,
+                    background: 'var(--t-hover)',
+                    color: 'var(--t-text-muted)',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    flexShrink: 0,
+                  }}
+                >
+                  {proposals.length}
+                </span>
+              )}
             </button>
             {proposalsOpen ? (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4, marginBottom: 4 }}>
@@ -593,6 +713,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                     onAccept={handleAcceptProposal}
                     onDismiss={handleDismissProposal}
                     busy={pendingProposalId === proposal.id}
+                    isNew={newProposalIds.has(proposal.id)}
                   />
                 ))}
               </div>
@@ -666,11 +787,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   <div key={key}>
                     <button
                       type="button"
+                      aria-expanded={isExpanded}
                       onClick={() => {
-                        if (item.kind === 'pr') {
-                          handleItemClick(item);
-                          return;
-                        }
                         if (isExpanded) {
                           setExpandedKey(null);
                         } else {
@@ -679,7 +797,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                         }
                       }}
                       onDoubleClick={() => handleItemClick(item)}
-                      title={item.kind === 'pr' ? 'Open pull request details' : undefined}
+                      title={item.kind === 'pr' ? 'Expand pull request' : 'Expand activity details'}
                       style={{
                         display: 'flex',
                         alignItems: 'flex-start',
@@ -750,7 +868,9 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                         paddingTop: 6, paddingRight: 14, paddingBottom: 10, paddingLeft: 52,
                         borderBottom: '1px solid var(--t-panel-border, rgba(0,0,0,0.06))',
                       }}>
-                        {renderExpandedDetail(item, prDetails, ciDetails, key)}
+                        {renderExpandedDetail(item, prDetails, ciDetails, key, {
+                          onOpenPr: (pr) => handleItemClick(pr),
+                        })}
                       </div>
                     ) : null}
                   </div>

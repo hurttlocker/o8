@@ -25,13 +25,20 @@ interface DirectiveProposalRowProps {
   onDismiss: (proposal: DirectiveProposalCandidate) => void;
   /** Set true while the dismiss POST is in flight to disable the buttons. */
   busy?: boolean;
+  /** Unseen by the operator — gets an accent border + leading dot. */
+  isNew?: boolean;
 }
 
-const YELLOW_ACCENT = '#f59e0b';
-const YELLOW_BG_SOFT = 'rgba(245, 158, 11, 0.08)';
-const YELLOW_BG_HOVER = 'rgba(245, 158, 11, 0.14)';
-const YELLOW_BORDER = 'rgba(245, 158, 11, 0.28)';
-const YELLOW_TEXT_DARK = '#b45309';
+// Theme-aware tokens (was a hardcoded amber palette — went muddy in
+// midnight and clashed with the accent-based chrome). The accent doubles
+// as the "actionable" signal; `isNew` rows additionally get an accent
+// border + dot for the unread hierarchy.
+const PROPOSAL_ACCENT = 'var(--t-accent)';
+const PROPOSAL_BG = 'var(--t-bg-card)';
+const PROPOSAL_BG_HOVER = 'var(--t-hover)';
+const PROPOSAL_BORDER = 'var(--t-border)';
+const PROPOSAL_BORDER_NEW = 'var(--t-accent-border)';
+const PROPOSAL_META = 'var(--t-text-muted)';
 const FONT_FAMILY = 'var(--font-sans-system)';
 const MONO_FAMILY = 'var(--font-mono, "SF Mono", Menlo, monospace)';
 
@@ -41,7 +48,7 @@ function formatObservationProvenance(proposal: Extract<DirectiveProposalCandidat
     : proposal.proposed_by;
 }
 
-export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: DirectiveProposalRowProps) {
+export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy, isNew }: DirectiveProposalRowProps) {
   const [hovered, setHovered] = useState(false);
   const [expanded, setExpanded] = useState(false);
 
@@ -64,11 +71,11 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
       style={{
         display: 'flex',
         flexDirection: 'column',
-        background: hovered ? YELLOW_BG_HOVER : YELLOW_BG_SOFT,
+        background: hovered ? PROPOSAL_BG_HOVER : PROPOSAL_BG,
         borderRadius: 8,
         borderWidth: 1,
         borderStyle: 'solid',
-        borderColor: YELLOW_BORDER,
+        borderColor: isNew ? PROPOSAL_BORDER_NEW : PROPOSAL_BORDER,
         transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         fontFamily: FONT_FAMILY,
         overflow: 'hidden',
@@ -88,6 +95,18 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
           paddingLeft: 10,
         }}
       >
+      {/* Unread dot — reserved slot keeps every row's body aligned whether
+          new or seen (no borderLeft accent — that's a forbidden MD pattern). */}
+      <span
+        aria-hidden
+        style={{
+          width: 6,
+          height: 6,
+          flexShrink: 0,
+          borderRadius: 999,
+          background: isNew ? PROPOSAL_ACCENT : 'transparent',
+        }}
+      />
       <button
         type="button"
         onClick={handleRowClick}
@@ -140,9 +159,9 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
           borderRadius: 6,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: YELLOW_BORDER,
-          background: busy ? 'transparent' : YELLOW_ACCENT,
-          color: busy ? YELLOW_TEXT_DARK : '#fff',
+          borderColor: 'var(--t-accent-border)',
+          background: busy ? 'transparent' : PROPOSAL_ACCENT,
+          color: busy ? PROPOSAL_META : '#fff',
           fontSize: 10,
           fontWeight: 700,
           cursor: busy ? 'wait' : 'pointer',
@@ -166,9 +185,9 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
           borderRadius: 6,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: YELLOW_BORDER,
+          borderColor: PROPOSAL_BORDER,
           background: 'transparent',
-          color: YELLOW_TEXT_DARK,
+          color: PROPOSAL_META,
           fontSize: 10,
           fontWeight: 700,
           cursor: busy ? 'wait' : 'pointer',
@@ -191,7 +210,7 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
             gap: 6,
             borderTopWidth: 1,
             borderTopStyle: 'solid',
-            borderTopColor: YELLOW_BORDER,
+            borderTopColor: PROPOSAL_BORDER,
             fontFamily: FONT_FAMILY,
           }}
         >
@@ -203,7 +222,7 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
               <div style={{ fontSize: 11.5, color: 'var(--t-text-secondary)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
                 {proposal.directiveBody || '(no body)'}
               </div>
-              <div style={{ fontSize: 10, color: YELLOW_TEXT_DARK, marginTop: 2 }}>
+              <div style={{ fontSize: 10, color: PROPOSAL_META, marginTop: 2 }}>
                 Imported from {proposal.sourceRepoName} · {Math.round(proposal.similarity * 100)}% stack overlap with {proposal.targetRepoName}
               </div>
             </>
@@ -215,7 +234,7 @@ export function DirectiveProposalRow({ proposal, onAccept, onDismiss, busy }: Di
               <div style={{ fontSize: 11.5, color: 'var(--t-text-secondary)', lineHeight: 1.45, whiteSpace: 'pre-wrap' }}>
                 {proposal.text}
               </div>
-              <div style={{ fontSize: 10, color: YELLOW_TEXT_DARK, marginTop: 2 }}>
+              <div style={{ fontSize: 10, color: PROPOSAL_META, marginTop: 2 }}>
                 Proposed by {formatObservationProvenance(proposal)} · {proposal.scope} · {proposal.kind}
               </div>
               <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginTop: 6 }}>
@@ -259,7 +278,7 @@ function ObservationBody({ proposal }: { proposal: Extract<DirectiveProposalCand
           flexShrink: 0,
           fontSize: 10,
           fontWeight: 700,
-          color: YELLOW_TEXT_DARK,
+          color: PROPOSAL_META,
           fontFamily: MONO_FAMILY,
           letterSpacing: '-0.01em',
           textTransform: 'uppercase',
@@ -306,7 +325,7 @@ function AutoBody({ proposal }: { proposal: Extract<DirectiveProposalCandidate, 
           flexShrink: 0,
           fontSize: 10,
           fontWeight: 700,
-          color: YELLOW_TEXT_DARK,
+          color: PROPOSAL_META,
           fontFamily: MONO_FAMILY,
           letterSpacing: '-0.01em',
         }}
@@ -361,7 +380,7 @@ function CrossRepoBody({
           flexShrink: 0,
           fontSize: 10,
           fontWeight: 700,
-          color: YELLOW_TEXT_DARK,
+          color: PROPOSAL_META,
           fontFamily: MONO_FAMILY,
           letterSpacing: '-0.01em',
         }}
