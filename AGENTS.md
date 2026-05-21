@@ -40,6 +40,15 @@ o8 packet heartbeat                    # lifecycle ping; safe no-op outside a pa
 o8 packet report --event progress      # surface a progress event to the operator
 o8 lane touches --path <file>          # other lanes touching the same file
 o8 cortex observe --kind gotcha --text "..."   # write a fact to Cortex memory
+
+# o8.md review surface — the operator authors o8.md; you ANNOTATE it (never overwrite).
+o8 spec read     [--repo <path>]       # raw o8.md content
+o8 spec index    [--repo <path>]       # structured review threads + summary
+o8 spec pending  [--repo <path>]       # only the UNRESOLVED threads (what to address)
+o8 spec check    [--repo <path>]       # validate the review markup
+o8 spec comment  --repo <path> --body "<thought>" [--anchor "<snippet>"]   # leave a new pointer (author defaults to AI)
+o8 spec reply    --repo <path> --to <id> --body "<msg>"                    # reply to a thread
+o8 spec resolve  --repo <path> --id <id> [--summary "<note>"]              # mark a thread resolved
 ```
 
 Errors come back as JSON. Most commands accept `--json` for machine-readable output. Calls are gated by the loopback + ws-token guard that protects the o8 API — they only work locally, no auth needed.
