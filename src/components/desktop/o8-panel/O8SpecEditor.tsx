@@ -18,7 +18,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { EditorState, StateField, type Extension, type Range } from '@codemirror/state';
+import { EditorState, StateField, Annotation, type Extension, type Range } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
 import { markdown } from '@codemirror/lang-markdown';
@@ -86,46 +86,60 @@ const DEL_MARK = styleMark('color: var(--o8ed-del); text-decoration: line-throug
 const SUBOLD_MARK = styleMark('color: var(--o8ed-del); text-decoration: line-through; opacity: 0.85;');
 const SUBNEW_MARK = styleMark('color: var(--o8ed-add);');
 
-function buildDeco(text: string): DecorationSet {
+// Marks programmatic doc replacements (load / external reconcile) so the
+// update listener can skip firing onChange (and a redundant autosave) for them.
+const External = Annotation.define<boolean>();
+
+// Build both the decoration set AND the set of HIDDEN ranges (used as atomic
+// ranges so the caret skips over hidden markup while editing). Marks (anchor
+// highlight, sub text) stay editable — only replaced/hidden spans are atomic.
+function buildAll(text: string): { deco: DecorationSet; atomic: DecorationSet } {
   const out: Range<Decoration>[] = [];
-  const push = (from: number, to: number, deco: Decoration) => { if (to >= from) out.push(deco.range(from, to)); };
-  for (const m of text.matchAll(/\{(?:id|by|at|re|status|resolved)="[^"]*"(?:\s+[A-Za-z_]+="[^"]*")*\}/g)) push(m.index!, m.index! + m[0].length, HIDE);
+  const atomicOut: Range<Decoration>[] = [];
+  const hide = (from: number, to: number, deco: Decoration = HIDE) => {
+    if (to >= from) { out.push(deco.range(from, to)); if (to > from) atomicOut.push(deco.range(from, to)); }
+  };
+  const mark = (from: number, to: number, deco: Decoration) => { if (to > from) out.push(deco.range(from, to)); };
+  for (const m of text.matchAll(/\{(?:id|by|at|re|status|resolved)="[^"]*"(?:\s+[A-Za-z_]+="[^"]*")*\}/g)) hide(m.index!, m.index! + m[0].length);
   for (const m of text.matchAll(/\{==([\s\S]*?)==\}/g)) {
     const start = m.index!; const innerStart = start + 3; const innerEnd = innerStart + m[1].length;
-    push(start, innerStart, HIDE); push(innerStart, innerEnd, HILITE_MARK); push(innerEnd, start + m[0].length, HIDE);
+    hide(start, innerStart); mark(innerStart, innerEnd, HILITE_MARK); hide(innerEnd, start + m[0].length);
   }
   for (const m of text.matchAll(/\{>>[\s\S]*?<<\}(\{[^}]*\})?/g)) {
     const meta = m[1] ?? '';
     const commentEnd = m.index! + m[0].length - meta.length; // end of `<<}`, before metadata
-    if (!/\bre=/.test(meta)) push(m.index!, m.index!, DOT); // replies (re=…) don't emit their own dot
-    push(m.index!, commentEnd, HIDE);
+    if (!/\bre=/.test(meta)) out.push(DOT.range(m.index!, m.index!)); // replies (re=…) don't emit a dot
+    hide(m.index!, commentEnd);
   }
   for (const m of text.matchAll(/\{\+\+([\s\S]*?)\+\+\}/g)) {
     const start = m.index!; const innerStart = start + 3; const innerEnd = innerStart + m[1].length;
-    push(start, innerStart, HIDE); push(innerStart, innerEnd, ADD_MARK); push(innerEnd, start + m[0].length, HIDE);
+    hide(start, innerStart); mark(innerStart, innerEnd, ADD_MARK); hide(innerEnd, start + m[0].length);
   }
   for (const m of text.matchAll(/\{--([\s\S]*?)--\}/g)) {
     const start = m.index!; const innerStart = start + 3; const innerEnd = innerStart + m[1].length;
-    push(start, innerStart, HIDE); push(innerStart, innerEnd, DEL_MARK); push(innerEnd, start + m[0].length, HIDE);
+    hide(start, innerStart); mark(innerStart, innerEnd, DEL_MARK); hide(innerEnd, start + m[0].length);
   }
   for (const m of text.matchAll(/\{~~([\s\S]*?)~>([\s\S]*?)~~\}/g)) {
     const start = m.index!; const oldStart = start + 3; const oldEnd = oldStart + m[1].length;
     const newStart = oldEnd + 2; const newEnd = newStart + m[2].length;
-    push(start, oldStart, HIDE); push(oldStart, oldEnd, SUBOLD_MARK); push(oldEnd, newStart, ARROW);
-    push(newStart, newEnd, SUBNEW_MARK); push(newEnd, start + m[0].length, HIDE);
+    hide(start, oldStart); mark(oldStart, oldEnd, SUBOLD_MARK); hide(oldEnd, newStart, ARROW);
+    mark(newStart, newEnd, SUBNEW_MARK); hide(newEnd, start + m[0].length);
   }
   for (const m of text.matchAll(/^( *)- \[([ xX])\] /gm)) {
     const from = m.index! + m[1].length;
-    push(from, from + m[0].length - m[1].length, Decoration.replace({ widget: new CheckWidget(m[2].toLowerCase() === 'x', from) }));
+    hide(from, from + m[0].length - m[1].length, Decoration.replace({ widget: new CheckWidget(m[2].toLowerCase() === 'x', from) }));
   }
-  for (const m of text.matchAll(/^(#{1,6})\s+/gm)) push(m.index!, m.index! + m[0].length, HIDE);
-  return Decoration.set(out, true);
+  for (const m of text.matchAll(/^(#{1,6})\s+/gm)) hide(m.index!, m.index! + m[0].length);
+  return { deco: Decoration.set(out, true), atomic: Decoration.set(atomicOut, true) };
 }
 
-const criticField = StateField.define<DecorationSet>({
-  create: (state) => buildDeco(state.doc.toString()),
-  update: (deco, tr) => (tr.docChanged ? buildDeco(tr.state.doc.toString()) : deco.map(tr.changes)),
-  provide: (f) => EditorView.decorations.from(f),
+const reviewField = StateField.define<{ deco: DecorationSet; atomic: DecorationSet }>({
+  create: (state) => buildAll(state.doc.toString()),
+  update: (v, tr) => (tr.docChanged ? buildAll(tr.state.doc.toString()) : { deco: v.deco.map(tr.changes), atomic: v.atomic.map(tr.changes) }),
+  provide: (f) => [
+    EditorView.decorations.from(f, (v) => v.deco),
+    EditorView.atomicRanges.of((view) => view.state.field(f).atomic),
+  ],
 });
 
 const mdHighlight = HighlightStyle.define([
@@ -217,11 +231,14 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
       keymap.of([...defaultKeymap, ...historyKeymap]),
       markdown(),
       syntaxHighlighting(mdHighlight),
-      criticField,
+      reviewField,
       editorTheme,
       EditorView.lineWrapping,
       EditorView.updateListener.of((u) => {
-        if (u.docChanged) onChangeRef.current(u.state.doc.toString());
+        // Skip onChange (and its debounced autosave) for programmatic loads.
+        if (u.docChanged && !u.transactions.some((t) => t.annotation(External))) {
+          onChangeRef.current(u.state.doc.toString());
+        }
         if (u.docChanged || u.geometryChanged) recomputeRef.current();
       }),
     ];
@@ -238,7 +255,7 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
     const view = viewRef.current;
     if (!view) return;
     const current = view.state.doc.toString();
-    if (value !== current) view.dispatch({ changes: { from: 0, to: current.length, insert: value } });
+    if (value !== current) view.dispatch({ changes: { from: 0, to: current.length, insert: value }, annotations: External.of(true) });
   }, [value]);
 
   // Accept / Dismiss a suggestion = a real doc mutation on its marker span.
