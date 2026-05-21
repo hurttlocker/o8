@@ -171,8 +171,6 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
       color: surface === 'solid' ? 'var(--t-chat-surface-text)' : 'var(--t-text)',
       ...contentRebinds,
     } as CSSProperties}>
-      {/* Handwriting font for the agent's margin notes (the alive layer). */}
-      <style>{"@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&display=swap');"}</style>
       <div style={{
         display: 'flex',
         alignItems: 'center',

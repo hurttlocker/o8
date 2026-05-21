@@ -332,7 +332,8 @@ export default function O8mdPreviewPage() {
   const current = APPROACHES.find((a) => a.key === active) ?? APPROACHES[0];
   return (
     <div style={{ minHeight: '100vh', background: 'var(--lab-page)', paddingTop: 36, paddingBottom: 80, paddingLeft: 24, paddingRight: 24, fontFamily: PROSE, ...THEMES[theme] } as React.CSSProperties}>
-      <style>{"@import url('https://fonts.googleapis.com/css2?family=Caveat:wght@500;600;700&family=Inter:wght@400;500;600&display=swap');"}</style>
+      {/* Caveat now comes from the self-hosted @font-face in globals.css (CSP-safe). */}
+      <style>{"@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');"}</style>
       <div style={{ maxWidth: 900, marginLeft: 'auto', marginRight: 'auto' }}>
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
           <div>
