@@ -10,6 +10,7 @@ import {
 } from '@/lib/projects/store';
 import type { ProjectRole, ProjectWithRepos } from '@/lib/projects/types';
 import {
+  DEFAULT_PROJECT_ID,
   getActiveProjectScopeForRepo,
   getProjectsLedger,
   upsertProjectLedgerRecord,
@@ -123,15 +124,20 @@ function findSettingsProject(
     if (bySlug) return bySlug;
   }
 
+  // Prefer the SQLite project that matches the resolved (active) panel project.
+  // A repo can belong to several projects, so a repo-id match alone would pick an
+  // arbitrary one — the active project is the right context.
+  const panelSlug = projectNameToSlug(panelProject.name);
+  const byPanel = projects.find((project) => project.slug === panelSlug)
+    ?? projects.find((project) => project.name.toLowerCase() === panelProject.name.toLowerCase());
+  if (byPanel) return byPanel;
+
   if (scopedRepoId) {
     const byRepo = projects.find((project) => project.repos.some((link) => link.repoId === scopedRepoId));
     if (byRepo) return byRepo;
   }
 
-  const panelSlug = projectNameToSlug(panelProject.name);
-  return projects.find((project) => project.slug === panelSlug)
-    ?? projects.find((project) => project.name.toLowerCase() === panelProject.name.toLowerCase())
-    ?? null;
+  return null;
 }
 
 function primaryRepoScore(repo: ProjectContextRepo): number {
@@ -188,8 +194,11 @@ export async function syncProjectStoreFromPanelLedger(): Promise<{
   let projects = listProjects();
   let createdProjects = 0;
   let linkedRepos = 0;
+  const hasConcretePanelProject = ledger.projects.some((project) => project.id !== DEFAULT_PROJECT_ID);
 
   for (const panelProject of ledger.projects) {
+    if (hasConcretePanelProject && panelProject.id === DEFAULT_PROJECT_ID) continue;
+
     const slug = projectNameToSlug(panelProject.name);
     let settingsProject = projects.find((project) => project.slug === slug)
       ?? projects.find((project) => project.name.toLowerCase() === panelProject.name.toLowerCase())
@@ -245,8 +254,10 @@ export async function syncPanelLedgerFromProjectStore(project: ProjectWithRepos)
 }
 
 export async function getProjectContext(options: ProjectContextOptions = {}): Promise<ProjectContext> {
-  const [syncResult, repos, ledger] = await Promise.all([
-    syncProjectStoreFromPanelLedger(),
+  // SQLite project_repos is the source of truth for membership; the ledger is a
+  // derived read-model. We deliberately do NOT sync the ledger back into SQLite
+  // here — that add-only sync is what resurrected removed repos on every call.
+  const [repos, ledger] = await Promise.all([
     listRepos(),
     getProjectsLedger(),
   ]);
@@ -255,9 +266,15 @@ export async function getProjectContext(options: ProjectContextOptions = {}): Pr
   const byId = repoById(repos);
   const activeScope = await getActiveProjectScopeForRepo(options.repoPath);
   const requestedRepoPath = options.repoPath?.trim() ? normalizeRepoPath(options.repoPath) : null;
+  // Prefer the ACTIVE project when the requested repo belongs to it — a repo can
+  // sit in multiple projects, and the agent context should follow whichever
+  // project is active in the dashboard, not just the first that contains it.
+  const projectHasRepo = (project: ProjectRecord) => Boolean(requestedRepoPath)
+    && project.repoPaths.some((repoPath) => normalizeRepoPath(repoPath) === requestedRepoPath);
   const panelProject = requestedRepoPath
-    ? ledger.projects.find((project) => project.repoPaths.some((repoPath) => normalizeRepoPath(repoPath) === requestedRepoPath))
-      ?? activeScope.project
+    ? (projectHasRepo(activeScope.project)
+        ? activeScope.project
+        : ledger.projects.find(projectHasRepo) ?? activeScope.project)
     : activeScope.project;
   const explicitPrimaryRepo = options.primaryRepoId ? byId.get(options.primaryRepoId) ?? null : null;
   const currentRepoCandidate = requestedRepoPath ? byPath.get(requestedRepoPath) ?? null : null;
@@ -298,10 +315,10 @@ export async function getProjectContext(options: ProjectContextOptions = {}): Pr
     });
   };
 
-  for (const repoPath of panelPaths) {
-    const repo = byPath.get(repoPath);
-    if (repo) pushRepo(repo, { inPanelProject: true, inSettingsProject: settingsRoles.has(repo.id) });
-  }
+  // Membership = the SQLite settings project's repos (source of truth) + the
+  // current repo. Ledger paths are NOT unioned in — that union is what kept a
+  // removed repo visible. `panelPaths` is still used only to flag which SQLite
+  // repos are also present in the panel ledger.
   for (const link of settingsProject?.repos ?? []) {
     const repo = byId.get(link.repoId);
     if (repo) pushRepo(repo, { inPanelProject: panelPaths.has(normalizeRepoPath(repo.localPath)), inSettingsProject: true });
@@ -329,9 +346,6 @@ export async function getProjectContext(options: ProjectContextOptions = {}): Pr
   }
   if (requestedRepoPath && !contextRepos.some((repo) => repo.localPath === requestedRepoPath)) {
     warnings.push('Requested repo is not part of the resolved project context.');
-  }
-  if (syncResult.createdProjects > 0 || syncResult.linkedRepos > 0) {
-    warnings.push(`Synchronized ${syncResult.createdProjects} project(s) and ${syncResult.linkedRepos} repo link(s) from the desktop rail.`);
   }
 
   const repoInProject = requestedRepoPath
@@ -363,7 +377,7 @@ export async function getProjectContext(options: ProjectContextOptions = {}): Pr
     source: {
       panelProjectName: panelProject.name,
       settingsProjectName: settingsProject?.name ?? null,
-      syncedFromPanel: syncResult.createdProjects > 0 || syncResult.linkedRepos > 0,
+      syncedFromPanel: false,
       warnings,
     },
   };
