@@ -776,6 +776,29 @@ function DashboardInner() {
     return scoped.length > 0 ? scoped : globalRepoEntries;
   }, [dashboardProjects.ledger, globalRepoEntries]);
 
+  // When the active PROJECT changes (clicking a different project in the
+  // switcher), switch the WHOLE app's current repo to that project's primary
+  // repo — the O8 panel follows, and a newly spawned orchestrator defaults to
+  // it (both key off the global repo). Clicking a repo WITHIN a project doesn't
+  // change activeProjectId, so per-repo navigation inside a project is kept.
+  const lastActiveProjectRef = useRef<string | null>(null);
+  useEffect(() => {
+    const ledger = dashboardProjects.ledger;
+    const activeId = ledger?.activeProjectId ?? null;
+    if (!activeId || activeId === lastActiveProjectRef.current) return;
+    const isFirst = lastActiveProjectRef.current === null;
+    lastActiveProjectRef.current = activeId;
+    if (isFirst) return; // don't override the repo chosen on initial load
+    const project = ledger?.projects.find((p) => p.id === activeId);
+    const primaryPath = project?.repoPaths?.[0];
+    if (!primaryPath) return;
+    const entry = globalRepoEntries.find((repo) => repo.localPath === primaryPath);
+    if (!entry) return;
+    setGlobalRepoId(entry.id);
+    setO8RepoPathOverride(primaryPath);
+    setO8CommitRepoPath(null);
+  }, [dashboardProjects.ledger, globalRepoEntries, setGlobalRepoId]);
+
   const handleO8SelectedFileChange = useCallback((filePath: string) => {
     setO8SelectedFile(filePath);
     setO8SelectedFileRepoPath(currentO8RepoPath);
