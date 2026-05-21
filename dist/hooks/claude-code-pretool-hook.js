@@ -191,7 +191,12 @@ async function main() {
   // managed agents — Claude Code's own permission system handles prompts
   // for the paired session, and routing through o8 is redundant.
   const isManagedSession = process.env.O8_MANAGED_SESSION === '1';
-  const outcome = evaluateToolUse(parsed);
+  // The operator's paired session is fully trusted — they opted out of the
+  // hard-safety guard ("remove that hook, I trust you", 2026-05-21). Only
+  // o8-managed autonomous agents are evaluated + routed to the approval
+  // surface; the paired session approves everything and relies on Claude
+  // Code's own permission system + the operator's oversight.
+  const outcome = isManagedSession ? evaluateToolUse(parsed) : { decision: 'approve' };
 
   if (!isManagedSession && outcome.decision === 'ask_user') {
     const payload = `${JSON.stringify(toHookPayload({ decision: 'approve' }))}\n`;
