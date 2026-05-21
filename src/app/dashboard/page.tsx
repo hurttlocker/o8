@@ -939,11 +939,10 @@ function DashboardInner() {
         }
         return;
       }
-      if (isEditable && !event.altKey) {
-        // Digit + Cmd+W shortcuts should not fire while the user is typing.
-        // Cmd+Opt+Arrow bypasses this guard above — consistent with iTerm.
-        return;
-      }
+      // Cmd+1-9 — jump straight to tab N. Allowed inside editable fields too
+      // (like browsers / VS Code) so power users switch tabs without leaving
+      // the composer. ⌘+digit is a no-op in a plain textarea, so nothing is
+      // lost. Shift+digit naturally falls through (event.key becomes '!' etc).
       if (!event.altKey && event.key >= '1' && event.key <= '9') {
         const handle = resolveHandle();
         if (!handle) return;
@@ -953,6 +952,12 @@ function DashboardInner() {
           const snap = handle.getTabsSnapshot();
           flash(snap.activeTabId);
         }
+        return;
+      }
+      if (isEditable && !event.altKey) {
+        // Cmd+W must not fire while typing — it would close the tab and drop
+        // the in-progress draft. Cmd+Opt+Arrow and Cmd+digit bypass this
+        // guard above, matching iTerm / browser tab navigation.
         return;
       }
       if (!event.altKey && !event.shiftKey && event.key.toLowerCase() === 'w') {
