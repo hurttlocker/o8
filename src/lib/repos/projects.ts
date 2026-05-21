@@ -6,7 +6,16 @@ import os from 'node:os';
 import path from 'node:path';
 
 import { readRepoPathRegistry } from './repo-path-registry';
-import { listProjects as listSqliteProjects } from '@/lib/projects/store';
+import {
+  addRepoToProject,
+  createProject as createSqliteProject,
+  deleteProject as deleteSqliteProject,
+  getProjectBySlug as getSqliteProjectBySlug,
+  getProjectWithRepos as getSqliteProjectWithRepos,
+  listProjects as listSqliteProjects,
+  removeRepoFromProject,
+  updateProject as updateSqliteProject,
+} from '@/lib/projects/store';
 import { listRepos } from './registry';
 
 const PROJECTS_DIR = path.join(os.homedir(), '.o8');
@@ -319,21 +328,23 @@ export async function createProject(name: string): Promise<ProjectsLedger> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Project name is required.');
   if (trimmed.length > 60) throw new Error('Project name must be 60 characters or fewer.');
+  // Create the project in SQLite (the source of truth). It surfaces in the
+  // ledger via the projection in enrich(), so we DON'T add a separate ledger
+  // record (that double-created it) — we just point the active project at it.
+  const slug = projectNameToSlug(trimmed);
+  let sqlite;
+  try {
+    sqlite = createSqliteProject({ name: trimmed, slug, description: null });
+  } catch {
+    sqlite = getSqliteProjectBySlug(slug);
+  }
   const ledger = await getProjectsLedger();
-  const used = new Set<ProjectColor | undefined>(ledger.projects.map((p) => p.color));
-  const project: ProjectRecord = {
-    id: makeId(),
-    name: trimmed,
-    repoPaths: [],
-    createdAt: nowIso(),
-    color: pickAutoColor(used),
-  };
   const next: ProjectsLedger = {
-    projects: [...ledger.projects, project],
-    activeProjectId: project.id,
+    ...ledger,
+    activeProjectId: sqlite?.id ?? ledger.activeProjectId,
   };
   await writeLedger(next);
-  return next;
+  return getProjectsLedger();
 }
 
 export async function setProjectColor(projectId: string, color: ProjectColor): Promise<ProjectsLedger> {
@@ -353,12 +364,18 @@ export async function renameProject(projectId: string, name: string): Promise<Pr
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Project name is required.');
   const ledger = await getProjectsLedger();
+  const target = ledger.projects.find((p) => p.id === projectId);
+  // Rename in SQLite too so the slug stays aligned (the ledger↔SQLite bridge).
+  if (target) {
+    const sqlite = resolveSqliteProject(target);
+    if (sqlite) updateSqliteProject(sqlite.id, { name: trimmed, slug: projectNameToSlug(trimmed) });
+  }
   const next: ProjectsLedger = {
     ...ledger,
     projects: ledger.projects.map((p) => (p.id === projectId ? { ...p, name: trimmed } : p)),
   };
   await writeLedger(next);
-  return next;
+  return getProjectsLedger();
 }
 
 export async function deleteProject(projectId: string): Promise<ProjectsLedger> {
@@ -366,22 +383,72 @@ export async function deleteProject(projectId: string): Promise<ProjectsLedger> 
   if (ledger.projects.length <= 1) {
     throw new Error('Cannot delete the only project.');
   }
+  const target = ledger.projects.find((p) => p.id === projectId);
+  // Delete the SQLite project (source of truth) so the projection stops re-adding
+  // it — otherwise a deleted project resurrects on the next read.
+  if (target) {
+    const sqlite = resolveSqliteProject(target);
+    if (sqlite) deleteSqliteProject(sqlite.id);
+  }
   const remaining = ledger.projects.filter((p) => p.id !== projectId);
   const activeProjectId = ledger.activeProjectId === projectId ? remaining[0]!.id : ledger.activeProjectId;
-  const next: ProjectsLedger = { projects: remaining, activeProjectId };
-  await writeLedger(next);
-  return next;
+  await writeLedger({ projects: remaining, activeProjectId });
+  return getProjectsLedger();
+}
+
+/**
+ * Resolve the SQLite project for a ledger project (by id, else slug). The ledger
+ * and SQLite use separate id namespaces bridged by slug, so try both.
+ */
+function resolveSqliteProject(ledgerProject: { id: string; name: string }) {
+  return getSqliteProjectWithRepos(ledgerProject.id)
+    ?? (() => {
+      const bySlug = getSqliteProjectBySlug(projectNameToSlug(ledgerProject.name));
+      return bySlug ? getSqliteProjectWithRepos(bySlug.id) : null;
+    })();
+}
+
+/**
+ * Reconcile the SQLite project (the membership source of truth) to exactly
+ * `repoPaths`, creating it if it doesn't exist yet. This is what makes a
+ * panel-rail membership edit (move/drag) actually stick instead of being
+ * overwritten by the SQLite-derived ledger projection on the next read.
+ */
+async function reconcileSqliteProjectRepos(ledgerProject: ProjectRecord, repoPaths: string[]): Promise<void> {
+  const repos = await listRepos();
+  const idByPath = new Map(repos.map((repo) => [normalizeRepoPath(repo.localPath), repo.id]));
+  const targetRepoIds = new Set(
+    repoPaths
+      .map((repoPath) => idByPath.get(normalizeRepoPath(repoPath)))
+      .filter((id): id is string => Boolean(id)),
+  );
+
+  let sqlite = resolveSqliteProject(ledgerProject);
+  if (!sqlite) {
+    const created = createSqliteProject({ name: ledgerProject.name, slug: projectNameToSlug(ledgerProject.name), description: null });
+    sqlite = getSqliteProjectWithRepos(created.id);
+  }
+  if (!sqlite) return;
+
+  const currentRepoIds = new Set(sqlite.repos.map((link) => link.repoId));
+  for (const repoId of targetRepoIds) {
+    if (!currentRepoIds.has(repoId)) addRepoToProject(sqlite.id, repoId, null, 'manual');
+  }
+  for (const repoId of currentRepoIds) {
+    if (!targetRepoIds.has(repoId)) removeRepoFromProject(sqlite.id, repoId);
+  }
 }
 
 export async function setProjectRepos(projectId: string, repoPaths: string[]): Promise<ProjectsLedger> {
   const ledger = await getProjectsLedger();
+  const project = ledger.projects.find((p) => p.id === projectId);
   const normalized = Array.from(new Set(repoPaths.map(normalizeRepoPath)));
-  const next: ProjectsLedger = {
-    ...ledger,
-    projects: ledger.projects.map((p) => (p.id === projectId ? { ...p, repoPaths: normalized } : p)),
-  };
-  await writeLedger(next);
-  return next;
+  if (project) {
+    // Membership goes to SQLite (the source of truth). The ledger's repoPaths are
+    // derived from SQLite via enrich, so re-read rather than persisting them here.
+    await reconcileSqliteProjectRepos(project, normalized);
+  }
+  return getProjectsLedger();
 }
 
 export async function removeRepoPathFromProjects(repoPath: string): Promise<ProjectsLedger> {
