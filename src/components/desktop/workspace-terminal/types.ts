@@ -120,6 +120,8 @@ export interface TerminalTabHandle {
     label?: string;
     targetSessionKey?: string;
   }) => string;
+  openOrchestratorTab: () => string;
+  openTerminalTab: (repo?: RegisteredRepo) => string;
   openHistoryChat: (
     historyTabId: string,
     title: string,

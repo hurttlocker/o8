@@ -69,6 +69,7 @@ export interface TaskPoolTask {
   lastEventAt: string | null;
   lastEventLabel: string | null;
   allowedFiles: string[];
+  sourceIssue: OrchestratorPacket['issue'] | null;
   project: TaskPoolProjectSummary | null;
   lane: TaskPoolLaneSummary | null;
   taskBrief?: string;
@@ -254,6 +255,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       lastEventAt: lane?.lastEventAt ?? packet.lastEventAt ?? null,
       lastEventLabel: lane?.lastEventLabel ?? packet.lastEventLabel ?? null,
       allowedFiles: packetAllowedFiles(packet),
+      sourceIssue: packet.issue ?? null,
       project: context ? toProjectSummary(context) : null,
       lane: toLaneSummary(lane),
       taskBrief: options.includeBrief && context
@@ -297,6 +299,7 @@ export async function getTaskPool(options: TaskPoolOptions = {}): Promise<TaskPo
       lastEventAt: lane.lastEventAt,
       lastEventLabel: lane.lastEventLabel,
       allowedFiles: [],
+      sourceIssue: null,
       project: context ? toProjectSummary(context) : null,
       lane: toLaneSummary(lane),
       taskBrief: options.includeBrief && context

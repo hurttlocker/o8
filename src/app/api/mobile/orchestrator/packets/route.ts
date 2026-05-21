@@ -7,9 +7,9 @@ export const dynamic = 'force-dynamic';
  * mobile-shaped payload.
  *
  * Feeds the o8-mobile "dispatched agents" pill that sits above the orchestrator
- * chat. The desktop equivalent is the repo-focus AgentsTab — it reads the same
- * mission state (`/api/orchestrator/state`) and the same lane registry, then
- * filters packets by repo path. This route mirrors that pipeline:
+ * chat. The desktop equivalent is the repo-focus Control Room — it reads the
+ * same mission state (`/api/orchestrator/state`) and the same lane registry,
+ * then filters packets by repo path. This route mirrors that pipeline:
  *
  *   1. syncOrchestratorControlPlaneState() — read + reconcile mission state
  *      (same call /api/orchestrator/state makes).

@@ -179,6 +179,9 @@ export interface AgentPanelProps {
   activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | null;
   onFocusOrchestratorTab?: () => void;
   onFocusAssistantTab?: () => void;
+  onCreateWorkspaceOrchestrator?: () => void;
+  onCreateWorkspaceChat?: () => void;
+  onCreateWorkspaceTerminal?: () => void;
   onOpenCommandPalette?: () => void;
   onOpenProjectManagement?: () => void;
   selectedRepoReadiness?: RepoReadiness | null;
@@ -191,6 +194,7 @@ export interface AgentPanelProps {
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onReviewPR?: (prNumber: number, repo?: string) => void;
+  onRepoAdded?: (repo: RepoRegistryEntry) => void | Promise<void>;
   onRepoRemoved?: (repo: RepoRegistryEntry) => void;
   onOpenSpecInWorkspace?: (repoPath: string) => void;
   onExpandWorkspace?: (workspace: string, repo: string | null) => void;

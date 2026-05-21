@@ -19,11 +19,8 @@ import type { ActivityItem } from './agent-panel/types';
 import { shortRepoLabel, normalizeRepoSlug } from './agent-panel/shared';
 import {
   ACTIVITY_COLORS,
-  ALL_REPOS_KEY,
   EMPTY_DATA,
   FILTER_TABS,
-  IconChevronDown,
-  IconFolder,
   IconZap,
   feedIconForItem,
   fetchRepoActivity,
@@ -39,6 +36,7 @@ import {
 import { repoSlugFromRemote } from './canvas-utils';
 import { useOrchestratorData } from './orchestrator-data-context';
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
+import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { PrPanel } from './pr-panel/PrPanel';
 import { DirectiveProposalRow } from './thoughts/DirectiveProposalRow';
@@ -96,6 +94,9 @@ interface O8ActivityPaneProps {
   repoPath?: string | null;
   repoSlug?: string | null;
   registeredRepos?: RepoRegistryEntry[];
+  allRepos?: boolean;
+  onSelectAllRepos?: () => void;
+  onSelectRepoPath?: (repoPath: string) => void;
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
   selectedPrNumber?: number | null;
@@ -106,6 +107,9 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   repoPath,
   repoSlug,
   registeredRepos: registeredRepoEntries = [],
+  allRepos = false,
+  onSelectAllRepos,
+  onSelectRepoPath,
   onSelectCommit,
   onSelectIssue,
   selectedPrNumber,
@@ -115,8 +119,6 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<O8FeedFilter>('all');
   const [fallbackRepoOptions, setFallbackRepoOptions] = useState<string[]>([]);
-  const [repoOverride, setRepoOverride] = useState<string | null>(null);
-  const [repoPickerOpen, setRepoPickerOpen] = useState(false);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [proposalsOpen, setProposalsOpen] = useState(false);
   // Frozen-per-mount set of proposal ids the operator had already seen.
@@ -240,15 +242,24 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     return () => { cancelled = true; };
   }, [registeredRepos.length]);
 
+  // Resolve the focused repo's slug from the shared scope (a localPath) so the
+  // feed fetch keys off the same repo the Workspace tab + left switcher show.
+  const selectedSlug = useMemo(() => {
+    if (!repoPath) return null;
+    const entry = registeredRepoEntries.find((e) => e.localPath === repoPath);
+    if (!entry) return null;
+    return repoSlugFromRemote(entry.remoteUrl) ?? normalizeRepoSlug(entry.name);
+  }, [repoPath, registeredRepoEntries]);
+
   const effectiveRepo = useMemo(() => {
-    if (repoOverride && repoOverride !== ALL_REPOS_KEY) return repoOverride;
+    if (selectedSlug) return selectedSlug;
     const normalized = normalizeRepoSlug(repoSlug);
     if (normalized) return normalized;
     if (repoOptions.length > 0) return repoOptions[0];
     return null;
-  }, [repoOverride, repoSlug, repoOptions]);
+  }, [selectedSlug, repoSlug, repoOptions]);
 
-  const isAllRepos = repoOverride === ALL_REPOS_KEY;
+  const isAllRepos = allRepos;
 
   // Fetch activity data
   useEffect(() => {
@@ -362,8 +373,6 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     return groups;
   }, [filtered]);
 
-  const repoLabel = isAllRepos ? 'All repos' : effectiveRepo ? shortRepoLabel(effectiveRepo) : 'No repo';
-
   const handleItemClick = useCallback((item: ActivityItem) => {
     if (item.kind === 'commit') {
       onSelectCommit?.(item.hash, item.repo ? { repo: item.repo } : undefined);
@@ -409,127 +418,14 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       }}>
         {/* Repo selector */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
-          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-            <button
-              type="button"
-              onClick={() => setRepoPickerOpen((v) => !v)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 5,
-                minHeight: 28,
-                paddingTop: 0,
-                paddingRight: 10,
-                paddingBottom: 0,
-                paddingLeft: 8,
-                borderRadius: 8,
-                border: '0.5px solid var(--t-divider-subtle)',
-                background: 'var(--t-panel)',
-                cursor: 'pointer',
-                fontFamily: 'var(--font-sans-system)',
-                fontSize: 11,
-                fontWeight: 600,
-                color: 'var(--t-text)',
-                letterSpacing: '-0.01em',
-              }}
-            >
-              <span style={{
-                width: 18,
-                height: 18,
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                borderRadius: 999,
-                background: ACTIVITY_COLORS.accentBg,
-                color: ACTIVITY_COLORS.accent,
-              }}>
-                <IconFolder size={11} color={ACTIVITY_COLORS.accent} />
-              </span>
-              {repoLabel}
-              <IconChevronDown size={10} color="var(--t-text-muted)" />
-            </button>
-
-            {repoPickerOpen ? (
-              <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{
-                position: 'absolute',
-                top: 32,
-                left: 0,
-                right: 0,
-                zIndex: 20,
-                borderRadius: 12,
-                border: '1px solid var(--t-panel-border)',
-                background: 'var(--t-panel-solid)',
-                boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
-                maxHeight: 200,
-                overflowY: 'auto',
-              }}>
-                <button
-                  type="button"
-                  onClick={() => { setRepoOverride(ALL_REPOS_KEY); setRepoPickerOpen(false); }}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 8,
-                    width: '100%',
-                    paddingTop: 7,
-                    paddingRight: 12,
-                    paddingBottom: 7,
-                    paddingLeft: 12,
-                    border: 'none',
-                    borderBottom: '1px solid var(--t-divider-subtle)',
-                    background: isAllRepos ? ACTIVITY_COLORS.accentBg : 'transparent',
-                    color: isAllRepos ? ACTIVITY_COLORS.accent : 'var(--t-text)',
-                    fontSize: 12,
-                    fontWeight: 600,
-                    cursor: 'pointer',
-                    fontFamily: 'var(--font-sans-system)',
-                    textAlign: 'left',
-                  }}
-                >
-                  All repos
-                </button>
-                {repoOptions.map((slug) => {
-                  const selected = slug === effectiveRepo && !isAllRepos;
-                  return (
-                    <button
-                      key={slug}
-                      type="button"
-                      onClick={() => { setRepoOverride(slug); setRepoPickerOpen(false); }}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 8,
-                        width: '100%',
-                        paddingTop: 7,
-                        paddingRight: 12,
-                        paddingBottom: 7,
-                        paddingLeft: 12,
-                        border: 'none',
-                        background: selected ? ACTIVITY_COLORS.accentBg : 'transparent',
-                        color: selected ? ACTIVITY_COLORS.accent : 'var(--t-text)',
-                        fontSize: 12,
-                        fontWeight: selected ? 600 : 400,
-                        cursor: 'pointer',
-                        fontFamily: 'var(--font-sans-system)',
-                        textAlign: 'left',
-                      }}
-                    >
-                      <IconFolder size={12} color={selected ? ACTIVITY_COLORS.accent : 'var(--t-text-muted)'} />
-                      {shortRepoLabel(slug)}
-                      <span style={{
-                        marginLeft: 'auto',
-                        fontSize: 12,
-                        color: 'var(--t-text-faint)',
-                        fontFamily: 'var(--font-sans-system)',
-                      }}>
-                        {slug.split('/')[0]}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            ) : null}
-          </div>
+          <O8RepoSelector
+            repos={registeredRepoEntries}
+            allRepos={allRepos}
+            selectedRepoPath={repoPath ?? null}
+            onSelectAll={() => onSelectAllRepos?.()}
+            onSelectRepo={(path) => onSelectRepoPath?.(path)}
+            style={{ flex: 1, minWidth: 0 }}
+          />
           <O8ScratchChat
             repoPath={repoPath ?? null}
             selectedFile={null}

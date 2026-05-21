@@ -16,7 +16,6 @@ import type { O8Tab } from '@/components/desktop/o8-panel/types';
 function ShellPreviewInner() {
   const [sidebar, setSidebar] = useState(true);
   const [terminal, setTerminal] = useState(true);
-  const [agents, setAgents] = useState(true);
   const [o8Tab, setO8Tab] = useState<O8Tab>('workspace');
 
   const colBorder = '1px solid var(--t-divider)';
@@ -29,8 +28,6 @@ function ShellPreviewInner() {
         </div>
         <div style={{ flex: 1, borderRight: colBorder }}>
           <WorkspaceHeaderStrip
-            isAgentsSectionActive={agents}
-            onOpenAgents={() => setAgents((v) => !v)}
             bottomPanelVisible={terminal}
             onToggleBottomPanel={() => setTerminal((v) => !v)}
           />

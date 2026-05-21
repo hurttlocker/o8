@@ -18,13 +18,19 @@ export const dynamic = 'force-dynamic';
 
 const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' } as const;
 
+function hideSyntheticWorkspace<T extends { name: string; slug: string }>(projects: T[]): T[] {
+  const hasConcreteProject = projects.some((project) => project.slug !== 'workspace');
+  if (!hasConcreteProject) return projects;
+  return projects.filter((project) => project.slug !== 'workspace' || project.name.toLowerCase() !== 'workspace');
+}
+
 export async function GET(req: NextRequest) {
   const denied = requirePanelAuth(req);
   if (denied) return denied;
 
   try {
     await syncProjectStoreFromPanelLedger();
-    const projects = listProjects();
+    const projects = hideSyntheticWorkspace(listProjects());
     return NextResponse.json({ projects }, { headers: NO_STORE });
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Failed to list projects.';

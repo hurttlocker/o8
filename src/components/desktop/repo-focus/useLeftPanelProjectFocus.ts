@@ -48,11 +48,6 @@ function writeStored(key: string, value: string): void {
   }
 }
 
-function fallbackRepo(repoPath: string): RepoFocusRepo {
-  const name = repoPath.split('/').filter(Boolean).pop() ?? 'repository';
-  return { id: repoPath, name, localPath: repoPath, remoteUrl: null, defaultBranch: 'main' };
-}
-
 export interface FocusedProjectView {
   /** The active project record. */
   project: ProjectRecord;
@@ -90,12 +85,12 @@ export function useLeftPanelProjectFocus({ registeredRepos, ledger }: Args): Lef
     if (!projectId || !ledger) return null;
     const project = ledger.projects.find((p) => p.id === projectId);
     if (!project) return null;
-    const repos: RepoFocusRepo[] = project.repoPaths.map((path) => {
+    const repos: RepoFocusRepo[] = project.repoPaths.flatMap((path) => {
       const normalized = normalizeRepoPath(path);
       const entry = registeredRepos.find(
         (r) => normalizeRepoPath(r.localPath) === normalized || r.id === path,
       );
-      return entry ? toRepoFocusRepo(entry) : fallbackRepo(normalized);
+      return entry ? [toRepoFocusRepo(entry)] : [];
     });
     const normalizedRepoPath = normalizeRepoPath(repoPath);
     const selectedRepo = normalizedRepoPath
@@ -111,11 +106,15 @@ export function useLeftPanelProjectFocus({ registeredRepos, ledger }: Args): Lef
   useEffect(() => {
     if (!ledger || !projectId) return;
     if (!ledger.projects.some((p) => p.id === projectId)) {
-      setProjectId('');
-      setRepoPath('');
-      writeStored(PROJECT_STORAGE_KEY, '');
-      writeStored(REPO_STORAGE_KEY, '');
+      const timeout = window.setTimeout(() => {
+        setProjectId('');
+        setRepoPath('');
+        writeStored(PROJECT_STORAGE_KEY, '');
+        writeStored(REPO_STORAGE_KEY, '');
+      }, 0);
+      return () => window.clearTimeout(timeout);
     }
+    return undefined;
   }, [ledger, projectId]);
 
   // If the focused repo dropped out of its project, fall back to project-
@@ -123,9 +122,13 @@ export function useLeftPanelProjectFocus({ registeredRepos, ledger }: Args): Lef
   useEffect(() => {
     if (!view) return;
     if (repoPath && !view.selectedRepo) {
-      setRepoPath('');
-      writeStored(REPO_STORAGE_KEY, '');
+      const timeout = window.setTimeout(() => {
+        setRepoPath('');
+        writeStored(REPO_STORAGE_KEY, '');
+      }, 0);
+      return () => window.clearTimeout(timeout);
     }
+    return undefined;
   }, [repoPath, view]);
 
   const focusByProjectId = useCallback((nextProjectId: string) => {

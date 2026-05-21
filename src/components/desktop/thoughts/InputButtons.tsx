@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import { AttachFilesButton } from './AttachFilesButton';
 import { SparklesIcon } from './ThoughtsIcons';
@@ -25,6 +25,14 @@ const EFFORT_DOT: Record<ThinkingEffort, string> = {
   high: 'var(--t-text-muted)',
   xhigh: 'var(--t-text-muted)',
   max: '#FF5A1F',
+};
+const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
+  adaptive: 2,
+  low: 1,
+  medium: 3,
+  high: 4,
+  xhigh: 5,
+  max: 6,
 };
 
 /**
@@ -132,6 +140,228 @@ export function ThinkingChip({
  *   [▊▊▊ effort] [model label] [✦ enhance]         [+ attach] [↑ send]
  */
 export type { ThinkingEffort };
+
+function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; active?: boolean }) {
+  const level = EFFORT_LEVEL[effort];
+  const color = active
+    ? (effort === 'max' ? '#FF5A1F' : 'var(--t-accent)')
+    : 'var(--t-text-faint)';
+  return (
+    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 1.25, width: 18, height: 9, flexShrink: 0 }}>
+      {Array.from({ length: 6 }).map((_, index) => {
+        const filled = index < level;
+        return (
+          <span
+            key={index}
+            style={{
+              width: 2,
+              height: 2.25 + (index * 0.8),
+              borderRadius: 999,
+              background: filled ? color : 'color-mix(in srgb, var(--t-text-faint) 22%, transparent)',
+              opacity: filled ? 1 : 0.7,
+            }}
+          />
+        );
+      })}
+    </span>
+  );
+}
+
+const MODEL_THINKING_MENU_WIDTH = 162;
+
+function ModelThinkingChip({
+  modelLabel,
+  effort,
+  adaptiveEnabled,
+  onEffortChange,
+}: {
+  modelLabel: string;
+  effort: ThinkingEffort;
+  adaptiveEnabled: boolean;
+  onEffortChange?: (effort: ThinkingEffort) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [hovered, setHovered] = useState(false);
+  const [focused, setFocused] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
+  const buttonRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
+  const selectedLabel = EFFORT_LABELS[effort];
+  const canOpen = Boolean(onEffortChange);
+  const showingAffordance = canOpen && (hovered || focused || open);
+
+  useEffect(() => {
+    if (!open) return;
+    const updateMenuPosition = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      const viewportWidth = window.innerWidth;
+      const viewportHeight = window.innerHeight;
+      const estimatedHeight = 190;
+      setMenuPosition({
+        left: Math.min(Math.max(8, rect.left - 10), Math.max(8, viewportWidth - MODEL_THINKING_MENU_WIDTH - 8)),
+        top: Math.max(8, Math.min(rect.top - estimatedHeight - 8, viewportHeight - estimatedHeight - 8)),
+      });
+    };
+    const handlePointer = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && buttonRef.current?.contains(target)) return;
+      if (target && menuRef.current?.contains(target)) return;
+      setOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    updateMenuPosition();
+    document.addEventListener('pointerdown', handlePointer);
+    document.addEventListener('keydown', handleKey);
+    window.addEventListener('resize', updateMenuPosition);
+    window.addEventListener('scroll', updateMenuPosition, true);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointer);
+      document.removeEventListener('keydown', handleKey);
+      window.removeEventListener('resize', updateMenuPosition);
+      window.removeEventListener('scroll', updateMenuPosition, true);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={buttonRef}
+        type="button"
+        onClick={() => { if (canOpen) setOpen((current) => !current); }}
+        onPointerEnter={() => setHovered(true)}
+        onPointerLeave={() => setHovered(false)}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        disabled={!canOpen}
+        title={`${modelLabel} · thinking ${selectedLabel}`}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 7,
+          height: 22,
+          maxWidth: 200,
+          paddingTop: 0,
+          paddingRight: canOpen ? 6 : 0,
+          paddingBottom: 0,
+          paddingLeft: canOpen ? 5 : 0,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: showingAffordance ? 'rgba(37, 99, 235, 0.14)' : 'transparent',
+          borderRadius: 7,
+          background: showingAffordance ? 'rgba(37, 99, 235, 0.052)' : 'transparent',
+          color: showingAffordance ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+          cursor: canOpen ? 'pointer' : 'default',
+          outline: focused && canOpen ? '2px solid rgba(37, 99, 235, 0.12)' : 'none',
+          outlineOffset: 1,
+          fontFamily: 'var(--font-sans-system)',
+          transition: 'background 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+      >
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 500, letterSpacing: '0' }}>
+          {modelLabel}
+        </span>
+        <ThinkingBars effort={effort} active={open || effort === 'max'} />
+        <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: canOpen ? 0.72 : 0 }}>
+          <path d="m6 9 6 6 6-6" />
+        </svg>
+      </button>
+
+      {open && menuPosition ? createPortal(
+        <div
+          ref={menuRef}
+          role="menu"
+          aria-label="Model and thinking"
+          style={{
+            position: 'fixed',
+            top: menuPosition.top,
+            left: menuPosition.left,
+            width: MODEL_THINKING_MENU_WIDTH,
+            paddingTop: 7,
+            paddingRight: 5,
+            paddingBottom: 5,
+            paddingLeft: 5,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-border)',
+            background: 'var(--t-panel)',
+            backdropFilter: 'blur(18px) saturate(1.3)',
+            boxShadow: 'var(--t-panel-shadow)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 4,
+            zIndex: 1000,
+            fontFamily: 'var(--font-sans-system)',
+          }}
+        >
+          <div style={{ paddingLeft: 5, paddingRight: 5, paddingBottom: 5, borderBottom: '1px solid var(--t-divider-subtle)' }}>
+            <div style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--t-text)', lineHeight: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</div>
+            <div style={{ marginTop: 1, fontSize: 9.5, fontWeight: 400, color: 'var(--t-text-muted)', lineHeight: '11px' }}>Thinking</div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {options.map((option) => {
+              const active = option === effort;
+              return (
+                <button
+                  key={option}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={active}
+                  onClick={() => {
+                    onEffortChange?.(option);
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'minmax(0, 1fr) auto',
+                    alignItems: 'center',
+                    gap: 6,
+                    minHeight: 23,
+                    paddingTop: 2,
+                    paddingRight: 6,
+                    paddingBottom: 2,
+                    paddingLeft: 7,
+                    borderWidth: 0,
+                    borderRadius: 8,
+                    background: active ? 'var(--t-accent-soft)' : 'transparent',
+                    color: active ? 'var(--t-accent)' : 'var(--t-text)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: 'var(--font-sans-system)',
+                  }}
+                  onMouseEnter={(event) => {
+                    if (!active) event.currentTarget.style.background = 'var(--t-hover)';
+                  }}
+                  onMouseLeave={(event) => {
+                    if (!active) event.currentTarget.style.background = 'transparent';
+                  }}
+                >
+                  <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
+                    <span style={{ fontSize: 11.5, fontWeight: active ? 500 : 400, lineHeight: '14px' }}>{EFFORT_LABELS[option]}</span>
+                    <span style={{ fontSize: 9, fontWeight: 400, color: active ? 'var(--t-accent)' : 'var(--t-text-muted)', lineHeight: '11px' }}>
+                      {option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`}
+                    </span>
+                  </span>
+                  <span style={{ display: 'inline-flex', alignItems: 'center', gap: 8 }}>
+                    <ThinkingBars effort={option} active={active} />
+                    <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? (option === 'max' ? '#FF5A1F' : 'var(--t-accent)') : 'transparent', flexShrink: 0 }} />
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>,
+        document.body,
+      ) : null}
+    </>
+  );
+}
 
 function repoPathLabel(path: string | null | undefined): string | null {
   if (!path?.trim()) return null;
@@ -462,6 +692,8 @@ export function InputButtons({
   workspaceTargets,
   selectedRepoPath,
   onSelectRepoPath,
+  inlineLeadingExtras,
+  inlineMeterSlot,
 }: {
   input: string;
   enhancing: boolean;
@@ -486,15 +718,10 @@ export function InputButtons({
   workspaceTargets?: OrchestratorWorkspaceTarget[];
   selectedRepoPath?: string | null;
   onSelectRepoPath?: (next: string) => void;
+  inlineLeadingExtras?: ReactNode;
+  inlineMeterSlot?: ReactNode;
 }) {
   const canSubmit = Boolean(input.trim());
-  const effortCycle: ThinkingEffort[] = adaptiveEnabled
-    ? ['adaptive', 'low', 'medium', 'high', 'xhigh', 'max']
-    : ['low', 'medium', 'high', 'xhigh', 'max'];
-
-  const cycleEffort = (next = effortCycle[(Math.max(effortCycle.indexOf(effort), 0)) + 1] ?? effortCycle[0]) => {
-    onEffortChange?.(next);
-  };
 
   return (
     <div style={{
@@ -506,27 +733,13 @@ export function InputButtons({
       paddingBottom: 6,
       paddingLeft: 10,
     }}>
-      <div style={{ display: 'none' }} aria-hidden="true">
-        <ThinkingChip effort={effort} adaptiveEnabled={adaptiveEnabled} onChange={cycleEffort} />
-      </div>
-
-      {/* Model label */}
       {modelLabel ? (
-        <span
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            fontSize: 10.5,
-            fontWeight: 500,
-            color: 'var(--t-text-faint)',
-            letterSpacing: '-0.005em',
-            whiteSpace: 'nowrap',
-            fontFamily: 'var(--font-sans-system)',
-          }}
-        >
-          {modelLabel}
-        </span>
+        <ModelThinkingChip
+          modelLabel={modelLabel}
+          effort={effort}
+          adaptiveEnabled={adaptiveEnabled}
+          onEffortChange={onEffortChange}
+        />
       ) : null}
 
       {/* Repo / workspace target */}
@@ -539,6 +752,15 @@ export function InputButtons({
             selectedRepoPath={selectedRepoPath}
             onSelectRepoPath={onSelectRepoPath}
           />
+        </>
+      ) : null}
+
+      {inlineLeadingExtras ? (
+        <>
+          {modelLabel || repoLabel ? <span style={{ color: 'var(--t-text-faint)' }}>·</span> : null}
+          <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, flexShrink: 0 }}>
+            {inlineLeadingExtras}
+          </span>
         </>
       ) : null}
 
@@ -574,6 +796,12 @@ export function InputButtons({
       </button>
 
       <div style={{ flex: 1 }} />
+
+      {inlineMeterSlot ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+          {inlineMeterSlot}
+        </span>
+      ) : null}
 
       <AttachFilesButton
         onUploadDiskFiles={onUploadDiskFiles}

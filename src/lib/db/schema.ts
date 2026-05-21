@@ -555,6 +555,8 @@ export const laneEvents = sqliteTable('lane_events', {
 
 export const supervisorInbox = sqliteTable('supervisor_inbox', {
   id: text('id').primaryKey(),
+  projectId: text('project_id'),
+  incidentKey: text('incident_key'),
   repoPath: text('repo_path').notNull(),
   packetId: text('packet_id'),
   kind: text('kind', {
@@ -566,9 +568,13 @@ export const supervisorInbox = sqliteTable('supervisor_inbox', {
   }).notNull().default('pending'),
   healAttemptCount: integer('heal_attempt_count').notNull().default(0),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  lastSeenAt: text('last_seen_at'),
+  repeatCount: integer('repeat_count').notNull().default(1),
   resolvedAt: text('resolved_at'),
 }, (table) => ({
   statusCreatedIdx: index('idx_supervisor_inbox_status_created').on(table.status, table.createdAt),
+  projectStatusCreatedIdx: index('idx_supervisor_inbox_project_status_created').on(table.projectId, table.status, table.createdAt),
+  incidentStatusIdx: index('idx_supervisor_inbox_incident_status').on(table.incidentKey, table.status),
   packetIdIdx: index('idx_supervisor_inbox_packet_id').on(table.packetId),
   repoCreatedIdx: index('idx_supervisor_inbox_repo_created').on(table.repoPath, table.createdAt),
 }));

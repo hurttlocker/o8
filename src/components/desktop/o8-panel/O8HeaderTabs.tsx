@@ -23,17 +23,6 @@ function IconFiles({ size = 16, color = '#e2e8f0' }: { size?: number; color?: st
   );
 }
 
-function IconGitPullRequest({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
-      <circle cx="18" cy="18" r="3" />
-      <circle cx="6" cy="6" r="3" />
-      <path d="M13 6h3a2 2 0 0 1 2 2v7" />
-      <line x1="6" y1="9" x2="6" y2="21" />
-    </svg>
-  );
-}
-
 function IconActivity({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
@@ -65,9 +54,8 @@ interface O8TabDef {
 // the rest stay icon-only so the row fits the panel width. No dividers.
 const O8_TABS: O8TabDef[] = [
   { id: 'workspace', label: 'Workspace', icon: (c) => <IconWorkspace size={15} color={c} /> },
-  { id: 'prs', label: 'PRs', icon: (c) => <IconGitPullRequest size={15} color={c} /> },
-  { id: 'inbox', label: 'Inbox', icon: (c) => <IconInbox size={15} color={c} /> },
   { id: 'activity', label: 'Activity', icon: (c) => <IconActivity size={15} color={c} /> },
+  { id: 'inbox', label: 'Inbox', icon: (c) => <IconInbox size={15} color={c} /> },
   { id: 'spec', label: 'o8.md', icon: (c) => <IconFiles size={15} color={c} /> },
 ];
 
@@ -140,6 +128,8 @@ export function O8HeaderTabs({
   activeTab: O8Tab;
   onTabChange: (tab: O8Tab) => void;
 }) {
+  const visualActiveTab = activeTab === 'prs' ? 'activity' : activeTab;
+
   return (
     <div
       role="tablist"
@@ -157,7 +147,7 @@ export function O8HeaderTabs({
         <O8TabPill
           key={def.id}
           def={def}
-          active={activeTab === def.id}
+          active={visualActiveTab === def.id}
           onClick={() => onTabChange(def.id)}
         />
       ))}

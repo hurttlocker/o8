@@ -1,10 +1,29 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { WarningCircle } from '@phosphor-icons/react';
 
 export function SupervisorInboxBadge() {
   const [humanRequiredCount, setHumanRequiredCount] = useState(0);
+
+  const refresh = useCallback(async () => {
+    try {
+      const response = await fetch('/api/panel/supervisor-inbox?scope=all', { cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = await response.json().catch(() => ({})) as {
+        summary?: {
+          humanRequired?: unknown;
+          active?: unknown;
+        };
+      };
+      const nextCount = payload.summary?.humanRequired ?? payload.summary?.active;
+      if (typeof nextCount === 'number' && Number.isFinite(nextCount)) {
+        setHumanRequiredCount(Math.max(0, Math.floor(nextCount)));
+      }
+    } catch {
+      // The status bar should not surface transient API failures as UI noise.
+    }
+  }, []);
 
   useEffect(() => {
     const handleUpdate = (event: Event) => {
@@ -12,14 +31,29 @@ export function SupervisorInboxBadge() {
       const nextCount = detail?.data?.humanRequiredCount;
       if (typeof nextCount === 'number' && Number.isFinite(nextCount)) {
         setHumanRequiredCount(Math.max(0, Math.floor(nextCount)));
+      } else {
+        void refresh();
       }
+    };
+    const handleFocus = () => {
+      void refresh();
     };
 
     window.addEventListener('o8:supervisor-inbox', handleUpdate);
+    window.addEventListener('focus', handleFocus);
+    const initialTimer = window.setTimeout(() => {
+      void refresh();
+    }, 0);
+    const timer = window.setInterval(() => {
+      void refresh();
+    }, 15000);
     return () => {
       window.removeEventListener('o8:supervisor-inbox', handleUpdate);
+      window.removeEventListener('focus', handleFocus);
+      window.clearTimeout(initialTimer);
+      window.clearInterval(timer);
     };
-  }, []);
+  }, [refresh]);
 
   const active = humanRequiredCount > 0;
   const background = active ? 'var(--t-warning-soft, rgba(249,115,22,0.11))' : 'var(--t-chrome-btn-bg)';
@@ -41,11 +75,13 @@ export function SupervisorInboxBadge() {
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 6,
-        height: 22,
+        justifyContent: 'center',
+        gap: 5,
+        height: 28,
+        minWidth: 44,
         paddingLeft: 8,
         paddingRight: 8,
-        borderRadius: 6,
+        borderRadius: 8,
         border: active ? `1px solid var(--t-warning-border, rgba(249,115,22,0.22))` : 'none',
         boxShadow: active ? 'none' : chromeShadow,
         background,
@@ -54,16 +90,7 @@ export function SupervisorInboxBadge() {
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      <WarningCircle size={11} weight={active ? 'fill' : 'bold'} />
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: '-0.01em',
-        }}
-      >
-        Inbox
-      </span>
+      <WarningCircle size={12} weight={active ? 'fill' : 'bold'} />
       <span
         style={{
           minWidth: 14,

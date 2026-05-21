@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { getSqlite } from '@/lib/db';
 import { listLanes } from '@/lib/lane/registry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
@@ -43,11 +43,14 @@ export interface EnqueueInboxItemInput {
 interface SupervisorInboxRow {
   id: string;
   project_id: string | null;
+  incident_key: string | null;
   repo_path: string;
   packet_id: string | null;
   kind: SupervisorInboxKind;
   payload: string;
   created_at: string;
+  last_seen_at: string | null;
+  repeat_count: number | null;
   status: SupervisorInboxStatus;
   resolved_at: string | null;
 }
@@ -57,8 +60,11 @@ export interface SupervisorInboxItem {
   repoPath: string;
   packetId: string | null;
   kind: SupervisorInboxKind;
+  incidentKey: string | null;
   payload: SupervisorInboxPayload;
   createdAt: string;
+  lastSeenAt: string;
+  repeatCount: number;
   status: SupervisorInboxStatus;
   resolvedAt: string | null;
   packetTitle: string | null;
@@ -95,11 +101,14 @@ function ensureSupervisorInboxTable() {
     CREATE TABLE IF NOT EXISTS supervisor_inbox (
       id TEXT PRIMARY KEY,
       project_id TEXT,
+      incident_key TEXT,
       repo_path TEXT NOT NULL,
       packet_id TEXT,
       kind TEXT NOT NULL,
       payload TEXT NOT NULL,
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT,
+      repeat_count INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'pending',
       resolved_at TEXT
     );
@@ -116,12 +125,29 @@ function ensureSupervisorInboxTable() {
   if (!columns.some((column) => column.name === 'project_id')) {
     sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN project_id TEXT');
   }
+  if (!columns.some((column) => column.name === 'incident_key')) {
+    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN incident_key TEXT');
+  }
+  if (!columns.some((column) => column.name === 'last_seen_at')) {
+    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN last_seen_at TEXT');
+  }
+  if (!columns.some((column) => column.name === 'repeat_count')) {
+    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN repeat_count INTEGER NOT NULL DEFAULT 1');
+  }
   sqlite.prepare(
     "UPDATE supervisor_inbox SET project_id = ? WHERE project_id IS NULL OR project_id = ''",
   ).run(DEFAULT_PROJECT_ID);
+  sqlite.prepare(
+    "UPDATE supervisor_inbox SET last_seen_at = created_at WHERE last_seen_at IS NULL OR last_seen_at = ''",
+  ).run();
+  sqlite.prepare(
+    'UPDATE supervisor_inbox SET repeat_count = 1 WHERE repeat_count IS NULL OR repeat_count < 1',
+  ).run();
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_project_status_created
       ON supervisor_inbox(project_id, status, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_incident_status
+      ON supervisor_inbox(incident_key, status);
   `);
 
   supervisorInboxReady = true;
@@ -143,6 +169,10 @@ function stringValue(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function payloadString(payload: SupervisorInboxPayload, key: string): string | null {
+  return stringValue(payload[key]);
+}
+
 function firstMeaningfulLine(text: string | null): string {
   if (!text) {
     return 'Operator review required.';
@@ -154,6 +184,51 @@ function firstMeaningfulLine(text: string | null): string {
     .find((candidate) => candidate && candidate !== '```');
 
   return line ?? 'Operator review required.';
+}
+
+function incidentHash(value: string): string {
+  return createHash('sha1').update(value).digest('hex').slice(0, 12);
+}
+
+function buildIncidentKey(input: {
+  projectId: string;
+  repoPath: string;
+  packetId: string | null;
+  kind: SupervisorInboxKind;
+  payload: SupervisorInboxPayload;
+}): string {
+  const laneId = payloadString(input.payload, 'laneId');
+  const worktreePath = payloadString(input.payload, 'worktreePath');
+  const stage = payloadString(input.payload, 'stage');
+  const verificationKind = payloadString(input.payload, 'verificationKind');
+  const errorLine = firstMeaningfulLine(
+    payloadString(input.payload, 'errorExcerpt')
+      ?? payloadString(input.payload, 'errorMessage')
+      ?? payloadString(input.payload, 'retryHandoffError')
+      ?? payloadString(input.payload, 'summary')
+      ?? payloadString(input.payload, 'verificationOutput')
+      ?? payloadString(input.payload, 'error')
+      ?? payloadString(input.payload, 'note'),
+  );
+  const anchor = input.packetId ?? laneId ?? worktreePath ?? input.repoPath;
+  return [
+    input.repoPath,
+    input.kind,
+    anchor,
+    stage ?? '',
+    verificationKind ?? '',
+    incidentHash(errorLine),
+  ].join('\u0000');
+}
+
+function incidentKeyForRow(row: SupervisorInboxRow): string {
+  return buildIncidentKey({
+    projectId: row.project_id?.trim() || DEFAULT_PROJECT_ID,
+    repoPath: row.repo_path,
+    packetId: row.packet_id,
+    kind: row.kind,
+    payload: parsePayload(row.payload),
+  });
 }
 
 function statusRank(status: SupervisorInboxStatus): number {
@@ -182,27 +257,42 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
   const status = input.status ?? RETENTION_POLICY[input.kind]?.defaultStatus ?? 'human_required';
   const packetId = input.packetId ?? null;
   const projectId = getActiveProjectScopeForRepoSync(input.repoPath).projectId;
+  const incidentKey = buildIncidentKey({
+    projectId,
+    repoPath: input.repoPath,
+    packetId,
+    kind: input.kind,
+    payload: input.payload,
+  });
   const existing = sqlite.prepare(`
-    SELECT id, project_id, repo_path, packet_id, kind, payload, created_at, status, resolved_at
+    SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
     FROM supervisor_inbox
-    WHERE kind = ?
-      AND project_id = ?
-      AND repo_path = ?
-      AND ((packet_id IS NULL AND ? IS NULL) OR packet_id = ?)
+    WHERE incident_key = ?
       AND status IN ('pending', 'healing', 'human_required')
-      AND datetime(created_at) >= datetime(?)
-    ORDER BY created_at DESC
+    ORDER BY datetime(last_seen_at) DESC, datetime(created_at) DESC
     LIMIT 1
-  `).get(input.kind, projectId, input.repoPath, packetId, packetId, new Date(Date.now() - 30 * 60_000).toISOString()) as SupervisorInboxRow | undefined;
+  `).get(incidentKey) as SupervisorInboxRow | undefined;
 
   if (existing) {
+    sqlite.prepare(`
+      UPDATE supervisor_inbox
+      SET payload = ?,
+          last_seen_at = ?,
+          repeat_count = COALESCE(repeat_count, 1) + 1,
+          incident_key = ?
+      WHERE id = ?
+    `).run(JSON.stringify(input.payload), createdAt, incidentKey, existing.id);
+
     return {
       id: existing.id,
       repoPath: existing.repo_path,
       packetId: existing.packet_id,
       kind: existing.kind,
-      payload: parsePayload(existing.payload),
+      incidentKey,
+      payload: input.payload,
       createdAt: existing.created_at,
+      lastSeenAt: createdAt,
+      repeatCount: Math.max(1, existing.repeat_count ?? 1) + 1,
       status: existing.status,
       resolvedAt: existing.resolved_at,
     };
@@ -212,22 +302,28 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
     INSERT INTO supervisor_inbox (
       id,
       project_id,
+      incident_key,
       repo_path,
       packet_id,
       kind,
       payload,
       created_at,
+      last_seen_at,
+      repeat_count,
       status,
       resolved_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
   `).run(
     id,
     projectId,
+    incidentKey,
     input.repoPath,
     packetId,
     input.kind,
     JSON.stringify(input.payload),
     createdAt,
+    createdAt,
+    1,
     status,
   );
 
@@ -236,20 +332,83 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
     repoPath: input.repoPath,
     packetId,
     kind: input.kind,
+    incidentKey,
     payload: input.payload,
     createdAt,
+    lastSeenAt: createdAt,
+    repeatCount: 1,
     status,
     resolvedAt: null,
   };
 }
 
-export function countInboxItems(status: SupervisorInboxStatus = 'human_required'): number {
+export function collapseActiveInboxIncidents(): number {
   ensureSupervisorInboxTable();
-  const projectId = getActiveProjectScopeForRepoSync().projectId;
+  const rows = getSqlite().prepare(`
+    SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
+    FROM supervisor_inbox
+    WHERE status IN ('pending', 'healing', 'human_required')
+  `).all() as SupervisorInboxRow[];
 
-  const row = getSqlite()
-    .prepare('SELECT COUNT(*) AS count FROM supervisor_inbox WHERE status = ? AND project_id = ?')
-    .get(status, projectId) as { count?: number } | undefined;
+  const groups = new Map<string, SupervisorInboxRow[]>();
+  for (const row of rows) {
+    const key = incidentKeyForRow(row);
+    groups.set(key, [...(groups.get(key) ?? []), row]);
+  }
+
+  let dismissed = 0;
+  const now = new Date().toISOString();
+  const db = getSqlite();
+  for (const [incidentKey, group] of groups) {
+    const sorted = [...group].sort((left, right) => {
+      const statusDiff = statusRank(left.status) - statusRank(right.status);
+      if (statusDiff !== 0) return statusDiff;
+      return (right.last_seen_at ?? right.created_at).localeCompare(left.last_seen_at ?? left.created_at);
+    });
+    const survivor = sorted[0];
+    if (!survivor) continue;
+
+    const repeatCount = group.reduce((total, row) => total + Math.max(1, row.repeat_count ?? 1), 0);
+    const lastSeenAt = sorted[0]?.last_seen_at ?? sorted[0]?.created_at ?? now;
+    db.prepare(`
+      UPDATE supervisor_inbox
+      SET incident_key = ?,
+          repeat_count = ?,
+          last_seen_at = ?
+      WHERE id = ?
+    `).run(incidentKey, repeatCount, lastSeenAt, survivor.id);
+
+    const duplicates = sorted.slice(1);
+    for (const duplicate of duplicates) {
+      db.prepare(`
+        UPDATE supervisor_inbox
+        SET incident_key = ?,
+            status = 'dismissed',
+            resolved_at = COALESCE(resolved_at, ?)
+        WHERE id = ?
+      `).run(incidentKey, now, duplicate.id);
+      dismissed += 1;
+    }
+  }
+
+  return dismissed;
+}
+
+export function countInboxItems(
+  status: SupervisorInboxStatus = 'human_required',
+  options: { includeAllProjects?: boolean; projectId?: string | null } = {},
+): number {
+  ensureSupervisorInboxTable();
+  collapseActiveInboxIncidents();
+  const projectId = options.projectId ?? getActiveProjectScopeForRepoSync().projectId;
+
+  const row = options.includeAllProjects
+    ? getSqlite()
+      .prepare('SELECT COUNT(*) AS count FROM supervisor_inbox WHERE status = ?')
+      .get(status) as { count?: number } | undefined
+    : getSqlite()
+      .prepare('SELECT COUNT(*) AS count FROM supervisor_inbox WHERE status = ? AND project_id = ?')
+      .get(status, projectId) as { count?: number } | undefined;
 
   return row?.count ?? 0;
 }
@@ -291,7 +450,7 @@ export function selfHealActiveByKindAndRepo(kind: SupervisorInboxKind, repoPath:
 export function runRetentionSweep(nowMs = Date.now()): number {
   ensureSupervisorInboxTable();
   const rows = getSqlite().prepare(`
-    SELECT id, repo_path, packet_id, kind, payload, created_at, status, resolved_at
+    SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
     FROM supervisor_inbox
     WHERE status IN ('pending', 'human_required')
   `).all() as SupervisorInboxRow[];
@@ -307,17 +466,30 @@ export function runRetentionSweep(nowMs = Date.now()): number {
   return dismissed;
 }
 
-export function listInboxItems(options: { includeDismissed?: boolean } = {}): SupervisorInboxItem[] {
+export function listInboxItems(options: {
+  includeDismissed?: boolean;
+  includeAllProjects?: boolean;
+  projectId?: string | null;
+} = {}): SupervisorInboxItem[] {
   ensureSupervisorInboxTable();
-  const projectId = getActiveProjectScopeForRepoSync().projectId;
+  collapseActiveInboxIncidents();
+  const projectId = options.projectId ?? getActiveProjectScopeForRepoSync().projectId;
 
-  const rows = getSqlite().prepare(`
-    SELECT id, project_id, repo_path, packet_id, kind, payload, created_at, status, resolved_at
-    FROM supervisor_inbox
-    WHERE project_id = ?
-      ${options.includeDismissed ? '' : `AND status != 'dismissed'`}
-    ORDER BY created_at DESC
-  `).all(projectId) as SupervisorInboxRow[];
+  const rows = options.includeAllProjects
+    ? getSqlite().prepare(`
+      SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
+      FROM supervisor_inbox
+      WHERE 1 = 1
+        ${options.includeDismissed ? '' : `AND status != 'dismissed'`}
+      ORDER BY datetime(last_seen_at) DESC, datetime(created_at) DESC
+    `).all() as SupervisorInboxRow[]
+    : getSqlite().prepare(`
+      SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
+      FROM supervisor_inbox
+      WHERE project_id = ?
+        ${options.includeDismissed ? '' : `AND status != 'dismissed'`}
+      ORDER BY datetime(last_seen_at) DESC, datetime(created_at) DESC
+    `).all(projectId) as SupervisorInboxRow[];
 
   const lanes = listLanes();
   const laneByPacketId = new Map(lanes.flatMap((lane) => (
@@ -362,7 +534,9 @@ export function listInboxItems(options: { includeDismissed?: boolean } = {}): Su
         ?? stringValue(payload.errorMessage)
         ?? stringValue(payload.retryHandoffError)
         ?? stringValue(payload.summary)
-        ?? stringValue(payload.verificationOutput),
+        ?? stringValue(payload.verificationOutput)
+        ?? stringValue(payload.error)
+        ?? stringValue(payload.note),
       );
 
       return {
@@ -370,8 +544,11 @@ export function listInboxItems(options: { includeDismissed?: boolean } = {}): Su
         repoPath: row.repo_path,
         packetId: row.packet_id,
         kind: row.kind,
+        incidentKey: incidentKeyForRow(row),
         payload,
         createdAt: row.created_at,
+        lastSeenAt: row.last_seen_at ?? row.created_at,
+        repeatCount: Math.max(1, row.repeat_count ?? 1),
         status: row.status,
         resolvedAt: row.resolved_at,
         packetTitle,
@@ -390,6 +567,53 @@ export function listInboxItems(options: { includeDismissed?: boolean } = {}): Su
       if (statusDiff !== 0) {
         return statusDiff;
       }
-      return right.createdAt.localeCompare(left.createdAt);
+      return right.lastSeenAt.localeCompare(left.lastSeenAt);
     });
+}
+
+export interface SupervisorInboxSummary {
+  active: number;
+  humanRequired: number;
+  pending: number;
+  healing: number;
+  selfHealed: number;
+  dismissed: number;
+  total: number;
+}
+
+export function summarizeInboxItems(items: SupervisorInboxItem[]): SupervisorInboxSummary {
+  return items.reduce<SupervisorInboxSummary>((summary, item) => {
+    summary.total += 1;
+    switch (item.status) {
+      case 'human_required':
+        summary.humanRequired += 1;
+        summary.active += 1;
+        break;
+      case 'pending':
+        summary.pending += 1;
+        summary.active += 1;
+        break;
+      case 'healing':
+        summary.healing += 1;
+        summary.active += 1;
+        break;
+      case 'self_healed':
+        summary.selfHealed += 1;
+        break;
+      case 'dismissed':
+        summary.dismissed += 1;
+        break;
+      default:
+        break;
+    }
+    return summary;
+  }, {
+    active: 0,
+    humanRequired: 0,
+    pending: 0,
+    healing: 0,
+    selfHealed: 0,
+    dismissed: 0,
+    total: 0,
+  });
 }

@@ -9,9 +9,10 @@ import { ChecksTab } from './tabs/ChecksTab';
 import { CommitsTab } from './tabs/CommitsTab';
 import { ReviewsTab } from './tabs/ReviewsTab';
 import { usePrDetail } from './usePrDetail';
+import { O8ScratchChat } from '../o8-panel/workspace-rail/O8ScratchChat';
 import type { PrPanelProps, PrTabId } from './types';
 
-export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, onClose }: PrPanelProps) {
+export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onClose }: PrPanelProps) {
   const { detail, loading, error } = usePrDetail(prNumber, repoSlug);
   const [activeTab, setActiveTab] = useState<PrTabId>('changes');
   const [summaryExpanded, setSummaryExpanded] = useState(false);
@@ -81,6 +82,14 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, onClose }: Pr
         baseRefName={detail.baseRefName}
         headRefName={detail.headRefName}
         url={detail.url}
+        actions={(
+          <O8ScratchChat
+            repoPath={repoPath ?? null}
+            selectedFile={null}
+            surface="diff"
+            placement="review-toolbar"
+          />
+        )}
         onClose={onClose}
       />
       <PrPanelTitle

@@ -29,13 +29,32 @@ interface CategoryRow {
   tokens: number;
 }
 
+function approxPayloadTokens(value: unknown): number {
+  if (value == null) return 0;
+  if (typeof value === 'string') return approxTokens(value);
+  try {
+    return approxTokens(JSON.stringify(value));
+  } catch {
+    return approxTokens(String(value));
+  }
+}
+
 function tokensFor(entry: MobileTranscriptEntry): number {
   if (typeof entry.compaction?.tokensAfter === 'number') {
     return entry.compaction.tokensAfter;
   }
+  if (entry.tokens) {
+    return Math.max(1, (entry.tokens.input ?? 0) + (entry.tokens.output ?? 0));
+  }
   const textTokens = approxTokens(entry.text ?? '');
   const thinkingTokens = entry.thinking ? approxTokens(entry.thinking) : 0;
-  const toolTokens = (entry.toolCalls ?? []).reduce((sum, call) => sum + approxTokens(call.name ?? ''), 0);
+  const toolTokens = (entry.toolCalls ?? []).reduce((sum, call) => {
+    return sum
+      + approxTokens(call.name ?? '')
+      + approxPayloadTokens(call.args)
+      + approxPayloadTokens(call.preview)
+      + approxPayloadTokens(call.result);
+  }, 0);
   return Math.max(1, textTokens + thinkingTokens + toolTokens);
 }
 
@@ -44,6 +63,14 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   const [anchor, setAnchor] = useState<{ left: number; bottom: number; width: number } | null>(null);
+  const residency = useOrchestratorContextResidency();
+  const estimatedConversationTokens = useMemo(() => {
+    const messages = residency?.messages ?? [];
+    return messages.reduce((sum, entry) => sum + tokensFor(entry), 0);
+  }, [residency?.messages]);
+  const estimatedTotal = SYSTEM_PROMPT_TOKENS + TOOLS_TOKENS + estimatedConversationTokens;
+  const effectiveRunningTotal = Math.max(runningTotal, estimatedTotal);
+  const usingEstimate = runningTotal <= 0 && effectiveRunningTotal > 0;
 
   const handleToggle = useCallback(() => {
     onClick?.();
@@ -82,11 +109,13 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
     };
   }, [open]);
 
-  const percent = Math.round((Math.max(0, Math.min(CONTEXT_LIMIT, runningTotal)) / CONTEXT_LIMIT) * 100);
+  const percent = Math.round((Math.max(0, Math.min(CONTEXT_LIMIT, effectiveRunningTotal)) / CONTEXT_LIMIT) * 100);
   const tone = percent >= 85 ? 'critical' : percent >= 60 ? 'warning' : 'idle';
-  const label = `${meterLabel(runningTotal)} / 1M · ${percent}%`;
-  const fill = Math.max(0, Math.min(8, Math.ceil((percent / 100) * 8)));
-  const fillColor = tone === 'critical' ? '#FF5A1F' : tone === 'warning' ? 'var(--t-text-muted)' : 'var(--t-text-faint)';
+  const label = `${meterLabel(effectiveRunningTotal)} / 1M · ${percent}%`;
+  const ringColor = tone === 'critical' ? '#FF5A1F' : tone === 'warning' ? 'var(--t-text-muted)' : 'var(--t-text-faint)';
+  const circumference = 43.98;
+  const dashOffset = circumference - ((Math.max(0, Math.min(100, percent)) / 100) * circumference);
+  const titlePrefix = usingEstimate ? 'Estimated context usage' : 'Context usage';
 
   return (
     <>
@@ -94,21 +123,56 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
         ref={buttonRef}
         type="button"
         onClick={handleToggle}
-        title={tokenCount > 0 ? `Context usage ${label} · +${meterLabel(tokenCount)} last turn` : `Context usage ${label}`}
+        aria-label={tokenCount > 0 ? `${titlePrefix} ${label}. ${meterLabel(tokenCount)} tokens added last turn.` : `${titlePrefix} ${label}.`}
+        data-context-meter
+        title={tokenCount > 0 ? `${titlePrefix} ${label} · +${meterLabel(tokenCount)} last turn` : `${titlePrefix} ${label}`}
         style={{
-          height: 26, maxWidth: 280, paddingTop: 0, paddingRight: 8, paddingBottom: 0, paddingLeft: 8, borderRadius: 8, borderWidth: 1, borderStyle: 'solid',
-          borderColor: open ? 'var(--t-text-muted)' : tone === 'critical' ? '#FF5A1F' : 'var(--t-border)', background: 'transparent',
-          color: tone === 'critical' ? '#FF5A1F' : 'var(--t-text-muted)',
-          display: 'inline-flex', alignItems: 'center', gap: 8, cursor: 'pointer', minWidth: 0, fontSize: 11.5, fontWeight: 400, letterSpacing: '0.01em',
-          whiteSpace: 'nowrap', fontVariantNumeric: 'tabular-nums', fontFamily: MONO_STACK,
-          transition: 'border-color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+          width: 24,
+          height: 24,
+          paddingTop: 0,
+          paddingRight: 0,
+          paddingBottom: 0,
+          paddingLeft: 0,
+          borderRadius: 999,
+          borderWidth: 0,
+          background: open ? 'var(--t-hover)' : 'transparent',
+          color: ringColor,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          flexShrink: 0,
+          transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+        onMouseEnter={(event) => {
+          if (!open) event.currentTarget.style.background = 'var(--t-hover)';
+        }}
+        onMouseLeave={(event) => {
+          if (!open) event.currentTarget.style.background = 'transparent';
         }}
       >
-        <span aria-hidden="true" style={{ width: 6, height: 6, borderRadius: 999, flexShrink: 0, background: tone === 'idle' ? 'var(--t-text-faint)' : '#FF5A1F' }} />
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
-          {Array.from({ length: 8 }, (_, segment) => <span key={segment} aria-hidden="true" style={{ width: 8, height: 6, borderRadius: 2, background: segment < fill ? fillColor : 'var(--t-divider-subtle)' }} />)}
-        </span>
-        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
+        <svg width={17} height={17} viewBox="0 0 18 18" aria-hidden="true" style={{ display: 'block', transform: 'rotate(-90deg)' }}>
+          <circle
+            cx="9"
+            cy="9"
+            r="7"
+            fill="none"
+            stroke="var(--t-divider-subtle)"
+            strokeWidth="3"
+          />
+          <circle
+            cx="9"
+            cy="9"
+            r="7"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="3"
+            strokeLinecap="round"
+            strokeDasharray={circumference}
+            strokeDashoffset={dashOffset}
+            opacity={percent > 0 ? 1 : 0}
+          />
+        </svg>
       </button>
       {open && anchor && typeof document !== 'undefined'
         ? createPortal(
@@ -116,7 +180,7 @@ export function ContextMeter({ tokenCount, runningTotal, onClick }: { tokenCount
             ref={popoverRef}
             anchorLeft={anchor.left}
             anchorBottom={anchor.bottom}
-            runningTotal={runningTotal}
+            runningTotal={effectiveRunningTotal}
             onClose={() => setOpen(false)}
           />,
           document.body,
@@ -200,7 +264,7 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
           paddingLeft: 14,
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.005em', color: 'var(--t-text)' }}>
+        <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0', color: 'var(--t-text)' }}>
           Context
         </span>
         <button

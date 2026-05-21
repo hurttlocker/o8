@@ -4,21 +4,16 @@ import type { RepoFocusTabId } from './types';
 import { REPO_FOCUS_FONT } from './utils';
 
 const DEFAULT_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
+  { id: 'control', label: 'Control' },
   { id: 'chats', label: 'Chats' },
-  { id: 'agents', label: 'Packets' },
-  { id: 'context', label: 'Context' },
-  { id: 'mission', label: 'Mission' },
-  { id: 'spec', label: 'o8.md' },
-  { id: 'files', label: 'Files' },
 ];
 
 interface RepoTabsProps {
   activeTab: RepoFocusTabId;
   onTabChange: (tab: RepoFocusTabId) => void;
   /**
-   * Tabs to render — defaults to the full 5-tab repo set. The project
-   * panel passes a 4-tab list (no o8.md) when the panel is in
-   * project-wide mode.
+   * Tabs to render — defaults to the repo-focus control set. Workspace
+   * notes live in the main o8 panel, not this left-panel surface.
    */
   tabs?: Array<{ id: RepoFocusTabId; label: string }>;
 }
@@ -38,10 +33,10 @@ export function RepoTabs({ activeTab, onTabChange, tabs = DEFAULT_TABS }: RepoTa
         borderBottomWidth: 1,
         borderBottomStyle: 'solid',
         borderBottomColor: 'var(--t-divider-subtle)',
-        background: 'color-mix(in srgb, var(--t-panel) 92%, transparent)',
-        paddingTop: 4,
+        background: 'color-mix(in srgb, var(--t-panel) 70%, transparent)',
+        paddingTop: 2,
         paddingRight: 10,
-        paddingBottom: 4,
+        paddingBottom: 2,
         paddingLeft: 10,
         overflowX: 'auto',
         scrollbarWidth: 'none',
@@ -58,7 +53,7 @@ export function RepoTabs({ activeTab, onTabChange, tabs = DEFAULT_TABS }: RepoTa
             onClick={() => onTabChange(tab.id)}
             style={{
               position: 'relative',
-              minHeight: 28,
+              minHeight: 24,
               borderWidth: 0,
               background: 'transparent',
               color: selected ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text-muted)',
@@ -68,9 +63,9 @@ export function RepoTabs({ activeTab, onTabChange, tabs = DEFAULT_TABS }: RepoTa
               fontWeight: selected ? 620 : 500,
               letterSpacing: '-0.01em',
               paddingTop: 0,
-              paddingRight: 10,
+              paddingRight: 8,
               paddingBottom: 0,
-              paddingLeft: 10,
+              paddingLeft: 8,
               whiteSpace: 'nowrap',
             }}
           >
@@ -80,9 +75,9 @@ export function RepoTabs({ activeTab, onTabChange, tabs = DEFAULT_TABS }: RepoTa
                 aria-hidden
                 style={{
                   position: 'absolute',
-                  left: 10,
-                  right: 10,
-                  bottom: 2,
+                  left: 8,
+                  right: 8,
+                  bottom: 0,
                   height: 2,
                   borderRadius: 999,
                   background: 'var(--t-brand-orange, #FF5A1F)',
