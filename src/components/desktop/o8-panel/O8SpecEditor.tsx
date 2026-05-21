@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import { EditorState, StateField, StateEffect, Annotation, type Extension, type Range } from '@codemirror/state';
 import { EditorView, Decoration, WidgetType, keymap, type DecorationSet } from '@codemirror/view';
 import { defaultKeymap, history, historyKeymap } from '@codemirror/commands';
@@ -404,9 +405,18 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
         <div style={{ width: RAIL_W, flexShrink: 0 }} />
       </div>
       {fontReady && notes.map((n) => (
-        <div key={n.id} style={{ position: 'absolute', top: n.top, right: 0, width: RAIL_W - 16, paddingLeft: 14 }}>
+        // Keyed by id, so framer-motion only runs the enter on NEWLY mounted
+        // notes (what a review just added) — existing notes don't re-animate on
+        // recompute. They settle in from the margin: fade + a small slide.
+        <motion.div
+          key={n.id}
+          initial={{ opacity: 0, x: 10 }}
+          animate={{ opacity: 1, x: 0 }}
+          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+          style={{ position: 'absolute', top: n.top, right: 0, width: RAIL_W - 16, paddingLeft: 14 }}
+        >
           <MarginNote note={n} onResolve={resolveSuggestion} onResolveComment={resolveComment} onReply={replyToComment} />
-        </div>
+        </motion.div>
       ))}
     </div>
   );
