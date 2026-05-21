@@ -43,6 +43,7 @@ import {
   handleSpecComment,
   handleSpecReply,
   handleSpecResolve,
+  handleSpecSuggest,
 } from '@/lib/mcp/operator-handlers/spec';
 import {
   MISSION_TOOLS,
@@ -530,6 +531,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_spec_comment: handleSpecComment,
   o8_spec_reply: handleSpecReply,
   o8_spec_resolve: handleSpecResolve,
+  o8_spec_suggest: handleSpecSuggest,
   o8_register_repo: handleRegisterRepo,
   o8_init_repo: handleInitRepo,
   o8_create_project: handleCreateProject,

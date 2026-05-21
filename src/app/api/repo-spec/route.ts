@@ -7,7 +7,7 @@ import {
   appendRoughdraftReply,
   markRoughdraftResolved,
 } from '@/lib/o8md/rfm';
-import { appendComment } from '@/lib/o8md/mutate';
+import { appendComment, insertSuggestion, type SuggestionKind } from '@/lib/o8md/mutate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -141,6 +141,32 @@ export async function POST(request: NextRequest) {
       const updated = appendComment(current, {
         body: body_,
         ...(anchor !== undefined ? { anchor } : {}),
+        ...(author !== undefined ? { author } : {}),
+      });
+      if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
+        return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+      }
+      writeFileSync(specPath, updated, 'utf-8');
+      const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
+      return NextResponse.json({ ok: true, id: newId, path: specPath });
+    }
+
+    if (action === 'suggest') {
+      const rawKind = body?.kind;
+      if (rawKind !== 'add' && rawKind !== 'del' && rawKind !== 'sub') {
+        return NextResponse.json({ ok: false, error: 'kind must be add, del, or sub' }, { status: 400 });
+      }
+      const kind: SuggestionKind = rawKind;
+      const anchor = typeof body?.anchor === 'string' ? body.anchor : undefined;
+      const text = typeof body?.text === 'string' ? body.text : undefined;
+      const replacement = typeof body?.replacement === 'string' ? body.replacement : undefined;
+      const author = typeof body?.author === 'string' ? body.author : undefined;
+      const beforeIds = new Set(extractRoughdraftReviewIndex(current).items.map((i) => i.id));
+      const updated = insertSuggestion(current, {
+        kind,
+        ...(anchor !== undefined ? { anchor } : {}),
+        ...(text !== undefined ? { text } : {}),
+        ...(replacement !== undefined ? { replacement } : {}),
         ...(author !== undefined ? { author } : {}),
       });
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {

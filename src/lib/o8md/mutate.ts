@@ -39,15 +39,26 @@ function assertSafeAttributeValue(value: string, field: string): void {
   }
 }
 
-/** Next document-local comment id (c1, c2, …). Comments and replies share the
- *  `c` prefix in RFM; suggestions use `s`. Mirrors the parser's nextCommentId. */
-function nextCommentId(markdown: string): string {
+/** Reject marker content that would close a CriticMarkup marker early. */
+function guardMarkerText(value: string): void {
+  const match = value.match(CRITICMARKUP_CLOSE_DELIMITER);
+  if (match) {
+    throw new Error(
+      `Text contains CriticMarkup close delimiter "${match[0]}". Rewrite without raw CriticMarkup delimiters.`,
+    );
+  }
+}
+
+/** Next document-local id for a prefix. Comments + replies share `c`;
+ *  suggestions use `s`. Mirrors the parser's id scheme. */
+function nextId(markdown: string, prefix: 'c' | 's'): string {
+  const pattern = new RegExp(`^${prefix}(\\d+)$`);
   let max = 0;
   for (const item of extractRoughdraftReviewIndex(markdown).items) {
-    const match = /^c(\d+)$/.exec(item.id);
+    const match = pattern.exec(item.id);
     if (match) max = Math.max(max, Number.parseInt(match[1], 10));
   }
-  return `c${max + 1}`;
+  return `${prefix}${max + 1}`;
 }
 
 function serializeMetadata(attrs: Record<string, string>): string {
@@ -66,17 +77,12 @@ function serializeMetadata(attrs: Record<string, string>): string {
  * or an anchor that isn't found.
  */
 export function appendComment(markdown: string, options: AppendCommentOptions): string {
-  const match = options.body.match(CRITICMARKUP_CLOSE_DELIMITER);
-  if (match) {
-    throw new Error(
-      `Comment text contains CriticMarkup close delimiter "${match[0]}". Rewrite without raw CriticMarkup delimiters.`,
-    );
-  }
+  guardMarkerText(options.body);
   const author = options.author ?? 'AI';
   assertSafeAttributeValue(author, 'author');
 
   const metadata = serializeMetadata({
-    id: nextCommentId(markdown),
+    id: nextId(markdown, 'c'),
     by: author,
     at: new Date().toISOString(),
   });
@@ -94,4 +100,78 @@ export function appendComment(markdown: string, options: AppendCommentOptions): 
   // Standalone note appended at the end, on its own line.
   const separator = markdown.length === 0 || markdown.endsWith('\n') ? '' : '\n';
   return `${markdown}${separator}${comment}\n`;
+}
+
+export type SuggestionKind = 'add' | 'del' | 'sub';
+
+export interface InsertSuggestionOptions {
+  kind: SuggestionKind;
+  /** Literal text in the doc. Required for `del`/`sub` (the text to cut/replace);
+   *  for `add`, optional insert-after point (omit to append at end). */
+  anchor?: string;
+  /** The added text. Required for `add`; ignored for del/sub. */
+  text?: string;
+  /** The replacement text. Required for `sub`; ignored for add/del. */
+  replacement?: string;
+  /** Author label. Defaults to "AI". */
+  author?: string;
+}
+
+/**
+ * Splice a CriticMarkup SUGGESTION (proposed edit) into o8.md — a non-destructive
+ * proposal the operator accepts or rejects; the original text is preserved inside
+ * the marker. Splice-only. Suggestion ids use the `s` prefix.
+ *
+ *   add → {++text++}{meta}                   (at anchor, else appended)
+ *   del → {--anchor--}{meta}                  (proposes cutting the anchor)
+ *   sub → {~~anchor~>replacement~~}{meta}     (proposes replacing the anchor)
+ *
+ * Throws on: marker text with a raw close delimiter, an unsafe author, a missing
+ * required field for the kind, an anchor that isn't found, or a `~>` inside a
+ * substitution operand (which would confuse the old/new split).
+ */
+export function insertSuggestion(markdown: string, options: InsertSuggestionOptions): string {
+  const author = options.author ?? 'AI';
+  assertSafeAttributeValue(author, 'author');
+  const meta = () => serializeMetadata({ id: nextId(markdown, 's'), by: author, at: new Date().toISOString() });
+
+  const spliceAtAnchor = (anchor: string, marker: string): string => {
+    const at = markdown.indexOf(anchor);
+    if (at === -1) throw new Error(`Anchor text not found in o8.md: ${JSON.stringify(anchor)}`);
+    return `${markdown.slice(0, at)}${marker}${markdown.slice(at + anchor.length)}`;
+  };
+
+  if (options.kind === 'sub') {
+    const original = options.anchor;
+    const replacement = options.replacement;
+    if (!original) throw new Error('sub suggestion requires `anchor` (the original text to replace)');
+    if (replacement === undefined) throw new Error('sub suggestion requires `replacement` (the new text)');
+    guardMarkerText(original);
+    guardMarkerText(replacement);
+    if (original.includes('~>') || replacement.includes('~>')) {
+      throw new Error('substitution text must not contain "~>"');
+    }
+    return spliceAtAnchor(original, `{~~${original}~>${replacement}~~}${meta()}`);
+  }
+
+  if (options.kind === 'del') {
+    const anchor = options.anchor;
+    if (!anchor) throw new Error('del suggestion requires `anchor` (the text to delete)');
+    guardMarkerText(anchor);
+    return spliceAtAnchor(anchor, `{--${anchor}--}${meta()}`);
+  }
+
+  // add
+  const text = options.text;
+  if (!text) throw new Error('add suggestion requires `text` (the text to add)');
+  guardMarkerText(text);
+  const marker = `{++${text}++}${meta()}`;
+  if (options.anchor !== undefined && options.anchor !== '') {
+    const at = markdown.indexOf(options.anchor);
+    if (at === -1) throw new Error(`Anchor text not found in o8.md: ${JSON.stringify(options.anchor)}`);
+    const insertAt = at + options.anchor.length;
+    return `${markdown.slice(0, insertAt)}${marker}${markdown.slice(insertAt)}`;
+  }
+  const separator = markdown.length === 0 || markdown.endsWith('\n') ? '' : '\n';
+  return `${markdown}${separator}${marker}\n`;
 }
