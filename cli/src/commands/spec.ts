@@ -12,6 +12,7 @@
  *   o8 spec comment  [--repo <path>] --body "<msg>" [--anchor "<text>"] [--by AI]
  *   o8 spec reply    [--repo <path>] --to <id> --body "<msg>" [--by AI]
  *   o8 spec resolve  [--repo <path>] --id <id> [--summary "<txt>"]
+ *   o8 spec suggest  [--repo <path>] --kind add|del|sub --anchor "<text>" [--text "<add>"] [--new "<replacement>"]
  */
 
 import { apiFetch, CliError, EXIT } from '../api.js';
@@ -41,6 +42,9 @@ interface SpecArgs {
   anchor?: string;
   summary?: string;
   by?: string;
+  kind?: string;
+  text?: string;
+  replacement?: string;
 }
 
 function parseSpecArgs(rest: string[]): SpecArgs {
@@ -59,6 +63,9 @@ function parseSpecArgs(rest: string[]): SpecArgs {
       case 'anchor': out.anchor = val; break;
       case 'summary': out.summary = val; break;
       case 'by': out.by = val; break;
+      case 'kind': out.kind = val; break;
+      case 'text': out.text = val; break;
+      case 'new': out.replacement = val; break;
       default: break;
     }
   }
@@ -140,12 +147,25 @@ export async function runSpec(mode: OutputMode, sub: string | undefined, rest: s
       printJson({ schema: 'o8/cli/spec-resolve/v1', ok: true });
       return EXIT.OK;
     }
+    case 'suggest': {
+      if (args.kind !== 'add' && args.kind !== 'del' && args.kind !== 'sub') {
+        throw new CliError('invalid_args', 'o8 spec suggest requires --kind add|del|sub.', EXIT.INVALID_ARGS);
+      }
+      const res = await apiFetch<{ ok?: boolean; id?: string; error?: string }>(cfg, base, {
+        method: 'POST',
+        query: { repoPath: args.repo, action: 'suggest' },
+        body: { kind: args.kind, anchor: args.anchor, text: args.text, replacement: args.replacement },
+      });
+      if (!res.data?.ok) throw new CliError('suggest_failed', res.data?.error ?? 'suggest rejected', EXIT.CONFLICT);
+      printJson({ schema: 'o8/cli/spec-suggest/v1', ok: true, id: res.data.id });
+      return EXIT.OK;
+    }
     default:
       throw new CliError(
         'unknown_subcommand',
         `Unknown spec subcommand: ${sub ?? '(none)'}`,
         EXIT.INVALID_ARGS,
-        'Try: read | index | pending | check | comment | reply | resolve',
+        'Try: read | index | pending | check | comment | reply | resolve | suggest',
       );
   }
 }
