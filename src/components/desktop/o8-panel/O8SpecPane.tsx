@@ -5,7 +5,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties }
 import { useTheme } from '@/lib/theme/context';
 import { O8SpecEditor } from './O8SpecEditor';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
-import { useOrchestratorData } from '../orchestrator-data-context';
 
 interface O8SpecPaneProps {
   repoPath?: string | null;
@@ -61,28 +60,46 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
   // else any CSS color string (a rainbow hue OR a neutral swatch incl. black).
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [customColor, setCustomColor] = useState<string | null>(null);
-  const orchestratorData = useOrchestratorData();
-  // Click-first review trigger: hand the orchestrator the doc + ask it to
-  // annotate via the o8_spec_* tools. (Auto-review-on-pause comes later.)
-  const requestReview = useCallback(() => {
-    if (!repoPath || !orchestratorData?.onAcceptDirectiveProposal) return;
-    orchestratorData.onAcceptDirectiveProposal({
-      id: `spec-review-${Date.now()}`,
-      text: `Review the o8.md for this repo (${repoPath}).
-
-1. First read it: call o8_spec_read with repoPath="${repoPath}".
-2. Glance at recent commits/issues so you know what's actually shipped vs. still open.
-3. Comment ONLY where there's something real to say — bar: "would this change what I do or know?" Skip proofreading and the obvious; a few sharp notes beat a wall. Best notes: a stale item that already shipped ("landed in v0.1.151 — can cross off"), a decision worth revisiting, a buried question, something that contradicts a recent commit.
-4. Anchor each note to an exact phrase from the doc. Use o8_spec_comment for a pointer/thought; o8_spec_suggest for a concrete edit (add/del/sub).
-
-Voice: a sharp teammate scribbling in the margin — keep each note to 1-2 short sentences, terse. No paragraphs, no preamble. Don't rewrite my prose. Pass repoPath="${repoPath}" to every o8_spec_* call.`,
-    });
-  }, [repoPath, orchestratorData]);
+  const [reviewing, setReviewing] = useState(false);
   const debounceRef = useRef<number | null>(null);
   // Last content we know o8.md holds on disk. Lets a background poll adopt the
   // orchestrator's annotations without a manual reload — and never clobber the
   // operator's unsaved edits (we only swap when local === last-saved).
   const serverContentRef = useRef('');
+
+  // Sparkle → headless one-shot review. An LLM turn server-side annotates o8.md
+  // and writes the markers; it never touches the orchestrator session, so
+  // nothing shows in the chat. New notes land on the rail — we refetch the
+  // annotated doc immediately (the 4s poll is the backstop).
+  const requestReview = useCallback(async () => {
+    if (!repoPath || reviewing) return;
+    setReviewing(true);
+    setError(null);
+    try {
+      const res = await fetch(`/api/repo-spec?action=review&repoPath=${encodeURIComponent(repoPath)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: '{}',
+      });
+      const data = await res.json();
+      if (!data?.ok) {
+        setError(typeof data?.error === 'string' ? data.error : 'Review failed');
+        return;
+      }
+      // Pull the freshly annotated doc in now — only when there are no unsaved
+      // local edits to clobber (same guard as the background poll).
+      const fresh = await fetch(`/api/repo-spec?repoPath=${encodeURIComponent(repoPath)}`).then((r) => r.json()).catch(() => null);
+      if (fresh?.ok && typeof fresh.content === 'string' && content === serverContentRef.current) {
+        serverContentRef.current = fresh.content;
+        setContent(fresh.content);
+        setLoadedContent(fresh.content);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setReviewing(false);
+    }
+  }, [repoPath, reviewing, content]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 5_000);
@@ -284,11 +301,11 @@ Voice: a sharp teammate scribbling in the margin — keep each note to 1-2 short
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            color: error ? 'var(--t-brand-red)' : 'var(--t-chat-surface-text-muted)',
+            color: error ? 'var(--t-brand-red)' : reviewing ? noteColor : 'var(--t-chat-surface-text-muted)',
             fontSize: 11,
             fontWeight: 600,
           }}>
-            Shared with agents · {status}
+            {reviewing ? 'o8 is reading your notes…' : `Shared with agents · ${status}`}
           </div>
         </div>
         <TitleBarButton
