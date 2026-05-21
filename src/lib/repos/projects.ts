@@ -127,8 +127,10 @@ async function readRawLedger(): Promise<ProjectsLedger | null> {
       ))
       .map(normalizeProjectRecord);
     if (projects.length === 0) return null;
-    const activeProjectId = typeof parsed.activeProjectId === 'string'
-      && projects.some((p) => p.id === parsed.activeProjectId)
+    // Preserve the stored active id even if it isn't among the stored project
+    // records — it may reference an appended SQLite project or a virtual
+    // single-repo project. getProjectsLedger finalizes it against the projection.
+    const activeProjectId = typeof parsed.activeProjectId === 'string' && parsed.activeProjectId
       ? parsed.activeProjectId
       : projects[0]!.id;
     return { projects, activeProjectId };
@@ -139,7 +141,13 @@ async function readRawLedger(): Promise<ProjectsLedger | null> {
 
 async function writeLedger(ledger: ProjectsLedger) {
   ensureDir();
-  await writeFile(PROJECTS_PATH, JSON.stringify(ledger, null, 2), 'utf8');
+  // Never persist virtual single-repo projections (id 'repo:*') — they're
+  // derived at read time from unassigned pool repos.
+  const persistable: ProjectsLedger = {
+    ...ledger,
+    projects: ledger.projects.filter((p) => !p.id.startsWith('repo:')),
+  };
+  await writeFile(PROJECTS_PATH, JSON.stringify(persistable, null, 2), 'utf8');
 }
 
 async function bootstrapDefaultLedger(): Promise<ProjectsLedger> {
@@ -162,7 +170,18 @@ async function bootstrapDefaultLedger(): Promise<ProjectsLedger> {
 export async function getProjectsLedger(): Promise<ProjectsLedger> {
   const existing = await readRawLedger();
   const base = existing ?? await bootstrapDefaultLedger();
-  return enrichLedgerWithSqliteRepoPaths(base);
+  const enriched = await enrichLedgerWithSqliteRepoPaths(base);
+  // Finalize the active id against the FULL projected list (incl. appended +
+  // virtual single-repo projects). If it's missing, or it's the legacy default
+  // while a concrete project exists, prefer a concrete (non-virtual) project.
+  const hasActive = enriched.projects.some((p) => p.id === enriched.activeProjectId);
+  if (!hasActive || enriched.activeProjectId === DEFAULT_PROJECT_ID) {
+    const concrete = enriched.projects.find((p) => p.id !== DEFAULT_PROJECT_ID && !p.id.startsWith('repo:'))
+      ?? enriched.projects.find((p) => p.id !== DEFAULT_PROJECT_ID)
+      ?? enriched.projects[0];
+    if (concrete) return { ...enriched, activeProjectId: concrete.id };
+  }
+  return enriched;
 }
 
 /**
@@ -226,6 +245,24 @@ async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<
     colorIndex += 1;
   }
 
+  // Single-repo projection: any pool repo not in ANY project surfaces as its own
+  // single-repo project so it's switchable and behaves as just that repo — until
+  // more repos get added to it, which promotes it to a real multi-repo project.
+  // These are virtual (id 'repo:<id>'); writeLedger never persists them.
+  const assignedPaths = new Set(projects.flatMap((p) => p.repoPaths.map(normalizeRepoPath)));
+  for (const repo of repos) {
+    const repoPath = normalizeRepoPath(repo.localPath);
+    if (assignedPaths.has(repoPath)) continue;
+    projects.push({
+      id: `repo:${repo.id}`,
+      name: repo.name,
+      repoPaths: [repoPath],
+      createdAt: repo.addedAt ?? nowIso(),
+      color: PROJECT_COLOR_PALETTE[colorIndex % PROJECT_COLOR_PALETTE.length],
+    });
+    colorIndex += 1;
+  }
+
   return { ...ledger, projects };
 }
 
@@ -244,8 +281,10 @@ export function getProjectsLedgerSync(): ProjectsLedger {
       ))
       .map(normalizeProjectRecord);
     if (projects.length === 0) throw new Error('Empty projects ledger');
-    const activeProjectId = typeof parsed.activeProjectId === 'string'
-      && projects.some((p) => p.id === parsed.activeProjectId)
+    // Preserve the stored active id even if it isn't among the stored project
+    // records — it may reference an appended SQLite project or a virtual
+    // single-repo project. getProjectsLedger finalizes it against the projection.
+    const activeProjectId = typeof parsed.activeProjectId === 'string' && parsed.activeProjectId
       ? parsed.activeProjectId
       : projects[0]!.id;
     return { projects, activeProjectId };
