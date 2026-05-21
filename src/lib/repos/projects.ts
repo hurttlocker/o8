@@ -89,6 +89,14 @@ function preferConcreteActiveProject(ledger: ProjectsLedger): ProjectsLedger {
   return concreteProject ? { ...ledger, activeProjectId: concreteProject.id } : ledger;
 }
 
+/** The effective active project — concrete project preferred over the legacy
+ *  `default` so the agent context resolves the same project the dashboard shows. */
+function resolveActiveProject(ledger: ProjectsLedger): ProjectRecord {
+  const preferred = preferConcreteActiveProject(ledger);
+  return preferred.projects.find((candidate) => candidate.id === preferred.activeProjectId)
+    ?? preferred.projects[0]!;
+}
+
 function ensureDir() {
   if (!existsSync(PROJECTS_DIR)) {
     mkdirSync(PROJECTS_DIR, { recursive: true });
@@ -174,23 +182,42 @@ async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<
   }
   const repoById = new Map(repos.map((repo) => [repo.id, repo]));
 
+  const pathsFor = (sp: (typeof sqliteProjects)[number]) => sp.repos
+    .map((link) => repoById.get(link.repoId)?.localPath ?? null)
+    .filter((repoPath): repoPath is string => Boolean(repoPath?.trim()))
+    .map(normalizeRepoPath);
+
   const repoPathsBySlug = new Map<string, string[]>();
   for (const sp of sqliteProjects) {
-    const paths = sp.repos
-      .map((link) => repoById.get(link.repoId)?.localPath ?? null)
-      .filter((repoPath): repoPath is string => Boolean(repoPath?.trim()))
-      .map(normalizeRepoPath);
-    repoPathsBySlug.set(sp.slug, paths);
+    repoPathsBySlug.set(sp.slug, pathsFor(sp));
   }
 
-  return {
-    ...ledger,
-    projects: ledger.projects.map((project) => {
-      const slug = projectNameToSlug(project.name);
-      const fresh = repoPathsBySlug.get(slug);
-      return fresh !== undefined ? { ...project, repoPaths: fresh } : project;
-    }),
-  };
+  // Override matched projects' repoPaths from SQLite (the canonical membership store).
+  const ledgerSlugs = new Set(ledger.projects.map((project) => projectNameToSlug(project.name)));
+  const projects: ProjectRecord[] = ledger.projects.map((project) => {
+    const slug = projectNameToSlug(project.name);
+    const fresh = repoPathsBySlug.get(slug);
+    return fresh !== undefined ? { ...project, repoPaths: fresh } : project;
+  });
+
+  // Project SQLite projects the ledger doesn't know about (e.g. created in the
+  // Settings dialog) so the dashboard sees EVERY real project — not just the
+  // ones the panel rail created. Without this, a Settings-curated project is
+  // orphaned and the dashboard keeps showing a stale one.
+  let colorIndex = projects.length;
+  for (const sp of sqliteProjects) {
+    if (ledgerSlugs.has(sp.slug)) continue;
+    projects.push({
+      id: sp.id,
+      name: sp.name,
+      repoPaths: pathsFor(sp),
+      createdAt: new Date(sp.createdAt ?? Date.now()).toISOString(),
+      color: PROJECT_COLOR_PALETTE[colorIndex % PROJECT_COLOR_PALETTE.length],
+    });
+    colorIndex += 1;
+  }
+
+  return { ...ledger, projects };
 }
 
 export function getProjectsLedgerSync(): ProjectsLedger {
@@ -237,10 +264,11 @@ export interface ActiveProjectScope {
 
 export function getActiveProjectScopeForRepoSync(repoPath?: string | null): ActiveProjectScope {
   const ledger = getProjectsLedgerSync();
-  const activeProject = ledger.projects.find((candidate) => candidate.id === ledger.activeProjectId)
-    ?? ledger.projects[0]!;
+  const activeProject = resolveActiveProject(ledger);
   const project = repoPath
-    ? ledger.projects.find((candidate) => repoPathBelongsToProject(candidate, repoPath)) ?? activeProject
+    ? (repoPathBelongsToProject(activeProject, repoPath)
+        ? activeProject
+        : ledger.projects.find((candidate) => repoPathBelongsToProject(candidate, repoPath)) ?? activeProject)
     : activeProject;
   const repoInActiveProject = repoPath ? repoPathBelongsToProject(project, repoPath) : false;
   return {
@@ -254,10 +282,11 @@ export function getActiveProjectScopeForRepoSync(repoPath?: string | null): Acti
 
 export async function getActiveProjectScopeForRepo(repoPath?: string | null): Promise<ActiveProjectScope> {
   const ledger = await getProjectsLedger();
-  const activeProject = ledger.projects.find((candidate) => candidate.id === ledger.activeProjectId)
-    ?? ledger.projects[0]!;
+  const activeProject = resolveActiveProject(ledger);
   const project = repoPath
-    ? ledger.projects.find((candidate) => repoPathBelongsToProject(candidate, repoPath)) ?? activeProject
+    ? (repoPathBelongsToProject(activeProject, repoPath)
+        ? activeProject
+        : ledger.projects.find((candidate) => repoPathBelongsToProject(candidate, repoPath)) ?? activeProject)
     : activeProject;
   const repoInActiveProject = repoPath ? repoPathBelongsToProject(project, repoPath) : false;
   return {
