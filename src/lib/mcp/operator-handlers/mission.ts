@@ -15,9 +15,12 @@ import {
 } from '@/lib/mcp/operator-mission-tools';
 import { getPacketScope } from '@/lib/lanes/scope';
 import {
+  archiveTask,
   blockTask,
   claimTask,
+  createTask,
   dispatchTask,
+  pruneTask,
   reportTask,
 } from '@/lib/tasks/actions';
 import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
@@ -205,6 +208,57 @@ export const MISSION_TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'o8_task_create',
+    description:
+      'Create a project-backed task in the o8 task pool. This creates a queued packet in the existing packet/lane control plane; it does not spawn a worker until o8_task_dispatch is called.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        title: {
+          type: 'string',
+          description: 'Short task title.',
+        },
+        summary: {
+          type: 'string',
+          description: 'Optional task detail or brief.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Optional project id or slug. If omitted, o8 resolves the active project.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Optional absolute repo path for the current repo.',
+        },
+        workerIntent: {
+          type: 'string',
+          enum: ['light_worker', 'heavy_worker', 'reviewer', 'diagnostic', 'orchestrator'],
+          description: 'Desired worker type. Production still selects Codex as the runtime.',
+        },
+        requestedProvider: {
+          type: 'string',
+          enum: ['codex', 'kimi', 'minimax', 'claude', 'gemini', 'opencode'],
+          description: 'Future provider hint. Preserved in routing metadata; production still selects Codex.',
+        },
+        requestedRuntime: {
+          type: 'string',
+          enum: ['codex', 'claude-code', 'gemini', 'opencode'],
+          description: 'Future runtime hint. Preserved in routing metadata; production still selects Codex.',
+        },
+        model: {
+          type: 'string',
+          description: 'Optional model hint. Only Codex model hints can affect production routing today.',
+        },
+        allowedFiles: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Optional allowed file hints for the packet brief.',
+        },
+      },
+      required: ['title'],
+    },
+  },
+  {
     name: 'o8_task_brief',
     description:
       'Return one project-backed task brief for a packet or lane id. Use this when a worker needs the exact main repo, current repo, related repo, and output policy before editing.',
@@ -381,6 +435,60 @@ export const MISSION_TOOLS: McpTool[] = [
         metadata: {
           type: 'object',
           description: 'Optional structured metadata to attach to the report.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Optional project id or slug filter.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Optional absolute repo path filter.',
+        },
+      },
+      required: ['taskId'],
+    },
+  },
+  {
+    name: 'o8_task_archive',
+    description:
+      'Archive a stale task-pool row by archiving its lane and marking its packet archived. Use this to prune old session_lost or launch_error rows from active ready/running pools while preserving history.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Packet id, lane id, or task id.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Optional cleanup reason.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Optional project id or slug filter.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Optional absolute repo path filter.',
+        },
+      },
+      required: ['taskId'],
+    },
+  },
+  {
+    name: 'o8_task_prune',
+    description:
+      'Permanently prune a done/archived task-pool row after the work is genuinely complete. Removes the terminal packet and lane from the visible pool, so use archive first for active or stale rows.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        taskId: {
+          type: 'string',
+          description: 'Packet id, lane id, or task id.',
+        },
+        reason: {
+          type: 'string',
+          description: 'Optional cleanup reason.',
         },
         projectId: {
           type: 'string',
@@ -821,6 +929,30 @@ export async function handleTaskList(args: Record<string, unknown>): Promise<Mcp
   }
 }
 
+export async function handleTaskCreate(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const allowedFiles = Array.isArray(args.allowedFiles)
+      ? args.allowedFiles.map((entry) => (typeof entry === 'string' ? entry.trim() : '')).filter(Boolean)
+      : null;
+    const result = await createTask({
+      actor: 'orchestrator',
+      title: requiredString(args, 'title'),
+      summary: optionalString(args, 'summary') || null,
+      projectId: optionalString(args, 'projectId') || null,
+      repoPath: optionalString(args, 'repoPath') || null,
+      model: optionalString(args, 'model') || null,
+      workerIntent: optionalString(args, 'workerIntent') || null,
+      requestedProvider: optionalString(args, 'requestedProvider') || null,
+      requestedRuntime: optionalString(args, 'requestedRuntime') || null,
+      allowedFiles,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_task_create failed: ${errorText(error)}`);
+    return textResult(`Failed to create task: ${errorText(error)}`, true);
+  }
+}
+
 export async function handleTaskBrief(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const taskId = requiredString(args, 'taskId');
@@ -920,6 +1052,36 @@ export async function handleTaskReport(args: Record<string, unknown>): Promise<M
   } catch (error) {
     console.error(`${'[mcp-operator]'} o8_task_report failed: ${errorText(error)}`);
     return textResult(`Failed to report task: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleTaskArchive(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const result = await archiveTask(requiredString(args, 'taskId'), {
+      actor: 'orchestrator',
+      reason: optionalString(args, 'reason') || null,
+      projectId: optionalString(args, 'projectId') || null,
+      repoPath: optionalString(args, 'repoPath') || null,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_task_archive failed: ${errorText(error)}`);
+    return textResult(`Failed to archive task: ${errorText(error)}`, true);
+  }
+}
+
+export async function handleTaskPrune(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const result = await pruneTask(requiredString(args, 'taskId'), {
+      actor: 'orchestrator',
+      reason: optionalString(args, 'reason') || null,
+      projectId: optionalString(args, 'projectId') || null,
+      repoPath: optionalString(args, 'repoPath') || null,
+    });
+    return jsonResult(result);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_task_prune failed: ${errorText(error)}`);
+    return textResult(`Failed to prune task: ${errorText(error)}`, true);
   }
 }
 

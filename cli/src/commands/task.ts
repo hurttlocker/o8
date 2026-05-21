@@ -94,7 +94,7 @@ interface TaskDetail {
 interface TaskMutation {
   schema: 'o8/task.mutation/v1';
   ok: boolean;
-  action: 'claim' | 'dispatch' | 'block' | 'report';
+  action: 'create' | 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune';
   taskId: string;
   packetId: string | null;
   laneId: string | null;
@@ -108,6 +108,8 @@ interface TaskMutation {
 const VALUE_FLAGS = new Set([
   '--project',
   '--repo',
+  '--title',
+  '--summary',
   '--note',
   '--message',
   '--model',
@@ -300,6 +302,47 @@ export async function runTaskBrief(mode: OutputMode, rest: string[]): Promise<nu
   return 0;
 }
 
+export async function runTaskCreate(mode: OutputMode, rest: string[]): Promise<number> {
+  const title = readFlagValue(rest, '--title') ?? positionalArgs(rest).join(' ').trim();
+  if (!title) {
+    throw new CliError(
+      'invalid_args',
+      'o8 task create requires --title or a title argument.',
+      EXIT.INVALID_ARGS,
+      'Example: o8 task create --title "Wire task pool actions" --repo /path/to/repo',
+    );
+  }
+
+  const cfg = resolveConfig();
+  const res = await apiFetch<TaskMutation>(
+    cfg,
+    '/api/tasks',
+    {
+      method: 'POST',
+      body: {
+        actor: 'orchestrator',
+        title,
+        summary: readFlagValue(rest, '--summary') ?? readFlagValue(rest, '--message'),
+        projectId: readFlagValue(rest, '--project'),
+        repoPath: readFlagValue(rest, '--repo'),
+        model: readFlagValue(rest, '--model'),
+        workerIntent: readFlagValue(rest, '--worker'),
+        requestedProvider: readFlagValue(rest, '--provider'),
+        requestedRuntime: readFlagValue(rest, '--runtime'),
+      },
+    },
+  );
+  if (!res.data) {
+    throw new CliError('invalid_response', 'Server returned an empty create result.', EXIT.INVALID_ARGS);
+  }
+  if (mode.human) {
+    printHumanMutation(res.data);
+  } else {
+    printJson(res.data);
+  }
+  return 0;
+}
+
 export async function runTaskClaim(mode: OutputMode, rest: string[]): Promise<number> {
   return runTaskMutation(mode, 'claim', rest, {
     actor: 'orchestrator',
@@ -350,5 +393,23 @@ export async function runTaskReport(mode: OutputMode, rest: string[]): Promise<n
     status: readFlagValue(rest, '--status'),
     reason: readFlagValue(rest, '--reason'),
     message: readFlagValue(rest, '--message'),
+  });
+}
+
+export async function runTaskArchive(mode: OutputMode, rest: string[]): Promise<number> {
+  return runTaskMutation(mode, 'archive', rest, {
+    actor: 'orchestrator',
+    projectId: readFlagValue(rest, '--project'),
+    repoPath: readFlagValue(rest, '--repo'),
+    reason: readFlagValue(rest, '--reason'),
+  });
+}
+
+export async function runTaskPrune(mode: OutputMode, rest: string[]): Promise<number> {
+  return runTaskMutation(mode, 'prune', rest, {
+    actor: 'orchestrator',
+    projectId: readFlagValue(rest, '--project'),
+    repoPath: readFlagValue(rest, '--repo'),
+    reason: readFlagValue(rest, '--reason'),
   });
 }

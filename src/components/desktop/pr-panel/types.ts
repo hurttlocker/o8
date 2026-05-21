@@ -74,5 +74,6 @@ export type CheckBucket = 'failing' | 'running' | 'passed' | 'neutral' | 'skippe
 export interface PrPanelProps {
   prNumber: number;
   repoSlug?: string | null;
+  repoPath?: string | null;
   onClose: () => void;
 }

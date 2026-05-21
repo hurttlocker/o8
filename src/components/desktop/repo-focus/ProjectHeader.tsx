@@ -1,14 +1,13 @@
 'use client';
 
 import type { ProjectRecord } from '../repo-registry/useProjects';
-import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { REPO_FOCUS_FONT } from './utils';
 
 interface ProjectHeaderProps {
   project: ProjectRecord;
   repoCount: number;
   packets: OrchestratorPacket[];
-  missionState?: OrchestratorMissionState;
   onBack: () => void;
 }
 
@@ -41,12 +40,13 @@ function rollUpPackets(packets: OrchestratorPacket[]): { running: number; awaiti
   return { running, awaitingReview };
 }
 
-export function ProjectHeader({ project, repoCount, packets, missionState, onBack }: ProjectHeaderProps) {
+export function ProjectHeader({ project, repoCount, packets, onBack }: ProjectHeaderProps) {
   const { running, awaitingReview } = rollUpPackets(packets);
   const repoSentence = `${repoCount} repo${repoCount === 1 ? '' : 's'}`;
   const packetSentence = running > 0 || awaitingReview > 0
-    ? `${running} running · ${awaitingReview} awaiting review`
-    : missionState?.summary?.split('\n')[0]?.trim() || 'No active work';
+    ? `${running} running · ${awaitingReview} review`
+    : null;
+  const subtitle = packetSentence ? `${repoSentence} · ${packetSentence}` : repoSentence;
 
   return (
     <header
@@ -81,12 +81,10 @@ export function ProjectHeader({ project, repoCount, packets, missionState, onBac
             color: 'var(--t-text-muted)',
             cursor: 'pointer',
             flexShrink: 0,
-            transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1), transform 80ms ease-out',
+            transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
           onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text)'; }}
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-muted)'; }}
-          onMouseDown={(e) => { e.currentTarget.style.transform = 'scale(0.94)'; }}
-          onMouseUp={(e) => { e.currentTarget.style.transform = 'scale(1)'; }}
         >
           <BackChevron />
         </button>
@@ -143,7 +141,7 @@ export function ProjectHeader({ project, repoCount, packets, missionState, onBac
               textOverflow: 'ellipsis',
             }}
           >
-            {repoSentence} · {packetSentence}
+            {subtitle}
           </div>
         </div>
       </div>

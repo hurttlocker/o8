@@ -9,6 +9,8 @@ import {
   updateRepo,
   validateRepo,
 } from '@/lib/repos/registry';
+import { removeRepoPathFromProjects } from '@/lib/repos/projects';
+import { removeRepoFromAllProjects } from '@/lib/projects/store';
 import { enrichRepoReadiness, enrichRepoReadinessList } from '@/lib/repos/readiness';
 import { triggerScan, triggerScanIfStale, startChangePolling, stopChangePolling } from '@/lib/skeleton/autoscan';
 import { clearRepo as clearSkeletonCache } from '@/lib/skeleton/store';
@@ -213,6 +215,8 @@ export async function DELETE(request: Request) {
 
     // Clean up skeleton/chunk cache + stop polling for this repo
     if (toRemove?.localPath) {
+      await removeRepoPathFromProjects(toRemove.localPath);
+      removeRepoFromAllProjects(toRemove.id);
       removeWorkspaceLifecycleRecordsForRepoPath(toRemove.localPath);
       pruneTerminalStateForRepoPath(toRemove.localPath);
       clearSkeletonCache(toRemove.localPath);

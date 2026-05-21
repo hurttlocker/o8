@@ -515,8 +515,32 @@ export function describeWorkspaceChatTab(tab: TerminalTab) {
   return {
     fullSummary,
     summary,
+    repoLabel,
     detail: detailParts.filter((value): value is string => Boolean(value)).join(' · ') || null,
   };
+}
+
+export function workspaceConversationHeaderLabel(tab: TerminalTab) {
+  const meta = describeWorkspaceChatTab(tab);
+  if (!meta) return null;
+  const repoLabel = meta.repoLabel ?? tab.repo?.name ?? null;
+  const tabLabel = tab.label?.trim() ?? '';
+  const title = tabLabel
+    && !/^ad\s*hoc/i.test(tabLabel)
+    && !/^chat-/i.test(tabLabel)
+    && tabLabel !== 'Assistant'
+    && tabLabel !== 'Agent'
+    && tabLabel !== 'Chat'
+    && tabLabel !== 'Orchestrator'
+    ? tabLabel
+    : meta.fullSummary
+    ?? meta.summary
+    ?? workspaceTabPrimaryLabel(tab);
+  if (!title) return repoLabel;
+  if (repoLabel && title !== repoLabel && !title.startsWith(`${repoLabel} /`)) {
+    return `${repoLabel} / ${title}`;
+  }
+  return title;
 }
 
 export function workspaceTabPrimaryLabel(tab: TerminalTab) {

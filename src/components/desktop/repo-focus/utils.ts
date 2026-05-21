@@ -94,8 +94,8 @@ const TERMINAL_PACKET_STATUSES = new Set(['released', 'archived', 'merged']);
 
 /**
  * True when the packet is live work the operator should see in the
- * Agents tab. Released / archived / merged packets graduate to the
- * Mission tab (history) and drop out of the live list.
+ * Control tab. Released / archived / merged packets graduate into
+ * archived history and drop out of the live list.
  *
  * Failed packets count as live so the operator notices them.
  */
@@ -109,8 +109,8 @@ export function isLivePacket(packet: OrchestratorPacket): boolean {
 
 /** Any released / archived / merged / failed packet — the per-repo
  *  archive of work that's already shipped (or stalled). Lives behind
- *  the merged drawer in AgentsTab, sorted newest-first. No time cap;
- *  the operator should see every concluded packet for the repo. */
+ *  collapsed history in Control/Mission surfaces, sorted newest-first.
+ *  No time cap; the operator should see every concluded packet for the repo. */
 export function isConcluded(packet: OrchestratorPacket): boolean {
   const release = (packet.releaseState ?? '').toLowerCase();
   const status = (packet.status ?? '').toLowerCase();

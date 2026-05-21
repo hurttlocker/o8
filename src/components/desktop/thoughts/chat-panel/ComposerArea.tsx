@@ -1,8 +1,7 @@
 'use client';
 
-import { forwardRef, isValidElement, useEffect, useId, useMemo, useRef, useState } from 'react';
-import { InputButtons, ThinkingChip, type ThinkingEffort } from '../InputButtons';
-import { useTokenEstimate } from '../useTokenEstimate';
+import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { PendingSteerCard, type PendingSteer } from './PendingSteerCard';
 import type { ThoughtsChatPermissionMode } from './types';
@@ -10,20 +9,7 @@ import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobi
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
-import { formatTokens } from '@/lib/util/format-tokens';
 import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useThoughtsComposerAttachments';
-
-const compactUsdFormatter = new Intl.NumberFormat('en-US', {
-  style: 'currency',
-  currency: 'USD',
-  minimumFractionDigits: 2,
-  maximumFractionDigits: 2,
-});
-
-interface FooterMeterSlotProps {
-  onClick?: () => void;
-  runningTotal?: number;
-}
 
 function formatElapsed(ms: number): string {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -345,16 +331,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   }
 
   const activeSlashCommand = slashSuggestions[Math.min(activeSlashIndex, Math.max(0, slashSuggestions.length - 1))] ?? null;
-  const footerLeadingSlot = showReasoningControls ? (
-    <ThinkingChip effort={effort} adaptiveEnabled={adaptiveEnabled} onChange={onEffortChange} />
-  ) : hasAssistantActivity ? <span>{displayMessagesCount} messages</span> : null;
-  const footerMeterProps = isValidElement<FooterMeterSlotProps>(footerMeterSlot) ? footerMeterSlot.props : null;
-  const tokenEstimate = useTokenEstimate({
-    enabled: showReasoningControls,
-    input,
-    model: modelLabel,
-    runningTotal: footerMeterProps?.runningTotal ?? 0,
-  });
+  const footerLeadingSlot = hasAssistantActivity && !showReasoningControls ? <span>{displayMessagesCount} messages</span> : null;
 
   const updateInput = (nextValue: string) => {
     if (dismissedSlashInput !== null && dismissedSlashInput !== nextValue) {
@@ -795,52 +772,17 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             workspaceTargets={workspaceTargets}
             selectedRepoPath={selectedRepoPath}
             onSelectRepoPath={onSelectRepoPath}
+            inlineLeadingExtras={composerLeadingExtras}
+            inlineMeterSlot={showReasoningControls ? footerMeterSlot : null}
           />
         </div>
       </div>
 
-      {footerLeadingSlot || composerLeadingExtras || footerMeterSlot ? (
+      {footerLeadingSlot ? (
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10, paddingTop: 6, paddingLeft: 2, paddingRight: 2, fontSize: 10, color: 'var(--t-text-faint)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 }}>
             {footerLeadingSlot}
-            {composerLeadingExtras}
           </div>
-          {tokenEstimate || footerMeterSlot ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 10, minWidth: 0, flexWrap: 'wrap' }}>
-              {tokenEstimate ? (
-                <button
-                  type="button"
-                  onClick={() => { footerMeterProps?.onClick?.(); }}
-                  title={`Projected next turn: ${formatTokens(tokenEstimate.projectedTokens).replace(/K$/u, 'k')} tokens · ${tokenEstimate.projectedPercent}% of context`}
-                  style={{
-                    borderWidth: 0,
-                    background: 'transparent',
-                    color: tokenEstimate.warnAtContextThreshold ? '#FF5A1F' : 'var(--t-text-faint)',
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    cursor: footerMeterProps?.onClick ? 'pointer' : 'default',
-                    minWidth: 0,
-                    fontSize: 11,
-                    fontWeight: 500,
-                    whiteSpace: 'nowrap',
-                    fontVariantNumeric: 'tabular-nums',
-                    fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace",
-                    paddingTop: 0,
-                    paddingRight: 0,
-                    paddingBottom: 0,
-                    paddingLeft: 0,
-                  }}
-                >
-                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                    {`~${formatTokens(tokenEstimate.projectedTokens).replace(/K$/u, 'k')} tokens`}
-                    {tokenEstimate.costUsd !== null ? ` · ~${compactUsdFormatter.format(tokenEstimate.costUsd)}` : ''}
-                  </span>
-                </button>
-              ) : null}
-              {footerMeterSlot ? <div style={{ display: 'flex', alignItems: 'center', flexShrink: 0 }}>{footerMeterSlot}</div> : null}
-            </div>
-          ) : null}
         </div>
       ) : null}
     </div>

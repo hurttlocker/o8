@@ -19,7 +19,13 @@ fn main() {
   if feature_on {
     if template.exists() {
       let contents = fs::read_to_string(&template).expect("read capabilities/mcp.json.in");
-      let _ = fs::write(&target, contents);
+      let should_write = fs::read_to_string(&target)
+        .map(|existing| existing != contents)
+        .unwrap_or(true);
+
+      if should_write {
+        let _ = fs::write(&target, contents);
+      }
     }
   } else if target.exists() {
     let _ = fs::remove_file(&target);

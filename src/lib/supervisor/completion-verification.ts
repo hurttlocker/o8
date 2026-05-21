@@ -107,23 +107,13 @@ export async function autoCommitCompletionWorktree(cwd: string): Promise<boolean
     return false;
   }
 
-  await execFileAsync(
-    'git',
-    [
-      'add',
-      '-A',
-      '--',
-      '.',
-      ':!node_modules',
-      ':!.next',
-      ':!dist',
-      ':!out',
-      ':!coverage',
-      ':!artifacts',
-      ':!.cortex-worktrees',
-    ],
-    { cwd, maxBuffer: COMMAND_MAX_BUFFER },
-  );
+  // `git status --porcelain` does not include ignored directories by default.
+  // Passing explicit negative pathspecs for ignored dirs makes Git error when
+  // those dirs exist, which is exactly what automation worktrees contain.
+  await execFileAsync('git', ['add', '-A', '--', '.'], {
+    cwd,
+    maxBuffer: COMMAND_MAX_BUFFER,
+  });
   await execFileAsync('git', ['commit', '--no-verify', '-m', 'auto-commit: agent work before review'], {
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,

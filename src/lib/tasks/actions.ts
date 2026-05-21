@@ -1,6 +1,10 @@
 import 'server-only';
 
+import { randomUUID } from 'node:crypto';
+
 import {
+  archiveLane,
+  deleteLane,
   findLaneByPacket,
   getLane,
   setLaneStatus,
@@ -17,16 +21,17 @@ import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import type { AgentReportReason, Lane, LaneEventActor } from '@/lib/lane/types';
 import { PRODUCTION_AGENT_RUNTIME, resolveWorkerRouting } from '@/lib/agents/routing';
 import { withLockedState } from '@/lib/orchestrator/control-plane';
+import { nextPacketReferenceLabel } from '@/lib/orchestrator/store';
 import type {
   OrchestratorLaneBinding,
   OrchestratorPacket,
   OrchestratorPacketStatus,
   WorkerRouting,
 } from '@/lib/orchestrator/types';
-import { getProjectContext } from '@/lib/projects/context';
+import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import { getTaskPoolTask, type TaskPoolTask } from './pool';
 
-export type TaskMutationAction = 'claim' | 'dispatch' | 'block' | 'report';
+export type TaskMutationAction = 'create' | 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune';
 
 export interface TaskMutationResult {
   schema: 'o8/task.mutation/v1';
@@ -46,6 +51,21 @@ export interface TaskMutationInput {
   actor?: LaneEventActor;
   projectId?: string | null;
   repoPath?: string | null;
+}
+
+export interface TaskCreateInput extends TaskMutationInput {
+  title: string;
+  summary?: string | null;
+  model?: string | null;
+  workerIntent?: string | null;
+  requestedProvider?: string | null;
+  requestedRuntime?: string | null;
+  allowedFiles?: string[] | null;
+  sourceIssue?: {
+    number?: number | null;
+    body?: string | null;
+    url?: string | null;
+  } | null;
 }
 
 export interface TaskClaimInput extends TaskMutationInput {
@@ -73,6 +93,14 @@ export interface TaskReportInput extends TaskMutationInput {
   metadata?: Record<string, unknown> | null;
 }
 
+export interface TaskArchiveInput extends TaskMutationInput {
+  reason?: string | null;
+}
+
+export interface TaskPruneInput extends TaskMutationInput {
+  reason?: string | null;
+}
+
 export class TaskMutationError extends Error {
   constructor(
     public status: number,
@@ -85,6 +113,22 @@ export class TaskMutationError extends Error {
 
 function nowIso() {
   return new Date().toISOString();
+}
+
+function slugifyTask(value: string): string {
+  return value
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40)
+    || 'task';
+}
+
+function normalizeAllowedFiles(value: string[] | null | undefined): string[] {
+  if (!Array.isArray(value)) return [];
+  return [...new Set(value.map((entry) => entry.trim()).filter(Boolean))].slice(0, 50);
 }
 
 function normalizeActor(actor: LaneEventActor | undefined): LaneEventActor {
@@ -242,6 +286,110 @@ function buildDispatchPrompt(task: TaskPoolTask, workerRouting: WorkerRouting, m
   ].filter((line): line is string => Boolean(line)).join('\n\n');
 }
 
+export async function createTask(input: TaskCreateInput): Promise<TaskMutationResult> {
+  const title = input.title?.trim();
+  if (!title) {
+    throw new TaskMutationError(400, 'title is required.');
+  }
+
+  const context = await getProjectContext({
+    projectId: input.projectId ?? null,
+    repoPath: input.repoPath ?? null,
+  });
+  const targetRepo = context.currentRepo ?? context.primaryRepo;
+  if (!targetRepo) {
+    throw new TaskMutationError(409, 'No repo available for this project task.');
+  }
+
+  const repoPath = targetRepo.localPath;
+  const summary = input.summary?.trim() || title;
+  const now = nowIso();
+  const workerRouting = resolveWorkerRouting({
+    workerIntent: input.workerIntent,
+    requestedProvider: input.requestedProvider,
+    requestedRuntime: input.requestedRuntime,
+    requestedModel: input.model,
+    source: 'task-create',
+  });
+  const allowedFiles = normalizeAllowedFiles(input.allowedFiles);
+  const taskBrief = buildProjectTaskBrief(context, {
+    repoPath,
+    taskTitle: title,
+    taskBody: summary,
+  });
+  const packetId = `pkt-${randomUUID()}`;
+  const sourceIssueNumber = typeof input.sourceIssue?.number === 'number' && Number.isFinite(input.sourceIssue.number)
+    ? Math.trunc(input.sourceIssue.number)
+    : null;
+  const branchTarget = sourceIssueNumber
+    ? `issue/${sourceIssueNumber}-${slugifyTask(title)}-${randomUUID().replace(/-/g, '').slice(0, 6)}`
+    : `agent/${slugifyTask(title)}-${randomUUID().replace(/-/g, '').slice(0, 6)}`;
+
+  await withLockedState((current) => {
+    const packet: OrchestratorPacket = {
+      id: packetId,
+      referenceLabel: nextPacketReferenceLabel(current.packets),
+      title,
+      summary,
+      workspaceTargetPath: repoPath,
+      branchTarget,
+      runtime: workerRouting.selectedRuntime,
+      dependencyLabels: [],
+      dependencyPacketIds: [],
+      queueState: 'queued',
+      releaseState: 'pending',
+      status: 'queued',
+      attemptCount: 0,
+      maxAttempts: 3,
+      blockedReason: null,
+      lastEventAt: now,
+      lastEventLabel: 'task_created',
+      archivedAt: null,
+      review: null,
+      lane: null,
+      workerIntent: workerRouting.workerIntent,
+      workerRouting,
+      issue: input.sourceIssue ? {
+        number: sourceIssueNumber ?? undefined,
+        body: input.sourceIssue.body ?? summary,
+        url: input.sourceIssue.url ?? undefined,
+      } : null,
+      prompt: [
+        '## Project Brief',
+        taskBrief,
+        '## Task',
+        summary,
+      ].join('\n\n'),
+      ...(allowedFiles.length > 0 ? { allowedFiles, predictedFiles: allowedFiles } : {}),
+    };
+
+    current.packets.push(packet);
+    if (!current.missionId) current.missionId = `task-pool-${Date.now().toString(36)}`;
+    if (!current.prompt) current.prompt = `Task pool for ${context.name}`;
+    if (!current.summary) current.summary = `Task pool for ${context.name}.`;
+    if (!current.repoPath) current.repoPath = repoPath;
+    if (!current.runtime) current.runtime = workerRouting.selectedRuntime;
+    current.updatedAt = now;
+  });
+
+  const freshTask = await getTaskPoolTask(packetId, {
+    projectId: context.id,
+    repoPath,
+  });
+
+  return {
+    schema: 'o8/task.mutation/v1',
+    ok: true,
+    action: 'create',
+    taskId: packetId,
+    packetId,
+    laneId: null,
+    note: `Task added to ${context.name}.`,
+    workerRouting,
+    task: freshTask,
+  };
+}
+
 export async function claimTask(taskId: string, input: TaskClaimInput = {}): Promise<TaskMutationResult> {
   const actor = normalizeActor(input.actor);
   const task = await resolveTask(taskId, input);
@@ -393,4 +541,71 @@ export async function reportTask(taskId: string, input: TaskReportInput = {}): P
     eventId: report.event.id,
     statusChanged: report.statusChanged,
   });
+}
+
+export async function archiveTask(taskId: string, input: TaskArchiveInput = {}): Promise<TaskMutationResult> {
+  const actor = normalizeActor(input.actor);
+  const task = await resolveTask(taskId, input);
+  const lane = task.laneId ? getLane(task.laneId) : task.packetId ? findLaneByPacket(task.packetId) : null;
+  const archivedAt = nowIso();
+  const note = input.reason?.trim() || 'Archived from task pool cleanup.';
+  let archivedLane: Lane | null = null;
+
+  if (lane) {
+    archivedLane = archiveLane(lane.id, actor);
+  }
+
+  if (task.packetId) {
+    await withLockedState((state) => {
+      const packet = state.packets.find((candidate) => candidate.id === task.packetId);
+      if (!packet) return null;
+      packet.status = 'archived';
+      packet.queueState = 'held';
+      packet.blockedReason = null;
+      packet.archivedAt = archivedAt;
+      packet.lastEventAt = archivedAt;
+      packet.lastEventLabel = 'archived';
+      if (packet.lane) {
+        packet.lane.lastEventAt = archivedAt;
+        packet.lane.lastEventLabel = 'archived';
+      }
+      state.updatedAt = archivedAt;
+      return null;
+    });
+  }
+
+  if (!task.packetId && !lane) {
+    throw new TaskMutationError(404, `Lane not found for task ${task.id}`);
+  }
+
+  return mutationResult('archive', task, archivedLane, note, { statusChanged: true });
+}
+
+export async function pruneTask(taskId: string, input: TaskPruneInput = {}): Promise<TaskMutationResult> {
+  const task = await resolveTask(taskId, input);
+  if (task.group !== 'done') {
+    throw new TaskMutationError(409, `Task ${task.id} is ${task.group}; archive it before pruning.`);
+  }
+
+  const lane = task.laneId ? getLane(task.laneId) : task.packetId ? findLaneByPacket(task.packetId) : null;
+  const note = input.reason?.trim() || 'Pruned terminal task-pool row.';
+  const prunedAt = nowIso();
+
+  if (task.packetId) {
+    await withLockedState((state) => {
+      const before = state.packets.length;
+      state.packets = state.packets.filter((packet) => packet.id !== task.packetId);
+      if (state.packets.length !== before) {
+        state.updatedAt = prunedAt;
+      }
+      return null;
+    });
+  }
+
+  const deletedLane = lane ? deleteLane(lane.id) : null;
+  if (!task.packetId && !deletedLane) {
+    throw new TaskMutationError(404, `Lane not found for task ${task.id}`);
+  }
+
+  return mutationResult('prune', task, deletedLane, note, { statusChanged: true });
 }

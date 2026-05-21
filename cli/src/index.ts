@@ -30,12 +30,14 @@ import { runPacketScope } from './commands/packet/scope.js';
 import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
 import { runSpec } from './commands/spec.js';
 import {
+  runTaskArchive,
   runTaskBlock,
   runTaskBrief,
   runTaskClaim,
   runTaskCreate,
   runTaskDispatch,
   runTaskList,
+  runTaskPrune,
   runTaskReport,
 } from './commands/task.js';
 import { printError, type OutputMode } from './output.js';
@@ -97,6 +99,8 @@ commands:
   task dispatch <id>   launch the claimed task through Codex-only routing
   task block <id>      mark a task blocked with --reason
   task report <id>     append a structured task progress event
+  task archive <id>    prune/archive stale task-pool rows
+  task prune <id>      permanently remove done/archived task-pool rows
   packet info          info about the packet bound to the current worktree
   packet scope [id]    one-call worker context (auto-resolves from cwd)
   packet heartbeat     update the current packet lane heartbeat
@@ -154,6 +158,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'dispatch') return runTaskDispatch(args.mode, args.rest);
       if (secondary === 'block') return runTaskBlock(args.mode, args.rest);
       if (secondary === 'report') return runTaskReport(args.mode, args.rest);
+      if (secondary === 'archive') return runTaskArchive(args.mode, args.rest);
+      if (secondary === 'prune') return runTaskPrune(args.mode, args.rest);
       throw unknownSubcommandError('task', secondary);
     }
     case 'packet': {

@@ -43,6 +43,8 @@ export interface ImperativeHandleDeps {
     draftReason?: string;
     targetSessionKey?: string;
   }) => string;
+  openWorkspaceOrchestratorTab: () => string;
+  openWorkspaceTerminalTab: (agentId: string, repo?: RegisteredRepo) => string;
   openWorkspaceInspectorTab: (canvasTab: NonNullable<TerminalTab['canvasTab']>, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
   persistTabsNow: (currentTabs: TerminalTab[], currentActiveId: string) => void;
   sendTerminalDetach: (sessionName: string) => void;
@@ -85,6 +87,8 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     isRestoreSettled: () => deps.restoreSettledRef.current,
     openCliChatSession: (options) => deps.openWorkspaceCliChatSession(options),
     openLlmChatSession: (options) => deps.openWorkspaceLlmChatSession(options ?? {}),
+    openOrchestratorTab: () => deps.openWorkspaceOrchestratorTab(),
+    openTerminalTab: (repo) => deps.openWorkspaceTerminalTab('shell', repo),
     openHistoryChat: (historyTabId, title, historyRepo) => {
       const currentTab = deps.tabsRef.current.find((tab) => tab.id === deps.activeTabId)
         ?? deps.tabsRef.current.find((tab) => tab.kind === 'llm-chat')
@@ -93,7 +97,11 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       const newTab = buildHistoryChatTab(currentTab, historyTabId, title, historyRepo);
       const previous = deps.tabsRef.current;
       const nextTabs = previous.some((tab) => tab.id === historyTabId)
-        ? previous
+        ? previous.map((tab) => (
+            tab.id === historyTabId
+              ? { ...tab, label: title, repo: newTab.repo ?? tab.repo }
+              : tab
+          ))
         : [...previous, newTab];
       deps.tabsRef.current = nextTabs;
       deps.setTabs(nextTabs);

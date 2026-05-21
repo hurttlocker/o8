@@ -14,6 +14,7 @@ import type { TerminalHandle } from '@/components/desktop/LiveOutput';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
+import type { Lane, LaneStatus } from '@/lib/lane/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
 import {
@@ -65,6 +66,83 @@ interface WorkspaceTerminalTarget {
   handle: TerminalTabHandle;
 }
 
+function isAutomationLane(lane: Pick<Lane, 'label'>): boolean {
+  return lane.label.trim().toLowerCase().startsWith('[automation]');
+}
+
+function cleanAutomationLaneTitle(label: string): string {
+  return label.replace(/^\[automation\]\s*/i, '').trim() || 'Automation run';
+}
+
+function automationLaneStatus(status: LaneStatus): MobileInboxSnapshot['sessions'][number]['status'] {
+  switch (status) {
+    case 'running':
+      return 'running';
+    case 'launching':
+    case 'recovering':
+      return 'waiting';
+    case 'awaiting_input':
+    case 'awaiting_orchestrator':
+    case 'failed':
+      return 'blocked';
+    case 'reviewing':
+    case 'merging':
+      return 'reviewing';
+    case 'completed':
+      return 'completed';
+    default:
+      return 'idle';
+  }
+}
+
+function buildAutomationLaneSession(lane: Lane): MobileInboxSnapshot['sessions'][number] {
+  const sessionKey = lane.sessionKey ?? `automation-lane:${lane.id}`;
+  const title = cleanAutomationLaneTitle(lane.label);
+  const lastEventAt = lane.lastEventAt ?? lane.updatedAt ?? lane.createdAt;
+  const parsedUpdatedAt = Date.parse(lane.updatedAt);
+  const hasLiveSession = Boolean(lane.sessionKey);
+  return {
+    id: sessionKey,
+    name: title,
+    squadId: 'automation',
+    runtime: lane.runtime,
+    model: lane.runtime,
+    status: automationLaneStatus(lane.status),
+    currentTask: `Automation · ${lane.status.replace(/_/g, ' ')}`,
+    workspace: lane.repoPath,
+    branch: lane.branch || lane.baseBranch || 'main',
+    sessionKey,
+    approvalStatus: 'none',
+    lastEventAt,
+    lastActivityAt: Number.isFinite(parsedUpdatedAt) ? parsedUpdatedAt : null,
+    context: { usedPercent: 0, trend: 'stable' },
+    alerts: lane.status === 'awaiting_input' || lane.status === 'failed' || lane.status === 'recovering' ? 1 : 0,
+    sessionId: lane.sessionKey ?? undefined,
+    sessionKind: 'automation',
+    surfaceLabel: title,
+    isCurrentSession: false,
+    runtimeSurface: {
+      id: sessionKey,
+      runtime: lane.runtime,
+      kind: 'chat-session',
+      ownership: 'owned',
+      title,
+      cwd: lane.worktreePath ?? lane.repoPath,
+      branch: lane.branch || lane.baseBranch || 'main',
+      sourceLabel: 'Automation run',
+      capabilities: {
+        attach: false,
+        readTail: hasLiveSession,
+        sendInput: hasLiveSession,
+        interrupt: hasLiveSession,
+        resize: false,
+        diffContext: true,
+        reviewContext: true,
+      },
+    },
+  };
+}
+
 export function useWorkspaceTerminal({
   activeTileId,
   contextualPanelHandlesRef,
@@ -84,6 +162,7 @@ export function useWorkspaceTerminal({
   const pendingWorkspaceTerminalResolversRef = useRef<Map<string, (handle: TerminalTabHandle) => void>>(new Map());
   const [workspaceChatSessionByTileId, setWorkspaceChatSessionByTileId] = useState<Record<string, string | undefined>>({});
   const [workspaceChatSessionsByTileId, setWorkspaceChatSessionsByTileId] = useState<Record<string, MobileInboxSnapshot['sessions']>>({});
+  const [automationLaneSessions, setAutomationLaneSessions] = useState<MobileInboxSnapshot['sessions']>([]);
   const [workspaceLaneByTileId, setWorkspaceLaneByTileId] = useState<Record<string, WorkspaceLaneState | null>>({});
   const [workspaceActiveTabKindByTileId, setWorkspaceActiveTabKindByTileId] = useState<Record<string, TerminalTab['kind'] | null>>({});
   const [workspaceTerminalResetNonceByTileId, setWorkspaceTerminalResetNonceByTileId] = useState<Record<string, number>>({});
@@ -245,6 +324,38 @@ export function useWorkspaceTerminal({
 
   const archivedLaneSessionKeys = useLaneArchivedSet();
 
+  const refreshAutomationLaneSessions = useCallback(async () => {
+    try {
+      const response = await fetch('/api/lanes?active=false', { cache: 'no-store' });
+      if (!response.ok) return;
+      const payload = await response.json() as { lanes?: Lane[] };
+      const sessions = (payload.lanes ?? [])
+        .filter(isAutomationLane)
+        .filter((lane) => lane.status !== 'archived' && lane.status !== 'completed')
+        .sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt))
+        .map(buildAutomationLaneSession);
+      setAutomationLaneSessions(sessions);
+    } catch {
+      // Best-effort sidebar visibility; the underlying automation lane remains durable.
+    }
+  }, []);
+
+  useEffect(() => {
+    const handler = () => { void refreshAutomationLaneSessions(); };
+    const initialRefreshId = window.setTimeout(handler, 0);
+    window.addEventListener('o8:lane-lifecycle', handler);
+    window.addEventListener('o8:agent-lifecycle', handler);
+    window.addEventListener('o8:supervisor-inbox', handler);
+    const intervalId = window.setInterval(handler, 30_000);
+    return () => {
+      window.clearTimeout(initialRefreshId);
+      window.clearInterval(intervalId);
+      window.removeEventListener('o8:lane-lifecycle', handler);
+      window.removeEventListener('o8:agent-lifecycle', handler);
+      window.removeEventListener('o8:supervisor-inbox', handler);
+    };
+  }, [refreshAutomationLaneSessions]);
+
   const ideWorkspaceSessionsForSidebar = useMemo(() => {
     const deduped = new Map<string, MobileInboxSnapshot['sessions'][number]>();
     for (const sessions of Object.values(workspaceChatSessionsByTileId)) {
@@ -257,8 +368,14 @@ export function useWorkspaceTerminal({
         deduped.set(session.sessionKey, session);
       }
     }
+    for (const session of automationLaneSessions) {
+      if (!session?.sessionKey) continue;
+      if (archivedLaneSessionKeys.has(session.sessionKey)) continue;
+      if (deduped.has(session.sessionKey)) continue;
+      deduped.set(session.sessionKey, session);
+    }
     return [...deduped.values()];
-  }, [workspaceChatSessionsByTileId, archivedLaneSessionKeys]);
+  }, [workspaceChatSessionsByTileId, automationLaneSessions, archivedLaneSessionKeys]);
 
   const workspaceChatTargets = useMemo(
     () => buildWorkspaceChatTargetOptions(workspaceChatSessions),
@@ -266,28 +383,31 @@ export function useWorkspaceTerminal({
   );
 
   useEffect(() => {
-    const openTerminalTileIds = new Set(collectTerminalLeafIds(tileLayout.root));
-    setWorkspaceChatSessionByTileId((current) => {
-      const next = Object.entries(current).reduce<Record<string, string | undefined>>((result, [tileId, value]) => {
-        if (openTerminalTileIds.has(tileId)) result[tileId] = value;
-        return result;
-      }, {});
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
-    setWorkspaceChatSessionsByTileId((current) => {
-      const next = Object.entries(current).reduce<Record<string, MobileInboxSnapshot['sessions']>>((result, [tileId, value]) => {
-        if (openTerminalTileIds.has(tileId)) result[tileId] = value;
-        return result;
-      }, {});
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
-    setWorkspaceLaneByTileId((current) => {
-      const next = Object.entries(current).reduce<Record<string, WorkspaceLaneState | null>>((result, [tileId, value]) => {
-        if (openTerminalTileIds.has(tileId)) result[tileId] = value;
-        return result;
-      }, {});
-      return Object.keys(next).length === Object.keys(current).length ? current : next;
-    });
+    const pruneId = window.setTimeout(() => {
+      const openTerminalTileIds = new Set(collectTerminalLeafIds(tileLayout.root));
+      setWorkspaceChatSessionByTileId((current) => {
+        const next = Object.entries(current).reduce<Record<string, string | undefined>>((result, [tileId, value]) => {
+          if (openTerminalTileIds.has(tileId)) result[tileId] = value;
+          return result;
+        }, {});
+        return Object.keys(next).length === Object.keys(current).length ? current : next;
+      });
+      setWorkspaceChatSessionsByTileId((current) => {
+        const next = Object.entries(current).reduce<Record<string, MobileInboxSnapshot['sessions']>>((result, [tileId, value]) => {
+          if (openTerminalTileIds.has(tileId)) result[tileId] = value;
+          return result;
+        }, {});
+        return Object.keys(next).length === Object.keys(current).length ? current : next;
+      });
+      setWorkspaceLaneByTileId((current) => {
+        const next = Object.entries(current).reduce<Record<string, WorkspaceLaneState | null>>((result, [tileId, value]) => {
+          if (openTerminalTileIds.has(tileId)) result[tileId] = value;
+          return result;
+        }, {});
+        return Object.keys(next).length === Object.keys(current).length ? current : next;
+      });
+    }, 0);
+    return () => window.clearTimeout(pruneId);
   }, [tileLayout.root]);
 
   useEffect(() => {
