@@ -312,8 +312,14 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
       const m = /^c(\d+)$/.exec(it.id);
       if (m) max = Math.max(max, Number.parseInt(m[1], 10));
     }
+    // Insert at the END of the thread (after the last existing reply) so a new
+    // reply lands at the bottom chronologically — not right under the parent.
+    let insertPos = note.endOffset;
+    for (const it of extractRoughdraftReviewIndex(view.state.doc.toString()).items) {
+      if (it.parentId === note.id) insertPos = Math.max(insertPos, it.endOffset);
+    }
     const reply = `{>>${text}<<}{id="c${max + 1}" by="user" at="${new Date().toISOString()}" re="${note.id}"}`;
-    view.dispatch({ changes: { from: note.endOffset, to: note.endOffset, insert: reply } });
+    view.dispatch({ changes: { from: insertPos, to: insertPos, insert: reply } });
   }, []);
 
   return (
