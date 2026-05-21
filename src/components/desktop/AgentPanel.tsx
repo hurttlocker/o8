@@ -167,17 +167,16 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     onSelectRepo?.(repo.id);
   }, [onRepoAdded, onSelectRepo, projects]);
   // Clicking a project just SELECTS it (makes it active) — the rest of the app
-  // follows (right panel + a new orchestrator). Opening the control room is now
-  // a separate action on the row's chevron (handleMiniOpenControlRoom).
+  // follows (right panel + a new orchestrator). The drawer stays OPEN so you can
+  // keep navigating; close it manually. Opening the control room is a separate
+  // action on the row's chevron (handleMiniOpenControlRoom).
   const handleMiniProjectSelect = useCallback((project: ProjectRecord) => {
-    setProjectsMenuOpen(false);
     void projects.switchActive(project.id);
   }, [projects]);
   // Clicking a repo selects that specific repo so the right side shows it — no
-  // auto control room.
+  // auto control room, and the drawer stays open for repo-to-repo navigation.
   const handleMiniRepoSelect = useCallback((project: ProjectRecord, repoPath: string) => {
     const repo = registeredRepoByPath.get(repoPath);
-    setProjectsMenuOpen(false);
     void projects.switchActive(project.id);
     onSelectRepo?.(repo?.id ?? repoPath);
   }, [onSelectRepo, projects, registeredRepoByPath]);
