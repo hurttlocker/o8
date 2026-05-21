@@ -475,7 +475,7 @@ function MarginNote({ note, onResolve, onResolveComment, onReply }: {
 function NoteChip({ label, tone, onClick }: { label: string; tone: 'add' | 'muted'; onClick: () => void }) {
   const color = tone === 'add' ? 'var(--o8ed-add)' : 'var(--o8ed-ink-faint)';
   return (
-    <button type="button" onClick={onClick} style={{ cursor: 'pointer', fontFamily: PROSE, fontSize: 10.5, fontWeight: 600, color, background: 'transparent', border: `1px solid ${color}`, borderRadius: 6, paddingTop: 2, paddingBottom: 2, paddingLeft: 8, paddingRight: 8 }}>
+    <button type="button" onClick={onClick} style={{ cursor: 'pointer', fontFamily: PROSE, fontSize: 10.5, fontWeight: 600, color, background: 'transparent', border: `1px solid ${color}`, borderRadius: 6, paddingTop: 2, paddingBottom: 2, paddingLeft: 8, paddingRight: 8, filter: 'saturate(0.55)' }}>
       {label}
     </button>
   );
