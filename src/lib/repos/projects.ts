@@ -225,7 +225,10 @@ async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<
   const projects: ProjectRecord[] = ledger.projects.map((project) => {
     const slug = projectNameToSlug(project.name);
     const fresh = repoPathsBySlug.get(slug);
-    return fresh !== undefined ? { ...project, repoPaths: fresh } : project;
+    // SQLite is the membership source of truth: a ledger project with no SQLite
+    // match owns no repos. Don't keep stale stored repoPaths — that's what kept
+    // a repo "assigned" to a deleted project and hid it from the single-repo view.
+    return { ...project, repoPaths: fresh ?? [] };
   });
 
   // Project SQLite projects the ledger doesn't know about (e.g. created in the
