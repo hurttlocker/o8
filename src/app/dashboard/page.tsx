@@ -762,6 +762,20 @@ function DashboardInner() {
   const currentO8RepoPath = o8CommitRepoPath ?? o8RepoPathOverride ?? globalRepoEntry?.localPath ?? null;
   const scopedO8SelectedFile = o8SelectedFileRepoPath === currentO8RepoPath ? o8SelectedFile : null;
 
+  // Scope the right-panel surfaces (Activity / PRs / GitHub) to the ACTIVE
+  // project's repos rather than the global pool, so repos that aren't in the
+  // project (old ones, ones moved out) don't keep showing in the control room.
+  // Falls back to the global list if scoping would empty it.
+  const activeProjectRepoEntries = useMemo(() => {
+    const ledger = dashboardProjects.ledger;
+    if (!ledger?.projects?.length) return globalRepoEntries;
+    const active = ledger.projects.find((p) => p.id === ledger.activeProjectId) ?? ledger.projects[0];
+    const paths = new Set((active?.repoPaths ?? []).map((p) => p.replace(/\/+$/, '')));
+    if (paths.size === 0) return globalRepoEntries;
+    const scoped = globalRepoEntries.filter((repo) => paths.has(repo.localPath.replace(/\/+$/, '')));
+    return scoped.length > 0 ? scoped : globalRepoEntries;
+  }, [dashboardProjects.ledger, globalRepoEntries]);
+
   const handleO8SelectedFileChange = useCallback((filePath: string) => {
     setO8SelectedFile(filePath);
     setO8SelectedFileRepoPath(currentO8RepoPath);
@@ -3200,7 +3214,7 @@ function DashboardInner() {
             lifecycleEvents={lifecycleEvents}
             orchestratorPackets={activePackets}
             orchestratorMissionState={thoughtsMissionState}
-            registeredRepos={globalRepoEntries}
+            registeredRepos={activeProjectRepoEntries}
             ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
             leftPanelFocus={leftPanelFocus}
           />
@@ -3442,7 +3456,7 @@ function DashboardInner() {
                       >
                         <LazyO8Panel
                           repoPath={currentO8RepoPath}
-                          registeredRepos={globalRepoEntries}
+                          registeredRepos={activeProjectRepoEntries}
                           onRepoPathChange={handleSelectO8RepoPath}
                           previews={workspacePreviews}
                           activeTab={o8ActiveTab}
