@@ -222,6 +222,13 @@ function SplitHeaderPillStrips({
   const dispatchClose = useCallback((workspaceId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId } }));
   }, []);
+  // Human-readable pane name for aria-labels so split-mode controls
+  // don't collide ("New tab (left pane)" vs "New tab (right pane)").
+  const paneLabel = (index: number) => (
+    workspaces.length === 2
+      ? (index === 0 ? 'left pane' : 'right pane')
+      : `pane ${index + 1}`
+  );
 
   return (
     <div data-no-drag style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'stretch' }}>
@@ -252,9 +259,10 @@ function SplitHeaderPillStrips({
                 onSpawnOrchestrator={() => dispatchSpawn(workspace.workspaceId, 'orchestrator')}
                 onSpawnChat={() => dispatchSpawn(workspace.workspaceId, 'chat')}
                 onSpawnTerminal={() => dispatchSpawn(workspace.workspaceId, 'terminal')}
+                ariaSuffix={paneLabel(index)}
               />
               {canClose ? (
-                <SplitPaneCloseButton onClick={() => dispatchClose(workspace.workspaceId)} />
+                <SplitPaneCloseButton onClick={() => dispatchClose(workspace.workspaceId)} paneLabel={paneLabel(index)} />
               ) : null}
             </div>
           </div>
@@ -264,7 +272,7 @@ function SplitHeaderPillStrips({
   );
 }
 
-function SplitPaneCloseButton({ onClick }: { onClick: () => void }) {
+function SplitPaneCloseButton({ onClick, paneLabel }: { onClick: () => void; paneLabel?: string }) {
   const [hovered, setHovered] = useState(false);
   return (
     <button
@@ -273,7 +281,7 @@ function SplitPaneCloseButton({ onClick }: { onClick: () => void }) {
       onClick={onClick}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
-      aria-label="Close split"
+      aria-label={paneLabel ? `Close split (${paneLabel})` : 'Close split'}
       title="Close split"
       style={{
         display: 'inline-flex',
@@ -405,7 +413,7 @@ function HeaderPill({
         gap: 6,
         height: 26,
         paddingLeft: 10,
-        paddingRight: hovered && !active ? 6 : 10,
+        paddingRight: 10,
         borderRadius: 7,
         background: active
           ? 'var(--t-input-bg)'
@@ -424,9 +432,41 @@ function HeaderPill({
       }}
       onClick={() => onSelect(tab.id)}
     >
-      <span style={{ display: 'inline-flex', flexShrink: 0 }}>
-        <PillRuntimeGlyph kind={tab.kind} runtime={tab.runtime} />
-      </span>
+      {/* Leading slot morphs runtime-icon ↔ close-X on hover — fixed
+          14px so the pill width never shifts. Click while hovered
+          (showing X) closes; the rest of the pill selects. */}
+      <button
+        type="button"
+        onClick={(event) => {
+          if (!hovered) return; // only the X is the close target
+          event.stopPropagation();
+          onClose(tab.id);
+        }}
+        aria-label={hovered ? `Close ${tab.label || 'tab'}` : undefined}
+        title={hovered ? 'Close tab' : undefined}
+        tabIndex={hovered ? 0 : -1}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 14,
+          height: 14,
+          borderWidth: 0,
+          background: 'transparent',
+          color: hovered ? 'var(--t-text)' : 'inherit',
+          cursor: hovered ? 'pointer' : 'inherit',
+          padding: 0,
+          flexShrink: 0,
+        }}
+      >
+        {hovered ? (
+          <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+            <path d="M6 6l12 12M18 6L6 18" />
+          </svg>
+        ) : (
+          <PillRuntimeGlyph kind={tab.kind} runtime={tab.runtime} />
+        )}
+      </button>
       <span
         style={{
           overflow: 'hidden',
@@ -437,42 +477,6 @@ function HeaderPill({
       >
         {display}
       </span>
-      {hovered ? (
-        <button
-          type="button"
-          onClick={(event) => {
-            event.stopPropagation();
-            onClose(tab.id);
-          }}
-          aria-label="Close tab"
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 14,
-            height: 14,
-            borderRadius: 4,
-            borderWidth: 0,
-            background: 'transparent',
-            color: 'var(--t-text-muted)',
-            cursor: 'pointer',
-            padding: 0,
-            flexShrink: 0,
-          }}
-          onMouseEnter={(event) => {
-            event.currentTarget.style.background = 'var(--t-input-bg)';
-            event.currentTarget.style.color = 'var(--t-text)';
-          }}
-          onMouseLeave={(event) => {
-            event.currentTarget.style.background = 'transparent';
-            event.currentTarget.style.color = 'var(--t-text-muted)';
-          }}
-        >
-          <svg width={9} height={9} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-            <path d="M6 6l12 12M18 6L6 18" />
-          </svg>
-        </button>
-      ) : null}
     </div>
   );
 }
@@ -535,11 +539,16 @@ function HeaderPlayButton({
   onSpawnChat,
   onSpawnTerminal,
   onContextMenu,
+  ariaSuffix,
 }: {
   onSpawnOrchestrator?: () => void;
   onSpawnChat?: () => void;
   onSpawnTerminal?: () => void;
   onContextMenu?: () => void;
+  /** Disambiguates the aria-label when two play buttons coexist in a
+   *  split (e.g. "New tab (left pane)") — without this Playwright and
+   *  other a11y tooling hit strict-mode duplicate-label violations. */
+  ariaSuffix?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -580,7 +589,7 @@ function HeaderPlayButton({
         }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
-        aria-label="New tab"
+        aria-label={ariaSuffix ? `New tab (${ariaSuffix})` : 'New tab'}
         title={onContextMenu ? 'New tab · right-click to split' : 'New tab'}
         style={{
           display: 'inline-flex',
