@@ -224,6 +224,20 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
   const recomputeRef = useRef(recompute);
   recomputeRef.current = recompute;
 
+  // Perf: the rail recompute re-parses the doc + forces layout (coordsAtPos),
+  // so coalesce it to at most once per ~90ms. Decorations (markup hiding /
+  // marks) stay instant — they live in the synchronous StateField, untouched.
+  const recomputeTimerRef = useRef<number | null>(null);
+  const scheduleRecompute = useCallback(() => {
+    if (recomputeTimerRef.current != null) return;
+    recomputeTimerRef.current = window.setTimeout(() => {
+      recomputeTimerRef.current = null;
+      recomputeRef.current();
+    }, 90);
+  }, []);
+  const scheduleRecomputeRef = useRef(scheduleRecompute);
+  scheduleRecomputeRef.current = scheduleRecompute;
+
   useEffect(() => {
     if (!hostRef.current) return;
     const extensions: Extension[] = [
@@ -239,15 +253,21 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
         if (u.docChanged && !u.transactions.some((t) => t.annotation(External))) {
           onChangeRef.current(u.state.doc.toString());
         }
-        if (u.docChanged || u.geometryChanged) recomputeRef.current();
+        if (u.docChanged || u.geometryChanged) scheduleRecomputeRef.current();
       }),
     ];
     const view = new EditorView({ state: EditorState.create({ doc: value, extensions }), parent: hostRef.current });
     viewRef.current = view;
-    const raf = requestAnimationFrame(() => recomputeRef.current());
-    const ro = new ResizeObserver(() => recomputeRef.current());
+    const raf = requestAnimationFrame(() => recomputeRef.current()); // first paint: immediate
+    const ro = new ResizeObserver(() => scheduleRecomputeRef.current());
     if (wrapRef.current) ro.observe(wrapRef.current);
-    return () => { cancelAnimationFrame(raf); ro.disconnect(); view.destroy(); viewRef.current = null; };
+    return () => {
+      cancelAnimationFrame(raf);
+      if (recomputeTimerRef.current != null) clearTimeout(recomputeTimerRef.current);
+      ro.disconnect();
+      view.destroy();
+      viewRef.current = null;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -271,6 +291,31 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
     view.dispatch({ changes: { from: note.offset, to: note.endOffset, insert } });
   }, []);
 
+  // Resolve a comment thread = add status="resolved" to its metadata (fades it).
+  const resolveComment = useCallback((note: NoteLayout) => {
+    const view = viewRef.current;
+    if (!view) return;
+    const marker = view.state.doc.sliceString(note.offset, note.endOffset);
+    const lastBrace = marker.lastIndexOf('}');
+    if (lastBrace < 0) return;
+    const pos = note.offset + lastBrace;
+    view.dispatch({ changes: { from: pos, to: pos, insert: ' status="resolved"' } });
+  }, []);
+
+  // Reply to a comment = splice an operator reply marker after it (re=parentId).
+  const replyToComment = useCallback((note: NoteLayout, message: string) => {
+    const view = viewRef.current;
+    const text = message.trim();
+    if (!view || !text || /<<\}|\+\+\}|--\}|~~\}|==\}/.test(text)) return;
+    let max = 0;
+    for (const it of extractRoughdraftReviewIndex(view.state.doc.toString()).items) {
+      const m = /^c(\d+)$/.exec(it.id);
+      if (m) max = Math.max(max, Number.parseInt(m[1], 10));
+    }
+    const reply = `{>>${text}<<}{id="c${max + 1}" by="user" at="${new Date().toISOString()}" re="${note.id}"}`;
+    view.dispatch({ changes: { from: note.endOffset, to: note.endOffset, insert: reply } });
+  }, []);
+
   return (
     <div ref={wrapRef} style={{ position: 'relative' }}>
       <div style={{ display: 'flex', alignItems: 'flex-start' }}>
@@ -279,18 +324,27 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
       </div>
       {notes.map((n) => (
         <div key={n.id} style={{ position: 'absolute', top: n.top, right: 0, width: RAIL_W - 16, paddingLeft: 14 }}>
-          <MarginNote note={n} onResolve={resolveSuggestion} />
+          <MarginNote note={n} onResolve={resolveSuggestion} onResolveComment={resolveComment} onReply={replyToComment} />
         </div>
       ))}
     </div>
   );
 }
 
-function MarginNote({ note, onResolve }: { note: NoteLayout; onResolve: (n: NoteLayout, accept: boolean) => void }) {
+function MarginNote({ note, onResolve, onResolveComment, onReply }: {
+  note: NoteLayout;
+  onResolve: (n: NoteLayout, accept: boolean) => void;
+  onResolveComment: (n: NoteLayout) => void;
+  onReply: (n: NoteLayout, message: string) => void;
+}) {
+  const [replying, setReplying] = useState(false);
+  const [draft, setDraft] = useState('');
   const isAI = note.author === 'AI';
   const ink = isAI ? 'var(--o8ed-orange)' : 'var(--o8ed-ink-soft)';
   const resolved = note.status === 'resolved';
   const isSuggestion = note.kind === 'suggestion';
+  const isComment = note.kind === 'comment';
+  const submitReply = () => { onReply(note, draft); setDraft(''); setReplying(false); };
   return (
     <div style={{ opacity: resolved ? 0.4 : 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -313,6 +367,25 @@ function MarginNote({ note, onResolve }: { note: NoteLayout; onResolve: (n: Note
           <NoteChip label="Accept" tone="add" onClick={() => onResolve(note, true)} />
           <NoteChip label="Dismiss" tone="muted" onClick={() => onResolve(note, false)} />
         </div>
+      ) : null}
+      {isComment && !resolved ? (
+        <div style={{ display: 'flex', gap: 6, marginTop: 5 }}>
+          <NoteChip label="Resolve" tone="add" onClick={() => onResolveComment(note)} />
+          <NoteChip label="Reply" tone="muted" onClick={() => setReplying((v) => !v)} />
+        </div>
+      ) : null}
+      {replying ? (
+        <input
+          autoFocus
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') { e.preventDefault(); submitReply(); }
+            if (e.key === 'Escape') { setReplying(false); setDraft(''); }
+          }}
+          placeholder="Reply…"
+          style={{ marginTop: 5, width: '100%', fontFamily: HAND, fontSize: 16, lineHeight: 1.2, color: 'var(--o8ed-ink)', background: 'transparent', border: 'none', borderBottom: '1px solid var(--o8ed-ink-faint)', outline: 'none', paddingTop: 2, paddingBottom: 2 }}
+        />
       ) : null}
     </div>
   );
