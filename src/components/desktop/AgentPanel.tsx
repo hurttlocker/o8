@@ -166,19 +166,27 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     await onRepoAdded?.(repo);
     onSelectRepo?.(repo.id);
   }, [onRepoAdded, onSelectRepo, projects]);
+  // Clicking a project just SELECTS it (makes it active) — the rest of the app
+  // follows (right panel + a new orchestrator). Opening the control room is now
+  // a separate action on the row's chevron (handleMiniOpenControlRoom).
   const handleMiniProjectSelect = useCallback((project: ProjectRecord) => {
     setProjectsMenuOpen(false);
     void projects.switchActive(project.id);
-    leftPanelFocus.focusByProjectId(project.id);
-  }, [leftPanelFocus, projects]);
+  }, [projects]);
+  // Clicking a repo selects that specific repo so the right side shows it — no
+  // auto control room.
   const handleMiniRepoSelect = useCallback((project: ProjectRecord, repoPath: string) => {
     const repo = registeredRepoByPath.get(repoPath);
     setProjectsMenuOpen(false);
     void projects.switchActive(project.id);
-    leftPanelFocus.focusByProjectId(project.id);
-    leftPanelFocus.setSelectedRepoPath(repoPath);
     onSelectRepo?.(repo?.id ?? repoPath);
-  }, [leftPanelFocus, onSelectRepo, projects, registeredRepoByPath]);
+  }, [onSelectRepo, projects, registeredRepoByPath]);
+  // The chevron explicitly opens the control room (project focus drawer).
+  const handleMiniOpenControlRoom = useCallback((project: ProjectRecord) => {
+    setProjectsMenuOpen(false);
+    void projects.switchActive(project.id);
+    leftPanelFocus.focusByProjectId(project.id);
+  }, [leftPanelFocus, projects]);
 
   useEffect(() => {
     const nonce = addRepoIntent?.nonce ?? null;
@@ -278,6 +286,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           onProjectsOpenChange={setProjectsMenuOpen}
           onProjectSelect={handleMiniProjectSelect}
           onRepoSelect={handleMiniRepoSelect}
+          onOpenProjectControlRoom={handleMiniOpenControlRoom}
           onManageProjects={handleOpenProjectManagement}
           onAddRepo={handleOpenAddRepoDialog}
         />
@@ -439,6 +448,7 @@ function MiniAgentPanelHeader({
   onProjectsOpenChange,
   onProjectSelect,
   onRepoSelect,
+  onOpenProjectControlRoom,
   onManageProjects,
   onAddRepo,
 }: {
@@ -453,6 +463,7 @@ function MiniAgentPanelHeader({
   onProjectsOpenChange: (open: boolean) => void;
   onProjectSelect: (project: ProjectRecord) => void;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
+  onOpenProjectControlRoom: (project: ProjectRecord) => void;
   onManageProjects: () => void;
   onAddRepo: () => void;
 }) {
@@ -530,6 +541,7 @@ function MiniAgentPanelHeader({
             registeredRepoByPath={registeredRepoByPath}
             onProjectSelect={onProjectSelect}
             onRepoSelect={onRepoSelect}
+            onOpenProjectControlRoom={onOpenProjectControlRoom}
             onManageProjects={onManageProjects}
             onAddRepo={onAddRepo}
           />
@@ -780,6 +792,7 @@ function MiniProjectsMenu({
   registeredRepoByPath,
   onProjectSelect,
   onRepoSelect,
+  onOpenProjectControlRoom,
   onManageProjects,
   onAddRepo,
 }: {
@@ -788,6 +801,7 @@ function MiniProjectsMenu({
   registeredRepoByPath: Map<string, RepoRegistryEntry>;
   onProjectSelect: (project: ProjectRecord) => void;
   onRepoSelect: (project: ProjectRecord, repoPath: string) => void;
+  onOpenProjectControlRoom: (project: ProjectRecord) => void;
   onManageProjects: () => void;
   onAddRepo: () => void;
 }) {
@@ -906,31 +920,35 @@ function MiniProjectsMenu({
                 >
                   {visibleRepoPaths.length}
                 </span>
-                {/* Hover-reveal "open" chevron — operator dogfood noted
-                    the project row click affordance wasn't obvious. The
-                    actual click already opens the LeftPanelProjectFocus
-                    drawer; this just telegraphs that clicking does
-                    something. */}
-                <svg
+                {/* Chevron = the explicit "open control room" affordance.
+                    Clicking the row itself just SELECTS the project; clicking
+                    this opens the project's control room (stopPropagation keeps
+                    the two separate). Hover-reveal via the row's mouse handlers. */}
+                <span
                   className="o8-project-row-chevron"
-                  width={11}
-                  height={11}
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  aria-hidden
+                  role="button"
+                  tabIndex={0}
+                  title="Open control room"
+                  aria-label={`Open control room for ${project.name}`}
+                  onClick={(event) => { event.stopPropagation(); onOpenProjectControlRoom(project); }}
+                  onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-faint)'; }}
                   style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
                     color: 'var(--t-text-faint)',
                     opacity: 0,
-                    transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                     flexShrink: 0,
+                    cursor: 'pointer',
+                    marginLeft: 2,
+                    transition: 'opacity 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                   }}
                 >
-                  <path d="m9 6 6 6-6 6" />
-                </svg>
+                  <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                    <path d="m9 6 6 6-6 6" />
+                  </svg>
+                </span>
               </button>
               {visibleRepoPaths.length > 0 ? (
                 <div style={{ paddingTop: 1, display: 'flex', flexDirection: 'column' }}>
