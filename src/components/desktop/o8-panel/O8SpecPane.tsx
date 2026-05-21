@@ -64,7 +64,14 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
     if (!repoPath || !orchestratorData?.onAcceptDirectiveProposal) return;
     orchestratorData.onAcceptDirectiveProposal({
       id: `spec-review-${Date.now()}`,
-      text: `Please review the o8.md for this repo (${repoPath}) and leave inline comments on anything worth flagging — typos, unclear bits, decisions to revisit. Use the o8_spec_comment / o8_spec_suggest tools to annotate; do not rewrite my prose.`,
+      text: `Review the o8.md for this repo (${repoPath}).
+
+1. First read it: call o8_spec_read with repoPath="${repoPath}".
+2. Glance at recent commits/issues so you know what's actually shipped vs. still open.
+3. Comment ONLY where there's something real to say — bar: "would this change what I do or know?" Skip proofreading and the obvious; a few sharp notes beat a wall. Best notes: a stale item that already shipped ("landed in v0.1.151 — can cross off"), a decision worth revisiting, a buried question, something that contradicts a recent commit.
+4. Anchor each note to an exact phrase from the doc. Use o8_spec_comment for a pointer/thought; o8_spec_suggest for a concrete edit (add/del/sub).
+
+Voice: a sharp teammate reading over my shoulder — short, specific, real. Don't rewrite my prose. Pass repoPath="${repoPath}" to every o8_spec_* call.`,
     });
   }, [repoPath, orchestratorData]);
   const debounceRef = useRef<number | null>(null);
