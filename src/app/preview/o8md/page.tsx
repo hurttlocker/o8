@@ -11,6 +11,7 @@
  */
 
 import { useState } from 'react';
+import { O8SpecEditor } from '@/components/desktop/o8-panel/O8SpecEditor';
 
 const HAND = "'Caveat', ui-rounded, cursive";
 const PROSE = "'Inter', system-ui, sans-serif";
@@ -285,14 +286,47 @@ function InlineApproach() {
   );
 }
 
+function LiveApproach() {
+  const [doc, setDoc] = useState(RAW_MD);
+  return (
+    <div>
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginBottom: 12, fontFamily: PROSE, fontSize: 11, color: 'var(--lab-ink-soft)' }}>
+        <span style={{ width: 7, height: 7, borderRadius: 999, background: 'var(--lab-add)', display: 'inline-block' }} />
+        real CodeMirror 6 · type to edit · markup hides as you go · ● = note (margin rail + accept/reject next)
+      </div>
+      <div
+        style={{
+          height: 460,
+          background: 'var(--lab-paper)',
+          borderRadius: 12,
+          border: '1px solid var(--lab-border)',
+          boxShadow: '0 1px 0 rgba(0,0,0,0.04), 0 14px 36px rgba(0,0,0,0.10)',
+          paddingLeft: 28,
+          paddingRight: 16,
+          overflow: 'hidden',
+          ['--o8ed-ink']: 'var(--lab-ink)',
+          ['--o8ed-ink-soft']: 'var(--lab-ink-soft)',
+          ['--o8ed-orange']: 'var(--lab-orange)',
+          ['--o8ed-add']: 'var(--lab-add)',
+          ['--o8ed-del']: 'var(--lab-del)',
+          ['--o8ed-hilite']: 'var(--lab-hilite)',
+        } as React.CSSProperties}
+      >
+        <O8SpecEditor value={doc} onChange={setDoc} />
+      </div>
+    </div>
+  );
+}
+
 const APPROACHES = [
-  { key: 'inline', label: '③ Inline (chosen)', sub: 'edit + see marks together · markup hidden · accept/reject in the margin', node: <InlineApproach /> },
+  { key: 'live', label: '④ Live (CodeMirror)', sub: 'the real editor — type into it · markup hides in place · margin rail + accept/reject next', node: <LiveApproach /> },
+  { key: 'inline', label: '③ Inline (target)', sub: 'static target — edit + see marks together · markup hidden · accept/reject in the margin', node: <InlineApproach /> },
   { key: 'reading', label: '② Reading / Editing', sub: 'clean reading view + raw edit toggle', node: <ReadingApproach /> },
   { key: 'overlay', label: '① Overlay textarea', sub: 'edit raw · marks glow behind · lightest', node: <OverlayApproach /> },
 ] as const;
 
 export default function O8mdPreviewPage() {
-  const [active, setActive] = useState<(typeof APPROACHES)[number]['key']>('inline');
+  const [active, setActive] = useState<(typeof APPROACHES)[number]['key']>('live');
   const [theme, setTheme] = useState<ThemeKey>('light');
   const current = APPROACHES.find((a) => a.key === active) ?? APPROACHES[0];
   return (
