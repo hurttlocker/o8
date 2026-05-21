@@ -25,6 +25,7 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar }: Left
           <TitleBarButton
             icon={<IconPanelLeft />}
             label="Toggle sidebar"
+            title="Toggle sidebar (⌘B)"
             onClick={onToggleSidebar}
             active={sidebarVisible}
           />
