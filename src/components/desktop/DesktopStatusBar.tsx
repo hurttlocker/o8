@@ -46,6 +46,8 @@ interface DesktopStatusBarProps {
    *  column next to the branch label. */
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
+  /** Open the keyboard-shortcuts reference overlay (also bound to ⌘/). */
+  onOpenShortcuts?: () => void;
 }
 
 function DesktopStatusBarBase({
@@ -54,6 +56,7 @@ function DesktopStatusBarBase({
   repoRemoteUrl = null,
   bottomPanelVisible = false,
   onToggleBottomPanel,
+  onOpenShortcuts,
   leftColumnWidth,
   rightColumnWidth,
   compact = false,
@@ -233,6 +236,7 @@ function DesktopStatusBarBase({
           gap: 6,
         }}
       >
+        {onOpenShortcuts ? <StatusShortcutsButton onClick={onOpenShortcuts} /> : null}
       </div>
     </div>
   );
@@ -327,6 +331,42 @@ function StatusTerminalToggle({ active, onClick }: { active: boolean; onClick: (
         <path d="m4 17 6-6-6-6" />
         <line x1="12" x2="20" y1="19" y2="19" />
       </svg>
+    </button>
+  );
+}
+
+/** `?` button — opens the keyboard-shortcuts reference. Sits at the
+ *  right edge of the status bar where global help affordances belong. */
+function StatusShortcutsButton({ onClick }: { onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-label="Keyboard shortcuts"
+      aria-haspopup="dialog"
+      title="Keyboard shortcuts (⌘/)"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 22,
+        height: 22,
+        borderRadius: 6,
+        borderWidth: 0,
+        background: hovered ? 'var(--t-hover)' : 'transparent',
+        color: hovered ? 'var(--t-text)' : 'var(--t-text-faint)',
+        cursor: 'pointer',
+        padding: 0,
+        fontSize: 12,
+        fontWeight: 700,
+        fontFamily: 'var(--font-sans-system)',
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+    >
+      ?
     </button>
   );
 }
