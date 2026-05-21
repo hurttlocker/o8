@@ -203,6 +203,7 @@ export function listProjects(): ProjectWithRepos[] {
 
 export interface UpdateProjectInput {
   name?: string;
+  slug?: string;
   description?: string | null;
   mainRepoId?: string | null;
 }
@@ -221,6 +222,13 @@ export function updateProject(id: string, input: UpdateProjectInput): Project | 
     }
     updates.push('name = ?');
     values.push(trimmed);
+  }
+  if (input.slug !== undefined) {
+    const trimmed = input.slug.trim();
+    if (trimmed) {
+      updates.push('slug = ?');
+      values.push(trimmed);
+    }
   }
   if (input.description !== undefined) {
     const trimmed = input.description?.trim() ?? null;
@@ -328,6 +336,36 @@ export function removeRepoFromProject(projectId: string, repoId: string): boolea
     return true;
   }
   return false;
+}
+
+export function removeRepoFromAllProjects(repoId: string): number {
+  const sqlite = db();
+  const affectedProjects = sqlite.prepare(
+    'SELECT DISTINCT project_id FROM project_repos WHERE repo_id = ?',
+  ).all(repoId) as Array<{ project_id: string }>;
+  if (affectedProjects.length === 0) return 0;
+
+  const now = nowMs();
+  const tx = sqlite.transaction(() => {
+    sqlite.prepare('DELETE FROM project_repos WHERE repo_id = ?').run(repoId);
+    for (const { project_id: projectId } of affectedProjects) {
+      const project = getProject(projectId);
+      let nextMainRepoId = project?.mainRepoId ?? null;
+      if (nextMainRepoId === repoId) {
+        const fallback = sqlite.prepare(
+          `SELECT repo_id FROM project_repos
+           WHERE project_id = ?
+           ORDER BY added_at ASC
+           LIMIT 1`,
+        ).get(projectId) as { repo_id: string } | undefined;
+        nextMainRepoId = fallback?.repo_id ?? null;
+      }
+      sqlite.prepare('UPDATE projects SET updated_at = ?, main_repo_id = ? WHERE id = ?')
+        .run(now, nextMainRepoId, projectId);
+    }
+  });
+  tx();
+  return affectedProjects.length;
 }
 
 export function setRepoRole(
