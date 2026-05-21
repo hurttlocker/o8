@@ -7,6 +7,7 @@ import {
   appendRoughdraftReply,
   markRoughdraftResolved,
 } from '@/lib/o8md/rfm';
+import { appendComment } from '@/lib/o8md/mutate';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -119,6 +120,27 @@ export async function POST(request: NextRequest) {
       const updated = appendRoughdraftReply(current, {
         parentId,
         message,
+        ...(author !== undefined ? { author } : {}),
+      });
+      if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
+        return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
+      }
+      writeFileSync(specPath, updated, 'utf-8');
+      const newId = extractRoughdraftReviewIndex(updated).items.find((i) => !beforeIds.has(i.id))?.id ?? null;
+      return NextResponse.json({ ok: true, id: newId, path: specPath });
+    }
+
+    if (action === 'comment') {
+      const body_ = typeof body?.body === 'string' ? body.body : null;
+      if (!body_) {
+        return NextResponse.json({ ok: false, error: 'body is required' }, { status: 400 });
+      }
+      const anchor = typeof body?.anchor === 'string' ? body.anchor : undefined;
+      const author = typeof body?.author === 'string' ? body.author : undefined;
+      const beforeIds = new Set(extractRoughdraftReviewIndex(current).items.map((i) => i.id));
+      const updated = appendComment(current, {
+        body: body_,
+        ...(anchor !== undefined ? { anchor } : {}),
         ...(author !== undefined ? { author } : {}),
       });
       if (Buffer.byteLength(updated, 'utf-8') > MAX_BYTES) {
