@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type MouseEvent } from 'react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { CheckCircle2, ChevronDown, ChevronRight, Folder } from '../../lucide-shims';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
@@ -1040,6 +1040,7 @@ function ChatGroupPicker({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const wrapperRef = useRef<HTMLDivElement | null>(null);
+  const menuId = useId();
 
   useEffect(() => {
     if (!open) return;
@@ -1067,6 +1068,7 @@ function ChatGroupPicker({
         onMouseLeave={() => setHovered(false)}
         aria-haspopup="menu"
         aria-expanded={open}
+        aria-controls={menuId}
         aria-label="Change chat grouping"
         title="Change chat grouping"
         style={{
@@ -1095,10 +1097,14 @@ function ChatGroupPicker({
           <circle cx="17" cy="12" r="2" />
         </svg>
       </button>
-      {open ? (
-        <div
-          role="menu"
-          style={{
+      {/* Always-mounted (display toggles) so agents can enumerate the
+          grouping options from the DOM without opening first. */}
+      <div
+        id={menuId}
+        role="menu"
+        aria-label="Chat grouping options"
+        style={{
+            display: open ? 'block' : 'none',
             position: 'absolute',
             top: '100%',
             right: 0,
@@ -1121,8 +1127,7 @@ function ChatGroupPicker({
           <ChatGroupPickerItem label="Group by repo" selected={mode === 'repo'} onClick={() => { onChange('repo'); setOpen(false); }} />
           <ChatGroupPickerItem label="Group by date" selected={mode === 'date'} onClick={() => { onChange('date'); setOpen(false); }} />
           <ChatGroupPickerItem label="Flat (no groups)" selected={mode === 'flat'} onClick={() => { onChange('flat'); setOpen(false); }} />
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
