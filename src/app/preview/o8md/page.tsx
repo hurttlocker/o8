@@ -116,7 +116,7 @@ Ship the marketing site that turns visitors into signups {~~without a sales call
 
 ## Active scope
 - [x] Hero + waitlist form
-- [ ] Pricing page with the {==three tiers==}{>>Do we still want 3 tiers, or 2 + enterprise?<<}{id="c1" by="user"}
+- [ ] Pricing page with the {==three tiers==}{>>Do we still want 3 tiers, or 2 + enterprise?<<}{id="c1" by="user"}{>>2 + enterprise tested better — switching.<<}{id="c4" by="AI" re="c1"}
 - [ ] Connect the waitlist to Clerk
 
 ## Notes
@@ -303,9 +303,10 @@ function LiveApproach() {
           boxShadow: '0 1px 0 rgba(0,0,0,0.04), 0 14px 36px rgba(0,0,0,0.10)',
           paddingLeft: 28,
           paddingRight: 16,
-          overflow: 'hidden',
+          overflowY: 'auto',
           ['--o8ed-ink']: 'var(--lab-ink)',
           ['--o8ed-ink-soft']: 'var(--lab-ink-soft)',
+          ['--o8ed-ink-faint']: 'var(--lab-ink-faint)',
           ['--o8ed-orange']: 'var(--lab-orange)',
           ['--o8ed-add']: 'var(--lab-add)',
           ['--o8ed-del']: 'var(--lab-del)',
