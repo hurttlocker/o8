@@ -51,6 +51,7 @@ import {
   resolveActiveDirectiveProjectScope,
 } from '@/lib/cortex/directives/filter';
 import { getProjectContext, type ProjectContext } from '@/lib/projects/context';
+import { extractRoughdraftReviewIndex } from '@/lib/o8md/rfm';
 
 import { extractGraphResolvedSymbols, type SymbolEdge } from './client';
 
@@ -295,12 +296,60 @@ function renderProjectScopeSection(context: ProjectContext): string[] {
 }
 
 /**
+ * Surface the operator's UNRESOLVED o8.md review threads so a dispatched agent
+ * answers them in-file (the roughdraft-inversion loop: operator authors o8.md,
+ * agent annotates). Best-effort + synchronous read of `<repoPath>/o8.md`; never
+ * throws and returns [] when there's no file or nothing open.
+ */
+function renderPendingSpecSection(repoPath: string): string[] {
+  let content: string;
+  try {
+    const specPath = join(repoPath, 'o8.md');
+    if (!existsSync(specPath)) return [];
+    content = readFileSync(specPath, 'utf-8');
+  } catch {
+    return [];
+  }
+
+  let open: { id: string; kind: string; anchorText?: string; text: string }[];
+  try {
+    open = extractRoughdraftReviewIndex(content).items
+      // Operator/human-authored open threads only — `AI` is the format's magic
+      // agent-author value, so the agent never sees its own (or peers') marks
+      // surfaced back as "operator notes". status!=resolved = still open.
+      .filter((item) =>
+        (item.kind === 'comment' || item.kind === 'suggestion')
+        && item.status !== 'resolved'
+        && item.author !== 'AI')
+      .map((item) => ({ id: item.id, kind: item.kind, anchorText: item.anchorText, text: item.text }));
+  } catch {
+    return [];
+  }
+  if (open.length === 0) return [];
+
+  const lines = ['## Operator notes (o8.md)'];
+  lines.push(
+    '- The operator left these open review threads in this repo\'s o8.md. Address them in your work and respond in-file with `o8 spec reply --to <id> --body "…"` or `o8 spec resolve --id <id> --summary "…"`. Never edit the operator\'s prose — annotate only.',
+  );
+  for (const item of open.slice(0, 12)) {
+    const anchor = item.anchorText ? ` @"${clampLine(item.anchorText, 60)}"` : '';
+    const kindTag = item.kind === 'suggestion' ? ' (suggestion)' : '';
+    lines.push(`- [${item.id}]${kindTag}${anchor}: ${clampLine(item.text, 200)}`);
+  }
+  if (open.length > 12) {
+    lines.push(`- …and ${open.length - 12} more (run \`o8 spec pending\`).`);
+  }
+  return lines;
+}
+
+/**
  * Truncate the rendered block from the bottom (Symbol Graph first, then
  * Outcomes, then Directives) until it fits inside MAX_BLOCK_CHARS. The
- * `<context>` wrapper is included in the budget.
+ * `<context>` wrapper is included in the budget. Operator o8.md notes are the
+ * highest priority — dropped last.
  */
-function fitWithinBudget(sections: { heading: 'project' | 'directives' | 'outcomes' | 'symbols'; lines: string[] }[]): string {
-  const order: typeof sections[number]['heading'][] = ['symbols', 'outcomes', 'directives', 'project'];
+function fitWithinBudget(sections: { heading: 'spec' | 'project' | 'directives' | 'outcomes' | 'symbols'; lines: string[] }[]): string {
+  const order: typeof sections[number]['heading'][] = ['symbols', 'outcomes', 'directives', 'project', 'spec'];
   const drop: Set<typeof sections[number]['heading']> = new Set();
 
   const render = () => {
@@ -367,6 +416,7 @@ export async function buildContextBlock({
   }
 
   return fitWithinBudget([
+    { heading: 'spec', lines: renderPendingSpecSection(repoPath) },
     { heading: 'project', lines: renderProjectScopeSection(projectContext) },
     { heading: 'directives', lines: renderDirectivesSection(directives) },
     { heading: 'outcomes', lines: renderOutcomesSection(outcomes) },
