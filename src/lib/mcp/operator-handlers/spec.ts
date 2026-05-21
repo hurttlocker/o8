@@ -92,6 +92,23 @@ export const SPEC_TOOLS: McpTool[] = [
       required: ['repoPath', 'targetId'],
     },
   },
+  {
+    name: 'o8_spec_suggest',
+    description: "Propose a non-destructive edit to the operator's o8.md: add text, delete a snippet, or substitute one phrase for another. The original is preserved inside the marker for the operator to accept or reject. add needs `text`; del needs `anchor`; sub needs `anchor` (original) + `replacement` (new).",
+    inputSchema: {
+      type: 'object',
+      additionalProperties: false,
+      properties: {
+        repoPath: repoPathProp,
+        kind: { type: 'string', enum: ['add', 'del', 'sub'], description: 'add | del | sub.' },
+        anchor: { type: 'string', description: 'Literal text to delete/replace (del/sub), or insert-after point (add).' },
+        text: { type: 'string', description: 'Text to add (add only).' },
+        replacement: { type: 'string', description: 'Replacement text (sub only).' },
+        by: { type: 'string', description: 'Author label. Defaults to "AI".' },
+      },
+      required: ['repoPath', 'kind'],
+    },
+  },
 ];
 
 function specPath(repoPath: string, extra: Record<string, string> = {}): string {
@@ -175,6 +192,33 @@ export async function handleSpecResolve(args: Record<string, unknown>): Promise<
     const result = await apiFetch(specPath(repoPath, { action: 'resolve' }), {
       method: 'POST',
       body: JSON.stringify({ targetId, ...(summary ? { summary } : {}) }),
+    });
+    return jsonResult(result);
+  } catch (error) {
+    return jsonResult({ ok: false, error: errorText(error) });
+  }
+}
+
+export async function handleSpecSuggest(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const repoPath = requiredString(args, 'repoPath');
+    const kind = requiredString(args, 'kind');
+    if (kind !== 'add' && kind !== 'del' && kind !== 'sub') {
+      return jsonResult({ ok: false, error: 'kind must be add, del, or sub' });
+    }
+    const anchor = optionalString(args, 'anchor');
+    const text = optionalString(args, 'text');
+    const replacement = optionalString(args, 'replacement');
+    const by = optionalString(args, 'by');
+    const result = await apiFetch(specPath(repoPath, { action: 'suggest' }), {
+      method: 'POST',
+      body: JSON.stringify({
+        kind,
+        ...(anchor ? { anchor } : {}),
+        ...(text ? { text } : {}),
+        ...(replacement ? { replacement } : {}),
+        ...(by ? { author: by } : {}),
+      }),
     });
     return jsonResult(result);
   } catch (error) {

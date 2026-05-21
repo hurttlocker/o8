@@ -7,7 +7,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { appendComment } from './mutate';
+import { appendComment, insertSuggestion } from './mutate';
 import { extractRoughdraftReviewIndex, validateRoughdraftMarkdown } from './rfm';
 
 let passed = 0;
@@ -58,6 +58,36 @@ check('rejects body with a close delimiter', () => {
 
 check('throws when anchor not found', () => {
   assert.throws(() => appendComment('hello\n', { body: 'note', anchor: 'nope' }), /Anchor text not found/);
+});
+
+check('sub suggestion parses back with original + replacement', () => {
+  const out = insertSuggestion('Use rough wording here.\n', { kind: 'sub', anchor: 'rough', replacement: 'specific' });
+  const item = extractRoughdraftReviewIndex(out).items[0];
+  assert.equal(item.suggestionKind, 'substitution');
+  assert.equal(item.originalText, 'rough');
+  assert.equal(item.replacementText, 'specific');
+  assert.equal(item.author, 'AI');
+  assert.equal(validateRoughdraftMarkdown(out).ok, true);
+});
+
+check('del suggestion parses back as a deletion', () => {
+  const out = insertSuggestion('Drop this clause, please.\n', { kind: 'del', anchor: 'this clause' });
+  const item = extractRoughdraftReviewIndex(out).items[0];
+  assert.equal(item.suggestionKind, 'deletion');
+  assert.equal(validateRoughdraftMarkdown(out).ok, true);
+});
+
+check('add suggestion (anchored) parses back as an addition with s-prefix id', () => {
+  const out = insertSuggestion('Ship it.\n', { kind: 'add', anchor: 'Ship it.', text: ' Add a rollback note.' });
+  const item = extractRoughdraftReviewIndex(out).items[0];
+  assert.equal(item.suggestionKind, 'addition');
+  assert.equal(item.id, 's1');
+  assert.equal(validateRoughdraftMarkdown(out).ok, true);
+});
+
+check('sub rejects ~> inside operands + missing replacement', () => {
+  assert.throws(() => insertSuggestion('a b\n', { kind: 'sub', anchor: 'a', replacement: 'x~>y' }), /~>/);
+  assert.throws(() => insertSuggestion('a b\n', { kind: 'sub', anchor: 'a' }), /requires .replacement/);
 });
 
 console.log(`\nmutate smoke: ${passed} checks passed.`);

@@ -49,6 +49,7 @@ o8 spec check    [--repo <path>]       # validate the review markup
 o8 spec comment  --repo <path> --body "<thought>" [--anchor "<snippet>"]   # leave a new pointer (author defaults to AI)
 o8 spec reply    --repo <path> --to <id> --body "<msg>"                    # reply to a thread
 o8 spec resolve  --repo <path> --id <id> [--summary "<note>"]              # mark a thread resolved
+o8 spec suggest  --repo <path> --kind add|del|sub --anchor "<text>" [--text "<add>"] [--new "<replacement>"]  # propose a non-destructive edit
 ```
 
 Errors come back as JSON. Most commands accept `--json` for machine-readable output. Calls are gated by the loopback + ws-token guard that protects the o8 API — they only work locally, no auth needed.
