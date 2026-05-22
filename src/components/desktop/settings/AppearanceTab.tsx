@@ -29,6 +29,7 @@ import {
   SectionLabel,
   TabBreadcrumb,
   TabHeading,
+  SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
 
 // ── Palette Preview Card ────────────────────────────────────────────────────
@@ -497,7 +498,7 @@ export function AppearanceTab() {
         paddingLeft: 8,
         paddingRight: 32,
         paddingBottom: 40,
-        maxWidth: 780,
+        maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
         fontFamily: APP_FONT_STACK,
       }}
     >
