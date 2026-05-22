@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
 import { AlertCircle, Archive, CheckCircle2, Clock, ShieldCheck } from '../../lucide-shims';
 import {
@@ -67,6 +67,21 @@ export function ControlRoomTab({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionMenu, setActionMenu] = useState<TaskActionMenuState | null>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [isWide, setIsWide] = useState(false);
+
+  useEffect(() => {
+    const node = rootRef.current;
+    if (!node || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const width = entries[0]?.contentRect.width ?? 0;
+      setIsWide(width >= 620);
+    });
+    observer.observe(node);
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
 
   const intakeRepos = useMemo(() => (
     selectedRepo ? [selectedRepo] : repos
@@ -540,6 +555,7 @@ export function ControlRoomTab({
 
   return (
     <div
+      ref={rootRef}
       style={{
         minHeight: '100%',
         paddingTop: 8,
@@ -589,30 +605,6 @@ export function ControlRoomTab({
         </div>
       ) : null}
 
-      <GitHubIntakeSection
-        issues={issueIntake}
-        loading={issueLoading}
-        refreshing={issueRefreshing}
-        error={issueError}
-        repoCount={intakeRepos.length}
-        selectedRepoName={selectedRepo?.name ?? null}
-        queuedIssueKeys={queuedIssueKeys}
-        busyKey={busyKey}
-        onRefresh={() => { void loadIssueIntake(false); }}
-        onQueue={(issue) => { void createIssueTask(issue, false); }}
-        onDispatch={(issue) => { void createIssueTask(issue, true); }}
-      />
-
-      <SupervisorIncidentSection
-        items={scopedSupervisorIncidents}
-        loading={supervisorLoading}
-        refreshing={supervisorRefreshing}
-        error={supervisorError}
-        busyKey={busyKey}
-        onRefresh={() => { void loadSupervisorIncidents(false); }}
-        onDismiss={(item) => { void dismissSupervisorIncident(item); }}
-      />
-
       <TaskStatusStrip
         counts={{
           blocked: liveBlockedTasks.length,
@@ -648,85 +640,116 @@ export function ControlRoomTab({
         </span>
       </div>
 
-      {error ? (
-        <StatusMessage icon={<AlertCircle size={14} strokeWidth={2} />} tone="#dc2626" title="Task pool unavailable" body={error} />
-      ) : null}
+      <div style={isWide ? { display: 'flex', gap: 14, alignItems: 'flex-start', marginTop: 4 } : { marginTop: 4 }}>
+        <div style={isWide ? { flex: '1.6 1 0', minWidth: 0 } : undefined}>
+          <GitHubIntakeSection
+            issues={issueIntake}
+            loading={issueLoading}
+            refreshing={issueRefreshing}
+            error={issueError}
+            repoCount={intakeRepos.length}
+            selectedRepoName={selectedRepo?.name ?? null}
+            queuedIssueKeys={queuedIssueKeys}
+            busyKey={busyKey}
+            onRefresh={() => { void loadIssueIntake(false); }}
+            onQueue={(issue) => { void createIssueTask(issue, false); }}
+            onDispatch={(issue) => { void createIssueTask(issue, true); }}
+          />
+        </div>
 
-      {!error && loading ? (
-        <StatusMessage icon={<Clock size={14} strokeWidth={2} />} tone="var(--t-text-muted)" title="Loading task pool" body="Reading packets, lanes, and routing state." />
-      ) : null}
+        <div style={isWide ? { flex: '1 1 0', minWidth: 0 } : undefined}>
+          <SupervisorIncidentSection
+            items={scopedSupervisorIncidents}
+            loading={supervisorLoading}
+            refreshing={supervisorRefreshing}
+            error={supervisorError}
+            busyKey={busyKey}
+            onRefresh={() => { void loadSupervisorIncidents(false); }}
+            onDismiss={(item) => { void dismissSupervisorIncident(item); }}
+          />
 
-      {!error && !loading && activeTasks.length === 0 ? (
-        <StatusMessage icon={<CheckCircle2 size={14} strokeWidth={2} />} tone="#16a34a" title="No active pool items" body="This scope has no blocked, review, running, or ready tasks." />
-      ) : null}
-
-      {!error && !loading && activeTasks.length > 0 ? (
-        <>
-          {attentionTasks.length > 0 ? (
-            <TaskSection
-              label="Needs decision"
-              tasks={urgentAttentionTasks}
-              activeSessionKey={activeSessionKey}
-              onSelectSession={onSelectSession}
-              onOpenMenu={(task, x, y) => setActionMenu({ task, x, y })}
-              emptyLabel={cleanupTasks.length > 0 ? 'No fresh blockers or reviews.' : undefined}
-              compactActions
-            />
+          {error ? (
+            <StatusMessage icon={<AlertCircle size={14} strokeWidth={2} />} tone="#dc2626" title="Task pool unavailable" body={error} />
           ) : null}
-          {cleanupTasks.length > 0 ? (
+
+          {!error && loading ? (
+            <StatusMessage icon={<Clock size={14} strokeWidth={2} />} tone="var(--t-text-muted)" title="Loading task pool" body="Reading packets, lanes, and routing state." />
+          ) : null}
+
+          {!error && !loading && activeTasks.length === 0 ? (
+            <StatusMessage icon={<CheckCircle2 size={14} strokeWidth={2} />} tone="#16a34a" title="No active pool items" body="This scope has no blocked, review, running, or ready tasks." />
+          ) : null}
+
+          {!error && !loading && activeTasks.length > 0 ? (
+            <>
+              {attentionTasks.length > 0 ? (
+                <TaskSection
+                  label="Needs decision"
+                  tasks={urgentAttentionTasks}
+                  activeSessionKey={activeSessionKey}
+                  onSelectSession={onSelectSession}
+                  onOpenMenu={(task, x, y) => setActionMenu({ task, x, y })}
+                  emptyLabel={cleanupTasks.length > 0 ? 'No fresh blockers or reviews.' : undefined}
+                  compactActions
+                />
+              ) : null}
+              {cleanupTasks.length > 0 ? (
+                <CollapsedTaskSection
+                  label="Stale / cleanup"
+                  tasks={cleanupTasks}
+                  open={staleAttentionOpen}
+                  onToggle={() => setStaleAttentionOpen((current) => !current)}
+                  activeSessionKey={activeSessionKey}
+                  onSelectSession={onSelectSession}
+                  onOpenMenu={(task, x, y) => setActionMenu({ task, x, y })}
+                  limit={6}
+                  compactActions
+                  overflowLabel="stale task"
+                  actionLabel="Prune stale tasks"
+                  actionDisabled={busyKey === 'archive:stale-cleanup'}
+                  actionIcon={<Archive size={12} strokeWidth={2} />}
+                  onAction={() => { void pruneCleanupTasks(); }}
+                />
+              ) : null}
+              <TaskSection
+                label="Working"
+                tasks={liveRunningTasks}
+                activeSessionKey={activeSessionKey}
+                onSelectSession={onSelectSession}
+                onOpenMenu={(task, x, y) => setActionMenu({ task, x, y })}
+                emptyLabel={cleanupTasks.length > 0 ? 'No live workers.' : attentionTasks.length === 0 ? 'No running workers.' : undefined}
+              />
+              <TaskSection
+                label="Ready pool"
+                tasks={liveReadyTasks}
+                activeSessionKey={activeSessionKey}
+                onSelectSession={onSelectSession}
+                onOpenMenu={(task, x, y) => setActionMenu({ task, x, y })}
+                limit={6}
+                emptyLabel={cleanupTasks.length > 0 ? 'No queued tasks.' : attentionTasks.length === 0 && liveRunningTasks.length === 0 ? 'No queued tasks.' : undefined}
+              />
+            </>
+          ) : null}
+
+          {!error && !loading && grouped.done.length > 0 ? (
             <CollapsedTaskSection
-              label="Stale / cleanup"
-              tasks={cleanupTasks}
-              open={staleAttentionOpen}
-              onToggle={() => setStaleAttentionOpen((current) => !current)}
+              label="Done / archived"
+              tasks={grouped.done}
+              open={doneOpen}
+              onToggle={() => setDoneOpen((current) => !current)}
               activeSessionKey={activeSessionKey}
               onSelectSession={onSelectSession}
               onOpenMenu={(task, x, y) => setActionMenu({ task, x, y })}
-              limit={6}
-              compactActions
-              overflowLabel="stale task"
-              actionLabel="Prune stale tasks"
-              actionDisabled={busyKey === 'archive:stale-cleanup'}
+              limit={8}
+              actionLabel="Prune done tasks"
+              actionDisabled={busyKey === 'prune:done-archived'}
               actionIcon={<Archive size={12} strokeWidth={2} />}
-              onAction={() => { void pruneCleanupTasks(); }}
+              onAction={() => { void pruneDoneTasks(); }}
             />
           ) : null}
-          <TaskSection
-            label="Working"
-            tasks={liveRunningTasks}
-            activeSessionKey={activeSessionKey}
-            onSelectSession={onSelectSession}
-            onOpenMenu={(task, x, y) => setActionMenu({ task, x, y })}
-            emptyLabel={cleanupTasks.length > 0 ? 'No live workers.' : attentionTasks.length === 0 ? 'No running workers.' : undefined}
-          />
-          <TaskSection
-            label="Ready pool"
-            tasks={liveReadyTasks}
-            activeSessionKey={activeSessionKey}
-            onSelectSession={onSelectSession}
-            onOpenMenu={(task, x, y) => setActionMenu({ task, x, y })}
-            limit={6}
-            emptyLabel={cleanupTasks.length > 0 ? 'No queued tasks.' : attentionTasks.length === 0 && liveRunningTasks.length === 0 ? 'No queued tasks.' : undefined}
-          />
-        </>
-      ) : null}
+        </div>
+      </div>
 
-      {!error && !loading && grouped.done.length > 0 ? (
-        <CollapsedTaskSection
-          label="Done / archived"
-          tasks={grouped.done}
-          open={doneOpen}
-          onToggle={() => setDoneOpen((current) => !current)}
-          activeSessionKey={activeSessionKey}
-          onSelectSession={onSelectSession}
-          onOpenMenu={(task, x, y) => setActionMenu({ task, x, y })}
-          limit={8}
-          actionLabel="Prune done tasks"
-          actionDisabled={busyKey === 'prune:done-archived'}
-          actionIcon={<Archive size={12} strokeWidth={2} />}
-          onAction={() => { void pruneDoneTasks(); }}
-        />
-      ) : null}
       {actionMenu ? (
         <TaskActionMenu
           state={actionMenu}

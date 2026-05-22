@@ -161,6 +161,7 @@ import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/type
 
 const DEFAULT_LEFT_PANEL_WIDTH = 240;
 const FOCUS_LEFT_PANEL_WIDTH = 320;
+const CONTROL_ROOM_WIDTH = 760; // wide "control-room mode" — Control tab opens the left panel wide for the two-column layout
 const MIN_RIGHT_PANEL_WIDTH = 240;
 const MAX_RIGHT_PANEL_WIDTH = 600;
 const MIN_O8_PANEL_WIDTH = 400;
@@ -474,6 +475,7 @@ function DashboardInner() {
       // silent
     }
   }, [workspaceHeaderActive.label, workspaceHeaderActive.tabId]);
+
   const contextualPanelHandlesRef = useRef<Map<string, ContextualPanelHandle>>(new Map());
   const settingsPanelRef = useRef<HTMLDivElement>(null);
   const [workspaceLifecycleRecords, setWorkspaceLifecycleRecords] = useState<WorkspaceLifecycleRecordView[]>([]);
@@ -829,6 +831,18 @@ function DashboardInner() {
     registeredRepos: globalRepoEntries,
     ledger: dashboardProjects.ledger,
   });
+
+  // "Control-room mode" — LeftPanelProjectFocus dispatches o8:control-room-wide
+  // when the Control tab is active, so the left column widens to fit the
+  // two-column control room and collapses back on Chats / close.
+  const [controlRoomWide, setControlRoomWide] = useState(false);
+  useEffect(() => {
+    const handler = (event: Event) => {
+      setControlRoomWide(Boolean((event as CustomEvent<{ wide?: boolean }>).detail?.wide));
+    };
+    window.addEventListener('o8:control-room-wide', handler);
+    return () => window.removeEventListener('o8:control-room-wide', handler);
+  }, []);
 
   const {
     activeWorkspaceChatSessionKey,
@@ -1626,20 +1640,58 @@ function DashboardInner() {
   const handleSelectSession = useCallback((sessionKey: string) => {
     // Open the session transcript in a canvas chat tab
     void (async () => {
-      const target = await waitForWorkspaceTerminalTarget({});
+      const selectedSession = ideWorkspaceSessionsForSidebar.find((session) => (
+        session.sessionKey === sessionKey
+        || session.id === sessionKey
+        || session.sessionId === sessionKey
+        || session.runtimeSurface?.id === sessionKey
+      ));
+      const sessionScope = selectedSession?.workspace
+        ?? selectedSession?.runtimeSurface?.cwd
+        ?? null;
+      const targetRepo = sessionScope
+        ? workspaceScopeEntries.find((repo) => (
+          pathBelongsToRepoScope(sessionScope, repo.localPath)
+          || pathBelongsToRepoScope(repo.localPath, sessionScope)
+        ))
+        : null;
+      const target = await waitForWorkspaceTerminalTarget({
+        repoPath: targetRepo?.localPath ?? sessionScope ?? undefined,
+      });
       if (!target) return;
-      const runtime = sessionKey.startsWith('claude-code:') ? 'claude-code'
+      const runtime = selectedSession?.runtime === 'claude-code'
+        || selectedSession?.runtime === 'gemini'
+        || selectedSession?.runtime === 'opencode'
+        || selectedSession?.runtime === 'codex'
+        ? selectedSession.runtime
+        : sessionKey.startsWith('claude-code:') ? 'claude-code'
         : sessionKey.startsWith('gemini-owned:') ? 'gemini'
         : sessionKey.startsWith('opencode-owned:') ? 'opencode'
         : 'codex';
+      const label = selectedSession?.name?.trim()
+        || selectedSession?.surfaceLabel?.trim()
+        || selectedSession?.currentTask?.trim()
+        || sessionKey.split(':').pop()?.slice(0, 12)
+        || 'Session';
       target.handle.openCliChatSession({
         runtime,
+        repo: targetRepo ? {
+          name: targetRepo.name,
+          localPath: targetRepo.localPath,
+          remoteUrl: targetRepo.remoteUrl,
+          branch: targetRepo.branch,
+          readiness: targetRepo.readiness,
+          registryRepoId: targetRepo.registryRepoId,
+          isWorktree: targetRepo.isWorktree,
+          worktreeStatus: targetRepo.worktreeStatus,
+        } : undefined,
         targetSessionKey: sessionKey,
-        label: sessionKey.split(':').pop()?.slice(0, 12) ?? 'Session',
+        label,
       });
+      setActiveTileId(target.tileId);
 
     })();
-  }, [waitForWorkspaceTerminalTarget]);
+  }, [ideWorkspaceSessionsForSidebar, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceScopeEntries]);
 
   const flashWorkspaceTab = useCallback((tabId: string) => {
     if (!tabId) return;
@@ -3159,7 +3211,7 @@ function DashboardInner() {
         // operator dragged the resizer wider — not an overlay sliding over
         // the workspace. The width is animated; the focus content renders
         // inline inside AgentPanel.
-        const effectiveLeftWidth = leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth;
+        const effectiveLeftWidth = leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth;
         return (
         <motion.div
           animate={{ width: effectiveLeftWidth }}
@@ -3589,7 +3641,7 @@ function DashboardInner() {
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
         onOpenShortcuts={() => setShortcutsOpen(true)}
-        leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? FOCUS_LEFT_PANEL_WIDTH : leftWidth) : 0}
+        leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth) : 0}
         rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
         onOpenSettings={toggleSettingsOverlay}
         onOpenMobilePairing={openMobilePairing}
