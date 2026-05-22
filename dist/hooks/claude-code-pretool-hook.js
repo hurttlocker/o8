@@ -1,6 +1,11 @@
 #!/usr/bin/env node
 'use strict';
 
+// ⚠️ SYNC-BY-HAND: hand-maintained twin of
+// src/lib/hooks/claude-code-pretool-hook.ts. Built/prod installs run THIS .js;
+// dev / fresh clones run the .ts via tsx (see install-hooks.ts). No build step
+// generates this from the .ts — mirror EVERY logic change in both files.
+
 function readStdin() {
   return new Promise((resolve, reject) => {
     let raw = '';
