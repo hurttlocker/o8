@@ -337,11 +337,14 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
     // First paint: coordsAtPos is only accurate once CodeMirror has MEASURED the
     // laid-out content. A bare rAF fires before that measure pass, so CM's height
     // estimates for not-yet-measured content (inline images, headings, wrapped
-    // lines) anchor the rail's notes at the wrong y — and it stays wrong until a
-    // manual scroll forces a re-measure. Drive recompute through CM's measure
-    // phase, then again as the late settles land (webfont swap + image decode
-    // fire no CM geometry event, so nothing else would re-trigger the rail).
-    const measureRecompute = () => viewRef.current?.requestMeasure({ read: () => recomputeRef.current() });
+    // lines) anchored the rail's notes at the wrong y until a manual scroll forced
+    // a re-measure. requestMeasure runs its read AFTER the measure pass — but
+    // recompute() DISPATCHES spacer effects, and dispatching inside a measure read
+    // is illegal (re-entrant update → throws → breaks the editor). So go through
+    // scheduleRecompute, which defers recompute to a timeout OUTSIDE the measure
+    // cycle. Re-fire on settles that emit no CM geometry event: webfont swap
+    // (fonts.ready) + inline-image decode (capture-phase load), plus backstops.
+    const measureRecompute = () => viewRef.current?.requestMeasure({ read: () => scheduleRecomputeRef.current() });
     const raf = requestAnimationFrame(measureRecompute);
     const settleTimers = [150, 500].map((d) => window.setTimeout(measureRecompute, d));
     if (typeof document !== 'undefined' && document.fonts?.ready) document.fonts.ready.then(measureRecompute, () => {});
