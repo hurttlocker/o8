@@ -1,3 +1,9 @@
+// ⚠️ SYNC-BY-HAND: this hook ships TWICE — this src .ts (run via `npx tsx`
+// in dev / fresh clones, before dist/ is built) and the hand-maintained
+// dist/hooks/claude-code-pretool-hook.js (run via node in built/prod installs).
+// install-hooks.ts picks the .js when it exists, else this .ts. There is NO
+// build step that generates the .js from this file — they are kept in sync by
+// hand. Mirror EVERY logic change in both, or dev and prod behave differently.
 import process from 'node:process';
 
 interface PreToolUseHookInput {
@@ -74,10 +80,28 @@ function evaluateToolUse(input: PreToolUseHookInput): PreToolUseHookOutput {
         reason: 'Destructive command blocked by o8 policy',
       };
     }
+    if (/\bgit\s+reset\s+--hard\b/i.test(command)) {
+      return {
+        decision: 'block',
+        reason: 'git reset --hard blocked — use git stash or git checkout <file> instead',
+      };
+    }
+    if (/\bgit\s+clean\s+-[a-z]*f/i.test(command)) {
+      return {
+        decision: 'block',
+        reason: 'git clean -f blocked — removes untracked files permanently',
+      };
+    }
+    if (/\bgit\s+checkout\s+\.\s*$/i.test(command)) {
+      return {
+        decision: 'block',
+        reason: 'git checkout . blocked — discards all unstaged changes',
+      };
+    }
     if (/\bgit\s+push\b/i.test(command) && /(?:--force|-f)(?:\s|$)/i.test(command)) {
       return {
-        decision: 'ask_user',
-        reason: 'Force push requires confirmation',
+        decision: 'block',
+        reason: 'Force push blocked by o8 policy — never force push',
       };
     }
     if (/\bgit\s+(?:push|merge|rebase)\b/i.test(command)) {
