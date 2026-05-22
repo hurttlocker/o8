@@ -32,13 +32,31 @@ Recent history follows Conventional Commit prefixes such as `feat:` and `fix:`. 
 When you're an agent dispatched into an o8 packet worktree, the `o8` CLI is on `$PATH` (symlinked to `/usr/local/bin/o8` once o8.app has run at least once). Use it instead of curling the local HTTP API — it knows your packet context and resolves cwd automatically.
 
 ```
-o8 status                              # global fleet snapshot
-o8 version
-o8 packet info                         # current packet metadata (id, branch, base, scope, runtime)
-o8 packet scope <packet-id>            # file ceiling, allowed/blocked paths, related-packet overlap
+o8 status                              # global fleet snapshot (running packets, lanes, merges, approvals)
+o8 version                             # CLI + connected server version
+o8 doctor [--reap]                     # verify port/token resolution + ping; --reap clears zombie lanes
+
+# Packet (your dispatched work) — most auto-resolve the lane from cwd
+o8 packet info                         # current packet metadata (id, branch, base, runtime, recent events)
+o8 packet scope [packet-id]            # one-call worker context: file ceiling, allowed/blocked paths, directives, related-packet overlap (auto-resolves from cwd)
 o8 packet heartbeat                    # lifecycle ping; safe no-op outside a packet
-o8 packet report --event progress      # surface a progress event to the operator
-o8 lane touches --path <file>          # other lanes touching the same file
+o8 packet report --event progress [--reason "..." --message "..."]   # surface a structured progress/blocker event
+o8 packet log [id] [--follow] [--since <cursor>]                     # read or tail this packet's lane events
+o8 packet runtime-drift                # detect + warn when the lane's bound runtime drifted (exit 5 on drift)
+o8 packet review --approve [--commit-message "..."]                  # approve + merge a reviewed packet
+
+# Task pool (project-backed work queue)
+o8 task list [--include-done] [--include-brief] [--project <id>] [--repo <path>]   # pool grouped ready/running/review/blocked/done
+o8 task create --title "..." [--summary "..." --project <id> --repo <path>]        # add a task to the ready pool
+o8 task brief <id>                     # full project-backed brief for one task
+o8 task claim <id>                     # bind/reserve a task to a lane
+o8 task dispatch <id>                  # launch the claimed task (Codex-only routing)
+o8 task block <id> --reason "..."      # mark a task blocked
+o8 task report <id> --event "..."      # append a task progress event
+o8 task archive <id>                   # prune/archive a stale task row
+o8 task prune <id>                     # permanently remove a done/archived task row
+
+o8 lane touches --path <file>          # other lanes touching the same file (or --packet <id>)
 o8 cortex observe --kind gotcha --text "..."   # write a fact to Cortex memory
 
 # o8.md review surface — the operator authors o8.md; you ANNOTATE it (never overwrite).
@@ -52,6 +70,6 @@ o8 spec resolve  --repo <path> --id <id> [--summary "<note>"]              # mar
 o8 spec suggest  --repo <path> --kind add|del|sub --anchor "<text>" [--text "<add>"] [--new "<replacement>"]  # propose a non-destructive edit
 ```
 
-Errors come back as JSON. Most commands accept `--json` for machine-readable output. Calls are gated by the loopback + ws-token guard that protects the o8 API — they only work locally, no auth needed.
+Output is JSON by default (pass `--human` for pretty ANSI). Errors come back as JSON with a stable schema + an exit code (1 invalid args, 2 connection refused, 3 unauthorized, 4 not found, 5 conflict). Calls are gated by the loopback + ws-token guard that protects the o8 API — they only work locally, no auth needed.
 
 If a command exits 127 (`command not found`), o8.app probably hasn't run yet on this machine, or the symlink was removed; fall back to typecheck + commit and the heal-bot will pick up signals from there.
