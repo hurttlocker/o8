@@ -334,11 +334,25 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
     ];
     const view = new EditorView({ state: EditorState.create({ doc: value, extensions }), parent: hostRef.current });
     viewRef.current = view;
-    const raf = requestAnimationFrame(() => recomputeRef.current()); // first paint: immediate
+    // First paint: coordsAtPos is only accurate once CodeMirror has MEASURED the
+    // laid-out content. A bare rAF fires before that measure pass, so CM's height
+    // estimates for not-yet-measured content (inline images, headings, wrapped
+    // lines) anchor the rail's notes at the wrong y — and it stays wrong until a
+    // manual scroll forces a re-measure. Drive recompute through CM's measure
+    // phase, then again as the late settles land (webfont swap + image decode
+    // fire no CM geometry event, so nothing else would re-trigger the rail).
+    const measureRecompute = () => viewRef.current?.requestMeasure({ read: () => recomputeRef.current() });
+    const raf = requestAnimationFrame(measureRecompute);
+    const settleTimers = [150, 500].map((d) => window.setTimeout(measureRecompute, d));
+    if (typeof document !== 'undefined' && document.fonts?.ready) document.fonts.ready.then(measureRecompute, () => {});
+    const onImgLoad = (e: Event) => { if ((e.target as HTMLElement | null)?.tagName === 'IMG') scheduleRecomputeRef.current(); };
+    view.contentDOM.addEventListener('load', onImgLoad, true);
     const ro = new ResizeObserver(() => scheduleRecomputeRef.current());
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => {
       cancelAnimationFrame(raf);
+      settleTimers.forEach((t) => window.clearTimeout(t));
+      view.contentDOM.removeEventListener('load', onImgLoad, true);
       if (recomputeTimerRef.current != null) clearTimeout(recomputeTimerRef.current);
       ro.disconnect();
       view.destroy();
