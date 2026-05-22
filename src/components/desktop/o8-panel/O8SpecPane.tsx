@@ -285,16 +285,34 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
         fontFamily: UI_FONT,
       }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            color: surface === 'solid' ? 'var(--t-chat-surface-text)' : 'var(--t-text)',
-            fontSize: 13,
-            fontWeight: 650,
-            letterSpacing: '-0.01em',
-          }}>
-            Workspace Notes
+          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+            <div style={{
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+              color: surface === 'solid' ? 'var(--t-chat-surface-text)' : 'var(--t-text)',
+              fontSize: 13,
+              fontWeight: 650,
+              letterSpacing: '-0.01em',
+            }}>
+              Workspace Notes
+            </div>
+            <div
+              aria-label={`Notes diff ${diffStats.additions} additions, ${diffStats.deletions} deletions`}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                fontFamily: MONO_FONT,
+                fontSize: 11,
+                fontVariantNumeric: 'tabular-nums',
+                flexShrink: 0,
+              }}
+            >
+              {diffStats.additions > 0 ? <span style={{ color: 'var(--t-terminal-ansi-bright-green, #16a34a)' }}>+{diffStats.additions}</span> : null}
+              {diffStats.deletions > 0 ? <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{diffStats.deletions}</span> : null}
+              {diffStats.additions === 0 && diffStats.deletions === 0 ? <span style={{ color: 'var(--t-text-faint)' }}>0</span> : null}
+            </div>
           </div>
           <div style={{
             marginTop: 2,
@@ -305,7 +323,7 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
             fontSize: 11,
             fontWeight: 600,
           }}>
-            {reviewing ? 'o8 is reading your notes…' : `Shared with agents · ${status}`}
+            {reviewing ? 'o8 is reading your notes…' : status}
           </div>
         </div>
         <TitleBarButton
@@ -375,22 +393,6 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
               </div>
             </>
           ) : null}
-        </div>
-        <div
-          aria-label={`Notes diff ${diffStats.additions} additions, ${diffStats.deletions} deletions`}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            fontFamily: MONO_FONT,
-            fontSize: 11,
-            fontVariantNumeric: 'tabular-nums',
-            flexShrink: 0,
-          }}
-        >
-          {diffStats.additions > 0 ? <span style={{ color: 'var(--t-terminal-ansi-bright-green, #16a34a)' }}>+{diffStats.additions}</span> : null}
-          {diffStats.deletions > 0 ? <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{diffStats.deletions}</span> : null}
-          {diffStats.additions === 0 && diffStats.deletions === 0 ? <span style={{ color: 'var(--t-text-faint)' }}>0</span> : null}
         </div>
       </div>
       <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14 }}>
