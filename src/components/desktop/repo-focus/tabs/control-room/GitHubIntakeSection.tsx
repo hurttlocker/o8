@@ -3,7 +3,7 @@
 import { CheckCircle2, GitPullRequest, Play, Plus, RefreshCw, Sparkles } from '../../../lucide-shims';
 import type { GitHubIssueIntake } from './types';
 import { issueKey } from './helpers';
-import { IconActionButton } from './shared';
+import { ActionButton, IconActionButton } from './shared';
 
 export function GitHubIntakeSection({
   issues,
@@ -127,9 +127,7 @@ export function GitHubIntakeSection({
                   fontSize: 11.75,
                   lineHeight: '15px',
                   fontWeight: 540,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
+                  overflowWrap: 'anywhere',
                 }}
               >
                 {issue.title}
@@ -164,22 +162,20 @@ export function GitHubIntakeSection({
                 <CheckCircle2 size={13} strokeWidth={2.1} />
               </span>
             ) : (
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
-                <IconActionButton
-                  label={`Queue ${issue.title}`}
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 }}>
+                <ActionButton
+                  label="Queue"
+                  icon={<Plus size={12} strokeWidth={2.1} />}
                   disabled={busy}
                   onClick={() => onQueue(issue)}
-                >
-                  <Plus size={12} strokeWidth={2.1} />
-                </IconActionButton>
-                <IconActionButton
-                  label={`Dispatch ${issue.title}`}
-                  active
+                />
+                <ActionButton
+                  label="Dispatch"
+                  icon={<Play size={12} strokeWidth={2.2} />}
+                  primary
                   disabled={busy}
                   onClick={() => onDispatch(issue)}
-                >
-                  <Play size={12} strokeWidth={2.2} />
-                </IconActionButton>
+                />
               </span>
             )}
           </div>

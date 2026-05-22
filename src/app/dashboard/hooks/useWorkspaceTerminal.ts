@@ -371,7 +371,39 @@ export function useWorkspaceTerminal({
     for (const session of automationLaneSessions) {
       if (!session?.sessionKey) continue;
       if (archivedLaneSessionKeys.has(session.sessionKey)) continue;
-      if (deduped.has(session.sessionKey)) continue;
+      const existing = deduped.get(session.sessionKey);
+      if (existing) {
+        deduped.set(session.sessionKey, {
+          ...existing,
+          name: session.name || existing.name,
+          squadId: 'automation',
+          sessionKind: 'automation',
+          surfaceLabel: session.surfaceLabel ?? session.name ?? existing.surfaceLabel,
+          currentTask: existing.currentTask || session.currentTask,
+          status: existing.status === 'running' ? existing.status : session.status,
+          runtimeSurface: {
+            ...session.runtimeSurface,
+            ...existing.runtimeSurface,
+            id: session.runtimeSurface?.id ?? existing.runtimeSurface?.id ?? session.sessionKey,
+            runtime: existing.runtimeSurface?.runtime ?? session.runtimeSurface?.runtime ?? existing.runtime ?? session.runtime ?? 'codex',
+            kind: existing.runtimeSurface?.kind ?? session.runtimeSurface?.kind ?? 'chat-session',
+            ownership: existing.runtimeSurface?.ownership ?? session.runtimeSurface?.ownership ?? 'owned',
+            title: session.runtimeSurface?.title ?? existing.runtimeSurface?.title ?? session.name ?? existing.name ?? 'Automation run',
+            cwd: existing.runtimeSurface?.cwd ?? session.runtimeSurface?.cwd,
+            sourceLabel: 'Automation run',
+            capabilities: {
+              attach: existing.runtimeSurface?.capabilities.attach ?? session.runtimeSurface?.capabilities.attach ?? false,
+              readTail: existing.runtimeSurface?.capabilities.readTail ?? session.runtimeSurface?.capabilities.readTail ?? false,
+              sendInput: existing.runtimeSurface?.capabilities.sendInput ?? session.runtimeSurface?.capabilities.sendInput ?? false,
+              interrupt: existing.runtimeSurface?.capabilities.interrupt ?? session.runtimeSurface?.capabilities.interrupt ?? false,
+              resize: existing.runtimeSurface?.capabilities.resize ?? session.runtimeSurface?.capabilities.resize ?? false,
+              diffContext: existing.runtimeSurface?.capabilities.diffContext ?? session.runtimeSurface?.capabilities.diffContext ?? false,
+              reviewContext: existing.runtimeSurface?.capabilities.reviewContext ?? session.runtimeSurface?.capabilities.reviewContext ?? false,
+            },
+          },
+        });
+        continue;
+      }
       deduped.set(session.sessionKey, session);
     }
     return [...deduped.values()];
@@ -625,7 +657,10 @@ export function useWorkspaceTerminal({
         repoPath: lane.repoPath,
         fallbackToAnyExisting: false,
       });
-      const packetTitle = packet?.title ?? lane.packetTitle ?? targetScope?.name ?? 'Dispatched Agent';
+      const rawPacketTitle = packet?.title ?? lane.packetTitle ?? targetScope?.name ?? 'Dispatched Agent';
+      const packetTitle = rawPacketTitle.trim().toLowerCase().startsWith('[automation]')
+        ? cleanAutomationLaneTitle(rawPacketTitle)
+        : rawPacketTitle;
       const packetReferenceLabel = packet?.referenceLabel ?? lane.packetReferenceLabel ?? lane.laneId ?? 'Lane';
       const packetStatus = packet && packet.status !== 'queued' && packet.status !== 'draft'
         ? packet.status

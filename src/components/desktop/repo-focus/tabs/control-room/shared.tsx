@@ -86,9 +86,9 @@ export function StatusChip({ group, count }: { group: 'blocked' | 'review' | 'ru
         flexShrink: 0,
       }}
     >
-      <span aria-hidden style={{ width: 5, height: 5, borderRadius: 999, background: tone.dot, flexShrink: 0 }} />
-      <span style={{ color: 'var(--t-text-faint)', fontWeight: 560 }}>{GROUP_LABELS[group]}</span>
-      <span style={{ fontWeight: 680 }}>{count}</span>
+      <span aria-hidden style={{ width: 5, height: 5, borderRadius: 999, background: tone.dot, opacity: count === 0 ? 0.35 : 1, flexShrink: 0 }} />
+      <span style={{ color: 'var(--t-text-faint)', fontWeight: 560, opacity: count === 0 ? 0.6 : 1 }}>{GROUP_LABELS[group]}</span>
+      <span style={{ fontWeight: 680, color: count === 0 ? 'var(--t-text-faint)' : 'inherit' }}>{count}</span>
     </span>
   );
 }

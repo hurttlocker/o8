@@ -66,6 +66,16 @@ export function LeftPanelProjectFocus({
     return () => window.removeEventListener('keydown', handler);
   }, [onBack]);
 
+  // Signal the dashboard to widen the left column into "control-room mode"
+  // while the Control tab is active; collapse back on Chats and on unmount.
+  // (Event, not a prop, to avoid drilling a callback through AgentPanel.)
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('o8:control-room-wide', { detail: { wide: visibleActiveTab === 'control' } }));
+  }, [visibleActiveTab]);
+  useEffect(() => () => {
+    window.dispatchEvent(new CustomEvent('o8:control-room-wide', { detail: { wide: false } }));
+  }, []);
+
   // Filter packets to the project's repos (or further to the selected
   // repo when one is anchored). The wider list drives the project header
   // roll-up; the narrower drives in-tab content.
