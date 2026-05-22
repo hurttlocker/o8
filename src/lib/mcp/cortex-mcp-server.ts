@@ -117,13 +117,17 @@ const TOOLS: McpTool[] = [
   {
     name: 'cortex_list_issues',
     description:
-      'List open GitHub issues for a repository. Returns issue number, title, labels, author, and body.',
+      'List open GitHub issues for a repository. Returns a bounded summary per issue (number, title, state, author, labels, comments, created) — not the body. Use `gh issue view` for full text.',
     inputSchema: {
       type: 'object',
       properties: {
         repo: {
           type: 'string',
           description: 'Repository slug (e.g. "owner/repo"). Uses the current repo if omitted.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max issues to return (default 30).',
         },
       },
     },
@@ -138,6 +142,10 @@ const TOOLS: McpTool[] = [
         repo: {
           type: 'string',
           description: 'Repository slug (e.g. "owner/repo"). Uses the current repo if omitted.',
+        },
+        limit: {
+          type: 'number',
+          description: 'Max PRs to return (default 30).',
         },
       },
     },
@@ -555,6 +563,14 @@ async function apiFetch(path: string, options?: RequestInit): Promise<unknown> {
   }
 }
 
+// Clamp a caller-supplied list limit so list tools stay token-bounded.
+function resolveLimit(value: unknown, fallback: number): number {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+    return Math.min(Math.floor(value), 200);
+  }
+  return fallback;
+}
+
 function textResult(text: string, isError = false): McpToolResult {
   return { content: [{ type: 'text', text }], isError };
 }
@@ -589,10 +605,11 @@ async function handleFleetStatus(args: Record<string, unknown>): Promise<McpTool
 async function handleListIssues(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const repo = (args.repo as string) || REPO_SLUG;
+    const limit = resolveLimit(args.limit, 30);
     const qs = repo ? `?repo=${encodeURIComponent(repo)}` : '';
     const data = await apiFetch(`/api/panel/issues${qs}`) as Record<string, unknown>;
     const issues = (data.issues ?? []) as Array<Record<string, unknown>>;
-    const summary = issues.map((i) => ({
+    const summary = issues.slice(0, limit).map((i) => ({
       number: i.number,
       title: i.title,
       state: i.state,
@@ -601,7 +618,7 @@ async function handleListIssues(args: Record<string, unknown>): Promise<McpToolR
       comments: i.comments,
       created: i.createdAt,
     }));
-    return jsonResult({ count: issues.length, repo: data.repo, issues: summary });
+    return jsonResult({ count: issues.length, returned: summary.length, repo: data.repo, issues: summary });
   } catch (err) {
     return textResult(`Failed to fetch issues: ${err}`, true);
   }
@@ -610,10 +627,11 @@ async function handleListIssues(args: Record<string, unknown>): Promise<McpToolR
 async function handleListPrs(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const repo = (args.repo as string) || REPO_SLUG;
+    const limit = resolveLimit(args.limit, 30);
     const qs = repo ? `?repo=${encodeURIComponent(repo)}` : '';
     const data = await apiFetch(`/api/panel/prs${qs}`) as Record<string, unknown>;
     const prs = (data.prs ?? []) as Array<Record<string, unknown>>;
-    const summary = prs.map((p) => ({
+    const summary = prs.slice(0, limit).map((p) => ({
       number: p.number,
       title: p.title,
       author: (p.author as Record<string, unknown>)?.login ?? null,
@@ -624,7 +642,7 @@ async function handleListPrs(args: Record<string, unknown>): Promise<McpToolResu
       reviewDecision: p.reviewDecision,
       created: p.createdAt,
     }));
-    return jsonResult({ count: prs.length, repo: data.repo, prs: summary });
+    return jsonResult({ count: prs.length, returned: summary.length, repo: data.repo, prs: summary });
   } catch (err) {
     return textResult(`Failed to fetch PRs: ${err}`, true);
   }

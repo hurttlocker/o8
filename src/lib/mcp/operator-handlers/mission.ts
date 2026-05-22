@@ -904,7 +904,19 @@ export async function handleGetPacketScope(args: Record<string, unknown>): Promi
     if (!result) {
       return textResult('Packet scope not found', true);
     }
-    return jsonResult(result);
+    // Bound directive prose so a project with many/long directives doesn't
+    // flood the worker's context — keep every directive, cap each body.
+    const DIRECTIVE_BODY_CAP = 600;
+    const scope = result as unknown as Record<string, unknown>;
+    if (Array.isArray(scope.directives)) {
+      scope.directives = (scope.directives as Array<Record<string, unknown>>).map((directive) => {
+        const body = directive.body;
+        return typeof body === 'string' && body.length > DIRECTIVE_BODY_CAP
+          ? { ...directive, body: `${body.slice(0, DIRECTIVE_BODY_CAP)}…[+${body.length - DIRECTIVE_BODY_CAP} chars truncated]` }
+          : directive;
+      });
+    }
+    return jsonResult(scope);
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_packet_scope failed: ${errorText(error)}`);
     return textResult(`Failed to read packet scope: ${errorText(error)}`, true);

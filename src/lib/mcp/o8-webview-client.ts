@@ -211,6 +211,10 @@ function coercePageMap(value: unknown): PageMapResult {
   return record as PageMapResult;
 }
 
+// Cap the rendered a11y tree so a dense page (hundreds of nodes) can't flood
+// the caller's context. The true count is reported in the footer.
+const SNAPSHOT_MAX_ELEMENTS = 200;
+
 function formatSnapshotTree(pageMap: PageMapResult): string {
   const lines: string[] = [];
   const title = typeof pageMap.title === 'string' ? pageMap.title : '';
@@ -236,7 +240,8 @@ function formatSnapshotTree(pageMap: PageMapResult): string {
     return lines.join('\n');
   }
 
-  for (const element of elements) {
+  const shown = elements.slice(0, SNAPSHOT_MAX_ELEMENTS);
+  for (const element of shown) {
     const indent = '  '.repeat(Math.max(0, element.depth ?? 0));
     const attributes: string[] = [];
 
@@ -274,6 +279,10 @@ function formatSnapshotTree(pageMap: PageMapResult): string {
 
     const suffix = attributes.length > 0 ? ` ${attributes.join(' ')}` : '';
     lines.push(`${indent}[${element.ref}] <${element.tag}>${suffix}`);
+  }
+
+  if (elements.length > shown.length) {
+    lines.push(`… (+${elements.length - shown.length} more refs — narrow with a selector or re-run after the page settles)`);
   }
 
   return lines.join('\n');
