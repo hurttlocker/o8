@@ -283,6 +283,7 @@ function DashboardInner() {
     timelineVisible, setTimelineVisible,
     desktopDraftInjection, setDesktopDraftInjection,
     thoughtsDraftInjection, setThoughtsDraftInjection,
+    thoughtsImageInjection, setThoughtsImageInjection,
     mobileRemoteHref,
     handleOpenSettingsTab,
   } = uiChrome;
@@ -314,10 +315,13 @@ function DashboardInner() {
     packetStatus: string | null;
   };
   type WorkspaceActivePayload = {
+    workspaceId: string | null;
     label: string | null;
     tabId: string | null;
     kind: string | null;
     tabs: WorkspaceTabSummary[];
+    contextRailAvailable: boolean;
+    contextRailVisible: boolean;
   };
   const [workspaceActiveMap, setWorkspaceActiveMap] = useState<Map<string, WorkspaceActivePayload>>(() => new Map());
   useEffect(() => {
@@ -327,6 +331,8 @@ function DashboardInner() {
         label?: string | null;
         tabId?: string | null;
         kind?: string | null;
+        contextRailAvailable?: boolean;
+        contextRailVisible?: boolean;
         removed?: boolean;
       }>).detail;
       const id = detail?.workspaceId;
@@ -337,12 +343,15 @@ function DashboardInner() {
           next.delete(id);
         } else {
           next.set(id, {
+            workspaceId: id,
             label: detail?.label ?? null,
             tabId: detail?.tabId ?? null,
             kind: detail?.kind ?? null,
             tabs: Array.isArray((detail as { tabs?: WorkspaceTabSummary[] })?.tabs)
               ? (detail as { tabs?: WorkspaceTabSummary[] }).tabs ?? []
               : [],
+            contextRailAvailable: Boolean(detail?.contextRailAvailable),
+            contextRailVisible: detail?.contextRailVisible !== false,
           });
         }
         return next;
@@ -360,7 +369,7 @@ function DashboardInner() {
       const [only] = workspaceActiveMap.values();
       return only;
     }
-    return { label: null, tabId: null, kind: null, tabs: [] };
+    return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], contextRailAvailable: false, contextRailVisible: false };
   }, [workspaceActiveMap]);
 
   // Side-by-side header pills for splits — both workspaces' tabs land
@@ -372,8 +381,16 @@ function DashboardInner() {
       workspaceId,
       tabs: payload.tabs,
       activeTabId: payload.tabId,
+      contextRailAvailable: payload.contextRailAvailable,
+      contextRailVisible: payload.contextRailVisible,
     }));
   }, [workspaceActiveMap]);
+
+  const handleToggleProjectContextRail = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('o8:request-toggle-context-rail', {
+      detail: { workspaceId: workspaceHeaderActive.workspaceId ?? null },
+    }));
+  }, [workspaceHeaderActive.workspaceId]);
 
   // `…` menu handlers. Only orchestrator + llm-chat tabs back to
   // /api/v2/chat-history, so we gate by kind. Other tab kinds (CLI
@@ -1885,6 +1902,45 @@ function DashboardInner() {
     return () => { window.removeEventListener('o8:resolve-blocker', handleResolveBlocker); };
   }, [setActiveWorkspace, setThoughtsDraftInjection]);
 
+  // Right-clicking an inline image in o8.md → "Add to chat" dispatches
+  // `o8:attach-image` with the asset URL. Fetch it here (single, always-mounted
+  // listener — avoids multi-firing across the visibility:hidden chat tabs), encode
+  // as a data URI, and stash it as an image injection the visible chat composer
+  // consumes once.
+  useEffect(() => {
+    const handleAttachImage = (event: Event) => {
+      const detail = (event as CustomEvent<{ url?: string; name?: string }>).detail;
+      if (!detail?.url) return;
+      const url = detail.url;
+      const name = detail.name || 'image';
+      void (async () => {
+        try {
+          const res = await fetch(url);
+          if (!res.ok) return;
+          const blob = await res.blob();
+          const dataUri = await new Promise<string>((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = () => resolve(reader.result as string);
+            reader.onerror = () => reject(reader.error);
+            reader.readAsDataURL(blob);
+          });
+          setThoughtsImageInjection({
+            id: `img-${Date.now()}`,
+            dataUri,
+            name,
+            mimeType: blob.type || 'image/png',
+          });
+        } catch { /* transient — ignore */ }
+      })();
+    };
+    window.addEventListener('o8:attach-image', handleAttachImage);
+    return () => window.removeEventListener('o8:attach-image', handleAttachImage);
+  }, [setThoughtsImageInjection]);
+
+  const handleImageInjectionConsumed = useCallback(() => {
+    setThoughtsImageInjection(null);
+  }, [setThoughtsImageInjection]);
+
   const handleExpandWorkspace = useCallback((workspace: string, repo: string | null) => {
     setActiveWorkspace(workspace);
     // Only open README tab if workspace actually has a README
@@ -3388,6 +3444,9 @@ function DashboardInner() {
           onSpawnChat={isSingleWorkspace ? handleSpawnChat : undefined}
           onSpawnTerminal={isSingleWorkspace ? handleSpawnTerminal : undefined}
           onPlayContextMenu={isSingleWorkspace ? handleSplitWorkspaceFromHeader : undefined}
+          projectContextRailAvailable={workspaceHeaderActive.contextRailAvailable}
+          projectContextRailVisible={workspaceHeaderActive.contextRailVisible}
+          onToggleProjectContextRail={workspaceHeaderActive.contextRailAvailable ? handleToggleProjectContextRail : undefined}
         />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
@@ -3430,7 +3489,7 @@ function DashboardInner() {
             workspaceTargets={orchestratorWorkspaceTargets}
             onMissionStateChange={handleThoughtsMissionStateChange}
             onLaunchPacket={launchOrchestrationPacket}
-            draftInjection={thoughtsDraftInjection}
+            draftInjection={thoughtsDraftInjection} imageInjection={thoughtsImageInjection} onImageInjectionConsumed={handleImageInjectionConsumed}
             onSelectSession={handleSelectSession}
             latestDispatchedTabId={latestDispatchedTabId}
             latestDispatchedAt={latestDispatchedAt}
@@ -3550,7 +3609,7 @@ function DashboardInner() {
                         workspaceTargets={orchestratorWorkspaceTargets}
                         onMissionStateChange={handleThoughtsMissionStateChange}
                         onLaunchPacket={launchOrchestrationPacket}
-                        draftInjection={thoughtsDraftInjection}
+                        draftInjection={thoughtsDraftInjection} imageInjection={thoughtsImageInjection} onImageInjectionConsumed={handleImageInjectionConsumed}
                         onSelectSession={handleSelectSession}
                         latestDispatchedTabId={latestDispatchedTabId}
                         latestDispatchedAt={latestDispatchedAt}
@@ -3613,7 +3672,7 @@ function DashboardInner() {
                         workspaceTargets={orchestratorWorkspaceTargets}
                         onMissionStateChange={handleThoughtsMissionStateChange}
                         onLaunchPacket={launchOrchestrationPacket}
-                        draftInjection={thoughtsDraftInjection}
+                        draftInjection={thoughtsDraftInjection} imageInjection={thoughtsImageInjection} onImageInjectionConsumed={handleImageInjectionConsumed}
                         onSelectSession={handleSelectSession}
                         latestDispatchedTabId={latestDispatchedTabId}
                         latestDispatchedAt={latestDispatchedAt}

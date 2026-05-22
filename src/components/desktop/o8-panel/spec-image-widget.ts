@@ -73,6 +73,44 @@ function openSpecLightbox(url: string, alt: string): void {
   document.body.appendChild(overlay);
 }
 
+// Right-click menu on a thumbnail. Hardcoded dark popover (transient overlay —
+// themed --t-* tokens render invisible on a dark menu in light mode).
+function openSpecImageMenu(x: number, y: number, url: string, name: string): void {
+  document.querySelectorAll('[data-o8-spec-img-menu]').forEach((el) => el.remove());
+  const menu = document.createElement('div');
+  menu.setAttribute('data-o8-spec-img-menu', '');
+  menu.style.cssText =
+    `position:fixed; left:${x}px; top:${y}px; z-index:99998; min-width:148px; padding:5px;`
+    + 'border-radius:10px; background:rgba(34,38,45,0.98); border:1px solid rgba(255,255,255,0.12);'
+    + 'box-shadow:0 10px 30px rgba(0,0,0,0.35); font-family:Inter, system-ui, sans-serif; font-size:12.5px;';
+  const item = document.createElement('button');
+  item.type = 'button';
+  item.textContent = 'Add to chat';
+  item.style.cssText =
+    'display:block; width:100%; text-align:left; padding-top:7px; padding-bottom:7px; padding-left:10px;'
+    + 'padding-right:10px; border-radius:7px; border:none; background:transparent; color:#e8ecf2; cursor:pointer; font:inherit;';
+  item.onmouseenter = () => { item.style.background = 'rgba(255,255,255,0.08)'; };
+  item.onmouseleave = () => { item.style.background = 'transparent'; };
+  const close = () => {
+    menu.remove();
+    document.removeEventListener('keydown', onKey, true);
+    document.removeEventListener('mousedown', onDown, true);
+  };
+  item.onclick = () => {
+    window.dispatchEvent(new CustomEvent('o8:attach-image', { detail: { url, name } }));
+    close();
+  };
+  const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') close(); };
+  const onDown = (e: MouseEvent) => { if (!menu.contains(e.target as Node)) close(); };
+  document.addEventListener('keydown', onKey, true);
+  setTimeout(() => document.addEventListener('mousedown', onDown, true), 0);
+  menu.appendChild(item);
+  document.body.appendChild(menu);
+  const r = menu.getBoundingClientRect();
+  if (r.right > window.innerWidth) menu.style.left = `${Math.max(8, window.innerWidth - r.width - 8)}px`;
+  if (r.bottom > window.innerHeight) menu.style.top = `${Math.max(8, window.innerHeight - r.height - 8)}px`;
+}
+
 class SpecImageWidget extends WidgetType {
   constructor(readonly images: ParsedSpecImage[], readonly repoPath: string | null) {
     super();
@@ -101,6 +139,11 @@ class SpecImageWidget extends WidgetType {
     img.loading = 'lazy';
     img.style.cssText = 'width:100%; height:100%; object-fit:cover; display:block;';
     img.onclick = (e) => { e.preventDefault(); e.stopPropagation(); openSpecLightbox(url, im.alt); };
+    box.oncontextmenu = (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      openSpecImageMenu(e.clientX, e.clientY, url, im.alt || im.src.split('/').pop() || 'image');
+    };
     box.appendChild(img);
     return box;
   }

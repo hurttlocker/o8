@@ -38,6 +38,7 @@ export function useUIChrome() {
   // ── Draft injections ──
   const [desktopDraftInjection, setDesktopDraftInjection] = useState<{ id: string; text: string } | null>(null);
   const [thoughtsDraftInjection, setThoughtsDraftInjection] = useState<{ id: string; text: string } | null>(null);
+  const [thoughtsImageInjection, setThoughtsImageInjection] = useState<{ id: string; dataUri: string; name: string; mimeType: string } | null>(null);
 
   // ── Mobile remote href ──
   const [mobileRemoteHref, setMobileRemoteHref] = useState('/mobile');
@@ -82,6 +83,8 @@ export function useUIChrome() {
     setDesktopDraftInjection,
     thoughtsDraftInjection,
     setThoughtsDraftInjection,
+    thoughtsImageInjection,
+    setThoughtsImageInjection,
 
     // Mobile
     mobileRemoteHref,
