@@ -413,8 +413,10 @@ const TOOLS: McpTool[] = [
           description: 'Optional list of repo IDs (from the repo registry) to add at creation time.',
         },
         roles: {
+          type: 'array',
+          items: { type: 'string' },
           description:
-            'Optional roles per repo. Either a parallel array (same length as repoIds) or a map { repoId: role }. ' +
+            'Optional roles as a parallel array matching repoIds order (same length). ' +
             'Curated roles: frontend, backend, fullstack, mobile, library, service, infra, docs, site, shared.',
         },
       },
@@ -541,7 +543,16 @@ async function apiFetch(path: string, options?: RequestInit): Promise<unknown> {
       ...(options?.headers ?? {}),
     },
   });
-  return res.json();
+  const body = await res.text();
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} ${res.statusText} from ${path}${body ? `: ${body.slice(0, 500)}` : ''}`);
+  }
+  if (!body) return {};
+  try {
+    return JSON.parse(body);
+  } catch {
+    throw new Error(`Non-JSON response from ${path} (HTTP ${res.status}): ${body.slice(0, 200)}`);
+  }
 }
 
 function textResult(text: string, isError = false): McpToolResult {
@@ -695,24 +706,17 @@ async function handleUpdatePacket(args: Record<string, unknown>): Promise<McpToo
     const updates = (args.updates ?? {}) as Record<string, unknown>;
     if (!packetId) return textResult('packetId is required', true);
 
-    // Read current state
-    const current = await apiFetch('/api/orchestrator/state') as Record<string, unknown>;
-    const mission = (current.mission ?? {}) as Record<string, unknown>;
-    const packets = (mission.packets ?? []) as Array<Record<string, unknown>>;
-    const idx = packets.findIndex((p) => p.id === packetId);
-    if (idx === -1) return textResult(`Packet ${packetId} not found`, true);
-
-    // Apply updates
-    packets[idx] = { ...packets[idx], ...updates };
-    const updated = { ...mission, packets };
-
-    // Write back
+    // Apply the delta atomically server-side — PATCH does the read-modify-write
+    // inside the control-plane lock, so concurrent packet edits aren't reverted.
     const result = await apiFetch('/api/orchestrator/state', {
-      method: 'POST',
-      body: JSON.stringify({ mission: updated }),
+      method: 'PATCH',
+      body: JSON.stringify({ packetId, updates }),
     }) as Record<string, unknown>;
 
-    return jsonResult({ ok: true, packet: packets[idx], updatedAt: (result.mission as Record<string, unknown>)?.updatedAt });
+    const mission = (result.mission ?? {}) as Record<string, unknown>;
+    const packets = (mission.packets ?? []) as Array<Record<string, unknown>>;
+    const packet = packets.find((p) => p.id === packetId);
+    return jsonResult({ ok: true, packet, updatedAt: mission.updatedAt });
   } catch (err) {
     return textResult(`Failed to update packet: ${err}`, true);
   }

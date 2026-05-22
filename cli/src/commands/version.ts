@@ -1,19 +1,21 @@
 /**
  * `o8 version` — CLI version + connected server version.
  *
- * The CLI version is baked at build time via package.json. The server version
- * is whatever `/api/panel/status` returns (currently always null — the
- * endpoint reports null today, so the CLI surfaces null until the server is
- * extended to include a version string).
+ * The CLI version is injected at build time from the repo-root package.json
+ * (the app version, kept in sync by scripts/sync-version.mjs) via an esbuild
+ * `--define` in cli/esbuild.config.mjs, so the bundled `o8` binary always
+ * reports the version it shipped with. The server version is whatever
+ * `/api/panel/status` returns.
  */
 
 import { apiFetch, type CliError } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { printHumanKv, printJson, type OutputMode } from '../output.js';
 
-// CLI-PHASE1-TODO: source this from cli/package.json at build time via an
-// esbuild --define injection rather than a hard string. Tracked in epic #926.
-const CLI_VERSION = '0.0.0-dev';
+// Replaced by esbuild --define at build time (cli/esbuild.config.mjs). Falls
+// back to a dev marker when run unbundled (e.g. via tsx during development).
+declare const __O8_CLI_VERSION__: string | undefined;
+const CLI_VERSION = typeof __O8_CLI_VERSION__ !== 'undefined' ? __O8_CLI_VERSION__ : '0.0.0-dev';
 
 interface PanelStatus {
   version: string | null;
