@@ -18,6 +18,7 @@ import {
   SettingsToggleButton,
   TabBreadcrumb,
   TabHeading,
+  SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
 
 type OverlapGateMode = 'advisory' | 'strict';
@@ -422,7 +423,7 @@ export function OperatorDefaultsTab() {
       paddingLeft: 8,
       paddingRight: 32,
       paddingBottom: 40,
-      maxWidth: 780,
+      maxWidth: SETTINGS_CONTENT_MAX_WIDTH,
       fontFamily: APP_FONT_STACK,
     }}>
       <TabBreadcrumb tab="dispatch" />

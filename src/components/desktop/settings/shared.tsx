@@ -67,6 +67,9 @@ export const THEME_ACCENT_RING = 'var(--t-settings-accent-ring, rgba(124, 156, 2
 export const APP_FONT_STACK = 'var(--font-sans-system)';
 export const MONO_FONT_STACK = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
+// Outer width cap for settings tab content. One knob — widen to fill more of a wide screen.
+export const SETTINGS_CONTENT_MAX_WIDTH = 1080;
+
 // Rams × o8-site editorial tokens — paper, ink, one orange. See o8_design_language.md.
 export const RAMS_ACCENT = '#FF5A1F';
 export const RAMS_HAIRLINE_SOFT = 'rgba(17, 17, 17, 0.08)';
