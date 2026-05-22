@@ -25,6 +25,12 @@ export function RightPanelMorphButton({
   const panelOpen = state !== 'collapsed';
   const label = panelOpen ? 'Close panel' : 'Open O8 panel';
   const handleClick = onToggleO8Panel;
+  const restBackground = 'var(--t-chrome-btn-bg)';
+  const hoverBackground = 'var(--t-chrome-btn-hover-bg)';
+  const activeBackground = 'var(--t-chrome-btn-active-bg)';
+  const restShadow = 'var(--t-chrome-btn-shadow)';
+  const hoverShadow = 'var(--t-chrome-btn-hover-shadow)';
+  const activeShadow = 'var(--t-chrome-btn-active-shadow)';
 
   return (
     <motion.button
@@ -42,22 +48,25 @@ export function RightPanelMorphButton({
         padding: 0,
         border: 'none',
         borderRadius: 7,
-        background: panelOpen ? 'var(--t-panel-active)' : 'transparent',
+        background: panelOpen ? activeBackground : restBackground,
+        boxShadow: panelOpen ? activeShadow : restShadow,
         color: panelOpen ? 'var(--t-text)' : 'var(--t-text-secondary)',
         cursor: 'pointer',
         flexShrink: 0,
         WebkitTapHighlightColor: 'transparent',
-        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
       onMouseEnter={(e) => {
         if (!panelOpen) {
-          e.currentTarget.style.background = 'var(--t-hover)';
+          e.currentTarget.style.background = hoverBackground;
+          e.currentTarget.style.boxShadow = hoverShadow;
         }
       }}
       onMouseLeave={(e) => {
         if (!panelOpen) {
-          e.currentTarget.style.background = 'transparent';
+          e.currentTarget.style.background = restBackground;
+          e.currentTarget.style.boxShadow = restShadow;
         }
       }}
     >
