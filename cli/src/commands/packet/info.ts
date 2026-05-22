@@ -91,18 +91,21 @@ export async function runPacketInfo(mode: OutputMode): Promise<number> {
     );
   }
 
-  // Pull recent events to mirror the epic's sample shape.
-  const eventsRes = await apiFetch<{ lane: Lane; events: LaneEvent[] }>(
-    cfg,
-    `/api/lanes/${encodeURIComponent(slugMatch.id)}`,
-    { query: { events: 20 } },
-  );
+  // Recent events + scope are independent of each other (both only need the
+  // lane id) — fetch them in parallel to halve the round-trips in a packet loop.
+  const [eventsRes, scopeRes] = await Promise.all([
+    apiFetch<{ lane: Lane; events: LaneEvent[] }>(
+      cfg,
+      `/api/lanes/${encodeURIComponent(slugMatch.id)}`,
+      { query: { events: 20 } },
+    ),
+    apiFetch<PacketScopeRuntime>(
+      cfg,
+      `/api/lanes/${encodeURIComponent(slugMatch.id)}/scope`,
+      { allowNotFound: true },
+    ).catch(() => null),
+  ]);
   const events = eventsRes.data?.events ?? [];
-  const scopeRes = await apiFetch<PacketScopeRuntime>(
-    cfg,
-    `/api/lanes/${encodeURIComponent(slugMatch.id)}/scope`,
-    { allowNotFound: true },
-  ).catch(() => null);
   const actualRuntime = scopeRes?.data?.actualRuntime ?? null;
 
   const payload = {
