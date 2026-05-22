@@ -240,7 +240,8 @@ export function TaskActionMenu({
   const viewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth;
   const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight;
   const menuWidth = 248;
-  const menuHeight = mode === 'menu' ? 266 : 214;
+  const canUnqueue = state.task.group === 'ready' || state.task.group === 'blocked';
+  const menuHeight = mode === 'menu' ? (canUnqueue ? 299 : 266) : 214;
   const panelRect = typeof document === 'undefined'
     ? null
     : document.querySelector('[data-o8-agent-panel="true"]')?.getBoundingClientRect() ?? null;
@@ -257,6 +258,7 @@ export function TaskActionMenu({
   const top = Math.min(Math.max(state.y, minTop), maxTop);
   const sessionKey = task.lane?.sessionKey ?? null;
   const taskIsDone = task.group === 'done';
+  const taskCanUnqueue = task.group === 'ready' || task.group === 'blocked';
 
   return (
     <>
@@ -343,6 +345,14 @@ export function TaskActionMenu({
                 { reason: taskIsDone ? 'Pruned from Control Room.' : 'Archived from Control Room.' },
               )}
             />
+            {taskCanUnqueue ? (
+              <MenuActionRow
+                label="Un-queue / remove"
+                disabled={busy}
+                danger
+                onClick={() => onAction(task, 'remove', { reason: 'Un-queued from Control Room.' })}
+              />
+            ) : null}
           </div>
         ) : (
           <div style={{ padding: '2px 4px 4px' }}>

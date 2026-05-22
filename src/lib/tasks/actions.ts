@@ -31,7 +31,7 @@ import type {
 import { buildProjectTaskBrief, getProjectContext } from '@/lib/projects/context';
 import { getTaskPoolTask, type TaskPoolTask } from './pool';
 
-export type TaskMutationAction = 'create' | 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune';
+export type TaskMutationAction = 'create' | 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune' | 'remove';
 
 export interface TaskMutationResult {
   schema: 'o8/task.mutation/v1';
@@ -608,4 +608,33 @@ export async function pruneTask(taskId: string, input: TaskPruneInput = {}): Pro
   }
 
   return mutationResult('prune', task, deletedLane, note, { statusChanged: true });
+}
+
+export async function removeTask(taskId: string, input: TaskPruneInput = {}): Promise<TaskMutationResult> {
+  const task = await resolveTask(taskId, input);
+  if (task.group === 'running') {
+    throw new TaskMutationError(409, `Task ${task.id} is running; block or report it before removing.`);
+  }
+
+  const lane = task.laneId ? getLane(task.laneId) : task.packetId ? findLaneByPacket(task.packetId) : null;
+  const note = input.reason?.trim() || 'Removed task-pool row.';
+  const removedAt = nowIso();
+
+  if (task.packetId) {
+    await withLockedState((state) => {
+      const before = state.packets.length;
+      state.packets = state.packets.filter((packet) => packet.id !== task.packetId);
+      if (state.packets.length !== before) {
+        state.updatedAt = removedAt;
+      }
+      return null;
+    });
+  }
+
+  const deletedLane = lane ? deleteLane(lane.id) : null;
+  if (!task.packetId && !deletedLane) {
+    throw new TaskMutationError(404, `Lane not found for task ${task.id}`);
+  }
+
+  return mutationResult('remove', task, deletedLane, note, { statusChanged: true });
 }
