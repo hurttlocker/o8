@@ -433,6 +433,35 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'o8_view_scroll',
+    description: 'Scroll the o8 webview — by direction (up/down, one viewport or a pixel amount), to a snapshot ref (scrollIntoView), or to top/bottom. Use to bring offscreen content into view before a screenshot or click.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        direction: { type: 'string', enum: ['up', 'down'], description: 'Scroll direction.' },
+        amount: { type: 'number', description: 'Pixels to scroll; omit for one viewport.' },
+        toRef: { type: 'number', description: 'A ref from o8_view_snapshot to scrollIntoView.' },
+        toTop: { type: 'boolean', description: 'Scroll to the top of the page.' },
+        toBottom: { type: 'boolean', description: 'Scroll to the bottom of the page.' },
+      },
+    },
+  },
+  {
+    name: 'o8_view_press_key',
+    description: "Press a key (with optional modifiers) in the o8 webview — e.g. Escape to close a modal, Enter to submit, or Cmd+K (key:'k', meta:true) to open the command palette. Fires a synthetic KeyboardEvent on the focused element: drives o8's own React keybindings, not OS-level shortcuts.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        key: { type: 'string', description: "Key value, e.g. 'Escape', 'Enter', 'k', 'ArrowDown'." },
+        meta: { type: 'boolean', description: 'Cmd (macOS) / Meta modifier.' },
+        ctrl: { type: 'boolean', description: 'Ctrl modifier.' },
+        shift: { type: 'boolean', description: 'Shift modifier.' },
+        alt: { type: 'boolean', description: 'Alt / Option modifier.' },
+      },
+      required: ['key'],
+    },
+  },
+  {
     name: 'o8_view_wait_for',
     description: 'Poll the o8 webview until a CSS selector resolves (optionally until its text includes a substring). Use to avoid racey sleep/screenshot retry loops when waiting for UI state — eg. a modal to open, a toast to appear, or a transcript line to render.',
     inputSchema: {
@@ -502,6 +531,31 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
     o8_view_navigate: async (args) => withStructuredErrors(async () => {
       const path = requiredString(args, 'path');
       const result = await getClient().navigate(path);
+      return jsonResult(result);
+    }),
+
+    o8_view_scroll: async (args) => withStructuredErrors(async () => {
+      const direction = args.direction === 'up' || args.direction === 'down' ? args.direction : undefined;
+      const amount = args.amount === 'half' ? 'half' : parseOptionalNumber(args.amount);
+      const result = await getClient().scroll({
+        direction,
+        amount,
+        toRef: parseOptionalNumber(args.toRef),
+        toTop: args.toTop === true,
+        toBottom: args.toBottom === true,
+      });
+      return jsonResult(result);
+    }),
+
+    o8_view_press_key: async (args) => withStructuredErrors(async () => {
+      const key = requiredString(args, 'key');
+      const result = await getClient().pressKey({
+        key,
+        meta: args.meta === true,
+        ctrl: args.ctrl === true,
+        shift: args.shift === true,
+        alt: args.alt === true,
+      });
       return jsonResult(result);
     }),
 
