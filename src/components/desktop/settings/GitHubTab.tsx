@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   type GitHubAccount,
   type GitHubRepo,
@@ -271,7 +272,7 @@ export function GitHubTab({
             <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', alignItems: 'center' }}>
               <button
                 type="button"
-                onClick={() => window.open(deviceFlow.verificationUriComplete || deviceFlow.verificationUri, '_blank', 'noopener,noreferrer')}
+                onClick={() => openExternalUrl(deviceFlow.verificationUriComplete || deviceFlow.verificationUri)}
                 style={quietActionStyle(false)}
               >
                 open github

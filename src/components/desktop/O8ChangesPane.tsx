@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   ActionButton,
   CheckIcon,
@@ -210,7 +211,7 @@ export const O8ChangesPane = memo(function O8ChangesPane({ repoPath, repoSlug, i
   const handleViewOnGitHub = useCallback((sha: string) => {
     const resolvedSha = resolveCommitSha(sha);
     if (!resolvedSha || !repoSlug) return;
-    window.open(`https://github.com/${repoSlug}/commit/${resolvedSha}`, '_blank', 'noopener,noreferrer');
+    openExternalUrl(`https://github.com/${repoSlug}/commit/${resolvedSha}`);
   }, [repoSlug, resolveCommitSha]);
 
   const handleBackToWorkingTree = useCallback(() => {

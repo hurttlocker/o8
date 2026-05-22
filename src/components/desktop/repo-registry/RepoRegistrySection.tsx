@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   FOCUS_REPO_SETUP_EVENT,
   OPEN_REPO_WORKSPACE_EVENT,
@@ -443,7 +444,7 @@ function RepoRegistrySectionBase({
       ));
     }).catch(() => null);
 
-    window.open(githubUrl, '_blank', 'noopener,noreferrer');
+    openExternalUrl(githubUrl);
   }, []);
 
   const openLaunchModal = useCallback((repo: RepoRegistryEntry) => {

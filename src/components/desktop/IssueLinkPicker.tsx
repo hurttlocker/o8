@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { AlertCircle, Check, ExternalLink, Search } from './lucide-shims';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 export interface LinkedIssueRef {
   repo: string;
@@ -430,7 +431,7 @@ export function IssueLinkPickerModal({
             {value?.url ? (
               <button
                 type="button"
-                onClick={() => window.open(value.url, '_blank', 'noopener,noreferrer')}
+                onClick={() => openExternalUrl(value.url)}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',

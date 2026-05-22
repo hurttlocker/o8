@@ -3,6 +3,7 @@
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { ChevronDown, ExternalLink, GitBranch, Loader2 } from './lucide-shims';
 import { formatBranchDisplayName } from './repo-registry/shared';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 // Branch-with-check glyph that matches Superconductor's pill icon: two
 // branch nodes joined by an arc, with a check mark inside the lower node.
@@ -232,7 +233,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, previewVa
 
   const openInBrowser = useCallback((url: string) => {
     if (typeof window !== 'undefined') {
-      window.open(url, '_blank', 'noopener,noreferrer');
+      openExternalUrl(url);
     }
   }, []);
 

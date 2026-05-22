@@ -12,6 +12,7 @@ import { PRFilesSection } from './PRFilesSection';
 import { PRChecksSection } from './PRChecksSection';
 import { PRCommentsSection } from './PRCommentsSection';
 import { PRReviewThreadsSection } from './PRReviewThreadsSection';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 export function PRViewer({
   prNumber,
@@ -64,7 +65,7 @@ export function PRViewer({
           {repo ? (
             <button
               type="button"
-              onClick={() => window.open(`https://github.com/${repo}/pull/${prNumber}`, '_blank', 'noopener,noreferrer')}
+              onClick={() => openExternalUrl(`https://github.com/${repo}/pull/${prNumber}`)}
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',

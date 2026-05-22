@@ -8,6 +8,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   PREVIEW_HOST_MESSAGE_SOURCE,
   PREVIEW_MESSAGE_SOURCE,
@@ -282,7 +283,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
   }, [activeTab, activeTabId]);
 
   const openExternal = useCallback(() => {
-    if (activeTab?.url) window.open(activeTab.url, '_blank');
+    if (activeTab?.url) openExternalUrl(activeTab.url);
   }, [activeTab]);
 
   // ── Element Picker ──

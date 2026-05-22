@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { ChevronDown } from '../lucide-shims';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 /**
  * ReviewGitActions — the Commit / Push / Open PR cluster on the Review
@@ -226,7 +227,7 @@ export function ReviewGitActions({
     try {
       await post('/api/review/push', {});
       if (repoSlug) {
-        window.open(`https://github.com/${repoSlug}/compare/${branch}?expand=1`, '_blank', 'noopener');
+        openExternalUrl(`https://github.com/${repoSlug}/compare/${branch}?expand=1`);
         setToast({ tone: 'ok', text: 'Pushed — opening the PR form' });
       } else {
         setToast({ tone: 'ok', text: 'Pushed — open the PR from GitHub' });

@@ -17,6 +17,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActivityItem } from './agent-panel/types';
 import { shortRepoLabel, normalizeRepoSlug } from './agent-panel/shared';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   ACTIVITY_COLORS,
   EMPTY_DATA,
@@ -382,10 +383,10 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       if (onSelectIssue) {
         onSelectIssue(item.number, item.repo);
       } else {
-        window.open(`https://github.com/${item.repo}/issues/${item.number}`, '_blank', 'noopener,noreferrer');
+        openExternalUrl(`https://github.com/${item.repo}/issues/${item.number}`);
       }
     } else if (item.kind === 'ci') {
-      window.open(`https://github.com/${item.repo}/actions/runs/${item.id}`, '_blank', 'noopener,noreferrer');
+      openExternalUrl(`https://github.com/${item.repo}/actions/runs/${item.id}`);
     }
   }, [onSelectCommit, onSelectIssue]);
 
