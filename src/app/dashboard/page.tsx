@@ -946,10 +946,16 @@ function DashboardInner() {
           fallbackToAnyExisting: true,
         });
         const snapshot = target.handle.getTabsSnapshot();
-        const primaryConversationTab = snapshot.tabs.find((tab) => tab.kind === 'orchestrator')
-          ?? snapshot.tabs.find((tab) => tab.kind === 'llm-chat' && tab.id !== historyTabId)
-          ?? snapshot.tabs.find((tab) => tab.kind === 'llm-chat')
-          ?? null;
+        // Reuse a tab that MATCHES the thread's kind — orchestrator threads
+        // (thoughts-*) reuse only an orchestrator tab (Claude); never load them
+        // into the free o8-Default casual chat. Falling through to historyTabId
+        // makes a fresh tab of the right kind (see buildHistoryChatTab).
+        const isOrchestratorThread = historyTabId.startsWith('thoughts-');
+        const primaryConversationTab = isOrchestratorThread
+          ? snapshot.tabs.find((tab) => tab.kind === 'orchestrator') ?? null
+          : snapshot.tabs.find((tab) => tab.kind === 'llm-chat' && tab.id !== historyTabId)
+              ?? snapshot.tabs.find((tab) => tab.kind === 'llm-chat')
+              ?? null;
         const tabId = target.handle.openHistoryChat(primaryConversationTab?.id ?? historyTabId, title, repo);
         if (tabId) {
           window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
