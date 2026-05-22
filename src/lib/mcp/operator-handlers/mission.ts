@@ -182,6 +182,19 @@ export const MISSION_TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'o8_packet_diff',
+    description:
+      "Read a packet's actual code diff (committed + uncommitted) against where its lane diverged from base — what to review before approving, without raw shell. Byte-bounded (default 64KB; pass maxBytes to raise, cap 512KB). Provide packetId or laneId.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: { type: 'string', description: 'Packet id (e.g. pkt-abc). Either packetId or laneId is required.' },
+        laneId: { type: 'string', description: 'Lane id (e.g. lane-xyz). Either packetId or laneId is required.' },
+        maxBytes: { type: 'number', description: 'Max diff bytes to return (default 65536, cap 524288).' },
+      },
+    },
+  },
+  {
     name: 'o8_task_list',
     description:
       'Return the simple o8 task pool grouped as ready, running, review, blocked, and done. This is a projection of packets and lanes, not a separate task store. Use it before claiming or dispatching work.',
@@ -920,6 +933,26 @@ export async function handleGetPacketScope(args: Record<string, unknown>): Promi
   } catch (error) {
     console.error(`${'[mcp-operator]'} get_packet_scope failed: ${errorText(error)}`);
     return textResult(`Failed to read packet scope: ${errorText(error)}`, true);
+  }
+}
+
+export async function handlePacketDiff(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const packetId = optionalString(args, 'packetId') || undefined;
+    const laneId = optionalString(args, 'laneId') || undefined;
+    const id = laneId || packetId;
+    if (!id) {
+      return textResult('packetId or laneId is required', true);
+    }
+    const maxBytes = typeof args.maxBytes === 'number' && Number.isFinite(args.maxBytes) && args.maxBytes > 0
+      ? Math.floor(args.maxBytes)
+      : undefined;
+    const qs = maxBytes ? `?maxBytes=${maxBytes}` : '';
+    const data = await apiFetch(`/api/lanes/${encodeURIComponent(id)}/diff${qs}`);
+    return jsonResult(data);
+  } catch (error) {
+    console.error(`${'[mcp-operator]'} o8_packet_diff failed: ${errorText(error)}`);
+    return textResult(`Failed to read packet diff: ${errorText(error)}`, true);
   }
 }
 
