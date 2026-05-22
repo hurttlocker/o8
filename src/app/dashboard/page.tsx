@@ -280,7 +280,7 @@ function DashboardInner() {
     activeNavSection, setActiveNavSection,
     settingsInitialTab,
     sidebarVisible, setSidebarVisible,
-    timelineVisible, setTimelineVisible,
+    timelineVisible,
     desktopDraftInjection, setDesktopDraftInjection,
     thoughtsDraftInjection, setThoughtsDraftInjection,
     thoughtsImageInjection, setThoughtsImageInjection,
@@ -385,12 +385,6 @@ function DashboardInner() {
       contextRailVisible: payload.contextRailVisible,
     }));
   }, [workspaceActiveMap]);
-
-  const handleToggleProjectContextRail = useCallback(() => {
-    window.dispatchEvent(new CustomEvent('o8:request-toggle-context-rail', {
-      detail: { workspaceId: workspaceHeaderActive.workspaceId ?? null },
-    }));
-  }, [workspaceHeaderActive.workspaceId]);
 
   // `…` menu handlers. Only orchestrator + llm-chat tabs back to
   // /api/v2/chat-history, so we gate by kind. Other tab kinds (CLI
@@ -685,8 +679,6 @@ function DashboardInner() {
     sidebarVisible,
     setLeftWidth,
     setSidebarVisible,
-    setTimelineVisible,
-    timelineVisible,
   });
 
   // ── Prefetch heavy lazy chunks on idle so Suspense fallbacks are never visible ──
@@ -2914,7 +2906,7 @@ function DashboardInner() {
   const showAgentPanelFtux = activeFtuxMilestone === 'firstAgentSpawned';
   const showCanvasFtux = activeFtuxMilestone === 'firstFileChange';
   const showApprovalFtux = activeFtuxMilestone === 'firstApproval';
-  const showCompletionFtux = activeFtuxMilestone === 'firstCompletion';
+  const showCompletionFtux = activeFtuxMilestone === 'firstCompletion' && timelineVisible;
   const showMobileFtux = activeFtuxMilestone === 'firstMobilePrompt';
   const changedFileLabel = ftuxFirstChangedFile?.path.split('/').pop() ?? 'your latest edit';
   const mobilePromptBody = mobileRemoteHref.startsWith('http')
@@ -3444,9 +3436,6 @@ function DashboardInner() {
           onSpawnChat={isSingleWorkspace ? handleSpawnChat : undefined}
           onSpawnTerminal={isSingleWorkspace ? handleSpawnTerminal : undefined}
           onPlayContextMenu={isSingleWorkspace ? handleSplitWorkspaceFromHeader : undefined}
-          projectContextRailAvailable={workspaceHeaderActive.contextRailAvailable}
-          projectContextRailVisible={workspaceHeaderActive.contextRailVisible}
-          onToggleProjectContextRail={workspaceHeaderActive.contextRailAvailable ? handleToggleProjectContextRail : undefined}
         />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />

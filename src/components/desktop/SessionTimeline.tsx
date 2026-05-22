@@ -238,7 +238,7 @@ export function SessionTimeline({
       : formatTime(cursorMin, anchorMs);
     const durationLabel = hoveredSeg ? formatDuration(durationMin) : null;
     const kindLabel = hoveredSeg ? SEGMENT_LABELS[hoveredSeg.kind] : 'IDLE';
-    const kindColor = hoveredSeg ? SEGMENT_COLORS[hoveredSeg.kind] : '#94a3b8';
+    const kindColor = hoveredSeg ? SEGMENT_COLORS[hoveredSeg.kind] : 'var(--t-text-faint)';
 
     const parsedAgent = parseTimelineAgent(hoveredSeg?.agent);
     const resolvedRuntimeLabel = parsedAgent.runtimeLabel ?? hoveredContext?.runtime ?? null;
@@ -285,7 +285,7 @@ export function SessionTimeline({
 
   if (loading) {
     return (
-      <div style={chromeStyle}>
+      <div data-chrome-surface="true" data-stationary-chrome="true" style={chromeStyle}>
         <div style={leftClusterStyle}>
           {onExpand ? <TimelineButton icon={<ExpandIcon />} label="Expand timeline" onClick={onExpand} /> : null}
           <span style={kickerStyle}>Today</span>
@@ -341,6 +341,8 @@ export function SessionTimeline({
 
   return (
     <motion.div
+      data-chrome-surface="true"
+      data-stationary-chrome="true"
       initial={{ opacity: 0, y: -2 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ type: 'spring', stiffness: 400, damping: 30 }}
@@ -361,8 +363,8 @@ export function SessionTimeline({
               paddingBottom: 2,
               paddingLeft: 7,
               borderRadius: 999,
-              background: 'rgba(239, 68, 68, 0.12)',
-              color: '#ef4444',
+              background: 'var(--red-soft)',
+              color: 'var(--red)',
               fontSize: 10,
               fontWeight: 700,
               letterSpacing: '0.04em',
@@ -371,7 +373,7 @@ export function SessionTimeline({
             }}
             title={`${errorSegmentCount} error block${errorSegmentCount === 1 ? '' : 's'} in the last 24h`}
           >
-            <span style={{ width: 5, height: 5, borderRadius: 999, background: '#ef4444' }} />
+            <span style={{ width: 5, height: 5, borderRadius: 999, background: 'var(--red)' }} />
             {errorSegmentCount} error{errorSegmentCount === 1 ? '' : 's'}
           </span>
         ) : null}
@@ -428,8 +430,8 @@ const chromeStyle = {
   paddingBottom: 0,
   paddingLeft: 90,
   gap: 12,
-  background: 'transparent',
-  borderBottom: '0.5px solid rgba(0, 0, 0, 0.04)',
+  background: 'var(--t-chrome, transparent)',
+  borderBottom: '0.5px solid var(--t-divider-subtle)',
   fontSize: 11,
   fontWeight: 500,
   color: 'var(--t-text-secondary)',
@@ -464,7 +466,7 @@ const legendStyle = {
 const shimmerStyle = {
   position: 'absolute',
   inset: 0,
-  background: 'linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.14) 50%, transparent 100%)',
+  background: 'linear-gradient(90deg, transparent 0%, var(--t-bg-card) 50%, transparent 100%)',
   animation: 'llmShimmer 1.6s linear infinite',
 } as const;
 
@@ -504,9 +506,9 @@ function HoverStatusRow({ label, children, tone = 'neutral' }: {
   tone?: 'neutral' | 'attention' | 'danger';
 }) {
   const valueColor = tone === 'danger'
-    ? '#d28787'
+    ? 'var(--red)'
     : tone === 'attention'
-      ? '#d4a050'
+      ? 'var(--t-celebration)'
       : 'var(--t-text)';
   return (
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, paddingTop: 4, paddingBottom: 4 }}>
@@ -563,7 +565,7 @@ function TimelineHoverCard({ info, card }: { info: TrackerHoverInfo; card: Hover
         borderRadius: 12,
         border: '1px solid var(--t-panel-border)',
         background: 'var(--t-panel-solid)',
-        boxShadow: 'var(--t-panel-shadow), 0 8px 32px rgba(15, 23, 42, 0.18)',
+        boxShadow: 'var(--t-panel-shadow)',
         color: 'var(--t-text)',
         pointerEvents: 'none',
         fontFamily: HOVER_CARD_FONT,

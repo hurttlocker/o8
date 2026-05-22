@@ -55,6 +55,7 @@ export function ColumnHeaderStrip({
   return (
     <div
       data-chrome-surface="true"
+      data-stationary-chrome="true"
       data-tauri-drag-region={drag ? '' : undefined}
       onMouseDown={drag ? handleMouseDown : undefined}
       style={{
@@ -65,9 +66,11 @@ export function ColumnHeaderStrip({
         gap: 4,
         paddingLeft: 8,
         paddingRight: 8,
-        background: 'transparent',
-        borderBottom: '0.5px solid var(--t-divider)',
+        background: 'var(--t-chrome, transparent)',
+        borderBottom: '0.5px solid var(--t-divider-subtle)',
+        color: 'var(--t-text)',
         position: 'relative',
+        boxSizing: 'border-box',
         ['WebkitAppRegion' as string]: drag ? 'drag' : 'no-drag',
         ...style,
       }}
