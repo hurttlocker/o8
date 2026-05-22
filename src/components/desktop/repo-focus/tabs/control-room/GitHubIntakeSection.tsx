@@ -1,9 +1,13 @@
 'use client';
 
+import { useState } from 'react';
 import { CheckCircle2, GitPullRequest, Play, Plus, RefreshCw, Sparkles } from '../../../lucide-shims';
+import { REPO_FOCUS_FONT } from '../../utils';
 import type { GitHubIssueIntake } from './types';
 import { issueKey } from './helpers';
 import { ActionButton, IconActionButton } from './shared';
+
+const COLLAPSED_LIMIT = 6;
 
 export function GitHubIntakeSection({
   issues,
@@ -30,7 +34,8 @@ export function GitHubIntakeSection({
   onQueue: (issue: GitHubIssueIntake) => void;
   onDispatch: (issue: GitHubIssueIntake) => void;
 }) {
-  const visibleIssues = issues.slice(0, 6);
+  const [showAll, setShowAll] = useState(false);
+  const visibleIssues = showAll ? issues : issues.slice(0, COLLAPSED_LIMIT);
   const overflow = issues.length - visibleIssues.length;
   const scopeLabel = selectedRepoName
     ? selectedRepoName
@@ -119,7 +124,33 @@ export function GitHubIntakeSection({
             >
               {issue.kind === 'epic' ? <Sparkles size={13} strokeWidth={2} /> : <GitPullRequest size={13} strokeWidth={2} />}
             </span>
-            <span style={{ minWidth: 0 }}>
+            <button
+              type="button"
+              disabled={!issue.url}
+              title={issue.url ? 'Open issue on GitHub' : undefined}
+              onClick={() => {
+                if (issue.url) window.open(issue.url, '_blank', 'noopener,noreferrer');
+              }}
+              style={{
+                minWidth: 0,
+                border: 0,
+                background: 'transparent',
+                borderRadius: 8,
+                paddingTop: 2,
+                paddingRight: 4,
+                paddingBottom: 2,
+                paddingLeft: 4,
+                marginLeft: -4,
+                textAlign: 'left',
+                cursor: issue.url ? 'pointer' : 'default',
+                fontFamily: REPO_FOCUS_FONT,
+                transition: 'background 140ms ease',
+              }}
+              onMouseEnter={(event) => {
+                if (issue.url) event.currentTarget.style.background = 'color-mix(in srgb, var(--t-text-faint) 9%, transparent)';
+              }}
+              onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+            >
               <span
                 style={{
                   display: 'block',
@@ -146,7 +177,7 @@ export function GitHubIntakeSection({
               >
                 {issue.repoName} - {issue.kind} #{issue.number} - {issue.comments} comment{issue.comments === 1 ? '' : 's'} - {issue.age} ago
               </span>
-            </span>
+            </button>
             {queued ? (
               <span
                 title="Queued"
@@ -182,10 +213,47 @@ export function GitHubIntakeSection({
         );
       }) : null}
 
-      {!loading && overflow > 0 ? (
-        <div style={{ paddingTop: 5, color: 'var(--t-text-faint)', fontSize: 10.5, lineHeight: '14px' }}>
-          + {overflow} more issue{overflow === 1 ? '' : 's'} in this scope
-        </div>
+      {!loading && (overflow > 0 || showAll) && issues.length > COLLAPSED_LIMIT ? (
+        <button
+          type="button"
+          onClick={() => setShowAll((current) => !current)}
+          style={{
+            width: '100%',
+            minHeight: 28,
+            marginTop: 6,
+            borderWidth: 1,
+            borderStyle: 'dashed',
+            borderColor: 'var(--t-divider-subtle)',
+            borderRadius: 9,
+            background: 'transparent',
+            color: 'var(--t-text-faint)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            paddingTop: 0,
+            paddingRight: 10,
+            paddingBottom: 0,
+            paddingLeft: 10,
+            fontFamily: REPO_FOCUS_FONT,
+            fontSize: 10.5,
+            lineHeight: '14px',
+            fontWeight: 580,
+            transition: 'color 140ms ease, border-color 140ms ease',
+          }}
+          onMouseEnter={(event) => {
+            event.currentTarget.style.color = 'var(--t-text-muted)';
+            event.currentTarget.style.borderColor = 'var(--t-text-faint)';
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.color = 'var(--t-text-faint)';
+            event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+          }}
+        >
+          {showAll
+            ? 'Show less'
+            : `+ ${overflow} more issue${overflow === 1 ? '' : 's'} in this scope`}
+        </button>
       ) : null}
     </section>
   );

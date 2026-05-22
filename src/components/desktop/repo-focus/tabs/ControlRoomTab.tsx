@@ -36,6 +36,32 @@ import {
   TaskSection,
   TaskStatusStrip,
 } from './control-room/components';
+import type { IdeWorkspaceSession } from '../types';
+
+interface PendingDispatch {
+  packetId: string | null;
+  laneId: string | null;
+  sessionKey: string | null;
+  startedAt: number;
+}
+
+const PENDING_DISPATCH_TIMEOUT_MS = 30_000;
+
+function findDispatchSessionKey(
+  pending: PendingDispatch,
+  sessions: IdeWorkspaceSession[],
+): string | null {
+  for (const session of sessions) {
+    if (!session.sessionKey) continue;
+    if (pending.sessionKey && session.sessionKey === pending.sessionKey) {
+      return session.sessionKey;
+    }
+    if (pending.packetId && session.orchestrationPacket?.packetId === pending.packetId) {
+      return session.sessionKey;
+    }
+  }
+  return null;
+}
 
 export function ControlRoomTab({
   project,
@@ -67,6 +93,7 @@ export function ControlRoomTab({
   const [busyKey, setBusyKey] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [actionMenu, setActionMenu] = useState<TaskActionMenuState | null>(null);
+  const [pendingDispatch, setPendingDispatch] = useState<PendingDispatch | null>(null);
   const rootRef = useRef<HTMLDivElement>(null);
   const [isWide, setIsWide] = useState(false);
 
@@ -252,6 +279,27 @@ export function ControlRoomTab({
     if (selectedRepo || !newTaskRepoPath) setNewTaskRepoPath(fallbackRepo);
   }, [newTaskRepoPath, repos, selectedRepo]);
 
+  useEffect(() => {
+    if (!pendingDispatch) return;
+    const matchKey = findDispatchSessionKey(pendingDispatch, ideWorkspaceSessions);
+    if (matchKey) {
+      onSelectSession?.(matchKey);
+      setPendingDispatch(null);
+      return;
+    }
+    const elapsed = Date.now() - pendingDispatch.startedAt;
+    if (elapsed >= PENDING_DISPATCH_TIMEOUT_MS) {
+      setPendingDispatch(null);
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      setPendingDispatch((current) => (current === pendingDispatch ? null : current));
+    }, PENDING_DISPATCH_TIMEOUT_MS - elapsed);
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [ideWorkspaceSessions, onSelectSession, pendingDispatch]);
+
   const mutateTask = useCallback(async (
     task: TaskPoolTask,
     action: TaskAction,
@@ -278,12 +326,15 @@ export function ControlRoomTab({
       setNotice(payload.note ?? `Task ${action} complete.`);
       setActionMenu(null);
       await refresh(true);
+      if (action === 'remove') {
+        await loadIssueIntake(true);
+      }
     } catch (err) {
       setNotice(err instanceof Error ? err.message : `Task ${action} failed.`);
     } finally {
       setBusyKey(null);
     }
-  }, [project.id, refresh, selectedRepo?.localPath]);
+  }, [loadIssueIntake, project.id, refresh, selectedRepo?.localPath]);
 
   const createControlTask = useCallback(async (dispatchAfterCreate = false) => {
     const title = newTaskTitle.trim();
@@ -384,6 +435,23 @@ export function ControlRoomTab({
           throw new Error(dispatchPayload.error ?? dispatchPayload.note ?? 'Issue dispatch failed.');
         }
         finalNote = dispatchPayload.note ?? `${issue.kind === 'epic' ? 'Epic' : 'Issue'} #${issue.number} queued and dispatched.`;
+
+        const dispatchedPacketId = dispatchPayload.packetId ?? dispatchPayload.task?.packetId ?? payload.taskId ?? null;
+        const dispatchedLaneId = dispatchPayload.laneId ?? dispatchPayload.task?.laneId ?? null;
+        const dispatchedSessionKey = dispatchPayload.task?.lane?.sessionKey ?? null;
+        const candidate: PendingDispatch = {
+          packetId: dispatchedPacketId,
+          laneId: dispatchedLaneId,
+          sessionKey: dispatchedSessionKey,
+          startedAt: Date.now(),
+        };
+        const immediateKey = findDispatchSessionKey(candidate, ideWorkspaceSessions);
+        if (immediateKey) {
+          onSelectSession?.(immediateKey);
+          setPendingDispatch(null);
+        } else if (candidate.packetId || candidate.sessionKey) {
+          setPendingDispatch(candidate);
+        }
       }
       setNotice(finalNote);
       await refresh(false);
@@ -393,7 +461,7 @@ export function ControlRoomTab({
     } finally {
       setBusyKey(null);
     }
-  }, [loadIssueIntake, project.id, refresh]);
+  }, [ideWorkspaceSessions, loadIssueIntake, onSelectSession, project.id, refresh]);
 
   const scopedTasks = useMemo(() => (
     tasks.filter((task) => taskMatchesProject(task, project, repos, selectedRepo))

@@ -78,7 +78,7 @@ export interface SupervisorInboxPayload {
 export interface TaskMutationPayload {
   schema: 'o8/task.mutation/v1';
   ok: boolean;
-  action: 'create' | 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune';
+  action: 'create' | 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune' | 'remove';
   taskId: string;
   packetId: string | null;
   laneId: string | null;
@@ -124,7 +124,7 @@ export interface ControlRoomTabProps {
   onSelectSession?: (sessionKey: string) => void;
 }
 
-export type TaskAction = 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune';
+export type TaskAction = 'claim' | 'dispatch' | 'block' | 'report' | 'archive' | 'prune' | 'remove';
 
 export interface TaskActionMenuState {
   task: TaskPoolTask;
