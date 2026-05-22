@@ -4,12 +4,19 @@
 
 import * as esbuild from 'esbuild';
 import { execSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const entry = join(__dirname, 'src', 'index.ts');
 const outFile = join(__dirname, 'dist', 'o8.mjs');
+
+// Inject the app version (repo-root package.json, kept in sync by
+// scripts/sync-version.mjs) so the bundled `o8 version` reports what it
+// shipped with instead of the dev placeholder.
+const rootPkg = JSON.parse(readFileSync(join(__dirname, '..', 'package.json'), 'utf8'));
+const cliVersion = rootPkg.version ?? '0.0.0-dev';
 
 // esbuild rewrites CJS `require()` calls into a `__require` shim that checks
 // `typeof require !== "undefined"`. With pure ESM output, that local `require`
@@ -33,6 +40,7 @@ await esbuild.build({
   format: 'esm',
   target: 'node22',
   banner: { js: ESM_BANNER },
+  define: { __O8_CLI_VERSION__: JSON.stringify(cliVersion) },
   outfile: outFile,
 });
 

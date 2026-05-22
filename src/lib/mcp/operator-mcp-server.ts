@@ -515,6 +515,7 @@ const TOOLS: McpTool[] = [
   ...APPROVE_TOOLS.filter((t) => t.name === 'o8_merge_preview'),
   ...MISSION_TOOLS.filter((t) => t.name === 'reset_packet'),
   ...MISSION_TOOLS.filter((t) => t.name === 'retry_packet'),
+  ...MISSION_TOOLS.filter((t) => t.name === 'rerun_with_feedback'),
   ...MISSION_TOOLS.filter((t) => t.name === 'o8_review_state'),
   ...MISSION_TOOLS.filter((t) => t.name === 'report_packet_event'),
 ];
