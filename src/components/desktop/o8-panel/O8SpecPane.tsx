@@ -432,7 +432,7 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
                 ['--o8ed-hilite' as string]: noteHilite,
               } as CSSProperties}
             >
-              <O8SpecEditor value={content} onChange={handleChange} />
+              <O8SpecEditor value={content} onChange={handleChange} repoPath={repoPath} />
             </div>
           )}
         </div>

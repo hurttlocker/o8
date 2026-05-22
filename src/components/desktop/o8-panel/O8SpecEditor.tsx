@@ -26,6 +26,7 @@ import { markdown } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { extractRoughdraftReviewIndex } from '@/lib/o8md/rfm';
+import { specImageDropPaste } from './spec-image-upload';
 
 const HAND = "'Caveat', ui-rounded, cursive";
 const PROSE = "'Inter', system-ui, sans-serif";
@@ -55,6 +56,10 @@ const spacerField = StateField.define<DecorationSet>({
 interface O8SpecEditorProps {
   value: string;
   onChange: (value: string) => void;
+  // Repo root for inline image upload (drop/paste → <repo>/o8-assets/). When
+  // absent (e.g. the standalone editor lab) image drop/paste is disabled and the
+  // editor stays a pure markdown surface.
+  repoPath?: string | null;
 }
 
 // ── widgets ──
@@ -201,12 +206,16 @@ interface NoteLayout {
   top: number;
 }
 
-export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
+export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
   const hostRef = useRef<HTMLDivElement | null>(null);
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const viewRef = useRef<EditorView | null>(null);
   const onChangeRef = useRef(onChange);
   onChangeRef.current = onChange;
+  // Kept in a ref so the (mount-once) image extension always reads the live repo
+  // path without rebuilding the editor when the operator switches repos.
+  const repoPathRef = useRef(repoPath);
+  repoPathRef.current = repoPath;
   const [notes, setNotes] = useState<NoteLayout[]>([]);
   // Caveat is a webfont. Until it loads the rail paints in a fallback (wider,
   // taller) font — wrong glyphs AND the char-count collision estimate (tuned
@@ -312,6 +321,7 @@ export function O8SpecEditor({ value, onChange }: O8SpecEditorProps) {
       spacerField,
       editorTheme,
       EditorView.lineWrapping,
+      specImageDropPaste(() => repoPathRef.current ?? null),
       EditorView.updateListener.of((u) => {
         // Skip onChange (and its debounced autosave) for programmatic loads.
         if (u.docChanged && !u.transactions.some((t) => t.annotation(External))) {
