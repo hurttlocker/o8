@@ -40,15 +40,18 @@ export function TitleBarButton({
       whileHover="hover"
       variants={{
         rest: {
-          background: 'rgba(0, 0, 0, 0)',
+          background: 'var(--t-chrome-btn-bg)',
+          boxShadow: 'var(--t-chrome-btn-shadow)',
           color: 'var(--t-text-secondary)',
         },
         hover: {
-          background: 'var(--t-hover)',
+          background: 'var(--t-chrome-btn-hover-bg)',
+          boxShadow: 'var(--t-chrome-btn-hover-shadow)',
           color: 'var(--t-text)',
         },
         active: {
-          background: 'var(--t-panel-active, var(--t-input-bg))',
+          background: 'var(--t-chrome-btn-active-bg)',
+          boxShadow: 'var(--t-chrome-btn-active-shadow)',
           color: activeColor,
         },
       }}
