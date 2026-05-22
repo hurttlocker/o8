@@ -27,6 +27,7 @@ import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { extractRoughdraftReviewIndex } from '@/lib/o8md/rfm';
 import { specImageDropPaste } from './spec-image-upload';
+import { specImageRender, specRepoPathCompartment, specRepoPathFacet } from './spec-image-widget';
 
 const HAND = "'Caveat', ui-rounded, cursive";
 const PROSE = "'Inter', system-ui, sans-serif";
@@ -322,6 +323,7 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
       editorTheme,
       EditorView.lineWrapping,
       specImageDropPaste(() => repoPathRef.current ?? null),
+      specImageRender(repoPath ?? null),
       EditorView.updateListener.of((u) => {
         // Skip onChange (and its debounced autosave) for programmatic loads.
         if (u.docChanged && !u.transactions.some((t) => t.annotation(External))) {
@@ -363,6 +365,13 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
     const current = view.state.doc.toString();
     if (value !== current) view.dispatch({ changes: { from: 0, to: current.length, insert: value }, annotations: External.of(true) });
   }, [value]);
+
+  // Keep the image-render facet in sync with the live repo path so repo-relative
+  // srcs resolve correctly. The editor is mount-once, so reconfigure (don't
+  // remount) when the operator switches repos.
+  useEffect(() => {
+    viewRef.current?.dispatch({ effects: specRepoPathCompartment.reconfigure(specRepoPathFacet.of(repoPath ?? null)) });
+  }, [repoPath]);
 
   // Accept / Dismiss a suggestion = a real doc mutation on its marker span.
   const resolveSuggestion = useCallback((note: NoteLayout, accept: boolean) => {
