@@ -287,6 +287,20 @@ export async function handleLaneEvents(args: Record<string, unknown>): Promise<M
   }
 }
 
+// Cap any oversized string field on a transcript event so a single large
+// tool_result payload can't flood the caller's context. The route already
+// bounds the raw tail (256KB) + window (200 events); this bounds per-event size.
+const PER_EVENT_TEXT_CAP = 2000;
+function capTranscriptEvent(event: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(event)) {
+    out[key] = typeof value === 'string' && value.length > PER_EVENT_TEXT_CAP
+      ? `${value.slice(0, PER_EVENT_TEXT_CAP)}…[+${value.length - PER_EVENT_TEXT_CAP} chars truncated]`
+      : value;
+  }
+  return out;
+}
+
 export async function handleTranscript(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
     const packetIdRaw = args.packetId;
@@ -313,7 +327,7 @@ export async function handleTranscript(args: Record<string, unknown>): Promise<M
     if (limit !== undefined) qs.set('limit', String(limit));
 
     const data = await apiFetch(`/api/orchestrator/packet-transcript?${qs.toString()}`) as Record<string, unknown>;
-    const events = Array.isArray(data.events) ? data.events as Array<Record<string, unknown>> : [];
+    const events = (Array.isArray(data.events) ? data.events as Array<Record<string, unknown>> : []).map(capTranscriptEvent);
     const nextCursorRaw = data.nextCursor;
     const nextCursor = typeof nextCursorRaw === 'number' && Number.isFinite(nextCursorRaw)
       ? nextCursorRaw
