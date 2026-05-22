@@ -46,6 +46,8 @@ export interface ThoughtsCardProps {
   onClose: () => void;
   agents?: FleetAgent[];
   draftInjection?: { id: string; text: string } | null;
+  imageInjection?: { id: string; dataUri: string; name: string; mimeType: string } | null;
+  onImageInjectionConsumed?: () => void;
   docked?: boolean;
   missionState: OrchestratorMissionState;
   workspaceTargets?: OrchestratorWorkspaceTarget[];

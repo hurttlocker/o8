@@ -26,6 +26,8 @@ export interface OrchestratorDataValue {
   onMissionStateChange: ThoughtsCardProps['onMissionStateChange'];
   onLaunchPacket?: ThoughtsCardProps['onLaunchPacket'];
   draftInjection?: ThoughtsCardProps['draftInjection'];
+  imageInjection?: ThoughtsCardProps['imageInjection'];
+  onImageInjectionConsumed?: ThoughtsCardProps['onImageInjectionConsumed'];
   /** Open the given agent session in a workspace terminal tab. */
   onSelectSession?: (sessionKey: string) => void;
   /** Tab id of the most-recently dispatched packet, for soft-orange highlight. */
@@ -61,6 +63,12 @@ export interface OrchestratorDataValue {
    * empty right gutter when (and only when) the wide panel is collapsed.
    */
   o8PanelVisible?: boolean;
+  /**
+   * Header-owned project context rail state for the active workspace pane.
+   * The rail itself lives inside OrchestratorTab; WorkspaceHeaderStrip owns
+   * the show/hide affordance so it can work in both single and split panes.
+   */
+  projectContextRailVisible?: boolean;
 }
 
 const OrchestratorDataContext = createContext<OrchestratorDataValue | null>(null);
