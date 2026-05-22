@@ -28,6 +28,8 @@ import { runPacketReport } from './commands/packet/report.js';
 import { runPacketReview } from './commands/packet/review.js';
 import { runPacketScope } from './commands/packet/scope.js';
 import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
+import { runPacketDiff } from './commands/packet/diff.js';
+import { runPacketCommit } from './commands/packet/commit.js';
 import { runSpec } from './commands/spec.js';
 import {
   runTaskArchive,
@@ -103,6 +105,8 @@ commands:
   task prune <id>      permanently remove done/archived task-pool rows
   packet info          info about the packet bound to the current worktree
   packet scope [id]    one-call worker context (auto-resolves from cwd)
+  packet diff [id]     the packet's code diff vs base (committed + uncommitted)
+  packet commit -m ".." stage + commit the worktree with an explicit pathspec
   packet heartbeat     update the current packet lane heartbeat
   packet review        approve + merge a reviewed packet
   packet report        append an agent_report event for this packet
@@ -165,6 +169,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     case 'packet': {
       if (secondary === 'info') return runPacketInfo(args.mode);
       if (secondary === 'scope') return runPacketScope(args.mode, args.rest);
+      if (secondary === 'diff') return runPacketDiff(args.mode, args.rest);
+      if (secondary === 'commit') return runPacketCommit(args.mode, args.rest);
       if (secondary === 'heartbeat') return runPacketHeartbeat(args.mode, args.rest);
       if (secondary === 'review') return runPacketReview(args.mode, args.rest);
       if (secondary === 'report') return runPacketReport(args.mode, args.rest);

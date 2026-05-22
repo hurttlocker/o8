@@ -39,6 +39,8 @@ o8 doctor [--reap]                     # verify port/token resolution + ping; --
 # Packet (your dispatched work) — most auto-resolve the lane from cwd
 o8 packet info                         # current packet metadata (id, branch, base, runtime, recent events)
 o8 packet scope [packet-id]            # one-call worker context: file ceiling, allowed/blocked paths, directives, related-packet overlap (auto-resolves from cwd)
+o8 packet diff [id]                    # this packet's code diff vs base (committed + uncommitted), byte-bounded
+o8 packet commit -m "<message>"        # stage + commit the worktree with an explicit pathspec (use instead of raw git add/commit)
 o8 packet heartbeat                    # lifecycle ping; safe no-op outside a packet
 o8 packet report --event progress [--reason "..." --message "..."]   # surface a structured progress/blocker event
 o8 packet log [id] [--follow] [--since <cursor>]                     # read or tail this packet's lane events
