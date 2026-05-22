@@ -103,6 +103,26 @@ function capEvalResult(raw: string): McpToolResult {
   });
 }
 
+// o8_view_read returns document.body.innerText, which is unbounded — a long
+// transcript / log / chat page floods the caller's context. readPage() calls
+// evalJs internally, so it does NOT pass through the o8_view_eval-handler cap;
+// cap it here with the same truncation-envelope shape.
+const READ_RESULT_BYTE_CAP = 16 * 1024;
+
+function capText(raw: string, capBytes: number): McpToolResult {
+  const sizeBytes = Buffer.byteLength(raw, 'utf8');
+  if (sizeBytes <= capBytes) {
+    return textResult(raw);
+  }
+  const preview = Buffer.from(raw, 'utf8').subarray(0, capBytes).toString('utf8');
+  return jsonResult({
+    truncated: true,
+    sizeBytes,
+    capBytes,
+    preview,
+  });
+}
+
 // Sibling of #868 — three Phase 2 audit agents (Recall Card, status-grouped
 // lanes, packet spec) flagged that the Rust execute_js bridge silently
 // returns the empty string when the user's last expression evaluates to a
@@ -469,7 +489,7 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
 
     o8_view_read: async () => withStructuredErrors(async () => {
       const result = await getClient().readPage();
-      return textResult(result.text);
+      return capText(result.text, READ_RESULT_BYTE_CAP);
     }),
 
     o8_view_eval: async (args) => withStructuredErrors(async () => {
