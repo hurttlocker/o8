@@ -50,8 +50,8 @@ export const MISSION_TOOLS: McpTool[] = [
       properties: {
         issues: {
           type: 'array',
-          items: { oneOf: [{ type: 'string' }, { type: 'number' }] },
-          description: 'GitHub issue references. Accepts any format: 495, "#495", "495", or "https://github.com/org/repo/issues/495". Fetches full issue data via `gh` CLI.',
+          items: { type: 'string' },
+          description: 'GitHub issue references. Accepts any format: "495", "#495", or "https://github.com/org/repo/issues/495" (pass numbers as strings). Fetches full issue data via `gh` CLI.',
         },
         issues_inline: {
           type: 'array',
@@ -565,10 +565,6 @@ export const MISSION_TOOLS: McpTool[] = [
               },
             },
             required: ['file', 'severity', 'description'],
-            anyOf: [
-              { required: ['status'] },
-              { required: ['resolution'] },
-            ],
           },
         },
         approved: {

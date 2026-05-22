@@ -183,3 +183,49 @@ export async function POST(req: NextRequest) {
     return buildErrorResponse(message);
   }
 }
+
+/**
+ * Atomic single-packet update. `cortex_update_packet` (MCP) previously read the
+ * whole mission, mutated one packet client-side, and POSTed the entire packets
+ * array back — racing concurrent packet edits (browser reconcile, other MCP
+ * calls) and silently reverting their writes. PATCH applies a packet-level
+ * delta INSIDE the control-plane lock so only the targeted fields change.
+ * Mission-identity fields stay server-owned (see #596) and cannot be patched.
+ */
+export async function PATCH(req: NextRequest) {
+  const denied = requirePanelAuth(req);
+  if (denied) return denied;
+
+  try {
+    const body = await req.json().catch(() => ({})) as {
+      packetId?: string;
+      updates?: Record<string, unknown>;
+    };
+    const packetId = (body.packetId ?? '').trim();
+    const updates = body.updates && typeof body.updates === 'object' ? body.updates : null;
+    if (!packetId || !updates) {
+      return buildErrorResponse('packetId and a non-empty updates object are required.', 400);
+    }
+
+    const FORBIDDEN_FIELDS = new Set(['id', 'missionId']);
+    const { state: mission, result } = await withLockedState((current) => {
+      const packet = current.packets.find((p) => p.id === packetId);
+      if (!packet) return { found: false } as const;
+      const mutablePacket = packet as unknown as Record<string, unknown>;
+      for (const [key, value] of Object.entries(updates)) {
+        if (FORBIDDEN_FIELDS.has(key)) continue;
+        mutablePacket[key] = value;
+      }
+      return { found: true } as const;
+    });
+
+    if (!result.found) return buildErrorResponse(`Packet ${packetId} not found.`, 404);
+
+    return NextResponse.json(buildStateResponse(mission), {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to patch packet.';
+    return buildErrorResponse(message);
+  }
+}
