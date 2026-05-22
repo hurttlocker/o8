@@ -199,6 +199,13 @@ export async function computeRestoredTabs(
       const restoredClaudeSessionId = effectiveRuntime === 'claude-code'
         ? (rawClaudeSessionId || stripPersistedRuntimeSessionKey(effectiveRuntime, savedChatSessionKey))
         : undefined;
+      const shouldPreserveHistoricalSessionKey = effectiveSessionKey.startsWith('codex-owned:')
+        || effectiveSessionKey.startsWith('codex-discovered:')
+        || effectiveSessionKey.startsWith('codex-live:')
+        || effectiveSessionKey.startsWith('gemini-owned:')
+        || effectiveSessionKey.startsWith('opencode-owned:');
+      const restoredChatSessionKey = liveSessionKey
+        ?? (shouldPreserveHistoricalSessionKey ? effectiveSessionKey : undefined);
       const tabId = claimWorkspaceTabId('chat', seenTabIds, savedTab.id);
       restoredTabs.push({
         id: tabId,
@@ -206,10 +213,10 @@ export async function computeRestoredTabs(
         kind: 'chat',
         tmuxSession: null,
         chatRuntime: effectiveRuntime,
-        chatSessionKey: liveSessionKey,
+        chatSessionKey: restoredChatSessionKey,
         claudeSessionId: restoredClaudeSessionId || undefined,
         chatModel: effectiveModel,
-        chatContinueLatest: liveSessionKey ? savedTab.chatContinueLatest : false,
+        chatContinueLatest: restoredChatSessionKey ? savedTab.chatContinueLatest : false,
         chatCheckpoints: savedTab.chatCheckpoints ?? [],
         repo: savedTab.repoPath ? { name: savedTab.repoName ?? 'repo', localPath: savedTab.repoPath } : (currentPreferredRepo ?? undefined),
         linkedIssue: savedTab.linkedIssue ?? null,

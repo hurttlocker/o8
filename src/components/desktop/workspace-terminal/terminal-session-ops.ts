@@ -23,6 +23,29 @@ import {
   resolveWorkspaceChatLaneStatus,
 } from '@/components/desktop/workspace-terminal/utils';
 
+function cleanRuntimeSessionLabel(label?: string | null): string | null {
+  const cleaned = label?.replace(/^\[automation\]\s*/i, '').trim();
+  return cleaned || null;
+}
+
+function sameRepoPath(left?: RegisteredRepo, right?: RegisteredRepo) {
+  return !right || left?.localPath === right.localPath;
+}
+
+function isOrphanSessionLabelMatch(
+  tab: TerminalTab,
+  options: Parameters<TerminalTabHandle['openCliChatSession']>[0],
+  resolvedRuntime: 'codex' | 'claude-code' | 'gemini' | 'opencode',
+) {
+  if (tab.kind !== 'chat') return false;
+  if (tab.chatRuntime !== resolvedRuntime) return false;
+  if (tab.chatSessionKey?.trim()) return false;
+  if (!sameRepoPath(tab.repo, options.repo)) return false;
+  const targetLabel = cleanRuntimeSessionLabel(options.label ?? options.orchestrationPacket?.title);
+  if (!targetLabel) return false;
+  return cleanRuntimeSessionLabel(tab.label) === targetLabel;
+}
+
 /* ------------------------------------------------------------------ */
 /*  openWorkspaceCliChatSession                                        */
 /* ------------------------------------------------------------------ */
@@ -95,7 +118,6 @@ export function computeCliChatSession(
     : currentTabs.find((tab) => (
         tab.kind === 'chat'
         && formatWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey) === normalizedTargetSessionKey
-        && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
       ));
   // #543 — Supervisor retries rebind the packet to a fresh sessionKey mid-
   // flight. Matching purely on targetSessionKey would open a new tab for
@@ -111,6 +133,9 @@ export function computeCliChatSession(
         && tab.orchestrationPacket?.packetId === targetedPacketId
         && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
       ));
+  const orphanLabelExisting = options.createNew || !options.targetSessionKey
+    ? null
+    : currentTabs.find((tab) => isOrphanSessionLabelMatch(tab, options, resolvedRuntime));
   const activeExisting = currentTabs.find((tab) => (
     tab.id === currentActiveTabId
     && tab.kind === 'chat'
@@ -128,7 +153,7 @@ export function computeCliChatSession(
       ? null
       : packetExisting
         ?? (options.targetSessionKey
-          ? targetedExisting ?? null
+          ? targetedExisting ?? orphanLabelExisting ?? null
           : activeExisting
             ?? currentTabs.find((tab) => (
               tab.kind === 'chat'
@@ -157,11 +182,11 @@ export function computeCliChatSession(
       : resolvedRuntime === 'gemini' ? GEMINI_CLI_MODELS[0].id
       : resolvedRuntime === 'opencode' ? getOpenCodeModels([])[0].id
       : CODEX_CLI_MODELS[0].id;
-    const nextTabs = currentTabs.map((tab) => (
+    const updatedTabs = currentTabs.map((tab) => (
       tab.id === resolvedTabId
         ? {
             ...tab,
-            label: options.label ?? options.orchestrationPacket?.title ?? tab.label,
+            label: cleanRuntimeSessionLabel(options.label ?? options.orchestrationPacket?.title) ?? tab.label,
             chatRuntime: resolvedRuntime,
             chatSessionKey: normalizedTargetSessionKey ?? tab.chatSessionKey,
             chatModel: options.modelId
@@ -174,6 +199,16 @@ export function computeCliChatSession(
           }
         : tab
     ));
+    const nextTabs = normalizedTargetSessionKey
+      ? updatedTabs.filter((tab) => (
+        tab.id === resolvedTabId
+        || tab.kind !== 'chat'
+        || (
+          formatWorkspaceChatSessionKey(tab.chatRuntime, tab.chatSessionKey) !== normalizedTargetSessionKey
+          && !isOrphanSessionLabelMatch(tab, options, resolvedRuntime)
+        )
+      ))
+      : updatedTabs;
     return { tabs: nextTabs, activeTabId: resolvedTabId, needsPersist: true };
   }
 
@@ -181,7 +216,7 @@ export function computeCliChatSession(
   const now = Date.now();
   const newTab: TerminalTab = {
     id: resolvedTabId,
-    label: options.label ?? options.orchestrationPacket?.title ?? adHocLaneTitle('chat'),
+    label: cleanRuntimeSessionLabel(options.label ?? options.orchestrationPacket?.title) ?? adHocLaneTitle('chat'),
     kind: 'chat',
     tmuxSession: null,
     chatRuntime: resolvedRuntime,
