@@ -112,24 +112,40 @@ class SpecImageWidget extends WidgetType {
     return row;
   }
 
-  // Single fixed row: thumb height + 12px vertical padding. Primes CM's pre-
-  // measure estimate; the real height is measured post-layout. Stable because
-  // the thumb box dimensions are set from WxH and never change after image load.
-  get estimatedHeight(): number { return THUMB_H + 12; }
+  // Primes CM's pre-measure estimate (~3 thumbs/row); the real height is measured
+  // post-layout. Stable because thumb box dimensions are set from WxH and never
+  // change after image load, so there's no jump once measured.
+  get estimatedHeight(): number {
+    const rows = Math.max(1, Math.ceil(this.images.length / 3));
+    return rows * (THUMB_H + 8) + 4;
+  }
   ignoreEvent(): boolean { return true; }
 }
 
 function buildImageDecorations(text: string, repoPath: string | null): DecorationSet {
   const out: Range<Decoration>[] = [];
-  let offset = 0;
-  for (const line of text.split('\n')) {
-    const parsed = parsePureImageLine(line);
-    if (parsed && line.length > 0) {
-      out.push(
-        Decoration.replace({ widget: new SpecImageWidget([parsed], repoPath), block: true }).range(offset, offset + line.length),
-      );
+  const lines = text.split('\n');
+  const starts: number[] = [];
+  let off = 0;
+  for (const line of lines) { starts.push(off); off += line.length + 1; }
+  let i = 0;
+  while (i < lines.length) {
+    const first = lines[i].length > 0 ? parsePureImageLine(lines[i]) : null;
+    if (!first) { i += 1; continue; }
+    // Extend over consecutive pure-image lines → one block widget rendering a
+    // flex-wrap gallery row. A run of length 1 is just a single inline image.
+    const imgs: ParsedSpecImage[] = [first];
+    let j = i + 1;
+    while (j < lines.length) {
+      const next = lines[j].length > 0 ? parsePureImageLine(lines[j]) : null;
+      if (!next) break;
+      imgs.push(next);
+      j += 1;
     }
-    offset += line.length + 1;
+    const from = starts[i];
+    const to = starts[j - 1] + lines[j - 1].length;
+    out.push(Decoration.replace({ widget: new SpecImageWidget(imgs, repoPath), block: true }).range(from, to));
+    i = j;
   }
   return Decoration.set(out, true);
 }
