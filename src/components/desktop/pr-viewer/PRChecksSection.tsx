@@ -1,6 +1,7 @@
 'use client';
 
 import React, { memo } from 'react';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   Check,
   ExternalLink,
@@ -96,7 +97,7 @@ function PRChecksSectionBase({
                 background: rowBackground,
                 border: activeItemIndex === i ? '1px solid rgba(37,99,235,0.16)' : '1px solid transparent',
               }}
-              onClick={() => check.detailsUrl && window.open(check.detailsUrl, '_blank')}
+              onClick={() => check.detailsUrl && openExternalUrl(check.detailsUrl)}
               onMouseEnter={(e) => {
                 if (activeItemIndex !== i) {
                   (e.currentTarget as HTMLDivElement).style.background = 'rgba(0,0,0,0.02)';

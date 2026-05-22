@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, Copy, Send } from '../lucide-shims';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 interface PortGroup {
   repo: string;
@@ -295,7 +296,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
                 if (onPortPreview) {
                   onPortPreview(port, url, repo);
                 } else {
-                  window.open(url, '_blank');
+                  openExternalUrl(url);
                 }
               }}
               style={{

@@ -2,6 +2,7 @@
 
 import type React from 'react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   PREVIEW_HOST_MESSAGE_SOURCE,
   PREVIEW_MESSAGE_SOURCE,
@@ -368,7 +369,7 @@ export function LocalhostPreviewTabs({
 
           <button
             type="button"
-            onClick={() => window.open(normalizedUrl, '_blank')}
+            onClick={() => openExternalUrl(normalizedUrl)}
             style={{
               display: 'inline-flex',
               alignItems: 'center',

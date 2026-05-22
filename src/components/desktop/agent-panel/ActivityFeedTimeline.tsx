@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, type ReactNode } from 'react';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   AlertCircle,
   ArrowRight,
@@ -190,11 +191,11 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                 return;
               }
               if (item.kind === 'issue') {
-                window.open(`https://github.com/${item.repo}/issues/${item.number}`, '_blank', 'noopener,noreferrer');
+                openExternalUrl(`https://github.com/${item.repo}/issues/${item.number}`);
                 return;
               }
               if (item.kind === 'ci') {
-                window.open(`https://github.com/${item.repo}/actions/runs/${item.id}`, '_blank', 'noopener,noreferrer');
+                openExternalUrl(`https://github.com/${item.repo}/actions/runs/${item.id}`);
               }
             };
 
@@ -453,7 +454,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                           <BlueGlassActionButton
                             icon={<ExternalLink size={12} strokeWidth={2} />}
                             label="Open on GitHub"
-                            onClick={() => window.open(`https://github.com/${item.repo}/pull/${item.number}`, '_blank', 'noopener,noreferrer')}
+                            onClick={() => openExternalUrl(`https://github.com/${item.repo}/pull/${item.number}`)}
                           />
                         </div>
                       </>
@@ -466,7 +467,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                         <BlueGlassActionButton
                           icon={<ExternalLink size={12} strokeWidth={2} />}
                           label="Open Run"
-                          onClick={() => window.open(`https://github.com/${item.repo}/actions/runs/${item.id}`, '_blank', 'noopener,noreferrer')}
+                          onClick={() => openExternalUrl(`https://github.com/${item.repo}/actions/runs/${item.id}`)}
                         />
                       </>
                     ) : item.kind === 'commit' ? (
@@ -498,7 +499,7 @@ export const ActivityFeedTimeline = memo(function ActivityFeedTimeline({
                         <BlueGlassActionButton
                           icon={<ExternalLink size={12} strokeWidth={2} />}
                           label="Open Issue"
-                          onClick={() => window.open(`https://github.com/${item.repo}/issues/${item.number}`, '_blank', 'noopener,noreferrer')}
+                          onClick={() => openExternalUrl(`https://github.com/${item.repo}/issues/${item.number}`)}
                         />
                       </>
                     ) : item.kind === 'event' ? (

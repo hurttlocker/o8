@@ -14,6 +14,7 @@
  */
 
 import { useMemo } from 'react';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   Chevron,
   expandedSurfaceStyle,
@@ -41,7 +42,7 @@ interface ProjectPulseRowProps {
 function openExternal(url: string | null | undefined) {
   if (!url) return;
   if (typeof window === 'undefined') return;
-  window.open(url, '_blank', 'noopener,noreferrer');
+  openExternalUrl(url);
 }
 
 function summarizeRepo(repo: ProjectPulseRepo): string | null {

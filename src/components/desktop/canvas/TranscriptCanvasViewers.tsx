@@ -7,6 +7,7 @@ import { motion } from 'framer-motion';
 import { ExternalLink, RefreshCw } from '../lucide-shims';
 import { LIGHT_CANVAS_VARS } from '@/components/desktop/canvas-utils';
 import { measureHeight } from '@/lib/pretext';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 interface TranscriptMessage {
   role: string;
@@ -338,7 +339,7 @@ function PortPreviewBase({ url, port, repo }: { url: string; port: number; repo?
         </button>
         <button
           type="button"
-          onClick={() => window.open(normalizedUrl, '_blank')}
+          onClick={() => openExternalUrl(normalizedUrl)}
           style={{
             display: 'inline-flex',
             alignItems: 'center',

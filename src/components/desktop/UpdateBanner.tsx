@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { createPortal } from 'react-dom';
 import { isTauri } from '@/lib/tauri/bridge';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 interface UpdateInfo {
   version: string;
@@ -136,7 +137,7 @@ export function UpdateBanner() {
 
   const handleInstall = useCallback(async () => {
     if (!isTauri()) {
-      window.open(update?.releaseUrl ?? RELEASE_URL, '_blank', 'noopener,noreferrer');
+      openExternalUrl(update?.releaseUrl ?? RELEASE_URL);
       return;
     }
 

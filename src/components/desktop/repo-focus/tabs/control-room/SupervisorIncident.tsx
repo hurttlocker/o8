@@ -7,6 +7,7 @@ import { formatElapsed } from '../../utils';
 import { FLAT_HOVER_SURFACE } from './constants';
 import { baseName, supervisorKindLabel, supervisorStatusTone } from './helpers';
 import { IconActionButton, TaskIconButton } from './shared';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 export function SupervisorIncidentSection({
   items,
@@ -213,7 +214,7 @@ export function SupervisorIncidentRow({
             active={false}
             onClick={(event) => {
               event.stopPropagation();
-              window.open(item.transcriptLink ?? '', '_blank', 'noopener,noreferrer');
+              openExternalUrl(item.transcriptLink ?? '');
             }}
           >
             <ExternalLink size={12} strokeWidth={2} />
