@@ -69,6 +69,7 @@ interface OrchestratorTabProps {
   // Empty/undefined = use server's env-configured fallback chain.
   initialChatOpenrouterModel?: string;
   initialThreadId?: string | null;
+  projectContextRailVisible?: boolean;
   // Forwarded to ThoughtsChatPanel — fires with the latest user message
   // text in chat mode so the tab strip can show a 3-word summary instead
   // of the generic "Chat" label.
@@ -219,6 +220,7 @@ function OrchestratorTabInner({
   initialChatModelId,
   initialChatOpenrouterModel,
   initialThreadId,
+  projectContextRailVisible = true,
   onChatSummary,
 }: OrchestratorTabProps) {
   const data = useOrchestratorData();
@@ -631,6 +633,8 @@ function OrchestratorTabInner({
       ref={chatPanelRef}
       open={active}
       draftInjection={effectiveDraftInjection}
+      imageInjection={data?.imageInjection ?? null}
+      onImageInjectionConsumed={data?.onImageInjectionConsumed}
       agents={agents}
       missionState={data.missionState}
       preferredRuntime={preferredRuntime}
@@ -776,7 +780,7 @@ function OrchestratorTabInner({
 
         {/* Right: Branch details launcher (Codex pattern). Self-hides when
             the wide O8 right panel is open and when no packet is selected. */}
-        <BranchDetailsLauncher />
+        <BranchDetailsLauncher visible={projectContextRailVisible} />
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
       <QuickActionPalette

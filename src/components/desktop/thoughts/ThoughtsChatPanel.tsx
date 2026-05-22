@@ -54,7 +54,6 @@ import {
   parseModeRoutingPrefix,
   stashPendingComposerDraft,
 } from '@/lib/composer-mode-routing';
-import { WaitingFooter } from '@/components/desktop/orchestrator/WaitingFooter';
 import { getChatModelOption, loadChatModelChoice } from '@/components/desktop/orchestrator/chat-models';
 import {
   createChatAssistantEntry,
@@ -139,6 +138,8 @@ function repoPathLabel(path: string | null | undefined): string | null {
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   open: boolean;
   draftInjection?: { id: string; text: string } | null;
+  imageInjection?: { id: string; dataUri: string; name: string; mimeType: string } | null;
+  onImageInjectionConsumed?: () => void;
   agents: FleetAgent[];
   missionState: OrchestratorMissionState;
   preferredRuntime: OrchestratorRuntime;
@@ -196,6 +197,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 }>(function ThoughtsChatPanel({
   open,
   draftInjection,
+  imageInjection,
+  onImageInjectionConsumed,
   agents,
   missionState,
   preferredRuntime,
@@ -352,6 +355,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const thinkingEffort: ThinkingEffort = thinkingOverride ?? (adaptiveThinkingEnabled ? 'adaptive' : 'max');
   const {
     attachedImages,
+    addAttachedImage,
     attachedFiles,
     dragOver: attachmentDragOver,
     dragHandlers: attachmentDragHandlers,
@@ -574,6 +578,19 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       : `${draftInjection.text}\n\n`);
     setTimeout(() => inputRef.current?.focus(), 50);
   }, [draftInjection?.id, draftInjection?.text, open]);
+
+  // Right-click "Add to chat" on an inline o8.md image relays here (via the
+  // dashboard, so only the VISIBLE tab consumes it). Apply once per id (ref
+  // guard) and tell the dashboard to clear it — the image lands in exactly one
+  // composer and never duplicates on tab refocus.
+  const appliedImageInjectionRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open || !imageInjection?.id) return;
+    if (appliedImageInjectionRef.current === imageInjection.id) return;
+    appliedImageInjectionRef.current = imageInjection.id;
+    addAttachedImage({ name: imageInjection.name, dataUri: imageInjection.dataUri, mimeType: imageInjection.mimeType });
+    onImageInjectionConsumed?.();
+  }, [open, imageInjection?.id, imageInjection?.name, imageInjection?.dataUri, imageInjection?.mimeType, addAttachedImage, onImageInjectionConsumed]);
 
   // Phase 4 friction fix #1: clear stale composer drafts on tab refocus.
   // The composer state is preserved across tab switches (the parent uses
@@ -1029,8 +1046,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const {
     lastAssistantId: suggestedReplyMessageId,
     chipsForLastAssistant,
+    isDismissedForLastAssistant: suggestedRepliesCollapsed,
     isPlaceholderVisibleForLastAssistant: suggestedRepliesPending,
     dismissChips: dismissSuggestedReplies,
+    restoreChips: restoreSuggestedReplies,
   } = useSuggestedReplies({
     enabled: isOrchestratorMode && !isChatMode,
     messages: displayMessages,
@@ -1673,9 +1692,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           isOrchestratorMode={isOrchestratorMode}
           suggestedReplyMessageId={suggestedReplyMessageId}
           suggestedReplies={chipsForLastAssistant}
+          suggestedRepliesCollapsed={suggestedRepliesCollapsed}
           suggestedRepliesPending={suggestedRepliesPending}
           onSelectSuggestion={(chip) => { sendNow(chip); }}
           onDismissSuggestions={dismissSuggestedReplies}
+          onRestoreSuggestions={restoreSuggestedReplies}
         />
       </div>
 
@@ -1685,11 +1706,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         showClearToast={showClearToast}
         showDraftClearedToast={showDraftClearedToast}
         thoughtsBodyBackground={thoughtsBodyBackground}
-      />
-
-      <WaitingFooter
-        count={isOrchestratorMode && displayWaiting ? Math.max(1, agents.filter((a) => a.status === 'running').length) : 0}
-        onStop={orchStream.interrupt}
       />
 
       <ComposerArea

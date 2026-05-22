@@ -59,6 +59,12 @@ export function useThoughtsComposerAttachments() {
     setAttachedImages((current) => current.filter((_, imageIndex) => imageIndex !== index));
   }, []);
 
+  // Programmatic add (e.g. "Add to chat" from an o8.md inline image). Respects
+  // the same 4-image cap as the drop/paste bridge above.
+  const addAttachedImage = useCallback((image: ThoughtsAttachedImage) => {
+    setAttachedImages((current) => (current.length >= 4 ? current : [...current, image]));
+  }, []);
+
   const removeAttachedFile = useCallback((fileName: string) => {
     setAttachedFiles((current) => current.filter((name) => name !== fileName));
   }, []);
@@ -75,6 +81,7 @@ export function useThoughtsComposerAttachments() {
     dragOver,
     dragHandlers,
     processFiles,
+    addAttachedImage,
     removeAttachedImage,
     removeAttachedFile,
     clearAttachments,
