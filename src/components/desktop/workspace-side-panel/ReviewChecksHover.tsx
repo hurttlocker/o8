@@ -2,6 +2,7 @@
 
 import { memo } from 'react';
 import { ExternalLink, MessageSquare } from '../lucide-shims';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import type {
   WorkspaceReviewCheckRun,
   WorkspaceReviewCheckRunDetail,
@@ -76,7 +77,7 @@ export const ReviewChecksHover = memo(function ReviewChecksHover({
             <BlueGlassActionButton
               icon={<ExternalLink size={12} strokeWidth={2} />}
               label="Open Run"
-              onClick={() => window.open(hoveredRun.url, '_blank', 'noopener,noreferrer')}
+              onClick={() => openExternalUrl(hoveredRun.url)}
             />
           ) : null}
         </>
@@ -137,7 +138,7 @@ export const ReviewChecksHover = memo(function ReviewChecksHover({
                       <ContextIconButton
                         icon={<ExternalLink size={11} strokeWidth={2} />}
                         label="Open run"
-                        onClick={() => window.open(run.url, '_blank', 'noopener,noreferrer')}
+                        onClick={() => openExternalUrl(run.url)}
                       />
                     ) : null}
                   </div>
@@ -340,7 +341,7 @@ export const ReviewChecksSection = memo(function ReviewChecksSection({
                           icon={<ExternalLink size={11} strokeWidth={2} />}
                           label="Open run"
                           onClick={() => {
-                            window.open(primaryRun.url, '_blank', 'noopener,noreferrer');
+                            openExternalUrl(primaryRun.url);
                           }}
                         />
                       ) : null}

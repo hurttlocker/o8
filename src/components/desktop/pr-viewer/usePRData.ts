@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   formatCiCheckInjection,
   formatCiCheckBatchInjection,
@@ -361,7 +362,7 @@ export function usePRData(
 
   const openPullRequestOnGitHub = useCallback(() => {
     if (!repo) return;
-    window.open(`https://github.com/${repo}/pull/${prNumber}`, '_blank', 'noopener,noreferrer');
+    openExternalUrl(`https://github.com/${repo}/pull/${prNumber}`);
   }, [prNumber, repo]);
 
   const checkContextKey = useCallback((name?: string | null) => `check:${name ?? 'unknown'}`, []);
@@ -435,7 +436,7 @@ export function usePRData(
       const selectedCheck = currentChecks[activeItemIndex];
       if (!selectedCheck) return;
       if (selectedCheck.detailsUrl) {
-        window.open(selectedCheck.detailsUrl, '_blank', 'noopener,noreferrer');
+        openExternalUrl(selectedCheck.detailsUrl);
         return;
       }
       if (!onInjectChatContext) {

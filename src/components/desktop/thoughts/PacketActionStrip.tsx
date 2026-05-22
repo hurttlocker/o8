@@ -14,6 +14,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { callResetPacket, callRetryPacket } from '@/lib/orchestrator/packet-actions';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 type ToastTone = 'retry' | 'neutral' | 'error';
 
@@ -172,7 +173,7 @@ function PacketActionStripBase({ packetId, issueUrl, prompt, runtime }: PacketAc
 
   const handleOpen = useCallback(() => {
     if (!issueUrl) return;
-    window.open(issueUrl, '_blank', 'noopener,noreferrer');
+    openExternalUrl(issueUrl);
   }, [issueUrl]);
 
   const handleCopy = useCallback(async () => {

@@ -13,6 +13,7 @@
 
 import type { CitationKind as CanonicalCitationKind } from '@/lib/cortex/qa/types';
 import { MONO_FAMILY } from './shared';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 export type CitationKind = CanonicalCitationKind;
 
@@ -64,7 +65,7 @@ export function CitationPill({ citation, onClick }: CitationPillProps) {
       return;
     }
     if (citation.url && typeof window !== 'undefined') {
-      window.open(citation.url, '_blank', 'noopener,noreferrer');
+      openExternalUrl(citation.url);
       return;
     }
     // Wave B wires real navigation — log for now so demo flow is observable.

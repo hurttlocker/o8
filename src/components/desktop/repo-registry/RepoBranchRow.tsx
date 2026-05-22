@@ -3,6 +3,7 @@
 import { memo, useCallback, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ExternalLink, PlayCircle } from '../lucide-shims';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   AlertCircle,
   FolderOpen,
@@ -1229,7 +1230,7 @@ function RepoBranchRowBase({
                 <RepoActionButton
                   label="Open PR"
                   icon={<ExternalLink size={12} strokeWidth={2} />}
-                  onClick={() => window.open(`${githubUrl}/compare/${branch.name}?expand=1`, '_blank')}
+                  onClick={() => openExternalUrl(`${githubUrl}/compare/${branch.name}?expand=1`)}
                   active
                 />
               ) : null}

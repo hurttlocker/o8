@@ -19,6 +19,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ExtractedProfile, ImportProgress } from '@/lib/connectors/chatgpt/types';
 import { OnboardingDispatchStep } from './onboarding/OnboardingDispatchStep';
 import { RuntimeRow } from './onboarding/RuntimeRow';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 // ── Shared constants ──
 
@@ -291,7 +292,7 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
       flowIdRef.current = d.flowId;
       csrfTokenRef.current = d.csrfToken ?? null;
       setGithubFlow({ stage: 'polling', userCode: d.userCode, verificationUrl: d.verificationUriComplete || d.verificationUri });
-      if (d.verificationUriComplete || d.verificationUri) window.open(d.verificationUriComplete || d.verificationUri, '_blank');
+      if (d.verificationUriComplete || d.verificationUri) openExternalUrl(d.verificationUriComplete || d.verificationUri);
       pollTimerRef.current = setInterval(async () => {
         if (!flowIdRef.current) return;
         pollAttemptsRef.current += 1;

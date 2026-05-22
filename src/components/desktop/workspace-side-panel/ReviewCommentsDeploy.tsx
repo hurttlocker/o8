@@ -1,6 +1,7 @@
 'use client';
 
 import { memo } from 'react';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   CheckCircle2,
   Clock,
@@ -288,7 +289,7 @@ export const ReviewDeploySection = memo(function ReviewDeploySection({
                     <ContextIconButton
                       icon={<ExternalLink size={11} strokeWidth={2} />}
                       label="Open deploy"
-                      onClick={() => window.open(deployment.url, '_blank', 'noopener,noreferrer')}
+                      onClick={() => openExternalUrl(deployment.url)}
                     />
                   ) : null}
                 </div>

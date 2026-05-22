@@ -10,6 +10,7 @@
 import { useState, useEffect, useRef, cloneElement, isValidElement, type ReactElement } from 'react';
 import { createPortal } from 'react-dom';
 import { isTauri } from '@/lib/tauri/bridge';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   UsersThree,
   ChartBar,
@@ -444,7 +445,7 @@ function PortsFooter({ onPortPreview }: { onPortPreview?: (port: number, url: st
                   onPortPreview(port, url, repo);
                   return;
                 }
-                window.open(url, '_blank');
+                openExternalUrl(url);
               }}
               style={{
                 display: 'flex',

@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 import {
   AlertTriangle,
   ArrowRight,
@@ -350,7 +351,7 @@ export const ReviewTab = memo(function ReviewTab({
   // ── Actions ────────────────────────────────────────────────────────
   const openBranchPullRequest = useCallback(() => {
     if (!repoSlug || !currentBranch) return;
-    window.open(`https://github.com/${repoSlug}/compare/main...${currentBranch}?expand=1`, '_blank', 'noopener,noreferrer');
+    openExternalUrl(`https://github.com/${repoSlug}/compare/main...${currentBranch}?expand=1`);
   }, [currentBranch, repoSlug]);
 
   const submitPullRequestAction = useCallback(async (action: 'merge') => {

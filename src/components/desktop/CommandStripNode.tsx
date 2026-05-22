@@ -3,6 +3,7 @@
 import { Fragment } from 'react';
 import { useState } from 'react';
 import type { BrainAnswerCitation, MobileTranscriptCommand, MobileTranscriptCommandChip } from '@/lib/mobile/types';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 const BODY_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, monospace';
@@ -106,7 +107,7 @@ function BrainAnswerBlock({
           title={citation.excerpt}
           onClick={() => {
             if (citation.url && typeof window !== 'undefined') {
-              window.open(citation.url, '_blank', 'noopener,noreferrer');
+              openExternalUrl(citation.url);
             }
           }}
           style={{
