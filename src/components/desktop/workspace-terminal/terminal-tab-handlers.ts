@@ -298,10 +298,15 @@ export function buildHistoryChatTab(
   historyRepo?: { name?: string; localPath?: string; branch?: string | null; remoteUrl?: string | null } | null,
 ): TerminalTab {
   const now = Date.now();
+  // Orchestrator threads are stored with a `thoughts-` id; reopen them as an
+  // orchestrator tab (Claude backend) rather than the free o8-Default casual
+  // chat. Anything else stays an llm-chat tab. (See #1100 + the thread-id bridge
+  // in OrchestratorTab.)
+  const isOrchestratorThread = historyTabId.startsWith('thoughts-');
   return {
     id: historyTabId,
     label: title,
-    kind: 'llm-chat',
+    kind: isOrchestratorThread ? 'orchestrator' : 'llm-chat',
     tmuxSession: null,
     repo: historyRepo?.localPath || historyRepo?.name
       ? {
