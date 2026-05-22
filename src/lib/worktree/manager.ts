@@ -1036,6 +1036,20 @@ export class WorktreeManager {
     if (await this.pathExists(worktreePath)) {
       const preserved = await this.preserveUncommittedWork(worktreePath, worktreeId);
       if (preserved === 'skip') return; // Could not save work — abort prune
+
+      // #1103 — a *clean* worktree can still hold committed-but-unmerged work
+      // (an agent committed, but the lane was marked no_changes_produced before
+      // review and the worktree later went stale). Removing the dir + force-
+      // deleting the branch would discard those commits. Copy them into the main
+      // repo as a `preserved/<id>` branch first, so disk is still reclaimed but
+      // the work survives and is recoverable.
+      const committed = await this.preserveCommittedWork(
+        worktreePath,
+        worktreeId,
+        entry?.baseBranch ?? 'main',
+        entry?.isolationKind ?? 'git-worktree',
+      );
+      if (committed === 'skip') return; // Could not preserve commits — abort to avoid loss
     }
 
     if ((entry?.isolationKind ?? 'git-worktree') === 'apfs-cow-clone') {
@@ -1202,6 +1216,72 @@ export class WorktreeManager {
     } catch {
       // git status failed — worktree might already be gone, safe to proceed
       return 'clean';
+    }
+  }
+
+  /**
+   * Preserve committed-but-unmerged work before destroying a worktree (#1103).
+   * `preserveUncommittedWork` only saves dirty files; a *clean* worktree can
+   * still hold commits that were never merged or pushed (e.g. the agent
+   * committed, but the lane was marked no_changes_produced before review). We
+   * copy those commits into the main repo under `preserved/<id>` so the dir can
+   * still be removed (disk reclaimed) without discarding the work.
+   * Returns 'preserved' if commits were saved, 'clean' if HEAD is already merged
+   * into base / empty, or 'skip' if preservation failed (caller aborts cleanup).
+   */
+  private async preserveCommittedWork(
+    worktreePath: string,
+    worktreeId: string,
+    baseBranch: string,
+    isolationKind: WorkspaceIsolationKind,
+  ): Promise<'preserved' | 'clean' | 'skip'> {
+    const base = baseBranch.trim() || 'main';
+
+    let headSha: string;
+    try {
+      const { stdout } = await execFileAsync('git', ['rev-parse', 'HEAD'], {
+        cwd: worktreePath,
+        timeout: 5000,
+      });
+      headSha = stdout.trim();
+      if (!headSha) return 'clean';
+    } catch {
+      // Not a resolvable git worktree (already gone) — nothing to save.
+      return 'clean';
+    }
+
+    // If HEAD is already an ancestor of base, the work is merged — o8 rebases
+    // before merge, so a merged branch fast-forwards into base. Nothing to do.
+    try {
+      await execFileAsync('git', ['merge-base', '--is-ancestor', 'HEAD', base], {
+        cwd: worktreePath,
+        timeout: 10_000,
+      });
+      return 'clean'; // exit 0 → HEAD ⊆ base
+    } catch {
+      // exit 1 (HEAD has commits not in base) or unknown base — preserve to be safe.
+    }
+
+    const preservedRef = `refs/heads/preserved/${worktreeId}`;
+    try {
+      if (isolationKind === 'apfs-cow-clone') {
+        // Separate object store — copy the commits into the main repo's store.
+        await execFileAsync('git', ['fetch', worktreePath, `+HEAD:${preservedRef}`], {
+          cwd: this.repoRoot,
+          timeout: 30_000,
+        });
+      } else {
+        // Shared object store — the commit is already present; just point a ref.
+        await execFileAsync('git', ['update-ref', preservedRef, headSha], {
+          cwd: this.repoRoot,
+          timeout: 5000,
+        });
+      }
+      console.log(`[worktree-prune] ${worktreeId} had unmerged commits — preserved as branch preserved/${worktreeId} (${headSha.slice(0, 8)})`);
+      return 'preserved';
+    } catch (err) {
+      console.warn(`[worktree-prune] Could not preserve committed work for ${worktreeId}, skipping cleanup to avoid loss: ${err instanceof Error ? err.message : String(err)}`);
+      return 'skip';
     }
   }
 
