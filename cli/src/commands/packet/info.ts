@@ -52,6 +52,15 @@ interface PacketScopeRuntime {
   worktreePath: string | null;
 }
 
+// Bound a single event payload so one large tool_result blob doesn't flood the
+// agent's context when it pipes `o8 packet info` JSON in (20 events inlined).
+const EVENT_PAYLOAD_CAP = 1000;
+function capEventPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  const json = JSON.stringify(payload);
+  if (json.length <= EVENT_PAYLOAD_CAP) return payload;
+  return { truncated: true, sizeChars: json.length, preview: json.slice(0, EVENT_PAYLOAD_CAP) };
+}
+
 export async function runPacketInfo(mode: OutputMode): Promise<number> {
   const match = detectWorktree(process.cwd());
   if (!match) {
@@ -119,7 +128,7 @@ export async function runPacketInfo(mode: OutputMode): Promise<number> {
         verb: e.verb,
         actor: e.actor,
         timestamp: e.timestamp,
-        payload: e.payload,
+        payload: capEventPayload(e.payload),
       })),
     },
   };

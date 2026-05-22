@@ -194,6 +194,22 @@ function printHumanScope(scope: PacketScope): void {
   }
 }
 
+// Agents pipe `o8 packet scope` JSON straight into their context. Keep every
+// directive but cap each body so a directive-heavy project doesn't flood it.
+// (Human output already prints only directive titles.)
+const DIRECTIVE_BODY_CAP = 600;
+function capScopeForJson(scope: PacketScope): PacketScope {
+  if (!Array.isArray(scope.directives) || scope.directives.length === 0) return scope;
+  return {
+    ...scope,
+    directives: scope.directives.map((directive) => (
+      typeof directive.body === 'string' && directive.body.length > DIRECTIVE_BODY_CAP
+        ? { ...directive, body: `${directive.body.slice(0, DIRECTIVE_BODY_CAP)}…[+${directive.body.length - DIRECTIVE_BODY_CAP} chars truncated — read o8.md / directive source for the rest]` }
+        : directive
+    )),
+  };
+}
+
 export async function runPacketScope(mode: OutputMode, rest: string[]): Promise<number> {
   const id = await resolveScopeId(rest);
   const cfg = resolveConfig();
@@ -206,7 +222,7 @@ export async function runPacketScope(mode: OutputMode, rest: string[]): Promise<
   if (mode.human) {
     printHumanScope(res.data);
   } else {
-    printJson(res.data);
+    printJson(capScopeForJson(res.data));
   }
   return 0;
 }
