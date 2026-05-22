@@ -68,6 +68,9 @@ export async function runStatus(mode: OutputMode): Promise<number> {
     .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
     .slice(0, 10);
 
+  // Bound the lane arrays so a worktree storm can't flood an agent piping
+  // `o8 status` JSON in. counts.* still report the true totals.
+  const LANE_CAP = 50;
   const payload = {
     schema: 'o8/cli/status/v1',
     counts: {
@@ -76,8 +79,9 @@ export async function runStatus(mode: OutputMode): Promise<number> {
       recentMerges: recentMerges.length,
       pendingApprovals: approvals.length,
     },
-    runningPackets: running.map(summarizeLane),
-    activeLanes: activeLanes.map(summarizeLane),
+    activeLanesTruncated: activeLanes.length > LANE_CAP,
+    runningPackets: running.slice(0, LANE_CAP).map(summarizeLane),
+    activeLanes: activeLanes.slice(0, LANE_CAP).map(summarizeLane),
     recentMerges: recentMerges.map(summarizeLane),
     pendingApprovals: approvals.map((a) => ({
       id: a.id,
