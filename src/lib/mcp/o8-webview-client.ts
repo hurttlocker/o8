@@ -450,6 +450,54 @@ export class O8WebviewClient {
     return { ok: true };
   }
 
+  async scroll(opts: {
+    direction?: 'up' | 'down';
+    amount?: number | 'half';
+    toRef?: number;
+    toTop?: boolean;
+    toBottom?: boolean;
+  }): Promise<{ ok: boolean }> {
+    await this.sendCommand('scroll_page', {
+      window_label: DEFAULT_WINDOW_LABEL,
+      direction: opts.direction,
+      amount: opts.amount,
+      to_ref: opts.toRef,
+      to_top: opts.toTop,
+      to_bottom: opts.toBottom,
+    });
+    return { ok: true };
+  }
+
+  async pressKey(opts: {
+    key: string;
+    meta?: boolean;
+    ctrl?: boolean;
+    shift?: boolean;
+    alt?: boolean;
+  }): Promise<{ ok: boolean }> {
+    // No native key command in the plugin — dispatch a synthetic KeyboardEvent
+    // through eval (same approach as navigate). Fires o8's own React keybindings
+    // (Cmd+K, Esc-to-close, Enter); it won't trigger OS-level shortcuts.
+    const init = JSON.stringify({
+      key: opts.key,
+      code: opts.key,
+      metaKey: !!opts.meta,
+      ctrlKey: !!opts.ctrl,
+      shiftKey: !!opts.shift,
+      altKey: !!opts.alt,
+      bubbles: true,
+      cancelable: true,
+    });
+    await this.evalJs(`(() => {
+      const el = document.activeElement || document.body;
+      const init = ${init};
+      el.dispatchEvent(new KeyboardEvent('keydown', init));
+      el.dispatchEvent(new KeyboardEvent('keyup', init));
+      return 'ok';
+    })()`);
+    return { ok: true };
+  }
+
   async readPage(): Promise<{ text: string }> {
     const result = await this.evalJs(`(() => {
       const root = document.body || document.documentElement;
