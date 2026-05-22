@@ -4205,7 +4205,22 @@ async function bootstrapWsServer() {
 
           if (outcome === 'completed') {
             try {
-              const probe = await probeNoChangesProduced(completionCwd, lane.baseBranch);
+              // #1103 — commit any staged/dirty work BEFORE judging zero-diff.
+              // The supervisor's completion grace keys on transcript growth, not
+              // the worktree, so a Codex turn that commits after its last
+              // transcript line races this probe and gets a false
+              // no_changes_produced. Auto-commit first, then probe, with one
+              // bounded settle + re-probe to catch a commit that lands inside
+              // the exec/poll window. (Any commit later than this is recovered
+              // by the silent-exit detector, not lost.)
+              const { autoCommitCompletionWorktree } = await import('@/lib/supervisor/completion-verification');
+              try { await autoCommitCompletionWorktree(completionCwd); } catch { /* non-fatal — fall through to probe */ }
+              let probe = await probeNoChangesProduced(completionCwd, lane.baseBranch);
+              if (probe.noChangesProduced) {
+                await new Promise((resolve) => setTimeout(resolve, 2000));
+                try { await autoCommitCompletionWorktree(completionCwd); } catch { /* non-fatal */ }
+                probe = await probeNoChangesProduced(completionCwd, lane.baseBranch);
+              }
               if (probe.noChangesProduced) {
                 const packetId = lane.packetId?.trim();
                 const now = new Date().toISOString();
