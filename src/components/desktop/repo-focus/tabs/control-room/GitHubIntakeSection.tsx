@@ -6,6 +6,7 @@ import { REPO_FOCUS_FONT } from '../../utils';
 import type { GitHubIssueIntake } from './types';
 import { issueKey } from './helpers';
 import { ActionButton, IconActionButton } from './shared';
+import { openExternalUrl } from '@/lib/desktop/open-external';
 
 const COLLAPSED_LIMIT = 6;
 
@@ -128,9 +129,7 @@ export function GitHubIntakeSection({
               type="button"
               disabled={!issue.url}
               title={issue.url ? 'Open issue on GitHub' : undefined}
-              onClick={() => {
-                if (issue.url) window.open(issue.url, '_blank', 'noopener,noreferrer');
-              }}
+              onClick={() => { openExternalUrl(issue.url); }}
               style={{
                 minWidth: 0,
                 border: 0,
