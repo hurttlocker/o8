@@ -30,6 +30,17 @@ export async function mergeOrphanLaneByPacket(
     expectedHeadSha: expectedHeadSha?.trim() || undefined,
     actor: 'orchestrator',
   });
+  // #1110 follow-up — same mergedClean backfill as the in-mission merge path
+  // in operator-mission-service/merge.ts. Orphan-lane merges hit a packet that
+  // session_outcomes did capture at completion time; backfill here closes the
+  // loop for that subset too. Fire-and-forget — never fail the merge over it.
+  if (result.ok) {
+    void import('./context-relay').then(({ markOutcomeMerged }) =>
+      markOutcomeMerged({ laneId: orphanLane.id, packetId }),
+    ).catch((err) => {
+      console.warn(`[session-outcome-merge] orphan-path mergedClean backfill failed for packet ${packetId}:`, err);
+    });
+  }
   return {
     merged: result.ok,
     note: result.ok

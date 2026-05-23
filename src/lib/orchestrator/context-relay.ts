@@ -1,3 +1,4 @@
+import { eq } from 'drizzle-orm';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getDb, sessionOutcomes } from '@/lib/db';
@@ -541,10 +542,49 @@ async function persistSessionOutcome(
       startedAt: completedAt, // best available — runtime telemetry could refine
       completedAt,
       // mergedClean / reviewApproved / reviewFindingsCount left at defaults;
-      // the merge + review handlers update them when they fire (follow-up).
+      // the merge handler stamps mergedClean via markOutcomeMerged() below
+      // when the packet's branch actually lands on main. Without that hop the
+      // routing recommender (#747) never sees a scoreable signal.
     }).onConflictDoNothing();
   } catch (err) {
     // Swallow — never let a ledger write break the capture flow.
     console.warn('[session-outcome-write] insert failed:', err);
+  }
+}
+
+/**
+ * Stamp `merged_clean = 1` on the session_outcomes row(s) for a successfully-
+ * merged packet/lane. Best-effort + fire-and-forget by the caller — never
+ * block a merge over a ledger write.
+ *
+ * Looks up by laneId first (most specific), falls back to packetId. Updates
+ * every matching row in case a retry produced two captures for the same
+ * packet (deterministic id collapses most cases, but be defensive).
+ */
+export async function markOutcomeMerged({
+  laneId,
+  packetId,
+}: {
+  laneId?: string | null;
+  packetId?: string | null;
+}): Promise<void> {
+  const db = getDb();
+  if (!db) return;
+  const trimmedLane = laneId?.trim() || null;
+  const trimmedPacket = packetId?.trim() || null;
+  if (!trimmedLane && !trimmedPacket) return;
+
+  try {
+    if (trimmedLane) {
+      await db.update(sessionOutcomes)
+        .set({ mergedClean: true })
+        .where(eq(sessionOutcomes.laneId, trimmedLane));
+    } else if (trimmedPacket) {
+      await db.update(sessionOutcomes)
+        .set({ mergedClean: true })
+        .where(eq(sessionOutcomes.packetId, trimmedPacket));
+    }
+  } catch (err) {
+    console.warn('[session-outcome-merge] mergedClean update failed:', err);
   }
 }
