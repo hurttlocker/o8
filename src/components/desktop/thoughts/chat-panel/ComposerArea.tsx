@@ -265,6 +265,22 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
       ...MODE_ROUTING_SLASH_COMMANDS.filter((item) => item.command.startsWith(commandToken)),
     ];
   }, [dismissedSlashInput, input, isOrchestratorMode]);
+
+  // After the parent clears `input` (post-submit), force the textarea height
+  // back to its minHeight. The onSubmit keydown handler already sets
+  // height: 'auto' optimistically, but React's value-clear happens on the next
+  // render so the autosize effect inside onChange never re-fires to shrink the
+  // box — the result is a textarea that stays oversized with the "Queue for
+  // next turn" placeholder showing at the grown height. Watching `input` for
+  // the empty-string transition catches every clear path (submit, slash-route,
+  // programmatic resets) without having to touch each call site.
+  useEffect(() => {
+    if (input !== '') return;
+    const node = inputRef && 'current' in inputRef ? inputRef.current : null;
+    if (!node) return;
+    node.style.height = 'auto';
+  }, [input, inputRef]);
+
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
   // Textarea stays typeable while the agent is busy so the user can compose a
   // steer. Enter queues through the parent's steer path; only the no-target
