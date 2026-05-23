@@ -19,13 +19,14 @@ interface LeftPanelProjectFocusProps extends RepoFocusDataProps {
   onBack: () => void;
 }
 
+// Operator decision 2026-05-23 — hide the Control tab; the basic Chats
+// surface does what we need for now. ControlRoomTab.tsx + control-room/
+// stay on disk so we can re-enable later by re-adding the entry.
 const PROJECTWIDE_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
-  { id: 'control', label: 'Control' },
   { id: 'chats', label: 'Chats' },
 ];
 
 const REPO_TABS: Array<{ id: RepoFocusTabId; label: string }> = [
-  { id: 'control', label: 'Control' },
   { id: 'chats', label: 'Chats' },
 ];
 
@@ -49,9 +50,13 @@ export function LeftPanelProjectFocus({
   }, [repos, selectedRepoPath]);
 
   const tabsForMode = selectedRepo ? REPO_TABS : PROJECTWIDE_TABS;
-  const [activeTab, setActiveTab] = useState<RepoFocusTabId>('control');
+  const [activeTab, setActiveTab] = useState<RepoFocusTabId>('chats');
 
-  const visibleActiveTab = tabsForMode.some((tab) => tab.id === activeTab) ? activeTab : 'control';
+  // Fallback to 'chats' when the saved active tab (e.g. legacy 'control') no
+  // longer appears in the visible list. Pre-hide-control this fell back to
+  // 'control' which always existed; now 'chats' is the only surfaced tab so
+  // it's the safe default.
+  const visibleActiveTab = tabsForMode.some((tab) => tab.id === activeTab) ? activeTab : 'chats';
 
   // ESC closes the entire panel — same as the prior repo-focus panel.
   useEffect(() => {
