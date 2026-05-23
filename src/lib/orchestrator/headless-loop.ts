@@ -15,6 +15,15 @@ const DEFAULT_INTERVAL_MS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
 const PRUNE_INTERVAL_MS = 10 * 60_000;
 const IDLE_HEARTBEAT_TICKS = 6;
+// #1111 — Per-tick deadline. When a tick wedges (we've seen 86-failure
+// streaks where withLockedState or pruneWorktrees hangs indefinitely), the
+// singleton tickPromise was poisoning every subsequent caller. After this
+// deadline elapses we clear the singleton so the next caller can start
+// fresh; the wedged tick keeps running in the background and its results
+// (state writes, lifecycle events) eventually land. Sized generously since
+// a healthy tick is ~hundreds of ms — 30s is "something is genuinely broken,
+// don't block the world on it."
+const TICK_DEADLINE_MS = 30_000;
 
 interface HeadlessSprintTickResult {
   launched: number;
@@ -254,7 +263,7 @@ export async function runHeadlessSprintTick(options: { releasePacketIds?: string
     return idleResult;
   }
 
-  tickPromise = (async () => {
+  const innerPromise: Promise<HeadlessSprintTickResult> = (async () => {
     let result: HeadlessSprintTickResult;
 
     do {
@@ -264,12 +273,36 @@ export async function runHeadlessSprintTick(options: { releasePacketIds?: string
     } while (rerunRequested || queuedReleasePacketIds.size > 0);
 
     return result;
-  })()
+  })();
+
+  // #1111 — Race the work against a deadline. Whichever resolves first
+  // wins; the loser keeps running in the background (we can't really kill
+  // a stuck `withLockedState` block). On deadline, we clear the singleton
+  // so the next caller starts a fresh tick instead of inheriting our wedge.
+  let deadlineHandle: ReturnType<typeof setTimeout> | null = null;
+  const deadlinePromise = new Promise<HeadlessSprintTickResult>((_, reject) => {
+    deadlineHandle = setTimeout(() => {
+      reject(new Error(`Headless tick exceeded ${TICK_DEADLINE_MS}ms deadline`));
+    }, TICK_DEADLINE_MS);
+  });
+
+  // When the inner work succeeds (or fails fast), make sure the deadline
+  // timer doesn't keep the process alive past tickPromise reset.
+  void innerPromise.finally(() => {
+    if (deadlineHandle) {
+      clearTimeout(deadlineHandle);
+      deadlineHandle = null;
+    }
+  });
+
+  tickPromise = Promise.race([innerPromise, deadlinePromise])
     .catch((error) => {
       console.error(`[headless] Tick failed: ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     })
     .finally(() => {
+      // Always clear the singleton — whether the inner work finished or the
+      // deadline fired — so the next caller can try again.
       tickPromise = null;
     });
 
