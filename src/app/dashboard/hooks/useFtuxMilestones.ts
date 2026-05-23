@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react';
-import { writeTimelineVisible } from '@/lib/appearance/timeline';
 import {
   areAllFtuxMilestonesSeen,
   readFtuxMilestones,
@@ -14,16 +13,12 @@ interface UseFtuxMilestonesArgs {
   sidebarVisible: boolean;
   setLeftWidth: Dispatch<SetStateAction<number>>;
   setSidebarVisible: Dispatch<SetStateAction<boolean>>;
-  setTimelineVisible: Dispatch<SetStateAction<boolean>>;
-  timelineVisible: boolean;
 }
 
 export function useFtuxMilestones({
   sidebarVisible,
   setLeftWidth,
   setSidebarVisible,
-  setTimelineVisible,
-  timelineVisible,
 }: UseFtuxMilestonesArgs) {
   const [ftuxMilestones, setFtuxMilestones] = useState<FtuxMilestonesState>(() => readFtuxMilestones());
   const [ftuxQueuedMilestones, setFtuxQueuedMilestones] = useState<FtuxMilestoneId[]>([]);
@@ -100,17 +95,6 @@ export function useFtuxMilestones({
     }
     setLeftWidth((current) => Math.max(current, FTUX_AGENT_PANEL_TARGET_WIDTH));
   }, [activeFtuxMilestone, setLeftWidth, setSidebarVisible, sidebarVisible]);
-
-  useEffect(() => {
-    if (activeFtuxMilestone !== 'firstCompletion') {
-      return;
-    }
-
-    if (!timelineVisible) {
-      writeTimelineVisible(true);
-      setTimelineVisible(true);
-    }
-  }, [activeFtuxMilestone, setTimelineVisible, timelineVisible]);
 
   return {
     activeFtuxMilestone,
