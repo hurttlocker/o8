@@ -16,12 +16,11 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { FolderPlus, GearSix } from '@phosphor-icons/react';
-import { Smartphone } from './lucide-shims';
 import { ChromeButton } from './chrome/ChromeButton';
 import { MergeActionCluster } from './MergeActionCluster';
 import { FooterPorts } from './desktop-status-bar/footer-ports';
 import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
+import { DeviceMobileIcon, FolderPlusIcon, GearSixIcon } from './desktop-status-bar/status-bar-icons';
 import { SettingsQuickDrawer } from './SettingsQuickDrawer';
 
 interface DesktopStatusBarProps {
@@ -34,7 +33,7 @@ interface DesktopStatusBarProps {
   leftColumnWidth?: number;
   /** Width of the right panel column when visible, in CSS px. */
   rightColumnWidth?: number;
-  /** Narrow desktop mode: keep only durable, terminal-like status chrome. */
+  /** Narrow desktop mode: keep durable status text and collapse action chrome. */
   compact?: boolean;
   onOpenSettings: () => void;
   onAddRepo: () => void;
@@ -137,7 +136,7 @@ function DesktopStatusBarBase({
       >
         <div ref={settingsButtonRef} style={{ display: 'flex', alignItems: 'center' }}>
           <ChromeButton
-            icon={<GearSix size={15} weight="bold" color="var(--t-text)" />}
+            icon={<GearSixIcon size={15} color="var(--t-text)" />}
             label="Settings"
             active={settingsDrawerOpen}
             onClick={toggleSettingsDrawer}
@@ -154,14 +153,14 @@ function DesktopStatusBarBase({
         {!compact ? (
           <>
             <ChromeButton
-              icon={<Smartphone size={15} />}
+              icon={<DeviceMobileIcon size={15} />}
               label="Pair mobile device"
               onClick={onOpenMobilePairing}
               size={28}
               radius={8}
             />
             <ChromeButton
-              icon={<FolderPlus size={15} weight="bold" color="var(--t-text)" />}
+              icon={<FolderPlusIcon size={15} color="var(--t-text)" />}
               label="Add repository"
               onClick={onAddRepo}
               size={28}
@@ -187,8 +186,9 @@ function DesktopStatusBarBase({
           branchName={branchName}
           repoName={repoName}
           repoRemoteUrl={repoRemoteUrl}
+          compact={compact}
         />
-        {onToggleBottomPanel ? (
+        {!compact && onToggleBottomPanel ? (
           <StatusTerminalToggle
             active={bottomPanelVisible}
             onClick={onToggleBottomPanel}
@@ -200,11 +200,11 @@ function DesktopStatusBarBase({
         style={{
           width: compact ? 0 : (rightColumnWidth ?? undefined),
           flexShrink: 0,
-          display: 'flex',
+          display: compact ? 'none' : 'flex',
           alignItems: 'center',
           justifyContent: 'flex-end',
-          paddingLeft: 12,
-          paddingRight: 12,
+          paddingLeft: compact ? 0 : 12,
+          paddingRight: compact ? 0 : 12,
           gap: 6,
         }}
       >
