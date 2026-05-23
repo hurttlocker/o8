@@ -20,6 +20,8 @@ export function TimelineEmptyState({
   return (
     <motion.div
       key="timeline-empty"
+      data-chrome-surface="true"
+      data-stationary-chrome="true"
       initial={{ opacity: 0, y: -2 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -2 }}
@@ -32,7 +34,7 @@ export function TimelineEmptyState({
         paddingRight: 16,
         paddingBottom: 10,
         paddingLeft: 90,
-        background: 'transparent',
+        background: 'var(--t-chrome, transparent)',
         borderBottom: '1px solid var(--t-divider-subtle)',
         color: 'var(--t-text)',
         fontFamily: 'var(--font-sans-system)',

@@ -4,7 +4,7 @@ import type { O8Tab } from './types';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render React icon components) ──
 
-function IconWorkspace({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
+function IconWorkspace({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
       <path d="M3 7.5A2.5 2.5 0 0 1 5.5 5H9l2 2.5h7.5A2.5 2.5 0 0 1 21 10v7.5a2.5 2.5 0 0 1-2.5 2.5h-13A2.5 2.5 0 0 1 3 17.5z" />
@@ -14,7 +14,7 @@ function IconWorkspace({ size = 16, color = '#e2e8f0' }: { size?: number; color?
   );
 }
 
-function IconFiles({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
+function IconFiles({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
       <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
@@ -23,7 +23,7 @@ function IconFiles({ size = 16, color = '#e2e8f0' }: { size?: number; color?: st
   );
 }
 
-function IconActivity({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
+function IconActivity({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
       <polyline points="22 12 18 12 15 21 9 3 6 12 2 12" />
@@ -31,7 +31,7 @@ function IconActivity({ size = 16, color = '#e2e8f0' }: { size?: number; color?:
   );
 }
 
-function IconInbox({ size = 16, color = '#e2e8f0' }: { size?: number; color?: string }) {
+function IconInbox({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
       <polyline points="22 12 16 12 14 15 10 15 8 12 2 12" />
@@ -69,6 +69,12 @@ function O8TabPill({
   onClick: () => void;
 }) {
   const color = active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE;
+  const restBackground = 'var(--t-chrome-btn-bg)';
+  const hoverBackground = 'var(--t-chrome-btn-hover-bg)';
+  const activeBackground = 'var(--t-chrome-btn-active-bg)';
+  const restShadow = 'var(--t-chrome-btn-shadow)';
+  const hoverShadow = 'var(--t-chrome-btn-hover-shadow)';
+  const activeShadow = 'var(--t-chrome-btn-active-shadow)';
   return (
     <button
       type="button"
@@ -88,19 +94,26 @@ function O8TabPill({
         paddingRight: active ? 11 : 0,
         border: 'none',
         borderRadius: 8,
-        background: active ? 'var(--t-panel-active, var(--t-input-bg))' : 'transparent',
+        background: active ? activeBackground : restBackground,
+        boxShadow: active ? activeShadow : restShadow,
         color,
         cursor: 'pointer',
         flexShrink: 0,
-        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         WebkitTapHighlightColor: 'transparent',
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
       onMouseEnter={(event) => {
-        if (!active) event.currentTarget.style.background = 'var(--t-hover)';
+        if (!active) {
+          event.currentTarget.style.background = hoverBackground;
+          event.currentTarget.style.boxShadow = hoverShadow;
+        }
       }}
       onMouseLeave={(event) => {
-        if (!active) event.currentTarget.style.background = 'transparent';
+        if (!active) {
+          event.currentTarget.style.background = restBackground;
+          event.currentTarget.style.boxShadow = restShadow;
+        }
       }}
     >
       {def.icon(color)}
