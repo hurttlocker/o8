@@ -52,7 +52,7 @@ interface InternalClaudeCodeInteractiveSession extends ClaudeCodeInteractiveSess
   activeTurn: InteractiveTurn | null;
 }
 
-const PROCESS_TIMEOUT_MS = 480_000;
+const PROCESS_TIMEOUT_MS = 1_800_000;
 const IDLE_TIMEOUT_MS = 30 * 60_000;
 const sessions = new Map<string, InternalClaudeCodeInteractiveSession>();
 type PermissionRequestEvent = Extract<ClaudeCodeStreamJsonParserEvent, { type: 'permission_request' }>;

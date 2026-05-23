@@ -69,7 +69,13 @@ const LOG_PREFIX = '[orchestrator-rehydrate]';
  * the model would narrate a plan, start running tools, and get killed before
  * it could emit the final summary. Bumping this is the root fix.
  */
-const PROCESS_TIMEOUT_MS = 480_000;
+// Bumped 480_000 → 1_800_000 (8min → 30min) on 2026-05-23 after Opus 4.7
+// hit the wall mid-investigation on #1113 — 83 tool calls deep into the
+// tile-system exploration when the kill fired. The narrate-and-exit failure
+// mode noted above is now mostly closed at this budget; architectural work
+// fits comfortably. If a turn legitimately needs more, the operator can
+// re-prompt with a tighter brief that pre-supplies the file pointers.
+const PROCESS_TIMEOUT_MS = 1_800_000;
 
 let startupRehydrationPromise: Promise<void> | null = null;
 let startupRehydrationComplete = false;
@@ -542,6 +548,16 @@ export async function sendToOrchestrator(
     // #457 — Process timeout: kill the claude process if it hangs
     const processTimeout = setTimeout(() => {
       console.warn(`[orchestrator-session] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
+      // Surface the kill to the chat surface so the user sees WHY the turn
+      // stopped emitting. Without this the UI just freezes mid-investigation
+      // with no terminating assistant message — looks like a hang. The error
+      // event is rendered by the chat as a small system-style note at the
+      // tail of the turn.
+      const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
+      onEvent({
+        type: 'error',
+        error: `Orchestrator hit the ${minutes}-minute turn limit and was terminated. Re-send your message to continue — or break the task into a tighter brief so it fits.`,
+      });
       proc.kill('SIGTERM');
       // Force kill after 5s if SIGTERM doesn't work
       setTimeout(() => {
