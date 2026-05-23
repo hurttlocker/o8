@@ -136,6 +136,40 @@ export class WorktreeFetchUnreachableError extends Error {
   }
 }
 
+/**
+ * Thrown when a freshly-created worktree's tsc fails before we hand it to an
+ * agent. Indicates main HEAD is in an internally-inconsistent state (e.g. a
+ * non-atomic commit landed the consumer side of a refactor without the
+ * matching producer). Catching this here prevents the loop's classic failure
+ * mode: every Codex diff appears clean against the broken base, and every
+ * subsequent merge fails with tsc errors that don't belong to the agent.
+ * See #1107.
+ */
+export class WorktreeBaseTypecheckError extends Error {
+  public readonly baseBranch: string;
+  public readonly worktreePath: string;
+  public readonly branch: string;
+  public readonly tscOutput: string;
+
+  constructor(options: {
+    baseBranch: string;
+    worktreePath: string;
+    branch: string;
+    tscOutput: string;
+    message?: string;
+  }) {
+    super(
+      options.message
+        ?? `Base typecheck failed for ${options.baseBranch} before launch — main HEAD is in an inconsistent state. Commit any pending matching changes (e.g. hook updates) before dispatching.`,
+    );
+    this.name = 'WorktreeBaseTypecheckError';
+    this.baseBranch = options.baseBranch;
+    this.worktreePath = options.worktreePath;
+    this.branch = options.branch;
+    this.tscOutput = options.tscOutput;
+  }
+}
+
 /** Age threshold for local base-branch ref on fetch failure (5 min). */
 const LOCAL_BASE_REF_FRESHNESS_MS = 5 * 60_000;
 
@@ -397,6 +431,55 @@ export class WorktreeManager {
       info.status = 'setup';
       await this.updateMetaStatus(taskId, 'setup');
       await this.runSetup(worktreePath);
+    }
+
+    // Pre-launch typecheck gate (#1107). The agent's diff is ALWAYS measured
+    // against the worktree's tsc, so a non-atomic commit on main HEAD (consumer
+    // side without the matching producer) poisons every packet branched off it:
+    // the agent's own work looks clean against the broken base AND the merge
+    // fails with tsc errors that don't belong to the agent. Catch that here
+    // and refuse to spawn the agent into a broken tree.
+    //
+    // Opt out with O8_SKIP_PRELAUNCH_TYPECHECK=1 if tsc is too slow / noisy for
+    // the dispatch loop. We use the repo-root tsc binary so we don't depend on
+    // the worktree having its own node_modules — Node module resolution walks
+    // up to the parent.
+    if (process.env.O8_SKIP_PRELAUNCH_TYPECHECK !== '1' && !opts.skipSetup) {
+      const tscBin = path.join(this.repoRoot, 'node_modules', '.bin', 'tsc');
+      try {
+        await execFileAsync(tscBin, ['--noEmit', '--incremental', 'false'], {
+          cwd: worktreePath,
+          timeout: 180_000,
+          maxBuffer: 8 * 1024 * 1024,
+        });
+      } catch (err) {
+        const stdout = (err as { stdout?: unknown })?.stdout;
+        const tscOutput = typeof stdout === 'string' ? stdout
+          : stdout instanceof Buffer ? stdout.toString('utf8')
+          : err instanceof Error ? err.message
+          : String(err);
+        // Mirror the rebase-conflict cleanup path — tear down the bad tree so
+        // we don't leak it on disk; remove the meta so the caller can retry.
+        try {
+          await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
+            cwd: this.repoRoot,
+            timeout: 15_000,
+          });
+        } catch { /* tree may already be gone */ }
+        try {
+          await execFileAsync('git', ['branch', '-D', branchName], {
+            cwd: this.repoRoot,
+            timeout: 5000,
+          });
+        } catch { /* branch may not exist */ }
+        await this.removeMeta(taskId);
+        throw new WorktreeBaseTypecheckError({
+          baseBranch,
+          worktreePath,
+          branch: branchName,
+          tscOutput: tscOutput.slice(0, 4000),
+        });
+      }
     }
 
     info.status = 'ready';
