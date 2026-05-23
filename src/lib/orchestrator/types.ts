@@ -54,6 +54,17 @@ export interface OrchestratorWorkspaceTarget {
   worktreeStatus?: string | null;
 }
 
+/**
+ * Sentinel `tileId` / `tabId` written into the lane binding when a packet
+ * is dispatched server-side (the MCP `dispatch_mission` path) without a
+ * caller-provided UI tile context. Empty strings used to live here — but
+ * `hasInteractiveLane` and `hasLaneBinding` use truthy checks on these
+ * fields, so empty strings silently hid the Focus button for every
+ * MCP-dispatched packet (#1113). The sentinel keeps those checks truthy
+ * while still being distinguishable from a real workspace-tile binding.
+ */
+export const MCP_DISPATCH_TILE_SENTINEL = 'mcp-dispatch';
+
 export interface OrchestratorLaneBinding {
   tileId: string;
   tabId: string;

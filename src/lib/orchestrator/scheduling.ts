@@ -12,11 +12,12 @@ import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/d
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
 import { getProjectContext } from '@/lib/projects/context';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
-import type {
-  OrchestratorLaneBinding,
-  OrchestratorMissionState,
-  OrchestratorPacket,
-  WorkerRouting,
+import {
+  MCP_DISPATCH_TILE_SENTINEL,
+  type OrchestratorLaneBinding,
+  type OrchestratorMissionState,
+  type OrchestratorPacket,
+  type WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 
@@ -105,11 +106,15 @@ function createLaneBinding(
   // `bind_worktree` / `launch_session`). Without this, MCP-dispatched packets
   // saw `worktreePath: null` on the binding even though a real worktree
   // existed, and the no_changes_produced check inspected the wrong tree.
-  // tileId/tabId do not live on the lane row — leave them empty here.
+  // tileId/tabId do not live on the lane row, but writing empty strings here
+  // made every downstream truthy check (`hasInteractiveLane`, `hasLaneBinding`)
+  // hide the Focus button for MCP-dispatched packets (#1113). The sentinel
+  // keeps those checks truthy and is filtered out by the workspace tile-handle
+  // lookup, so this never collides with a real workspace binding.
   const laneRow = getLane(laneId);
   return {
-    tileId: '',
-    tabId: '',
+    tileId: MCP_DISPATCH_TILE_SENTINEL,
+    tabId: MCP_DISPATCH_TILE_SENTINEL,
     repoPath: packet.workspaceTargetPath,
     worktreePath: laneRow?.worktreePath ?? null,
     runtime: workerRouting?.selectedRuntime ?? packet.runtime,
