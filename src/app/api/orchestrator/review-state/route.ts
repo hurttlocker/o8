@@ -21,6 +21,7 @@ import {
   type DeriveReviewStateOrchestratorReview,
 } from '@/lib/orchestrator/derive-review-state';
 import { syncOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { synthesizePacketFromLane } from '@/lib/orchestrator/synthesize-packet';
 import { requirePanelAuth } from '@/lib/panel/auth';
 
 export const runtime = 'nodejs';
@@ -89,12 +90,19 @@ export async function GET(request: NextRequest) {
 
   try {
     const mission = await syncOrchestratorControlPlaneState();
-    const packet = mission.packets.find((candidate) => candidate.id === packetId);
-    if (!packet) {
+    const lane = findLatestLaneByPacket(packetId);
+
+    // #1112 — Mission state is an in-memory singleton that gets overwritten
+    // by each new `create_mission`, so packets from a prior mission lose
+    // their entry even though the lane is alive. Fall through to the lane
+    // registry (same pattern as #1106) and synthesize a minimal packet stub
+    // so review-state still surfaces something useful. Only 404 if neither
+    // mission state nor the lane registry knows about the packet.
+    const missionPacket = mission.packets.find((candidate) => candidate.id === packetId);
+    if (!missionPacket && !lane) {
       return errorResponse('packet_not_found', `Packet ${packetId} not found.`, 404);
     }
-
-    const lane = findLatestLaneByPacket(packetId);
+    const packet = missionPacket ?? synthesizePacketFromLane(packetId, lane!);
 
     // Merge gate is computed on-demand from the lane's diff. If the lane is
     // gone (archived / never spawned) we can't run the gate — fall back to

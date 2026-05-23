@@ -1,8 +1,10 @@
 import { createApproval, recordApprovalAudit, resolveApproval } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
+import type { Lane } from '@/lib/lane/types';
 import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { synthesizePacketFromLane } from '@/lib/orchestrator/synthesize-packet';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type {
   OrchestratorPacket,
@@ -140,26 +142,47 @@ async function captureReviewedHeadSha(packetId: string, explicitHeadSha?: string
 
 export async function submitPacketReview(input: SubmitReviewInput) {
   const state = currentMissionState();
-  const packet = state.packets.find((candidate) => candidate.id === input.packetId);
-  if (!packet) {
-    throw new Error(`Packet ${input.packetId} not found.`);
+  const missionPacket = state.packets.find((candidate) => candidate.id === input.packetId);
+
+  // #1112 — Lane-registry fallback. When a new `create_mission` runs, the
+  // prior mission's packets get evicted from in-memory state. The lane row
+  // is the durable source of truth (same pattern as #1106 for governance
+  // reads). When the mission lookup misses but a lane exists, synthesize a
+  // minimal packet stub from the lane and skip the mission-state write.
+  let orphanLane: Lane | null = null;
+  let packet: OrchestratorPacket;
+  if (missionPacket) {
+    packet = missionPacket;
+  } else {
+    orphanLane = findLatestLaneByPacket(input.packetId);
+    if (!orphanLane) {
+      throw new Error(`Packet ${input.packetId} not found.`);
+    }
+    packet = synthesizePacketFromLane(input.packetId, orphanLane);
   }
 
   const reviewedHeadSha = await captureReviewedHeadSha(packet.id, input.reviewedHeadSha);
   const summary = buildReviewSummary(input.findings, input.approved);
   const auditApprovalId = recordPacketReviewAudit(packet, input.findings, input.approved, summary, reviewedHeadSha);
 
-  const finalState = writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({
-    ...state,
-    packets: state.packets.map((candidate) => candidate.id === packet.id
-      ? {
-          ...candidate,
-          review: buildPacketReview(input.findings, input.approved, summary, reviewedHeadSha, auditApprovalId),
-        }
-      : candidate),
-  }));
+  // Only update mission state when the packet actually lives there — orphan
+  // path leaves state unchanged (the audit log is the record of truth for
+  // that case until the merge happens via the lane-fallback merge path).
+  let resolvedAuditApprovalId: string | null = auditApprovalId ?? null;
+  if (missionPacket) {
+    const finalState = writeOrchestratorControlPlaneState(normalizeOrchestratorMissionState({
+      ...state,
+      packets: state.packets.map((candidate) => candidate.id === packet.id
+        ? {
+            ...candidate,
+            review: buildPacketReview(input.findings, input.approved, summary, reviewedHeadSha, auditApprovalId),
+          }
+        : candidate),
+    }));
+    resolvedAuditApprovalId = finalState.packets.find((candidate) => candidate.id === packet.id)?.review?.auditApprovalId ?? null;
+  }
 
-  log(`Recorded review for packet ${packet.id}.`, {
+  log(`Recorded review for packet ${packet.id}${orphanLane ? ` (orphan via lane ${orphanLane.id})` : ''}.`, {
     approved: input.approved,
     findings: input.findings.length,
     reviewedHeadSha: reviewedHeadSha ?? null,
@@ -171,6 +194,6 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     findingsCount: input.findings.length,
     reviewedHeadSha: reviewedHeadSha ?? null,
     auditEventType: 'orchestrator_review',
-    auditApprovalId: finalState.packets.find((candidate) => candidate.id === packet.id)?.review?.auditApprovalId ?? null,
+    auditApprovalId: resolvedAuditApprovalId,
   };
 }
