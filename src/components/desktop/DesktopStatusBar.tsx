@@ -107,7 +107,10 @@ function DesktopStatusBarBase({
       data-chrome-surface="true"
       data-stationary-chrome="true"
       style={{
-        height: 28,
+        // Bumped from 28 → 36 so the footer card (= 36 - 5 = 31 tall) fits
+        // the 28px tall FooterPorts + SupervisorInboxBadge cleanly without
+        // them spilling out of the card's rounded bottom.
+        height: 36,
         flexShrink: 0,
         display: 'flex',
         alignItems: 'stretch',
@@ -121,55 +124,92 @@ function DesktopStatusBarBase({
         boxSizing: 'border-box',
       }}
     >
+      {/* Left footer — bottom half of the SAME visual card as the panel
+          above. Flat top corners (meet the panel card flush), rounded
+          bottom corners. A thin top border draws the divider between
+          panel content and footer buttons. */}
       <div
         style={{
           width: compact ? 'auto' : leftColumnWidth,
           flexShrink: 0,
           display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          paddingLeft: 12,
-          paddingRight: 12,
-          overflow: 'hidden',
-          transform: 'translateY(-8px)',
+          // Buffer mirrors the panel card's: 5px on left/right/bottom,
+          // 0 on top so this card meets the panel card with no gap.
+          paddingTop: 0,
+          paddingRight: 5,
+          paddingBottom: 5,
+          paddingLeft: 5,
+          overflow: 'visible',
         }}
       >
-        <div ref={settingsButtonRef} style={{ display: 'flex', alignItems: 'center' }}>
-          <ChromeButton
-            icon={<GearSixIcon size={15} color="var(--t-text)" />}
-            label="Settings"
-            active={settingsDrawerOpen}
-            onClick={toggleSettingsDrawer}
-            size={28}
-            radius={8}
+        <div
+          // Inner card — flat top (merges with panel above), rounded bottom.
+          // Centered cluster — buttons sit in the middle of the footer, not
+          // crammed left like a traditional status bar.
+          //
+          // Token overrides flatten any chrome-btn-styled descendants (the
+          // SupervisorInboxBadge especially renders a solid white pill with
+          // shadow in its inactive state — those tokens are appropriate over
+          // vibrancy chrome but look like a floating tile on the solid card).
+          style={{
+            flex: 1,
+            minWidth: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 6,
+            paddingLeft: 10,
+            paddingRight: 10,
+            background: 'var(--t-panel-solid)',
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
+            borderBottomLeftRadius: 14,
+            borderBottomRightRadius: 14,
+            borderTop: '0.5px solid var(--t-divider-subtle)',
+            boxShadow: '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+            ['--t-chrome-btn-bg' as string]: 'transparent',
+            ['--t-chrome-btn-shadow' as string]: 'none',
+            ['--t-chrome-btn-hover-bg' as string]: 'var(--t-hover)',
+            ['--t-chrome-btn-hover-shadow' as string]: 'none',
+          }}
+        >
+          <div ref={settingsButtonRef} style={{ display: 'flex', alignItems: 'center' }}>
+            <ChromeButton
+              icon={<GearSixIcon size={14} color="var(--t-text)" />}
+              label="Settings"
+              active={settingsDrawerOpen}
+              onClick={toggleSettingsDrawer}
+              size={22}
+              radius={6}
+            />
+          </div>
+          <SettingsQuickDrawer
+            open={settingsDrawerOpen}
+            anchorRect={settingsAnchorRect}
+            onClose={closeSettingsDrawer}
+            onOpenSettings={openFullSettings}
           />
+          {!compact ? (
+            <>
+              <ChromeButton
+                icon={<DeviceMobileIcon size={14} />}
+                label="Pair mobile device"
+                onClick={onOpenMobilePairing}
+                size={22}
+                radius={6}
+              />
+              <ChromeButton
+                icon={<FolderPlusIcon size={14} color="var(--t-text)" />}
+                label="Add repository"
+                onClick={onAddRepo}
+                size={22}
+                radius={6}
+              />
+              <FooterPorts onPortPreview={onPortPreview} />
+              <SupervisorInboxBadge />
+            </>
+          ) : null}
         </div>
-        <SettingsQuickDrawer
-          open={settingsDrawerOpen}
-          anchorRect={settingsAnchorRect}
-          onClose={closeSettingsDrawer}
-          onOpenSettings={openFullSettings}
-        />
-        {!compact ? (
-          <>
-            <ChromeButton
-              icon={<DeviceMobileIcon size={15} />}
-              label="Pair mobile device"
-              onClick={onOpenMobilePairing}
-              size={28}
-              radius={8}
-            />
-            <ChromeButton
-              icon={<FolderPlusIcon size={15} color="var(--t-text)" />}
-              label="Add repository"
-              onClick={onAddRepo}
-              size={28}
-              radius={8}
-            />
-            <FooterPorts onPortPreview={onPortPreview} />
-            <SupervisorInboxBadge />
-          </>
-        ) : null}
       </div>
 
       <div

@@ -3290,22 +3290,52 @@ function DashboardInner() {
                 : { duration: 0.001 }
           }
           data-mcp-scope="agent-panel"
-          data-chrome-surface="true"
+          // No data-chrome-surface here anymore — the inner card paints a
+          // SOLID surface over the vibrancy, so children use the regular
+          // palette (dark text in light mode) rather than the chrome-flip
+          // (white text on dark vibrancy bleed) overrides.
           style={{
             width: effectiveLeftWidth,
             flexShrink: 0,
             height: '100%',
             display: 'flex',
             flexDirection: 'column',
-            overflow: 'hidden',
+            // Allow the inner card's drop shadow to escape the column box.
+            overflow: 'visible',
             position: 'relative',
-            // Dainty 1px divider on the right edge so the left panel reads
-            // as separate from the workspace without claiming layout width.
-            // box-shadow extends BEYOND the element box so the inner column
-            // keeps its full effectiveLeftWidth.
-            boxShadow: '1px 0 0 var(--t-divider-subtle)',
+            // Claude-style floating card. 5px buffer on top/left/right;
+            // bottom is 0 because the DesktopStatusBar's left section
+            // renders directly below as the second half of the SAME
+            // visual card (flat-bottom panel + flat-top footer, divider
+            // between them).
+            paddingTop: 5,
+            paddingLeft: 5,
+            paddingRight: 5,
+            paddingBottom: 0,
           }}
         >
+          {/* Floating card — paper over vibrancy. Top corners rounded;
+              bottom corners flat so this card merges flush with the
+              footer card rendered in DesktopStatusBar (which has flat
+              top + rounded bottom). Together they read as one card. */}
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              display: 'flex',
+              flexDirection: 'column',
+              overflow: 'hidden',
+              borderTopLeftRadius: 14,
+              borderTopRightRadius: 14,
+              borderBottomLeftRadius: 0,
+              borderBottomRightRadius: 0,
+              background: 'var(--t-panel-solid)',
+              // Soft elevation so the card reads as lifted off the chrome
+              // without becoming heavy. Tuned for both themes (alpha is
+              // small enough that it disappears into the dark backdrop).
+              boxShadow: '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+            }}
+          >
           <LeftHeaderStrip
             sidebarVisible={sidebarVisible}
             onToggleSidebar={() => setSidebarVisible(v => !v)}
@@ -3389,6 +3419,7 @@ function DashboardInner() {
             ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
             leftPanelFocus={leftPanelFocus}
           />
+          </div>
           </div>
         </motion.div>
       );
