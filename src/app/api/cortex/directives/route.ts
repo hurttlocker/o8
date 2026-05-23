@@ -25,7 +25,7 @@
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
-import { readdirSync, readFileSync, existsSync } from 'node:fs';
+import { readdirSync, readFileSync, existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { readAllDirectiveTrailers } from '@/lib/cortex/directive-merges';
@@ -150,5 +150,104 @@ export async function GET(req: NextRequest) {
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to load directives.';
     return NextResponse.json({ error: message }, { status: 500 });
+  }
+}
+
+/**
+ * POST /api/cortex/directives
+ *
+ * Writes a directive markdown file to the data dir. The auto-directive proposer
+ * (#746) + the cross-repo proposer (#748) + the operator's Accept clicks all
+ * funnel here so the proposal → directive loop closes IN-APP instead of
+ * requiring the operator to hand-edit markdown files in a terminal.
+ *
+ * Body shape:
+ *   {
+ *     id?: string            // slug; defaults to d-<ts>-<random>
+ *     title: string
+ *     scope: 'global' | 'project' | string  // string = repoName for repo-scoped
+ *     repoName?: string                     // when scope is the repo name
+ *     projects?: string[]                   // project slugs (scope=project)
+ *     priority?: number                     // higher = more important; default 5
+ *     body: string                          // the directive text
+ *   }
+ *
+ * Idempotent on id: writing the same id overwrites the file (intentional —
+ * lets the operator re-Accept a tweaked proposal). Loopback-gated by middleware.
+ */
+export async function POST(req: NextRequest) {
+  try {
+    const body = (await req.json().catch(() => null)) as null | {
+      id?: unknown; title?: unknown; scope?: unknown; repoName?: unknown;
+      projects?: unknown; priority?: unknown; body?: unknown;
+    };
+    if (!body || typeof body !== 'object') {
+      return NextResponse.json({ ok: false, error: 'body must be JSON' }, { status: 400 });
+    }
+    const title = typeof body.title === 'string' ? body.title.trim() : '';
+    const scope = typeof body.scope === 'string' ? body.scope.trim() : '';
+    const text = typeof body.body === 'string' ? body.body.trim() : '';
+    if (!title || !scope || !text) {
+      return NextResponse.json({ ok: false, error: 'title, scope, and body are required' }, { status: 400 });
+    }
+
+    const idCandidate = typeof body.id === 'string' ? body.id.trim() : '';
+    const id = idCandidate || `d-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+    if (!/^[A-Za-z0-9._-]+$/.test(id)) {
+      return NextResponse.json({ ok: false, error: 'id must match [A-Za-z0-9._-]+' }, { status: 400 });
+    }
+
+    const repoName = typeof body.repoName === 'string' ? body.repoName.trim() : '';
+    const projects = Array.isArray(body.projects)
+      ? body.projects.filter((s): s is string => typeof s === 'string' && s.trim().length > 0).map((s) => s.trim())
+      : [];
+    const priority = typeof body.priority === 'number' && Number.isFinite(body.priority)
+      ? Math.max(0, Math.min(100, Math.round(body.priority)))
+      : 5;
+    const now = new Date().toISOString();
+
+    const dataDir = getDataDir();
+    const directivesDir = join(dataDir, 'directives');
+    mkdirSync(directivesDir, { recursive: true });
+    const filePath = join(directivesDir, `${id}.md`);
+
+    // Preserve `created` on re-write so the file's history isn't reset on edit.
+    let created = now;
+    if (existsSync(filePath)) {
+      try {
+        const existing = readFileSync(filePath, 'utf-8');
+        const parsed = parseDirectiveFile(existing, id);
+        if (parsed?.id) {
+          const createdMatch = existing.match(/^created:\s*(.+)$/m);
+          if (createdMatch) created = createdMatch[1].trim();
+        }
+      } catch { /* ignore — treat as new */ }
+    }
+
+    // YAML-ish frontmatter the parser expects. Quote strings that could
+    // ambiguate. Keep formatting consistent so re-reads round-trip cleanly.
+    const escapedTitle = title.replace(/"/g, '\\"');
+    const projectsLine = projects.length ? `projects: [${projects.map((p) => `"${p.replace(/"/g, '\\"')}"`).join(', ')}]\n` : '';
+    const repoLine = repoName ? `repoName: "${repoName.replace(/"/g, '\\"')}"\n` : '';
+    const frontmatter = `---
+id: ${id}
+title: "${escapedTitle}"
+scope: ${scope}
+${repoLine}priority: ${priority}
+${projectsLine}created: ${created}
+updated: ${now}
+---
+
+${text}
+`;
+
+    writeFileSync(filePath, frontmatter, 'utf-8');
+
+    return NextResponse.json({ ok: true, id, path: filePath }, {
+      headers: { 'Cache-Control': 'no-store, max-age=0' },
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to write directive.';
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
