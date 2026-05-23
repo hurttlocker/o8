@@ -9,7 +9,7 @@ import type {
 } from './types';
 
 type LaneRegistryModule = typeof import('@/lib/lane/registry');
-type ActivePacketLane = NonNullable<ReturnType<LaneRegistryModule['findLaneByPacket']>>;
+type ActivePacketLane = NonNullable<ReturnType<LaneRegistryModule['findLatestLaneByPacket']>>;
 
 const loadApprovalsStore = () => import('@/lib/approvals/store');
 const loadDirectiveMerges = () => import('@/lib/cortex/directive-merges');
@@ -120,7 +120,7 @@ async function getWaveMergeOrder(
 ): Promise<OrderedMergeCandidate[] | null> {
   const [
     { buildDependencyGraph },
-    { findLaneByPacket },
+    { findLatestLaneByPacket },
     { getWorktreeManager },
     { detectFileOverlaps, recommendMergeOrder },
   ] = await Promise.all([
@@ -154,7 +154,7 @@ async function getWaveMergeOrder(
   const worktrees = await getWorktreeManager(repoPath).list();
   const worktreeByPath = new Map(worktrees.map((worktree) => [worktree.path, worktree] as const));
   const candidates = sameWavePackets.flatMap((packet) => {
-    const lane = findLaneByPacket(packet.id);
+    const lane = findLatestLaneByPacket(packet.id);
     if (!lane?.worktreePath) {
       return [];
     }
@@ -219,11 +219,11 @@ async function withGateVerdict(
   // Preserve prior decoration if merge.ts already populated the fields.
   if (result.checks && result.blockers) return result;
 
-  const [{ findLaneByPacket }, { buildPreviewForLane }] = await Promise.all([
+  const [{ findLatestLaneByPacket }, { buildPreviewForLane }] = await Promise.all([
     loadLaneRegistry(),
     loadPreviewMerge(),
   ]);
-  const lane = findLaneByPacket(packetId);
+  const lane = findLatestLaneByPacket(packetId);
   if (!lane) return result;
 
   let preview: MergePreviewResult;
@@ -259,7 +259,7 @@ async function dispatchPacketMerge(
   actor: 'orchestrator' | 'user',
 ): Promise<MergePacketResult> {
   const [
-    { findLaneByPacket },
+    { findLatestLaneByPacket },
     { capturePostMergeCleanupTarget, postMergeCleanup },
     { dispatch: dispatchLaneCommand },
     { mapReviewSummary },
@@ -276,7 +276,7 @@ async function dispatchPacketMerge(
     return alreadyReleased;
   }
 
-  const lane = findLaneByPacket(packet.id);
+  const lane = findLatestLaneByPacket(packet.id);
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
   }
@@ -449,8 +449,8 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     };
   }
 
-  const { findLaneByPacket } = await loadLaneRegistry();
-  const lane = findLaneByPacket(packet.id);
+  const { findLatestLaneByPacket } = await loadLaneRegistry();
+  const lane = findLatestLaneByPacket(packet.id);
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
   }

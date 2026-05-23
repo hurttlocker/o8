@@ -12,7 +12,7 @@
  * "gate could not run".
  */
 
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
@@ -128,7 +128,7 @@ function hasApprovedOrchestratorReview(packetId: string): boolean {
 /**
  * Run the merge gate against a lane and return the structured preview shape.
  * Callers already holding a `Lane` reference should use this path — it
- * avoids the extra `findLaneByPacket` lookup.
+ * avoids the extra `findLatestLaneByPacket` lookup.
  */
 export function buildPreviewForLane(
   lane: Lane,
@@ -154,7 +154,7 @@ export function buildPreviewForLane(
  * deterministic "unwired" payload so callers can surface it cleanly.
  */
 export function previewPacketMerge(packetId: string): MergePreviewResult {
-  const lane = findLaneByPacket(packetId);
+  const lane = findLatestLaneByPacket(packetId);
   if (!lane) {
     return {
       packetId,
