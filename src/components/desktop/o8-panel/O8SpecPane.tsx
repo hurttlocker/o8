@@ -1,5 +1,4 @@
 'use client';
-/* eslint-disable react-hooks/set-state-in-effect -- repo changes intentionally reload editor state from o8.md */
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useTheme } from '@/lib/theme/context';
@@ -59,7 +58,15 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
   // Per-user note styling for the o8.md rail. customColor=null → brand orange;
   // else any CSS color string (a rainbow hue OR a neutral swatch incl. black).
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const [customColor, setCustomColor] = useState<string | null>(null);
+  const [customColor, setCustomColor] = useState<string | null>(() => {
+    try {
+      if (typeof window === 'undefined') return null;
+      const raw = window.localStorage.getItem('o8:spec:note-color');
+      return raw && raw !== '' ? raw : null;
+    } catch {
+      return null;
+    }
+  });
   const [reviewing, setReviewing] = useState(false);
   const debounceRef = useRef<number | null>(null);
   // Last content we know o8.md holds on disk. Lets a background poll adopt the
@@ -104,14 +111,6 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 5_000);
     return () => window.clearInterval(timer);
-  }, []);
-
-  // Load the saved note color once on mount.
-  useEffect(() => {
-    try {
-      const raw = window.localStorage.getItem('o8:spec:note-color');
-      if (raw != null && raw !== '') setCustomColor(raw);
-    } catch { /* ignore */ }
   }, []);
 
   const pickColor = useCallback((c: string) => {
