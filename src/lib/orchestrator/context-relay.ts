@@ -8,7 +8,6 @@ import type { AgentSummary } from '@/lib/fleet/types';
 import { extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import {
   buildMissingPacketSelfReview,
-  isPacketSelfReview,
   parsePacketSelfReview,
   stripPacketSelfReview,
 } from '@/lib/orchestrator/self-review';
@@ -221,20 +220,6 @@ function isReviewFinding(value: unknown): value is OrchestratorReviewFinding {
     && (candidate.severity === 'bug' || candidate.severity === 'rule_violation' || candidate.severity === 'note')
     && (candidate.resolution === 'fixed' || candidate.resolution === 'accepted' || candidate.resolution === 'deferred')
     && (candidate.fixSuggestion === undefined || typeof candidate.fixSuggestion === 'string');
-}
-
-function isPacketReviewContext(value: unknown): value is PacketReviewContext {
-  if (!value || typeof value !== 'object') {
-    return false;
-  }
-
-  const candidate = value as Record<string, unknown>;
-  return typeof candidate.approved === 'boolean'
-    && Array.isArray(candidate.findings)
-    && candidate.findings.every(isReviewFinding)
-    && typeof candidate.reviewedAt === 'string'
-    && (candidate.reviewer === undefined || typeof candidate.reviewer === 'string')
-    && (candidate.diffSha === undefined || typeof candidate.diffSha === 'string');
 }
 
 function toPacketReviewContext(review: {
