@@ -287,6 +287,10 @@ export function useSuggestedReplies({ enabled, messages, isStreaming }: UseSugge
     return chipsByMessage.get(lastAssistantId) ?? [];
   }, [chipsByMessage, dismissedMessages, enabled, lastAssistantId]);
 
+  const isDismissedForLastAssistant = useMemo(() => (
+    Boolean(enabled && lastAssistantId && dismissedMessages.has(lastAssistantId))
+  ), [dismissedMessages, enabled, lastAssistantId]);
+
   // Phase 4 — placeholder visible when a fetch is currently in-flight or has
   // just failed (within PLACEHOLDER_VISIBLE_MS). Used by the UI to render a
   // [•••] strip so the user knows chips were attempted instead of silently
@@ -309,10 +313,22 @@ export function useSuggestedReplies({ enabled, messages, isStreaming }: UseSugge
     });
   }, [lastAssistantId]);
 
+  const restoreChips = useCallback(() => {
+    if (!lastAssistantId) return;
+    setDismissedMessages((prev) => {
+      if (!prev.has(lastAssistantId)) return prev;
+      const next = new Set(prev);
+      next.delete(lastAssistantId);
+      return next;
+    });
+  }, [lastAssistantId]);
+
   return {
     lastAssistantId,
     chipsForLastAssistant,
+    isDismissedForLastAssistant,
     isPlaceholderVisibleForLastAssistant,
     dismissChips,
+    restoreChips,
   };
 }
