@@ -4454,8 +4454,19 @@ async function bootstrapWsServer() {
                   console.error(`[context-relay] Failed to capture completion context for packet ${packetId}:`, error);
                 }
               }
-              await enqueueAutoReview(updated.id);
-              await triggerHeadlessSprintTick(packetId ? [packetId] : undefined);
+              // #1110 — Both calls are "kick off a downstream job"; their HTTP
+              // round-trip is just an enqueue ack. When /api/orchestrator/headless-tick
+              // wedges (a stuck singleton tickPromise can hang for 15s+; auto-review
+              // is fast at ~4ms), awaiting them propagates a TimeoutError up to the
+              // outer catch and the supervisor callback aborts mid-flight — which
+              // silently breaks the auto-loop. Detach them: the enqueue still lands,
+              // and any slowness in the handler doesn't poison the supervisor.
+              void enqueueAutoReview(updated.id).catch((err) => {
+                console.warn(`[supervisor] enqueueAutoReview kicked off but errored (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+              });
+              void triggerHeadlessSprintTick(packetId ? [packetId] : undefined).catch((err) => {
+                console.warn(`[supervisor] triggerHeadlessSprintTick errored (non-fatal): ${err instanceof Error ? err.message : String(err)}`);
+              });
             }
             console.log(`[supervisor] Agent ${surfaceId} completed, lane ${lane.id} -> reviewing`);
             return;
