@@ -2,24 +2,6 @@
 
 Latest bounded learnings captured from failed retry attempts.
 
-## Packet pkt-76bbc50d-a4d1-456d-b90d-5a92bd9e2f71 attempt 2
-
-```json
-{
-  "packetId": "pkt-76bbc50d-a4d1-456d-b90d-5a92bd9e2f71",
-  "attempt": 2,
-  "timestamp": "2026-04-16T18:42:33.984Z",
-  "typecheckOutput": "Post-completion rule check failed. These are mechanical invariants — every violation is a user-visible bug waiting to ship.\n\nViolations (33) across 3 file(s):\n\n**src/app/dashboard/page.tsx**\n- L2161 [css-shorthand] Use longhand paddingTop / paddingLeft instead of padding: '12px 14px'. React 19 warns on mixed shorthand/longhand.\n- L2164 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L2209 [css-shorthand] Use longhand paddingTop / paddingLeft instead of padding: '0 14px'. React 19 warns on mixed shorthand/longhand.\n\n**src/components/desktop/NavRail.tsx**\n- L17 [icon-library] Import raw SVG path data from @phosphor-icons/react/dist/defs/ instead of @phosphor-icons/react. Neither lucide-react nor @phosphor-icons/react render correctly in the Tauri webview.\n- L18 [icon-library] Import raw SVG path data from @phosphor-icons/react/dist/defs/ instead of @phosphor-icons/react. Neither lucide-react nor @phosphor-icons/react render correctly in the Tauri webview.\n- L62 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L63 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L66 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L67 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L70 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L71 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L78 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L82 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L86 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L165 [css-shorthand] Use longhand paddingTop / paddingLeft instead of padding: '4px 0'. React 19 warns on mixed shorthand/longhand.\n- L244 [css-shorthand] Use longhand paddingTop / paddingLeft instead of padding: '4px 0'. React 19 warns on mixed shorthand/longhand.\n- L379 [css-shorthand] Use longhand marginTop / marginLeft instead of margin: '4px auto'. React 19 warns on mixed shorthand/longhand.\n- L382 [css-shorthand] Use longhand paddingTop / paddingLeft instead of padding: '2px 0'. React 19 warns on mixed shorthand/longhand.\n- L428 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L465 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L475 [rgba-white] Use var(--t-panel) / var(--t-bg-card) / var(--t-input-bg) instead of hardcoded rgba white values. Midnight theme turns these into gray blobs — see commit 929ffdf.\n- L516 [css-shorthand] Use longhand paddingTop / paddingLeft instead of padding: '12px 4px'. React 19 warns on mixed shorthand/longhand.\n\n**src/components/desktop/Onboarding.tsx*…",
-  "selfReviewSummary": "Agent completion did not include the required self-review block.",
-  "filesChanged": [
-    "src/app/dashboard/page.ts",
-    "src/components/desktop/NavRail.ts",
-    "src/components/desktop/Onboarding.ts"
-  ],
-  "summary": "Self-review: Agent completion did not include the required self-review block."
-}
-```
-
 ## Packet pkt-814c9cd5-8cb3-48fa-a193-3c5a7f69cf3c attempt 1
 
 ```json
@@ -53,5 +35,22 @@ Latest bounded learnings captured from failed retry attempts.
     "CLAUDE.md"
   ],
   "summary": "Self-review: Agent completion did not include the required self-review block."
+}
+```
+
+## Packet pkt-d397bec5-1b26-44a1-9875-77eda372828d attempt 1
+
+```json
+{
+  "packetId": "pkt-d397bec5-1b26-44a1-9875-77eda372828d",
+  "attempt": 1,
+  "timestamp": "2026-05-23T00:01:00.821Z",
+  "typecheckOutput": "Command failed: npx tsc --noEmit\n\nsrc/components/desktop/thoughts/ThoughtsChatPanel.tsx(1049,5): error TS2339: Property 'isDismissedForLastAssistant' does not exist on type '{ lastAssistantId: string | null; chipsForLastAssistant: string[]; isPlaceholderVisibleForLastAssistant: boolean; dismissChips: () => void; }'.\nsrc/components/desktop/thoughts/ThoughtsChatPanel.tsx(1052,5): error TS2339: Property 'restoreChips' does not exist on type '{ lastAssistantId: string | null; chipsForLastAssistant: string[]; isPlaceholderVisibleForLastAssistant: boolean; dismissChips: () => void; }'.\nsrc/components/desktop/thoughts/ThoughtsChatPanel.tsx(1695,11): error TS2322: Type '{ ref: RefObject<HTMLDivElement | null>; displayMessages: MobileTranscriptEntry[]; displayWaiting: boolean; repoPath: string | null; ... 16 more ...; onRestoreSuggestions: any; }' is not assignable to type 'IntrinsicAttributes & ChatMessageListProps & RefAttributes<HTMLDivElement>'.\n  Property 'suggestedRepliesCollapsed' does not exist on type 'IntrinsicAttributes & ChatMessageListProps & RefAttributes<HTMLDivElement>'. Did you mean 'suggestedRepliesPending'?\nsrc/components/desktop/workspace-terminal/OrchestratorTab.tsx(783,32): error TS2322: Type '{ visible: boolean; }' is not assignable to type 'IntrinsicAttributes'.\n  Property 'visible' does not exist on type 'IntrinsicAttributes'.",
+  "selfReviewSummary": "Agent completion did not include the required self-review block.",
+  "filesChanged": [
+    "src/components/desktop/thoughts/ThoughtsChatPanel.ts",
+    "src/components/desktop/workspace-terminal/OrchestratorTab.ts"
+  ],
+  "summary": "Self-review: Agent completion did not include the required self-review block. | Key errors: src/components/desktop/thoughts/ThoughtsChatPanel.tsx(1049,5): error TS2339: Property 'isDismissedForLastAssistant' does not exist on type '{ lastAssistantId: string | null; chipsForLastAssistant: string[]; isPlaceholderVisibleForLastAssis… | src/components/desktop/thoughts/ThoughtsChatPanel.tsx(1052,5): error TS2339: Property 'restoreChips' does not exist on type '{ lastAssistantId: string | null; chips…"
 }
 ```
