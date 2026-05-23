@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { WarningCircle } from '@phosphor-icons/react';
+import { WarningCircleIcon } from './status-bar-icons';
 
 export function SupervisorInboxBadge() {
   const [humanRequiredCount, setHumanRequiredCount] = useState(0);
@@ -56,10 +56,10 @@ export function SupervisorInboxBadge() {
   }, [refresh]);
 
   const active = humanRequiredCount > 0;
-  const background = active ? 'var(--t-warning-soft, rgba(249,115,22,0.11))' : 'var(--t-chrome-btn-bg)';
+  const background = active ? 'var(--t-warning-soft)' : 'var(--t-chrome-btn-bg)';
   const chromeShadow = 'var(--t-chrome-btn-shadow)';
-  const countBackground = active ? 'var(--t-warning, #f97316)' : 'transparent';
-  const countColor = active ? '#ffffff' : 'var(--t-text-muted)';
+  const countBackground = active ? 'var(--t-warning)' : 'transparent';
+  const countColor = active ? 'var(--t-warning-contrast)' : 'var(--t-text-muted)';
 
   const openInboxTab = () => {
     if (typeof window === 'undefined') return;
@@ -82,15 +82,15 @@ export function SupervisorInboxBadge() {
         paddingLeft: 8,
         paddingRight: 8,
         borderRadius: 8,
-        border: active ? `1px solid var(--t-warning-border, rgba(249,115,22,0.22))` : 'none',
+        border: active ? '1px solid var(--t-warning-border)' : 'none',
         boxShadow: active ? 'none' : chromeShadow,
         background,
-        color: active ? 'var(--t-warning, #c2410c)' : 'var(--t-chrome-btn-text, var(--t-text))',
+        color: active ? 'var(--t-warning)' : 'var(--t-chrome-btn-text, var(--t-text))',
         cursor: 'pointer',
         fontFamily: 'var(--font-sans-system)',
       }}
     >
-      <WarningCircle size={12} weight={active ? 'fill' : 'bold'} />
+      <WarningCircleIcon size={12} filled={active} />
       <span
         style={{
           minWidth: 14,
