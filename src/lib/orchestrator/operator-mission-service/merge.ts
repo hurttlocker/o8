@@ -304,6 +304,15 @@ async function dispatchPacketMerge(
   // directory. The helper is idempotent — if commands.ts already removed
   // the worktree, this call reports `already-removed` and exits quickly.
   if (result.ok) {
+    // #1110 follow-up — stamp mergedClean on the session_outcomes row so the
+    // routing recommender (#747) can score successful merges. Fire-and-forget:
+    // a ledger update failure must NEVER roll back a successful merge.
+    void import('@/lib/orchestrator/context-relay').then(({ markOutcomeMerged }) =>
+      markOutcomeMerged({ laneId: lane.id, packetId: packet.id }),
+    ).catch((err) => {
+      console.warn(`[session-outcome-merge] mergedClean backfill failed for packet ${packet.id}:`, err);
+    });
+
     const [{ removeMergedWorktree }, { appendDirectiveTrailer }] = await Promise.all([
       loadWorktreeCleanup(),
       loadDirectiveMerges(),
