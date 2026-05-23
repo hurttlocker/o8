@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { findLaneByPacket, getLane } from '@/lib/lane/registry';
+import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
 
 const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 32 * 1024 * 1024;
@@ -26,7 +26,7 @@ export async function GET(
   if (denied) return denied;
 
   const { id } = await params;
-  const lane = getLane(id) ?? findLaneByPacket(id);
+  const lane = getLane(id) ?? findLatestLaneByPacket(id);
   if (!lane) {
     return NextResponse.json({ ok: false, note: 'No lane found for that id/packet.' }, { status: 404 });
   }

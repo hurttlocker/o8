@@ -13,7 +13,7 @@
  *     a lane with a worktree)
  */
 import { NextResponse, type NextRequest } from 'next/server';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import { runMergeGate, type MergeGateResult } from '@/lib/lane/merge-gate';
 import {
   derivePacketReviewState,
@@ -94,7 +94,7 @@ export async function GET(request: NextRequest) {
       return errorResponse('packet_not_found', `Packet ${packetId} not found.`, 404);
     }
 
-    const lane = findLaneByPacket(packetId);
+    const lane = findLatestLaneByPacket(packetId);
 
     // Merge gate is computed on-demand from the lane's diff. If the lane is
     // gone (archived / never spawned) we can't run the gate — fall back to
