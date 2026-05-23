@@ -75,10 +75,12 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar }: Left
   return (
     <ColumnHeaderStrip
       drag
-      // Tighter than the default 36px strip — the macOS traffic lights are
-      // ~13px tall centered at y~16. With a 28px strip the toggle button
-      // (18px) centers at y~18, much closer to the lights' baseline.
-      height={28}
+      // Strip height 32 centers the 18px FlatIconButton at y=21 inside the
+      // card (5 paddingTop + (32-18)/2 + 9 = 21), which matches the
+      // Orchestrator pill text center in the workspace header strip.
+      // The operator's eventual plan is to use the same button across
+      // both panels, so keeping them visually aligned matters.
+      height={32}
       left={
         <>
           {/* Spacer for the macOS traffic lights (close / minimize / maximize).
