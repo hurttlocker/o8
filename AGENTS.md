@@ -59,7 +59,10 @@ o8 task archive <id>                   # prune/archive a stale task row
 o8 task prune <id>                     # permanently remove a done/archived task row
 
 o8 lane touches --path <file>          # other lanes touching the same file (or --packet <id>)
-o8 cortex observe --kind gotcha --text "..."   # write a fact to Cortex memory
+
+# Brain feedback — workers contribute observations the orchestrator promotes to directives.
+# See "Contributing to the brain" below; this is the only way a worker writes to memory.
+o8 cortex observe --kind <regression|pattern|gotcha|preference> --text "..." [--scope packet|repo|global]
 
 # o8.md review surface — the operator authors o8.md; you ANNOTATE it (never overwrite).
 o8 spec read     [--repo <path>]       # raw o8.md content
@@ -75,3 +78,18 @@ o8 spec suggest  --repo <path> --kind add|del|sub --anchor "<text>" [--text "<ad
 Output is JSON by default (pass `--human` for pretty ANSI). Errors come back as JSON with a stable schema + an exit code (1 invalid args, 2 connection refused, 3 unauthorized, 4 not found, 5 conflict). Calls are gated by the loopback + ws-token guard that protects the o8 API — they only work locally, no auth needed.
 
 If a command exits 127 (`command not found`), o8.app probably hasn't run yet on this machine, or the symlink was removed; fall back to typecheck + commit and the heal-bot will pick up signals from there.
+
+## Contributing to the brain (`o8 cortex observe`)
+
+When you notice something the operator should remember across dispatches, emit an observation. The o8 auto-directive proposer (#746) picks observations off the queue, surfaces them as a yellow "Proposed directive" row in the O8 Activity tab, and the operator's Accept click writes them as a real directive — which then lands in every future packet's `<context>` envelope. **This is how a worker contributes to the brain.** Each kind has a specific intent:
+
+- `--kind gotcha` — something that bit you that should bite no one again. *"Worktree dirty after `git worktree remove`; check `.git/worktrees/*` metadata before re-creating the lane."*
+- `--kind pattern` — a coding rule the operator should enforce. *"Tauri webview rejects `@phosphor-icons/react`; use raw SVG path data from `@phosphor-icons/react/dist/defs/` instead."*
+- `--kind regression` — a measurable degradation you found. *"`/api/panel/repos` jumped 8 → 60 ms after the projects-ledger migration."*
+- `--kind preference` — a stylistic / workflow choice the operator stated. *"This operator prefers `paddingTop/paddingLeft` longhand to `padding: '12px 14px'` shorthand (React 19 warns on the mix)."*
+
+`--scope packet` (default) means "this is specific to this packet's domain"; `--scope repo` is "all packets in this repo should remember this"; `--scope global` is "every dispatch across every repo should remember this." When in doubt, use `repo`.
+
+The CLI auto-detects your packet from the worktree path — no need to pass `--packet-id` from inside `.cortex-worktrees/packet-*`. If the orchestrator dispatched you to a non-packet path, pass `--packet-id` explicitly.
+
+**Use this whenever:** post-completion you'd write a "by the way" note to the operator. The proposer will surface it. The operator will Accept or Dismiss. Either way, the brain learns and the next agent doesn't have to rediscover what you found.
