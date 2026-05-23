@@ -159,6 +159,13 @@ The operator MCP server also exposes 7 tools for controlling the running o8 webv
 
 These wrap a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock` exposed by the Tauri `dev-mcp-plugin` feature. Signed/prod builds always include the socket. Dev builds need `cargo tauri dev --features dev-mcp-plugin`.
 
+**Known gotchas when driving the webview from another Claude session (#1105):**
+
+- **Eval-based tools time out but the action fires anyway.** `o8_view_type`, `o8_view_eval`, and `o8_view_snapshot` route through `eval_and_await` and can return `"eval_and_await failed: Timeout waiting for ..."` when the JS thread is briefly busy (hydration, route change, streaming response). The underlying side effect — the keystrokes, the `.click()`, the `setter.call(textarea, value)` — **already fired synchronously**. Don't retry on this error; take a screenshot to confirm whether the action happened.
+- **CSS pixels ≠ screenshot pixels.** `o8_view_screenshot` returns a bitmap (e.g. 1024×466), but `o8_view_click({x, y})` expects CSS pixels (e.g. 2032×925 on a Retina app). Coords from a screenshot land 50-117% off. **Pattern: find the element via `o8_view_eval` (`el.getBoundingClientRect()` returns CSS coords), THEN pass those coords to `o8_view_click`** — or click by `aria-label` via a `querySelector` eval rather than coordinates.
+- **Don't sort buttons by position to find the composer Send.** The right Workspace panel + open dialogs contain buttons at the same y. Use `aria-label="Send (Enter)"` explicitly.
+- **Screenshot panics no longer kill the sidecar** (since v0.1.155 / #1109) — but a panicked screenshot still returns an error. Fall back to a coords-only flow if `o8_view_screenshot` errors twice in a row.
+
 The previous standalone `tauri-mcp` node bridge has been retired — the operator MCP server now owns all webview control. Only the `o8` entry remains in `.mcp.json`.
 
 Both bundle via esbuild in `scripts/tauri-export.mjs` → `out/server/*.mjs`. The Tauri sidecar sets `O8_BUNDLED_MCP_PATH` + `O8_BUNDLED_MCP_DIR` so packaged installs launch with `node <bundled>.mjs` instead of dev `tsx` paths. Config generator at `/api/setup/mcp-config` emits the correct command per install mode.
