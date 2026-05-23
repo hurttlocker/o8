@@ -12,48 +12,38 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 interface ModeChipProps {
   selectedMode: OrchestrationMode;
   selectedSingleRuntime: OrchestratorRuntime;
   onSelectFleet: () => void;
+  /**
+   * Kept for backwards-compatible call sites + legacy single-mode tabs that
+   * already exist on disk. The picker UI no longer surfaces a single-runtime
+   * section (operator decision 2026-05-23 — only Fleet and Chat are exposed
+   * in the picker; existing single-mode tabs still render their label
+   * correctly via chipLabel fallback).
+   */
   onSpawnSingleTab?: (runtime: OrchestratorRuntime) => void;
   onSpawnChatTab?: () => void;
 }
-
-interface SingleRuntimeOption {
-  id: OrchestratorRuntime;
-  label: string;
-}
-
-const SINGLE_RUNTIMES: SingleRuntimeOption[] = [
-  { id: 'codex', label: 'Codex' },
-  { id: 'gemini', label: 'Gemini' },
-  { id: 'opencode', label: 'opencode' },
-];
 
 const FONT_FAMILY = 'var(--font-sans-system)';
 
 function chipLabel(mode: OrchestrationMode, runtime: OrchestratorRuntime): string {
   if (mode === 'fleet') return 'Fleet';
   if (mode === 'chat') return 'Chat';
-  return SINGLE_RUNTIMES.find((r) => r.id === runtime)?.label ?? runtime;
+  // Legacy single-mode label — capitalize the runtime id.
+  return runtime.charAt(0).toUpperCase() + runtime.slice(1);
 }
 
 export function ModeChip({
   selectedMode,
   selectedSingleRuntime,
   onSelectFleet,
-  onSpawnSingleTab,
   onSpawnChatTab,
 }: ModeChipProps) {
-  const opencodeEnabled = useExperimentalOpencodeFlag();
-  const visibleSingleRuntimes = opencodeEnabled
-    ? SINGLE_RUNTIMES
-    : SINGLE_RUNTIMES.filter((r) => r.id !== 'opencode');
-
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
@@ -99,12 +89,6 @@ export function ModeChip({
 
   const handlePickFleet = () => {
     onSelectFleet();
-    setOpen(false);
-  };
-
-  const handlePickSingle = (runtime: OrchestratorRuntime) => {
-    if (!onSpawnSingleTab) return;
-    onSpawnSingleTab(runtime);
     setOpen(false);
   };
 
@@ -197,23 +181,10 @@ export function ModeChip({
               <PopoverRow
                 active={selectedMode === 'fleet'}
                 title="Fleet orchestration"
-                detail="Stay on this tab · Claude routes Codex + Gemini in waves."
+                detail="Stay on this tab · Claude routes Codex in waves."
                 onClick={handlePickFleet}
                 glyph={<FleetGlyph />}
               />
-
-              <PopoverSectionLabel>Single runtime · spawns new tab</PopoverSectionLabel>
-              {visibleSingleRuntimes.map((runtime) => (
-                <PopoverRow
-                  key={runtime.id}
-                  active={selectedMode === 'single' && selectedSingleRuntime === runtime.id}
-                  title={runtime.label}
-                  detail="One agent · no orchestration."
-                  onClick={() => handlePickSingle(runtime.id)}
-                  glyph={<SingleGlyph />}
-                  disabled={!onSpawnSingleTab}
-                />
-              ))}
 
               <PopoverSectionLabel>Chat · spawns new tab</PopoverSectionLabel>
               <PopoverRow
@@ -338,15 +309,6 @@ function FleetGlyph() {
       <path d="M12 8v4" />
       <path d="m12 12-6 4" />
       <path d="m12 12 6 4" />
-    </svg>
-  );
-}
-
-function SingleGlyph() {
-  return (
-    <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <circle cx="12" cy="12" r="3" />
-      <circle cx="12" cy="12" r="9" />
     </svg>
   );
 }
