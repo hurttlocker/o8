@@ -358,6 +358,15 @@ export function serializeTabsForPersistence(currentTabs: TerminalTab[]) {
       orchestrationPacket: tab.orchestrationPacket ?? undefined,
       supervisorStatus: tab.supervisorStatus ?? undefined,
       autoArchiveOnIdle: tab.autoArchiveOnIdle ?? undefined,
+      // #F4 (2026-05-23 dogfood) — orchestrator-kind tabs need their sticky
+      // mode + per-mode fields persisted so a reload doesn't collapse them
+      // into Chat. The restore heuristic in terminal-restore.ts reads `mode`
+      // (with `kind`) to decide whether to rehydrate as orchestrator or
+      // llm-chat; missing `mode` was forcing the wrong branch.
+      mode: tab.mode,
+      singleRuntime: tab.singleRuntime,
+      chatModelId: tab.chatModelId,
+      chatOpenrouterModel: tab.chatOpenrouterModel,
       canvasTab: tab.canvasTab ? {
         id: tab.canvasTab.id,
         kind: tab.canvasTab.kind,
