@@ -2047,6 +2047,15 @@ fn ensure_cli_on_path(cli_source: &Path) {
                             // Stale symlink from a previous install — replace.
                             let _ = std::fs::remove_file(target);
                         }
+                        Ok(existing) if existing.to_string_lossy().contains("/server/bin/o8") => {
+                            // Stale dev-target symlink (e.g. a prior `cargo tauri dev`
+                            // left /usr/local/bin/o8 pointing at
+                            // <repo>/src-tauri/target/{debug,release}/server/bin/o8).
+                            // Those bundles go stale once the user runs the production
+                            // app — replace with the current bundled CLI. Phase 6 of
+                            // SHIP_5_PLAN.md (#1104 hardening).
+                            let _ = std::fs::remove_file(target);
+                        }
                         Ok(_) => {
                             // User-owned symlink to something else — leave alone.
                             return;
