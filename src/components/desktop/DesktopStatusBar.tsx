@@ -19,7 +19,7 @@ import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { FolderPlus, GearSix } from '@phosphor-icons/react';
 import { Smartphone } from './lucide-shims';
 import { ChromeButton } from './chrome/ChromeButton';
-import { MergeActionCluster, type MergePreviewVariant } from './MergeActionCluster';
+import { MergeActionCluster } from './MergeActionCluster';
 import { FooterPorts } from './desktop-status-bar/footer-ports';
 import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
 import { SettingsQuickDrawer } from './SettingsQuickDrawer';
@@ -96,32 +96,6 @@ function DesktopStatusBarBase({
       window.removeEventListener('scroll', syncSettingsAnchor, true);
     };
   }, [settingsDrawerOpen, syncSettingsAnchor]);
-
-  // Dev preview override for MergeActionCluster — operator cycles through
-  // the merge-pill states from main without needing a real PR. Initial
-  // state MUST be 'auto' to match SSR; we read localStorage AFTER mount
-  // in an effect to avoid a hydration mismatch that regenerates the
-  // entire React tree (which silently breaks unrelated surfaces like
-  // the left rail's chat list).
-  const PREVIEW_STORAGE_KEY = 'o8:merge-preview-variant';
-  const PREVIEW_CYCLE: MergePreviewVariant[] = ['auto', 'idle', 'open', 'view-pending', 'view-fail', 'merge-ready'];
-  const [mergePreview, setMergePreview] = useState<MergePreviewVariant>('auto');
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    const stored = window.localStorage.getItem(PREVIEW_STORAGE_KEY);
-    if (stored && PREVIEW_CYCLE.includes(stored as MergePreviewVariant)) {
-      setMergePreview(stored as MergePreviewVariant);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-  const cycleMergePreview = useCallback(() => {
-    setMergePreview((current) => {
-      const idx = PREVIEW_CYCLE.indexOf(current);
-      const next = PREVIEW_CYCLE[(idx + 1) % PREVIEW_CYCLE.length];
-      if (typeof window !== 'undefined') window.localStorage.setItem(PREVIEW_STORAGE_KEY, next);
-      return next;
-    });
-  }, []);
 
   // Three-column footer that mirrors the dashboard layout above. Left section
   // takes the AgentPanel's exact width, right section takes the right-panel's
@@ -213,7 +187,6 @@ function DesktopStatusBarBase({
           branchName={branchName}
           repoName={repoName}
           repoRemoteUrl={repoRemoteUrl}
-          previewVariant={mergePreview}
         />
         {onToggleBottomPanel ? (
           <StatusTerminalToggle
@@ -221,7 +194,6 @@ function DesktopStatusBarBase({
             onClick={onToggleBottomPanel}
           />
         ) : null}
-        <MergePreviewCycler variant={mergePreview} onCycle={cycleMergePreview} />
       </div>
 
       <div
@@ -243,60 +215,6 @@ function DesktopStatusBarBase({
 }
 
 export const DesktopStatusBar = memo(DesktopStatusBarBase);
-
-/** Dev cycler — small eye-style button that flips MergeActionCluster
- *  through its visual states from main, so the operator can fine-tune
- *  the pill look without standing up a real PR. Persists across reloads
- *  via localStorage. */
-function MergePreviewCycler({ variant, onCycle }: { variant: MergePreviewVariant; onCycle: () => void }) {
-  const [hovered, setHovered] = useState(false);
-  const isActive = variant !== 'auto';
-  const label: Record<MergePreviewVariant, string> = {
-    auto: 'live',
-    idle: 'idle',
-    open: 'open',
-    'view-pending': 'pending',
-    'view-fail': 'fail',
-    'merge-ready': 'ready',
-  };
-  return (
-    <button
-      type="button"
-      onClick={onCycle}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      aria-label={`Preview merge state — ${label[variant]}. Click to cycle.`}
-      title={`Merge preview: ${label[variant]} — click to cycle`}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 4,
-        height: 20,
-        paddingLeft: 6,
-        paddingRight: 6,
-        borderRadius: 6,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: isActive ? 'var(--t-accent-border, rgba(37, 99, 235, 0.3))' : 'transparent',
-        background: isActive
-          ? 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))'
-          : hovered
-            ? 'var(--t-hover)'
-            : 'transparent',
-        color: isActive ? 'var(--t-accent)' : 'var(--t-text-faint)',
-        cursor: 'pointer',
-        fontSize: 9.5,
-        fontWeight: 600,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
-        fontFamily: 'var(--font-sans-system)',
-        transition: 'background 120ms ease, color 120ms ease, border-color 120ms ease',
-      }}
-    >
-      {label[variant]}
-    </button>
-  );
-}
 
 /** Terminal toggle pill that lives alongside the branch label in the
  *  status bar's center column. Chrome-less by design — just the icon,

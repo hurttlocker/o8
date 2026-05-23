@@ -144,7 +144,7 @@ function ChatSurfaceBase({
         </div>
       ) : null}
 
-      <div ref={scrollRef} className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingTop: isEmpty ? 0 : 24, paddingRight: 24, paddingBottom: 24, paddingLeft: 24, position: 'relative' }}>
+      <div ref={scrollRef} className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingTop: isEmpty ? 0 : 24, paddingRight: 'var(--cortex-chat-gutter)', paddingBottom: 24, paddingLeft: 'var(--cortex-chat-gutter)', position: 'relative' }}>
         {/* Floating history toggle — shown only in the empty state, since
             the inline meta bar is hidden there. Gives users a discoverable
             way to browse past conversations without stacking chrome bars. */}
@@ -228,7 +228,7 @@ function ChatSurfaceBase({
           </div>
         ) : null}
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginLeft: 'auto', marginRight: 'auto' }}>
           {messages.map((message, index) => {
             const previousMessage = index > 0 ? messages[index - 1] : null;
             const showTimeSeparator = previousMessage ? message.timestamp - previousMessage.timestamp > 5 * 60 * 1000 : false;

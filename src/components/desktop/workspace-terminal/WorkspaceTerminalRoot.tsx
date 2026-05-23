@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/refs -- useWorkspaceTerminalController returns render state and stable refs through one controller object. */
 
-import { forwardRef, useEffect, useMemo, useRef } from 'react';
+import { forwardRef, useEffect, useId, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
 import { RotateCcw } from '../lucide-shims';
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
@@ -44,11 +44,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
 
     // Stable workspace instance id — declared early so the spawn /
     // close event listeners below can use it.
-    const workspaceIdRef = useRef<string>('');
-    if (!workspaceIdRef.current) {
-      workspaceIdRef.current = `ws-${Math.random().toString(36).slice(2, 10)}-${Date.now()}`;
-    }
-    const workspaceInstanceId = workspaceIdRef.current;
+    const workspaceInstanceId = useId();
 
     // Listen for header spawn / close-workspace requests. Events
     // include an optional workspaceId — when set, only the matching
@@ -95,6 +91,8 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // `…` / right-click menu actions when applicable.
     const activeTabId = controller.activeTab?.id ?? null;
     const activeTabKind = controller.activeTab?.kind ?? null;
+    const projectContextRailAvailable = activeTabKind === 'orchestrator' || activeTabKind === 'llm-chat';
+    const [projectContextRailVisible, setProjectContextRailVisible] = useState(true);
     const tabsForBroadcast = useMemo(() => (
       controller.visibleTabs.map((tab) => ({
         id: tab.id,
@@ -106,6 +104,20 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         packetStatus: tab.orchestrationPacket?.status ?? null,
       }))
     ), [controller.visibleTabs]);
+
+    useEffect(() => {
+      if (typeof window === 'undefined') return;
+      const onToggle = (event: Event) => {
+        const detail = (event as CustomEvent<{ workspaceId?: string | null }>).detail;
+        const eventWorkspaceId = detail?.workspaceId;
+        if (eventWorkspaceId && eventWorkspaceId !== workspaceInstanceId) return;
+        if (!eventWorkspaceId && props.canCloseTile === true) return;
+        setProjectContextRailVisible((value) => !value);
+      };
+      window.addEventListener('o8:request-toggle-context-rail', onToggle as EventListener);
+      return () => window.removeEventListener('o8:request-toggle-context-rail', onToggle as EventListener);
+    }, [props.canCloseTile, workspaceInstanceId]);
+
     useEffect(() => {
       if (typeof window === 'undefined') return;
       window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
@@ -115,6 +127,8 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           tabId: activeTabId,
           kind: activeTabKind,
           tabs: tabsForBroadcast,
+          contextRailAvailable: projectContextRailAvailable,
+          contextRailVisible: projectContextRailVisible,
         },
       }));
       return () => {
@@ -125,11 +139,13 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
             tabId: null,
             kind: null,
             tabs: [],
+            contextRailAvailable: false,
+            contextRailVisible: false,
             removed: true,
           },
         }));
       };
-    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsForBroadcast]);
+    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsForBroadcast, projectContextRailAvailable, projectContextRailVisible]);
 
     // Listen for chat-history rename so the workspace tab's label
     // refreshes in sync with the chat-history PATCH. The header strip
@@ -370,6 +386,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onConsumeChatDraftInjection={controller.handleConsumeChatDraftInjection}
           onSaveCheckpoint={controller.handleSaveCheckpoint}
           onRestoreLatestCheckpoint={controller.handleRestoreLatestCheckpoint}
+          projectContextRailVisible={projectContextRailVisible}
           sendTerminalAttach={props.sendTerminalAttach}
           sendTerminalInput={props.sendTerminalInput}
           sendTerminalResize={props.sendTerminalResize}
