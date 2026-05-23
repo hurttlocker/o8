@@ -124,6 +124,29 @@ export function useDirectiveProposals({
   }, [open, visible, retryNonce]);
 
   const handleAccept = useCallback((proposal: DirectiveProposalCandidate) => {
+    // #1108/Phase 3 — Accept now WRITES the directive file in-app so the
+    // proposer → directive loop closes without the operator hand-editing
+    // markdown in a terminal. The onAccept draft-into-composer fires too
+    // so the operator can still see + tweak the text (re-POSTing if they
+    // want a different version). Fire-and-forget — never block the UI.
+    const draft = proposal.draftDirective || '';
+    const firstLine = draft.split('\n').map((l) => l.trim()).find((l) => l.length > 0) ?? '';
+    const title = (firstLine.replace(/^[-*#>\s]+/, '').slice(0, 120) || 'Untitled directive');
+    const scope = proposal.source === 'cross-repo'
+      ? 'project'
+      : proposal.source === 'observation'
+        ? (proposal.scope === 'global' ? 'global' : proposal.scope === 'repo' ? 'repo' : 'project')
+        : 'project';
+    const priority = proposal.source === 'cross-repo' ? (proposal.directivePriority ?? 5) : 5;
+    const body = draft || (proposal.source === 'observation' ? proposal.text : title);
+    void fetch('/api/cortex/directives', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title, scope, priority, body }),
+    }).catch((err) => {
+      console.warn('[directive-accept] write failed:', err instanceof Error ? err.message : err);
+    });
+
     onAccept(proposal);
     // #855 — Cross-repo Accept stamps directive origin in the sidecar map
     // so the next 30-min tick won't propose D back to its source. Fire and
