@@ -367,6 +367,27 @@ export function findLaneByPacket(packetId: string): Lane | null {
   return mapLaneRow(row);
 }
 
+/**
+ * Like findLaneByPacket but does NOT filter by lane status. Returns the most-
+ * recently-created lane for the packet — including terminal lanes (archived,
+ * completed, failed). Governance READ paths (merge preview, merge dispatch,
+ * review state, packet diff) must use this so a botched merge that dropped the
+ * lane to a terminal state doesn't render the packet invisible to the
+ * orchestrator. See #1106.
+ *
+ * Supervisor / reaper / agent-report callers that DEPEND on the terminal-row
+ * skip continue to use findLaneByPacket — do not change those.
+ */
+export function findLatestLaneByPacket(packetId: string): Lane | null {
+  const row = getLaneDb()
+    .select()
+    .from(lanes)
+    .where(eq(lanes.packetId, packetId))
+    .orderBy(desc(lanes.createdAt))
+    .get();
+  return mapLaneRow(row);
+}
+
 export function findLaneByRepoAndBranch(repoPath: string, branch: string): Lane | null {
   const row = getLaneDb()
     .select()
