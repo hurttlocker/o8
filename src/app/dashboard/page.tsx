@@ -3299,6 +3299,11 @@ function DashboardInner() {
             flexDirection: 'column',
             overflow: 'hidden',
             position: 'relative',
+            // Dainty 1px divider on the right edge so the left panel reads
+            // as separate from the workspace without claiming layout width.
+            // box-shadow extends BEYOND the element box so the inner column
+            // keeps its full effectiveLeftWidth.
+            boxShadow: '1px 0 0 var(--t-divider-subtle)',
           }}
         >
           <LeftHeaderStrip
