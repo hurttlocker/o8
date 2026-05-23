@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-05-01T00:52:24.808Z",
+  "generatedAt": "2026-05-01T02:49:08.946Z",
   "rows": [
     {
       "caseId": "t1-q01",
@@ -9,81 +9,24 @@
       "referenceAnswer": "The override variable is CORTEX_IDE_DATA_DIR. Default path is ~/.cortex-ide.",
       "brain": {
         "text": "I don't have that information yet.",
-        "durationMs": 1777,
+        "durationMs": 34967,
         "meta": {
           "class": "A",
-          "retrievalMs": 217,
-          "classifyMs": 971,
+          "retrievalMs": 241,
+          "classifyMs": 9710,
           "citations": [],
           "citationCount": 0
         }
       },
       "grep": {
-        "text": "The data directory override environment variable for cortex-ide is `CORTEX_IDE_DATA_DIR` [CLAUDE.md:316]. The default path for this directory is `~/.cortex-ide` [CLAUDE.md:316].",
-        "durationMs": 1143,
-        "meta": {
-          "tokens": [
-            "data",
-            "directory",
-            "override",
-            "environment",
-            "variable",
-            "cortex-ide",
-            "default",
-            "path"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 316,
-              "matched": [
-                "data",
-                "override",
-                "default"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/DESIGN.md",
-              "line": 268,
-              "matched": [
-                "data",
-                "path"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/worktree-storage-path-decision.md",
-              "line": 31,
-              "matched": [
-                "data",
-                "path"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/cursor-parity-mar-apr-2026.md",
-              "line": 17,
-              "matched": [
-                "data",
-                "path"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/cortex-v2-dogfood-report-2026-04-09.md",
-              "line": 9,
-              "matched": [
-                "data",
-                "path"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 499,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "The environment variable to override the data directory for cortex-ide is `CORTEX_IDE_DATA_DIR`. The default path is `~/.cortex-ide/`. (Environment Variables)",
-        "durationMs": 737,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 104,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     },
     {
@@ -93,12 +36,12 @@
       "question": "What is the minimum touch target size enforced in the o8 design system, and what's the rationale?",
       "referenceAnswer": "44px minimum for all interactive elements, per Apple Human Interface Guidelines.",
       "brain": {
-        "text": "The o8 design system enforces a minimum touch target size of 44px [FACT-7c8cde9a-3fe9-44fa-8f25-714b91c8bbfc]. This is a requirement for all mobile tool call cards, which also need to support dark mode and have animated status dots [FACT-7c8cde9a-3fe9-44fa-8f25-714b91c8bbfc].",
-        "durationMs": 2802,
+        "text": "The minimum touch target size enforced in the o8 design system is **44px** [FACT-7c8cde9a-3fe9-44fa-8f25-714b91c8bbfc]. The rows do not provide an explicit rationale for this specific value — only that all mobile tool call cards are required to meet it alongside dark mode support and animated status dots [FACT-7c8cde9a-3fe9-44fa-8f25-714b91c8bbfc].",
+        "durationMs": 41333,
         "meta": {
           "class": "B",
-          "retrievalMs": 230,
-          "classifyMs": 1475,
+          "retrievalMs": 233,
+          "classifyMs": 28651,
           "citations": [
             {
               "kind": "fact",
@@ -110,71 +53,14 @@
         }
       },
       "grep": {
-        "text": "The o8 design system enforces a minimum touch target size of 44px for all interactive elements [DESIGN.md:172, DESIGN.md:399]. This guideline is based on the Apple Human Interface Guidelines (HIG) [DESIGN.md:172, DESIGN.md:399].",
-        "durationMs": 739,
-        "meta": {
-          "tokens": [
-            "minimum",
-            "touch",
-            "target",
-            "size",
-            "enforced",
-            "design",
-            "system"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 303,
-              "matched": [
-                "minimum",
-                "touch",
-                "target"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/prompts/codex-sprint-1-orchestrator-loop.md",
-              "line": 160,
-              "matched": [
-                "minimum",
-                "touch",
-                "target"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/DESIGN.md",
-              "line": 170,
-              "matched": [
-                "touch",
-                "target"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/DESIGN.md",
-              "line": 399,
-              "matched": [
-                "touch",
-                "target"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 58,
-              "matched": [
-                "touch",
-                "design"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 252,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "The o8 design system enforces a minimum touch target size of 44px for all interactive elements, aligning with Apple HIG guidelines. This ensures usability and accessibility. (DESIGN.md §03)",
-        "durationMs": 842,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 100,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     },
     {
@@ -184,12 +70,12 @@
       "question": "How is a new o8 release shipped from a developer's machine? What is the exact local command sequence?",
       "referenceAnswer": "npm version patch (bumps + tags via sync-version.mjs hook), then git push --follow-tags, then npm run ship (cargo tauri build with signing key + uploads via scripts/release.mjs to GitHub releases). Auto-update banner in installed app picks it up.",
       "brain": {
-        "text": "A new patch release is shipped using the command sequence: `npm version patch && npm run ship` [FACT-99b1911f-1972-4566-ba58-20aef5003d01]. The project utilizes a signed Tauri release pipeline for shipping releases [FACT-d3a965c6-3a65-482d-b878-5713e6d9c78b].",
-        "durationMs": 2044,
+        "text": "The exact local command sequence for shipping a new o8 patch release is `npm version patch && npm run ship` [FACT-99b1911f-1972-4566-ba58-20aef5003d01]. Under the hood, releases flow through a signed Tauri pipeline with full Apple Developer ID signing and notarization [FACT-a4ee60df-4ad4-4e5e-8951-1b0e32cca1d9], and the underlying build command that must succeed is `npm run tauri:build:signed` [FACT-b32591d1-ecce-40d0-90a2-ef29289a9997].",
+        "durationMs": 44974,
         "meta": {
           "class": "B",
-          "retrievalMs": 146,
-          "classifyMs": 937,
+          "retrievalMs": 166,
+          "classifyMs": 27205,
           "citations": [
             {
               "kind": "fact",
@@ -198,74 +84,27 @@
             },
             {
               "kind": "fact",
-              "rowId": "fact-d3a965c6-3a65-482d-b878-5713e6d9c78b",
+              "rowId": "fact-a4ee60df-4ad4-4e5e-8951-1b0e32cca1d9",
+              "table": "facts"
+            },
+            {
+              "kind": "fact",
+              "rowId": "fact-b32591d1-ecce-40d0-90a2-ef29289a9997",
               "table": "facts"
             }
           ],
-          "citationCount": 2
+          "citationCount": 3
         }
       },
       "grep": {
-        "text": "To ship a new o8 release from a developer's machine, the local command sequence is: `npm version patch`, `git push --follow-tags`, and `npm run ship` [CLAUDE.md:30,31,32,33]. This process bypasses CI and publishes to GitHub [CLAUDE.md:30]. The `npm version patch` command bumps the version and syncs manifests, while `npm run ship` builds and uploads the release [CLAUDE.md:31,33].",
-        "durationMs": 862,
-        "meta": {
-          "tokens": [
-            "new",
-            "release",
-            "shipped",
-            "local"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/codebase-memory-build.md",
-              "line": 60,
-              "matched": [
-                "new",
-                "release"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/conductor-changelog-synthesis-2026-03-27.md",
-              "line": 181,
-              "matched": [
-                "new",
-                "release"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/conductor-changelog-synthesis-2026-03-27.md",
-              "line": 186,
-              "matched": [
-                "new",
-                "shipped"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/cortex-autoresearch-setup.md",
-              "line": 699,
-              "matched": [
-                "new",
-                "shipped"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 30,
-              "matched": [
-                "release",
-                "local"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 141,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "A new o8 release is shipped locally using the following command sequence:\n\n1.  `npm version patch`\n2.  `git push --follow-tags`\n3.  `npm run ship`\n\nThis process bumps the version, syncs manifests, tags the commit, pushes to origin, builds a signed native app, and uploads it as a GitHub release. (CLAUDE.md - Shipping)",
-        "durationMs": 1074,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 70,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     },
     {
@@ -275,85 +114,31 @@
       "question": "Why was the OpenRouter Class A composer timeout in eval mode bumped from 10s to 25s? Be specific about the regression that prompted the change.",
       "referenceAnswer": "Ownership category accuracy crashed from 35% to 2% in eval mode because composer Class A's OpenRouter call timed out at 10s on the full 30-row payload (after the rows.slice(0,20)→(0,30) fix). p95 for multi-row prompts was past 10s. 25s gives headroom for worst case without hanging real failures too long. Same bump applied in the classifier.",
       "brain": {
-        "text": "The provided documents do not contain information about the OpenRouter Class A composer timeout being bumped from 10s to 25s or any specific regression that prompted such a change.",
-        "durationMs": 2429,
+        "text": "I don't have that information yet — try indexing more directives or PRs.\n\nNone of the provided rows mention OpenRouter, a Class A composer timeout change from 10s to 25s in eval mode, or any regression that prompted such a bump. The closest timeout-related rows are [FACT-0a5804f4] (a `postRestApi()` helper with a 10s timeout), [FACT-1b306f9b] (a boot probe polling up to 10s), and [ISS-4350328120] (a demo runner timeout mismatch), but none of these describe the OpenRouter eval-mode change you're asking about.",
+        "durationMs": 29670,
         "meta": {
           "class": "B",
-          "retrievalMs": 425,
-          "classifyMs": 1085,
-          "citations": [],
-          "citationCount": 0
+          "retrievalMs": 319,
+          "classifyMs": 11432,
+          "citations": [
+            {
+              "kind": "issue",
+              "rowId": "issue-4350328120",
+              "table": "github_issues"
+            }
+          ],
+          "citationCount": 1
         }
       },
       "grep": {
-        "text": "I don't have that information yet.",
-        "durationMs": 853,
-        "meta": {
-          "tokens": [
-            "openrouter",
-            "class",
-            "composer",
-            "timeout",
-            "eval",
-            "mode",
-            "bumped",
-            "10s",
-            "25s",
-            "regression",
-            "prompted"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/cortex-locomo-benchmark.md",
-              "line": 41,
-              "matched": [
-                "openrouter",
-                "class",
-                "eval"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/managed-agents-decision.md",
-              "line": 52,
-              "matched": [
-                "openrouter",
-                "mode"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/cortex-autoresearch-setup.md",
-              "line": 245,
-              "matched": [
-                "openrouter",
-                "mode"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/cortex-autoresearch/sessions/2026-03-23-main-smoke-session.md",
-              "line": 57,
-              "matched": [
-                "openrouter",
-                "mode"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/cortex-autoresearch/sessions/2026-03-23-main-smoke-session.md",
-              "line": 63,
-              "matched": [
-                "openrouter",
-                "mode"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 266,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "I don't have that information yet.",
-        "durationMs": 958,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 236,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     },
     {
@@ -363,86 +148,25 @@
       "question": "Which composer model is the eval-mode tier 0 primary, and what's the approximate per-run cost?",
       "referenceAnswer": "Anthropic Claude Sonnet 4.6 via OpenRouter (model id 'anthropic/claude-sonnet-4-6'). Approximately $0.026 per smoke run. Picked because false-negative cost on the ship gate exceeds the bill.",
       "brain": {
-        "text": "The eval-as-judge call costs approximately $0.60 per run [FACT-064ee103-f585-4799-ae8e-5dddd7fd0b47]. The provided rows do not specify which composer model is the eval-mode tier 0 primary.",
-        "durationMs": 1754,
+        "text": "I don't have that information yet.",
+        "durationMs": 39972,
         "meta": {
-          "class": "B",
-          "retrievalMs": 186,
-          "classifyMs": 845,
-          "citations": [
-            {
-              "kind": "fact",
-              "rowId": "fact-064ee103-f585-4799-ae8e-5dddd7fd0b47",
-              "table": "facts"
-            }
-          ],
-          "citationCount": 1
+          "class": "A",
+          "retrievalMs": 264,
+          "classifyMs": 26345,
+          "citations": [],
+          "citationCount": 0
         }
       },
       "grep": {
-        "text": "The provided documentation does not specify which composer model is the eval-mode tier 0 primary, nor does it mention the approximate per-run cost for any composer model. The documentation does mention \"Composer 2\" as a foundation model [docs/cursor-parity-mar-apr-2026.md:145], and that models generally get cheaper every quarter [docs/o8-product-brief.md:56].",
-        "durationMs": 775,
-        "meta": {
-          "tokens": [
-            "composer",
-            "model",
-            "eval-mode",
-            "tier",
-            "primary",
-            "per-run",
-            "cost"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/cursor-parity-mar-apr-2026.md",
-              "line": 128,
-              "matched": [
-                "composer",
-                "model"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/cursor-parity-mar-apr-2026.md",
-              "line": 145,
-              "matched": [
-                "composer",
-                "model"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 287,
-              "matched": [
-                "model",
-                "cost"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/monetization-issues.md",
-              "line": 183,
-              "matched": [
-                "model",
-                "cost"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/o8-product-brief.md",
-              "line": 56,
-              "matched": [
-                "model",
-                "cost"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 187,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "I don't have that information yet.",
-        "durationMs": 1179,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 97,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     },
     {
@@ -452,101 +176,31 @@
       "question": "Why is the Sonnet CLI timeout set to 300s in the composer Class B path?",
       "referenceAnswer": "Sonnet CLI bootstrap can take 60-90s, then multi-row synthesis adds another 30-60s on the 30-row composer payload. The prior 60s default killed the call before the model even started generating, forcing fall-through to paid OpenRouter even when the user has a free Claude Max subscription. 300s lets the free CLI tier actually deliver.",
       "brain": {
-        "text": "The Sonnet CLI timeout is not explicitly stated as 300s in the provided rows. However, Class B (reasoning + Sonnet streaming) has a latency budget targeting a 2.0s TTFT and 4s TTLT with a 6s ceiling [FACT-fd77caf3-b691-4879-83fe-3dd8d28e87c4]. Class B also uses Claude Sonnet streaming compose with a 1-3s total time [FACT-e627904b-52e7-4bbf-b672-dd0bad3c67c6]. The demo runner internal timeout was previously 30s [FACT-b47c443a-fa88-41c4-8ac6-d878be966168], and a previous gateway communication approach using openclaw CLI had a 30-second timeout [FACT-0b9b9685-5f52-4839-90fa-e39b9d5bdcef].",
-        "durationMs": 2643,
+        "text": "I don't have that information yet — try indexing more directives or PRs.\n\nThe available rows describe Class B's latency targets (2.0s TTFT / 4s TTLT / 6s ceiling) [FACT-fd77caf3] and confirm it uses Claude Sonnet streaming compose (1–3s total) [FACT-e627904b], but no row mentions a 300s timeout constant specifically set for the Sonnet CLI in the Class B composer path or explains the rationale behind it.\n\nThe only 5-minute (300s) figure in the indexed rows refers to **Vercel Workflows' step timeout** being architecturally mismatched for long-running agent packets [CMT-issue-513-4263362375] — not a Sonnet CLI setting in the composer.",
+        "durationMs": 34230,
         "meta": {
           "class": "B",
-          "retrievalMs": 249,
-          "classifyMs": 855,
+          "retrievalMs": 324,
+          "classifyMs": 10248,
           "citations": [
             {
-              "kind": "fact",
-              "rowId": "fact-fd77caf3-b691-4879-83fe-3dd8d28e87c4",
-              "table": "facts"
-            },
-            {
-              "kind": "fact",
-              "rowId": "fact-e627904b-52e7-4bbf-b672-dd0bad3c67c6",
-              "table": "facts"
-            },
-            {
-              "kind": "fact",
-              "rowId": "fact-b47c443a-fa88-41c4-8ac6-d878be966168",
-              "table": "facts"
-            },
-            {
-              "kind": "fact",
-              "rowId": "fact-0b9b9685-5f52-4839-90fa-e39b9d5bdcef",
-              "table": "facts"
+              "kind": "comment",
+              "rowId": "comment-issue-513-4263362375",
+              "table": "github_comments"
             }
           ],
-          "citationCount": 4
+          "citationCount": 1
         }
       },
       "grep": {
-        "text": "I don't have that information yet.",
-        "durationMs": 497,
-        "meta": {
-          "tokens": [
-            "sonnet",
-            "cli",
-            "timeout",
-            "300s",
-            "composer",
-            "class",
-            "path"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/cursor-parity-mar-apr-2026.md",
-              "line": 47,
-              "matched": [
-                "sonnet",
-                "composer"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 223,
-              "matched": [
-                "cli",
-                "composer"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/o8-product-brief.md",
-              "line": 39,
-              "matched": [
-                "cli",
-                "path"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/monetization-issues.md",
-              "line": 211,
-              "matched": [
-                "cli",
-                "class"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/how-o8-works.md",
-              "line": 90,
-              "matched": [
-                "cli",
-                "path"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 600,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "I don't have that information yet.",
-        "durationMs": 893,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 98,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     },
     {
@@ -556,97 +210,36 @@
       "question": "What does the daily compactor cron job do? What categories of work does it perform on the facts table?",
       "referenceAnswer": "The compactor performs four jobs: (1) GC orphans (facts whose source rows are gone), (2) dedupe near-duplicate facts, (3) time-decay scoring of older facts, (4) near-dup merge into canonical facts. Runs daily via cron, scheduled per #915.",
       "brain": {
-        "text": "The daily compactor cron job is responsible for transitioning dispatch rule entries from candidate status to either promoted or demoted [FACT-82cdeece-1409-4a94-9a6a-6fa3ff55229e]. This job represents the 'learned' part of the system and requires sufficient signal volume to validate its decisions [FACT-de57e7ae-e45d-420d-96f6-1de82cf9d917]. It is part of the Cursor Bugbot governance loop [FACT-18f8a2fa-f377-4fed-87aa-7fa06019b3a3].",
-        "durationMs": 2148,
+        "text": "The retrieved rows provide only partial information about the daily compactor cron job. The one concrete category visible in these rows is **contradiction detection**, referred to as \"Job 6,\" which involves a final LLM filter to determine whether two facts are contradictory [ISS-4361871707]. There is also a planned **weekly digest** feature (issue #970) to surface compactor insights to the founder, suggesting the compactor accumulates summarizable work but the founder currently can't see what it did [ISS-4361871804].\n\nI don't have that information yet — try indexing more directives or PRs. Specifically, the full job list (Jobs 1–5 and beyond) isn't covered by these rows; indexing the compactor source file or its design issue would fill in the remaining categories.",
+        "durationMs": 47003,
         "meta": {
           "class": "B",
-          "retrievalMs": 259,
-          "classifyMs": 747,
+          "retrievalMs": 482,
+          "classifyMs": 27337,
           "citations": [
             {
-              "kind": "fact",
-              "rowId": "fact-82cdeece-1409-4a94-9a6a-6fa3ff55229e",
-              "table": "facts"
+              "kind": "issue",
+              "rowId": "issue-4361871707",
+              "table": "github_issues"
             },
             {
-              "kind": "fact",
-              "rowId": "fact-de57e7ae-e45d-420d-96f6-1de82cf9d917",
-              "table": "facts"
-            },
-            {
-              "kind": "fact",
-              "rowId": "fact-18f8a2fa-f377-4fed-87aa-7fa06019b3a3",
-              "table": "facts"
+              "kind": "issue",
+              "rowId": "issue-4361871804",
+              "table": "github_issues"
             }
           ],
-          "citationCount": 3
+          "citationCount": 2
         }
       },
       "grep": {
-        "text": "The daily compactor cron job is an optional job that runs after a manual flow is proven [cortex-ide/docs/research/cortex-autoresearch-setup.md:784]. The provided hits do not specify what categories of work it performs on the facts table.",
-        "durationMs": 766,
-        "meta": {
-          "tokens": [
-            "daily",
-            "compactor",
-            "cron",
-            "job",
-            "categories",
-            "perform",
-            "facts",
-            "table"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/cortex-autoresearch-setup.md",
-              "line": 784,
-              "matched": [
-                "daily",
-                "cron"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/substrate-eval-gate.md",
-              "line": 32,
-              "matched": [
-                "job",
-                "table"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/superlocalmemory-audit.md",
-              "line": 401,
-              "matched": [
-                "categories",
-                "facts"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/performance-architecture-principles.md",
-              "line": 126,
-              "matched": [
-                "perform",
-                "table"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/cortex-memory-research-agenda-2026-03-24.md",
-              "line": 65,
-              "matched": [
-                "facts",
-                "table"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 261,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "I don't have that information yet.",
-        "durationMs": 991,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 262,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     },
     {
@@ -656,82 +249,25 @@
       "question": "What does the fs.watch on docs feature do, and which issue introduced it?",
       "referenceAnswer": "fs.watch on docs (CLAUDE.md, README.md, AGENTS.md, etc.) triggers incremental re-distillation when the founder edits these files, so the Brain stays in sync without a full re-index. Introduced in issue #964, shipped as PR #976.",
       "brain": {
-        "text": "The `fs.watch` on Codex JSONL files is used to push new lines via WebSocket for real-time agent output [FACT-a86cd271-8a11-4632-9f2d-6bf7d9cbcd31]. This feature was introduced as a fix direction in Issue #157 to address response delivery speed for Claude Code mobile [FACT-35dfe16c-96b5-4905-8b4f-90b72d47b8ef]. Issue #490 also mentions using `fs.watch()` on Codex JSONL files as an option for WebSocket push [FACT-a86cd271-8a11-4632-9f2d-6bf7d9cbcd31].",
-        "durationMs": 2130,
+        "text": "I don't have that information yet.",
+        "durationMs": 47857,
         "meta": {
-          "class": "B",
-          "retrievalMs": 185,
-          "classifyMs": 691,
-          "citations": [
-            {
-              "kind": "fact",
-              "rowId": "fact-a86cd271-8a11-4632-9f2d-6bf7d9cbcd31",
-              "table": "facts"
-            },
-            {
-              "kind": "fact",
-              "rowId": "fact-35dfe16c-96b5-4905-8b4f-90b72d47b8ef",
-              "table": "facts"
-            }
-          ],
-          "citationCount": 2
+          "class": "A",
+          "retrievalMs": 161,
+          "classifyMs": 32344,
+          "citations": [],
+          "citationCount": 0
         }
       },
       "grep": {
-        "text": "The \"fs.watch on docs\" feature appears to be related to a \"live watch mode\" or \"live run watch\" functionality [docs/v0-product-spec.md:78, docs/company-thesis.md:135, docs/system-architecture.md:65]. This feature allows for watching multiple agents and conducting work from a phone, addressing issues with siloed AI coding tools and degraded workflows [docs/o8-product-brief.md:9]. The provided grep hits do not specify which issue introduced this feature.",
-        "durationMs": 830,
-        "meta": {
-          "tokens": [
-            "watch",
-            "docs",
-            "issue"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 113,
-              "matched": [
-                "watch"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/v0-product-spec.md",
-              "line": 78,
-              "matched": [
-                "watch"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/company-thesis.md",
-              "line": 135,
-              "matched": [
-                "watch"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/o8-product-brief.md",
-              "line": 9,
-              "matched": [
-                "watch"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/system-architecture.md",
-              "line": 65,
-              "matched": [
-                "watch"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 110,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "I don't have that information yet.",
-        "durationMs": 756,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 506,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     },
     {
@@ -741,88 +277,25 @@
       "question": "What was the ownership-category regression that prompted the rows.slice(0,20) → rows.slice(0,30) fix in src/lib/cortex/qa/composer.ts?",
       "referenceAnswer": "Project rows from emitProjectRows landed at retrieval ranks 21-24 and got truncated by the slice(0,20). The retriever's unionMerge has MERGE_LIMIT=30, so the slice in the composer was tighter than the merge ceiling. Result: ownership accuracy stayed at 35% even after PR #949 paid the bill of adding project + project_repo retrieval. Matching the slice to MERGE_LIMIT=30 unlocked the project rows for the composer.",
       "brain": {
-        "text": "The provided rows do not contain information about an ownership-category regression that prompted a fix in `src/lib/cortex/qa/composer.ts`.",
-        "durationMs": 1899,
+        "text": "I don't have that information yet.",
+        "durationMs": 43257,
         "meta": {
-          "class": "B",
-          "retrievalMs": 354,
-          "classifyMs": 847,
+          "class": "A",
+          "retrievalMs": 305,
+          "classifyMs": 28108,
           "citations": [],
           "citationCount": 0
         }
       },
       "grep": {
-        "text": "I don't have that information yet.",
-        "durationMs": 986,
-        "meta": {
-          "tokens": [
-            "ownership-category",
-            "regression",
-            "prompted",
-            "rows",
-            "slice",
-            "fix",
-            "src",
-            "lib",
-            "cortex",
-            "composer"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/prompts/remove-openclaw.md",
-              "line": 169,
-              "matched": [
-                "fix",
-                "src",
-                "lib"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/AGENTS.md",
-              "line": 4,
-              "matched": [
-                "src",
-                "lib",
-                "cortex"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 42,
-              "matched": [
-                "src",
-                "lib",
-                "cortex"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/cortex-memory-integration.md",
-              "line": 237,
-              "matched": [
-                "src",
-                "lib",
-                "cortex"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/substrate-eval-gate.md",
-              "line": 83,
-              "matched": [
-                "src",
-                "lib",
-                "cortex"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 232,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "I don't have that information yet.",
-        "durationMs": 734,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 136,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     },
     {
@@ -832,84 +305,25 @@
       "question": "What is the source_authority value the composer assigns to a merged PR versus an open PR, and which row type has the highest authority?",
       "referenceAnswer": "Merged PRs are 0.95, open PRs are 0.8. Directives are the highest at 1.0. Outcomes are 0.9. Closed issues are 0.85, open issues are 0.75. Comment opinions are 0.7. Fact rows pre-v18 backfill default to 0.5.",
       "brain": {
-        "text": "The provided rows do not contain information about the `source_authority` value for merged versus open PRs, nor do they indicate which row type has the highest authority.",
-        "durationMs": 1742,
+        "text": "I don't have that information yet.",
+        "durationMs": 47349,
         "meta": {
           "class": "A",
-          "retrievalMs": 277,
-          "classifyMs": 729,
+          "retrievalMs": 263,
+          "classifyMs": 27410,
           "citations": [],
           "citationCount": 0
         }
       },
       "grep": {
-        "text": "I don't have that information yet.",
-        "durationMs": 569,
-        "meta": {
-          "tokens": [
-            "source_authority",
-            "composer",
-            "assigns",
-            "merged",
-            "versus",
-            "open",
-            "row",
-            "type",
-            "highest",
-            "authority"
-          ],
-          "hitCount": 5,
-          "hits": [
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/research/page-agent-audit.md",
-              "line": 372,
-              "matched": [
-                "open",
-                "row",
-                "type"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/docs/how-o8-works.md",
-              "line": 7,
-              "matched": [
-                "assigns",
-                "open"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/README.md",
-              "line": 24,
-              "matched": [
-                "open",
-                "row"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 210,
-              "matched": [
-                "open",
-                "row"
-              ]
-            },
-            {
-              "file": "/Users/marquisehurtt/cortex-ide/CLAUDE.md",
-              "line": 224,
-              "matched": [
-                "open",
-                "row"
-              ]
-            }
-          ]
-        }
+        "text": "",
+        "durationMs": 220,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       },
       "longCtx": {
-        "text": "I don't have that information yet.",
-        "durationMs": 626,
-        "meta": {
-          "docCharLen": 56997
-        }
+        "text": "",
+        "durationMs": 135,
+        "error": "[qa][openrouter] HTTP 402: {\"error\":{\"message\":\"Insufficient credits. Add more using https://openrouter.ai/settings/credits\",\"code\":402}}"
       }
     }
   ]
