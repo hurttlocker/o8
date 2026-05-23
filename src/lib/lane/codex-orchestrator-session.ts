@@ -44,8 +44,8 @@ export interface SendToCodexOrchestratorOptions {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';
-/** Mirror of orchestrator-session.ts PROCESS_TIMEOUT_MS (8 min). */
-const PROCESS_TIMEOUT_MS = 480_000;
+/** Mirror of orchestrator-session.ts PROCESS_TIMEOUT_MS (30 min). */
+const PROCESS_TIMEOUT_MS = 1_800_000;
 const USER_CODEX_HOME = join(homedir(), '.codex');
 const USER_CODEX_CONFIG_PATH = join(USER_CODEX_HOME, 'config.toml');
 const CODEX_ORCHESTRATOR_HOME_DIR = join(
@@ -387,6 +387,13 @@ export async function sendToCodexOrchestrator(
 
     const processTimeout = setTimeout(() => {
       console.warn(`[codex-orchestrator-session] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
+      // Surface the kill to the chat — mirrors orchestrator-session.ts so the
+      // user sees a small terminating note instead of a silent freeze.
+      const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
+      onEvent({
+        type: 'error',
+        error: `Orchestrator hit the ${minutes}-minute turn limit and was terminated. Re-send your message to continue — or break the task into a tighter brief so it fits.`,
+      });
       proc.kill('SIGTERM');
       setTimeout(() => {
         if (!proc.killed) proc.kill('SIGKILL');
