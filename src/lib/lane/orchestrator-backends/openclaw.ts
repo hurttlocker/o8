@@ -64,8 +64,8 @@ interface OpenclawAgentResult extends OpenclawPayloadBlock {
 
 /** Dedicated openclaw profile — isolates state/config under ~/.openclaw-o8. */
 const OPENCLAW_PROFILE = 'o8';
-/** Mirror of the other orchestrator backends' 8-minute process budget. */
-const PROCESS_TIMEOUT_MS = 480_000;
+/** Mirror of the other orchestrator backends' 30-minute process budget. */
+const PROCESS_TIMEOUT_MS = 1_800_000;
 
 const OPENCLAW_SOURCE_HOME = join(homedir(), '.openclaw');
 const OPENCLAW_SOURCE_CONFIG = join(OPENCLAW_SOURCE_HOME, 'openclaw.json');
@@ -626,6 +626,13 @@ async function sendToOpenclawOrchestrator(
 
     const processTimeout = setTimeout(() => {
       console.warn(`[openclaw-orchestrator] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
+      // Surface the kill to the chat — mirrors orchestrator-session.ts so the
+      // user sees a small terminating note instead of a silent freeze.
+      const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
+      onEvent({
+        type: 'error',
+        error: `Orchestrator hit the ${minutes}-minute turn limit and was terminated. Re-send your message to continue — or break the task into a tighter brief so it fits.`,
+      });
       proc.kill('SIGTERM');
       setTimeout(() => {
         if (!proc.killed) proc.kill('SIGKILL');
