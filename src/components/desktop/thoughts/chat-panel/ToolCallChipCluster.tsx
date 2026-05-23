@@ -128,7 +128,6 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
     <div
       ref={rootRef}
       style={{
-        position: 'relative',
         display: 'flex',
         alignItems: 'flex-start',
         flexWrap: 'wrap',
@@ -136,7 +135,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
         maxWidth: '92%',
         paddingTop: 2,
         paddingRight: 0,
-        paddingBottom: selectedTool ? 10 : 2,
+        paddingBottom: selectedTool ? 4 : 2,
         paddingLeft: 0,
       }}
     >
@@ -160,16 +159,14 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
           role="dialog"
           aria-label={`${selectedTool.name} tool call detail`}
           style={{
-            position: 'absolute',
-            top: 'calc(100% + 4px)',
-            left: 0,
-            zIndex: 40,
-            width: 'min(460px, calc(100vw - 48px))',
+            flexBasis: '100%',
+            marginTop: 7,
+            width: 'min(560px, 100%)',
             maxHeight: 320,
             overflowY: 'auto',
             display: 'flex',
             flexDirection: 'column',
-            gap: 10,
+            gap: 12,
             paddingTop: 12,
             paddingRight: 12,
             paddingBottom: 12,
@@ -177,9 +174,9 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-divider-subtle)',
-            borderRadius: 12,
-            background: 'var(--t-bg-card)',
-            boxShadow: 'var(--t-panel-shadow)',
+            borderRadius: 18,
+            background: 'color-mix(in srgb, var(--t-bg-card) 92%, transparent)',
+            boxShadow: '0 18px 45px rgba(15, 23, 42, 0.08)',
             color: 'var(--t-text)',
             fontFamily: 'var(--font-sans-system)',
           }}
@@ -193,7 +190,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
             <div style={{ minWidth: 0 }}>
               <div style={{
                 fontSize: 10,
-                fontWeight: 700,
+                fontWeight: 640,
                 color: 'var(--t-text-muted)',
                 letterSpacing: '0.06em',
                 textTransform: 'uppercase',
@@ -203,11 +200,12 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
               <div style={{
                 marginTop: 3,
                 fontSize: 13,
-                fontWeight: 700,
+                fontWeight: 620,
                 color: 'var(--t-text)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
                 whiteSpace: 'nowrap',
+                fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)',
               }}>
                 {selectedTool.name}
               </div>
@@ -222,10 +220,10 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
                 borderStyle: 'solid',
                 borderColor: 'var(--t-divider-subtle)',
                 borderRadius: 999,
-                background: 'var(--t-panel)',
+                background: 'var(--t-bg-card)',
                 color: 'var(--t-text-secondary)',
                 fontSize: 11,
-                fontWeight: 700,
+                fontWeight: 600,
                 paddingTop: 4,
                 paddingRight: 8,
                 paddingBottom: 4,

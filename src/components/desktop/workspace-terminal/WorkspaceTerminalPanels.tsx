@@ -39,6 +39,7 @@ interface WorkspaceTerminalPanelsProps {
   onConsumeChatDraftInjection: (tabId: string, injectionId: string) => void;
   onSaveCheckpoint: (tabId: string) => void;
   onRestoreLatestCheckpoint: (tabId: string) => void;
+  projectContextRailVisible: boolean;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
@@ -67,6 +68,7 @@ function WorkspaceTerminalPanelsBase({
   onConsumeChatDraftInjection,
   onSaveCheckpoint,
   onRestoreLatestCheckpoint,
+  projectContextRailVisible,
   sendTerminalAttach,
   sendTerminalInput,
   sendTerminalResize,
@@ -90,6 +92,7 @@ function WorkspaceTerminalPanelsBase({
               initialSingleRuntime={tab.singleRuntime}
               initialChatModelId={tab.chatModelId}
               initialThreadId={tab.id.startsWith('thoughts-') ? tab.id : undefined}
+              projectContextRailVisible={projectContextRailVisible}
               onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
             />
           </Suspense>
@@ -105,6 +108,7 @@ function WorkspaceTerminalPanelsBase({
               initialChatModelId={tab.chatModelId}
               initialChatOpenrouterModel={tab.chatOpenrouterModel}
               initialThreadId={tab.id}
+              projectContextRailVisible={projectContextRailVisible}
               onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
             />
           </Suspense>

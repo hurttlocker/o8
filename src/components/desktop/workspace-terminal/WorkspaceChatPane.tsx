@@ -221,8 +221,8 @@ function WorkspaceChatPaneBase({
           overflowY: 'auto',
           paddingTop: chat.llmMessages.length === 0 && !chat.agentRunning ? 0 : 24,
           paddingBottom: 24,
-          paddingLeft: 24,
-          paddingRight: 24,
+          paddingLeft: 'var(--cortex-chat-gutter)',
+          paddingRight: 'var(--cortex-chat-gutter)',
           background: 'transparent',
         }}
       >
@@ -380,7 +380,7 @@ function WorkspaceChatPaneBase({
           )
         ) : (
           <Suspense fallback={null}>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: 720, marginLeft: 'auto', marginRight: 'auto' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginLeft: 'auto', marginRight: 'auto' }}>
               {chat.visibleMessages.map((message, index) => {
                 // For dispatched packets: replace the FIRST user bubble (the
                 // giant packet prompt) with a collapsible PacketHeaderCard so

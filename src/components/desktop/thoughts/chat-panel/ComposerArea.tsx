@@ -1,6 +1,6 @@
 'use client';
 
-import { forwardRef, useEffect, useId, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { PendingSteerCard, type PendingSteer } from './PendingSteerCard';
@@ -86,83 +86,44 @@ function ComposerStatusBar({
 
   return (
     <div
+      role="status"
+      aria-live="polite"
+      aria-label={`${activeTargetLabel} running for ${formatElapsed(elapsed)}`}
+      title={runningSummary ? `Running ${runningSummary}` : undefined}
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 10,
-        paddingTop: 8,
-        paddingRight: 12,
-        paddingBottom: 8,
-        paddingLeft: 12,
-        marginBottom: 8,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'rgba(37, 99, 235, 0.22)',
-        borderRadius: 12,
-        background: 'linear-gradient(180deg, rgba(37, 99, 235, 0.07), rgba(37, 99, 235, 0.03))',
-        boxShadow: '0 8px 22px rgba(37, 99, 235, 0.08)',
+        gap: 6,
+        height: 18,
+        paddingTop: 0,
+        paddingRight: 4,
+        paddingBottom: 7,
+        paddingLeft: 4,
+        color: 'var(--t-text-muted)',
       }}
     >
       <svg
-        width="14"
-        height="14"
+        width="10"
+        height="10"
         viewBox="0 0 24 24"
         fill="none"
-        stroke="#2563eb"
-        strokeWidth="3"
+        stroke="currentColor"
+        strokeWidth="3.2"
         strokeLinecap="round"
         style={{ animation: 'spin 0.9s linear infinite', flexShrink: 0 }}
         aria-hidden="true"
       >
         <path d="M21 12a9 9 0 1 1-6.22-8.56" />
       </svg>
-      <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-        <div style={{
-          display: 'flex',
-          alignItems: 'baseline',
-          gap: 8,
-          fontSize: 12,
-          fontWeight: 700,
-          color: 'var(--t-text)',
-          letterSpacing: '-0.01em',
-        }}>
-          <span>{activeTargetLabel} is working</span>
-          <span style={{
-            fontSize: 10.5,
-            fontWeight: 600,
-            color: '#2563eb',
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-            letterSpacing: '0',
-          }}>
-            {formatElapsed(elapsed)}
-          </span>
-        </div>
-        {runningSummary ? (
-          <div style={{
-            fontSize: 10.5,
-            color: 'var(--t-text-muted)',
-            fontFamily: '"SF Mono", ui-monospace, monospace',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}>
-            running: {runningSummary}
-          </div>
-        ) : null}
-      </div>
-      {[0, 1, 2].map((index) => (
-        <div
-          key={index}
-          style={{
-            width: 5,
-            height: 5,
-            borderRadius: '50%',
-            background: '#2563eb',
-            opacity: 0.8,
-            animation: `llmDot 1.2s ease-in-out ${index * 0.18}s infinite`,
-          }}
-        />
-      ))}
+      <span style={{
+        fontSize: 11,
+        fontWeight: 500,
+        fontFamily: '"SF Mono", ui-monospace, monospace',
+        letterSpacing: '0',
+        color: 'var(--t-text-secondary)',
+      }}>
+        {formatElapsed(elapsed)}
+      </span>
     </div>
   );
 }
@@ -270,7 +231,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
 }, inputRef) {
   const [activeSlashIndex, setActiveSlashIndex] = useState(0);
   const [dismissedSlashInput, setDismissedSlashInput] = useState<string | null>(null);
-  const workingLockHintId = useId();
   const runningTools = useMemo<MobileTranscriptToolCall[]>(() => {
     if (!isOrchestratorMode) return [];
     // Scan the latest assistant message for any tool calls still marked as
@@ -307,23 +267,15 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   }, [dismissedSlashInput, input, isOrchestratorMode]);
   const acceptsDirectInput = isOrchestratorMode || isChatMode || isSingleMode;
   // Textarea stays typeable while the agent is busy so the user can compose a
-  // steer (⌘⏎). Plain Enter is still blocked via the isWorkingLocked guard in
-  // onKeyDown — only the no-target case disables the textarea outright.
+  // steer. Enter queues through the parent's steer path; only the no-target
+  // case disables the textarea outright.
   // The Send button itself still flips to Stop via `working` on InputButtons.
   const isDisabled = !acceptsDirectInput && !targetAgentExists;
   const showReasoningControls = (isOrchestratorMode || isSingleMode) && !isChatMode;
   const isWorkingLocked = acceptsDirectInput && (displayWaiting || runningTools.length > 0);
-  const workingTargetLabel = activeTargetLabel.trim() || 'The agent';
-  const canStopWorkingTurn = isOrchestratorMode && displayWaiting && Boolean(onStop);
-  const workingLockReason = runningTools.length > 0
-    ? `${workingTargetLabel} is running tools.`
-    : `${workingTargetLabel} is finishing the current turn.`;
-  const workingLockAction = canStopWorkingTurn
-    ? 'Use Stop to interrupt, or wait for the next turn.'
-    : 'Wait for the next turn before typing.';
   let composerPlaceholder = `Message ${activeTargetLabel}…`;
   if (isWorkingLocked) {
-    composerPlaceholder = 'Composer unlocks when this turn finishes';
+    composerPlaceholder = 'Queue for next turn';
   } else if (isOrchestratorMode) {
     composerPlaceholder = 'Ask anything · / for commands';
   } else if (displayWaiting) {
@@ -580,66 +532,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             />
           ) : null}
 
-          {isWorkingLocked ? (
-            <div
-              id={workingLockHintId}
-              role="status"
-              aria-live="polite"
-              style={{
-                display: 'flex',
-                alignItems: 'flex-start',
-                gap: 8,
-                marginTop: attachedImages.length > 0 || attachedFiles.length > 0 ? 6 : 10,
-                marginRight: 12,
-                marginBottom: 0,
-                marginLeft: 12,
-                paddingTop: 7,
-                paddingRight: 10,
-                paddingBottom: 7,
-                paddingLeft: 10,
-                borderRadius: 10,
-                border: '1px solid rgba(249, 115, 22, 0.2)',
-                background: 'rgba(249, 115, 22, 0.08)',
-                color: 'var(--t-text-muted)',
-                fontSize: 11,
-                lineHeight: 1.35,
-              }}
-            >
-              <span
-                aria-hidden="true"
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  width: 18,
-                  height: 18,
-                  borderRadius: 999,
-                  background: 'rgba(249, 115, 22, 0.13)',
-                  color: '#f97316',
-                  flexShrink: 0,
-                }}
-              >
-                <svg
-                  width="11"
-                  height="11"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2.6"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <rect x="5" y="11" width="14" height="10" rx="2" />
-                  <path d="M8 11V8a4 4 0 0 1 8 0v3" />
-                </svg>
-              </span>
-              <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>
-                <span style={{ color: 'var(--t-text)', fontWeight: 700 }}>Composer locked.</span>{' '}
-                {workingLockReason} {workingLockAction}
-              </span>
-            </div>
-          ) : null}
-
           <textarea
             ref={inputRef}
             value={input}
@@ -674,10 +566,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                 if (lastUserMsg) updateInput(lastUserMsg.text);
                 return;
               }
-              // ⌘⏎ / Ctrl+Enter — steer. Routes around the busy-Enter lockout and
-              // through the parent's enqueue path. Fires before the slash-suggestions
-              // and plain-Enter handlers so it works even when the textarea is
-              // disabled (which it is while displayWaiting).
+              // ⌘⏎ / Ctrl+Enter — steer. Routes through the parent's enqueue path.
               if (event.key === 'Enter' && (event.metaKey || event.ctrlKey)) {
                 event.preventDefault();
                 if (!input.trim() || !onSteer) return;
@@ -689,11 +578,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }
               if (event.key === 'Enter' && !event.shiftKey) {
                 event.preventDefault();
-                // Plain Enter is locked while the agent is busy. User options
-                // are: Stop (the bottom Send-toggled-to-Stop button) or Steer
-                // (⌘⏎, handled above). Matches operator's "either stop or
-                // steer" call ([[borrow_conductor_steer_queue]]).
-                if (isWorkingLocked) return;
+                if (isWorkingLocked) {
+                  if (!input.trim() || !onSteer) return;
+                  onSteer();
+                  if (event.currentTarget) {
+                    event.currentTarget.style.height = 'auto';
+                  }
+                  return;
+                }
                 if (slashSuggestions.length > 0 && activeSlashCommand) {
                   const normalized = input.trim();
                   const [commandToken] = normalized.split(/\s+/, 1);
@@ -726,7 +618,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
               }
             }}
             onPaste={handleTextareaPaste}
-            aria-describedby={isWorkingLocked ? workingLockHintId : undefined}
             placeholder={composerPlaceholder}
             disabled={isDisabled}
             rows={2}

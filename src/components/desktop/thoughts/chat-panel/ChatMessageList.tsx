@@ -30,6 +30,8 @@ interface ChatMessageListProps {
   suggestedReplies?: string[];
   onSelectSuggestion?: (chip: string) => void;
   onDismissSuggestions?: () => void;
+  suggestedRepliesCollapsed?: boolean;
+  onRestoreSuggestions?: () => void;
   // Phase 4 — when true, render a [•••] placeholder under the last assistant
   // message even if `suggestedReplies` is empty. Indicates a fetch is in
   // flight or just failed, so the user knows chips were attempted.
@@ -54,6 +56,8 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   suggestedReplies,
   onSelectSuggestion,
   onDismissSuggestions,
+  suggestedRepliesCollapsed = false,
+  onRestoreSuggestions,
   suggestedRepliesPending = false,
 }, chatEndRef) {
   // Phase 4 — chips strip renders when EITHER chips arrived OR a fetch is in
@@ -65,6 +69,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
     && (
       (suggestedReplies && suggestedReplies.length > 0)
       || suggestedRepliesPending
+      || (suggestedRepliesCollapsed && onRestoreSuggestions)
     )
     && onSelectSuggestion
     && onDismissSuggestions,
@@ -88,97 +93,112 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
     <div className="thoughts-scroll cortex-scroll-fade-y cortex-themed-scroll" style={{
       flex: 1,
       overflowY: 'auto',
-      padding: '14px 16px 12px',
+      paddingTop: 14,
+      paddingRight: 'var(--cortex-chat-gutter)',
+      paddingBottom: 12,
+      paddingLeft: 'var(--cortex-chat-gutter)',
       display: 'flex',
       flexDirection: 'column',
-      gap: 18,
       background: thoughtsBodyBackground,
       minHeight: 0,
     }}>
-      {showEmptyWithOverride ? (
-        <div style={{
-          display: 'flex',
-          flex: 1,
-          minHeight: 0,
-        }}>
-          {emptyStateOverride}
-        </div>
-      ) : null}
-      {showEmptyWithFallback ? emptyStateFallback : null}
+      <div style={{
+        width: '100%',
+        maxWidth: 'var(--cortex-chat-column-max)',
+        minHeight: '100%',
+        marginRight: 'auto',
+        marginLeft: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 18,
+      }}>
+        {showEmptyWithOverride ? (
+          <div style={{
+            display: 'flex',
+            flex: 1,
+            minHeight: 0,
+          }}>
+            {emptyStateOverride}
+          </div>
+        ) : null}
+        {showEmptyWithFallback ? emptyStateFallback : null}
 
-      {topContent}
+        {topContent}
 
-      {displayMessages.map((msg, index) => {
-        const isLatestAssistant = index === lastAssistantIndex;
-        const showChipsHere = isLatestAssistant
-          && hasSuggestedReplies
-          && msg.id === suggestedReplyMessageId
-          && onSelectSuggestion
-          && onDismissSuggestions;
-        return (
-          <Fragment key={msg.id}>
-            <DesktopAgentMessage
-              entry={msg}
-              isLast={index === displayMessages.length - 1 && !displayWaiting}
-              repoPath={repoPath}
-            />
-            {showChipsHere ? (
-              <SuggestedReplies
-                chips={suggestedReplies ?? []}
-                disabled={displayWaiting}
-                onSelect={onSelectSuggestion}
-                onDismiss={onDismissSuggestions}
-                isPlaceholder={suggestedRepliesPending}
+        {displayMessages.map((msg, index) => {
+          const isLatestAssistant = index === lastAssistantIndex;
+          const showChipsHere = isLatestAssistant
+            && hasSuggestedReplies
+            && msg.id === suggestedReplyMessageId
+            && onSelectSuggestion
+            && onDismissSuggestions;
+          return (
+            <Fragment key={msg.id}>
+              <DesktopAgentMessage
+                entry={msg}
+                isLast={index === displayMessages.length - 1 && !displayWaiting}
+                repoPath={repoPath}
               />
-            ) : null}
-          </Fragment>
-        );
-      })}
+              {showChipsHere ? (
+                <SuggestedReplies
+                  chips={suggestedReplies ?? []}
+                  disabled={displayWaiting}
+                  onSelect={onSelectSuggestion}
+                  onDismiss={onDismissSuggestions}
+                  collapsed={suggestedRepliesCollapsed}
+                  onRestore={onRestoreSuggestions}
+                  isPlaceholder={suggestedRepliesPending}
+                />
+              ) : null}
+            </Fragment>
+          );
+        })}
 
-      {isCompacting ? (
-        <div style={{
-          padding: '12px 14px',
-          borderRadius: 14,
-          background: 'linear-gradient(180deg, rgba(254, 249, 195, 0.72), rgba(254, 240, 138, 0.22))',
-          border: '1px solid rgba(245, 158, 11, 0.18)',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 7,
-          boxShadow: '0 12px 30px rgba(245, 158, 11, 0.08)',
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(245, 158, 11, 0.3)', borderTopColor: '#f59e0b', animation: 'spin 1s linear infinite' }} />
-            Compaction in progress
+        {isCompacting ? (
+          <div style={{
+            padding: '12px 14px',
+            borderRadius: 14,
+            background: 'linear-gradient(180deg, rgba(254, 249, 195, 0.72), rgba(254, 240, 138, 0.22))',
+            border: '1px solid rgba(245, 158, 11, 0.18)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 7,
+            boxShadow: '0 12px 30px rgba(245, 158, 11, 0.08)',
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(245, 158, 11, 0.3)', borderTopColor: '#f59e0b', animation: 'spin 1s linear infinite' }} />
+              Compaction in progress
+            </div>
+            <div style={{ fontSize: 11, color: '#92400e', lineHeight: 1.5 }}>
+              Context is being compressed. Messages sent now will be queued and delivered after compaction completes.
+            </div>
           </div>
-          <div style={{ fontSize: 11, color: '#92400e', lineHeight: 1.5 }}>
-            Context is being compressed. Messages sent now will be queued and delivered after compaction completes.
+        ) : null}
+
+        {displayWaiting && !isCompacting && !isOrchestratorMode ? (
+          <div style={{
+            alignSelf: 'flex-start',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '10px 14px',
+            borderRadius: 16,
+            background: thoughtsMutedGlass,
+            border: thoughtsElevatedBorder,
+            boxShadow: thoughtsElevatedShadow,
+          }}>
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: activeTargetColor, boxShadow: `0 0 0 4px ${activeTargetColor}14`, flexShrink: 0 }} />
+            {[0, 1, 2].map((index) => (
+              <div key={index} style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--t-text-secondary)', animation: `llmDot 1.2s ease-in-out ${index * 0.18}s infinite` }} />
+            ))}
+            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)', letterSpacing: '-0.01em' }}>
+              {activeTargetLabel} is thinking…
+            </span>
           </div>
-        </div>
-      ) : null}
+        ) : null}
 
-      {displayWaiting && !isCompacting && !isOrchestratorMode ? (
-        <div style={{
-          alignSelf: 'flex-start',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          padding: '10px 14px',
-          borderRadius: 16,
-          background: thoughtsMutedGlass,
-          border: thoughtsElevatedBorder,
-          boxShadow: thoughtsElevatedShadow,
-        }}>
-          <span style={{ width: 8, height: 8, borderRadius: '50%', background: activeTargetColor, boxShadow: `0 0 0 4px ${activeTargetColor}14`, flexShrink: 0 }} />
-          {[0, 1, 2].map((index) => (
-            <div key={index} style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--t-text-secondary)', animation: `llmDot 1.2s ease-in-out ${index * 0.18}s infinite` }} />
-          ))}
-          <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)', letterSpacing: '-0.01em' }}>
-            {activeTargetLabel} is thinking…
-          </span>
-        </div>
-      ) : null}
-
-      <div ref={chatEndRef} />
+        <div ref={chatEndRef} />
+      </div>
     </div>
   );
 });

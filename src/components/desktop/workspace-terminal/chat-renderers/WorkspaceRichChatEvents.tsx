@@ -2,6 +2,7 @@
 
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import { DiffViewer } from '@/components/desktop/o8-panel/workspace-rail/DiffViewer';
+import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import {
   deriveFileChangesFromTools,
   type FileChangePreview,
@@ -11,6 +12,7 @@ import {
 } from '@/components/desktop/llm-chat/shared';
 import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 import type { ClaudePermissionDecision } from '@/components/desktop/workspace-terminal/workspace-stream-events';
+import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 
 type PermissionRequest = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'permission_request' }>;
 type PlanStep = Extract<ClaudeCodeStreamJsonChatEvent, { type: 'plan_step' }>;
@@ -21,12 +23,6 @@ const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, Menlo, monospace';
 const WEB_TOOL_RE = /(?:web|search|fetch|browse|browser)/i;
 const URL_RE = /https?:\/\/[^\s)<>"']+/g;
-
-function ellipsize(value: string, max = 90) {
-  const compact = value.replace(/\s+/g, ' ').trim();
-  if (compact.length <= max) return compact;
-  return `${compact.slice(0, max - 3)}...`;
-}
 
 function hostnameFor(url: string) {
   try {
@@ -91,21 +87,6 @@ function webLinksFor(message: LLMMessage) {
     seen.add(link.url);
     return true;
   });
-}
-
-function toolSummary(tool: Pick<ToolCallInfo, 'args' | 'preview'>) {
-  if (tool.preview) return ellipsize(tool.preview);
-  const args = tool.args ?? {};
-  const preferredKeys = ['command', 'cmd', 'file_path', 'path', 'pattern', 'query', 'url', 'description'];
-  for (const key of preferredKeys) {
-    const value = args[key];
-    if (typeof value === 'string' && value.trim()) return ellipsize(value);
-  }
-  const firstEntry = Object.entries(args).find(([, value]) => (
-    typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean'
-  ));
-  if (firstEntry) return ellipsize(`${firstEntry[0]}: ${String(firstEntry[1])}`);
-  return '';
 }
 
 function statusColor(status?: string) {
@@ -376,52 +357,23 @@ function ToolCards({
 }) {
   const results = events.filter((event): event is ToolResultEvent => event.type === 'tool_result');
   const calls = events.filter((event): event is ToolCallEvent => event.type === 'tool_call');
-  const visibleCalls = calls.length > 0 ? eventToolCalls(events) : (toolCalls ?? []);
+  const visibleCalls: MobileTranscriptToolCall[] = calls.length > 0
+    ? eventToolCalls(events).map((tool, index) => {
+      const result = results.find((candidate) => (
+        candidate.id && calls[index]?.id
+          ? candidate.id === calls[index]?.id
+          : candidate.name === tool.name
+      ));
+      return {
+        ...tool,
+        result: result?.output ?? result?.preview,
+      };
+    })
+    : (toolCalls ?? []);
   if (visibleCalls.length === 0) return null;
 
   return (
-    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-      {visibleCalls.map((tool, index) => {
-        const result = results.find((candidate) => (
-          candidate.id && calls[index]?.id
-            ? candidate.id === calls[index]?.id
-            : candidate.name === tool.name
-        ));
-        const summary = toolSummary(tool);
-        return (
-          <div
-            key={`${tool.name}-${index}-${summary}`}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              maxWidth: '100%',
-              minHeight: 26,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-divider-subtle)',
-              borderRadius: 8,
-              backgroundColor: 'var(--t-input-bg)',
-              paddingTop: 4,
-              paddingRight: 9,
-              paddingBottom: 4,
-              paddingLeft: 8,
-              fontFamily: UI_FONT,
-              boxSizing: 'border-box',
-            }}
-            title={result?.preview ?? result?.output ?? summary}
-          >
-            <span style={{ width: 6, height: 6, borderRadius: 999, backgroundColor: statusColor(tool.status), flexShrink: 0 }} />
-            <span style={{ color: 'var(--t-text)', fontSize: 11.5, fontWeight: 800, whiteSpace: 'nowrap' }}>{tool.name}</span>
-            {summary ? (
-              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-muted)', fontSize: 11 }}>
-                {summary}
-              </span>
-            ) : null}
-          </div>
-        );
-      })}
-    </div>
+    <ToolCallChipCluster toolCalls={visibleCalls} />
   );
 }
 
