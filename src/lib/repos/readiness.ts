@@ -69,17 +69,41 @@ function readinessLabel(state: RepoReadiness['state']) {
   }
 }
 
+// Tracks in-flight background refreshes so a flood of stale-cache hits within
+// the same window only schedules one underlying recompute per repo.
+const inFlightRefreshes = new Map<string, Promise<RepoReadiness>>();
+
 export async function getRepoReadiness(repo: RepoReadinessInput): Promise<RepoReadiness> {
   const cacheKey = repo.localPath;
   const cached = readinessCache.get(cacheKey);
   const originOverride = getRepoOriginConfiguredOverride(repo.localPath);
-  if (cached && Date.now() - cached.ts < READINESS_CACHE_TTL_MS) {
+
+  if (cached) {
+    const fresh = Date.now() - cached.ts < READINESS_CACHE_TTL_MS;
+    if (!fresh) {
+      // Stale-while-revalidate (Phase 5 of SHIP_5_PLAN.md): return the cached
+      // value immediately and refresh in the background so /api/panel/repos
+      // never spends 60 ms doing ~5 git execs per repo on a dashboard render.
+      // Cold misses still recompute synchronously (the else branch below).
+      if (!inFlightRefreshes.has(cacheKey)) {
+        const refresh = refreshRepoReadinessUncached(repo)
+          .finally(() => inFlightRefreshes.delete(cacheKey));
+        inFlightRefreshes.set(cacheKey, refresh);
+        void refresh.catch(() => undefined);
+      }
+    }
     if (originOverride !== null && cached.value.originConfigured !== originOverride) {
       return { ...cached.value, originConfigured: originOverride };
     }
     return cached.value;
   }
 
+  // Cold miss — must compute synchronously so the first caller gets real data.
+  return refreshRepoReadinessUncached(repo);
+}
+
+async function refreshRepoReadinessUncached(repo: RepoReadinessInput): Promise<RepoReadiness> {
+  const cacheKey = repo.localPath;
   const currentBranch = await getCurrentBranch(repo.localPath, repo.defaultBranch || 'main');
   const [dirty, packageJsonExists, nodeModulesExists, originConfigured, missingEnvFiles] = await Promise.all([
     hasDirtyWorktree(repo.localPath),
