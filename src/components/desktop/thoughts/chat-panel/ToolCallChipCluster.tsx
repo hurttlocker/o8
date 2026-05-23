@@ -93,13 +93,34 @@ function toolKey(tool: MobileTranscriptToolCall, index: number) {
   return tool.id?.trim() ? tool.id : `${tool.name}-${index}`;
 }
 
+/**
+ * Collapse threshold: when an assistant turn fires more tool calls than this,
+ * the cluster shows ONE summary chip (running tool if any, else most recent)
+ * plus a "+N more" affordance instead of tiling every chip. Picked from
+ * dogfood observation — a 73-call architectural exploration shouldn't paint
+ * a 24-row pill wall just to convey "I'm reading the codebase." Click the
+ * "+N more" chip to expand and inspect every chip individually.
+ */
+const COLLAPSE_AT = 3;
+
 export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscriptToolCall[] }) {
   const [expandedToolId, setExpandedToolId] = useState<string | null>(null);
+  const [showAll, setShowAll] = useState(false);
   const rootRef = useRef<HTMLDivElement | null>(null);
   const selectedTool = useMemo(() => {
     if (!expandedToolId) return null;
     return toolCalls.find((tool, index) => toolKey(tool, index) === expandedToolId) ?? null;
   }, [expandedToolId, toolCalls]);
+
+  // Collapsed-state pick: prefer an actively-running tool so the user sees
+  // *what* is in flight. Falls back to the latest call when everything's done.
+  // Hook must live above the early-return below to keep hook order stable
+  // across renders where toolCalls toggles between empty and non-empty.
+  const summaryTool = useMemo(() => {
+    if (toolCalls.length === 0) return null;
+    const running = toolCalls.find((tool) => chipStatus(tool) === 'running');
+    return running ?? toolCalls[toolCalls.length - 1];
+  }, [toolCalls]);
 
   useEffect(() => {
     if (!selectedTool) return;
@@ -122,7 +143,10 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
     };
   }, [selectedTool]);
 
-  if (toolCalls.length === 0) return null;
+  if (toolCalls.length === 0 || !summaryTool) return null;
+
+  const hiddenCount = Math.max(0, toolCalls.length - 1);
+  const collapsed = !showAll && toolCalls.length >= COLLAPSE_AT;
 
   return (
     <div
@@ -139,20 +163,98 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
         paddingLeft: 0,
       }}
     >
-      {toolCalls.map((tool, index) => {
-        const key = toolKey(tool, index);
-        const classified = classifyToolCallChip(tool.name);
-        return (
-          <ToolCallChip
-            key={key}
-            verb={classified.verb}
-            kind={classified.kind}
-            argument={toolArgument(tool)}
-            status={chipStatus(tool)}
-            onClick={() => setExpandedToolId((current) => current === key ? null : key)}
-          />
-        );
-      })}
+      {collapsed ? (
+        <>
+          {(() => {
+            const key = toolKey(summaryTool, toolCalls.indexOf(summaryTool));
+            const classified = classifyToolCallChip(summaryTool.name);
+            return (
+              <ToolCallChip
+                key={key}
+                verb={classified.verb}
+                kind={classified.kind}
+                argument={toolArgument(summaryTool)}
+                status={chipStatus(summaryTool)}
+                onClick={() => setExpandedToolId((current) => current === key ? null : key)}
+              />
+            );
+          })()}
+          <button
+            type="button"
+            onClick={() => setShowAll(true)}
+            aria-label={`Show all ${toolCalls.length} tool calls in this turn`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 4,
+              border: '1px solid var(--t-divider-subtle)',
+              borderRadius: 999,
+              background: 'transparent',
+              color: 'var(--t-text-muted)',
+              fontFamily: 'var(--font-sans-system)',
+              fontSize: 11,
+              fontWeight: 540,
+              letterSpacing: '0.01em',
+              paddingTop: 3,
+              paddingRight: 9,
+              paddingBottom: 3,
+              paddingLeft: 9,
+              cursor: 'pointer',
+              WebkitTapHighlightColor: 'transparent',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; }}
+          >
+            +{hiddenCount} more
+          </button>
+        </>
+      ) : (
+        <>
+          {toolCalls.map((tool, index) => {
+            const key = toolKey(tool, index);
+            const classified = classifyToolCallChip(tool.name);
+            return (
+              <ToolCallChip
+                key={key}
+                verb={classified.verb}
+                kind={classified.kind}
+                argument={toolArgument(tool)}
+                status={chipStatus(tool)}
+                onClick={() => setExpandedToolId((current) => current === key ? null : key)}
+              />
+            );
+          })}
+          {toolCalls.length >= COLLAPSE_AT ? (
+            <button
+              type="button"
+              onClick={() => setShowAll(false)}
+              aria-label="Collapse tool call list"
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                border: '1px solid var(--t-divider-subtle)',
+                borderRadius: 999,
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                fontFamily: 'var(--font-sans-system)',
+                fontSize: 11,
+                fontWeight: 540,
+                letterSpacing: '0.01em',
+                paddingTop: 3,
+                paddingRight: 9,
+                paddingBottom: 3,
+                paddingLeft: 9,
+                cursor: 'pointer',
+                WebkitTapHighlightColor: 'transparent',
+              }}
+              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-muted)'; }}
+            >
+              Collapse
+            </button>
+          ) : null}
+        </>
+      )}
 
       {selectedTool ? (
         <div
