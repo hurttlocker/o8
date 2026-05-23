@@ -29,7 +29,7 @@ Recent history follows Conventional Commit prefixes such as `feat:` and `fix:`. 
 
 ## o8 CLI (available inside packet worktrees)
 
-When you're an agent dispatched into an o8 packet worktree, the `o8` CLI is on `$PATH` (symlinked to `/usr/local/bin/o8` once o8.app has run at least once). Use it instead of curling the local HTTP API — it knows your packet context and resolves cwd automatically.
+When you're an agent dispatched into an o8 packet worktree, the `o8` CLI is on `$PATH` (symlinked to `/usr/local/bin/o8` once o8.app has run at least once; if exit 127 the symlink is missing — re-launch o8.app once to restore it). Use it instead of curling the local HTTP API — it knows your packet context and resolves cwd automatically.
 
 ```
 o8 status                              # global fleet snapshot (running packets, lanes, merges, approvals)
