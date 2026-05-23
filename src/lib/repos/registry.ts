@@ -287,9 +287,26 @@ function sortRepos(repos: RepoRegistryEntry[]) {
   });
 }
 
+// #1110 follow-up — short-TTL in-memory cache. /api/panel/repos used to spend
+// ~60ms parsing this JSON on every dashboard render even after the readiness
+// SWR landed; this drops steady-state reads to single-digit ms. All mutation
+// paths (addRepo / updateRepo / removeRepo) invalidate via writeStore().
+let _cachedStore: { value: RepoRegistryStore; ts: number } | null = null;
+const STORE_CACHE_TTL_MS = 5_000;
+
+function invalidateStoreCache() {
+  _cachedStore = null;
+}
+
 async function readStore(): Promise<RepoRegistryStore> {
+  if (_cachedStore && Date.now() - _cachedStore.ts < STORE_CACHE_TTL_MS) {
+    return _cachedStore.value;
+  }
+
   if (!(await pathExists(REGISTRY_PATH))) {
-    return { version: 1, repos: [] };
+    const empty: RepoRegistryStore = { version: 1, repos: [] };
+    _cachedStore = { value: empty, ts: Date.now() };
+    return empty;
   }
 
   const parsed = await readJsonFile<Partial<RepoRegistryStore>>(REGISTRY_PATH).catch(() => null);
@@ -297,10 +314,12 @@ async function readStore(): Promise<RepoRegistryStore> {
     throw new Error('Repository registry is unreadable. Check ~/.o8/repos.json.');
   }
 
-  return {
+  const value: RepoRegistryStore = {
     version: 1,
     repos: sortRepos((parsed.repos as RepoRegistryEntry[]).map(normalizeRepoEntry)),
   };
+  _cachedStore = { value, ts: Date.now() };
+  return value;
 }
 
 async function writeStore(store: RepoRegistryStore) {
@@ -308,6 +327,7 @@ async function writeStore(store: RepoRegistryStore) {
     version: 1,
     repos: sortRepos(store.repos),
   });
+  invalidateStoreCache();
 }
 
 /**
