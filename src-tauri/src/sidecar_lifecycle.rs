@@ -64,7 +64,22 @@ pub(crate) fn install_shutdown_handlers() {
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         prev(info);
-        kill_tracked_children();
+        // Only reap children when the panic is on a thread whose death actually
+        // brings down the process (the main thread, or an explicitly-named one).
+        // tokio worker threads (`tokio-rt-worker`, `tokio-rt-blocking`) panicking
+        // are isolated by tokio's task::Builder panic catching and do NOT cause
+        // process exit — but our previous "panic == shutdown" rule killed the
+        // bundled Next + WS sidecars anyway. See #1109 where an MCP plugin
+        // screenshot panic on a tokio worker took the whole backend down.
+        let on_main = std::thread::current().name() == Some("main");
+        if on_main {
+            kill_tracked_children();
+        } else {
+            log::warn!(
+                "[panic-isolation] non-main thread {:?} panicked but the process is still running — NOT reaping children (see #1109)",
+                std::thread::current().name().unwrap_or("<unnamed>")
+            );
+        }
     }));
 
     #[cfg(unix)]
