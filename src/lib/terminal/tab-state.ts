@@ -4,7 +4,8 @@
  */
 
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-import type { WorkspaceOrchestrationPacketBadge } from '@/lib/orchestrator/types';
+import type { OrchestrationMode, OrchestratorRuntime, WorkspaceOrchestrationPacketBadge } from '@/lib/orchestrator/types';
+import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
 
 export interface PersistedChatCheckpoint {
   id: string;
@@ -28,6 +29,21 @@ export interface PersistedTab {
   chatModel?: string;
   chatContinueLatest?: boolean;
   chatCheckpoints?: PersistedChatCheckpoint[];
+  /**
+   * Sticky composer mode for orchestrator-kind tabs (#F4 in the 2026-05-23
+   * dogfood findings). Pre-fix this was missing from persistence; the restore
+   * heuristic in `terminal-restore.ts` then defaulted to `kind: 'llm-chat'`,
+   * which silently forced the tab into Chat mode even though the saved
+   * transcript was clearly an orchestrator turn. Persist + rehydrate so the
+   * orchestrator vs chat decision survives reload.
+   */
+  mode?: OrchestrationMode;
+  /** When `mode === 'single'`, which runtime this tab dispatches to. */
+  singleRuntime?: OrchestratorRuntime;
+  /** Chat-mode model selection (o8 free-tier OpenRouter pool vs BYOK). */
+  chatModelId?: ChatModelId;
+  /** Per-tab pinned OpenRouter model slug overriding the chain. */
+  chatOpenrouterModel?: string;
   linkedIssue?: {
     repo: string;
     number: number;
