@@ -188,8 +188,8 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
           paddingRight: 8,
           borderRadius: 8,
           borderWidth: 0,
-          background: 'rgba(34,197,94,0.1)',
-          color: '#16a34a',
+          background: 'var(--t-success-soft)',
+          color: 'var(--t-success)',
           fontSize: 10,
           fontWeight: 700,
           fontFamily: '"SF Mono", ui-monospace, monospace',
@@ -216,7 +216,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
             borderRadius: 12,
             background: 'var(--t-panel-solid)',
             border: '1px solid var(--t-panel-border)',
-            boxShadow: 'var(--t-panel-shadow), 0 8px 24px rgba(15, 23, 42, 0.18)',
+            boxShadow: 'var(--t-panel-shadow)',
             zIndex: 9999,
             fontFamily: 'var(--font-sans-system)',
           }}
@@ -230,7 +230,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
               fontSize: 11,
               fontWeight: 600,
               color: 'var(--t-text-faint)',
-              letterSpacing: '-0.01em',
+              letterSpacing: 0,
             }}
           >
             {total} active port{total === 1 ? '' : 's'}
@@ -329,7 +329,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
                   width: 6,
                   height: 6,
                   borderRadius: 3,
-                  background: '#22c55e',
+                  background: 'var(--t-success)',
                   flexShrink: 0,
                 }}
               />
@@ -385,7 +385,7 @@ function PortActionPanel({
     fontSize: 11,
     fontWeight: 600,
     color: 'var(--t-text-faint)',
-    letterSpacing: '-0.01em',
+    letterSpacing: 0,
   } as const;
 
   const actionRowStyle = {
@@ -408,7 +408,7 @@ function PortActionPanel({
     fontFamily: 'var(--font-sans-system)',
   };
 
-  const toastTone = toast?.tone === 'success' ? '#16a34a' : '#dc2626';
+  const toastTone = toast?.tone === 'success' ? 'var(--t-success)' : 'var(--t-danger)';
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
@@ -504,7 +504,7 @@ function PortActionPanel({
             fontSize: 11,
             fontWeight: 600,
             color: toastTone,
-            letterSpacing: '-0.01em',
+            letterSpacing: 0,
           }}
         >
           {toast.message}
