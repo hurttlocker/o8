@@ -1,7 +1,7 @@
 'use client';
 
 import { motion } from 'framer-motion';
-import { IconColumns, IconDelta, IconPanelRightCollapse } from './icons';
+import { IconColumns, IconGitDiff, IconPanelRightCollapse } from './icons';
 
 export function RightPanelMorphButton({
   workspacePanelVisible,
@@ -71,7 +71,7 @@ export function RightPanelMorphButton({
       }}
     >
       <span style={{ position: 'relative', width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
-        {/* Review (delta) icon */}
+        {/* Review (changes) icon */}
         <motion.span
           initial={false}
           animate={{
@@ -82,7 +82,7 @@ export function RightPanelMorphButton({
           transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
           style={{ position: 'absolute', inset: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <IconDelta />
+          <IconGitDiff />
         </motion.span>
         {/* O8 (columns) icon */}
         <motion.span
