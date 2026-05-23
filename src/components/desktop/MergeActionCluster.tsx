@@ -8,13 +8,21 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 // Branch-with-check glyph that matches Superconductor's pill icon: two
 // branch nodes joined by an arc, with a check mark inside the lower node.
 // Renders crisply at 14px in both light and dark themes.
-function BranchMergeIcon({ size = 14, color = 'currentColor' }: { size?: number; color?: string }) {
+function BranchMergeIcon({
+  size = 14,
+  color = 'currentColor',
+  checkColor = 'var(--t-tone-success-contrast)',
+}: {
+  size?: number;
+  color?: string;
+  checkColor?: string;
+}) {
   return (
     <svg width={size} height={size} viewBox="0 0 16 16" fill="none" stroke={color} strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden>
       <circle cx="4" cy="3" r="1.4" />
       <circle cx="11.5" cy="11.5" r="2.4" fill={color} stroke={color} />
       <path d="M4 4.4 V8.5 A2.6 2.6 0 0 0 6.6 11.1 H8.6" />
-      <path d="M10.4 11.5 L11.3 12.4 L13 10.6" stroke="var(--t-bg-card, #ffffff)" strokeWidth={1.4} fill="none" />
+      <path d="M10.4 11.5 L11.3 12.4 L13 10.6" stroke={checkColor} strokeWidth={1.4} fill="none" />
     </svg>
   );
 }
@@ -22,6 +30,8 @@ function BranchMergeIcon({ size = 14, color = 'currentColor' }: { size?: number;
 interface MergeActionClusterProps {
   branchName: string | null;
   repoName: string | null;
+  /** Compact status bar mode keeps the branch label and hides action chrome. */
+  compact?: boolean;
   /** GitHub remote URL for the active repo. Used to resolve the slug for
    *  /api/panel/prs and /api/panel/prs/[number] calls. */
   repoRemoteUrl: string | null;
@@ -48,14 +58,31 @@ const MERGE_METHOD_LABELS: Record<MergeMethod, { primary: string; menuLabel: str
   rebase: { primary: 'Rebase & merge', menuLabel: 'Rebase and merge', description: 'Replay commits onto the base, no merge commit' },
 };
 
-// Desaturated tones — sage/amber/rose instead of neon. The status bar reads
-// as ambient information, not a UI alarm. Pill backgrounds use the matching
-// hue at low opacity over the chrome glass.
 const TONE = {
-  success: { text: '#7fa68f', bg: 'rgba(127, 166, 143, 0.14)', border: 'rgba(127, 166, 143, 0.28)' },
-  pending: { text: '#a39565', bg: 'rgba(163, 149, 101, 0.14)', border: 'rgba(163, 149, 101, 0.28)' },
-  fail:    { text: '#a37b7b', bg: 'rgba(163, 123, 123, 0.14)', border: 'rgba(163, 123, 123, 0.28)' },
-  muted:   { text: 'var(--t-text-muted)', bg: 'transparent', border: 'transparent' },
+  success: {
+    text: 'var(--t-tone-success)',
+    bg: 'var(--t-tone-success-bg)',
+    border: 'var(--t-tone-success-border)',
+    contrast: 'var(--t-tone-success-contrast)',
+  },
+  pending: {
+    text: 'var(--t-tone-pending)',
+    bg: 'var(--t-tone-pending-bg)',
+    border: 'var(--t-tone-pending-border)',
+    contrast: 'var(--t-text)',
+  },
+  fail: {
+    text: 'var(--t-tone-fail)',
+    bg: 'var(--t-tone-fail-bg)',
+    border: 'var(--t-tone-fail-border)',
+    contrast: 'var(--t-text)',
+  },
+  muted: {
+    text: 'var(--t-text-muted)',
+    bg: 'transparent',
+    border: 'transparent',
+    contrast: 'var(--t-text)',
+  },
 } as const;
 
 function repoSlugFromRemote(remoteUrl: string | null | undefined): string | null {
@@ -126,8 +153,8 @@ function derive(
   return { variant: 'open', statusText: 'No open PR', statusTone: 'muted', pr: null, primaryLabel: 'Open PR', primaryIcon: 'external', disabled: false };
 }
 
-function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeActionClusterProps) {
-  const repoSlug = repoSlugFromRemote(repoRemoteUrl);
+function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact = false }: MergeActionClusterProps) {
+  const repoSlug = compact ? null : repoSlugFromRemote(repoRemoteUrl);
   const [pr, setPr] = useState<PrSummary | null>(null);
   const [merging, setMerging] = useState(false);
   const [toast, setToast] = useState<{ tone: 'success' | 'fail'; message: string } | null>(null);
@@ -242,6 +269,45 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
   const tone = TONE[derived.statusTone];
   const successTone = TONE.success;
 
+  if (compact) {
+    return (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          minWidth: 0,
+          height: 30,
+          paddingTop: 2,
+          paddingBottom: 4,
+          paddingLeft: 8,
+          paddingRight: 8,
+          fontFamily: 'var(--font-sans-system)',
+        }}
+      >
+        <span
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 5,
+            minWidth: 0,
+            maxWidth: 'min(46vw, 240px)',
+            overflow: 'hidden',
+            color: 'var(--t-text-muted)',
+            fontSize: 11,
+            fontWeight: 440,
+            letterSpacing: 0,
+            whiteSpace: 'nowrap',
+          }}
+          title={repoName ? `${repoName} · ${branchName}` : branchName ?? undefined}
+        >
+          <GitBranch size={11} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayBranch}</span>
+        </span>
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -250,7 +316,10 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
         justifyContent: 'center',
         gap: 14,
         height: 30,
-        flexShrink: 0,
+        minWidth: 0,
+        maxWidth: '100%',
+        overflow: 'hidden',
+        flexShrink: 1,
         paddingTop: 2,
         paddingBottom: 4,
         paddingLeft: 12,
@@ -263,16 +332,19 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
           display: 'inline-flex',
           alignItems: 'center',
           gap: 5,
+          minWidth: 0,
+          maxWidth: 180,
+          overflow: 'hidden',
           fontSize: 11,
           fontWeight: 440,
           color: 'var(--t-text-muted)',
-          letterSpacing: '-0.005em',
+          letterSpacing: 0,
           whiteSpace: 'nowrap',
         }}
         title={repoName ? `${repoName} · ${branchName}` : branchName ?? undefined}
       >
-        <GitBranch size={11} strokeWidth={1.8} />
-        {displayBranch}
+        <GitBranch size={11} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayBranch}</span>
       </span>
 
       {derived.statusText ? (
@@ -281,7 +353,8 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
             fontSize: 11,
             fontWeight: 600,
             color: tone.text,
-            letterSpacing: '-0.005em',
+            letterSpacing: 0,
+            whiteSpace: 'nowrap',
           }}
         >
           {derived.statusText}
@@ -306,7 +379,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
             padding: 0,
             fontSize: 11,
             fontWeight: 440,
-            letterSpacing: '-0.005em',
+            letterSpacing: 0,
             fontFamily: 'inherit',
           }}
           onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
@@ -323,7 +396,8 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
             fontSize: 11,
             fontWeight: 600,
             color: toast.tone === 'success' ? successTone.text : TONE.fail.text,
-            letterSpacing: '-0.005em',
+            letterSpacing: 0,
+            whiteSpace: 'nowrap',
           }}
         >
           {toast.message}
@@ -361,7 +435,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
               opacity: derived.disabled || merging ? 0.6 : 1,
               fontSize: 11.5,
               fontWeight: 600,
-              letterSpacing: '-0.005em',
+              letterSpacing: 0,
               fontFamily: 'var(--font-sans-system)',
               transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
             }}
@@ -369,7 +443,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
             {merging ? (
               <Loader2 size={12} strokeWidth={2} style={{ animation: 'spin 0.9s linear infinite' }} />
             ) : derived.primaryIcon === 'check' ? (
-              <BranchMergeIcon size={13} color={successTone.text} />
+              <BranchMergeIcon size={13} color={successTone.text} checkColor={successTone.contrast} />
             ) : derived.primaryIcon === 'external' ? (
               <ExternalLink size={12} strokeWidth={2} />
             ) : (
@@ -434,18 +508,17 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
                 bottom: 'calc(100% + 6px)',
                 right: 0,
                 minWidth: 240,
-                // Overlay chrome — always dark + light text regardless of theme.
-                background: 'rgba(20, 24, 30, 0.96)',
-                border: '1px solid rgba(255, 255, 255, 0.12)',
+                background: 'var(--t-panel-solid)',
+                border: '1px solid var(--t-panel-border)',
                 borderRadius: 10,
-                boxShadow: '0 18px 44px rgba(0, 0, 0, 0.32)',
+                boxShadow: 'var(--t-panel-shadow)',
                 paddingTop: 4,
                 paddingBottom: 4,
                 paddingLeft: 4,
                 paddingRight: 4,
                 zIndex: 60,
                 fontFamily: 'var(--font-sans-system)',
-                color: 'rgba(255, 255, 255, 0.94)',
+                color: 'var(--t-text)',
               }}
             >
               {(['squash', 'merge', 'rebase'] as const).map((method) => {
@@ -471,19 +544,19 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeAc
                       paddingRight: 10,
                       borderRadius: 7,
                       border: 'none',
-                      background: isActive ? 'rgba(255, 255, 255, 0.08)' : 'transparent',
-                      color: 'rgba(255, 255, 255, 0.94)',
+                      background: isActive ? 'var(--t-panel-hover)' : 'transparent',
+                      color: 'var(--t-text)',
                       cursor: 'pointer',
                       textAlign: 'left',
                       fontFamily: 'inherit',
                     }}
-                    onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255, 255, 255, 0.08)'; }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
                     onMouseLeave={(event) => {
-                      event.currentTarget.style.background = isActive ? 'rgba(255, 255, 255, 0.08)' : 'transparent';
+                      event.currentTarget.style.background = isActive ? 'var(--t-panel-hover)' : 'transparent';
                     }}
                   >
-                    <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: '-0.005em' }}>{meta.menuLabel}</span>
-                    <span style={{ fontSize: 10.5, color: 'rgba(226, 232, 240, 0.62)', letterSpacing: '-0.005em', marginTop: 1 }}>{meta.description}</span>
+                    <span style={{ fontSize: 12, fontWeight: 600, letterSpacing: 0 }}>{meta.menuLabel}</span>
+                    <span style={{ fontSize: 10.5, color: 'var(--t-text-muted)', letterSpacing: 0, marginTop: 1 }}>{meta.description}</span>
                   </button>
                 );
               })}
