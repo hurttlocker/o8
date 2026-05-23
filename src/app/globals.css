@@ -58,6 +58,8 @@ html::-webkit-scrollbar {
   --cortex-dialog-header-padding: 16px 18px 14px;
   --cortex-dialog-body-padding: 18px;
   --cortex-dialog-footer-padding: 14px 18px 18px;
+  --cortex-chat-gutter: clamp(22px, 4vw, 68px);
+  --cortex-chat-column-max: 960px;
 }
 
 :root.dark-mode, .dark-mode {
@@ -1762,6 +1764,21 @@ button.workflow-file-item.workflow-file-item-active {
 /* Hide scrollbar — AgentPanel */
 .hide-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+.thoughts-scroll {
+  scrollbar-width: none;
+}
+
+.thoughts-scroll::-webkit-scrollbar {
+  display: none;
+}
+
+@media (max-width: 720px) {
+  :root {
+    --cortex-chat-gutter: 18px;
+    --cortex-chat-column-max: 100%;
+  }
 }
 
 /* Cursor blink for streaming text */

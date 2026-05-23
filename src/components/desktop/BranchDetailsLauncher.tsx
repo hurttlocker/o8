@@ -1,11 +1,13 @@
 'use client';
 
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
-import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { useWorkspaceChanges } from './o8-panel/workspace-rail/ChangesList';
+import type { OrchestratorPacket, OrchestratorRuntime, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 
 const ROW_HEIGHT = 32;
+const CHECK_ROW_HEIGHT = 28;
 
 function pickActivePacket(packets: OrchestratorPacket[] | undefined, selectedId: string | null | undefined): OrchestratorPacket | null {
   if (!packets || packets.length === 0) return null;
@@ -26,19 +28,52 @@ function pickActivePacket(packets: OrchestratorPacket[] | undefined, selectedId:
   return top;
 }
 
-export function BranchDetailsLauncher() {
+function runtimeLabel(runtime: OrchestratorRuntime | string | undefined) {
+  if (!runtime) return 'Codex';
+  if (runtime === 'claude-code') return 'Claude';
+  if (runtime === 'opencode') return 'OpenCode';
+  return runtime.charAt(0).toUpperCase() + runtime.slice(1);
+}
+
+function pickTarget(
+  activePacket: OrchestratorPacket | null,
+  targets: OrchestratorWorkspaceTarget[] | undefined,
+): OrchestratorWorkspaceTarget | null {
+  if (!targets || targets.length === 0) return null;
+  if (activePacket?.workspaceTargetPath) {
+    const hit = targets.find((target) => target.localPath === activePacket.workspaceTargetPath);
+    if (hit) return hit;
+  }
+  return targets[0] ?? null;
+}
+
+export function BranchDetailsLauncher({ visible = true }: { visible?: boolean }) {
   const data = useOrchestratorData();
+  const [progressOpen, setProgressOpen] = useState(false);
+  const [environmentOpen, setEnvironmentOpen] = useState(true);
 
   const activePacket = useMemo(
     () => pickActivePacket(data?.missionState?.packets, data?.selectedPacketId),
     [data?.missionState?.packets, data?.selectedPacketId],
   );
 
-  if (!data || data.o8PanelVisible) return null;
-  if (!activePacket) return null;
+  const activeTarget = useMemo(
+    () => pickTarget(activePacket, data?.workspaceTargets ?? []),
+    [activePacket, data?.workspaceTargets],
+  );
 
-  const branch = activePacket.branchTarget || 'branch';
-  const repoPath = activePacket.workspaceTargetPath ?? null;
+  const branch = activePacket?.branchTarget || activeTarget?.branch || 'main';
+  const repoPath = activePacket?.workspaceTargetPath ?? activeTarget?.localPath ?? null;
+  const changes = useWorkspaceChanges(repoPath);
+
+  if (!data || data.o8PanelVisible || !visible) return null;
+
+  const packetRuntime = activePacket?.runtime ?? data.agents.find((agent) => agent.status === 'running' || agent.currentTask)?.runtime;
+  const subagentLabel = activePacket
+    ? runtimeLabel(activePacket.runtime)
+    : data.agents.find((agent) => agent.currentTask || agent.status === 'running')?.name;
+  const progressRows = buildProgressRows(activePacket, activeTarget, branch);
+  const hasDiff = changes.totalAdditions > 0 || changes.totalDeletions > 0;
 
   const open = (tab: NonNullable<Parameters<NonNullable<typeof data.onOpenO8Panel>>[0]['tab']>) => {
     data.onOpenO8Panel?.({ repoPath, tab });
@@ -46,54 +81,124 @@ export function BranchDetailsLauncher() {
 
   return (
     <aside
+      className="hide-scrollbar"
       style={{
         width: 256,
         flexShrink: 0,
-        paddingTop: 14,
+        paddingTop: 12,
         paddingRight: 14,
         paddingBottom: 14,
         paddingLeft: 6,
         display: 'flex',
         flexDirection: 'column',
-        gap: 6,
+        gap: 8,
         minHeight: 0,
         overflowY: 'auto',
+        scrollbarWidth: 'none',
       }}
     >
       <Card>
-        <Header label="Branch details" hint={branch} />
-        <Row icon={<DiffIcon />} label="Changes" onClick={() => open('prs')} />
-        <Row icon={<BranchIcon />} label="Git actions" onClick={() => open('workspace')} />
-        <Row icon={<GhIcon />} label="Create pull request" onClick={() => open('prs')} />
+        <SectionHeader
+          label="Progress"
+          hint={activePacket?.referenceLabel ?? activeTarget?.label ?? 'Workspace'}
+          open={progressOpen}
+          onClick={() => setProgressOpen((value) => !value)}
+        />
+        {progressOpen ? (
+          <div style={{ paddingTop: 2, paddingBottom: 4 }}>
+            {progressRows.map((row) => (
+              <ProgressRow key={row.label} label={row.label} done={row.done} muted={row.muted} />
+            ))}
+          </div>
+        ) : null}
       </Card>
 
       <Card>
-        <Header label="Artifacts" />
-        <ArtifactsBody repoPath={repoPath} onOpenBrowser={() => open('browser')} />
+        <SectionHeader
+          label="Environment"
+          open={environmentOpen}
+          onClick={() => setEnvironmentOpen((value) => !value)}
+          metric={hasDiff ? <DiffStats additions={changes.totalAdditions} deletions={changes.totalDeletions} /> : null}
+          action={<GearIcon />}
+        />
+        {environmentOpen ? (
+          <div style={{ paddingTop: 2, paddingBottom: 3 }}>
+            <Row icon={<DiffIcon />} label="Changes" detail={changes.files.length > 0 ? `${changes.files.length}` : undefined} onClick={() => open('workspace')} />
+            <Row icon={<LaptopIcon />} label="Local" onClick={() => open('workspace')} />
+            <Row icon={<BranchIcon />} label={branch} onClick={() => open('workspace')} />
+            <Row icon={<CommitIcon />} label="Commit" onClick={() => open('workspace')} />
+            <Row icon={<GhIcon />} label="Create pull request" onClick={() => open('prs')} />
+          </div>
+        ) : null}
       </Card>
 
       <Card>
-        <Header label="Sources" />
+        <StaticHeader label="Subagents" />
+        {subagentLabel ? (
+          <Row
+            icon={<WorkerIcon />}
+            label={`${subagentLabel} (worker)`}
+            onClick={() => {
+              if (activePacket?.lane?.sessionKey) data.onSelectSession?.(activePacket.lane.sessionKey);
+            }}
+            tone={activePacket?.status === 'blocked' || activePacket?.status === 'failed' ? 'danger' : undefined}
+          />
+        ) : (
+          <StaticRow icon={<WorkerIcon />} label="No active subagents" muted />
+        )}
+      </Card>
+
+      <Card>
+        <StaticHeader label="Browser" />
+        <Row icon={<GlobeIcon />} label="o8" detail={typeof window === 'undefined' ? undefined : window.location.host} onClick={() => open('browser')} />
+      </Card>
+
+      <Card>
+        <StaticHeader label="Sources" />
+        <StaticRow icon={<SquaresIcon />} label="O8" muted />
         <Row icon={<SquaresIcon />} label="Playwright" onClick={() => open('browser')} muted />
         <Row icon={<SquaresIcon />} label="Chrome Devtools" onClick={() => open('browser')} muted />
+        <StaticRow icon={<GlobeIcon />} label="Web search" muted />
       </Card>
+
+      <span style={{ display: 'none' }} aria-hidden data-runtime={runtimeLabel(packetRuntime)} />
     </aside>
   );
+}
+
+function buildProgressRows(
+  activePacket: OrchestratorPacket | null,
+  activeTarget: OrchestratorWorkspaceTarget | null,
+  branch: string,
+) {
+  if (!activePacket) {
+    return [
+      { label: `${activeTarget?.label ?? 'Workspace'} selected`, done: true, muted: false },
+      { label: `Branch ${branch}`, done: true, muted: false },
+      { label: 'No active packet', done: false, muted: true },
+    ];
+  }
+
+  return [
+    { label: activePacket.title || activePacket.referenceLabel, done: true, muted: false },
+    { label: activePacket.status.replace(/_/g, ' '), done: activePacket.status !== 'blocked' && activePacket.status !== 'failed', muted: false },
+    { label: activePacket.lastEventLabel || `Branch ${branch}`, done: true, muted: !activePacket.lastEventLabel },
+  ];
 }
 
 function Card({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        borderRadius: 14,
+        borderRadius: 18,
         borderWidth: 1,
         borderStyle: 'solid',
-        borderColor: 'var(--t-border-subtle, var(--t-border))',
-        background: 'var(--t-bg-card)',
-        paddingTop: 10,
-        paddingBottom: 6,
-        paddingLeft: 4,
-        paddingRight: 4,
+        borderColor: 'color-mix(in srgb, var(--t-border-subtle, var(--t-border)) 78%, transparent)',
+        background: 'color-mix(in srgb, var(--t-bg-card) 88%, transparent)',
+        paddingTop: 9,
+        paddingBottom: 7,
+        paddingLeft: 6,
+        paddingRight: 6,
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -103,23 +208,90 @@ function Card({ children }: { children: ReactNode }) {
   );
 }
 
-function Header({ label, hint }: { label: string; hint?: string }) {
+function StaticHeader({
+  label,
+}: {
+  label: string;
+}) {
   return (
     <div
       style={{
         display: 'flex',
         alignItems: 'center',
-        gap: 6,
+        minHeight: 28,
         paddingLeft: 10,
         paddingRight: 10,
-        paddingBottom: 8,
-        fontSize: 11,
-        fontWeight: 600,
+        paddingBottom: 4,
+        fontSize: 13,
+        fontWeight: 520,
         letterSpacing: '-0.005em',
         color: 'var(--t-text-muted)',
       }}
     >
+      {label}
+    </div>
+  );
+}
+
+function SectionHeader({
+  label,
+  hint,
+  action,
+  metric,
+  open,
+  onClick,
+}: {
+  label: string;
+  hint?: string;
+  action?: ReactNode;
+  metric?: ReactNode;
+  open: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 6,
+        width: '100%',
+        minHeight: 30,
+        paddingLeft: 10,
+        paddingRight: 10,
+        paddingTop: 0,
+        paddingBottom: 4,
+        border: 0,
+        borderRadius: 10,
+        background: 'transparent',
+        fontSize: 13,
+        fontWeight: 520,
+        letterSpacing: '-0.005em',
+        color: 'var(--t-text-muted)',
+        fontFamily: 'inherit',
+        textAlign: 'left',
+        cursor: 'pointer',
+      }}
+      onMouseEnter={(e) => {
+        e.currentTarget.style.background = 'color-mix(in srgb, var(--t-text-muted) 7%, transparent)';
+      }}
+      onMouseLeave={(e) => {
+        e.currentTarget.style.background = 'transparent';
+      }}
+    >
       <span>{label}</span>
+      <span
+        style={{
+          display: 'inline-flex',
+          transform: open ? 'rotate(90deg)' : 'rotate(0deg)',
+          transition: 'transform 160ms cubic-bezier(0.22, 1, 0.36, 1)',
+          color: 'var(--t-text-muted)',
+          opacity: 0.8,
+        }}
+      >
+        <ChevronIcon />
+      </span>
       {hint ? (
         <span
           style={{
@@ -138,6 +310,77 @@ function Header({ label, hint }: { label: string; hint?: string }) {
           {hint}
         </span>
       ) : null}
+      {metric ? (
+        <span style={{ marginLeft: 'auto', display: 'inline-flex' }}>
+          {metric}
+        </span>
+      ) : null}
+      {action ? (
+        <span
+          onClick={(event) => event.stopPropagation()}
+          style={{ display: 'inline-flex', color: 'var(--t-text-muted)' }}
+        >
+          {action}
+        </span>
+      ) : null}
+    </button>
+  );
+}
+
+function DiffStats({ additions, deletions }: { additions: number; deletions: number }) {
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        fontSize: 12.5,
+        fontWeight: 520,
+        letterSpacing: '-0.01em',
+        fontVariantNumeric: 'tabular-nums',
+      }}
+    >
+      <span style={{ color: 'var(--t-terminal-ansi-bright-green, #22c55e)' }}>+{additions}</span>
+      <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{deletions}</span>
+    </span>
+  );
+}
+
+function ProgressRow({ label, done, muted }: { label: string; done: boolean; muted?: boolean }) {
+  return (
+    <div
+      style={{
+        minHeight: CHECK_ROW_HEIGHT,
+        paddingLeft: 10,
+        paddingRight: 10,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 9,
+        color: muted ? 'var(--t-text-muted)' : 'var(--t-text-secondary)',
+        fontSize: 12.5,
+        fontWeight: 500,
+        lineHeight: 1.35,
+        letterSpacing: '-0.005em',
+      }}
+    >
+      <span
+        style={{
+          width: 14,
+          height: 14,
+          borderRadius: 999,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          flexShrink: 0,
+          color: done ? 'var(--t-bg-card)' : 'var(--t-text-muted)',
+          background: done
+            ? 'color-mix(in srgb, var(--t-text-muted) 72%, transparent)'
+            : 'color-mix(in srgb, var(--t-text-muted) 12%, transparent)',
+        }}
+      >
+        {done ? <CheckIcon /> : null}
+      </span>
+      <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>{label}</span>
     </div>
   );
 }
@@ -155,19 +398,33 @@ const ROW_BASE: CSSProperties = {
   cursor: 'pointer',
   textAlign: 'left',
   fontSize: 13,
-  fontWeight: 500,
+  fontWeight: 520,
   letterSpacing: '-0.005em',
   color: 'var(--t-text)',
   fontFamily: 'inherit',
 };
 
-function Row({ icon, label, onClick, muted = false }: { icon: ReactNode; label: string; onClick: () => void; muted?: boolean }) {
+function Row({
+  icon,
+  label,
+  detail,
+  onClick,
+  muted = false,
+  tone,
+}: {
+  icon: ReactNode;
+  label: string;
+  detail?: string;
+  onClick: () => void;
+  muted?: boolean;
+  tone?: 'danger';
+}) {
   return (
     <button
       onClick={onClick}
       style={{
         ...ROW_BASE,
-        color: muted ? 'var(--t-text-muted)' : 'var(--t-text)',
+        color: tone === 'danger' ? '#dc2626' : muted ? 'var(--t-text-muted)' : 'var(--t-text)',
       }}
       onMouseEnter={(e) => {
         e.currentTarget.style.background = 'var(--t-panel-hover)';
@@ -178,41 +435,22 @@ function Row({ icon, label, onClick, muted = false }: { icon: ReactNode; label: 
     >
       <span style={{ display: 'inline-flex', flexShrink: 0, color: muted ? 'var(--t-text-muted)' : 'var(--t-text-secondary)' }}>{icon}</span>
       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+      {detail ? <span style={{ color: 'var(--t-text-muted)', fontWeight: 450, whiteSpace: 'nowrap' }}>{detail}</span> : null}
     </button>
   );
 }
 
-function ArtifactsBody({ repoPath, onOpenBrowser }: { repoPath: string | null; onOpenBrowser: () => void }) {
-  // Placeholder: artifact discovery (running localhost ports inside the
-  // packet worktree) is not wired yet. When it lands, replace this stub
-  // with the real list of detected URLs.
-  void repoPath;
+function StaticRow({ icon, label, muted = false }: { icon: ReactNode; label: string; muted?: boolean }) {
   return (
     <div
       style={{
-        paddingLeft: 10,
-        paddingRight: 10,
-        paddingTop: 4,
-        paddingBottom: 10,
-        fontSize: 12,
-        color: 'var(--t-text-muted)',
-        opacity: 0.7,
-        letterSpacing: '-0.005em',
+        ...ROW_BASE,
+        cursor: 'default',
+        color: muted ? 'var(--t-text-muted)' : 'var(--t-text)',
       }}
     >
-      <button
-        onClick={onOpenBrowser}
-        style={{
-          ...ROW_BASE,
-          paddingLeft: 0,
-          paddingRight: 0,
-          color: 'var(--t-text-muted)',
-          fontWeight: 500,
-        }}
-      >
-        <span style={{ display: 'inline-flex', flexShrink: 0 }}><GlobeIcon /></span>
-        <span>Open browser</span>
-      </button>
+      <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--t-text-muted)' }}>{icon}</span>
+      <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
     </div>
   );
 }
@@ -230,6 +468,16 @@ function DiffIcon() {
   );
 }
 
+function LaptopIcon() {
+  return (
+    <svg {...svgProps()}>
+      <rect x="4" y="5" width="16" height="11" rx="2" />
+      <path d="M3 19h18" />
+      <path d="M8 16h8" />
+    </svg>
+  );
+}
+
 function BranchIcon() {
   return (
     <svg {...svgProps()}>
@@ -238,6 +486,28 @@ function BranchIcon() {
       <circle cx="18" cy="8" r="2" />
       <path d="M6 8v8" />
       <path d="M18 10v2a4 4 0 0 1-4 4H8" />
+    </svg>
+  );
+}
+
+function CommitIcon() {
+  return (
+    <svg {...svgProps()}>
+      <path d="M3 12h6" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M15 12h6" />
+    </svg>
+  );
+}
+
+function WorkerIcon() {
+  return (
+    <svg {...svgProps()}>
+      <rect x="7" y="4" width="10" height="8" rx="3" />
+      <circle cx="9.5" cy="8" r=".6" fill="currentColor" stroke="none" />
+      <circle cx="14.5" cy="8" r=".6" fill="currentColor" stroke="none" />
+      <path d="M8 18a4 4 0 0 1 8 0" />
+      <path d="M12 12v2" />
     </svg>
   );
 }
@@ -256,6 +526,31 @@ function GlobeIcon() {
     <svg {...svgProps()}>
       <circle cx="12" cy="12" r="9" />
       <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18" />
+    </svg>
+  );
+}
+
+function GearIcon() {
+  return (
+    <svg {...svgProps()}>
+      <path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z" />
+      <path d="M19.4 15a1.7 1.7 0 0 0 .34 1.88l.05.05a2 2 0 1 1-2.83 2.83l-.05-.05A1.7 1.7 0 0 0 15 19.4a1.7 1.7 0 0 0-1 .6V20a2 2 0 1 1-4 0v-.08a1.7 1.7 0 0 0-1-.6 1.7 1.7 0 0 0-1.88.34l-.05.05a2 2 0 1 1-2.83-2.83l.05-.05A1.7 1.7 0 0 0 4.6 15a1.7 1.7 0 0 0-.6-1H4a2 2 0 1 1 0-4h.08a1.7 1.7 0 0 0 .6-1 1.7 1.7 0 0 0-.34-1.88l-.05-.05a2 2 0 1 1 2.83-2.83l.05.05A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-.6V4a2 2 0 1 1 4 0v.08a1.7 1.7 0 0 0 1 .6 1.7 1.7 0 0 0 1.88-.34l.05-.05a2 2 0 1 1 2.83 2.83l-.05.05A1.7 1.7 0 0 0 19.4 9c.24.35.44.68.6 1H20a2 2 0 1 1 0 4h-.08c-.16.32-.36.65-.52 1Z" />
+    </svg>
+  );
+}
+
+function ChevronIcon() {
+  return (
+    <svg {...svgProps(14)}>
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+function CheckIcon() {
+  return (
+    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m5 12 4 4 10-10" />
     </svg>
   );
 }

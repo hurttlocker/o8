@@ -3,7 +3,7 @@
 import React, { memo, useMemo, useRef, useState } from 'react';
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ChevronDown, FolderOpen, SlidersHorizontal } from '../lucide-shims';
-import { DesktopToolCallStack } from '../DesktopToolCallStack';
+import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import {
   THEME_ACCENT_SOFT,
   THEME_ACCENT,
@@ -157,7 +157,7 @@ export const AgentTurnGroup = memo(function AgentTurnGroup({
               display: 'flex',
               flexDirection: 'column',
               gap: 8,
-              maxWidth: '92%',
+              maxWidth: 'min(100%, var(--cortex-chat-column-max))',
             }}>
               <div style={{
                 display: 'flex',
@@ -426,7 +426,7 @@ export const ActiveTurnCard = memo(function ActiveTurnCard({
       display: 'flex',
       flexDirection: 'column',
       gap: 10,
-      maxWidth: '92%',
+      maxWidth: 'min(100%, var(--cortex-chat-column-max))',
       padding: '12px 14px',
       borderRadius: 18,
       background: 'linear-gradient(180deg, var(--t-panel) 0%, var(--t-panel-translucent) 100%)',
@@ -471,7 +471,7 @@ export const ActiveTurnCard = memo(function ActiveTurnCard({
       </div>
 
       {liveToolCalls.length > 0 ? (
-        <DesktopToolCallStack toolCalls={liveToolCalls} />
+        <ToolCallChipCluster toolCalls={liveToolCalls} />
       ) : null}
 
       {mdBlocks.length > 0 ? (
@@ -581,6 +581,12 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
   };
 
   const shouldVirtualize = groupedTranscript.length > 20;
+  const transcriptColumnStyle: React.CSSProperties = {
+    width: '100%',
+    maxWidth: 'var(--cortex-chat-column-max)',
+    marginRight: 'auto',
+    marginLeft: 'auto',
+  };
 
   return (
     <div style={{ position: 'relative', flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -592,9 +598,9 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
           flex: 1,
           overflowY: 'auto',
           paddingTop: topInset,
-          paddingRight: 14,
+          paddingRight: 'var(--cortex-chat-gutter)',
           paddingBottom: 12,
-          paddingLeft: 14,
+          paddingLeft: 'var(--cortex-chat-gutter)',
         }}
       >
         {loading ? (
@@ -634,79 +640,83 @@ export const DesktopTranscriptPane = memo(function DesktopTranscriptPane({
                     transform: `translateY(${virtualItem.start}px)`,
                   }}
                 >
-                  {group.kind !== 'agent' ? (
-                    group.entries.map((entry) => {
-                      const entryIndex = normalizedTranscript.findIndex((c) => c.id === entry.id);
-                      return (
-                        <Bubble
-                          key={entry.id}
-                          entry={entry}
-                          previousEntry={entryIndex > 0 ? normalizedTranscript[entryIndex - 1] : null}
-                          agentName={currentAgentName}
-                          isNew={getIsNewEntry(entry.id)}
-                          onOpenMermaid={onOpenMermaid}
-                          onRunInTerminal={onRunInTerminal}
-                        />
-                      );
-                    })
-                  ) : (
-                    <AgentTurnGroup
-                      group={group}
-                      previousGroup={virtualItem.index > 0 ? groupedTranscript[virtualItem.index - 1] : null}
-                      transcript={normalizedTranscript}
-                      currentAgentName={currentAgentName}
-                      getIsNewEntry={getIsNewEntry}
-                      onOpenMermaid={onOpenMermaid}
-                      onRunInTerminal={onRunInTerminal}
-                      onOpenDiff={onOpenDiff}
-                      onOpenFile={onOpenFile}
-                      currentWorkspace={currentWorkspace}
-                    />
-                  )}
+                  <div style={transcriptColumnStyle}>
+                    {group.kind !== 'agent' ? (
+                      group.entries.map((entry) => {
+                        const entryIndex = normalizedTranscript.findIndex((c) => c.id === entry.id);
+                        return (
+                          <Bubble
+                            key={entry.id}
+                            entry={entry}
+                            previousEntry={entryIndex > 0 ? normalizedTranscript[entryIndex - 1] : null}
+                            agentName={currentAgentName}
+                            isNew={getIsNewEntry(entry.id)}
+                            onOpenMermaid={onOpenMermaid}
+                            onRunInTerminal={onRunInTerminal}
+                          />
+                        );
+                      })
+                    ) : (
+                      <AgentTurnGroup
+                        group={group}
+                        previousGroup={virtualItem.index > 0 ? groupedTranscript[virtualItem.index - 1] : null}
+                        transcript={normalizedTranscript}
+                        currentAgentName={currentAgentName}
+                        getIsNewEntry={getIsNewEntry}
+                        onOpenMermaid={onOpenMermaid}
+                        onRunInTerminal={onRunInTerminal}
+                        onOpenDiff={onOpenDiff}
+                        onOpenFile={onOpenFile}
+                        currentWorkspace={currentWorkspace}
+                      />
+                    )}
+                  </div>
                 </div>
               );
             })}
           </div>
         ) : (
           groupedTranscript.map((group, groupIndex) => {
-            if (group.kind !== 'agent') {
-              return group.entries.map((entry) => {
-                const entryIndex = normalizedTranscript.findIndex((candidate) => candidate.id === entry.id);
-                const isNew = getIsNewEntry(entry.id);
-                return (
-                  <Bubble
-                    key={entry.id}
-                    entry={entry}
-                    previousEntry={entryIndex > 0 ? normalizedTranscript[entryIndex - 1] : null}
-                    agentName={currentAgentName}
-                    isNew={isNew}
+            return (
+              <div key={group.id} style={transcriptColumnStyle}>
+                {group.kind !== 'agent' ? (
+                  group.entries.map((entry) => {
+                    const entryIndex = normalizedTranscript.findIndex((candidate) => candidate.id === entry.id);
+                    const isNew = getIsNewEntry(entry.id);
+                    return (
+                      <Bubble
+                        key={entry.id}
+                        entry={entry}
+                        previousEntry={entryIndex > 0 ? normalizedTranscript[entryIndex - 1] : null}
+                        agentName={currentAgentName}
+                        isNew={isNew}
+                        onOpenMermaid={onOpenMermaid}
+                        onRunInTerminal={onRunInTerminal}
+                      />
+                    );
+                  })
+                ) : (
+                  <AgentTurnGroup
+                    group={group}
+                    previousGroup={groupIndex > 0 ? groupedTranscript[groupIndex - 1] : null}
+                    transcript={normalizedTranscript}
+                    currentAgentName={currentAgentName}
+                    getIsNewEntry={getIsNewEntry}
                     onOpenMermaid={onOpenMermaid}
                     onRunInTerminal={onRunInTerminal}
+                    onOpenDiff={onOpenDiff}
+                    onOpenFile={onOpenFile}
+                    currentWorkspace={currentWorkspace}
                   />
-                );
-              });
-            }
-
-            return (
-              <AgentTurnGroup
-                key={group.id}
-                group={group}
-                previousGroup={groupIndex > 0 ? groupedTranscript[groupIndex - 1] : null}
-                transcript={normalizedTranscript}
-                currentAgentName={currentAgentName}
-                getIsNewEntry={getIsNewEntry}
-                onOpenMermaid={onOpenMermaid}
-                onRunInTerminal={onRunInTerminal}
-                onOpenDiff={onOpenDiff}
-                onOpenFile={onOpenFile}
-                currentWorkspace={currentWorkspace}
-              />
+                )}
+              </div>
             );
           })
         )}
 
-      {showActiveTurn && (
+        {showActiveTurn && (
           <div style={{
+            ...transcriptColumnStyle,
             display: 'flex',
             paddingTop: 8,
             paddingRight: 16,

@@ -54,6 +54,11 @@ interface WorkspaceHeaderStripProps {
   /** Active tab id from the headerTabs list — drives which pill renders
    *  as filled. */
   headerActiveTabId?: string | null;
+  /** Header-owned toggle for the Codex-style project context rail.
+   *  Hidden unless the active workspace tab can render that rail. */
+  projectContextRailAvailable?: boolean;
+  projectContextRailVisible?: boolean;
+  onToggleProjectContextRail?: () => void;
   /** Side-by-side pill strips for splits — when populated (2+ entries)
    *  the center slot renders two pill rows separated by a small vertical
    *  divider, one per split workspace. Replaces headerLabel + headerTabs
@@ -62,6 +67,8 @@ interface WorkspaceHeaderStripProps {
     workspaceId: string;
     tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
     activeTabId: string | null;
+    contextRailAvailable?: boolean;
+    contextRailVisible?: boolean;
   }> | null;
   /** Optional action callbacks for the `…` menu next to the title.
    *  Items only render when the corresponding callback is provided —
@@ -105,9 +112,13 @@ export function WorkspaceHeaderStrip({
   onPlayContextMenu,
   headerTabs,
   headerActiveTabId,
+  projectContextRailAvailable = false,
+  projectContextRailVisible = true,
+  onToggleProjectContextRail,
   splitHeaderWorkspaces,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
+  const showProjectContextToggle = projectContextRailAvailable && Boolean(onToggleProjectContextRail);
   const tabs = headerTabs ?? [];
   const isSplit = Boolean(splitHeaderWorkspaces && splitHeaderWorkspaces.length >= 2);
   // Split mode → side-by-side pill strips. Single 2+ tabs → pill strip.
@@ -163,8 +174,17 @@ export function WorkspaceHeaderStrip({
         </div>
       ) : null}
       right={
-        hasPlayButton || onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
+        showProjectContextToggle || hasPlayButton || onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
           <>
+            {showProjectContextToggle ? (
+              <TitleBarButton
+                icon={<IconInfoCircle />}
+                label={projectContextRailVisible ? 'Hide project context' : 'Show project context'}
+                title={projectContextRailVisible ? 'Hide project context' : 'Show project context'}
+                onClick={onToggleProjectContextRail}
+                active={projectContextRailVisible}
+              />
+            ) : null}
             {hasPlayButton ? (
               <HeaderPlayButton
                 onSpawnOrchestrator={onSpawnOrchestrator}
@@ -215,6 +235,8 @@ function SplitHeaderPillStrips({
     workspaceId: string;
     tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
     activeTabId: string | null;
+    contextRailAvailable?: boolean;
+    contextRailVisible?: boolean;
   }>;
 }) {
   const dispatchSpawn = useCallback((workspaceId: string, kind: 'orchestrator' | 'chat' | 'terminal') => {
@@ -222,6 +244,9 @@ function SplitHeaderPillStrips({
   }, []);
   const dispatchClose = useCallback((workspaceId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId } }));
+  }, []);
+  const dispatchToggleProjectContextRail = useCallback((workspaceId: string) => {
+    window.dispatchEvent(new CustomEvent('o8:request-toggle-context-rail', { detail: { workspaceId } }));
   }, []);
   // Human-readable pane name for aria-labels so split-mode controls
   // don't collide ("New tab (left pane)" vs "New tab (right pane)").
@@ -256,6 +281,15 @@ function SplitHeaderPillStrips({
               />
             </div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingLeft: 4, paddingRight: 6, flexShrink: 0 }}>
+              {workspace.contextRailAvailable ? (
+                <TitleBarButton
+                  icon={<IconInfoCircle />}
+                  label={workspace.contextRailVisible === false ? `Show project context (${paneLabel(index)})` : `Hide project context (${paneLabel(index)})`}
+                  title={workspace.contextRailVisible === false ? 'Show project context' : 'Hide project context'}
+                  onClick={() => dispatchToggleProjectContextRail(workspace.workspaceId)}
+                  active={workspace.contextRailVisible !== false}
+                />
+              ) : null}
               <HeaderPlayButton
                 onSpawnOrchestrator={() => dispatchSpawn(workspace.workspaceId, 'orchestrator')}
                 onSpawnChat={() => dispatchSpawn(workspace.workspaceId, 'chat')}
@@ -303,6 +337,26 @@ function SplitPaneCloseButton({ onClick, paneLabel }: { onClick: () => void; pan
         <path d="M6 6l12 12M18 6L6 18" />
       </svg>
     </button>
+  );
+}
+
+function IconInfoCircle({ size = 16 }: { size?: number }) {
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0 }}
+    >
+      <circle cx="12" cy="12" r="9" />
+      <path d="M12 10v6" />
+      <path d="M12 7.5h.01" />
+    </svg>
   );
 }
 
@@ -482,7 +536,7 @@ function HeaderPill({
   );
 }
 
-function PillRuntimeGlyph({ kind, runtime }: { kind: string; runtime: string | null }) {
+function PillRuntimeGlyph({ kind }: { kind: string; runtime: string | null }) {
   // Single-color minimal glyph so the pill stays Codex-flat. The full
   // brand-colored runtime icons (CodexIcon / ClaudeIcon / GeminiIcon /
   // OpenCodeIcon) sit too heavily in a crowded strip. If we want to

@@ -3,7 +3,7 @@
 /**
  * MessageActions — inline action bar under each agent message.
  *
- * Default mode:  ▶ Play  📋 Copy  ↻ Retry  ··· More
+ * Default mode:  ▶ Play  📋 Copy  👍 👎  🔖 Keep  ⎇ Fork
  * Playing mode:  ⏪ 10s  ⏸ Pause  ⏩ 10s  1x  0:24/1:47  ■ Stop
  *
  * The row morphs in place — zero new UI elements (Option A).
@@ -13,14 +13,16 @@
 import { memo, useCallback, useEffect, useState } from 'react';
 import {
   Check,
+  Bookmark,
   Copy,
-  MoreHorizontal,
+  GitBranch,
   Pause,
   Play,
-  RefreshCw,
   RotateCcw,
   RotateCw,
   Square,
+  ThumbsDown,
+  ThumbsUp,
   Volume2,
 } from './lucide-shims';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
@@ -28,26 +30,28 @@ import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/en
 const THEME_ACCENT = 'var(--t-accent, #2563eb)';
 const THEME_ACCENT_SOFT = 'var(--t-accent-soft, rgba(37, 99, 235, 0.08))';
 const THEME_ACCENT_BORDER = 'var(--t-accent-border, rgba(37, 99, 235, 0.22))';
-const THEME_BG_CARD = 'var(--t-bg-card, rgba(148, 163, 184, 0.08))';
 
 interface MessageActionsProps {
   messageId: string;
   messageText: string;
-  onRetry?: () => void;
+  canPinContext?: boolean;
+  isPinnedContext?: boolean;
+  onTogglePinContext?: () => void;
+  onFork?: () => void;
 }
 
 const iconBtnBase: React.CSSProperties = {
   display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 32,
-  height: 32,
-  borderRadius: 8,
-  border: '1px solid var(--t-panel-border)',
-  background: THEME_BG_CARD,
+  width: 26,
+  height: 26,
+  borderRadius: 7,
+  border: '1px solid transparent',
+  background: 'transparent',
   color: 'var(--t-text-secondary)',
   cursor: 'pointer',
-  transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+  transition: 'background-color 140ms ease, border-color 140ms ease, color 140ms ease',
   paddingTop: 0,
   paddingRight: 0,
   paddingBottom: 0,
@@ -66,9 +70,13 @@ function formatTime(s: number): string {
 export const MessageActions = memo(function MessageActions({
   messageId,
   messageText,
-  onRetry,
+  canPinContext = false,
+  isPinnedContext = false,
+  onTogglePinContext,
+  onFork,
 }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
+  const [rating, setRating] = useState<'up' | 'down' | null>(null);
   const [ttsState, setTtsState] = useState<PlaybackState>('idle');
   const [isThisMessage, setIsThisMessage] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -131,9 +139,9 @@ export const MessageActions = memo(function MessageActions({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 2,
-          marginTop: 8,
-          paddingTop: 6,
+          gap: 1,
+          marginTop: 7,
+          paddingTop: 5,
           borderTop: '1px solid var(--t-divider)',
         }}
       >
@@ -145,7 +153,7 @@ export const MessageActions = memo(function MessageActions({
           aria-label="Back 10 seconds"
           style={{ ...iconBtnBase, color: THEME_ACCENT }}
         >
-          <RotateCcw size={15} strokeWidth={1.8} />
+          <RotateCcw size={13} strokeWidth={1.8} />
         </button>
 
         {/* Pause / Resume */}
@@ -158,20 +166,20 @@ export const MessageActions = memo(function MessageActions({
           title={ttsState === 'playing' ? 'Pause' : 'Resume'}
           aria-label={ttsState === 'playing' ? 'Pause' : 'Resume'}
           style={{
-          ...iconBtnBase,
-          width: 36,
-          height: 36,
-          background: THEME_ACCENT_SOFT,
-          borderColor: THEME_ACCENT_BORDER,
+            ...iconBtnBase,
+            width: 28,
+            height: 28,
+            background: THEME_ACCENT_SOFT,
+            borderColor: THEME_ACCENT_BORDER,
             color: THEME_ACCENT,
           }}
         >
           {ttsState === 'loading' ? (
-            <Volume2 size={17} strokeWidth={1.8} className="spin" />
+            <Volume2 size={14} strokeWidth={1.8} className="spin" />
           ) : ttsState === 'playing' ? (
-            <Pause size={17} strokeWidth={2} />
+            <Pause size={14} strokeWidth={2} />
           ) : (
-            <Play size={17} strokeWidth={2} />
+            <Play size={14} strokeWidth={2} />
           )}
         </button>
 
@@ -183,7 +191,7 @@ export const MessageActions = memo(function MessageActions({
           aria-label="Forward 10 seconds"
           style={{ ...iconBtnBase, color: THEME_ACCENT }}
         >
-          <RotateCw size={15} strokeWidth={1.8} />
+          <RotateCw size={13} strokeWidth={1.8} />
         </button>
 
         {/* Speed */}
@@ -200,18 +208,18 @@ export const MessageActions = memo(function MessageActions({
             alignItems: 'center',
             justifyContent: 'center',
             width: 'auto',
-            height: 32,
-            borderRadius: 8,
+            height: 26,
+            borderRadius: 7,
             border: '1px solid transparent',
             background: 'transparent',
             cursor: 'pointer',
-            transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+            transition: 'color 140ms ease',
             paddingTop: 0,
-            paddingRight: 6,
+            paddingRight: 5,
             paddingBottom: 0,
-            paddingLeft: 6,
-            fontSize: 11,
-            fontWeight: 700,
+            paddingLeft: 5,
+            fontSize: 10,
+            fontWeight: 600,
             fontFamily: 'var(--font-sans-system)',
             color: rate === 1 ? 'var(--t-text-faint)' : THEME_ACCENT,
           }}
@@ -221,7 +229,7 @@ export const MessageActions = memo(function MessageActions({
 
         {/* Time */}
         <span style={{
-          fontSize: 11,
+          fontSize: 10,
           fontWeight: 500,
           color: 'var(--t-text-faint)',
           fontFamily: 'SF Mono, ui-monospace, monospace',
@@ -239,27 +247,27 @@ export const MessageActions = memo(function MessageActions({
           onClick={() => ttsEngine.stop()}
           title="Stop"
           aria-label="Stop playback"
-        style={{
-          ...iconBtnBase,
-          marginLeft: 'auto',
-          color: '#ef4444',
+          style={{
+            ...iconBtnBase,
+            marginLeft: 'auto',
+            color: '#ef4444',
           }}
         >
-          <Square size={14} strokeWidth={2} fill="#ef4444" />
+          <Square size={11} strokeWidth={2} fill="#ef4444" />
         </button>
       </div>
     );
   }
 
-  // ── Default mode: ▶ 📋 ↻ ··· ──
+  // ── Default mode: ▶ 📋 👍 👎 🔖 ⎇ ──
   return (
     <div
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 4,
-          marginTop: 8,
-          paddingTop: 4,
+          gap: 3,
+          marginTop: 7,
+          paddingTop: 5,
           borderTop: '1px solid var(--t-divider-subtle)',
         }}
       >
@@ -270,7 +278,7 @@ export const MessageActions = memo(function MessageActions({
         aria-label="Play"
         style={{ ...iconBtnBase }}
       >
-        <Play size={16} strokeWidth={1.8} />
+        <Play size={14} strokeWidth={1.8} />
       </button>
 
       <button
@@ -280,31 +288,66 @@ export const MessageActions = memo(function MessageActions({
         aria-label="Copy message"
         style={{
           ...iconBtnBase,
-          background: copied ? 'rgba(34, 197, 94, 0.08)' : THEME_BG_CARD,
-          borderColor: copied ? 'rgba(34, 197, 94, 0.15)' : 'var(--t-panel-border)',
+          background: copied ? 'rgba(34, 197, 94, 0.08)' : 'transparent',
+          borderColor: copied ? 'rgba(34, 197, 94, 0.15)' : 'transparent',
           color: copied ? '#22c55e' : 'var(--t-text-secondary)',
         }}
       >
-        {copied ? <Check size={16} strokeWidth={2} /> : <Copy size={16} strokeWidth={1.8} />}
+        {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.8} />}
       </button>
 
       <button
         type="button"
-        onClick={onRetry ?? (() => {})}
-        title="Retry"
-        aria-label="Retry"
-        style={{ ...iconBtnBase }}
+        onClick={() => setRating((value) => (value === 'up' ? null : 'up'))}
+        title="Good response"
+        aria-label="Good response"
+        aria-pressed={rating === 'up'}
+        style={{
+          ...iconBtnBase,
+          color: rating === 'up' ? '#16a34a' : 'var(--t-text-secondary)',
+        }}
       >
-        <RefreshCw size={16} strokeWidth={1.8} />
+        <ThumbsUp size={14} strokeWidth={1.8} />
       </button>
 
       <button
         type="button"
-        title="More actions"
-        aria-label="More actions"
+        onClick={() => setRating((value) => (value === 'down' ? null : 'down'))}
+        title="Bad response"
+        aria-label="Bad response"
+        aria-pressed={rating === 'down'}
+        style={{
+          ...iconBtnBase,
+          color: rating === 'down' ? '#ef4444' : 'var(--t-text-secondary)',
+        }}
+      >
+        <ThumbsDown size={14} strokeWidth={1.8} />
+      </button>
+
+      {canPinContext ? (
+        <button
+          type="button"
+          onClick={onTogglePinContext}
+          title={isPinnedContext ? 'Remove from repo context' : 'Keep in repo context'}
+          aria-label={isPinnedContext ? 'Remove from repo context' : 'Keep in repo context'}
+          aria-pressed={isPinnedContext}
+          style={{
+            ...iconBtnBase,
+            color: isPinnedContext ? 'var(--yellow)' : 'var(--t-text-secondary)',
+          }}
+        >
+          <Bookmark size={14} strokeWidth={1.8} fill={isPinnedContext ? 'currentColor' : 'none'} />
+        </button>
+      ) : null}
+
+      <button
+        type="button"
+        onClick={onFork}
+        title="Fork from here"
+        aria-label="Fork from here"
         style={{ ...iconBtnBase }}
       >
-        <MoreHorizontal size={16} strokeWidth={1.8} />
+        <GitBranch size={14} strokeWidth={1.8} />
       </button>
     </div>
   );

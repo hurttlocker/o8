@@ -1,23 +1,24 @@
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { Bookmark, Brain, Check, ChevronRight, Copy, FileText, GitBranch, Loader2, Pencil, RefreshCw, Square, ThumbsDown, ThumbsUp, Trash2, Volume2, VolumeOff } from '../lucide-shims';
+import { memo, useCallback, useState } from 'react';
+import { Check, ChevronRight, Copy, FileText, Pencil } from '../lucide-shims';
 
-import { DesktopToolCallStack } from '../DesktopToolCallStack';
+import { MessageActions } from '../MessageActions';
+import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import { renderLLMMarkdown } from '../LLMMarkdown';
 import { ChainOfThought } from './ChainOfThought';
 import { deriveFileChangesFromTools, THEME_ACCENT, THEME_ACCENT_BORDER, THEME_ACCENT_SOFT, THEME_ACCENT_SOFT_STRONG, THEME_BG_CARD, THEME_PANEL_GLASS, type FileChangePreview, type LLMMessage, type ToolCallInfo } from './shared';
 
 const ACTION_BTN_STYLE: React.CSSProperties = {
-  display: 'flex',
+  display: 'inline-flex',
   alignItems: 'center',
   justifyContent: 'center',
-  width: 28,
-  height: 28,
-  border: '1px solid var(--t-panel-border)',
-  background: THEME_BG_CARD,
+  width: 26,
+  height: 26,
+  border: '1px solid transparent',
+  background: 'transparent',
   color: 'var(--t-text-secondary)',
   cursor: 'pointer',
-  borderRadius: 8,
-  transition: 'color 150ms, background 150ms, border-color 150ms',
+  borderRadius: 7,
+  transition: 'background-color 140ms ease, border-color 140ms ease, color 140ms ease',
   paddingTop: 0,
   paddingRight: 0,
   paddingBottom: 0,
@@ -96,8 +97,8 @@ function ActionButton({ active, activeColor, icon, label, onClick }: { active?: 
       onMouseLeave={(event) => {
         if (active) return;
         event.currentTarget.style.color = 'var(--t-text-faint)';
-        event.currentTarget.style.background = THEME_BG_CARD;
-        event.currentTarget.style.borderColor = 'var(--t-panel-border)';
+        event.currentTarget.style.background = 'transparent';
+        event.currentTarget.style.borderColor = 'transparent';
       }}
     >
       {icon}
@@ -158,9 +159,7 @@ function FileChangeCard({ change }: { change: FileChangePreview }) {
 function MessageBubbleBase({
   message,
   isLast,
-  onRetry,
   onEdit,
-  onDelete,
   onFork,
   onApplyToFile,
   onApplyDiff,
@@ -179,12 +178,8 @@ function MessageBubbleBase({
   onRunInTerminal?: (command: string) => void;
 }) {
   const [copied, setCopied] = useState(false);
-  const [liked, setLiked] = useState<'up' | 'down' | null>(null);
   const [bookmarked, setBookmarked] = useState(false);
   const [hovered, setHovered] = useState(false);
-  const [ttsState, setTtsState] = useState<'idle' | 'loading' | 'playing'>('idle');
-  const [ttsProgress, setTtsProgress] = useState(0);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
   const isUser = message.role === 'user';
   const syntheticNarrativeToolCall = !isUser && !(message.toolCalls?.length) ? toolCallFromNarrative(message.content) : null;
   const visibleContent = !isUser && syntheticNarrativeToolCall ? '' : message.content;
@@ -194,57 +189,6 @@ function MessageBubbleBase({
     ? [...(message.toolCalls ?? []).map(normalizeExecToolCall), ...(syntheticNarrativeToolCall ? [syntheticNarrativeToolCall] : [])]
       .filter((tool) => !STACK_HIDDEN_TOOL_NAMES.has(tool.name.toLowerCase()))
     : [];
-
-  useEffect(() => () => {
-    if (audioRef.current) {
-      audioRef.current.pause();
-      audioRef.current = null;
-    }
-  }, []);
-
-  const handleSpeak = useCallback(async () => {
-    if (ttsState === 'playing') {
-      if (audioRef.current) {
-        audioRef.current.pause();
-        audioRef.current = null;
-      }
-      setTtsState('idle');
-      setTtsProgress(0);
-      return;
-    }
-    if (ttsState === 'loading') return;
-    setTtsState('loading');
-    try {
-      const cleanText = visibleContent.replace(/```[\s\S]*?```/g, ' code block ').replace(/`([^`]+)`/g, '$1').replace(/!\[[^\]]*\]\([^)]+\)/g, ' image ').replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[#*_~|>/]/g, '').replace(/\n{2,}/g, '. ').replace(/\n/g, ' ').trim();
-      const response = await fetch('/api/tts', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ text: cleanText }) });
-      if (!response.ok) throw new Error('TTS failed');
-      const blob = await response.blob();
-      const url = URL.createObjectURL(blob);
-      const audio = new Audio(url);
-      audioRef.current = audio;
-      audio.addEventListener('timeupdate', () => {
-        if (audio.duration > 0) {
-          setTtsProgress((audio.currentTime / audio.duration) * 100);
-        }
-      });
-      audio.addEventListener('ended', () => {
-        setTtsState('idle');
-        setTtsProgress(0);
-        URL.revokeObjectURL(url);
-        audioRef.current = null;
-      });
-      audio.addEventListener('error', () => {
-        setTtsState('idle');
-        setTtsProgress(0);
-        audioRef.current = null;
-      });
-      await audio.play();
-      setTtsState('playing');
-    } catch {
-      setTtsState('idle');
-      setTtsProgress(0);
-    }
-  }, [ttsState, visibleContent]);
 
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(visibleContent);
@@ -284,8 +228,8 @@ function MessageBubbleBase({
       {!isUser && (message.thinkingSteps || message.thinking) ? <ChainOfThought steps={message.thinkingSteps || []} thinking={message.thinking} durationMs={message.thinkingDurationMs} /> : null}
       {!isUser && fileChanges.length > 0 ? <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: '90%', marginTop: 4 }}>{fileChanges.map((change) => <FileChangeCard key={change.id} change={change} />)}</div> : null}
       {!isUser && visibleToolCalls.length > 0 ? (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxWidth: '90%', marginTop: 4 }}>
-          <DesktopToolCallStack toolCalls={visibleToolCalls} />
+        <div style={{ marginTop: 4, width: '100%' }}>
+          <ToolCallChipCluster toolCalls={visibleToolCalls} />
         </div>
       ) : null}
       {!isUser && message.sources && message.sources.length > 0 ? (
@@ -312,35 +256,16 @@ function MessageBubbleBase({
         </div>
       ) : null}
 
-      {!isUser && ttsState !== 'idle' ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 6, paddingBottom: 2, paddingLeft: 2, maxWidth: '90%', animation: 'llmFadeIn 200ms ease-out' }}>
-          <button type="button" onClick={handleSpeak} style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 32, height: 32, borderRadius: '50%', border: 'none', background: ttsState === 'playing' ? '#3b82f6' : '#e2e8f0', color: ttsState === 'playing' ? '#ffffff' : '#94a3b8', cursor: 'pointer', transition: 'all 200ms', flexShrink: 0 }}>
-            {ttsState === 'loading' ? <Loader2 size={16} style={{ animation: 'spin 1s linear infinite' }} /> : <Square size={12} fill="currentColor" />}
-          </button>
-          <div style={{ flex: 1, height: 4, background: '#e2e8f0', borderRadius: 2, overflow: 'hidden', minWidth: 100 }}>
-            {ttsState === 'loading' ? <div style={{ width: '30%', height: '100%', background: 'linear-gradient(90deg, #3b82f6, #60a5fa, #3b82f6)', borderRadius: 2, animation: 'ttsShimmer 1.5s ease-in-out infinite' }} /> : <div style={{ width: `${ttsProgress}%`, height: '100%', background: '#3b82f6', borderRadius: 2, transition: 'width 100ms linear' }} />}
-          </div>
-          {ttsState === 'playing' ? <div style={{ display: 'flex', alignItems: 'center', gap: 2, marginLeft: 4 }}>{[0, 1, 2, 3, 4].map((index) => <div key={index} style={{ width: 3, background: '#3b82f6', borderRadius: 1.5, animation: `ttsWave 0.8s ease-in-out ${index * 0.1}s infinite alternate` }} />)}</div> : null}
-        </div>
-      ) : null}
-
       {!isUser && hasVisibleContent ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 2, paddingTop: 2, paddingBottom: 4, opacity: hovered || isLast ? 1 : 0, transition: 'opacity 150ms' }}>
-          {message.model ? <span style={{ fontSize: 11, color: 'var(--t-text-muted)', marginRight: 4, fontFamily: 'var(--font-sans-system)' }}>{message.model}</span> : null}
-          {message.tokens ? <span style={{ fontSize: 10, color: 'var(--t-text-faint)', marginRight: 4, fontFamily: 'ui-monospace, monospace' }}>{message.tokens.input + message.tokens.output} tok</span> : null}
-          {message.costUsd != null && message.costUsd > 0 ? <span style={{ fontSize: 10, color: 'var(--t-text-faint)', marginRight: 6, fontFamily: 'ui-monospace, monospace' }}>${message.costUsd.toFixed(4)}</span> : null}
-          {message.recalledFacts != null && message.recalledFacts > 0 ? <span title={`${message.recalledFacts} memor${message.recalledFacts === 1 ? 'y' : 'ies'} recalled from Cortex`} style={{ display: 'inline-flex', alignItems: 'center', gap: 3, fontSize: 10, color: '#8b5cf6', marginRight: 4, fontFamily: 'var(--font-sans-system)' }}><Brain size={10} />{message.recalledFacts}</span> : null}
-          <div style={{ width: 1, height: 14, background: 'var(--t-divider)', marginLeft: 2, marginRight: 2 }} />
-          <ActionButton icon={copied ? <Check size={14} /> : <Copy size={14} />} label={copied ? 'Copied' : 'Copy'} active={copied} onClick={handleCopy} />
-          <ActionButton icon={ttsState === 'loading' ? <Loader2 size={14} style={{ animation: 'spin 1s linear infinite' }} /> : ttsState === 'playing' ? <VolumeOff size={14} /> : <Volume2 size={14} />} label={ttsState === 'playing' ? 'Stop' : ttsState === 'loading' ? 'Loading...' : 'Read aloud'} active={ttsState === 'playing'} activeColor="#3b82f6" onClick={handleSpeak} />
-          <ActionButton icon={<RefreshCw size={14} />} label="Retry" onClick={() => onRetry?.()} />
-          <div style={{ width: 1, height: 14, background: '#e2e8f0', marginLeft: 2, marginRight: 2 }} />
-          <ActionButton icon={<ThumbsUp size={14} />} label="Good response" active={liked === 'up'} activeColor="#10b981" onClick={() => setLiked((value) => value === 'up' ? null : 'up')} />
-          <ActionButton icon={<ThumbsDown size={14} />} label="Bad response" active={liked === 'down'} activeColor="#ef4444" onClick={() => setLiked((value) => value === 'down' ? null : 'down')} />
-          <ActionButton icon={<Bookmark size={14} fill={bookmarked ? '#3b82f6' : 'none'} />} label={bookmarked ? 'Bookmarked' : 'Bookmark'} active={bookmarked} activeColor="#3b82f6" onClick={() => setBookmarked((value) => !value)} />
-          <div style={{ width: 1, height: 14, background: '#e2e8f0', marginLeft: 2, marginRight: 2 }} />
-          {onFork ? <ActionButton icon={<GitBranch size={14} />} label="Fork from here" onClick={onFork} /> : null}
-          {onDelete ? <ActionButton icon={<Trash2 size={14} />} label="Delete message" onClick={onDelete} /> : null}
+        <div style={{ width: '100%' }}>
+          <MessageActions
+            messageId={message.id}
+            messageText={visibleContent}
+            canPinContext
+            isPinnedContext={bookmarked}
+            onTogglePinContext={() => setBookmarked((value) => !value)}
+            onFork={onFork}
+          />
         </div>
       ) : null}
 
@@ -348,7 +273,6 @@ function MessageBubbleBase({
         <div style={{ display: 'flex', gap: 2, paddingTop: 2, opacity: hovered ? 1 : 0, transition: 'opacity 150ms' }}>
           <ActionButton icon={<Pencil size={13} />} label="Edit message" onClick={() => onEdit?.(visibleContent)} />
           <ActionButton icon={copied ? <Check size={13} /> : <Copy size={13} />} label="Copy" active={copied} onClick={handleCopy} />
-          {onDelete ? <ActionButton icon={<Trash2 size={13} />} label="Delete" onClick={onDelete} /> : null}
         </div>
       ) : null}
     </div>

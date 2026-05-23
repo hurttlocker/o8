@@ -2,10 +2,10 @@
 
 import React, { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import Image from 'next/image';
-import { ChevronRight, SlidersHorizontal, Sparkles } from '../lucide-shims';
+import { SlidersHorizontal, Sparkles } from '../lucide-shims';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
 import { ThinkingStrip } from '@/components/desktop/orchestrator/ThinkingStrip';
-import { DesktopToolCallStack } from '../DesktopToolCallStack';
+import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import { MessageActions } from '../MessageActions';
 import { isSlashCommandText } from '@/lib/slash-commands';
 import { ttsEngine } from '@/lib/tts/engine';
@@ -28,7 +28,6 @@ import {
   isImageMedia,
 } from './shared';
 import { renderMarkdownBlocks } from './markdown';
-import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { BubbleProps } from './types';
 
 export const Bubble = memo(function Bubble({ entry, previousEntry, agentName, isNew, onOpenMermaid, onRunInTerminal }: BubbleProps) {
@@ -566,10 +565,9 @@ export const Bubble = memo(function Bubble({ entry, previousEntry, agentName, is
         </div>
       ) : null}
       {hasToolCalls ? (
-        <CollapsibleToolCalls
-          toolCalls={entry.toolCalls ?? []}
-          marginTop={hasText || hasMedia ? 12 : 0}
-        />
+        <div style={{ marginTop: hasText || hasMedia ? 12 : 0 }}>
+          <ToolCallChipCluster toolCalls={entry.toolCalls ?? []} />
+        </div>
       ) : null}
       {entry.role === 'assistant' && hasText ? (
         <MessageActions messageId={entry.id} messageText={displayText} />
@@ -596,58 +594,3 @@ export const Bubble = memo(function Bubble({ entry, previousEntry, agentName, is
     </article>
   );
 });
-
-function CollapsibleToolCalls({ toolCalls, marginTop }: { toolCalls: MobileTranscriptToolCall[]; marginTop: number }) {
-  const [expanded, setExpanded] = useState(false);
-  const count = toolCalls.length;
-  const doneCount = toolCalls.filter((t) => t.status === 'done' || !t.status).length;
-  const allDone = doneCount === count;
-  const summary = allDone
-    ? `${count} tool call${count === 1 ? '' : 's'}`
-    : `${doneCount}/${count} tool calls`;
-
-  return (
-    <div style={{ marginTop }}>
-      <button
-        type="button"
-        onClick={() => setExpanded((v) => !v)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          padding: '5px 10px',
-          borderRadius: 8,
-          border: '1px solid var(--t-divider-subtle)',
-          background: expanded ? 'var(--t-hover)' : 'transparent',
-          color: 'var(--t-text-secondary)',
-          fontSize: 11,
-          fontWeight: 600,
-          fontFamily: 'var(--font-sans-system)',
-          cursor: 'pointer',
-          letterSpacing: '-0.01em',
-          transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-        }}
-        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
-        onMouseLeave={(e) => { e.currentTarget.style.background = expanded ? 'var(--t-hover)' : 'transparent'; }}
-      >
-        <ChevronRight
-          size={12}
-          strokeWidth={2}
-          style={{
-            transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)',
-            transition: 'transform 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-            flexShrink: 0,
-          }}
-        />
-        <span style={{ color: allDone ? '#10b981' : 'var(--t-accent, #2563eb)' }}>
-          {summary}
-        </span>
-      </button>
-      {expanded ? (
-        <div style={{ marginTop: 8 }}>
-          <DesktopToolCallStack toolCalls={toolCalls} />
-        </div>
-      ) : null}
-    </div>
-  );
-}

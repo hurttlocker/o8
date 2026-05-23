@@ -41,15 +41,6 @@ function isImageMedia(item: MobileTranscriptMedia) {
   return item.kind === 'image';
 }
 
-function PinGlyph() {
-  return (
-    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ display: 'block' }}>
-      <path d="M12 15v6" />
-      <path d="M8.5 5.5h7l-1.7 4.3 2.4 2.6h-8.4l2.4-2.6-1.7-4.3Z" />
-    </svg>
-  );
-}
-
 const MediaGrid = memo(function MediaGrid({
   media,
   tint,
@@ -195,8 +186,6 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
   const isEvicted = useOrchestratorEntryEvicted(entry.id);
   const canPin = Boolean(repoPath?.trim()) && entry.type !== 'compaction' && entry.type !== 'command';
-  const [showMetaActions, setShowMetaActions] = useState(false);
-  const [pinHover, setPinHover] = useState(false);
   const [isPinned, setIsPinned] = useState(() => canPin ? hydrateOrchestratorTurnPinEntry(repoPath, entry) : entry.pinned === true);
   const evictedEyebrow = isEvicted ? (
     <span
@@ -280,7 +269,6 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
 
   const renderMetaRow = useCallback((align: 'flex-start' | 'flex-end') => {
     if (!entry.timestampLabel) return null;
-    const showPinAction = canPin && showMetaActions;
     return (
       <div style={{
         display: 'inline-flex',
@@ -290,40 +278,12 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         paddingLeft: align === 'flex-start' ? 2 : 0,
         paddingRight: align === 'flex-end' ? 4 : 0,
       }}>
-        {isPinned ? <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--yellow)', flexShrink: 0 }} /> : null}
         <span style={{ fontSize: 10, color: 'var(--t-text-faint)' }}>
           {entry.timestampLabel}
         </span>
-        {canPin ? (
-          <button
-            type="button"
-            onClick={handlePinToggle}
-            onMouseEnter={() => setPinHover(true)}
-            onMouseLeave={() => setPinHover(false)}
-            aria-label={isPinned ? 'Unpin turn' : 'Pin turn'}
-            title={isPinned ? 'Unpin turn' : 'Pin turn'}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 14,
-              height: 14,
-              padding: 0,
-              border: 'none',
-              background: 'transparent',
-              color: isPinned ? 'var(--yellow)' : pinHover ? 'var(--t-text-secondary)' : 'var(--t-text-faint)',
-              opacity: showPinAction ? 1 : 0,
-              pointerEvents: showPinAction ? 'auto' : 'none',
-              cursor: 'pointer',
-              transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-            }}
-          >
-            <PinGlyph />
-          </button>
-        ) : null}
       </div>
     );
-  }, [canPin, entry.timestampLabel, handlePinToggle, isPinned, pinHover, showMetaActions]);
+  }, [entry.timestampLabel]);
 
   if (isCompaction) {
     return (
@@ -350,11 +310,6 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         gap: 8,
         opacity: evictedOpacity,
         transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-      }}
-      onMouseEnter={() => setShowMetaActions(true)}
-      onMouseLeave={() => {
-        setShowMetaActions(false);
-        setPinHover(false);
       }}>
         {evictedEyebrow}
         {hasMedia ? <MediaGrid media={entry.media ?? []} tint="user" /> : null}
@@ -397,11 +352,6 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       animation: isLast ? 'llmFadeIn 180ms ease-out' : undefined,
       opacity: evictedOpacity,
       transition: 'opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-    }}
-    onMouseEnter={() => setShowMetaActions(true)}
-    onMouseLeave={() => {
-      setShowMetaActions(false);
-      setPinHover(false);
     }}>
       {evictedEyebrow}
       {hasThinking ? (
@@ -440,7 +390,13 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
 
       {entry.role === 'assistant' && hasText ? (
         <div style={{ width: '100%' }}>
-          <MessageActions messageId={entry.id} messageText={displayText} />
+          <MessageActions
+            messageId={entry.id}
+            messageText={displayText}
+            canPinContext={canPin}
+            isPinnedContext={isPinned}
+            onTogglePinContext={handlePinToggle}
+          />
         </div>
       ) : null}
 

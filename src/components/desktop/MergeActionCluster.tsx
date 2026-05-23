@@ -25,52 +25,7 @@ interface MergeActionClusterProps {
   /** GitHub remote URL for the active repo. Used to resolve the slug for
    *  /api/panel/prs and /api/panel/prs/[number] calls. */
   repoRemoteUrl: string | null;
-  /** Dev preview override — when set to a non-'auto' value the cluster
-   *  short-circuits the derived state and renders the named preset
-   *  visual. Lets the operator fine-tune the pill in dev without
-   *  needing to land on a real feature branch with a real PR. */
-  previewVariant?: MergePreviewVariant;
 }
-
-export type MergePreviewVariant =
-  | 'auto'
-  | 'idle'
-  | 'open'
-  | 'view-pending'
-  | 'view-fail'
-  | 'merge-ready';
-
-const PREVIEW_DERIVED: Record<Exclude<MergePreviewVariant, 'auto'>, Derived> = {
-  idle: { variant: 'idle', statusText: null, statusTone: 'muted', pr: null, primaryLabel: '', primaryIcon: 'branch', disabled: true },
-  open: { variant: 'open', statusText: 'No open PR', statusTone: 'muted', pr: null, primaryLabel: 'Open PR', primaryIcon: 'external', disabled: false },
-  'view-pending': {
-    variant: 'view',
-    statusText: 'Checks running',
-    statusTone: 'pending',
-    pr: { number: 1234, title: 'preview', headRefName: 'preview', baseRefName: 'main', isDraft: false, mergeable: 'UNKNOWN', reviewDecision: 'REVIEW_REQUIRED', statusCheckRollup: 'PENDING' },
-    primaryLabel: 'View PR',
-    primaryIcon: 'external',
-    disabled: false,
-  },
-  'view-fail': {
-    variant: 'view',
-    statusText: 'Conflicts',
-    statusTone: 'fail',
-    pr: { number: 1234, title: 'preview', headRefName: 'preview', baseRefName: 'main', isDraft: false, mergeable: 'DIRTY', reviewDecision: 'REVIEW_REQUIRED', statusCheckRollup: 'FAILURE' },
-    primaryLabel: 'View PR',
-    primaryIcon: 'external',
-    disabled: false,
-  },
-  'merge-ready': {
-    variant: 'merge',
-    statusText: 'Ready to merge',
-    statusTone: 'success',
-    pr: { number: 1234, title: 'preview', headRefName: 'preview', baseRefName: 'main', isDraft: false, mergeable: 'CLEAN', reviewDecision: 'APPROVED', statusCheckRollup: 'SUCCESS' },
-    primaryLabel: 'Squash & merge',
-    primaryIcon: 'check',
-    disabled: false,
-  },
-};
 
 interface PrSummary {
   number: number;
@@ -171,7 +126,7 @@ function derive(
   return { variant: 'open', statusText: 'No open PR', statusTone: 'muted', pr: null, primaryLabel: 'Open PR', primaryIcon: 'external', disabled: false };
 }
 
-function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, previewVariant = 'auto' }: MergeActionClusterProps) {
+function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl }: MergeActionClusterProps) {
   const repoSlug = repoSlugFromRemote(repoRemoteUrl);
   const [pr, setPr] = useState<PrSummary | null>(null);
   const [merging, setMerging] = useState(false);
@@ -227,9 +182,7 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, previewVa
     return () => window.removeEventListener('mousedown', handler);
   }, [menuOpen]);
 
-  const derived = previewVariant !== 'auto'
-    ? PREVIEW_DERIVED[previewVariant]
-    : derive(branchName, pr, repoSlug, mergeMethod);
+  const derived = derive(branchName, pr, repoSlug, mergeMethod);
 
   const openInBrowser = useCallback((url: string) => {
     if (typeof window !== 'undefined') {

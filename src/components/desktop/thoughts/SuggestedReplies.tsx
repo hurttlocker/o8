@@ -12,9 +12,11 @@ import { useState, useSyncExternalStore } from 'react';
 
 interface SuggestedRepliesProps {
   chips: string[];
+  collapsed?: boolean;
   disabled?: boolean;
   onSelect: (chip: string) => void;
   onDismiss: () => void;
+  onRestore?: () => void;
   // Phase 4 — when true and `chips` is empty, render a [•••] placeholder so
   // the user knows a fetch was attempted (instead of silently rendering
   // nothing). Suppressed once real chips arrive.
@@ -53,13 +55,73 @@ function getReducedMotionServerSnapshot(): boolean {
   return false;
 }
 
-export function SuggestedReplies({ chips, disabled = false, onSelect, onDismiss, isPlaceholder = false }: SuggestedRepliesProps) {
+export function SuggestedReplies({
+  chips,
+  collapsed = false,
+  disabled = false,
+  onSelect,
+  onDismiss,
+  onRestore,
+  isPlaceholder = false,
+}: SuggestedRepliesProps) {
   const [hoveredIndex, setHoveredIndex] = useState<number | null>(null);
   const [dismissHover, setDismissHover] = useState(false);
+  const [restoreHover, setRestoreHover] = useState(false);
   const reduceMotion = useSyncExternalStore(subscribeReducedMotion, getReducedMotion, getReducedMotionServerSnapshot);
 
   const filteredChips = chips.filter((chip) => chip.trim().length > 0);
   const hasChips = filteredChips.length > 0;
+
+  if (collapsed) {
+    return (
+      <button
+        type="button"
+        disabled={disabled}
+        onClick={() => {
+          if (disabled) return;
+          onRestore?.();
+        }}
+        onMouseEnter={() => setRestoreHover(true)}
+        onMouseLeave={() => setRestoreHover(false)}
+        aria-label="Show suggested replies"
+        title="Show suggested replies"
+        style={{
+          appearance: 'none',
+          alignSelf: 'flex-start',
+          cursor: disabled ? 'default' : 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          marginTop: 4,
+          marginLeft: 2,
+          borderRadius: 999,
+          borderTopWidth: 0,
+          borderRightWidth: 0,
+          borderBottomWidth: 0,
+          borderLeftWidth: 0,
+          background: restoreHover && !disabled ? 'var(--t-panel-hover, rgba(0,0,0,0.05))' : 'transparent',
+          color: restoreHover && !disabled
+            ? 'var(--t-text-secondary, #5b6475)'
+            : 'var(--t-text-tertiary, var(--t-text-secondary, #9ca3af))',
+          opacity: disabled ? 0.45 : 1,
+          transition: reduceMotion ? 'none' : 'background 120ms ease, color 120ms ease, opacity 160ms ease',
+          padding: 0,
+        }}
+      >
+        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path
+            d="M6 14.5 12 8.5l6 6"
+            stroke="currentColor"
+            strokeWidth="1.8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      </button>
+    );
+  }
 
   // Phase 4 — placeholder strip when a fetch failed (or is mid-retry) and we
   // don't have chips yet. Renders a muted three-dot row so the user knows
@@ -183,7 +245,8 @@ export function SuggestedReplies({ chips, disabled = false, onSelect, onDismiss,
         }}
         onMouseEnter={() => setDismissHover(true)}
         onMouseLeave={() => setDismissHover(false)}
-        aria-label="Dismiss suggested replies"
+        aria-label="Hide suggested replies"
+        title="Hide suggested replies"
         style={{
           appearance: 'none',
           cursor: disabled ? 'default' : 'pointer',

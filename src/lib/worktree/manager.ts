@@ -444,7 +444,7 @@ export class WorktreeManager {
     // the dispatch loop. We use the repo-root tsc binary so we don't depend on
     // the worktree having its own node_modules — Node module resolution walks
     // up to the parent.
-    if (process.env.O8_SKIP_PRELAUNCH_TYPECHECK !== '1' && !opts.skipSetup) {
+    if (process.env.O8_SKIP_PRELAUNCH_TYPECHECK !== '1') {
       const tscBin = path.join(this.repoRoot, 'node_modules', '.bin', 'tsc');
       try {
         await execFileAsync(tscBin, ['--noEmit', '--incremental', 'false'], {
