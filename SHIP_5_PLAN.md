@@ -168,3 +168,38 @@ Install + relaunch with `env -u O8_DEV_FRONTEND_URL` (the launchd inherits-dev-b
 ## Progress
 
 Tasks #90-#95 created. Mark them as work lands. This file is the source of truth — update it as scope or order changes.
+
+---
+
+## ✅ Shipped — `v0.1.155` (2026-05-23)
+
+Release: https://github.com/hurttlocker/cortex-ide/releases/tag/v0.1.155 · mirrored to `hurttlocker/o8`.
+
+Commits in order:
+
+| Phase | Commit | Status |
+|---|---|---|
+| 1 — `#1109` sidecar isolation | `6d0085b7` | ✅ shipped + `cargo check` clean |
+| 2 — `session_outcomes` writes | `f33c8a4d` | ✅ shipped (in `chunks/8025.js`); first row on next packet completion |
+| 3 — Directive Accept writes file | `920d4dc8` | ✅ shipped |
+| 4 — Brain-feedback docs (`o8 cortex observe`) | `76fed8e5` | ✅ live in `AGENTS.md` |
+| 5 — `getRepoReadiness` SWR | `089654c4` | 🟡 partial — 117ms cold → 60ms steady-state; `listRepos()` is the next bottleneck |
+| 6a — CLI symlink hardening | `6b4a81ef` | ✅ live (`o8 version` reports `0.1.155`, symlink points at `/Applications/o8.app/...`) |
+| 6b — Webview MCP gotchas in CLAUDE.md | `d8766448` | ✅ live |
+
+Plus version commit `f59d1e34` (`0.1.154`) and the `0.1.155` bump landed at ship time.
+
+### Verified live
+
+- `o8 version` reports `0.1.155` from `/usr/local/bin/o8` (Phase 6a).
+- `/api/panel/repos` first-hit 117ms → 5x warm-up to ~60ms (Phase 5 partial).
+- Bundled servers come back cleanly after relaunch with `env -u O8_DEV_FRONTEND_URL` (no regressions from Phase 1's change).
+- `chunks/4741.js` contains `READINESS_CACHE_TTL` (Phase 5 in the bundle).
+- `chunks/8025.js` contains `persistSessionOutcome` (Phase 2 in the bundle).
+
+### Follow-ups (post ship #5)
+
+1. **`listRepos()` perf** — file the read of `~/.cortex-ide/repos.json` behind a short-TTL JSON cache so `/api/panel/repos` drops from 60ms steady-state to single-digit ms.
+2. **First packet-completion session_outcomes write** — dispatch one small packet through the loop, confirm a row lands in `session_outcomes` with sensible columns + see Recent Outcomes in the next packet brief.
+3. **`tauri-plugin-mcp` external crate** — wrap `take_screenshot` in `catch_unwind` and add `cssWidth`/`cssHeight` to the response shape. Sibling crate patch; would close `#1105` properly (the CLAUDE.md docs added today are a workaround).
+4. **Backfill `mergedClean` on `session_outcomes` rows** — needs a hook on the actual merge handler (Phase 2 leaves it null at capture; the routing recommender needs `mergedClean=true` rows to score).
