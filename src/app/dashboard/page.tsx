@@ -163,9 +163,10 @@ const DEFAULT_LEFT_PANEL_WIDTH = 240;
 const FOCUS_LEFT_PANEL_WIDTH = 320;
 const CONTROL_ROOM_WIDTH = 760; // wide "control-room mode" — Control tab opens the left panel wide for the two-column layout
 const MIN_RIGHT_PANEL_WIDTH = 240;
-const MAX_RIGHT_PANEL_WIDTH = 600;
+const MAX_RIGHT_PANEL_WIDTH = 720;
 const MIN_O8_PANEL_WIDTH = 400;
 const MAX_O8_PANEL_WIDTH = 1200;
+const O8_SPEC_PANEL_TARGET_WIDTH = 600;
 const COMPACT_SHELL_MEDIA_QUERY = '(max-width: 980px)';
 const O8_ACTIVE_TAB_STORAGE_KEY = 'o8ActiveTab';
 const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'activity';
@@ -556,6 +557,18 @@ function DashboardInner() {
     try { window.localStorage.setItem('o8:right-panel:width-o8', String(o8Width)); } catch { /* ignore */ }
   }, [o8Width]);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
+  const o8SpecAutoWidenedRef = useRef(false);
+  const handleO8TabChange = useCallback((tab: O8Tab) => {
+    if (tab === 'spec' && !o8SpecAutoWidenedRef.current) {
+      o8SpecAutoWidenedRef.current = true;
+      setO8Width((current) => (
+        current < O8_SPEC_PANEL_TARGET_WIDTH
+          ? O8_SPEC_PANEL_TARGET_WIDTH
+          : current
+      ));
+    }
+    setO8ActiveTab(tab);
+  }, []);
   const [o8PrNumber, setO8PrNumber] = useState<number | null>(null);
   const [o8PrRepo, setO8PrRepo] = useState<string | null>(null);
   const [o8BrowserUrl, setO8BrowserUrl] = useState<string | null>(null);
@@ -3571,7 +3584,7 @@ function DashboardInner() {
                 workspacePanelVisible={rightPanelKind === 'review'}
                 onToggleO8Panel={handleToggleO8Panel}
                 o8ActiveTab={o8ActiveTab}
-                onO8TabChange={rightPanelKind === 'o8' ? setO8ActiveTab : undefined}
+                onO8TabChange={rightPanelKind === 'o8' ? handleO8TabChange : undefined}
                 browserActive={rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
                 browserPreviewUrl={o8BrowserHoverUrl}
                 onOpenBrowser={handleOpenBrowser}
