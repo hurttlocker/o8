@@ -73,7 +73,13 @@ export function parseDirectiveFile(raw: string, fallbackId: string): ParsedDirec
     const idx = line.indexOf(':');
     if (idx <= 0) continue;
     const key = line.slice(0, idx).trim();
-    const value = line.slice(idx + 1).trim();
+    // #1119 — spec-ingest writes quoted YAML values for `title:` / `repoName:`
+    // (so titles can contain `:` and other punctuation). Strip a single
+    // surrounding pair of `"` or `'` so downstream equality checks
+    // (`directiveAppliesToRepo` doing `declaredRepo === repoName`) match the
+    // unquoted on-disk repo name. Mirrors the front-matter parser in
+    // `extractDirectiveFields` (v14-fts5-migration.ts).
+    const value = line.slice(idx + 1).trim().replace(/^["']|["']$/g, '');
     if (key) meta[key] = value;
   }
 
