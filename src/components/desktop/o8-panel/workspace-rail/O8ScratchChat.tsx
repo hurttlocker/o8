@@ -903,7 +903,11 @@ export function O8ScratchChat({
                 type="button"
                 onClick={() => { void askBrain(); }}
                 disabled={!input.trim() || askLoading}
-                title={!input.trim() ? 'Type a question to ask the Engineering Brain' : 'Ask the Engineering Brain (cortex_ask)'}
+                title={
+                  !input.trim()
+                    ? 'Type a question to ask the Engineering Brain'
+                    : 'Ask the Engineering Brain (cortex_ask) — paid path: grok-4.1-fast classifier + retrieval (o8 sub) + Claude Sonnet 4.6 via your Claude Code subscription'
+                }
                 style={{
                   minHeight: 26,
                   borderRadius: 7,
@@ -922,10 +926,25 @@ export function O8ScratchChat({
                   paddingBottom: 0,
                   paddingLeft: 9,
                   transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  position: 'relative',
                 }}
                 onMouseEnter={(e) => { if (input.trim() && !askLoading) { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text)'; } }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = input.trim() && !askLoading ? 'var(--t-text-muted)' : 'var(--t-text-faint)'; }}
               >
+                {/* Brand-orange premium dot — the cost-asymmetry signal. Free
+                    buttons (Send / Summary / Orchestrator) don't carry one;
+                    Ask Brain rides a paid pipeline so the dot flags it. */}
+                <span
+                  aria-hidden
+                  style={{
+                    width: 5,
+                    height: 5,
+                    borderRadius: '50%',
+                    background: 'var(--t-brand-orange, #FF5A1F)',
+                    flexShrink: 0,
+                    boxShadow: '0 0 0 1.5px var(--o8-scratch-surface)',
+                  }}
+                />
                 <Brain size={14} />
                 {askLoading ? 'Asking' : 'Ask Brain'}
               </button>
@@ -959,6 +978,42 @@ export function O8ScratchChat({
                 {sending ? 'Sending' : 'Send'}
                 <PaperPlaneTilt size={14} weight="fill" />
               </button>
+            </div>
+
+            {/* Cost-shape legend (#1125). Send/Summary/Orchestrator ride the
+                free OpenRouter chat models; Ask Brain runs the cortex_ask
+                pipeline (paid grok-4.1-fast for classify+retrieve, Claude
+                Sonnet via your Claude Code subscription for narrative answers).
+                Tiny + faint by design — informative without competing with
+                the composer. */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                marginTop: 6,
+                fontFamily: UI_FONT,
+                fontSize: 9.5,
+                fontWeight: 500,
+                color: 'var(--t-text-faint, #94a3b8)',
+                letterSpacing: '-0.005em',
+              }}
+            >
+              <span>Send · Summary · Orchestrator: free models</span>
+              <span style={{ opacity: 0.5 }}>·</span>
+              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                <span
+                  aria-hidden
+                  style={{
+                    width: 4,
+                    height: 4,
+                    borderRadius: '50%',
+                    background: 'var(--t-brand-orange, #FF5A1F)',
+                    flexShrink: 0,
+                  }}
+                />
+                Ask Brain: grok + your Claude sub
+              </span>
             </div>
           </div>
         </div>
