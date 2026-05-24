@@ -143,19 +143,23 @@ function ViewButton({ active, label, onClick }: { active: boolean; label: string
       type="button"
       onClick={onClick}
       style={{
-        border: `1px solid ${active ? 'var(--t-brand-orange)' : 'var(--t-divider-subtle)'}`,
-        borderRadius: 10,
+        // Flat per DESIGN.md §06.7 — no always-on border. Active fills with
+        // var(--t-input-bg); inactive is transparent → var(--t-hover) on
+        // hover. Geometry matched: 26h / 7r.
+        border: 'none',
+        borderRadius: 7,
         background: active ? 'var(--t-input-bg)' : 'transparent',
         color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
         cursor: 'pointer',
         fontFamily: UI_FONT,
         fontSize: 11,
         fontWeight: 600,
-        minHeight: 28,
+        minHeight: 26,
         paddingTop: 0,
         paddingRight: 10,
         paddingBottom: 0,
         paddingLeft: 10,
+        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--t-hover)'; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}

@@ -732,10 +732,10 @@ export function O8ScratchChat({
                 onClick={() => { void summarizeGithub(); }}
                 disabled={!repoPath || summaryLoading}
                 style={{
-                  minHeight: 28,
-                  borderRadius: 9,
-                  border: '1px solid var(--t-divider-subtle)',
-                  background: 'var(--t-input-bg)',
+                  minHeight: 26,
+                  borderRadius: 7,
+                  border: 'none',
+                  background: 'transparent',
                   color: repoPath && !summaryLoading ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
                   cursor: repoPath && !summaryLoading ? 'pointer' : 'default',
                   display: 'inline-flex',
@@ -748,7 +748,10 @@ export function O8ScratchChat({
                   paddingRight: 10,
                   paddingBottom: 0,
                   paddingLeft: 9,
+                  transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
+                onMouseEnter={(e) => { if (repoPath && !summaryLoading) { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text)'; } }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = repoPath && !summaryLoading ? 'var(--t-text-muted)' : 'var(--t-text-faint)'; }}
               >
                 <Article size={14} />
                 {summaryLoading ? 'Summarizing' : 'Summary'}
@@ -758,10 +761,10 @@ export function O8ScratchChat({
                 onClick={addToOrchestrator}
                 disabled={!messages.length || !data?.onAcceptDirectiveProposal}
                 style={{
-                  minHeight: 28,
-                  borderRadius: 9,
-                  border: '1px solid var(--t-divider-subtle)',
-                  background: 'var(--t-input-bg)',
+                  minHeight: 26,
+                  borderRadius: 7,
+                  border: 'none',
+                  background: 'transparent',
                   color: messages.length ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
                   cursor: messages.length ? 'pointer' : 'default',
                   display: 'inline-flex',
@@ -774,7 +777,10 @@ export function O8ScratchChat({
                   paddingRight: 10,
                   paddingBottom: 0,
                   paddingLeft: 9,
+                  transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
+                onMouseEnter={(e) => { if (messages.length) { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text)'; } }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = messages.length ? 'var(--t-text-muted)' : 'var(--t-text-faint)'; }}
               >
                 <ArrowBendUpRight size={14} />
                 Orchestrator
@@ -785,8 +791,11 @@ export function O8ScratchChat({
                 onClick={() => void send()}
                 disabled={!input.trim() || sending}
                 style={{
-                  minHeight: 28,
-                  borderRadius: 9,
+                  // Primary CTA — keeps the accent fill since it's the
+                  // composer's primary action. Geometry matched to the
+                  // flat pill spec (26h, 7r). No inset shadow.
+                  minHeight: 26,
+                  borderRadius: 7,
                   border: 'none',
                   background: !input.trim() || sending ? 'var(--t-divider-subtle)' : 'var(--t-accent)',
                   color: !input.trim() || sending ? 'var(--t-text-faint)' : 'var(--t-on-accent, #ffffff)',
@@ -815,11 +824,14 @@ export function O8ScratchChat({
 }
 
 const actionButtonBaseStyle: CSSProperties = {
+  // Flat per DESIGN.md §06.7 — transparent at rest, var(--t-hover) on hover
+  // (handled per-call-site since this is just a base). No border, no inset
+  // shadow, height 26 / radius 7.
   width: 'auto',
-  height: 28,
-  borderRadius: 9,
-  border: '1px solid var(--o8-scratch-input-border)',
-  background: 'var(--o8-scratch-input)',
+  height: 26,
+  borderRadius: 7,
+  border: 'none',
+  background: 'transparent',
   color: 'var(--o8-scratch-action)',
   cursor: 'pointer',
   display: 'inline-flex',
@@ -835,13 +847,12 @@ const actionButtonBaseStyle: CSSProperties = {
   fontSize: 11,
   fontWeight: 750,
   flexShrink: 0,
-  boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.24)',
 };
 
 const iconButtonStyle: CSSProperties = {
   ...actionButtonBaseStyle,
-  width: 30,
-  minWidth: 30,
+  width: 26,
+  minWidth: 26,
   paddingRight: 0,
   paddingLeft: 0,
 };
