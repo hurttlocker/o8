@@ -2,14 +2,15 @@
 
 import { motion } from 'framer-motion';
 
-// ── Icon Button ──
-
-// TitleBarButton — flat compact chip matching the right-side title bar buttons
-// (BrowserHoverButton / RightPanelMorphButton). Transparent at rest, hover
-// fills with --t-hover, active uses --t-panel-active. Pass `accent="orange"`
-// to make the active state glow brand orange (matches the Browser button).
+// TitleBarButton — flat icon button per DESIGN.md §06.7. The "motion buttons"
+// language locked 2026-05-23: bg + color crossfade only, no scale, no boxy
+// active state. Pass `accent="orange"` to tint the active-state icon brand
+// orange (e.g. Browser button when its panel is open).
 //
-// Motion is color/fill only. No tap-scale or lifted hover states here.
+// Most app-shell buttons now flow through HeaderIconPill (which is this same
+// language wrapped tighter for column header strips); TitleBarButton is kept
+// for the few remaining one-off chrome positions that still want a slightly
+// roomier hit area.
 export function TitleBarButton({
   icon,
   label,
@@ -40,18 +41,15 @@ export function TitleBarButton({
       whileHover="hover"
       variants={{
         rest: {
-          background: 'var(--t-chrome-btn-bg)',
-          boxShadow: 'var(--t-chrome-btn-shadow)',
+          background: 'var(--t-pill-rest-bg, transparent)',
           color: 'var(--t-text-secondary)',
         },
         hover: {
-          background: 'var(--t-chrome-btn-hover-bg)',
-          boxShadow: 'var(--t-chrome-btn-hover-shadow)',
+          background: 'var(--t-hover)',
           color: 'var(--t-text)',
         },
         active: {
-          background: 'var(--t-chrome-btn-active-bg)',
-          boxShadow: 'var(--t-chrome-btn-active-shadow)',
+          background: 'var(--t-input-bg)',
           color: activeColor,
         },
       }}
@@ -60,9 +58,12 @@ export function TitleBarButton({
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 28,
-        height: 28,
-        padding: 0,
+        width: 26,
+        height: 26,
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        paddingRight: 0,
         border: 'none',
         borderRadius: 7,
         cursor: 'pointer',

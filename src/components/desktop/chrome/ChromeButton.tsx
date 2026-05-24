@@ -21,18 +21,18 @@
 
 import { type CSSProperties, type ReactNode } from 'react';
 
-// Chrome button surface tokens. Each theme defines these in `themes.ts`, and a
-// `[data-chrome-surface="true"]` scope in the ThemeProvider overrides them when
-// a chrome region sits on top of the vibrancy bleed (right panel in light
-// mode, etc). Consuming CSS vars means hover/active updates cascade through
-// the override without the component having to know about it.
-const BG_INACTIVE = 'var(--t-chrome-btn-bg)';
-const BG_HOVER = 'var(--t-chrome-btn-hover-bg)';
-const BG_ACTIVE = 'var(--t-chrome-btn-active-bg)';
-const SHADOW_INACTIVE = 'var(--t-chrome-btn-shadow)';
-const SHADOW_HOVER = 'var(--t-chrome-btn-hover-shadow)';
-const SHADOW_ACTIVE = 'var(--t-chrome-btn-active-shadow)';
-const TEXT_COLOR = 'var(--t-chrome-btn-text, var(--t-text))';
+// Flat button surface tokens — DESIGN.md §06.7. The legacy chrome-btn-* tokens
+// (boxy bg + inset shadow) were retired here on 2026-05-23 per operator lock-in.
+// The button is transparent at rest, paints var(--t-hover) on hover, and uses
+// var(--t-input-bg) when the surrounding UI requires an "active" indicator on
+// the button itself. No shadows on hover or active.
+const BG_INACTIVE = 'transparent';
+const BG_HOVER = 'var(--t-hover)';
+const BG_ACTIVE = 'var(--t-input-bg)';
+const SHADOW_INACTIVE = 'none';
+const SHADOW_HOVER = 'none';
+const SHADOW_ACTIVE = 'none';
+const TEXT_COLOR = 'var(--t-text)';
 
 export function chromeNeoStyle(active: boolean, size = 32, radius = 10): CSSProperties {
   return {
@@ -98,8 +98,11 @@ export function ChromeButton({
   onClick,
   active = false,
   badge,
-  size = 32,
-  radius = 10,
+  // Defaults updated to DESIGN.md §06.7 — 26 tall, 7px radius. Existing call
+  // sites that pass `size={22} radius={6}` (DesktopStatusBar footer) still
+  // win via prop overrides.
+  size = 26,
+  radius = 7,
   title,
   noDrag = false,
 }: ChromeButtonProps) {
