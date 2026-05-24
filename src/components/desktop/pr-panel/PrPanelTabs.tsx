@@ -107,15 +107,10 @@ function PrTabButton({
   onClick: () => void;
 }) {
   const danger = spec.tone === 'danger';
-  // Mirror O8SpecPane.ViewButton: orange border + input-bg when active,
-  // divider-subtle hairline + transparent when inactive. Danger keeps the
-  // red border/text in both states so a failing checks tab reads loud
-  // even when it isn't the active tab.
-  const borderColor = danger
-    ? '#ef4444'
-    : active
-      ? 'var(--t-brand-orange, #FF5A1F)'
-      : 'var(--t-divider-subtle)';
+  // Per DESIGN.md §06.7 — flat tab pill. No always-on border; the active
+  // state is the var(--t-input-bg) fill alone. Danger gets a red text +
+  // count color so a failing checks tab still reads loud even when it
+  // isn't selected; no red border outline.
   const background = active ? 'var(--t-input-bg)' : 'transparent';
   const labelColor = danger
     ? '#ef4444'
@@ -136,15 +131,13 @@ function PrTabButton({
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
-        minHeight: 28,
+        minHeight: 26,
         paddingTop: 0,
         paddingBottom: 0,
         paddingLeft: 10,
         paddingRight: 10,
-        borderRadius: 10,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor,
+        borderRadius: 7,
+        borderWidth: 0,
         background,
         color: labelColor,
         cursor: 'pointer',
@@ -152,7 +145,7 @@ function PrTabButton({
         fontSize: 11,
         fontWeight: 600,
         letterSpacing: '-0.005em',
-        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(e) => {
         if (!active && !danger) e.currentTarget.style.background = 'var(--t-hover)';
