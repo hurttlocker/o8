@@ -93,6 +93,10 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
     const result = await apiFetch('/api/cortex/ask/answer', {
       method: 'POST',
       body: JSON.stringify(body),
+      // Brain classifier currently spends 10–40s on cold calls (#1115).
+      // Bumped from the 15s default so cortex_ask doesn't time out
+      // before retrieval even runs. Drop back to 30s after #1115 lands.
+      timeoutMs: 90_000,
     }) as {
       ok?: boolean;
       answer?: string;
