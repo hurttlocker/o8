@@ -6,6 +6,7 @@ import {
   ArrowsInSimple,
   ArrowsOutSimple,
   Article,
+  Brain,
   PaperPlaneTilt,
   Trash,
   X,
@@ -59,10 +60,20 @@ type ScratchRole = 'user' | 'assistant';
 type ScratchSurface = 'file' | 'diff';
 type ScratchTriggerPlacement = 'floating' | 'review-toolbar';
 
+interface ScratchCitation {
+  kind: string;
+  rowId: string;
+  table?: string;
+  excerpt?: string;
+  url?: string;
+}
+
 interface ScratchMessage {
   id: string;
   role: ScratchRole;
   content: string;
+  /** Engineering Brain citations rendered as small pills below the answer. */
+  citations?: ScratchCitation[];
 }
 
 interface ScratchContext {
@@ -349,6 +360,7 @@ export function O8ScratchChat({
   const [expanded, setExpanded] = useState(false);
   const [sending, setSending] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
+  const [askLoading, setAskLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [handoffNote, setHandoffNote] = useState<string | null>(null);
   const [selectionSnapshot, setSelectionSnapshot] = useState('');
@@ -429,6 +441,7 @@ export function O8ScratchChat({
     setInput('');
     setSending(false);
     setSummaryLoading(false);
+    setAskLoading(false);
     setError(null);
     setHandoffNote(null);
   }, []);
@@ -578,6 +591,71 @@ export function O8ScratchChat({
     }
   }, [repoPath, summaryLoading]);
 
+  const askBrain = useCallback(async () => {
+    // #1117 — third composer path: send the current input to the Engineering
+    // Brain via the non-streaming /api/cortex/ask/answer endpoint, render the
+    // JSON answer in an assistant bubble with citation pills underneath.
+    const question = input.trim();
+    if (!question || askLoading) return;
+
+    const userMessage: ScratchMessage = {
+      id: `o8-ask-brain-user-${Date.now()}`,
+      role: 'user',
+      content: question,
+    };
+    const assistantId = `o8-ask-brain-assistant-${Date.now() + 1}`;
+    const assistantMessage: ScratchMessage = {
+      id: assistantId,
+      role: 'assistant',
+      content: '',
+    };
+
+    setMessages((current) => [...current, userMessage, assistantMessage]);
+    setInput('');
+    setError(null);
+    setHandoffNote(null);
+    setAskLoading(true);
+
+    // Classifier currently runs 11-43s end-to-end; cap at 90s so a hung
+    // backend doesn't leave the bubble in a silent Thinking… state.
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 90_000);
+
+    try {
+      const response = await fetch('/api/cortex/ask/answer', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ question, repoPath: repoPath ?? undefined }),
+        signal: controller.signal,
+      });
+      const payload = await response.json().catch(() => ({})) as {
+        ok?: boolean;
+        answer?: string;
+        citations?: ScratchCitation[];
+        error?: string;
+      };
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || `Ask Brain failed (${response.status}).`);
+      }
+      const answer = payload.answer?.trim() || 'The Engineering Brain returned no answer.';
+      const citations = Array.isArray(payload.citations) ? payload.citations : [];
+      setMessages((current) => current.map((message) => (
+        message.id === assistantId
+          ? { ...message, content: answer, citations }
+          : message
+      )));
+    } catch (err) {
+      const reason = (err as { name?: string })?.name === 'AbortError'
+        ? 'Ask Brain timed out after 90s.'
+        : err instanceof Error ? err.message : 'Ask Brain failed.';
+      setMessages((current) => current.filter((message) => message.id !== assistantId));
+      setError(reason);
+    } finally {
+      clearTimeout(timeoutId);
+      setAskLoading(false);
+    }
+  }, [askLoading, input, repoPath]);
+
   return (
     <>
       <div ref={buttonRef} style={{ display: 'inline-flex', flexShrink: 0 }}>
@@ -678,7 +756,43 @@ export function O8ScratchChat({
                     }}
                   >
                     {message.role === 'assistant' ? (
-                      message.content ? <MarkdownRender content={message.content} /> : <span style={{ color: 'var(--t-text-muted)' }}>Thinking...</span>
+                      message.content ? (
+                        <>
+                          <MarkdownRender content={message.content} />
+                          {message.citations && message.citations.length > 0 ? (
+                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
+                              {message.citations.map((citation, idx) => (
+                                <span
+                                  key={`${message.id}-cite-${idx}`}
+                                  title={citation.excerpt || `${citation.kind}:${citation.rowId}`}
+                                  style={{
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    height: 18,
+                                    borderRadius: 6,
+                                    paddingTop: 0,
+                                    paddingRight: 6,
+                                    paddingBottom: 0,
+                                    paddingLeft: 6,
+                                    background: 'var(--t-divider-subtle)',
+                                    color: 'var(--t-text-muted)',
+                                    fontFamily: MONO_FONT,
+                                    fontSize: 10,
+                                    fontWeight: 700,
+                                    letterSpacing: '-0.01em',
+                                    cursor: citation.url ? 'pointer' : 'default',
+                                  }}
+                                  onClick={() => {
+                                    if (citation.url) window.open(citation.url, '_blank', 'noopener,noreferrer');
+                                  }}
+                                >
+                                  {citation.kind}:{citation.rowId}
+                                </span>
+                              ))}
+                            </div>
+                          ) : null}
+                        </>
+                      ) : <span style={{ color: 'var(--t-text-muted)' }}>Thinking...</span>
                     ) : (
                       message.content
                     )}
@@ -784,6 +898,36 @@ export function O8ScratchChat({
               >
                 <ArrowBendUpRight size={14} />
                 Orchestrator
+              </button>
+              <button
+                type="button"
+                onClick={() => { void askBrain(); }}
+                disabled={!input.trim() || askLoading}
+                title={!input.trim() ? 'Type a question to ask the Engineering Brain' : 'Ask the Engineering Brain (cortex_ask)'}
+                style={{
+                  minHeight: 26,
+                  borderRadius: 7,
+                  border: 'none',
+                  background: 'transparent',
+                  color: input.trim() && !askLoading ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+                  cursor: input.trim() && !askLoading ? 'pointer' : 'default',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  fontFamily: UI_FONT,
+                  fontSize: 11,
+                  fontWeight: 750,
+                  paddingTop: 0,
+                  paddingRight: 10,
+                  paddingBottom: 0,
+                  paddingLeft: 9,
+                  transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+                }}
+                onMouseEnter={(e) => { if (input.trim() && !askLoading) { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text)'; } }}
+                onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = input.trim() && !askLoading ? 'var(--t-text-muted)' : 'var(--t-text-faint)'; }}
+              >
+                <Brain size={14} />
+                {askLoading ? 'Asking' : 'Ask Brain'}
               </button>
               <div style={{ flex: 1 }} />
               <button
