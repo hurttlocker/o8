@@ -124,8 +124,19 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-export async function apiFetch(path: string, init?: RequestInit): Promise<unknown> {
+export interface ApiFetchOptions extends RequestInit {
+  /** Per-call timeout override in ms. Defaults to FETCH_TIMEOUT_MS (15s).
+   *  Use a higher value for endpoints that legitimately take longer
+   *  (e.g. /api/cortex/ask/answer can spend 10–40s in the classifier — see #1115). */
+  timeoutMs?: number;
+}
+
+export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<unknown> {
   let lastError: Error | undefined;
+  const timeoutMs = init?.timeoutMs ?? FETCH_TIMEOUT_MS;
+  // Strip timeoutMs from the RequestInit so fetch doesn't see it.
+  const { timeoutMs: _omit, ...fetchInit } = init ?? {};
+  void _omit;
 
   for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
     if (attempt > 0) {
@@ -137,16 +148,16 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<unknow
     try {
       const baseUrl = resolveApiBaseLive();
       const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      const timer = setTimeout(() => controller.abort(), timeoutMs);
       const panelToken = readPanelToken();
       const baseHeaders: Record<string, string> = { 'Content-Type': 'application/json' };
       if (panelToken) {
         baseHeaders.Authorization = `Bearer ${panelToken}`;
       }
       const res = await fetch(`${baseUrl}${path}`, {
-        ...init,
+        ...fetchInit,
         signal: controller.signal,
-        headers: { ...baseHeaders, ...init?.headers },
+        headers: { ...baseHeaders, ...fetchInit.headers },
       });
       clearTimeout(timer);
       _apiHealthy = true;
@@ -155,7 +166,7 @@ export async function apiFetch(path: string, init?: RequestInit): Promise<unknow
       lastError = err instanceof Error ? err : new Error(String(err));
       _apiHealthy = false;
       if (lastError.name === 'AbortError') {
-        lastError = new Error(`Request to ${path} timed out after ${FETCH_TIMEOUT_MS}ms`);
+        lastError = new Error(`Request to ${path} timed out after ${timeoutMs}ms`);
       }
     }
   }
