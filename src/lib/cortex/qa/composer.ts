@@ -26,7 +26,7 @@ import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { isByokRequired } from '@/lib/cortex/qa/llm/byok-keys';
 import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
-import type { TypedRow } from '@/lib/cortex/qa/types';
+import type { CitationKind, TypedRow } from '@/lib/cortex/qa/types';
 import { getOperatorDefaultsSync, type ClassAComposer } from '@/lib/operator/defaults';
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
@@ -228,30 +228,118 @@ function shortDocHandle(rowId: string): string {
 // ── Citation parsing + verification ──────────────────────────────────────────
 
 /**
- * Map of bracket handle → TypedRow, built from the topRows the retriever
- * returned. Only handles that exist in this map are accepted into the answer.
+ * Lookup tables built from topRows so the citation translator can resolve
+ * whatever shape the LLM happens to emit:
+ *
+ *   - `exact`   maps the full bracket handle (`FACT-<full-uuid>`, `D-014`,
+ *               `PR-3605666757`, etc.) and the bare rowId to its row.
+ *   - `prefix`  maps a `<kind-prefix>:<lowercased-first-8-chars>` key to the
+ *               row. Used to rescue abbreviated handles like `FACT-6f634881`
+ *               that the Codex composer tier emits instead of the full UUID
+ *               (#1118). Only populated for kinds whose rowId is long enough
+ *               that an 8-char prefix is unambiguous (facts/docs/projects);
+ *               populated only when exactly one row in this batch shares the
+ *               prefix, so we never silently mis-attribute a citation.
  */
-function buildCitationLookup(rows: TypedRow[]): Map<string, TypedRow> {
-  const map = new Map<string, TypedRow>();
+interface CitationLookup {
+  exact: Map<string, TypedRow>;
+  prefix: Map<string, TypedRow>;
+}
+
+/** Kinds where the rowId is opaque + long enough that an 8-char prefix is
+ *  meaningful for disambiguation. Adding a new kind here also requires the
+ *  retriever to emit handles long enough that a prefix collision is unlikely. */
+const PREFIX_FRIENDLY_KINDS: ReadonlySet<CitationKind> = new Set<CitationKind>([
+  'fact',
+  'doc',
+  'project',
+  'project_repo',
+]);
+
+/**
+ * Build the exact + prefix lookup maps used by `translateCitations`. See the
+ * `CitationLookup` doc above for the shape rationale.
+ */
+function buildCitationLookup(rows: TypedRow[]): CitationLookup {
+  const exact = new Map<string, TypedRow>();
+  // Track every row keyed by `<kind>:<8-char-prefix>` along with how many rows
+  // share that prefix. We only promote to the prefix map at the end when the
+  // count is exactly 1 — collisions stay unresolved so we don't silently
+  // mis-attribute a citation when two facts happen to share an 8-char prefix.
+  const prefixCandidates = new Map<string, { row: TypedRow; count: number }>();
+
   for (const row of rows) {
     const handle = buildCitationHandle(row).toUpperCase();
-    map.set(handle, row);
-    // Also index on bare rowId (e.g. "481" → outcome row) for flexibility.
-    map.set(row.citation.rowId.toUpperCase(), row);
+    exact.set(handle, row);
+    exact.set(row.citation.rowId.toUpperCase(), row);
+
+    if (PREFIX_FRIENDLY_KINDS.has(row.citation.kind)) {
+      // Take the first 8 chars after the kind prefix in the bracket handle
+      // (e.g. `FACT-6F634881-...` → `6F634881`). That matches the Codex
+      // truncation pattern; 8 chars is the empirical sweet spot — long enough
+      // to be ~unique across a 30-row retrieval batch, short enough to match
+      // what abbreviating LLMs emit.
+      const dashIdx = handle.indexOf('-');
+      if (dashIdx > 0) {
+        const kindPrefix = handle.slice(0, dashIdx); // e.g. "FACT"
+        const tail = handle.slice(dashIdx + 1);
+        const short = tail.slice(0, 8);
+        if (short.length === 8) {
+          const key = `${kindPrefix}-${short}`;
+          const existing = prefixCandidates.get(key);
+          if (existing) {
+            existing.count += 1;
+          } else {
+            prefixCandidates.set(key, { row, count: 1 });
+          }
+        }
+      }
+    }
   }
-  return map;
+
+  const prefix = new Map<string, TypedRow>();
+  for (const [key, entry] of prefixCandidates) {
+    if (entry.count === 1) prefix.set(key, entry.row);
+  }
+
+  return { exact, prefix };
 }
 
 /**
- * Parse bracket citations like [D-014], [O-481], [PR-650] from an LLM answer.
- * Returns the set of handles found (uppercased).
+ * Resolve a single bracket handle (uppercased) to its row, trying exact match
+ * first and falling back to the unambiguous-prefix index. Returns `null` when
+ * neither matches.
+ */
+function resolveHandle(handle: string, lookup: CitationLookup): TypedRow | null {
+  const exact = lookup.exact.get(handle);
+  if (exact) return exact;
+  // Prefix rescue: `FACT-6F634881` → `FACT-6F634881-F11A-...` when exactly
+  // one row in this batch shares the 8-char tail.
+  return lookup.prefix.get(handle) ?? null;
+}
+
+/**
+ * Parse bracket citations like [D-014], [O-481], [PR-650], [FACT-abc123],
+ * and multi-handle clusters like [FACT-aaa, FACT-bbb] from an LLM answer.
+ * Returns the deduped set of handles found (uppercased).
  */
 function parseBracketHandles(answer: string): string[] {
-  const re = /\[([A-Z0-9_\-#.]+)\]/gi;
+  // Bracket body can contain multiple handles separated by `,` `;` or
+  // whitespace. We grab the whole body first, then split.
+  const re = /\[([^\[\]\n]+)\]/g;
   const handles: string[] = [];
   let m: RegExpExecArray | null;
   while ((m = re.exec(answer)) !== null) {
-    handles.push(m[1].toUpperCase());
+    const body = m[1];
+    for (const piece of body.split(/[,;\s]+/)) {
+      const clean = piece.trim().toUpperCase();
+      // Skip bracket bodies that don't look like citation handles (numbers,
+      // free text, etc.). A handle has at least one `-` and starts with a
+      // letter (kind prefix) — e.g. `D-014`, `FACT-abc`, `PR-3605`.
+      if (/^[A-Z][A-Z0-9_\-#.]*-[A-Z0-9_\-#.]+$/i.test(clean)) {
+        handles.push(clean);
+      }
+    }
   }
   return [...new Set(handles)];
 }
@@ -259,27 +347,53 @@ function parseBracketHandles(answer: string): string[] {
 /**
  * Translate `[BRACKET-ID]` markers in the answer to `[CITATION:<kind>-<rowId>]`
  * format that AnswerStream expects. Drops any handle not in the lookup
- * (anti-hallucination).
+ * (anti-hallucination). Also handles two #1118 cases:
+ *   - Abbreviated handles (`FACT-6f634881` → `FACT-6F634881-F11A-...`) via the
+ *     prefix index in `lookup`.
+ *   - Multi-handle clusters (`[FACT-aaa, FACT-bbb]`) — each inner handle
+ *     resolves independently, the bracket is rewritten with one
+ *     `[CITATION:...]` per verified handle.
  */
-function translateCitations(answer: string, lookup: Map<string, TypedRow>): {
+function translateCitations(answer: string, lookup: CitationLookup): {
   translatedAnswer: string;
   verifiedRows: TypedRow[];
 } {
   const verifiedSet = new Set<string>();
   const verifiedRows: TypedRow[] = [];
 
-  const translated = answer.replace(/\[([A-Z0-9_\-#.]+)\]/gi, (match, handle) => {
-    const row = lookup.get(handle.toUpperCase());
-    if (!row) {
-      // Unverified citation — drop it (return empty string so no stray text leaks).
-      return '';
-    }
+  const recordRow = (row: TypedRow): string => {
     const key = `${row.citation.kind}:${row.citation.rowId}`;
     if (!verifiedSet.has(key)) {
       verifiedSet.add(key);
       verifiedRows.push(row);
     }
     return `[CITATION:${row.citation.kind}-${row.citation.rowId}]`;
+  };
+
+  // Match any non-nested bracket body. We accept whatever's inside and then
+  // split on `,` `;` or whitespace so multi-handle clusters survive.
+  const translated = answer.replace(/\[([^\[\]\n]+)\]/g, (_match, body: string) => {
+    const pieces = body.split(/[,;\s]+/).map((p) => p.trim()).filter(Boolean);
+    if (pieces.length === 0) return '';
+    const verified: string[] = [];
+    let sawCitationShape = false;
+    for (const piece of pieces) {
+      const handle = piece.toUpperCase();
+      // Only treat pieces that look like citation handles. Anything else
+      // (e.g. raw [link text]) falls through unchanged so we don't strip
+      // unrelated brackets.
+      if (!/^[A-Z][A-Z0-9_\-#.]*-[A-Z0-9_\-#.]+$/i.test(handle)) continue;
+      sawCitationShape = true;
+      const row = resolveHandle(handle, lookup);
+      if (row) verified.push(recordRow(row));
+    }
+    if (!sawCitationShape) {
+      // No citation-looking piece in this bracket — leave the original text alone.
+      return `[${body}]`;
+    }
+    // All pieces looked like handles but none verified → drop the bracket
+    // (anti-hallucination). Otherwise concatenate the verified CITATION markers.
+    return verified.join('');
   });
 
   return { translatedAnswer: translated.trim(), verifiedRows };
@@ -609,7 +723,7 @@ async function tryComposeSonnet(
  * three LLM tiers so the SSE shape stays identical regardless of which
  * provider answered.
  */
-function emitClassAAnswer(rawAnswer: string, lookup: Map<string, TypedRow>, emit: SseEmit): void {
+function emitClassAAnswer(rawAnswer: string, lookup: CitationLookup, emit: SseEmit): void {
   const { translatedAnswer, verifiedRows } = translateCitations(rawAnswer, lookup);
   emit('token', { text: translatedAnswer });
   for (const row of verifiedRows) {
@@ -714,7 +828,7 @@ async function composeClassBViaOpenRouter(
   repoPath: string | undefined,
   topRows: TypedRow[],
   emit: SseEmit,
-  lookup: Map<string, TypedRow>,
+  lookup: CitationLookup,
 ): Promise<void> {
   try {
     const system = buildSonnetComposeSystem();
