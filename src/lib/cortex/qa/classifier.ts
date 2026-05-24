@@ -1,17 +1,24 @@
 /**
  * Question classifier for the Cortex Q&A composer (epic #915 sub-2,
- * provider chain rewired in path-to-70 phase 1.7 v2).
+ * provider chain rewired in path-to-70 phase 1.7 v2,
+ * fast-path + cache shipped in #1115).
  *
  * Five-tier provider chain — all return the same { class, bm25Variants } shape:
- *   1. Claude Haiku CLI       (free for Claude Max users — primary)
- *   2. Codex CLI (gpt-5.5)    (free for ChatGPT Plus / Codex sub users)
- *   3. OpenRouter (grok-4.1-fast + flash-lite + gpt-5.4-nano fallback) — paid HTTP
+ *   1. OpenRouter (grok-4.1-fast + flash-lite + gpt-5.4-nano fallback) — paid HTTP, ~500ms
+ *   2. Claude Haiku CLI       (free for Claude Max users — skipped unless in-app orchestrator ON)
+ *   3. Codex CLI (gpt-5.5)    (free for ChatGPT Plus / Codex sub users)
  *   4. Gemini Flash JSON-mode (last LLM tier; demoted because of recent 503s)
  *   5. Heuristic fallback     (lexical "why/how/explain" → Class B)
  *
- * Latency tradeoff is intentional: tiers 1 + 2 are ~15s each but FREE for
- * users with the corresponding subscription. Two free paths beat one fast
- * paid path. OpenRouter (~1s) is the safety net when neither sub is active.
+ * Why OpenRouter is tier 1 now (changed in #1115): the CLI tiers spend 15-30s
+ * on bootstrap alone, making the classifier the dominant cost in the Q&A
+ * pipeline (43s classify vs 500ms retrieve). OpenRouter's grok-4.1-fast is
+ * empirically <500ms p50 and matches CLI quality on the 6-question bake-off.
+ * The CLI tiers remain available as fallbacks when OpenRouter is unreachable
+ * (no key, HTTP error, timeout).
+ *
+ * Cache: 60s in-process cache keyed by sha256(question). Identical questions
+ * within 60s skip the LLM call entirely — sub-millisecond hit path.
  *
  * Class A = lookup: "who/when/where/what" — expects a 1-2 fact answer
  * Class B = reasoning: "why/how/explain" — expects multi-fact composition
@@ -21,6 +28,8 @@
  */
 
 import 'server-only';
+
+import { createHash } from 'node:crypto';
 
 import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
@@ -33,6 +42,58 @@ export interface ClassifierResult {
   bm25Variants: string[];
 }
 
+// ── In-process classifier cache ──────────────────────────────────────────────
+//
+// Identical questions within the TTL skip every LLM call. The cache is keyed
+// by sha256(question) — repoPath/projectId don't influence classification
+// (Class A/B + BM25 variants are properties of the question, not the scope).
+//
+// TTL is short (60s) so a corrected classifier ships fast in the dev loop;
+// production cold cache is the only path that pays for the LLM call.
+
+const CLASSIFIER_CACHE_TTL_MS = 60_000;
+const CLASSIFIER_CACHE_MAX = 500;
+
+interface ClassifierCacheEntry {
+  result: ClassifierResult;
+  expiresAt: number;
+}
+
+const classifierCache = new Map<string, ClassifierCacheEntry>();
+
+function classifierCacheKey(question: string): string {
+  return createHash('sha256').update(question.trim().toLowerCase()).digest('hex');
+}
+
+function getCachedClassification(question: string): ClassifierResult | null {
+  const entry = classifierCache.get(classifierCacheKey(question));
+  if (!entry) return null;
+  if (Date.now() > entry.expiresAt) {
+    classifierCache.delete(classifierCacheKey(question));
+    return null;
+  }
+  return entry.result;
+}
+
+function setCachedClassification(question: string, result: ClassifierResult): void {
+  classifierCache.set(classifierCacheKey(question), {
+    result,
+    expiresAt: Date.now() + CLASSIFIER_CACHE_TTL_MS,
+  });
+  // Lazy eviction of expired entries when the cache grows large.
+  if (classifierCache.size > CLASSIFIER_CACHE_MAX) {
+    const now = Date.now();
+    for (const [k, v] of classifierCache) {
+      if (now > v.expiresAt) classifierCache.delete(k);
+    }
+  }
+}
+
+/** Test-only: clear the classifier cache. */
+export function resetClassifierCache(): void {
+  classifierCache.clear();
+}
+
 const CLASSIFIER_PROMPT = `Classify the engineering question. Return ONLY a single JSON object — no prose, no markdown fences, no \`\`\` blocks, no commentary before or after.
 The very first character of your response MUST be \`{\` and the last MUST be \`}\`.
 Output exactly: { "class": "A" | "B", "bm25_variants": ["v1","v2","v3"] }
@@ -42,16 +103,24 @@ bm25_variants: 3-5 alternate phrasings using synonyms and rephrasings of the que
 
 /**
  * Classify the question with a 5-tier provider chain:
- *   1. Claude Haiku CLI (Claude Max subscription — no per-token cost, primary)
- *   2. Codex CLI gpt-5.5 (ChatGPT Plus / Codex subscription — also free)
- *   3. OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5.4-nano fallback) — paid HTTP
+ *   1. OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5.4-nano fallback) — paid HTTP, ~500ms
+ *   2. Claude Haiku CLI (Claude Max sub — free, ~6-12s, only when in-app orchestrator toggle ON)
+ *   3. Codex CLI gpt-5.5 (ChatGPT Plus sub — free, ~15-30s, fallback when OpenRouter unreachable)
  *   4. Gemini Flash (JSON-mode; demoted because of recent 503s)
  *   5. Heuristic fallback (lexical "why/how/explain" → Class B)
+ *
+ * Cache: 60s in-process by sha256(question). Sub-ms hit path.
  *
  * Returns the classification + BM25 variants. Never throws; on full failure
  * returns the heuristic Class B so retrieval still gets at least one variant.
  */
 export async function classifyQuestion(question: string): Promise<ClassifierResult> {
+  // ── Cache hit path (sub-millisecond) ───────────────────────────────────
+  const cached = getCachedClassification(question);
+  if (cached) {
+    return cached;
+  }
+
   const prompt = `${CLASSIFIER_PROMPT}\n\nQuestion: ${question}`;
   // O8_EVAL_MODE=1 skips CLI tiers (their bootstrap dominates eval wall time)
   // and routes to anthropic/claude-haiku-4-5 via OpenRouter — same intelligence
@@ -65,20 +134,32 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
     const sonnetResult = await tryOpenRouter(prompt, question, 'anthropic/claude-sonnet-4-6');
     if (sonnetResult) {
       console.info('[qa][classifier] resolved via openrouter:anthropic/claude-sonnet-4-6');
+      setCachedClassification(question, sonnetResult);
       return sonnetResult;
     }
     // Eval-mode tier 0b: Haiku 4.5 via OpenRouter as cheap fallback before grok.
     const haikuOpenrouterResult = await tryOpenRouter(prompt, question, 'anthropic/claude-haiku-4-5');
     if (haikuOpenrouterResult) {
       console.info('[qa][classifier] resolved via openrouter:anthropic/claude-haiku-4-5 (sonnet-fallback)');
+      setCachedClassification(question, haikuOpenrouterResult);
       return haikuOpenrouterResult;
     }
   }
 
-  // Tier ordering depends on the in-app orchestrator toggle (epic #1044):
-  //   - toggle OFF (default) → Codex is effective tier 1, Haiku is skipped
-  //     (it would throw anyway, no point burning the fast-throw cycle).
-  //   - toggle ON              → Haiku tier 1, Codex tier 2 (legacy order).
+  // Tier 1: OpenRouter (HTTP, ~500ms) — promoted to first in #1115 because the
+  // CLI tiers spend 15-30s on bootstrap alone and dominate interactive Q&A latency.
+  // The CLI tiers remain as fallbacks below.
+  const openrouterResult = await tryOpenRouter(prompt, question);
+  if (openrouterResult) {
+    console.info(`[qa][classifier] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL} (tier 1)`);
+    setCachedClassification(question, openrouterResult);
+    return openrouterResult;
+  }
+
+  // CLI tier ordering depends on the in-app orchestrator toggle (epic #1044):
+  //   - toggle OFF (default) → Codex is the only CLI tier (Haiku would throw —
+  //     no Claude Max sub assumed by default).
+  //   - toggle ON             → Haiku first, then Codex.
   let inAppOrchestratorOn = false;
   if (!evalMode) {
     try {
@@ -89,33 +170,27 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
     }
   }
 
-  // Tier 1 (when toggle ON): Haiku CLI — free for Claude Max users. Skipped in
-  // eval mode or when the toggle is OFF (Codex takes the lead slot instead).
+  // Tier 2 (only when toggle ON): Haiku CLI — free for Claude Max users.
   if (!evalMode && inAppOrchestratorOn) {
     const haikuResult = await tryHaiku(prompt, question);
     if (haikuResult) {
-      console.info('[qa][classifier] resolved via haiku-cli (tier 1)');
+      console.info('[qa][classifier] resolved via haiku-cli (tier 2 fallback)');
+      setCachedClassification(question, haikuResult);
       return haikuResult;
     }
   }
 
-  // Tier 1 (when toggle OFF — default) / Tier 2 (when toggle ON): Codex CLI
-  // — free for ChatGPT Plus / Codex sub users. Always tried when not eval-mode.
+  // Tier 3: Codex CLI — free for ChatGPT Plus / Codex sub users. Always tried
+  // when not eval-mode and OpenRouter failed.
   if (!evalMode) {
     const codexResult = await tryCodex(prompt, question);
     if (codexResult) {
       console.info(
-        `[qa][classifier] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (${inAppOrchestratorOn ? 'tier 2' : 'tier 1 default'})`,
+        `[qa][classifier] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (tier 3 fallback)`,
       );
+      setCachedClassification(question, codexResult);
       return codexResult;
     }
-  }
-
-  // Tier 3: OpenRouter (fast, paid — safety net when both CLIs unavailable).
-  const openrouterResult = await tryOpenRouter(prompt, question);
-  if (openrouterResult) {
-    console.info(`[qa][classifier] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL}`);
-    return openrouterResult;
   }
 
   // Tier 4: Flash (when a Google AI key is present).
@@ -124,11 +199,13 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
     const flashResult = await tryFlash(question, apiKey);
     if (flashResult) {
       console.info('[qa][classifier] resolved via flash');
+      setCachedClassification(question, flashResult);
       return flashResult;
     }
   }
 
-  // Tier 5: heuristic.
+  // Tier 5: heuristic. Don't cache — we want subsequent calls to retry the LLM
+  // tiers in case they were transiently down.
   console.info('[qa][classifier] resolved via heuristic');
   return fallback(question);
 }
