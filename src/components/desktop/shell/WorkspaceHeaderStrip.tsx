@@ -13,7 +13,7 @@
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
-import { TitleBarButton } from '../title-bar/TitleBarButton';
+import { HeaderIconPill } from './HeaderIconPill';
 import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 
@@ -184,12 +184,12 @@ export function WorkspaceHeaderStrip({
         showProjectContextToggle || hasPlayButton || onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
           <>
             {showProjectContextToggle ? (
-              <TitleBarButton
+              <HeaderIconPill
                 icon={<IconInfoCircle />}
                 label={projectContextRailVisible ? 'Hide project context' : 'Show project context'}
                 title={projectContextRailVisible ? 'Hide project context' : 'Show project context'}
                 onClick={onToggleProjectContextRail}
-                active={projectContextRailVisible}
+                yNudge={-3}
               />
             ) : null}
             {hasPlayButton ? (
@@ -201,18 +201,19 @@ export function WorkspaceHeaderStrip({
               />
             ) : null}
             {onToggleBottomPanel ? (
-              <TitleBarButton
+              <HeaderIconPill
                 icon={<IconTerminal />}
                 label="Toggle terminal"
                 onClick={onToggleBottomPanel}
-                active={bottomPanelVisible}
+                yNudge={-3}
               />
             ) : null}
             {onSplitWorkspacePanel ? (
-              <TitleBarButton
+              <HeaderIconPill
                 icon={<IconColumns />}
                 label="Split workspace"
                 onClick={onSplitWorkspacePanel}
+                yNudge={-3}
               />
             ) : null}
             {showRightPanelFallbackToggle ? (
@@ -289,12 +290,12 @@ function SplitHeaderPillStrips({
             </div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingLeft: 4, paddingRight: 6, flexShrink: 0 }}>
               {workspace.contextRailAvailable ? (
-                <TitleBarButton
+                <HeaderIconPill
                   icon={<IconInfoCircle />}
                   label={workspace.contextRailVisible === false ? `Show project context (${paneLabel(index)})` : `Hide project context (${paneLabel(index)})`}
                   title={workspace.contextRailVisible === false ? 'Show project context' : 'Hide project context'}
                   onClick={() => dispatchToggleProjectContextRail(workspace.workspaceId)}
-                  active={workspace.contextRailVisible !== false}
+                  yNudge={-3}
                 />
               ) : null}
               <HeaderPlayButton
