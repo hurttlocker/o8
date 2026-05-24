@@ -6,17 +6,23 @@
  *   2. ANTHROPIC_API_KEY — power users with a direct API key
  *   3. Gemini Flash      — fallback when neither is available
  *
- * Uses `--print` mode for one-shot CLI invocations so these calls never
- * pollute the orchestrator session registry or the runtime adapter system.
- * The working directory is os.tmpdir() so the invocation doesn't pick up
- * any project-level .claude/ config.
+ * CLI path uses the `claude --input-format stream-json` REPL spawn (no `-p` /
+ * `--print`) — the same shape the in-app chat tab uses — so calls bill against
+ * the user's Claude Code MAX subscription pool, NOT the gated Agent SDK pool
+ * that `--print` taps. Shared spawn helper lives in
+ * `src/lib/claude-code/one-shot-repl.ts`. See #1124 for the SDK-billing trap
+ * and #1066 for the original REPL migration.
+ *
+ * Working directory is os.tmpdir() so the invocation doesn't pick up any
+ * project-level .claude/ config.
  */
 
 import 'server-only';
 
 import { execFile } from 'node:child_process';
-import os from 'node:os';
 import { promisify } from 'node:util';
+
+import { askClaudeOneShot } from '@/lib/claude-code/one-shot-repl';
 
 const execFileAsync = promisify(execFile);
 
@@ -122,92 +128,6 @@ export function resetSonnetProviderCache(): void {
   cachedTier = null;
 }
 
-// ── CLI streaming parser ──────────────────────────────────────────────────────
-
-/**
- * Parse a stream-json output line from the Claude CLI (streaming mode).
- * Returns text from assistant events; null for all other event types.
- *
- * With --verbose the relevant event shapes are:
- *   - content_block_delta { delta: { type: 'text_delta', text } }   — API streaming
- *   - assistant { message: { content: [{ type: 'text', text }] } }  — verbose fallback
- *
- * We skip `result` events here to avoid duplicating text that already came
- * through the assistant event.
- */
-function extractCliStreamingText(line: string): string | null {
-  if (!line.trim()) return null;
-  try {
-    const evt = JSON.parse(line) as Record<string, unknown>;
-
-    // API streaming delta — { type: 'content_block_delta', delta: { type: 'text_delta', text } }
-    if (
-      evt['type'] === 'content_block_delta' &&
-      typeof evt['delta'] === 'object' &&
-      evt['delta'] !== null
-    ) {
-      const delta = evt['delta'] as Record<string, unknown>;
-      if (delta['type'] === 'text_delta' && typeof delta['text'] === 'string') {
-        return delta['text'];
-      }
-    }
-
-    // Verbose assistant event — { type: 'assistant', message: { content: [{ type: 'text', text }] } }
-    if (evt['type'] === 'assistant' && typeof evt['message'] === 'object' && evt['message'] !== null) {
-      const msg = evt['message'] as Record<string, unknown>;
-      const content = msg['content'];
-      if (Array.isArray(content)) {
-        const parts: string[] = [];
-        for (const block of content) {
-          if (
-            typeof block === 'object' &&
-            block !== null &&
-            (block as Record<string, unknown>)['type'] === 'text' &&
-            typeof (block as Record<string, unknown>)['text'] === 'string'
-          ) {
-            parts.push((block as Record<string, unknown>)['text'] as string);
-          }
-        }
-        if (parts.length > 0) return parts.join('');
-      }
-    }
-  } catch {
-    // not JSON — skip
-  }
-  return null;
-}
-
-/**
- * Parse a stream-json output line for the non-streaming (batch) path.
- * Extracts text only from the terminal `result` event, which contains the
- * complete response text. Skips assistant events to avoid double-counting.
- */
-function extractCliResultText(line: string): string | null {
-  if (!line.trim()) return null;
-  try {
-    const evt = JSON.parse(line) as Record<string, unknown>;
-    if (evt['type'] === 'result' && typeof evt['result'] === 'string') {
-      return evt['result'];
-    }
-  } catch {
-    // not JSON — skip
-  }
-  return null;
-}
-
-/**
- * Full text extractor for non-streaming CLI output.
- * Scans all lines for the terminal `result` event and returns its text.
- */
-function extractCliFullText(output: string): string {
-  const lines = output.split('\n').filter(Boolean);
-  for (const line of lines) {
-    const text = extractCliResultText(line);
-    if (text !== null) return text;
-  }
-  return '';
-}
-
 // ── callSonnet public API ─────────────────────────────────────────────────────
 
 interface SonnetMessages {
@@ -245,127 +165,49 @@ export async function callSonnet(
   return callFlashFallback(opts);
 }
 
-// ── CLI provider ──────────────────────────────────────────────────────────────
+// ── CLI provider (REPL stream-json — subscription-billed) ───────────────────
 
 /**
- * Build the full user message combining system prompt + messages.
- * We pass system content as part of the prompt since `--print` doesn't
- * accept a separate system flag via CLI.
+ * Build the prompt for the REPL one-shot. System content is prepended as a
+ * `<system>...</system>` block since the one-shot frame only carries a `user`
+ * message — keeping the same shape the prior `--print` path used so existing
+ * eval baselines stay comparable.
  */
 function buildCliPrompt(system: string, messages: SonnetMessages['messages']): string {
   const userMsg = messages[messages.length - 1]?.content ?? '';
-  // Prepend system as context block so the model respects it.
   return `<system>\n${system}\n</system>\n\n${userMsg}`;
 }
 
+/**
+ * Invoke Sonnet via the REPL one-shot helper. Subscription-billed (no `-p` /
+ * `--print`) — see #1124 for the trap the old `--print` path fell into.
+ *
+ * Streaming mode is preserved at the public API level (callers in composer.ts
+ * still `for await` the token stream) but the REPL one-shot doesn't expose a
+ * mid-turn token stream the way the API does; we resolve the full text and
+ * yield it once. Callers don't care: they accumulate into `fullText` anyway
+ * before doing citation post-processing.
+ */
 async function callSonnetCli(
   opts: SonnetMessages & { stream?: boolean },
   claudeBin: string,
 ): Promise<{ text: string; tier: SonnetTier } | { tokens: AsyncIterable<string>; tier: SonnetTier }> {
   const prompt = buildCliPrompt(opts.system, opts.messages);
+  const timeoutMs = opts.timeoutMs ?? 300_000;
 
-  // Always use tmpdir so no project .claude/ config is inherited.
-  const cwd = os.tmpdir();
-
-  // --verbose is required when combining --print and --output-format stream-json.
-  // Prompt is fed via stdin so multi-line content never gets mangled by shell arg
-  // parsing (positional args with newlines confuse the CLI's argv parser).
-  const cliArgs = [
-    '--print',
-    '--verbose',
-    '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--model', 'claude-sonnet-4-6',
-  ];
-
-  const env = {
-    ...process.env,
-    FORCE_COLOR: '0',
-    NO_COLOR: '1',
-  };
+  const text = await askClaudeOneShot(prompt, {
+    binary: claudeBin,
+    model: 'claude-sonnet-4-6',
+    timeoutMs,
+  });
 
   if (opts.stream) {
-    // Streaming: return an async generator that yields tokens as the CLI writes them.
     const tokens = (async function* (): AsyncIterable<string> {
-      const { spawn } = await import('node:child_process');
-      const child = spawn(claudeBin, cliArgs, {
-        cwd,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      // Write prompt to stdin, then close so the CLI knows input is done.
-      child.stdin!.write(prompt, 'utf-8');
-      child.stdin!.end();
-
-      let lineBuffer = '';
-      const decoder = new TextDecoder();
-
-      for await (const chunk of child.stdout!) {
-        const str = typeof chunk === 'string' ? chunk : decoder.decode(chunk as Buffer, { stream: true });
-        lineBuffer += str;
-        const lines = lineBuffer.split('\n');
-        lineBuffer = lines.pop() ?? '';
-        for (const line of lines) {
-          const text = extractCliStreamingText(line);
-          if (text) yield text;
-        }
-      }
-
-      // Flush remaining buffer.
-      if (lineBuffer.trim()) {
-        const text = extractCliStreamingText(lineBuffer);
-        if (text) yield text;
-      }
-
-      // Wait for exit so caller can detect errors.
-      await new Promise<void>((resolve) => child.on('close', () => resolve()));
+      if (text) yield text;
     })();
-
     return { tokens, tier: 'cli' };
   }
-
-  // Non-streaming: spawn, write prompt to stdin, collect stdout to completion.
-  // Using spawn (not execFileAsync) so we can write to stdin — execFile's type
-  // definition doesn't expose the `input` option even though the runtime accepts it.
-  try {
-    const text = await new Promise<string>((resolve, reject) => {
-      const { spawn: spawnSync } = require('node:child_process') as typeof import('node:child_process');
-      const child = spawnSync(claudeBin, cliArgs, {
-        cwd,
-        env,
-        stdio: ['pipe', 'pipe', 'pipe'],
-      });
-
-      child.stdin!.write(prompt, 'utf-8');
-      child.stdin!.end();
-
-      let stdout = '';
-      let stderr = '';
-      child.stdout!.on('data', (chunk: Buffer) => { stdout += chunk.toString(); });
-      child.stderr!.on('data', (chunk: Buffer) => { stderr += chunk.toString(); });
-
-      const timeoutMs = opts.timeoutMs ?? 60_000;
-      const timer = setTimeout(() => {
-        child.kill();
-        reject(new Error(`[qa] Claude CLI timed out after ${Math.round(timeoutMs / 1000)}s`));
-      }, timeoutMs);
-
-      child.on('close', (code) => {
-        clearTimeout(timer);
-        if (code !== 0 && stdout.trim() === '') {
-          reject(new Error(`[qa] Claude CLI exited with code ${code}: ${stderr.slice(0, 400)}`));
-        } else {
-          resolve(stdout);
-        }
-      });
-    });
-
-    return { text: extractCliFullText(text), tier: 'cli' };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new Error(`[qa] Claude CLI invocation failed: ${message}`);
-  }
+  return { text, tier: 'cli' };
 }
 
 // ── API provider ──────────────────────────────────────────────────────────────
