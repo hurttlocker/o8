@@ -322,6 +322,10 @@ function resolveHandle(handle: string, lookup: CitationLookup): TypedRow | null 
  * Parse bracket citations like [D-014], [O-481], [PR-650], [FACT-abc123],
  * and multi-handle clusters like [FACT-aaa, FACT-bbb] from an LLM answer.
  * Returns the deduped set of handles found (uppercased).
+ *
+ * Character class includes `:` so spec-ingest directive handles
+ * (`D-spec-ingest:cortex-ide:design:06-motifs:06-7-flat-icon-button-...`)
+ * survive the shape gate (#1121).
  */
 function parseBracketHandles(answer: string): string[] {
   // Bracket body can contain multiple handles separated by `,` `;` or
@@ -335,8 +339,9 @@ function parseBracketHandles(answer: string): string[] {
       const clean = piece.trim().toUpperCase();
       // Skip bracket bodies that don't look like citation handles (numbers,
       // free text, etc.). A handle has at least one `-` and starts with a
-      // letter (kind prefix) — e.g. `D-014`, `FACT-abc`, `PR-3605`.
-      if (/^[A-Z][A-Z0-9_\-#.]*-[A-Z0-9_\-#.]+$/i.test(clean)) {
+      // letter (kind prefix) — e.g. `D-014`, `FACT-abc`, `PR-3605`,
+      // `D-spec-ingest:cortex-ide:design:...` (colons for spec-ingest IDs).
+      if (/^[A-Z][A-Z0-9_\-#.:]*-[A-Z0-9_\-#.:]+$/i.test(clean)) {
         handles.push(clean);
       }
     }
@@ -381,8 +386,9 @@ function translateCitations(answer: string, lookup: CitationLookup): {
       const handle = piece.toUpperCase();
       // Only treat pieces that look like citation handles. Anything else
       // (e.g. raw [link text]) falls through unchanged so we don't strip
-      // unrelated brackets.
-      if (!/^[A-Z][A-Z0-9_\-#.]*-[A-Z0-9_\-#.]+$/i.test(handle)) continue;
+      // unrelated brackets. Colons are allowed so spec-ingest directive
+      // handles (`D-spec-ingest:cortex-ide:design:...`) survive (#1121).
+      if (!/^[A-Z][A-Z0-9_\-#.:]*-[A-Z0-9_\-#.:]+$/i.test(handle)) continue;
       sawCitationShape = true;
       const row = resolveHandle(handle, lookup);
       if (row) verified.push(recordRow(row));
