@@ -31,13 +31,28 @@ import { getOperatorDefaultsSync, type ClassAComposer } from '@/lib/operator/def
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
-function buildFlashComposePrompt(question: string, rowsJson: string): string {
+function buildFlashComposePrompt(
+  question: string,
+  rowsJson: string,
+  options: { specIngestPresent?: boolean } = {},
+): string {
+  // #1122 — when a directive (D-… handle) lands at the head of the rows,
+  // it's the canonical answer for this codebase-rule question. Directives
+  // come from the repo's spec files (CLAUDE.md / AGENTS.md / DESIGN.md /
+  // docs/**) and seed rules, and outrank any FACT- distillation that
+  // contradicts them on a number, limit, or rule. The legacy "Prefer FACT-"
+  // instruction sent the composer to a stale fact even when the directive
+  // disagreed; this flip aligns the composer with the retrieval pin in
+  // unionMerge.
+  const preferenceRule = options.specIngestPresent
+    ? 'When the rows include a D-… (directive) handle, prefer it as the primary citation — directives are the canonical spec for this repo and outrank any FACT- distillation that contradicts them on a number, limit, or rule. Cite FACT- rows only as supporting evidence after the directive.'
+    : 'Prefer FACT- handles as primary citations.';
   return `Answer concisely (1-2 sentences) using ONLY the provided typed rows.
 Question: ${question}
 Rows (each row has a \`handle\` for citation, \`content\` with the actual text, and \`source_authority\` 0-1): ${rowsJson}
 
 Rules:
-1. If ANY row's content addresses the question — fully or partially — lead with that information. Quote concrete values, numbers, names, and identifiers verbatim from the content. Prefer FACT- handles as primary citations.
+1. If ANY row's content addresses the question — fully or partially — lead with that information. Quote concrete values, numbers, names, and identifiers verbatim from the content. ${preferenceRule}
 2. Cite the relevant row(s) inline in [BRACKET-ID] form where BRACKET-ID is the handle field from the row (e.g. [D-014], [O-481], [PR-650], [FACT-abc123]).
 3. Source-of-truth hierarchy: each row carries \`source_authority\` (0-1). When two rows contradict, cite the higher-authority one. Directives (1.0) are the project's rules — prefer them over comment opinions (0.7). Merged PRs (0.95) outrank open ones (0.8). Closed issues (0.85) outrank open ones (0.75).
 4. NEVER hedge with "I don't have that information yet" when you ARE answering. Either answer with citations OR respond with the exact string "I don't have that information yet." and nothing else. There is no middle ground — no preambles, no apologies.
@@ -453,7 +468,14 @@ export async function composeClassA(
       source_authority: rowAuthority(r),
     })),
   );
-  const composePrompt = buildFlashComposePrompt(question, rowsJson);
+  // #1122 — when ANY directive (seed-* or spec-ingest:*) is at the head of
+  // the topRows list, flip the composer's "prefer FACT-" rule to
+  // "prefer the directive". `unionMerge` already pins directives ABOVE facts
+  // for Class A; this prompt change makes the composer respect that ordering
+  // when picking lead citations.
+  const leadKind = topRows[0]?.citation.kind;
+  const specIngestPresent = leadKind === 'directive';
+  const composePrompt = buildFlashComposePrompt(question, rowsJson, { specIngestPresent });
   // O8_EVAL_MODE=1 is the ship-gate / smoke path. We use Sonnet 4.6 via
   // OpenRouter (~$0.026/run) because false negatives cost more in re-
   // investigation than the bill. Production user chat (non-eval-mode)
