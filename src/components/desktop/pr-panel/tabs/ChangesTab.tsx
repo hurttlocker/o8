@@ -115,7 +115,10 @@ const FileRow = memo(function FileRow({ file }: { file: PrFile }) {
           border: 'none',
           cursor: 'pointer',
           textAlign: 'left',
+          transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
+        onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+        onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
       >
         <span style={{ color: 'var(--t-text-faint)', display: 'inline-flex' }}>
           {open ? <ChevronDown size={12} strokeWidth={2} /> : <ChevronRight size={12} strokeWidth={2} />}

@@ -307,13 +307,13 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
           paddingBottom: 7,
           paddingLeft: 14,
           border: 'none',
-          background: isExpanded ? 'rgba(37,99,235,0.06)' : 'transparent',
+          background: isExpanded ? 'var(--t-input-bg)' : 'transparent',
           cursor: 'pointer',
           textAlign: 'left',
           transition: 'background 100ms cubic-bezier(0.22, 1, 0.36, 1)',
           fontFamily: 'var(--font-sans-system)',
         }}
-        onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'rgba(37,99,235,0.04)'; }}
+        onMouseEnter={(e) => { if (!isExpanded) e.currentTarget.style.background = 'var(--t-hover)'; }}
         onMouseLeave={(e) => { if (!isExpanded) e.currentTarget.style.background = 'transparent'; }}
       >
         <div

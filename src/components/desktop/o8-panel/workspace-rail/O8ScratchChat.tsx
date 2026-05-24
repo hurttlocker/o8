@@ -271,20 +271,15 @@ function HeaderButton({
   active,
   disabled,
   onOpen,
-  placement = 'floating',
 }: {
   active: boolean;
   disabled: boolean;
   onOpen: () => void;
   placement?: ScratchTriggerPlacement;
 }) {
-  const toolbar = placement === 'review-toolbar';
-  const size = toolbar ? 28 : 32;
-  const inactiveBackground = toolbar ? 'transparent' : 'var(--t-chat-surface-card-bg, rgba(15, 23, 42, 0.04))';
-  const activeBackground = toolbar ? 'var(--t-chrome-btn-active-bg, var(--t-hover))' : 'var(--t-accent-soft, rgba(37, 99, 235, 0.1))';
-  const inactiveBorder = toolbar ? 'none' : '1px solid var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))';
-  const activeBorder = toolbar ? 'none' : '1px solid var(--t-accent-border, rgba(37, 99, 235, 0.26))';
-
+  // Flat per DESIGN.md §06.7 — same language as HeaderIconPill regardless of
+  // placement. The chunky ring + inset shadow that used to differentiate the
+  // floating placement was the "wrong hover" the operator called out.
   return (
     <button
       type="button"
@@ -294,12 +289,15 @@ function HeaderButton({
       onMouseDown={(event) => event.preventDefault()}
       onClick={onOpen}
       style={{
-        width: size,
-        height: size,
-        padding: 0,
-        border: active ? activeBorder : inactiveBorder,
-        borderRadius: toolbar ? 8 : 10,
-        background: active ? activeBackground : inactiveBackground,
+        width: 26,
+        height: 26,
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        paddingRight: 0,
+        border: 'none',
+        borderRadius: 7,
+        background: active ? 'var(--t-input-bg)' : 'transparent',
         color: active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE,
         cursor: disabled ? 'default' : 'pointer',
         display: 'inline-flex',
@@ -311,23 +309,20 @@ function HeaderButton({
         position: 'relative',
         WebkitTapHighlightColor: 'transparent',
         opacity: disabled ? 0.62 : 1,
-        boxShadow: toolbar ? 'none' : (active ? '0 0 0 3px rgba(96, 165, 250, 0.14)' : 'inset 0 1px 0 rgba(255, 255, 255, 0.28)'),
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
       onMouseEnter={(event) => {
         if (!active && !disabled) {
-          event.currentTarget.style.background = toolbar ? 'var(--t-hover)' : 'var(--t-accent-soft, rgba(37, 99, 235, 0.1))';
-          event.currentTarget.style.borderColor = toolbar ? 'transparent' : 'var(--t-accent-border, rgba(37, 99, 235, 0.26))';
+          event.currentTarget.style.background = 'var(--t-hover)';
         }
       }}
       onMouseLeave={(event) => {
         if (!active) {
-          event.currentTarget.style.background = inactiveBackground;
-          event.currentTarget.style.borderColor = toolbar ? 'transparent' : 'var(--t-chat-surface-input-border, rgba(15, 23, 42, 0.12))';
+          event.currentTarget.style.background = 'transparent';
         }
       }}
     >
-      <AskO8Icon size={16} color={active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE} />
+      <AskO8Icon size={14} color={active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE} />
     </button>
   );
 }
