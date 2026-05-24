@@ -1,32 +1,36 @@
 /**
- * Haiku CLI adapter for the Cortex Q&A layer (epic #915 path-to-70 phase 1.6).
+ * Haiku CLI adapter for the Cortex Q&A layer (epic #915 path-to-70 phase 1.6,
+ * REPL migration #1124).
  *
- * Single-purpose, non-streaming wrapper around `claude --print --model
- * claude-haiku-4-5-20251001`. Used as the second-tier fallback on hot paths
- * that previously degraded straight from Gemini Flash → heuristic:
+ * Single-purpose, non-streaming wrapper around the `claude --input-format
+ * stream-json` REPL spawn (no `-p` / `--print`) targeting
+ * claude-haiku-4-5-20251001. Used as a CLI tier on hot paths:
  *
- *   composeClassA():  Flash → Haiku CLI → Sonnet CLI → heuristic
- *   classifyQuestion: Flash → Haiku CLI → heuristic
+ *   composeClassA():  Codex → OpenRouter → Flash → Haiku/Sonnet CLI → heuristic
+ *   classifyQuestion: OpenRouter → Codex → Haiku CLI → Flash → heuristic
+ *
+ * Why REPL (not `--print`):
+ *   - `--print` bills against the user's Agent SDK pool. The REPL spawn bills
+ *     against the user's Claude Code MAX subscription pool — the same line a
+ *     terminal `claude` REPL session uses. See #1124 for the trap; #1066 for
+ *     the original REPL migration on the chat tab.
+ *   - Shared spawn shape via src/lib/claude-code/one-shot-repl.ts so any
+ *     future flag change stays in lockstep with the chat tab and Sonnet
+ *     adapter.
  *
  * Why CLI specifically:
- *   - Uses the founder's Claude Max subscription. Zero per-token cost.
+ *   - Uses the user's Claude Max subscription. Zero per-token cost.
  *   - No ANTHROPIC_API_KEY required. No OpenRouter required.
  *   - Mirrors src/lib/cortex/qa/llm/sonnet-adapter.ts's CLI tier exactly,
  *     so binary detection survives Finder-launched Tauri apps via login-shell.
- *
- * Why a separate adapter (vs. extending sonnet-adapter):
- *   - Callers want a dead-simple `callHaiku(prompt) → string` shape with a
- *     short timeout (8s default). Haiku is fast; long timeouts mean the
- *     CLI is wedged and we should fall through.
- *   - The Sonnet adapter has a 3-tier (CLI/API/Flash) cascade plus
- *     streaming. Haiku here is CLI-only and non-streaming on purpose.
  */
 
 import 'server-only';
 
-import { execFile, spawn } from 'node:child_process';
-import os from 'node:os';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+
+import { askClaudeOneShot } from '@/lib/claude-code/one-shot-repl';
 
 const execFileAsync = promisify(execFile);
 
@@ -92,56 +96,6 @@ export function resetHaikuProviderCache(): void {
   cachedClaudeBin = undefined;
 }
 
-// ── stream-json parser (result event only — non-streaming) ───────────────────
-
-/**
- * Scan Claude CLI stream-json output for the terminal `result` event and
- * return its text. Mirrors extractCliFullText in sonnet-adapter.ts so any
- * future shape change in one adapter is easy to mirror in the other.
- */
-function extractResultText(output: string): string {
-  const lines = output.split('\n').filter(Boolean);
-  // Prefer the terminal `result` event (complete answer, no double-counting).
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      const evt = JSON.parse(line) as Record<string, unknown>;
-      if (evt['type'] === 'result' && typeof evt['result'] === 'string') {
-        return evt['result'];
-      }
-    } catch {
-      // not JSON — skip
-    }
-  }
-  // Fallback: stitch assistant events if no terminal result was emitted.
-  const parts: string[] = [];
-  for (const line of lines) {
-    if (!line.trim()) continue;
-    try {
-      const evt = JSON.parse(line) as Record<string, unknown>;
-      if (evt['type'] === 'assistant' && typeof evt['message'] === 'object' && evt['message'] !== null) {
-        const msg = evt['message'] as Record<string, unknown>;
-        const content = msg['content'];
-        if (Array.isArray(content)) {
-          for (const block of content) {
-            if (
-              typeof block === 'object' &&
-              block !== null &&
-              (block as Record<string, unknown>)['type'] === 'text' &&
-              typeof (block as Record<string, unknown>)['text'] === 'string'
-            ) {
-              parts.push((block as Record<string, unknown>)['text'] as string);
-            }
-          }
-        }
-      }
-    } catch {
-      // not JSON — skip
-    }
-  }
-  return parts.join('');
-}
-
 // ── Public API ───────────────────────────────────────────────────────────────
 
 export interface CallHaikuOptions {
@@ -150,28 +104,29 @@ export interface CallHaikuOptions {
 }
 
 /**
- * Call Claude Haiku via the CLI with `prompt` on stdin.
+ * Call Claude Haiku via the REPL one-shot helper. Subscription-billed
+ * (`claude --input-format stream-json`, no `-p` / `--print`) — see #1124 for
+ * the SDK-billing trap the prior `--print` path fell into.
  *
  * Throws on:
+ *   - in-app orchestrator toggle OFF (gate matches the chat tab)
  *   - claude binary not found
- *   - CLI exit code non-zero with empty stdout
+ *   - REPL spawn / exit error
  *   - timeout exceeded
  *   - empty result text
  *
  * Caller is responsible for the fallback chain (composer/classifier each
- * have their own next-step on failure — Sonnet CLI or heuristic).
+ * have their own next-step on failure — Codex CLI, OpenRouter, Flash,
+ * Sonnet CLI, heuristic).
  */
 export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 8_000;
 
-  // June 15 2026 — Haiku CLI invokes `claude --print` which bills against the
-  // user's Agent SDK credit pool. Gated behind the same toggle as the in-app
-  // orchestrator chat (Settings → Operator Defaults → 07). When off, throw
-  // so the classifier/composer cascade falls through to Codex CLI →
-  // OpenRouter → Flash → heuristic. Importing dynamically because this
-  // adapter is loaded under `import 'server-only'` and the operator defaults
-  // module is also server-only — the dynamic import keeps the dependency
-  // graph one-way at compile time.
+  // Subscription pool gate — matches the chat tab's behaviour. When the
+  // operator toggle is OFF, the user has explicitly opted out of the Claude
+  // CLI tier (e.g. they don't have a Max sub and want Codex/OpenRouter only),
+  // so we throw and let the cascade fall through. Dynamic import keeps the
+  // server-only dependency graph one-way.
   const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
   if (!resolveInAppOrchestratorEnabledSync()) {
     throw new Error('[qa][haiku] disabled by operator setting (inAppOrchestratorEnabled=false)');
@@ -182,58 +137,13 @@ export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Pr
     throw new Error('[qa][haiku] claude CLI not found on PATH or login shell');
   }
 
-  // --verbose required when combining --print + --output-format stream-json.
-  // Prompt fed via stdin so multi-line content isn't mangled by argv parsing.
-  const cliArgs = [
-    '--print',
-    '--verbose',
-    '--dangerously-skip-permissions',
-    '--output-format', 'stream-json',
-    '--model', 'claude-haiku-4-5-20251001',
-  ];
-
-  // tmpdir cwd so no project .claude/ config bleeds in.
-  const cwd = os.tmpdir();
-  const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1' };
-
-  const stdout = await new Promise<string>((resolve, reject) => {
-    const child = spawn(claudeBin, cliArgs, {
-      cwd,
-      env,
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-
-    child.stdin!.write(prompt, 'utf-8');
-    child.stdin!.end();
-
-    let outBuf = '';
-    let errBuf = '';
-    child.stdout!.on('data', (chunk: Buffer) => { outBuf += chunk.toString(); });
-    child.stderr!.on('data', (chunk: Buffer) => { errBuf += chunk.toString(); });
-
-    const timer = setTimeout(() => {
-      child.kill();
-      reject(new Error(`[qa][haiku] CLI timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-
-    child.on('error', (err) => {
-      clearTimeout(timer);
-      reject(new Error(`[qa][haiku] CLI spawn error: ${err.message}`));
-    });
-
-    child.on('close', (code) => {
-      clearTimeout(timer);
-      if (code !== 0 && outBuf.trim() === '') {
-        reject(new Error(`[qa][haiku] CLI exited ${code}: ${errBuf.slice(0, 400)}`));
-      } else {
-        resolve(outBuf);
-      }
-    });
+  const text = await askClaudeOneShot(prompt, {
+    binary: claudeBin,
+    model: 'claude-haiku-4-5-20251001',
+    timeoutMs,
   });
-
-  const text = extractResultText(stdout).trim();
-  if (!text) {
-    throw new Error('[qa][haiku] CLI returned empty result');
+  if (!text.trim()) {
+    throw new Error('[qa][haiku] REPL returned empty result');
   }
   return text;
 }

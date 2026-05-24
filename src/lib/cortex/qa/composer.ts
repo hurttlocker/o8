@@ -462,19 +462,22 @@ export async function composeClassA(
   const sonnetCliFirst = classAMode === 'sonnet-cli';
   let triedSonnetCli = false;
 
-  // Eval-mode tier 0: Sonnet 4.6 via OpenRouter — best reasoning + synthesis,
-  // never hedges when rows answer the question.
+  // Eval-mode tier 0: Sonnet 4.6 via the REPL adapter (subscription-billed,
+  // #1124) — best reasoning + synthesis, never hedges when rows answer the
+  // question. Routed through `tryComposeSonnet` (the adapter) instead of
+  // `tryComposeOpenRouter('anthropic/...')` so eval doesn't burn paid
+  // OpenRouter credits on the Anthropic models.
   if (evalMode) {
-    const sonnetAnswer = await tryComposeOpenRouter(composePrompt, 'anthropic/claude-sonnet-4-6');
+    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
     if (sonnetAnswer) {
-      console.info('[qa][composer-A] resolved via openrouter:anthropic/claude-sonnet-4-6');
+      console.info('[qa][composer-A] resolved via sonnet-repl (eval tier 0)');
       emitClassAAnswer(sonnetAnswer, lookup, emit);
       return;
     }
-    // Eval-mode tier 0b: Haiku 4.5 via OpenRouter as cheap fallback before grok.
-    const haikuAnswer = await tryComposeOpenRouter(composePrompt, 'anthropic/claude-haiku-4-5');
+    // Eval-mode tier 0b: Haiku 4.5 via the REPL adapter as cheap fallback.
+    const haikuAnswer = await tryComposeHaiku(composePrompt);
     if (haikuAnswer) {
-      console.info('[qa][composer-A] resolved via openrouter:anthropic/claude-haiku-4-5 (sonnet-fallback)');
+      console.info('[qa][composer-A] resolved via haiku-repl (eval tier 0b)');
       emitClassAAnswer(haikuAnswer, lookup, emit);
       return;
     }
@@ -819,9 +822,14 @@ export async function composeClassB(
 }
 
 /**
- * Eval-mode Class B path. Routes the same Sonnet system+user prompt through
- * OpenRouter (non-streaming) instead of Sonnet CLI. ~14-16s saved per case.
- * Used only when O8_EVAL_MODE=1.
+ * Eval-mode Class B path. Routes the Sonnet system+user prompt through the
+ * REPL one-shot adapter (subscription-billed, #1124) instead of either Sonnet
+ * CLI streaming or paid OpenRouter `anthropic/claude-sonnet-4-6`. Same
+ * adapter the production Class B path uses (`callSonnet`) — just non-streaming
+ * because eval cares about final answer correctness, not TTFT.
+ *
+ * Function name kept (`composeClassBViaOpenRouter`) to minimise the diff;
+ * the implementation no longer touches OpenRouter for the Anthropic models.
  */
 async function composeClassBViaOpenRouter(
   question: string,
@@ -831,15 +839,25 @@ async function composeClassBViaOpenRouter(
   lookup: CitationLookup,
 ): Promise<void> {
   try {
-    const system = buildSonnetComposeSystem();
-    const user = buildSonnetComposeUser(question, repoPath, topRows);
-    // Eval-mode primary = Sonnet 4.6 (matches Class A) — best synthesis for
-    // the ship-gate signal. ~$0.026/smoke-run. grok stays as the fallback
-    // path inside callOpenRouter's models[] chain.
-    const fullText = await callOpenRouter(`${system}\n\n${user}`, {
-      timeoutMs: 30_000,
-      model: 'anthropic/claude-sonnet-4-6',
+    const result = await callSonnet({
+      system: buildSonnetComposeSystem(),
+      messages: [
+        {
+          role: 'user',
+          content: buildSonnetComposeUser(question, repoPath, topRows),
+        },
+      ],
+      stream: false,
+      // Eval mode tolerates the full Sonnet REPL bootstrap; the runner caps
+      // overall wall time per case.
+      timeoutMs: 300_000,
     });
+    if (result.tier === 'flash') {
+      // Adapter degraded back to Flash — no Claude path was available, so
+      // fall back to Class A (which has its own chain).
+      return composeClassA(question, repoPath, topRows, emit);
+    }
+    const fullText = result.text;
 
     let finalAnswer = '';
     if (fullText.trim()) {

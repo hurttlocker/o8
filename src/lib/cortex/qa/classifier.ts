@@ -34,6 +34,7 @@ import { createHash } from 'node:crypto';
 import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
+import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 
 export type QuestionClass = 'A' | 'B';
 
@@ -122,27 +123,29 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
   }
 
   const prompt = `${CLASSIFIER_PROMPT}\n\nQuestion: ${question}`;
-  // O8_EVAL_MODE=1 skips CLI tiers (their bootstrap dominates eval wall time)
-  // and routes to anthropic/claude-haiku-4-5 via OpenRouter — same intelligence
-  // tier as the local Haiku CLI users get in production.
+  // O8_EVAL_MODE=1 routes the Anthropic tiers through the REPL one-shot
+  // adapters (subscription-billed, #1124) instead of OpenRouter's paid
+  // `anthropic/claude-...` models. The REPL path also skips the OpenRouter
+  // round-trip, so eval runs are cheaper AND closer to what production users
+  // hit on the Class B path.
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
-  // Eval-mode tier 0: Sonnet 4.6 via OpenRouter — matches the composer's
+  // Eval-mode tier 0: Sonnet 4.6 via the REPL adapter — matches the composer's
   // primary model so classifier + composer use the same reasoning quality.
   // BM25 variants from Sonnet are reliably better than grok-4.1-fast.
   if (evalMode) {
-    const sonnetResult = await tryOpenRouter(prompt, question, 'anthropic/claude-sonnet-4-6');
+    const sonnetResult = await trySonnetRepl(prompt, question);
     if (sonnetResult) {
-      console.info('[qa][classifier] resolved via openrouter:anthropic/claude-sonnet-4-6');
+      console.info('[qa][classifier] resolved via sonnet-repl (eval tier 0)');
       setCachedClassification(question, sonnetResult);
       return sonnetResult;
     }
-    // Eval-mode tier 0b: Haiku 4.5 via OpenRouter as cheap fallback before grok.
-    const haikuOpenrouterResult = await tryOpenRouter(prompt, question, 'anthropic/claude-haiku-4-5');
-    if (haikuOpenrouterResult) {
-      console.info('[qa][classifier] resolved via openrouter:anthropic/claude-haiku-4-5 (sonnet-fallback)');
-      setCachedClassification(question, haikuOpenrouterResult);
-      return haikuOpenrouterResult;
+    // Eval-mode tier 0b: Haiku 4.5 via the REPL adapter as cheap fallback.
+    const haikuReplResult = await tryHaiku(prompt, question);
+    if (haikuReplResult) {
+      console.info('[qa][classifier] resolved via haiku-repl (eval tier 0b)');
+      setCachedClassification(question, haikuReplResult);
+      return haikuReplResult;
     }
   }
 
@@ -220,6 +223,33 @@ async function tryHaiku(prompt: string, question: string): Promise<ClassifierRes
     return parseClassifierJson(text, question);
   } catch (err) {
     console.warn('[qa][classifier] Haiku CLI failed:', err instanceof Error ? err.message : err);
+    return null;
+  }
+}
+
+/**
+ * Eval-mode tier 0: Sonnet 4.6 via the REPL one-shot adapter. Used in place
+ * of `tryOpenRouter(prompt, question, 'anthropic/claude-sonnet-4-6')` post-#1124
+ * so eval runs go through the subscription pool instead of paid OpenRouter.
+ */
+async function trySonnetRepl(prompt: string, question: string): Promise<ClassifierResult | null> {
+  try {
+    const result = await callSonnet({
+      system: 'You are a strict classifier. Return only the JSON object specified.',
+      messages: [{ role: 'user', content: prompt }],
+      stream: false,
+      // Eval mode tolerates the longer Sonnet bootstrap; downstream timeout in
+      // the runner already caps overall wall time.
+      timeoutMs: 120_000,
+    });
+    if (result.tier === 'flash') {
+      // Adapter degraded back to Flash — that means no Claude path was
+      // available. Return null so the caller falls through to grok-4.1-fast.
+      return null;
+    }
+    return parseClassifierJson(result.text, question);
+  } catch (err) {
+    console.warn('[qa][classifier] Sonnet REPL failed:', err instanceof Error ? err.message : err);
     return null;
   }
 }
