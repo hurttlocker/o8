@@ -12,8 +12,9 @@
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
+import { SidebarTogglePill } from './SidebarTogglePill';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
-import { IconColumns, IconPanelLeft, IconTerminal } from '../title-bar/icons';
+import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 
 interface WorkspaceHeaderStripProps {
@@ -132,14 +133,15 @@ export function WorkspaceHeaderStrip({
       drag
       left={
         <>
-          {leadingInset ? <div style={{ width: 78, flexShrink: 0 }} /> : null}
+          {/* When this strip is leftmost (sidebar collapsed), pad past the
+              macOS traffic lights — they're drawn at fixed window coords by
+              the OS. 64px clears the green light (~x=62) plus the standard
+              ~10px breathing room before the toggle pill. */}
+          {leadingInset ? <div style={{ width: 64, flexShrink: 0 }} /> : null}
           {onToggleSidebar ? (
-            <TitleBarButton
-              icon={<IconPanelLeft />}
-              label="Toggle sidebar"
-              title="Toggle sidebar (⌘B)"
+            <SidebarTogglePill
+              sidebarVisible={sidebarVisible}
               onClick={onToggleSidebar}
-              active={sidebarVisible}
             />
           ) : null}
         </>
