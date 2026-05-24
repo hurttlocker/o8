@@ -99,4 +99,9 @@ export interface RetrieverInput {
   /** Cap on rows returned by a single retriever. Defaults are retriever-
    *  specific; each respects this when set. */
   limit?: number;
+  /** Classifier output (#1122). Class A = lookup ("what is the X"); the
+   *  orchestrator uses this in `unionMerge` to route directive-first when
+   *  spec-ingest has authoritative content, preventing stale facts from
+   *  winning over the canonical CLAUDE.md/AGENTS.md/DESIGN.md substrate. */
+  questionClass?: 'A' | 'B';
 }

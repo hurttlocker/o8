@@ -287,11 +287,26 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
       return { retriever: 'fts', rows, durationMs: Date.now() - start };
     }
 
-    // Variants come from the Flash classifier (later sub-issue). For now
-    // we just OR them with the raw question to widen recall.
-    const variants = input.bm25Variants?.length
-      ? input.bm25Variants
-      : [input.question];
+    // Variants come from the classifier (#1115). The grok-generated rephrasings
+    // often substitute domain tokens with synonyms ("ceiling" → "limit",
+    // "exempt" → "excluded") and pad each variant with stop-words, which
+    // pumps BM25 scores for off-topic directives that share the stop-words
+    // and starves the canonical section.
+    //
+    // #1122: route by question class.
+    //   - Class A (lookup) → use ONLY the raw question. Class A asks "what is
+    //     the X" where precise canonical phrasing beats paraphrased recall.
+    //   - Class B / unknown → original behavior (variants OR question).
+    //
+    // Even when variants are used, the raw question is always prepended so
+    // domain-specific tokens always reach BM25.
+    const isClassA = input.questionClass === 'A';
+    const variantBag = isClassA
+      ? [input.question]
+      : input.bm25Variants?.length
+        ? [input.question, ...input.bm25Variants]
+        : [input.question];
+    const variants = Array.from(new Set(variantBag.filter((v) => v?.trim().length > 0)));
     const matches = variants
       .map((v) => buildMatchQuery(v))
       .filter((m): m is string => Boolean(m));
@@ -625,21 +640,39 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
     // the canonical spec but can't find directives to pin if they were
     // already dropped here. Quota is small (4) so non-directive rows still
     // fill 26 of the 30 returned slots.
+    //
+    // #1122 — reserve additional slots for ANY directive (seed-* or other
+    // non-spec-ingest directive ids) so legacy seed directives that hold the
+    // canonical lookup answer (e.g. `seed-cortex-ide-800-line-ceiling`) reach
+    // unionMerge. Without this they're filtered out by `others.slice(limit-4)`
+    // because outcome/PR/issue RRF scores beat the directive RRF.
     const SPEC_INGEST_QUOTA = 4;
+    const ANY_DIRECTIVE_QUOTA = 4;
     const sorted = [...rrfRows.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
     const limit = input.limit ?? DEFAULT_LIMIT;
+    const isDirective = (row: TypedRow): boolean => row.citation.kind === 'directive';
     const isSpecIngest = (row: TypedRow): boolean =>
-      row.citation.kind === 'directive' &&
+      isDirective(row) &&
       typeof row.citation.rowId === 'string' &&
       row.citation.rowId.startsWith('spec-ingest:');
     const specIngestPicks = sorted.filter(isSpecIngest).slice(0, SPEC_INGEST_QUOTA);
-    const specIngestKeys = new Set(
+    const reservedKeys = new Set(
       specIngestPicks.map((r) => `${r.citation.kind}:${r.citation.rowId}`),
     );
+    const otherDirectivePicks = sorted
+      .filter(
+        (r) =>
+          isDirective(r) && !reservedKeys.has(`${r.citation.kind}:${r.citation.rowId}`),
+      )
+      .slice(0, ANY_DIRECTIVE_QUOTA);
+    for (const r of otherDirectivePicks) {
+      reservedKeys.add(`${r.citation.kind}:${r.citation.rowId}`);
+    }
+    const reservedDirectives = [...specIngestPicks, ...otherDirectivePicks];
     const others = sorted
-      .filter((r) => !specIngestKeys.has(`${r.citation.kind}:${r.citation.rowId}`))
-      .slice(0, Math.max(0, limit - specIngestPicks.length));
-    rows.push(...specIngestPicks, ...others);
+      .filter((r) => !reservedKeys.has(`${r.citation.kind}:${r.citation.rowId}`))
+      .slice(0, Math.max(0, limit - reservedDirectives.length));
+    rows.push(...reservedDirectives, ...others);
   } catch (error) {
     console.warn(
       '[qa][fts] retriever failed:',
