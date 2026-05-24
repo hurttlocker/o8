@@ -19,9 +19,16 @@ import { IconPanelLeft } from '../title-bar/icons';
 interface SidebarTogglePillProps {
   sidebarVisible?: boolean;
   onClick?: () => void;
+  /**
+   * Per-context vertical nudge (px). Defaults to -4 for LeftHeaderStrip
+   * (32px strip, paddingTop=5 card). WorkspaceHeaderStrip passes -5 so the
+   * pill lands at the SAME window-y when the sidebar collapses and the
+   * toggle migrates over there — without this it jumps 1px on toggle.
+   */
+  yNudge?: number;
 }
 
-export function SidebarTogglePill({ sidebarVisible = true, onClick }: SidebarTogglePillProps) {
+export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = -2 }: SidebarTogglePillProps) {
   const active = sidebarVisible;
   return (
     <motion.button
@@ -31,9 +38,11 @@ export function SidebarTogglePill({ sidebarVisible = true, onClick }: SidebarTog
       title="Toggle sidebar (⌘B)"
       data-no-drag
       initial={false}
-      animate={active ? 'active' : 'rest'}
+      animate="rest"
       whileHover="hover"
-      whileTap="tap"
+      // FLAT motion — bg + color crossfade only, no scale, no boxy active
+      // state. The toggle looks identical regardless of sidebar-open vs
+      // sidebar-closed; the sidebar's presence/absence IS the indicator.
       variants={{
         rest: {
           background: 'var(--t-pill-rest-bg, transparent)',
@@ -42,13 +51,6 @@ export function SidebarTogglePill({ sidebarVisible = true, onClick }: SidebarTog
         hover: {
           background: 'var(--t-hover)',
           color: 'var(--t-text)',
-        },
-        active: {
-          background: 'var(--t-input-bg)',
-          color: 'var(--t-text)',
-        },
-        tap: {
-          scale: 0.94,
         },
       }}
       transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
@@ -66,6 +68,11 @@ export function SidebarTogglePill({ sidebarVisible = true, onClick }: SidebarTog
         borderRadius: 7,
         cursor: 'pointer',
         flexShrink: 0,
+        // Localized upward nudge so the pill sits higher inside whichever
+        // strip places it. Default -4 fits the LeftHeaderStrip card placement;
+        // WorkspaceHeaderStrip overrides with -5 to keep window-y identical
+        // across the sidebar-open ↔ sidebar-closed toggle.
+        marginTop: yNudge,
         WebkitTapHighlightColor: 'transparent',
         ['WebkitAppRegion' as string]: 'no-drag',
       }}

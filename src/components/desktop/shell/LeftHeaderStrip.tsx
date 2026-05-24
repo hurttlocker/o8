@@ -17,11 +17,12 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar }: Left
   return (
     <ColumnHeaderStrip
       drag
-      // Strip height 34 (the workspace strip is 36, but the workspace area
-      // sits at window-y=4 while this card sits at y=5 — losing 1px each
-      // side of the 26px pill brings the pill to y=9 to match the
-      // Orchestrator pill across the column boundary).
-      height={34}
+      // Strip height 32 — pulls the toggle pill up 1px to y=8 so it visually
+      // shifts higher in the card chrome after the traffic lights moved down
+      // to y=22. The workspace pills stay at y=9 (their strip is still 36),
+      // delta vs the toggle is now -1px (toggle slightly higher) which the
+      // operator wants given the new light position.
+      height={32}
       left={
         <>
           {/* Spacer for the macOS traffic lights (close / minimize / maximize).
