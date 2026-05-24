@@ -1,0 +1,26 @@
+/**
+ * Next.js 16 instrumentation hook — runs once when the server starts.
+ *
+ * Currently fires a single fire-and-forget probe to warm the OpenRouter
+ * undici connection pool (#1123). Without this, the first cortex_ask call
+ * after dev-server / prod-app startup pays ~1.7s for DNS + TLS + HTTP/2
+ * setup before the classifier request lands; with the warm-up the pool is
+ * already hot by the time a user question arrives.
+ *
+ * The probe never throws and never blocks boot. Real calls retry on failure.
+ *
+ * Only runs on the `nodejs` runtime (server). Edge runtime skips this — the
+ * Q&A pipeline is server-only and never reaches Edge.
+ */
+
+export async function register(): Promise<void> {
+  if (process.env.NEXT_RUNTIME !== 'nodejs') return;
+
+  // Dynamic import so the warm-up module isn't pulled into Edge bundles.
+  const { warmupOpenRouter } = await import('@/lib/cortex/qa/llm/openrouter-adapter');
+
+  // Fire-and-forget — don't await. The boot path returns immediately and the
+  // probe completes in the background (~200ms typical in prod, ~900ms in dev
+  // because Turbopack compiles the module on first registration).
+  void warmupOpenRouter();
+}
