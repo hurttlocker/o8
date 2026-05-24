@@ -171,3 +171,43 @@ export async function callOpenRouter(
 export function describeOpenRouterModel(servedModel: string | undefined): string {
   return servedModel?.trim() ? servedModel : OPENROUTER_PRIMARY_MODEL;
 }
+
+// ── Cold-start pool warm-up (#1123) ──────────────────────────────────────────
+//
+// The first real call to `callOpenRouter` pays ~1.7s for DNS + TLS + HTTP/2
+// connection setup before the request lands on a warm undici pool. Subsequent
+// calls hit the pool and run in ~200-700ms. We pre-pay that one-time cost by
+// firing a tiny unauthenticated GET against `/api/v1/models` at boot so the
+// pool is hot before the first user question lands.
+//
+// The probe is fire-and-forget: it never throws, never rejects, never blocks
+// the boot path. Net cost: one ~200ms request per Node process lifetime.
+
+let warmupStarted = false;
+
+/**
+ * Warm the undici connection pool to openrouter.ai. Idempotent — safe to call
+ * many times; only the first call fires a request. Returns immediately and
+ * resolves when the probe finishes (callers should rarely await this).
+ */
+export async function warmupOpenRouter(): Promise<void> {
+  if (warmupStarted) return;
+  warmupStarted = true;
+  const startedAt = Date.now();
+  try {
+    // GET /api/v1/models is unauthenticated and returns a small JSON catalog.
+    // Discard the body — we only care about establishing the TLS session.
+    const res = await fetch('https://openrouter.ai/api/v1/models', {
+      method: 'GET',
+      signal: AbortSignal.timeout(5_000),
+    });
+    // Drain the body so the connection returns to the pool keep-alive idle
+    // state instead of being torn down.
+    await res.arrayBuffer().catch(() => undefined);
+    console.info(`[qa][openrouter] warm-up ${res.status} in ${Date.now() - startedAt}ms`);
+  } catch (err) {
+    // Silent — boot must never fail because the warm-up couldn't reach
+    // OpenRouter (offline dev, captive portal, etc.). Real calls will retry.
+    console.info(`[qa][openrouter] warm-up skipped (${Date.now() - startedAt}ms): ${err instanceof Error ? err.message : err}`);
+  }
+}
