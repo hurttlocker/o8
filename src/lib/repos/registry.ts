@@ -424,7 +424,26 @@ export async function addRepo(localPath: string) {
   });
 
   fireSignatureRecompute();
+
+  // #1114 — fire-and-forget spec ingest so the Engineering Brain has
+  // substrate to answer design/convention questions about this repo. Done
+  // out-of-band so addRepo's response isn't blocked on disk scans. Errors
+  // are logged but never raised; the registry write already succeeded.
+  void scheduleSpecIngest(entry.localPath, entry.name);
+
   return entry;
+}
+
+async function scheduleSpecIngest(repoPath: string, repoSlug: string): Promise<void> {
+  try {
+    const { ingestRepoSpecs } = await import('@/lib/cortex/spec-ingest');
+    const result = await ingestRepoSpecs(repoPath, repoSlug);
+    console.log(
+      `[spec-ingest] addRepo(${repoSlug}): scanned=${result.scannedFiles} written=${result.writtenDirectives} deletedStale=${result.deletedStaleDirectives}`,
+    );
+  } catch (err) {
+    console.error(`[spec-ingest] addRepo(${repoSlug}) failed:`, err);
+  }
 }
 
 export async function updateRepo(
