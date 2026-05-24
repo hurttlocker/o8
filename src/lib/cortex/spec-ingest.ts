@@ -7,14 +7,26 @@
  *   - Root files: README.md, CLAUDE.md, AGENTS.md, DESIGN.md, THEME.md
  *   - Directories: docs/** (recursive, *.md only)
  *
- * Chunking:
- *   One directive per H2 section. The text BEFORE the first H2 becomes an
- *   "Overview" chunk. Sections shorter than 40 chars are skipped (likely
- *   stubs or empty headers).
+ * Chunking (#1120):
+ *   Base unit is one directive per H2 section. The text BEFORE the first H2
+ *   becomes an "Overview" chunk. Sections shorter than 40 chars are skipped
+ *   (likely stubs or empty headers).
+ *
+ *   An H2 is FURTHER split into per-H3 sub-chunks when either:
+ *     - it has 3+ H3 children (rule of thumb: 7 motifs under §06 collapse
+ *       into one ~14KB chunk otherwise), OR
+ *     - the full H2 body exceeds H3_SPLIT_BODY_CHARS (4000)
+ *   In that case the H2 produces no rolled-up chunk on its own — only its
+ *   H3 sub-chunks (plus any preamble before the first H3, attached to the
+ *   first H3 chunk if non-trivial). If neither threshold is hit, the H2
+ *   stays as a single chunk as before.
  *
  * Idempotency:
  *   All directive IDs begin with `spec-ingest:<repoSlug>:`. Re-running
  *   delete-then-writes so re-ingest on the same repo doesn't duplicate.
+ *   H3 IDs use the colon-extended form
+ *   `spec-ingest:<repoSlug>:<file>:<h2-slug>:<h3-slug>` and still match the
+ *   `spec-ingest:<repoSlug>:` prefix used by deletePriorSpecDirectives.
  *
  * Filenames:
  *   Directive files live in <dataDir>/directives/. The directive ID can
@@ -37,6 +49,12 @@ const MAX_FRONT_MATTER_TITLE_CHARS = 160;
 const MAX_DIRECTIVE_BODY_CHARS = 16_000;
 const DIRECTIVE_ID_PREFIX = 'spec-ingest';
 
+// H3 split thresholds (#1120). An H2 splits into per-H3 chunks when EITHER
+// is true. Tuned for DESIGN.md §06 Motifs (7 H3 kids, ~4.1 KB body): both
+// trigger, so we always split it.
+const H3_SPLIT_MIN_CHILDREN = 3;
+const H3_SPLIT_BODY_CHARS = 4000;
+
 export interface SpecIngestResult {
   scannedFiles: number;
   writtenDirectives: number;
@@ -44,9 +62,16 @@ export interface SpecIngestResult {
   files: string[];
 }
 
-interface H2Section {
-  heading: string;
+interface DocSection {
+  // Slug fragment for the H2 (e.g. "06-motifs").
   slug: string;
+  // Optional H3 sub-slug (e.g. "06-7-flat-icon-button-locked-the-button-language").
+  // When present, the directive ID is `<...>:<slug>:<subSlug>`.
+  subSlug?: string;
+  // Heading line shown inside the directive markdown body and in the title.
+  // For H3 chunks this is "H2 — H3" so the chunk's anchoring is unambiguous
+  // when surfaced as a citation in cortex_ask.
+  heading: string;
   body: string;
 }
 
@@ -65,14 +90,21 @@ function stripFrontMatter(md: string): string {
   return md.slice(closing + 4).replace(/^\s*\n/, '');
 }
 
+interface RawH2 {
+  heading: string;
+  slug: string;
+  rawBody: string; // includes any nested H3 lines verbatim
+}
+
 /**
- * Split a markdown document into one section per top-level H2 heading.
- * Content before the first H2 becomes an Overview section.
+ * Pass 1: split markdown into H2 sections only. Content before the first
+ * H2 becomes an Overview section. Bodies still contain their `### ` H3
+ * subheadings — splitH2IntoH3s handles them.
  */
-function chunkByH2(md: string): H2Section[] {
+function splitByH2(md: string): RawH2[] {
   const body = stripFrontMatter(md);
   const lines = body.split('\n');
-  const sections: H2Section[] = [];
+  const sections: RawH2[] = [];
 
   let currentHeading = 'Overview';
   let currentSlug = 'overview';
@@ -81,7 +113,7 @@ function chunkByH2(md: string): H2Section[] {
   const flush = () => {
     const text = currentLines.join('\n').trim();
     if (text.length >= MIN_SECTION_BODY_CHARS) {
-      sections.push({ heading: currentHeading, slug: currentSlug, body: text });
+      sections.push({ heading: currentHeading, slug: currentSlug, rawBody: text });
     }
   };
 
@@ -98,13 +130,121 @@ function chunkByH2(md: string): H2Section[] {
   }
   flush();
 
-  // De-dupe slugs within the same file (rare but possible — e.g. multiple
-  // "## Why" sections). Append a numeric suffix.
+  return sections;
+}
+
+interface H3Child {
+  heading: string;
+  slug: string;
+  body: string;
+}
+
+/**
+ * Walk an H2 body and pull out its H3 children. Returns:
+ *   - `preamble`: text between the H2 heading and the first H3 (may be empty)
+ *   - `children`: one entry per `### ` line, body trimmed
+ * If there are no H3s, `children` is empty.
+ */
+function splitH2IntoH3s(rawBody: string): { preamble: string; children: H3Child[] } {
+  const lines = rawBody.split('\n');
+  const children: H3Child[] = [];
+  const preambleLines: string[] = [];
+  let inH3 = false;
+  let currentHeading = '';
+  let currentSlug = '';
+  let currentLines: string[] = [];
+
+  const flushH3 = () => {
+    const text = currentLines.join('\n').trim();
+    if (text.length === 0 && currentHeading.length === 0) return;
+    children.push({ heading: currentHeading, slug: currentSlug || 'section', body: text });
+  };
+
+  for (const line of lines) {
+    const h3 = line.match(/^###\s+(.+?)\s*$/);
+    if (h3) {
+      if (inH3) flushH3();
+      inH3 = true;
+      currentHeading = h3[1].trim();
+      currentSlug = slugify(currentHeading) || 'section';
+      currentLines = [];
+    } else if (inH3) {
+      currentLines.push(line);
+    } else {
+      preambleLines.push(line);
+    }
+  }
+  if (inH3) flushH3();
+
+  return {
+    preamble: preambleLines.join('\n').trim(),
+    children,
+  };
+}
+
+/**
+ * Split a markdown document into directive-sized sections.
+ *
+ * Default: one chunk per H2 (with pre-first-H2 text as an Overview chunk).
+ *
+ * An H2 is FURTHER split into per-H3 chunks when either
+ *   - it has H3_SPLIT_MIN_CHILDREN (3) or more H3 kids, OR
+ *   - its full body exceeds H3_SPLIT_BODY_CHARS (4000)
+ * In that case the H2 produces zero rolled-up chunks and one chunk per H3
+ * child instead. Any preamble before the first H3 is folded into the first
+ * H3 chunk so we don't lose intro prose.
+ *
+ * Within-file slug collisions get a numeric suffix as before.
+ */
+function chunkMarkdown(md: string): DocSection[] {
+  const raw = splitByH2(md);
+  const sections: DocSection[] = [];
+
+  for (const h2 of raw) {
+    const { preamble, children } = splitH2IntoH3s(h2.rawBody);
+    const overBodyThreshold = h2.rawBody.length > H3_SPLIT_BODY_CHARS;
+    const enoughChildren = children.length >= H3_SPLIT_MIN_CHILDREN;
+    const shouldSplit = children.length > 0 && (enoughChildren || overBodyThreshold);
+
+    if (!shouldSplit) {
+      // Keep as-is. Body still has the H3 lines verbatim — that's fine,
+      // the chunk reads naturally.
+      if (h2.rawBody.length >= MIN_SECTION_BODY_CHARS) {
+        sections.push({ slug: h2.slug, heading: h2.heading, body: h2.rawBody });
+      }
+      continue;
+    }
+
+    // Split: each H3 becomes its own chunk. Fold preamble into the first
+    // H3 body so any intro prose between the H2 line and the first H3
+    // stays attached to the answer for "what's in §06".
+    for (let i = 0; i < children.length; i++) {
+      const child = children[i];
+      const body = i === 0 && preamble.length > 0
+        ? `${preamble}\n\n${child.body}`.trim()
+        : child.body.trim();
+      if (body.length < MIN_SECTION_BODY_CHARS) continue;
+      sections.push({
+        slug: h2.slug,
+        subSlug: child.slug,
+        heading: `${h2.heading} — ${child.heading}`,
+        body,
+      });
+    }
+  }
+
+  // De-dupe slug pairs within the same file. The composite key is
+  // `<h2-slug>::<h3-slug>` or just `<h2-slug>` so an H2 chunk and a
+  // (hypothetical) split-with-same-slug pair don't collide.
   const seen = new Map<string, number>();
   return sections.map((section) => {
-    const count = (seen.get(section.slug) ?? 0) + 1;
-    seen.set(section.slug, count);
-    return count === 1 ? section : { ...section, slug: `${section.slug}-${count}` };
+    const key = section.subSlug ? `${section.slug}::${section.subSlug}` : section.slug;
+    const count = (seen.get(key) ?? 0) + 1;
+    seen.set(key, count);
+    if (count === 1) return section;
+    return section.subSlug
+      ? { ...section, subSlug: `${section.subSlug}-${count}` }
+      : { ...section, slug: `${section.slug}-${count}` };
   });
 }
 
@@ -248,11 +388,13 @@ export async function ingestRepoSpecs(repoPath: string, repoSlug?: string): Prom
     const relPath = relative(repoPath, filePath);
     const fileSlug = slugify(relPath.replace(/\.md$/i, '')) || 'spec';
 
-    const sections = chunkByH2(raw);
+    const sections = chunkMarkdown(raw);
     if (sections.length === 0) continue;
 
     for (const section of sections) {
-      const id = `${DIRECTIVE_ID_PREFIX}:${slug}:${fileSlug}:${section.slug}`;
+      const id = section.subSlug
+        ? `${DIRECTIVE_ID_PREFIX}:${slug}:${fileSlug}:${section.slug}:${section.subSlug}`
+        : `${DIRECTIVE_ID_PREFIX}:${slug}:${fileSlug}:${section.slug}`;
       const rawTitle = `${slug}/${relPath} — ${section.heading}`;
       const title = rawTitle.length > MAX_FRONT_MATTER_TITLE_CHARS
         ? `${rawTitle.slice(0, MAX_FRONT_MATTER_TITLE_CHARS - 1)}…`
