@@ -273,6 +273,39 @@ See `src/components/shared/icons/` for the established pattern. Shim system docu
 
 Horizontal strip above the workspace showing day-level activity (coding / thinking / testing / error). 36px tall. Muted colors, no bold. See `SessionTimeline.tsx`.
 
+### 06.7 Flat icon button — LOCKED (the button language)
+
+Every icon-shaped control across the app uses one visual language. Operator locked it 2026-05-23 after the floating-card refactor. The template is `SidebarTogglePill` (commit `0bf0d592`), generalized as `HeaderIconPill` (commit `690c7e40`).
+
+**Geometry**
+
+- `height: 26`, `minWidth: 26` (icon-only) or `paddingLeft/Right: 9-11` (icon + label)
+- `borderRadius: 7`
+- `border: none`, `boxShadow: none`
+- Icon size 13–16 (use 13–14 for chrome rows, 16 inside cards)
+
+**State + motion**
+
+- **Rest**: `background: transparent`, `color: var(--t-text-secondary)`
+- **Hover**: `background: var(--t-hover)`, `color: var(--t-text)`
+- **Active** (selected tab / open panel): `background: var(--t-input-bg)`, `color: var(--t-text)` — only when the surrounding UI doesn't already signal state. If the panel itself shows/hides on click, the bg stays transparent (no boxy "this button is active" feedback).
+- **No scale, no translate, no shadow on hover**. The button stays anchored. Motion happens *inside* the button — bg + color crossfade only. Use framer-motion variants with `transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}`.
+- **No tap scale**. The click effect is the bg snap and the resulting UI change. Don't shrink the whole button.
+
+**What we never do**
+
+- ❌ `var(--t-chrome-btn-bg)` / `var(--t-chrome-btn-shadow)` / `var(--t-chrome-btn-active-shadow)` — these paint chunky boxy bgs and inset borders that read as a toolbar pill against the floating card. The chrome-btn token family is deprecated for new code; the few remaining consumers (footer status badges) override the tokens to `transparent` / `none` at their parent boundary.
+- ❌ Scale-on-hover (`scale: 1.06`) — "moves the whole button". Locked OUT by operator.
+- ❌ Inset borders / outlines on the active state. State is communicated by the action's *result*, not the button chrome.
+
+**Vertical position in column header strips**
+
+Pills use `marginTop` to keep their window-y identical across the sidebar-open ↔ sidebar-closed toggle:
+- `LeftHeaderStrip` (32px strip inside the floating card, paddingTop=5): `yNudge={-2}` (default)
+- `WorkspaceHeaderStrip` / `PanelHeaderStrip` (36px strips at window-y=4): `yNudge={-3}`
+
+See `HeaderIconPill.tsx` for the canonical implementation.
+
 ---
 
 ## 07 — Components
