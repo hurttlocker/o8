@@ -142,6 +142,11 @@ export function WorkspaceHeaderStrip({
             <SidebarTogglePill
               sidebarVisible={sidebarVisible}
               onClick={onToggleSidebar}
+              // Workspace strip is 36 tall starting at y=4; the left card's
+              // strip is 32 starting at y=5. +1 offset (vs the left default)
+              // keeps the pill at the same window-y across the sidebar
+              // toggle — without this it shifts 1px on collapse.
+              yNudge={-3}
             />
           ) : null}
         </>
