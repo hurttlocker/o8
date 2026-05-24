@@ -40,6 +40,33 @@ export const CORTEX_TOOLS: McpTool[] = [
       required: ['packetId', 'kind', 'text'],
     },
   },
+  {
+    name: 'cortex_ask',
+    description:
+      'Ask the Engineering Brain a natural-language question. Joins session_outcomes + directives + symbol_graph + GitHub PRs across the operator\'s projects, classifies the question (Class A factual / Class B narrative), retrieves via SQL + FTS5 + graph, and composes an answer with citations back to source rows. Non-streaming JSON result. Use for: "who owns X", "how does Y get reviewed", "what changed in Z this week", "have we tried this before".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: {
+          type: 'string',
+          description: 'The natural-language question. Plain English, complete sentence.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Absolute path to the repo whose context to bias toward. Optional.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Project id to scope the answer to. Optional — defaults to the active project for repoPath.',
+        },
+        bypassCache: {
+          type: 'boolean',
+          description: 'Skip the 30s in-process answer cache. Default false.',
+        },
+      },
+      required: ['question'],
+    },
+  },
 ];
 
 function parseKind(value: string): string {
@@ -51,6 +78,46 @@ function parseScope(value: string): string {
   if (!value) return 'packet';
   if (OBSERVATION_SCOPES.has(value)) return value;
   throw new Error('scope must be one of packet, repo, global');
+}
+
+export async function handleAsk(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const question = requiredString(args, 'question');
+    const body: Record<string, unknown> = { question };
+    const repoPath = optionalString(args, 'repoPath');
+    if (repoPath) body.repoPath = repoPath;
+    const projectId = optionalString(args, 'projectId');
+    if (projectId) body.projectId = projectId;
+    if (args.bypassCache === true) body.bypassCache = true;
+
+    const result = await apiFetch('/api/cortex/ask/answer', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }) as {
+      ok?: boolean;
+      answer?: string;
+      citations?: unknown[];
+      class?: string;
+      retrievalMs?: number;
+      classifyMs?: number;
+      error?: string;
+    };
+
+    if (!result?.ok) {
+      return jsonResult({ ok: false, error: result?.error ?? 'cortex_ask failed' });
+    }
+
+    return jsonResult({
+      ok: true,
+      answer: result.answer ?? '',
+      citations: result.citations ?? [],
+      class: result.class ?? null,
+      retrievalMs: result.retrievalMs ?? null,
+      classifyMs: result.classifyMs ?? null,
+    });
+  } catch (error) {
+    return jsonResult({ ok: false, error: errorText(error) });
+  }
 }
 
 export async function handleProposeObservation(args: Record<string, unknown>): Promise<McpToolResult> {

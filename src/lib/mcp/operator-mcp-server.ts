@@ -32,6 +32,7 @@ import {
 } from '@/lib/mcp/operator-handlers/approve';
 import {
   CORTEX_TOOLS,
+  handleAsk,
   handleProposeObservation,
 } from '@/lib/mcp/operator-handlers/cortex';
 import {
@@ -531,6 +532,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_lane_events: handleLaneEvents,
   o8_packet_transcript: handleTranscript,
   cortex_propose_observation: handleProposeObservation,
+  cortex_ask: handleAsk,
   o8_spec_read: handleSpecRead,
   o8_spec_review_index: handleSpecReviewIndex,
   o8_spec_pending_feedback: handleSpecPendingFeedback,
