@@ -659,17 +659,24 @@ function HeaderPlayButton({
         aria-controls={menuId}
         title={onContextMenu ? 'New tab (⌘T) · right-click to split' : 'New tab (⌘T)'}
         style={{
+          // Matched to HeaderIconPill: 26 tall, 7px radius, transparent →
+          // var(--t-hover) on hover. Keeps the accent color since play is
+          // the brand-orange spawn action.
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 24,
-          height: 24,
-          borderRadius: 6,
+          height: 26,
+          minWidth: 26,
+          paddingLeft: 7,
+          paddingRight: 7,
+          borderRadius: 7,
           borderWidth: 0,
           background: open || hovered ? 'var(--t-hover)' : 'transparent',
           color: 'var(--t-accent)',
           cursor: 'pointer',
-          padding: 0,
+          // Same vertical nudge as the other workspace-strip pills so play
+          // baselines with the toggle, terminal, split, etc.
+          marginTop: -3,
           transition: 'background 120ms ease',
         }}
       >

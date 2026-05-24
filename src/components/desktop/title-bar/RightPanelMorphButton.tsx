@@ -22,15 +22,8 @@ export function RightPanelMorphButton({
     : workspacePanelVisible
       ? 'review'
       : 'collapsed';
-  const panelOpen = state !== 'collapsed';
-  const label = panelOpen ? 'Close panel' : 'Open O8 panel';
+  const label = state === 'collapsed' ? 'Open O8 panel' : 'Close panel';
   const handleClick = onToggleO8Panel;
-  const restBackground = 'var(--t-chrome-btn-bg)';
-  const hoverBackground = 'var(--t-chrome-btn-hover-bg)';
-  const activeBackground = 'var(--t-chrome-btn-active-bg)';
-  const restShadow = 'var(--t-chrome-btn-shadow)';
-  const hoverShadow = 'var(--t-chrome-btn-hover-shadow)';
-  const activeShadow = 'var(--t-chrome-btn-active-shadow)';
 
   return (
     <motion.button
@@ -38,36 +31,38 @@ export function RightPanelMorphButton({
       aria-label={label}
       title={`${label} (⌘⌥B)`}
       onClick={handleClick}
+      data-no-drag
       initial={false}
+      animate="rest"
+      whileHover="hover"
+      variants={{
+        rest: {
+          background: 'var(--t-pill-rest-bg, transparent)',
+          color: 'var(--t-text-secondary)',
+        },
+        hover: {
+          background: 'var(--t-hover)',
+          color: 'var(--t-text)',
+        },
+      }}
+      transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
       style={{
+        // Matched to HeaderIconPill: 26 tall, 7px radius, flat hover.
+        // The state indicator is the icon morph, not the button bg.
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 28,
-        height: 28,
-        padding: 0,
-        border: 'none',
+        height: 26,
+        minWidth: 26,
+        paddingLeft: 7,
+        paddingRight: 7,
         borderRadius: 7,
-        background: panelOpen ? activeBackground : restBackground,
-        boxShadow: panelOpen ? activeShadow : restShadow,
-        color: panelOpen ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        borderWidth: 0,
         cursor: 'pointer',
         flexShrink: 0,
+        marginTop: -3,
         WebkitTapHighlightColor: 'transparent',
-        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         ['WebkitAppRegion' as string]: 'no-drag',
-      }}
-      onMouseEnter={(e) => {
-        if (!panelOpen) {
-          e.currentTarget.style.background = hoverBackground;
-          e.currentTarget.style.boxShadow = hoverShadow;
-        }
-      }}
-      onMouseLeave={(e) => {
-        if (!panelOpen) {
-          e.currentTarget.style.background = restBackground;
-          e.currentTarget.style.boxShadow = restShadow;
-        }
       }}
     >
       <span style={{ position: 'relative', width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>

@@ -109,37 +109,36 @@ export function BrowserHoverButton({
           onClick?.();
         }}
         initial={false}
-        animate={active ? 'active' : 'rest'}
+        animate="rest"
         whileHover="hover"
         variants={{
           rest: {
-            background: 'var(--t-chrome-btn-bg)',
-            boxShadow: 'var(--t-chrome-btn-shadow)',
-            color: 'var(--t-text-secondary)',
+            background: 'var(--t-pill-rest-bg, transparent)',
+            color: active ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text-secondary)',
           },
           hover: {
-            background: 'var(--t-chrome-btn-hover-bg)',
-            boxShadow: 'var(--t-chrome-btn-hover-shadow)',
-            color: 'var(--t-text)',
-          },
-          active: {
-            background: 'var(--t-chrome-btn-active-bg)',
-            boxShadow: 'var(--t-chrome-btn-active-shadow)',
-            color: 'var(--t-brand-orange, #FF5A1F)',
+            background: 'var(--t-hover)',
+            color: active ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--t-text)',
           },
         }}
         transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
         style={{
+          // Matched to HeaderIconPill — 26 tall, 7px radius, flat hover.
+          // Brand-orange icon color when active is the only state indicator.
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          width: 28,
-          height: 28,
-          padding: 0,
+          height: 26,
+          minWidth: 26,
+          paddingTop: 0,
+          paddingBottom: 0,
+          paddingLeft: 7,
+          paddingRight: 7,
           border: 'none',
           borderRadius: 7,
           cursor: 'pointer',
           flexShrink: 0,
+          marginTop: -3,
           WebkitTapHighlightColor: 'transparent',
           ['WebkitAppRegion' as string]: 'no-drag',
         }}
