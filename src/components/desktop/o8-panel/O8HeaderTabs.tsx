@@ -69,12 +69,6 @@ function O8TabPill({
   onClick: () => void;
 }) {
   const color = active ? O8_ICON_ACTIVE : O8_ICON_INACTIVE;
-  const restBackground = 'var(--t-chrome-btn-bg)';
-  const hoverBackground = 'var(--t-chrome-btn-hover-bg)';
-  const activeBackground = 'var(--t-chrome-btn-active-bg)';
-  const restShadow = 'var(--t-chrome-btn-shadow)';
-  const hoverShadow = 'var(--t-chrome-btn-hover-shadow)';
-  const activeShadow = 'var(--t-chrome-btn-active-shadow)';
   return (
     <button
       type="button"
@@ -83,36 +77,40 @@ function O8TabPill({
       title={def.label}
       aria-label={def.label}
       aria-selected={active}
+      data-no-drag
       style={{
+        // Matched to HeaderIconPill — 26 tall, 7px radius, flat hover.
+        // Active = filled bg (panel chrome surface for the selected tab),
+        // inactive = transparent → var(--t-hover) on hover.
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         gap: active ? 6 : 0,
-        height: 30,
-        width: active ? 'auto' : 30,
-        paddingLeft: active ? 9 : 0,
-        paddingRight: active ? 11 : 0,
+        height: 26,
+        minWidth: 26,
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: active ? 9 : 7,
+        paddingRight: active ? 11 : 7,
         border: 'none',
-        borderRadius: 8,
-        background: active ? activeBackground : restBackground,
-        boxShadow: active ? activeShadow : restShadow,
+        borderRadius: 7,
+        background: active ? 'var(--t-input-bg)' : 'transparent',
         color,
         cursor: 'pointer',
         flexShrink: 0,
-        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), box-shadow 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+        marginTop: -3,
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
         WebkitTapHighlightColor: 'transparent',
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
       onMouseEnter={(event) => {
         if (!active) {
-          event.currentTarget.style.background = hoverBackground;
-          event.currentTarget.style.boxShadow = hoverShadow;
+          event.currentTarget.style.background = 'var(--t-hover)';
         }
       }}
       onMouseLeave={(event) => {
         if (!active) {
-          event.currentTarget.style.background = restBackground;
-          event.currentTarget.style.boxShadow = restShadow;
+          event.currentTarget.style.background = 'transparent';
         }
       }}
     >
