@@ -56,8 +56,12 @@ export function SupervisorInboxBadge() {
   }, [refresh]);
 
   const active = humanRequiredCount > 0;
-  const background = active ? 'var(--t-warning-soft)' : 'var(--t-chrome-btn-bg)';
-  const chromeShadow = 'var(--t-chrome-btn-shadow)';
+  // DESIGN.md §06.7 — flat. Active uses the warning-soft fill (informational
+  // emphasis, not a chrome-btn boxy bg). Inactive is transparent; the
+  // surrounding footer card chrome already overrides --t-chrome-btn-bg to
+  // transparent, but we set it explicitly here so the component stands on
+  // its own when consumed outside the card.
+  const background = active ? 'var(--t-warning-soft)' : 'transparent';
   const countBackground = active ? 'var(--t-warning)' : 'transparent';
   const countColor = active ? 'var(--t-warning-contrast)' : 'var(--t-text-muted)';
 
@@ -77,18 +81,21 @@ export function SupervisorInboxBadge() {
         alignItems: 'center',
         justifyContent: 'center',
         gap: 5,
-        height: 28,
-        minWidth: 44,
-        paddingLeft: 8,
-        paddingRight: 8,
-        borderRadius: 8,
-        border: active ? '1px solid var(--t-warning-border)' : 'none',
-        boxShadow: active ? 'none' : chromeShadow,
+        height: 26,
+        minWidth: 36,
+        paddingLeft: 7,
+        paddingRight: 7,
+        borderRadius: 7,
+        border: 'none',
+        boxShadow: 'none',
         background,
-        color: active ? 'var(--t-warning)' : 'var(--t-chrome-btn-text, var(--t-text))',
+        color: active ? 'var(--t-warning)' : 'var(--t-text-secondary)',
         cursor: 'pointer',
         fontFamily: 'var(--font-sans-system)',
+        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
+      onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--t-hover)'; }}
+      onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
     >
       <WarningCircleIcon size={12} filled={active} />
       <span

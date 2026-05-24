@@ -78,13 +78,22 @@ const CheckRow = memo(function CheckRow({ check, bucket }: { check: PrCheck; buc
             paddingBottom: 3,
             paddingLeft: 8,
             paddingRight: 8,
-            borderRadius: 8,
-            border: '1px solid var(--t-divider-subtle)',
+            borderRadius: 7,
+            border: 'none',
             background: 'transparent',
             color: 'var(--t-text-secondary, var(--t-text-muted))',
             fontSize: 10,
             fontWeight: 600,
             cursor: 'pointer',
+            transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+          onMouseEnter={(e) => {
+            e.currentTarget.style.background = 'var(--t-hover)';
+            e.currentTarget.style.color = 'var(--t-text)';
+          }}
+          onMouseLeave={(e) => {
+            e.currentTarget.style.background = 'transparent';
+            e.currentTarget.style.color = 'var(--t-text-secondary, var(--t-text-muted))';
           }}
         >
           Debug
