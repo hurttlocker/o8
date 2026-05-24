@@ -538,6 +538,33 @@ const TOOLS: McpTool[] = [
       required: ['suggestionId'],
     },
   },
+  {
+    name: 'cortex_ask',
+    description:
+      'Ask the Engineering Brain a natural-language question. Joins session_outcomes + directives + symbol_graph + GitHub PRs across the operator\'s projects, classifies the question (Class A factual / Class B narrative), retrieves via SQL + FTS5 + graph, and composes an answer with citations back to source rows. Non-streaming JSON result. Use for: "who owns X", "how does Y get reviewed", "what changed in Z this week", "have we tried this before".',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        question: {
+          type: 'string',
+          description: 'The natural-language question. Plain English, complete sentence.',
+        },
+        repoPath: {
+          type: 'string',
+          description: 'Absolute path to the repo whose context to bias toward. Optional — defaults to the current repo if the MCP session is repo-scoped.',
+        },
+        projectId: {
+          type: 'string',
+          description: 'Project id to scope the answer to. Optional — defaults to the active project for repoPath.',
+        },
+        bypassCache: {
+          type: 'boolean',
+          description: 'Skip the 30s in-process answer cache. Default false. Use when iterating on the same question against fresh data.',
+        },
+      },
+      required: ['question'],
+    },
+  },
 ];
 
 // ── Tool Handlers ──
@@ -1310,6 +1337,46 @@ async function handleDismissProjectSuggestion(args: Record<string, unknown>): Pr
   }
 }
 
+async function handleAsk(args: Record<string, unknown>): Promise<McpToolResult> {
+  const question = typeof args.question === 'string' ? args.question.trim() : '';
+  if (!question) return textResult('question is required.', true);
+
+  const body: Record<string, unknown> = { question };
+  if (typeof args.repoPath === 'string' && args.repoPath.trim()) {
+    body.repoPath = args.repoPath.trim();
+  } else if (REPO_PATH) {
+    // Default to the MCP session's bound repo (if launched repo-scoped).
+    body.repoPath = REPO_PATH;
+  }
+  if (typeof args.projectId === 'string' && args.projectId.trim()) {
+    body.projectId = args.projectId.trim();
+  }
+  if (args.bypassCache === true) {
+    body.bypassCache = true;
+  }
+
+  try {
+    const data = await apiFetch('/api/cortex/ask/answer', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }) as { ok?: boolean; answer?: string; citations?: unknown[]; class?: string; retrievalMs?: number; classifyMs?: number; error?: string };
+
+    if (!data?.ok) {
+      return textResult(`cortex_ask error: ${data?.error ?? 'unknown'}`, true);
+    }
+
+    return jsonResult({
+      answer: data.answer ?? '',
+      citations: data.citations ?? [],
+      class: data.class ?? null,
+      retrievalMs: data.retrievalMs ?? null,
+      classifyMs: data.classifyMs ?? null,
+    });
+  } catch (err) {
+    return textResult(`cortex_ask failed: ${err instanceof Error ? err.message : String(err)}`, true);
+  }
+}
+
 const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<McpToolResult>> = {
   cortex_fleet_status: handleFleetStatus,
   cortex_list_issues: handleListIssues,
@@ -1336,6 +1403,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   cortex_refresh_project_suggestions: handleRefreshProjectSuggestions,
   cortex_create_project_from_suggestion: handleCreateProjectFromSuggestion,
   cortex_dismiss_project_suggestion: handleDismissProjectSuggestion,
+  cortex_ask: handleAsk,
 };
 
 // ── JSON-RPC Server ──
