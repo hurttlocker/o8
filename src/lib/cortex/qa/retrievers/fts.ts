@@ -222,10 +222,34 @@ function repoNameScoreMultiplier(
   return name === scope.primaryRepoName ? 1.2 : 0.88;
 }
 
+/**
+ * Resolve a directive id to its on-disk filename.
+ *
+ * #1119 — spec-ingest writes filenames with `:` flattened to `__` so the path
+ * is portable across tooling (see `spec-ingest.ts` line 297). Legacy directives
+ * (seed-*, d-*) never contained `:` so their id = filename. We try the legacy
+ * `<id>.md` first to preserve fast-path reads for the 100+ existing
+ * directives, then fall back to the spec-ingest convention. The bug surfaced
+ * as "ALL 868 spec-ingest directives silently filtered out of the FTS
+ * retriever's output" — `readDirective` returned null for every one of them
+ * because `directives/spec-ingest:cortex-ide:design:06-7-*.md` doesn't exist
+ * on disk; only the `__`-separated variant does.
+ */
+function resolveDirectivePath(id: string): string | null {
+  const dir = join(getDataDir(), 'directives');
+  const legacyPath = join(dir, `${id}.md`);
+  if (existsSync(legacyPath)) return legacyPath;
+  if (id.includes(':')) {
+    const flatPath = join(dir, `${id.replace(/:/g, '__')}.md`);
+    if (existsSync(flatPath)) return flatPath;
+  }
+  return null;
+}
+
 function readDirective(id: string): ParsedDirective | null {
   try {
-    const filePath = join(getDataDir(), 'directives', `${id}.md`);
-    if (!existsSync(filePath)) return null;
+    const filePath = resolveDirectivePath(id);
+    if (!filePath) return null;
     return parseDirectiveFile(readFileSync(filePath, 'utf-8'), id);
   } catch {
     return null;
@@ -518,12 +542,16 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
         if (!record) return;
         const hit = directivesHits.get(id)!;
         const score = 1 / (RRF_K + idx);
+        // #1119 — surface the on-disk filename (which uses `__` for
+        // spec-ingest directives) so the citation link resolves. Falls back
+        // to the raw id for legacy directives that never contained `:`.
+        const sourceFileName = id.includes(':') ? id.replace(/:/g, '__') : id;
         accumulate(`directive:${id}`, score, {
           citation: {
             kind: 'directive',
             rowId: id,
             table: 'directives_fts',
-            sourcePath: `~/.o8/directives/${id}.md`,
+            sourcePath: `~/.o8/directives/${sourceFileName}.md`,
             excerpt: hit.excerpt,
           },
           fields: {
@@ -590,10 +618,28 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
       }
     }
 
-    // Final pass — sort by RRF score, slice to limit. Caller can re-sort
-    // or filter, but the retriever returns the most-relevant first.
+    // #1119 — guarantee the top SPEC_INGEST_QUOTA spec-ingest directives
+    // survive the per-retriever slice. Without this, the directive RRF score
+    // (best ~0.0161 for an idx=2 hit) loses to outcomes/PRs/issues whose RRF
+    // score is ~0.0167 at idx=0. The orchestrator's unionMerge wants to pin
+    // the canonical spec but can't find directives to pin if they were
+    // already dropped here. Quota is small (4) so non-directive rows still
+    // fill 26 of the 30 returned slots.
+    const SPEC_INGEST_QUOTA = 4;
     const sorted = [...rrfRows.values()].sort((a, b) => (b.score ?? 0) - (a.score ?? 0));
-    rows.push(...sorted.slice(0, input.limit ?? DEFAULT_LIMIT));
+    const limit = input.limit ?? DEFAULT_LIMIT;
+    const isSpecIngest = (row: TypedRow): boolean =>
+      row.citation.kind === 'directive' &&
+      typeof row.citation.rowId === 'string' &&
+      row.citation.rowId.startsWith('spec-ingest:');
+    const specIngestPicks = sorted.filter(isSpecIngest).slice(0, SPEC_INGEST_QUOTA);
+    const specIngestKeys = new Set(
+      specIngestPicks.map((r) => `${r.citation.kind}:${r.citation.rowId}`),
+    );
+    const others = sorted
+      .filter((r) => !specIngestKeys.has(`${r.citation.kind}:${r.citation.rowId}`))
+      .slice(0, Math.max(0, limit - specIngestPicks.length));
+    rows.push(...specIngestPicks, ...others);
   } catch (error) {
     console.warn(
       '[qa][fts] retriever failed:',
