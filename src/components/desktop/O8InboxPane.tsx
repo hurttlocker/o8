@@ -464,33 +464,33 @@ function InboxActionButton({
       onClick={onClick}
       disabled={disabled}
       style={{
+        // Flat per DESIGN.md §06.7 — transparent at rest, var(--t-hover) on
+        // hover, no border, no bg-card chunk.
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
-        width: 24,
-        height: 24,
+        width: 26,
+        height: 26,
         borderRadius: 7,
-        border: '1px solid var(--t-divider-subtle)',
-        background: disabled ? 'var(--t-bg-subtle)' : 'var(--t-bg-card)',
-        color: disabled ? 'var(--t-text-secondary)' : 'var(--t-text-secondary)',
+        border: 'none',
+        background: 'transparent',
+        color: disabled ? 'var(--t-text-faint)' : 'var(--t-text-secondary)',
         cursor: disabled ? 'default' : 'pointer',
         opacity: 1,
         flexShrink: 0,
         ['--o8-inbox-action-icon' as string]: disabled ? 'var(--t-text-faint, #94a3b8)' : 'var(--t-text-secondary, #64748b)',
-        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1), opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(event) => {
         if (!disabled) {
           event.currentTarget.style.background = 'var(--t-hover)';
-          event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
           event.currentTarget.style.color = 'var(--t-text)';
           event.currentTarget.style.setProperty('--o8-inbox-action-icon', 'var(--t-text, #0f172a)');
         }
       }}
       onMouseLeave={(event) => {
-        event.currentTarget.style.background = disabled ? 'var(--t-bg-subtle)' : 'var(--t-bg-card)';
-        event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
-        event.currentTarget.style.color = 'var(--t-text-secondary)';
+        event.currentTarget.style.background = 'transparent';
+        event.currentTarget.style.color = disabled ? 'var(--t-text-faint)' : 'var(--t-text-secondary)';
         event.currentTarget.style.setProperty('--o8-inbox-action-icon', disabled ? 'var(--t-text-faint, #94a3b8)' : 'var(--t-text-secondary, #64748b)');
       }}
     >
@@ -537,37 +537,35 @@ function FilterChip({
       type="button"
       onClick={onClick}
       style={{
+        // Flat filter chip — drops always-on border for clean transparent
+        // rest. Active state uses tone-tinted soft fill; inactive is fully
+        // transparent and crossfades to var(--t-hover) on hover.
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
         height: 26,
         paddingLeft: 11,
         paddingRight: 11,
-        borderRadius: 10,
-        border: `1px solid ${borderColor}`,
-        background: activeBackground,
+        borderRadius: 7,
+        border: 'none',
+        background: active ? activeBackground : 'transparent',
         color,
         fontSize: 10,
         fontWeight: 700,
         cursor: 'pointer',
         lineHeight: 1,
         whiteSpace: 'nowrap',
-        boxShadow: active
-          ? 'inset 0 1px 0 rgba(255, 255, 255, 0.08)'
-          : 'inset 0 1px 0 rgba(255, 255, 255, 0.04)',
-        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), border-color 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(event) => {
         if (!active) {
           event.currentTarget.style.background = 'var(--t-hover)';
-          event.currentTarget.style.borderColor = 'var(--t-border)';
           event.currentTarget.style.color = 'var(--t-text)';
         }
       }}
       onMouseLeave={(event) => {
         if (!active) {
-          event.currentTarget.style.background = 'var(--t-bg-card)';
-          event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+          event.currentTarget.style.background = 'transparent';
           event.currentTarget.style.color = 'var(--t-text-secondary)';
         }
       }}
