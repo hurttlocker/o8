@@ -93,10 +93,11 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
     const result = await apiFetch('/api/cortex/ask/answer', {
       method: 'POST',
       body: JSON.stringify(body),
-      // Brain classifier currently spends 10–40s on cold calls (#1115).
-      // Bumped from the 15s default so cortex_ask doesn't time out
-      // before retrieval even runs. Drop back to 30s after #1115 lands.
-      timeoutMs: 90_000,
+      // 30s ceiling — classifier+retrieval+composer typically resolve in <5s
+      // after the #1115 fast-path (OpenRouter tier 1 + 60s cache). The 30s
+      // floor covers cold OpenRouter timeouts → Codex CLI fallback (~15s)
+      // + composer streaming on long answers.
+      timeoutMs: 30_000,
     }) as {
       ok?: boolean;
       answer?: string;
