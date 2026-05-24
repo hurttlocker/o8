@@ -116,8 +116,9 @@ export async function askCortex(
     repoPath,
     projectId,
     bm25Variants: classification.bm25Variants,
+    questionClass: classification.class,
   });
-  const topRows = unionMerge(results);
+  const topRows = unionMerge(results, { questionClass: classification.class });
   const retrievalMs = Date.now() - retrievalStart;
 
   // [qa-debug] Log retrieval diagnostics so we can trace empty-answer false-positives.
@@ -229,8 +230,9 @@ export async function runAskPipeline(
       repoPath,
       projectId,
       bm25Variants: classification.bm25Variants,
+      questionClass: classification.class,
     });
-    topRows = unionMerge(results);
+    topRows = unionMerge(results, { questionClass: classification.class });
   } catch (err) {
     console.warn('[qa][ask] retrieval error:', err);
     topRows = [];
