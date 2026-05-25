@@ -43,6 +43,7 @@ const FACTS_PIN_LIMIT = 6;
  * enough that lookup-class questions still surface 6 facts in the top 10.
  */
 const SPEC_INGEST_PIN_LIMIT = 4;
+const OUTCOME_INTENT_PIN_LIMIT = 12;
 
 /**
  * #1122 — Class A codebase-rule questions (e.g. "what is the maximum file
@@ -169,6 +170,17 @@ export function unionMerge(
   // the local pin-keys + budget arithmetic below.
   const pinnedSpecIngest = pinnedDirectives;
 
+  const sqlResult = otherResults.find((r) => r.retriever === 'sql');
+  const pinnedOutcomes: TypedRow[] = sqlResult
+    ? [...sqlResult.rows]
+        .filter((row) => (
+          row.citation.kind === 'outcome' &&
+          (row.fields as Record<string, unknown>).retrievalIntent === 'recent_session_outcomes'
+        ))
+        .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
+        .slice(0, Math.min(OUTCOME_INTENT_PIN_LIMIT, MERGE_LIMIT))
+    : [];
+
   // #1122 — Class A lookup questions get directive-first routing: when a
   // directive is in the pin, skip the facts pin so the composer's
   // "Prefer FACT-" instruction can't override the canonical spec. Class B
@@ -181,7 +193,7 @@ export function unionMerge(
   // Take up to FACTS_PIN_LIMIT facts in their retriever's existing order
   // (retrieveFacts sorts by BM25 rank descending — score field). Cap so the
   // combined pin (spec-ingest + facts) never exceeds MERGE_LIMIT.
-  const factsBudget = Math.max(0, MERGE_LIMIT - pinnedSpecIngest.length);
+  const factsBudget = Math.max(0, MERGE_LIMIT - pinnedOutcomes.length - pinnedSpecIngest.length);
   const pinnedFacts: TypedRow[] = factsResult && !suppressFactsPin
     ? [...factsResult.rows]
         .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
@@ -192,6 +204,9 @@ export function unionMerge(
   // retriever (extremely unlikely — only facts retriever emits 'fact' kind —
   // but cheap insurance against future cross-retriever overlap).
   const pinnedKeys = new Set<string>();
+  for (const row of pinnedOutcomes) {
+    pinnedKeys.add(`${row.citation.kind}:${row.citation.rowId}`);
+  }
   for (const row of pinnedSpecIngest) {
     pinnedKeys.add(`${row.citation.kind}:${row.citation.rowId}`);
   }
@@ -239,11 +254,11 @@ export function unionMerge(
 
   const remainingSlots = Math.max(
     0,
-    MERGE_LIMIT - pinnedSpecIngest.length - pinnedFacts.length,
+    MERGE_LIMIT - pinnedOutcomes.length - pinnedSpecIngest.length - pinnedFacts.length,
   );
   const mergedNonFacts = [...rows.values()]
     .sort((a, b) => (b.score ?? 0) - (a.score ?? 0))
     .slice(0, remainingSlots);
 
-  return [...pinnedSpecIngest, ...pinnedFacts, ...mergedNonFacts];
+  return [...pinnedOutcomes, ...pinnedSpecIngest, ...pinnedFacts, ...mergedNonFacts];
 }
