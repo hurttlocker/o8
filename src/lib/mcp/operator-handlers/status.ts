@@ -3,8 +3,27 @@ import {
   type McpToolResult,
   apiFetch,
   jsonResult,
+  requiredString,
   textResult,
 } from './shared';
+import { findLaneByPacket, setLaneStatus } from '@/lib/lane/registry';
+
+const NO_STEERABLE_SESSION = 'Packet has no steerable session — use rerun_with_feedback instead.';
+
+async function steerSession(sessionKey: string, message: string): Promise<Record<string, unknown>> {
+  const result = await apiFetch('/api/runtime/action', {
+    method: 'POST',
+    body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message }),
+  }) as Record<string, unknown>;
+  return result;
+}
+
+function steerFailureNote(result: Record<string, unknown>): string | null {
+  if (result.ok !== false && typeof result.error !== 'string') return null;
+  if (typeof result.note === 'string') return result.note;
+  if (typeof result.error === 'string') return result.error;
+  return 'Runtime steer failed.';
+}
 
 export const STATUS_TOOLS: McpTool[] = [
   {
@@ -46,6 +65,25 @@ export const STATUS_TOOLS: McpTool[] = [
           description: 'Filter to a specific session. Returns all if omitted.',
         },
       },
+    },
+  },
+  {
+    name: 'steer_packet',
+    description:
+      'Use steer_packet when you want to nudge a parked Codex session with new info, such as typecheck failed and here is the output. Codex warm thread state means this is ~1 turn cost versus rerun_with_feedback, which creates a full new worker. Use rerun_with_feedback when the prior session is gone, or when you need a fresh worker to retry from scratch.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        packetId: {
+          type: 'string',
+          description: 'Packet id for the parked session to steer.',
+        },
+        message: {
+          type: 'string',
+          description: 'Follow-up instruction to append to the existing Codex session.',
+        },
+      },
+      required: ['packetId', 'message'],
     },
   },
   {
@@ -129,10 +167,7 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
 
     if (sessionKey) {
       // Steer existing session
-      result = await apiFetch('/api/runtime/action', {
-        method: 'POST',
-        body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message }),
-      }) as Record<string, unknown>;
+      result = await steerSession(sessionKey, message);
     } else {
       // Launch new task via orchestrator
       result = await apiFetch('/api/orchestrator/delegate', {
@@ -169,6 +204,38 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
   } catch (err) {
     console.error(`[o8-operator] o8_send failed: ${err}`);
     return textResult(`Failed to send: ${err}`, true);
+  }
+}
+
+export async function handleSteerPacket(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const packetId = requiredString(args, 'packetId');
+    const message = requiredString(args, 'message');
+    const lane = findLaneByPacket(packetId);
+    if (!lane?.sessionKey) {
+      return textResult(NO_STEERABLE_SESSION, true);
+    }
+
+    const steerResult = await steerSession(lane.sessionKey, message);
+    const steerFailure = steerFailureNote(steerResult);
+    if (steerFailure) {
+      return textResult(`Failed to steer packet: ${steerFailure}`, true);
+    }
+
+    const updatedLane = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
+    if (!updatedLane || updatedLane.status !== 'running') {
+      return textResult(NO_STEERABLE_SESSION, true);
+    }
+
+    return jsonResult({
+      ok: true,
+      packetId,
+      laneId: lane.id,
+      note: 'Steered packet via warm session.',
+    });
+  } catch (err) {
+    console.error(`[o8-operator] steer_packet failed: ${err}`);
+    return textResult(`Failed to steer packet: ${err}`, true);
   }
 }
 
