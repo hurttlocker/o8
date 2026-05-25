@@ -52,11 +52,11 @@ Question: ${question}
 Rows (each row has a \`handle\` for citation, \`content\` with the actual text, and \`source_authority\` 0-1): ${rowsJson}
 
 Rules:
-1. If ANY row's content addresses the question — fully or partially — lead with that information. Quote concrete values, numbers, names, and identifiers verbatim from the content. ${preferenceRule}
+1. Answer with facts clearly stated or directly entailed by row content. A row "addresses" the question only when it carries the requested fact itself, not merely matching keywords or a related topic. Quote concrete values, numbers, names, and identifiers verbatim from the content. ${preferenceRule}
 2. Cite the relevant row(s) inline in [BRACKET-ID] form where BRACKET-ID is the handle field from the row (e.g. [D-014], [O-481], [PR-650], [FACT-abc123]).
 3. Source-of-truth hierarchy: each row carries \`source_authority\` (0-1). When two rows contradict, cite the higher-authority one. Directives (1.0) are the project's rules — prefer them over comment opinions (0.7). Merged PRs (0.95) outrank open ones (0.8). Closed issues (0.85) outrank open ones (0.75).
-4. NEVER hedge with "I don't have that information yet" when you ARE answering. Either answer with citations OR respond with the exact string "I don't have that information yet." and nothing else. There is no middle ground — no preambles, no apologies.
-5. Only respond "I don't have that information yet." when none of the rows even mention the topic.`;
+4. Do not infer missing owners, authors, counts, commit SHAs, paths, issue numbers, dates, repos, runtimes, or failure modes from adjacent rows. If rows are partial, answer the supported part and say which requested value is not stated.
+5. Either answer with cited literal facts OR respond with the exact string "I don't have that information yet." and nothing else.`;
 }
 
 function buildSonnetComposeSystem(): string {
@@ -65,10 +65,10 @@ function buildSonnetComposeSystem(): string {
 Rules:
 1. Answer in 1-6 sentences. Be direct and specific. For multi-fact specs (latency budgets, schema/table lists, cache TTLs, configuration values, enumerated rules), enumerate EVERY relevant fact present in the rows — don't cherry-pick one and skip the rest. Single-fact questions still get a single tight sentence.
 2. Cite EVERY fact using the row's citation handle in [BRACKET-ID] form (e.g. [D-014] for directives, [O-481] for outcomes, [PR-650] for PRs). One citation per fact, inline.
-3. Rows with citation handle prefix \`FACT-\` are pre-extracted facts (high confidence). Prefer these as your primary citations when they answer the question. Cite raw rows (D-/O-/PR-/CMT-/DOC-) only when no FACT- row covers the fact.
+3. Retrieved rows are search hits, not proof. Use a row when its fields state the fact or can be directly summarized to answer the question; matching BM25 keywords, topic overlap, or a real citation handle is not enough.
 4. Source-of-truth hierarchy: each row carries \`source_authority\` (0-1). When two rows contradict, cite the higher-authority one. Directives (1.0) are the project's rules — prefer them over comment opinions (0.7). Merged PRs (0.95) outrank open ones (0.8). Closed issues (0.85) outrank open ones (0.75).
-5. Ground every claim in the retrieved rows. Do not invent facts, numbers, or names not present in the rows.
-6. If rows don't answer the question, say exactly: "I don't have that information yet — try indexing more directives or PRs."
+5. Rows with citation handle prefix \`FACT-\` are pre-extracted facts (high confidence). Prefer them only when they answer or directly support the question; otherwise ignore them or use a better raw row.
+6. Do not infer missing owners, authors, counts, commit SHAs, paths, issue numbers, dates, repos, runtimes, or failure modes from adjacent rows. If rows are partial, answer the supported part and name the missing value. Related incidents or broad category rows are not partial answers to named-rule, owner, author, count, or ID questions unless they name the requested thing. If rows don't answer the question, say exactly: "I don't have that information yet — try indexing more directives or PRs." and nothing else.
 7. Stream your answer token by token.`;
 }
 
