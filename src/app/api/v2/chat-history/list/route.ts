@@ -96,7 +96,9 @@ export async function GET(request: NextRequest) {
         // orchestrator/chat tab, even before the operator types. Those
         // threads are noise in the left rail until they have content.
         // Pinned / starred empties stay visible (operator explicitly cared).
-        const explicitlyKept = data.pinned === true || data.starred === true;
+        const explicitlyKept = data.pinned === true
+          || data.starred === true
+          || (includeOrchestrator && data.orchestratorVisible === true);
         if (isEmpty && !explicitlyKept) {
           // Garbage-collect long-orphaned empty placeholders so they don't
           // accumulate on disk forever. Anything newer than the TTL stays

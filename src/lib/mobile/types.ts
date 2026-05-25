@@ -295,6 +295,8 @@ export interface MobileOrchestratorThread {
   backend: MobileOrchestratorBackend | null;
   /** openclaw agent id that ran the thread; null for non-openclaw/untagged. */
   agent: string | null;
+  /** Whether the chat-history thread is pinned on the desktop. */
+  pinned?: boolean;
 }
 
 /**
