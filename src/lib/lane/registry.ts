@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { and, asc, desc, eq, isNotNull, ne, notInArray } from 'drizzle-orm';
+import { and, asc, desc, eq, gt, isNotNull, ne, notInArray } from 'drizzle-orm';
 import { expireStaleApprovals, listApprovalsForContext } from '@/lib/approvals/store';
 import { getDb, getSqlite, laneEvents, lanes } from '@/lib/db';
 import { recordDispatchRule } from '@/lib/dispatch/rules-store';
@@ -607,6 +607,52 @@ export function getLaneEvents(laneId: string, limit = 50): LaneEvent[] {
     .all()
     .map(mapLaneEventRow)
     .reverse();
+}
+
+/**
+ * Count lane events of a given verb that occurred AFTER the most recent
+ * `launching_session` status_change for this lane. Used by the post-rebase
+ * typecheck escalation (#1108) so a packet that gets reset_packet'd and
+ * dispatched again doesn't inherit retry counters from the prior session.
+ *
+ * Returns 0 when the lane has no launch boundary yet (events still count
+ * from the lane creation timestamp in that case via the `since` floor).
+ */
+export function countLaneEventsByVerbSinceLastLaunch(
+  laneId: string,
+  verb: LaneEventVerb,
+): number {
+  // `launching_session` is the label set on status transitions to 'launching'
+  // (see commands.ts launch_session handler) and is the closest event-stream
+  // marker for "fresh session boundary on this lane". We treat the most
+  // recent occurrence as the scope floor.
+  const launchEvent = getLaneDb()
+    .select()
+    .from(laneEvents)
+    .where(and(
+      eq(laneEvents.laneId, laneId),
+      eq(laneEvents.verb, 'status_change'),
+    ))
+    .orderBy(desc(laneEvents.timestamp))
+    .all()
+    .find((row) => parseEventPayload(row.payloadJson).status === 'launching');
+
+  const sinceFloor = launchEvent?.timestamp;
+  const rows = getLaneDb()
+    .select()
+    .from(laneEvents)
+    .where(sinceFloor
+      ? and(
+        eq(laneEvents.laneId, laneId),
+        eq(laneEvents.verb, verb),
+        gt(laneEvents.timestamp, sinceFloor),
+      )
+      : and(
+        eq(laneEvents.laneId, laneId),
+        eq(laneEvents.verb, verb),
+      ))
+    .all();
+  return rows.length;
 }
 
 export function getAllEvents(limit = 200): LaneEvent[] {
