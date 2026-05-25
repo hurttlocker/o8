@@ -61,7 +61,11 @@ import type { BrowserAttachmentSummary } from '@/lib/browser/types';
 import { getAttachedBrowserSummary, setAttachedBrowserSummary } from './lib/browser/attachment-state';
 import { getBrowserProvider } from './lib/browser/inventory';
 import type { CommandCenterSnapshot } from './lib/command-center/snapshot';
-import type { MobileInboxSnapshot, MobileTranscriptEntry } from './lib/mobile/types';
+import type { MobileInboxSnapshot, MobileOrchestratorThread, MobileTranscriptEntry } from './lib/mobile/types';
+import {
+  listMobileOrchestratorRevealRequests,
+  listMobileOrchestratorThreads,
+} from './lib/mobile/orchestrator-thread-history';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import {
@@ -1274,6 +1278,72 @@ function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => bo
   for (const client of clients.values()) {
     if (filter && !filter(client)) continue;
     sendRaw(client, json);
+  }
+}
+
+function sendOrchestratorThreadSnapshot(client: ClientState) {
+  try {
+    send(client, {
+      channel: 'orchestrator-threads',
+      event: 'snapshot',
+      data: { threads: listMobileOrchestratorThreads({ backend: null }) },
+    });
+  } catch {
+    // Snapshot is a live convenience; HTTP thread fetch remains the fallback.
+  }
+}
+
+function orchestratorThreadFingerprint(thread: MobileOrchestratorThread): string {
+  return JSON.stringify({
+    id: thread.id,
+    title: thread.title,
+    lastMessageAt: thread.lastMessageAt,
+    runtime: thread.runtime,
+    status: thread.status,
+    messageCount: thread.messageCount,
+    repoPath: thread.repoPath,
+    repoName: thread.repoName,
+    repoBranch: thread.repoBranch,
+    backend: thread.backend,
+    agent: thread.agent,
+    pinned: thread.pinned === true,
+  });
+}
+
+let lastOrchestratorThreadFingerprints = new Map<string, string>();
+let lastOrchestratorRevealCursor = new Date(Date.now() - 3000).toISOString();
+
+function pushOrchestratorThreadChanges() {
+  if (clients.size === 0) return;
+  try {
+    const threads = listMobileOrchestratorThreads({ backend: null });
+    const nextFingerprints = new Map<string, string>();
+    for (const thread of threads) {
+      const fingerprint = orchestratorThreadFingerprint(thread);
+      nextFingerprints.set(thread.id, fingerprint);
+      const previous = lastOrchestratorThreadFingerprints.get(thread.id);
+      if (previous === fingerprint) continue;
+      broadcast({
+        channel: 'orchestrator-threads',
+        event: previous ? 'updated' : 'created',
+        data: { thread },
+      });
+    }
+    lastOrchestratorThreadFingerprints = nextFingerprints;
+
+    const revealRequests = listMobileOrchestratorRevealRequests(lastOrchestratorRevealCursor);
+    for (const request of revealRequests) {
+      if (Date.parse(request.requestedAt) > Date.parse(lastOrchestratorRevealCursor)) {
+        lastOrchestratorRevealCursor = request.requestedAt;
+      }
+      broadcast({
+        channel: 'orchestrator-threads',
+        event: 'reveal',
+        data: request,
+      });
+    }
+  } catch (error) {
+    console.warn('[ws-server] orchestrator thread sync failed:', error instanceof Error ? error.message : String(error));
   }
 }
 
@@ -2499,6 +2569,13 @@ function startPollingLoops() {
     void Promise.allSettled(activeClients.map((c) => syncClientHistory(c)));
   }, SAFETY_NET_HISTORY_MS);
 
+  // Built-in o8/Claude orchestrator thread sync. The Next API process owns
+  // chat-history writes; this WS bridge watches the durable records and pushes
+  // thread create/update/reveal events to desktop + mobile clients.
+  setInterval(() => {
+    pushOrchestratorThreadChanges();
+  }, 1_000);
+
   // Conflict scan — poll every 5s, push updates to all clients when conflicts change
   // TODO: Track repo per client session for multi-repo support (currently uses process.cwd())
   let lastConflictHash = '';
@@ -3656,6 +3733,7 @@ wss.on('connection', (ws) => {
 
   // Send initial inbox
   void syncClientInbox(client);
+  sendOrchestratorThreadSnapshot(client);
   startBrowserDiscoveryRealtimeLoop();
 
   ws.on('message', (raw) => {
