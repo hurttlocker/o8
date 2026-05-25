@@ -103,6 +103,7 @@ export async function POST(request: NextRequest) {
 
   // Preserve starred status from existing file
   let starred = false;
+  let pinned = false;
   let title: string | undefined;
   let planText: string | undefined;
   let repoName: string | undefined;
@@ -112,9 +113,13 @@ export async function POST(request: NextRequest) {
   let backend: 'codex' | 'claude' | 'openclaw' | undefined;
   let agent: string | undefined;
   let archivedAt: string | null | undefined;
+  let orchestratorVisible: boolean | undefined;
+  let mobileCreatedAt: string | null | undefined;
+  let mobileRevealRequestedAt: string | null | undefined;
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
     starred = existing.starred || false;
+    pinned = existing.pinned === true;
     title = existing.title;
     planText = normalizePlanText(existing.planText);
     repoName = existing.repoName;
@@ -124,6 +129,9 @@ export async function POST(request: NextRequest) {
     backend = normalizeBackend(existing.backend);
     agent = normalizeAgent(existing.agent);
     archivedAt = normalizeNullableDate(existing.archivedAt);
+    orchestratorVisible = existing.orchestratorVisible === true ? true : undefined;
+    mobileCreatedAt = normalizeNullableDate(existing.mobileCreatedAt);
+    mobileRevealRequestedAt = normalizeNullableDate(existing.mobileRevealRequestedAt);
   } catch { /* new file */ }
   const nextArchivedAt = body.archivedAt !== undefined
     ? normalizeNullableDate(body.archivedAt) ?? null
@@ -134,6 +142,7 @@ export async function POST(request: NextRequest) {
     model: body.model,
     savedAt: new Date().toISOString(),
     starred: body.starred ?? starred,
+    pinned: body.pinned ?? pinned,
     title: body.title ?? title,
     planText: normalizePlanText(body.planText) ?? planText ?? extractedPlanText,
     repoName: body.repoName ?? repoName,
@@ -143,6 +152,9 @@ export async function POST(request: NextRequest) {
     backend: normalizeBackend(body.backend) ?? backend ?? null,
     agent: normalizeAgent(body.agent) ?? agent ?? null,
     archivedAt: nextArchivedAt,
+    orchestratorVisible,
+    mobileCreatedAt,
+    mobileRevealRequestedAt,
   }));
 
   return NextResponse.json({ ok: true });

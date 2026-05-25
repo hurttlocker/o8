@@ -50,7 +50,7 @@ import {
 import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
-import type { MobileInboxSnapshot } from '@/lib/mobile/types';
+import type { MobileInboxSnapshot, MobileOrchestratorThread } from '@/lib/mobile/types';
 import type {
   OrchestratorLaneBinding,
   OrchestratorLaneSnapshot,
@@ -228,6 +228,16 @@ function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
     return raw;
   }
   return null;
+}
+
+function historyRepoContextFromMobileThread(thread: MobileOrchestratorThread): SavedChatRepoContext | null {
+  if (!thread.repoPath) return null;
+  return {
+    name: thread.repoName ?? undefined,
+    localPath: thread.repoPath,
+    branch: thread.repoBranch ?? null,
+    remoteUrl: null,
+  };
 }
 
 export default function DashboardPage() {
@@ -995,6 +1005,54 @@ function DashboardInner() {
       }
     })();
   }, [activeTileId, setActiveSessionKey, waitForWorkspaceTerminalTarget]);
+
+  const mobileRevealCursorRef = useRef(new Date(Date.now() - 3000).toISOString());
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let disposed = false;
+    let inFlight = false;
+    const seen = new Set<string>();
+
+    const pollMobileRevealRequests = async () => {
+      if (disposed || inFlight) return;
+      inFlight = true;
+      try {
+        const res = await fetch(`/api/mobile/orchestrator/threads/reveal?since=${encodeURIComponent(mobileRevealCursorRef.current)}`, { cache: 'no-store' });
+        if (!res.ok || disposed) return;
+        const data = await res.json() as {
+          requests?: Array<{ requestedAt?: string; thread?: MobileOrchestratorThread }>;
+        };
+        const requests = Array.isArray(data.requests) ? data.requests : [];
+        for (const request of requests) {
+          const requestedAt = typeof request.requestedAt === 'string' ? request.requestedAt : null;
+          const thread = request.thread;
+          if (!requestedAt || !thread?.id || !thread.title) continue;
+          if (Date.parse(requestedAt) > Date.parse(mobileRevealCursorRef.current)) {
+            mobileRevealCursorRef.current = requestedAt;
+          }
+          const seenKey = `${thread.id}:${requestedAt}`;
+          if (seen.has(seenKey)) continue;
+          seen.add(seenKey);
+          handleOpenHistoryChatFromPanel(
+            thread.id,
+            thread.title,
+            historyRepoContextFromMobileThread(thread),
+          );
+        }
+      } catch {
+        // Best-effort mobile reveal bridge; the normal history list still works.
+      } finally {
+        inFlight = false;
+      }
+    };
+
+    void pollMobileRevealRequests();
+    const timer = window.setInterval(pollMobileRevealRequests, 1500);
+    return () => {
+      disposed = true;
+      window.clearInterval(timer);
+    };
+  }, [handleOpenHistoryChatFromPanel]);
 
   // ── Workspace tab hotkeys ──
   // Cmd+1..Cmd+9 jump to the Nth workspace tab, Cmd+Opt+Left / Right cycle
