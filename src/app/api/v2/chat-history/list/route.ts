@@ -40,6 +40,34 @@ interface ChatHistoryEntry {
   archivedAt?: string | null;
 }
 
+function normalizeSessionIds(value: unknown): Record<string, string | null> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const normalized: Record<string, string | null> = {};
+  for (const [key, rawSessionId] of Object.entries(value as Record<string, unknown>)) {
+    if (!key) continue;
+    if (rawSessionId === null) {
+      normalized[key] = null;
+      continue;
+    }
+    if (typeof rawSessionId !== 'string') continue;
+    const sessionId = rawSessionId.trim();
+    if (sessionId) normalized[key] = sessionId;
+  }
+  return normalized;
+}
+
+function inferOrchestratorModel(tabId: string, data: Record<string, unknown>): string {
+  if (typeof data.model === 'string' && data.model.trim()) return data.model.trim();
+  const backend = typeof data.backend === 'string' ? data.backend : '';
+  if (backend === 'claude') return 'claude-code';
+  if (backend === 'codex') return 'codex';
+  if (backend === 'openclaw') return 'openclaw';
+  const sessionIds = normalizeSessionIds(data.orchestratorSessionIds);
+  if (sessionIds.claude) return 'claude-code';
+  if (sessionIds.codex) return 'codex';
+  return tabId.startsWith('thoughts-') ? 'claude-code' : 'unknown';
+}
+
 export async function GET(request: NextRequest) {
   const searchQuery = request.nextUrl.searchParams.get('q')?.toLowerCase();
   const includeOrchestrator = request.nextUrl.searchParams.get('include') === 'orchestrator';
@@ -147,7 +175,7 @@ export async function GET(request: NextRequest) {
           preview,
           empty: isEmpty,
           messageCount: messages.length,
-          model: data.model || 'unknown',
+          model: inferOrchestratorModel(tabId, data),
           savedAt: data.savedAt || stat.mtime.toISOString(),
           modifiedAt: stat.mtime.toISOString(),
           starred: data.starred || false,

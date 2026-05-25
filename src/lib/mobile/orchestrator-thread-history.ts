@@ -6,6 +6,7 @@ import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/
 export const ORCHESTRATOR_HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 const MAX_THREADS = 20;
 const DEFAULT_MODEL = 'claude-code';
+const DEFAULT_BACKEND: MobileOrchestratorBackend = 'claude';
 
 export interface OrchestratorThreadRevealRequest {
   requestedAt: string;
@@ -94,6 +95,31 @@ function inferRuntime(model: string | undefined | null): MobileOrchestratorThrea
   return 'unknown';
 }
 
+function inferBackendFromSessionIds(record: OrchestratorHistoryRecord): MobileOrchestratorBackend | null {
+  const sessionIds = normalizeSessionIds(record.orchestratorSessionIds);
+  if (sessionIds.claude) return 'claude';
+  if (sessionIds.codex) return 'codex';
+  return null;
+}
+
+function modelForBackend(backend: MobileOrchestratorBackend | null): string | null {
+  if (backend === 'claude') return 'claude-code';
+  if (backend === 'codex') return 'codex';
+  if (backend === 'openclaw') return 'openclaw';
+  return null;
+}
+
+function effectiveBackend(record: OrchestratorHistoryRecord): MobileOrchestratorBackend | null {
+  return normalizeBackend(record.backend) ?? inferBackendFromSessionIds(record);
+}
+
+function effectiveModel(tabId: string, record: OrchestratorHistoryRecord): string | null {
+  if (typeof record.model === 'string' && record.model.trim()) return record.model.trim();
+  const backendModel = modelForBackend(effectiveBackend(record));
+  if (backendModel) return backendModel;
+  return tabId.startsWith('thoughts-') ? DEFAULT_MODEL : null;
+}
+
 function trimTitle(value: unknown, fallback: string): string {
   if (typeof value !== 'string') return fallback;
   const trimmed = value.trim();
@@ -123,7 +149,7 @@ function projectThread(
     id: tabId,
     title: trimTitle(record.title, fallbackTitle),
     lastMessageAt: record.savedAt || modifiedAt,
-    runtime: inferRuntime(record.model),
+    runtime: inferRuntime(effectiveModel(tabId, record)),
     status: messages.length === 0 ? 'idle' : lastMessage?.role === 'user' ? 'busy' : 'ready',
     messageCount: messages.length,
     repoPath: typeof record.repoPath === 'string' ? record.repoPath : null,
@@ -131,7 +157,7 @@ function projectThread(
       ? record.repoName
       : repoNameFromPath(typeof record.repoPath === 'string' ? record.repoPath : null),
     repoBranch: typeof record.repoBranch === 'string' ? record.repoBranch : null,
-    backend: normalizeBackend(record.backend),
+    backend: effectiveBackend(record),
     agent: normalizeAgent(record.agent),
     pinned: record.pinned === true,
   };
@@ -176,7 +202,7 @@ export function listMobileOrchestratorThreads(options: {
       const filePath = join(ORCHESTRATOR_HISTORY_DIR, file);
       const stat = statSync(filePath);
       const record = JSON.parse(readFileSync(filePath, 'utf-8')) as OrchestratorHistoryRecord;
-      const threadBackend = normalizeBackend(record.backend);
+      const threadBackend = effectiveBackend(record);
       if (wantOpenclaw ? threadBackend !== 'openclaw' : threadBackend === 'openclaw') {
         continue;
       }
@@ -217,7 +243,7 @@ export function createMobileOrchestratorThread(input: {
     repoName: trimTitle(input.repoName, repoNameFromPath(repoPath) ?? 'Project'),
     repoBranch: typeof input.repoBranch === 'string' && input.repoBranch.trim() ? input.repoBranch.trim() : null,
     remoteUrl: null,
-    backend: null,
+    backend: DEFAULT_BACKEND,
     agent: null,
     archivedAt: null,
     orchestratorVisible: true,
@@ -260,7 +286,9 @@ export function writeOrchestratorBackendSessionId(
   writeHistoryRecord(tabId, {
     ...existing,
     messages: Array.isArray(existing.messages) ? existing.messages : [],
+    model: existing.model ?? modelForBackend(backend) ?? DEFAULT_MODEL,
     savedAt: existing.savedAt ?? now,
+    backend: normalizeBackend(existing.backend) ?? backend,
     orchestratorSessionIds: nextSessionIds,
     orchestratorSessionUpdatedAt: now,
   });
