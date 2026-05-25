@@ -65,11 +65,11 @@ import type { MobileInboxSnapshot, MobileOrchestratorThread, MobileTranscriptEnt
 import {
   listMobileOrchestratorRevealRequests,
   listMobileOrchestratorThreads,
+  writeOrchestratorBackendSessionId,
 } from './lib/mobile/orchestrator-thread-history';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
 import {
-  getOrchestratorSession,
   rehydrateOrchestratorSessions,
 } from './lib/lane/orchestrator-session';
 import {
@@ -764,11 +764,12 @@ interface OrchestratorSubscription {
 // so event broadcast matches on it.
 const orchestratorSubscriptions = new Map<string, OrchestratorSubscription>();
 
-// #624 — In-flight AbortControllers keyed by `${repoPath}::${backend}::${agent}`.
+// #624 — In-flight AbortControllers keyed by `${repoPath}::${backend}::${agent}::${threadId}`.
 // Attached when an orchestrator-send turn starts; orchestrator-interrupt calls
 // .abort() on the matching entry to terminate the streaming subprocess within
-// 1-2s. Per-backend AND per-openclaw-agent so concurrent turns on the same repo
-// don't clobber each other. Entries are removed when the turn resolves.
+// 1-2s. Per-backend, per-openclaw-agent, and per thoughts thread so concurrent
+// turns on the same repo don't clobber each other. Entries are removed when the
+// turn resolves.
 const orchestratorInflightAborts = new Map<string, AbortController>();
 
 /** Composite key for `orchestratorSubscriptions` (`agent` is '' for codex/claude). */
@@ -777,8 +778,8 @@ function orchestratorSubKey(clientId: string, backend: OrchestratorBackendId, ag
 }
 
 /** Composite key for `orchestratorInflightAborts` (`agent` is '' for codex/claude). */
-function orchestratorAbortKey(repoPath: string, backend: OrchestratorBackendId, agent: string): string {
-  return `${repoPath}::${backend}::${agent}`;
+function orchestratorAbortKey(repoPath: string, backend: OrchestratorBackendId, agent: string, threadId: string | null): string {
+  return `${repoPath}::${backend}::${agent}::${threadId ?? ''}`;
 }
 
 function resolveMsgThreadId(msg: Record<string, unknown>): string | null {
@@ -2242,7 +2243,7 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
   const threadId = resolveMsgThreadId(msg);
 
   try {
-    const session = backend.ensureSession(repoPath, agentTag);
+    const session = backend.ensureSession(repoPath, agentTag, threadId);
     const routeSessionName = orchestratorRouteSessionName(session.sessionName, threadId);
     orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
       clientId: client.id,
@@ -2293,7 +2294,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const agentId = resolveMsgAgentId(msg, backend.id);
   const agentTag = agentId || undefined;
   const threadId = resolveMsgThreadId(msg);
-  const abortKey = orchestratorAbortKey(repoPath, backend.id, agentId);
+  const abortKey = orchestratorAbortKey(repoPath, backend.id, agentId, threadId);
 
   // #624 — Declared outside try so the catch can also release the entry.
   let turnController: AbortController | null = null;
@@ -2302,13 +2303,13 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     console.log(`[ws-server][orchestrator] Routing chat via ${backend.label}${agentId ? ` (agent ${agentId})` : ''}`);
 
     const sessionName = orchestratorRouteSessionName(
-      backend.ensureSession(repoPath, agentTag).sessionName,
+      backend.ensureSession(repoPath, agentTag, threadId).sessionName,
       threadId,
     );
     const sendTurn = (
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
-    ): Promise<void> => backend.sendTurn(repoPath, message, onEvent, { permissionMode, thinkingEffort, model, agent: agentTag, signal });
+    ): Promise<void> => backend.sendTurn(repoPath, message, onEvent, { permissionMode, thinkingEffort, model, agent: agentTag, threadId, signal });
 
     // Ensure a subscription exists for the selected backend + agent.
     orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
@@ -2397,10 +2398,13 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           break;
 
         case 'done':
+          if (threadId && event.sessionId && (backend.id === 'claude' || backend.id === 'codex')) {
+            writeOrchestratorBackendSessionId(threadId, backend.id, event.sessionId);
+          }
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, threadId, backend: backend.id, agent: agentTag },
+            data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, backend: backend.id, agent: agentTag },
           });
           break;
 
@@ -2447,13 +2451,14 @@ function handleOrchestratorInterrupt(client: ClientState, msg: Record<string, un
   if (!repoPath) return;
   const backendId = resolveMsgBackendId(msg);
   const agentId = resolveMsgAgentId(msg, backendId);
+  const threadId = resolveMsgThreadId(msg);
   const label = `${backendId}${agentId ? `/${agentId}` : ''}`;
-  const controller = orchestratorInflightAborts.get(orchestratorAbortKey(repoPath, backendId, agentId));
+  const controller = orchestratorInflightAborts.get(orchestratorAbortKey(repoPath, backendId, agentId, threadId));
   if (!controller) {
-    console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${label}) — no in-flight turn`);
+    console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${label}${threadId ? ` ${threadId}` : ''}) — no in-flight turn`);
     return;
   }
-  console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${label}, client ${client.id})`);
+  console.log(`[ws-server] orchestrator-interrupt for ${repoPath} (${label}${threadId ? ` ${threadId}` : ''}, client ${client.id})`);
   controller.abort();
   // Leave the map entry in place; handleOrchestratorSendMsg removes it when
   // the turn resolves (the abort causes close to fire within 1-2s).
@@ -2470,7 +2475,7 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
   const agentId = resolveMsgAgentId(msg, backend.id);
   const agentTag = agentId || undefined;
   const threadId = resolveMsgThreadId(msg);
-  const session = backend.peekSession(repoPath, agentTag);
+  const session = backend.peekSession(repoPath, agentTag, threadId);
   const status = session?.status ?? 'dead';
   const sessionName = session ? orchestratorRouteSessionName(session.sessionName, threadId) : null;
 
@@ -3423,9 +3428,6 @@ const httpServer = createServer((req, res) => {
           console.log(`[ws-server] orchestrator-reload aborted in-flight turn(s) for ${repoPath}`);
         }
 
-        const session = getOrchestratorSession(repoPath);
-        const sessionName = session?.sessionName ?? null;
-
         // Broadcast a `notice` event to every orchestrator subscriber for
         // this repo. The UI hook renders a short-lived banner.
         const payload = JSON.stringify({
@@ -3441,8 +3443,7 @@ const httpServer = createServer((req, res) => {
         });
         let delivered = 0;
         for (const sub of orchestratorSubscriptions.values()) {
-          if (sessionName && sub.sessionName !== sessionName) continue;
-          if (!sessionName && sub.repoPath !== repoPath) continue;
+          if (sub.repoPath !== repoPath) continue;
           const c = clients.get(sub.clientId);
           if (c) {
             sendRaw(c, payload);
@@ -3454,7 +3455,7 @@ const httpServer = createServer((req, res) => {
         res.end(JSON.stringify({
           ok: true,
           repoPath,
-          sessionName,
+          sessionName: null,
           aborted,
           delivered,
           noticeId,

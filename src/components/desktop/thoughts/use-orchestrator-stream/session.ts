@@ -135,6 +135,7 @@ interface PrimeCompactedSessionOptions {
   messagesRef: RefLike<MobileTranscriptEntry[]>;
   payload: CompactResponsePayload;
   repoPath: string;
+  threadId?: string | null;
   setMessages: (entries: MobileTranscriptEntry[]) => void;
   setRunningTotal: (value: number) => void;
   setTokenCount: (value: number) => void;
@@ -152,11 +153,11 @@ export async function primeCompactedOrchestratorSession(
   await fetch('/api/orchestrator/reset-session', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ repoPath }),
+    body: JSON.stringify({ repoPath, threadId: options.threadId }),
   }).catch(() => null);
 
   if (payload.resumePrelude) {
-    queueOrchestratorSessionPrelude(repoPath, payload.resumePrelude, 'replace');
+    queueOrchestratorSessionPrelude(repoPath, payload.resumePrelude, 'replace', options.threadId);
   }
 
   const nextTotal = typeof payload.tokensAfter === 'number' ? payload.tokensAfter : 0;

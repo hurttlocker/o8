@@ -31,33 +31,33 @@ import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 const claudeBackend: OrchestratorBackend = {
   id: 'claude',
   label: 'Claude',
-  peekSession(repoPath) {
-    const session = getOrchestratorSession(repoPath);
+  peekSession(repoPath, _agent, threadId) {
+    const session = getOrchestratorSession(repoPath, threadId);
     return session ? { sessionName: session.sessionName, status: session.status } : null;
   },
-  ensureSession(repoPath) {
-    const session = ensureOrchestratorSession(repoPath);
+  ensureSession(repoPath, _agent, threadId) {
+    const session = ensureOrchestratorSession(repoPath, threadId);
     return { sessionName: session.sessionName, status: session.status };
   },
   sendTurn(repoPath, message, onEvent, options) {
-    return sendToOrchestrator(ensureOrchestratorSession(repoPath), message, onEvent, options);
+    return sendToOrchestrator(ensureOrchestratorSession(repoPath, options?.threadId), message, onEvent, options);
   },
 };
 
 const codexBackend: OrchestratorBackend = {
   id: 'codex',
   label: 'Codex',
-  peekSession(repoPath) {
-    const session = getCodexOrchestratorSession(repoPath);
+  peekSession(repoPath, _agent, threadId) {
+    const session = getCodexOrchestratorSession(repoPath, threadId);
     return session ? { sessionName: session.sessionName, status: session.status } : null;
   },
-  ensureSession(repoPath) {
-    const session = ensureCodexOrchestratorSession(repoPath);
+  ensureSession(repoPath, _agent, threadId) {
+    const session = ensureCodexOrchestratorSession(repoPath, threadId);
     return { sessionName: session.sessionName, status: session.status };
   },
   sendTurn(repoPath, message, onEvent, options) {
     return sendToCodexOrchestrator(
-      ensureCodexOrchestratorSession(repoPath),
+      ensureCodexOrchestratorSession(repoPath, options?.threadId),
       message,
       onEvent,
       options,
