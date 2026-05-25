@@ -38,7 +38,6 @@ import { getApfsCowCapability } from './apfs';
 import {
   gitCommandErrorMessage,
   shouldClassifyFetchAsOriginMissing,
-  WorktreeOriginMissingError,
 } from './errors';
 
 const execFileAsync = promisify(execFile);
@@ -66,6 +65,8 @@ const NODE_LOCK_FILES = [
   'bun.lock',
 ];
 let lastAutoPruneAt = 0;
+
+export type WorktreeRebaseStrategy = 'ours' | 'theirs';
 
 /**
  * Thrown when a worktree cannot be rebased onto its base branch cleanly.
@@ -606,10 +607,24 @@ export class WorktreeManager {
    *
    * Clean path: logs `[worktree-rebase] <branch> rebased onto origin/<baseBranch>`.
    */
+  async rebaseOntoMain(
+    worktreePath: string,
+    opts: {
+      baseBranch?: string;
+      branchName?: string;
+      strategy?: WorktreeRebaseStrategy;
+    } = {},
+  ): Promise<void> {
+    const baseBranch = opts.baseBranch?.trim() || 'main';
+    const branchName = opts.branchName?.trim() || path.basename(worktreePath);
+    await this.rebaseOntoBase(worktreePath, baseBranch, branchName, opts.strategy);
+  }
+
   private async rebaseOntoBase(
     worktreePath: string,
     baseBranch: string,
     branchName: string,
+    strategy?: WorktreeRebaseStrategy,
   ): Promise<void> {
     // Fetch the latest base ref from origin. Failure is recoverable only if
     // the local base ref is recent — otherwise the agent would branch from a
@@ -662,7 +677,12 @@ export class WorktreeManager {
     }
 
     try {
-      await execFileAsync('git', ['rebase', rebaseTarget], {
+      const rebaseArgs = ['rebase'];
+      if (strategy) {
+        rebaseArgs.push('-X', strategy);
+      }
+      rebaseArgs.push(rebaseTarget);
+      await execFileAsync('git', rebaseArgs, {
         cwd: worktreePath,
         timeout: 60_000,
       });

@@ -1,0 +1,459 @@
+import { execFile } from 'node:child_process';
+import { stat } from 'node:fs/promises';
+import { promisify } from 'node:util';
+
+import type {
+  ApprovalConflictReport,
+  ApprovalGateResult,
+  ApprovalRisk,
+  MergeStrategy,
+} from '@/lib/approvals/types';
+import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
+import { appendEvent, getLane, setLaneStatus, updateLane } from '@/lib/lane/registry';
+import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
+import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
+import { getWorktreeManager } from '@/lib/worktree/launch';
+import {
+  WorktreeFetchUnreachableError,
+  WorktreeRebaseConflictError,
+  type WorktreeRebaseStrategy,
+} from '@/lib/worktree/manager';
+
+const execFileAsync = promisify(execFile);
+
+type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
+
+type CreateLaneActionApproval = (
+  lane: Lane,
+  actor: LaneEventActor,
+  input: {
+    verb: 'merge' | 'create_pr';
+    commitMessage?: string;
+    expectedHeadSha?: string;
+    reviewSummary?: string;
+    title: string;
+    description: string;
+    summary: string;
+    risk: ApprovalRisk;
+    policyRuleId: string;
+    metadata?: Record<string, string>;
+    note: string;
+    gateResult?: ApprovalGateResult;
+    conflictReport?: ApprovalConflictReport;
+    strategy?: MergeStrategy;
+  },
+) => Promise<LaneCommandResult>;
+
+export interface WorktreeSideMergeInput {
+  lane: Lane;
+  command: MergeCommand;
+  actor: LaneEventActor;
+  gateResult: ApprovalGateResult;
+  createLaneActionApproval: CreateLaneActionApproval;
+}
+
+async function git(cwd: string, args: string[], opts: { timeout?: number; maxBuffer?: number } = {}) {
+  return execFileAsync('git', args, {
+    cwd,
+    timeout: opts.timeout ?? 60_000,
+    maxBuffer: opts.maxBuffer ?? 8 * 1024 * 1024,
+  });
+}
+
+function gitErrorMessage(error: unknown): string {
+  const err = error as { stdout?: unknown; stderr?: unknown; message?: unknown };
+  const stderr = typeof err.stderr === 'string' ? err.stderr.trim()
+    : err.stderr instanceof Buffer ? err.stderr.toString('utf8').trim()
+    : '';
+  const stdout = typeof err.stdout === 'string' ? err.stdout.trim()
+    : err.stdout instanceof Buffer ? err.stdout.toString('utf8').trim()
+    : '';
+  const message = typeof err.message === 'string' ? err.message.trim() : String(error);
+  return stderr || stdout || message || 'Git command failed.';
+}
+
+async function worktreeExistsOnDisk(worktreePath: string): Promise<boolean> {
+  try {
+    const dirStat = await stat(worktreePath);
+    if (!dirStat.isDirectory()) return false;
+    const gitStat = await stat(`${worktreePath}/.git`);
+    return gitStat.isFile() || gitStat.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+async function commitDirtyWorktree(worktreePath: string, commitMessage: string): Promise<void> {
+  await git(worktreePath, ['add', '-A']);
+  const { stdout: porcelain } = await git(worktreePath, ['status', '--porcelain'], { timeout: 5000 });
+  if (porcelain.trim()) {
+    await git(worktreePath, ['commit', '-m', commitMessage]);
+  }
+}
+
+async function currentBranch(cwd: string): Promise<string> {
+  const { stdout } = await git(cwd, ['rev-parse', '--abbrev-ref', 'HEAD'], { timeout: 5000 });
+  return stdout.trim();
+}
+
+async function amendViaO8Suffix(worktreePath: string): Promise<void> {
+  try {
+    const { stdout: tipSubject } = await git(worktreePath, ['log', '-1', '--pretty=%s'], { timeout: 5000 });
+    const subject = tipSubject.trim();
+    if (subject && !subject.includes('[via-o8]')) {
+      await git(worktreePath, ['commit', '--amend', '-m', `${subject} [via-o8]`, '--allow-empty']);
+    }
+  } catch {
+    // Best-effort tag for changelog rendering. Never block a valid merge.
+  }
+}
+
+function mergeRefForLane(laneId: string): string {
+  return `refs/o8/merge/${laneId.replace(/[^A-Za-z0-9._-]/g, '-')}`;
+}
+
+async function deleteRefBestEffort(repoPath: string, ref: string): Promise<void> {
+  try {
+    await git(repoPath, ['update-ref', '-d', ref], { timeout: 5000 });
+  } catch {
+    // Temporary integration refs are best-effort cleanup only.
+  }
+}
+
+async function pushWorkerBranchBestEffort(worktreePath: string, actualBranch: string): Promise<void> {
+  try {
+    await git(worktreePath, ['push', '-u', 'origin', actualBranch], { timeout: 60_000 });
+    console.log(`[lane-merge] Pushed worker branch ${actualBranch} to origin before fast-forward.`);
+  } catch (error) {
+    console.warn(
+      `[lane-merge] Worker branch push skipped for ${actualBranch}: ${gitErrorMessage(error)}`,
+    );
+  }
+}
+
+async function fetchWorkerHeadIntoMainRepo(
+  repoPath: string,
+  worktreePath: string,
+  actualBranch: string,
+  integrationRef: string,
+): Promise<void> {
+  await git(repoPath, ['fetch', worktreePath, `+${actualBranch}:${integrationRef}`], { timeout: 60_000 });
+}
+
+async function refExists(cwd: string, ref: string): Promise<boolean> {
+  try {
+    await git(cwd, ['rev-parse', '--verify', ref], { timeout: 5000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function isAncestor(cwd: string, ancestor: string, descendant: string): Promise<boolean> {
+  try {
+    await git(cwd, ['merge-base', '--is-ancestor', ancestor, descendant], { timeout: 10_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function refreshOriginBaseBestEffort(repoPath: string, baseBranch: string): Promise<string | null> {
+  try {
+    await git(repoPath, ['fetch', 'origin', baseBranch, '--quiet'], { timeout: 60_000 });
+  } catch (error) {
+    console.warn(`[lane-merge] Could not refresh origin/${baseBranch} before fast-forward: ${gitErrorMessage(error)}`);
+  }
+
+  const originRef = `origin/${baseBranch}`;
+  return await refExists(repoPath, originRef) ? originRef : null;
+}
+
+async function syncWorktreeBaseForCleanup(
+  repoPath: string,
+  worktreePath: string,
+  baseBranch: string,
+): Promise<void> {
+  try {
+    await git(worktreePath, ['fetch', repoPath, `${baseBranch}:${baseBranch}`], { timeout: 30_000 });
+  } catch (error) {
+    console.warn(
+      `[lane-merge] Could not sync ${baseBranch} back into worktree before cleanup: ${gitErrorMessage(error)}`,
+    );
+  }
+}
+
+async function enqueueDecompositions(repoPath: string, runtime: Lane['runtime']): Promise<string> {
+  try {
+    const { enqueueDecompositionsAfterMerge } = await import('@/lib/dispatch/decomposition-pipeline');
+    const decomposition = await enqueueDecompositionsAfterMerge({ repoPath, runtime });
+    if (decomposition.enqueued === 0) {
+      return '';
+    }
+    const names = decomposition.candidates
+      .map((candidate) => candidate.relativePath)
+      .join(', ');
+    return ` Enqueued ${decomposition.enqueued} decomposition dispatch${decomposition.enqueued === 1 ? '' : 'es'} for over-ceiling file${decomposition.enqueued === 1 ? '' : 's'}: ${names}.`;
+  } catch (error) {
+    console.warn(
+      `[lane-merge] Decomposition scan failed for ${repoPath}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+    return '';
+  }
+}
+
+function classifyFastForwardFailure(message: string): 'dirty-working-tree' | 'non-fast-forward' | 'invalid-ref' | 'merge-failed' {
+  const lower = message.toLowerCase();
+  if (lower.includes('would be overwritten') || lower.includes('local changes')) return 'dirty-working-tree';
+  if (lower.includes('not possible to fast-forward') || lower.includes('not something we can merge')) return 'non-fast-forward';
+  if (lower.includes('not a valid object name') || lower.includes('unknown revision') || lower.includes('invalid')) return 'invalid-ref';
+  return 'merge-failed';
+}
+
+async function createRebaseConflictApproval(
+  input: WorktreeSideMergeInput,
+  error: WorktreeRebaseConflictError,
+): Promise<LaneCommandResult> {
+  const { lane, command, actor, gateResult, createLaneActionApproval } = input;
+  const files = error.conflictFiles;
+  const conflictList = files.length > 0
+    ? `\n\nConflicting files:\n${files.map((file) => `- ${file}`).join('\n')}`
+    : '';
+  return createLaneActionApproval(lane, actor, {
+    verb: 'merge',
+    commitMessage: command.commitMessage,
+    expectedHeadSha: command.expectedHeadSha,
+    reviewSummary: command.reviewSummary,
+    title: `Rebase conflict: ${lane.label}`,
+    description: `Worktree-side rebase failed before main was touched: ${error.message}${conflictList}\n\nResolve the rebase in ${error.worktreePath}, or choose a conflict strategy and retry. o8 will not fall back to merging this packet into the operator checkout.`,
+    summary: `Rebase conflict on ${lane.branch} → ${lane.baseBranch}. ${files.length} file${files.length === 1 ? '' : 's'} conflicting.`,
+    risk: 'high',
+    policyRuleId: 'rebase_conflict_escalation',
+    metadata: {
+      ConflictFiles: files.join(', ') || 'unknown',
+      FailureCategory: 'rebase-conflict',
+    },
+    note: `Rebase conflict escalated to operator. ${files.length} conflicting file${files.length === 1 ? '' : 's'}.`,
+    gateResult: { passed: gateResult.passed, violations: gateResult.violations },
+    conflictReport: {
+      files,
+      mergeError: error.message,
+    },
+  });
+}
+
+async function createFastForwardFailureApproval(
+  input: WorktreeSideMergeInput,
+  error: unknown,
+): Promise<LaneCommandResult> {
+  const { lane, command, actor, gateResult, createLaneActionApproval } = input;
+  const message = gitErrorMessage(error);
+  const failureCategory = classifyFastForwardFailure(message);
+  const title = failureCategory === 'dirty-working-tree'
+    ? `Fast-forward blocked: ${lane.label} (main has uncommitted changes)`
+    : failureCategory === 'non-fast-forward'
+      ? `Fast-forward blocked: ${lane.label} (base moved)`
+      : failureCategory === 'invalid-ref'
+        ? `Fast-forward blocked: ${lane.label} (invalid integration ref)`
+        : `Fast-forward failed: ${lane.label}`;
+  const summary = failureCategory === 'dirty-working-tree'
+    ? `Cannot fast-forward ${lane.baseBranch}: operator working-tree changes would be overwritten.`
+    : failureCategory === 'non-fast-forward'
+      ? `Cannot fast-forward ${lane.baseBranch}: the rebased packet head is no longer ahead of the current base.`
+      : `Fast-forward of ${lane.branch} → ${lane.baseBranch} failed: ${message}`;
+
+  return createLaneActionApproval(lane, actor, {
+    verb: 'merge',
+    commitMessage: command.commitMessage,
+    expectedHeadSha: command.expectedHeadSha,
+    reviewSummary: command.reviewSummary,
+    title,
+    description: `The packet rebased cleanly in its worktree, but the final fast-forward in ${lane.repoPath} failed: ${message}\n\no8 did not stash, checkout, or run a fallback merge in the operator checkout.`,
+    summary,
+    risk: 'high',
+    policyRuleId: 'fast_forward_failure_escalation',
+    metadata: {
+      ConflictFiles: 'n/a',
+      FailureCategory: failureCategory,
+    },
+    note: `Fast-forward escalated to operator (${failureCategory}): ${message}`,
+    gateResult: { passed: gateResult.passed, violations: gateResult.violations },
+    conflictReport: {
+      files: [],
+      mergeError: message,
+    },
+  });
+}
+
+export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
+  const { lane, command, actor } = input;
+  const worktreePath = lane.worktreePath;
+  if (!worktreePath) {
+    return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
+  }
+
+  try {
+    if (!(await worktreeExistsOnDisk(worktreePath))) {
+      setLaneStatus(command.laneId, 'reviewing', 'system', 'worktree_not_found');
+      return {
+        ok: false,
+        laneId: command.laneId,
+        note: `Worktree not found on disk: ${worktreePath}`,
+      };
+    }
+
+    const mgr = getWorktreeManager(lane.repoPath);
+    const worktreeId = worktreePath.split('/').filter(Boolean).pop()!;
+
+    const headLock = await checkExpectedHeadSha(worktreePath, command.expectedHeadSha);
+    if (!headLock.ok) {
+      setLaneStatus(command.laneId, 'reviewing', 'system', 'head_sha_drift');
+      appendEvent(command.laneId, 'merge_head_drift', actor, {
+        expectedHeadSha: headLock.expectedHeadSha,
+        currentHeadSha: headLock.currentHeadSha,
+        branch: lane.branch,
+        baseBranch: lane.baseBranch,
+        packetId: lane.packetId,
+      });
+      return {
+        ok: false,
+        laneId: command.laneId,
+        note: formatHeadShaMismatchNote(headLock),
+        expectedHeadSha: headLock.expectedHeadSha,
+        currentHeadSha: headLock.currentHeadSha,
+      };
+    }
+
+    if (command.commitMessage) {
+      try {
+        await commitDirtyWorktree(worktreePath, command.commitMessage);
+      } catch {
+        // Preserve historical merge behavior: a clean tree or failed empty commit
+        // attempt should not block the merge path.
+      }
+    }
+
+    const actualBranch = await currentBranch(worktreePath);
+    if (!actualBranch || actualBranch === 'HEAD') {
+      return { ok: false, laneId: command.laneId, note: 'Cannot merge detached worktree HEAD.' };
+    }
+    console.log(`[lane-merge] Actual worktree branch: ${actualBranch} (lane.branch: ${lane.branch})`);
+
+    if (command.strategy === 'manual') {
+      setLaneStatus(command.laneId, 'awaiting_input', actor, 'manual_resolution');
+      return {
+        ok: false,
+        laneId: command.laneId,
+        note: `Lane parked for manual rebase resolution in ${worktreePath}. Resolve the rebase, then retry merge.`,
+      };
+    }
+
+    const rebaseStrategy: WorktreeRebaseStrategy | undefined = command.strategy === 'ours' || command.strategy === 'theirs'
+      ? command.strategy
+      : undefined;
+    try {
+      await mgr.rebaseOntoMain(worktreePath, {
+        baseBranch: lane.baseBranch,
+        branchName: actualBranch,
+        strategy: rebaseStrategy,
+      });
+      console.log(`[lane-merge] Rebased ${actualBranch} onto latest ${lane.baseBranch} in worktree`);
+    } catch (error) {
+      if (error instanceof WorktreeRebaseConflictError) {
+        return createRebaseConflictApproval(input, error);
+      }
+      if (error instanceof WorktreeFetchUnreachableError) {
+        setLaneStatus(command.laneId, 'reviewing', 'system', 'fetch_unreachable');
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `Cannot refresh ${lane.baseBranch} before rebase: ${error.message}`,
+        };
+      }
+      throw error;
+    }
+
+    const typecheck = await runLaneRebaseTypecheck({
+      cwd: worktreePath,
+      actualBranch,
+      logPrefix: 'lane-merge',
+    });
+    if (!typecheck.ok) {
+      setLaneStatus(command.laneId, 'reviewing', 'system', 'typecheck_failed');
+      return {
+        ok: false,
+        laneId: command.laneId,
+        note: `Typecheck failed after rebase onto ${lane.baseBranch}. Fix type errors before merging.\n\n${typecheck.output}`,
+      };
+    }
+
+    await amendViaO8Suffix(worktreePath);
+    await pushWorkerBranchBestEffort(worktreePath, actualBranch);
+
+    const integrationRef = mergeRefForLane(command.laneId);
+    try {
+      await fetchWorkerHeadIntoMainRepo(lane.repoPath, worktreePath, actualBranch, integrationRef);
+      const originBaseRef = await refreshOriginBaseBestEffort(lane.repoPath, lane.baseBranch);
+      if (originBaseRef && !(await isAncestor(lane.repoPath, originBaseRef, integrationRef))) {
+        setLaneStatus(command.laneId, 'reviewing', 'system', 'base_advanced_after_rebase');
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `${originBaseRef} advanced after the worktree rebase. Retry merge so ${actualBranch} rebases onto the newest ${lane.baseBranch}.`,
+        };
+      }
+
+      const mainCheckoutBranch = await currentBranch(lane.repoPath);
+      if (mainCheckoutBranch !== lane.baseBranch) {
+        setLaneStatus(command.laneId, 'reviewing', 'system', 'base_checkout_mismatch');
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `Fast-forward requires ${lane.repoPath} to be on ${lane.baseBranch}; current branch is ${mainCheckoutBranch}.`,
+        };
+      }
+
+      try {
+        await git(lane.repoPath, ['merge', '--ff-only', integrationRef], { timeout: 60_000 });
+      } catch (error) {
+        return createFastForwardFailureApproval(input, error);
+      }
+    } finally {
+      await deleteRefBestEffort(lane.repoPath, integrationRef);
+    }
+
+    let pushedToOrigin = false;
+    let pushError: string | undefined;
+    try {
+      await git(lane.repoPath, ['push', 'origin', lane.baseBranch], { timeout: 60_000 });
+      pushedToOrigin = true;
+      console.log(`[lane-merge] Pushed ${lane.baseBranch} to origin after fast-forwarding ${actualBranch}`);
+    } catch (error) {
+      pushError = gitErrorMessage(error);
+      console.warn(`[lane-merge] Push to origin failed for ${lane.baseBranch} after fast-forwarding ${actualBranch}: ${pushError}`);
+    }
+
+    await syncWorktreeBaseForCleanup(lane.repoPath, worktreePath, lane.baseBranch);
+    await mgr.cleanup(worktreeId, { force: true, deleteBranch: true });
+    void mgr.prune().catch(() => {});
+    updateLane(command.laneId, { worktreePath: null }, 'system');
+    setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
+
+    const decompositionNote = await enqueueDecompositions(lane.repoPath, lane.runtime);
+    const updated = getLane(command.laneId);
+    const mergeNote = pushedToOrigin
+      ? `Rebased ${lane.branch} onto ${lane.baseBranch}, fast-forwarded ${lane.baseBranch}, and pushed to origin.${decompositionNote}`
+      : `Rebased ${lane.branch} onto ${lane.baseBranch} and fast-forwarded ${lane.baseBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${decompositionNote}`;
+    return {
+      ok: true,
+      laneId: command.laneId,
+      note: mergeNote,
+      lane: updated ?? undefined,
+      pushedToOrigin,
+      pushError,
+    };
+  } catch (error) {
+    setLaneStatus(command.laneId, 'reviewing', 'system', 'merge_error');
+    return { ok: false, laneId: command.laneId, note: gitErrorMessage(error) };
+  }
+}
