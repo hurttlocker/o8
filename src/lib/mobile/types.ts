@@ -344,6 +344,10 @@ export interface MobileActivityEvent {
   title: string;
   /** Secondary line, e.g. `"main · 9393504"` or `"agent/x → main"`. */
   detail?: string;
+  /** Optional URL the mobile app can open to inspect/test this work. */
+  previewUrl?: string;
+  /** Optional review/operator comments displayed in mobile activity details. */
+  comments?: string[];
   /** Short repo name, e.g. `"cortex-ide"`. */
   repo?: string;
   /** Event time as epoch milliseconds. */
