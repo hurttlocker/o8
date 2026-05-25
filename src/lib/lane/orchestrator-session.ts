@@ -28,6 +28,10 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
 import {
+  readOrchestratorBackendSessionId,
+  writeOrchestratorBackendSessionId,
+} from '@/lib/mobile/orchestrator-thread-history';
+import {
   createToolCallTracker,
   processStreamEvent,
   type OrchestratorEvent,
@@ -41,6 +45,8 @@ import { getMcpServersConfig } from './orchestrator-mcp-config';
 export interface OrchestratorSession {
   sessionName: string;
   repoPath: string;
+  /** UI/history thread id (thoughts-*), when this session belongs to a persisted chat. */
+  threadId: string | null;
   /** Claude Code session ID for --resume continuity */
   claudeSessionId: string | null;
   status: 'ready' | 'busy' | 'dead';
@@ -90,21 +96,35 @@ function ensureOrchestratorStateDir(): void {
   }
 }
 
-function orchestratorResetSignalPath(repoPath: string): string {
-  return join(ORCHESTRATOR_STATE_DIR, `session-reset-${repoHash(normalizeRepoPath(repoPath))}.json`);
+function normalizeThreadId(threadId?: string | null): string | null {
+  const trimmed = threadId?.trim() ?? '';
+  return trimmed.startsWith('thoughts-') ? trimmed : null;
 }
 
-function writeOrchestratorResetSignal(repoPath: string): void {
+function threadKey(threadId?: string | null): string | null {
+  const normalized = normalizeThreadId(threadId);
+  return normalized ? normalized.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) : null;
+}
+
+function orchestratorResetSignalPath(repoPath: string, threadId?: string | null): string {
+  const threadSuffix = threadKey(threadId);
+  return join(
+    ORCHESTRATOR_STATE_DIR,
+    `session-reset-${repoHash(normalizeRepoPath(repoPath))}${threadSuffix ? `-${threadSuffix}` : ''}.json`,
+  );
+}
+
+function writeOrchestratorResetSignal(repoPath: string, threadId?: string | null): void {
   ensureOrchestratorStateDir();
   writeFileSync(
-    orchestratorResetSignalPath(repoPath),
-    `${JSON.stringify({ repoPath: normalizeRepoPath(repoPath), requestedAt: Date.now() })}\n`,
+    orchestratorResetSignalPath(repoPath, threadId),
+    `${JSON.stringify({ repoPath: normalizeRepoPath(repoPath), threadId: normalizeThreadId(threadId), requestedAt: Date.now() })}\n`,
     'utf8',
   );
 }
 
-function consumeOrchestratorResetSignal(repoPath: string): boolean {
-  const signalPath = orchestratorResetSignalPath(repoPath);
+function consumeOrchestratorResetSignal(repoPath: string, threadId?: string | null): boolean {
+  const signalPath = orchestratorResetSignalPath(repoPath, threadId);
   if (!existsSync(signalPath)) {
     return false;
   }
@@ -144,6 +164,7 @@ function buildRehydratedSession(repoPath: string, claudeSessionId: string, creat
   return {
     sessionName: orchestratorSessionName(repoPath),
     repoPath,
+    threadId: null,
     claudeSessionId,
     status: 'ready',
     proc: null,
@@ -329,29 +350,34 @@ function repoHash(repoPath: string): string {
   return createHash('sha256').update(repoPath).digest('hex').slice(0, 8);
 }
 
-export function orchestratorSessionName(repoPath: string): string {
-  return `cortex-orchestrator-${repoHash(normalizeRepoPath(repoPath))}`;
+export function orchestratorSessionName(repoPath: string, threadId?: string | null): string {
+  const threadSuffix = threadKey(threadId);
+  return `cortex-orchestrator-${repoHash(normalizeRepoPath(repoPath))}${threadSuffix ? `-${threadSuffix}` : ''}`;
 }
 
-export function getOrchestratorSession(repoPath: string): OrchestratorSession | null {
+export function getOrchestratorSession(repoPath: string, threadId?: string | null): OrchestratorSession | null {
   void rehydrateOrchestratorSessions().catch(() => {
     // Startup rehydration is best-effort; callers can still create a fresh session.
   });
-  return sessions.get(orchestratorSessionName(repoPath)) ?? null;
+  return sessions.get(orchestratorSessionName(repoPath, threadId)) ?? null;
 }
 
-export function requestOrchestratorSessionReset(repoPath: string): { repoPath: string; sessionName: string } {
+export function requestOrchestratorSessionReset(repoPath: string, threadId?: string | null): { repoPath: string; sessionName: string; threadId: string | null } {
   const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const sessionName = orchestratorSessionName(normalizedRepoPath);
+  const normalizedThreadId = normalizeThreadId(threadId);
+  const sessionName = orchestratorSessionName(normalizedRepoPath, normalizedThreadId);
 
-  writeOrchestratorResetSignal(normalizedRepoPath);
+  writeOrchestratorResetSignal(normalizedRepoPath, normalizedThreadId);
 
   const session = sessions.get(sessionName);
   if (session) {
     session.claudeSessionId = null;
   }
+  if (normalizedThreadId) {
+    writeOrchestratorBackendSessionId(normalizedThreadId, 'claude', null);
+  }
 
-  return { repoPath: normalizedRepoPath, sessionName };
+  return { repoPath: normalizedRepoPath, sessionName, threadId: normalizedThreadId };
 }
 
 /**
@@ -365,30 +391,34 @@ export function requestOrchestratorSessionReset(repoPath: string): { repoPath: s
  * Callers are expected to also broadcast a `notice` event to WS subscribers
  * so the UI can show a reload banner (see ws-server `/internal/orchestrator-reload`).
  */
-export function reloadOrchestratorSession(repoPath: string): {
+export function reloadOrchestratorSession(repoPath: string, threadId?: string | null): {
   repoPath: string;
   sessionName: string;
+  threadId: string | null;
   claudeSessionId: string | null;
 } {
   const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const sessionName = orchestratorSessionName(normalizedRepoPath);
+  const normalizedThreadId = normalizeThreadId(threadId);
+  const sessionName = orchestratorSessionName(normalizedRepoPath, normalizedThreadId);
   const session = sessions.get(sessionName);
   return {
     repoPath: normalizedRepoPath,
     sessionName,
+    threadId: normalizedThreadId,
     claudeSessionId: session?.claudeSessionId ?? null,
   };
 }
 
 // ── Ensure session exists ──
 
-export function ensureOrchestratorSession(repoPath: string): OrchestratorSession {
+export function ensureOrchestratorSession(repoPath: string, threadId?: string | null): OrchestratorSession {
   void rehydrateOrchestratorSessions().catch(() => {
     // Startup rehydration is best-effort; callers can still create a fresh session.
   });
 
   const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const sessionName = orchestratorSessionName(normalizedRepoPath);
+  const normalizedThreadId = normalizeThreadId(threadId);
+  const sessionName = orchestratorSessionName(normalizedRepoPath, normalizedThreadId);
   const existing = sessions.get(sessionName);
 
   if (existing && existing.status !== 'dead') {
@@ -398,13 +428,14 @@ export function ensureOrchestratorSession(repoPath: string): OrchestratorSession
   const session: OrchestratorSession = {
     sessionName,
     repoPath: normalizedRepoPath,
-    claudeSessionId: null,
+    threadId: normalizedThreadId,
+    claudeSessionId: readOrchestratorBackendSessionId(normalizedThreadId, 'claude'),
     status: 'ready',
     proc: null,
     createdAt: Date.now(),
   };
   sessions.set(sessionName, session);
-  console.log(`[orchestrator-session] Created ${sessionName} for ${normalizedRepoPath}`);
+  console.log(`[orchestrator-session] Created ${sessionName} for ${normalizedRepoPath}${normalizedThreadId ? ` (${normalizedThreadId})` : ''}`);
   return session;
 }
 
@@ -464,7 +495,7 @@ export async function sendToOrchestrator(
     throw new Error('Orchestrator session is busy');
   }
 
-  if (consumeOrchestratorResetSignal(session.repoPath)) {
+  if (consumeOrchestratorResetSignal(session.repoPath, session.threadId)) {
     session.claudeSessionId = null;
   }
 

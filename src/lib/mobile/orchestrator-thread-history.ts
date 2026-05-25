@@ -34,6 +34,8 @@ type OrchestratorHistoryRecord = {
   orchestratorVisible?: boolean;
   mobileCreatedAt?: string | null;
   mobileRevealRequestedAt?: string | null;
+  orchestratorSessionIds?: Record<string, string | null>;
+  orchestratorSessionUpdatedAt?: string | null;
 };
 
 function ensureHistoryDir() {
@@ -56,6 +58,22 @@ function readHistoryRecord(tabId: string): OrchestratorHistoryRecord | null {
 function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
   ensureHistoryDir();
   writeFileSync(safeOrchestratorHistoryPath(tabId), JSON.stringify(record));
+}
+
+function normalizeSessionIds(value: unknown): Record<string, string | null> {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
+  const normalized: Record<string, string | null> = {};
+  for (const [key, rawSessionId] of Object.entries(value as Record<string, unknown>)) {
+    if (!key) continue;
+    if (rawSessionId === null) {
+      normalized[key] = null;
+      continue;
+    }
+    if (typeof rawSessionId !== 'string') continue;
+    const sessionId = rawSessionId.trim();
+    if (sessionId) normalized[key] = sessionId;
+  }
+  return normalized;
 }
 
 function normalizeBackend(value: unknown): MobileOrchestratorBackend | null {
@@ -205,10 +223,58 @@ export function createMobileOrchestratorThread(input: {
     orchestratorVisible: true,
     mobileCreatedAt: now,
     mobileRevealRequestedAt: input.reveal === false ? null : now,
+    orchestratorSessionIds: {},
+    orchestratorSessionUpdatedAt: null,
   };
 
   writeHistoryRecord(tabId, record);
   return projectThread(tabId, record, now);
+}
+
+export function readOrchestratorBackendSessionId(
+  tabId: string | null | undefined,
+  backend: 'claude' | 'codex',
+): string | null {
+  if (!tabId?.startsWith('thoughts-')) return null;
+  const record = readHistoryRecord(tabId);
+  if (!record) return null;
+  const sessionIds = normalizeSessionIds(record.orchestratorSessionIds);
+  const sessionId = sessionIds[backend];
+  return typeof sessionId === 'string' && sessionId.trim() ? sessionId.trim() : null;
+}
+
+export function writeOrchestratorBackendSessionId(
+  tabId: string | null | undefined,
+  backend: 'claude' | 'codex',
+  sessionId: string | null,
+): void {
+  if (!tabId?.startsWith('thoughts-')) return;
+  const now = new Date().toISOString();
+  const existing = readHistoryRecord(tabId) ?? { messages: [], savedAt: now };
+  const nextSessionIds = normalizeSessionIds(existing.orchestratorSessionIds);
+  if (sessionId?.trim()) {
+    nextSessionIds[backend] = sessionId.trim();
+  } else {
+    delete nextSessionIds[backend];
+  }
+  writeHistoryRecord(tabId, {
+    ...existing,
+    messages: Array.isArray(existing.messages) ? existing.messages : [],
+    savedAt: existing.savedAt ?? now,
+    orchestratorSessionIds: nextSessionIds,
+    orchestratorSessionUpdatedAt: now,
+  });
+}
+
+export function clearOrchestratorBackendSessionIds(tabId: string | null | undefined): void {
+  if (!tabId?.startsWith('thoughts-')) return;
+  const existing = readHistoryRecord(tabId);
+  if (!existing) return;
+  writeHistoryRecord(tabId, {
+    ...existing,
+    orchestratorSessionIds: {},
+    orchestratorSessionUpdatedAt: new Date().toISOString(),
+  });
 }
 
 export function requestMobileOrchestratorReveal(tabId: string): OrchestratorThreadRevealRequest | null {

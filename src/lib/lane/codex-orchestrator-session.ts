@@ -18,12 +18,18 @@ import type { OrchestratorEvent } from './orchestrator-stream-events';
 import { getMcpServersConfig } from './orchestrator-mcp-config';
 import type { OrchestratorMcpServersConfig } from './orchestrator-mcp-config';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import {
+  readOrchestratorBackendSessionId,
+  writeOrchestratorBackendSessionId,
+} from '@/lib/mobile/orchestrator-thread-history';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
 export interface CodexOrchestratorSession {
   sessionName: string;
   repoPath: string;
+  /** UI/history thread id (thoughts-*), when this session belongs to a persisted chat. */
+  historyThreadId: string | null;
   /** Codex thread id captured from the `thread.started` event for `exec resume`. */
   threadId: string | null;
   status: 'ready' | 'busy' | 'dead';
@@ -70,6 +76,16 @@ function normalizeRepoPath(repoPath: string): string {
 
 function repoHash(repoPath: string): string {
   return createHash('sha256').update(repoPath).digest('hex').slice(0, 8);
+}
+
+function normalizeHistoryThreadId(threadId?: string | null): string | null {
+  const trimmed = threadId?.trim() ?? '';
+  return trimmed.startsWith('thoughts-') ? trimmed : null;
+}
+
+function historyThreadKey(threadId?: string | null): string | null {
+  const normalized = normalizeHistoryThreadId(threadId);
+  return normalized ? normalized.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) : null;
 }
 
 function tomlKey(key: string): string {
@@ -202,17 +218,19 @@ export function ensureCodexHome(repoPath: string): string {
   return codexHome;
 }
 
-export function codexOrchestratorSessionName(repoPath: string): string {
-  return `cortex-codex-orchestrator-${repoHash(normalizeRepoPath(repoPath))}`;
+export function codexOrchestratorSessionName(repoPath: string, threadId?: string | null): string {
+  const threadSuffix = historyThreadKey(threadId);
+  return `cortex-codex-orchestrator-${repoHash(normalizeRepoPath(repoPath))}${threadSuffix ? `-${threadSuffix}` : ''}`;
 }
 
-export function getCodexOrchestratorSession(repoPath: string): CodexOrchestratorSession | null {
-  return sessions.get(codexOrchestratorSessionName(repoPath)) ?? null;
+export function getCodexOrchestratorSession(repoPath: string, threadId?: string | null): CodexOrchestratorSession | null {
+  return sessions.get(codexOrchestratorSessionName(repoPath, threadId)) ?? null;
 }
 
-export function ensureCodexOrchestratorSession(repoPath: string): CodexOrchestratorSession {
+export function ensureCodexOrchestratorSession(repoPath: string, threadId?: string | null): CodexOrchestratorSession {
   const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const sessionName = codexOrchestratorSessionName(normalizedRepoPath);
+  const normalizedThreadId = normalizeHistoryThreadId(threadId);
+  const sessionName = codexOrchestratorSessionName(normalizedRepoPath, normalizedThreadId);
   const existing = sessions.get(sessionName);
 
   if (existing && existing.status !== 'dead') {
@@ -222,13 +240,14 @@ export function ensureCodexOrchestratorSession(repoPath: string): CodexOrchestra
   const session: CodexOrchestratorSession = {
     sessionName,
     repoPath: normalizedRepoPath,
-    threadId: null,
+    historyThreadId: normalizedThreadId,
+    threadId: readOrchestratorBackendSessionId(normalizedThreadId, 'codex'),
     status: 'ready',
     proc: null,
     createdAt: Date.now(),
   };
   sessions.set(sessionName, session);
-  console.log(`[codex-orchestrator-session] Created ${sessionName} for ${normalizedRepoPath}`);
+  console.log(`[codex-orchestrator-session] Created ${sessionName} for ${normalizedRepoPath}${normalizedThreadId ? ` (${normalizedThreadId})` : ''}`);
   return session;
 }
 
@@ -635,15 +654,20 @@ export async function sendToCodexOrchestrator(
  * start a fresh codex thread instead of resuming. Used by the conversational
  * reload paths so a new MCP registration takes effect immediately.
  */
-export function requestCodexOrchestratorSessionReset(repoPath: string): {
+export function requestCodexOrchestratorSessionReset(repoPath: string, threadId?: string | null): {
   repoPath: string;
   sessionName: string;
+  threadId: string | null;
 } {
   const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const sessionName = codexOrchestratorSessionName(normalizedRepoPath);
+  const normalizedThreadId = normalizeHistoryThreadId(threadId);
+  const sessionName = codexOrchestratorSessionName(normalizedRepoPath, normalizedThreadId);
   const session = sessions.get(sessionName);
   if (session) {
     session.threadId = null;
   }
-  return { repoPath: normalizedRepoPath, sessionName };
+  if (normalizedThreadId) {
+    writeOrchestratorBackendSessionId(normalizedThreadId, 'codex', null);
+  }
+  return { repoPath: normalizedRepoPath, sessionName, threadId: normalizedThreadId };
 }
