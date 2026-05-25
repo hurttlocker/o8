@@ -44,7 +44,7 @@ export const ThoughtsHistoryPanel = forwardRef<ThoughtsHistoryPanelHandle, {
     const id = ++fetchRef.current;
     setLoading(true);
     try {
-      const res = await fetch('/api/v2/chat-history/list');
+      const res = await fetch('/api/v2/chat-history/list?include=orchestrator');
       if (!res.ok || id !== fetchRef.current) return;
       const data = await res.json() as { conversations?: ThoughtsHistoryEntry[] };
       const thoughts = (data.conversations ?? []).filter(

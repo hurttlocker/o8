@@ -65,6 +65,42 @@ function normalizeSessionIds(value: unknown): Record<string, string | null> | un
   return Object.keys(normalized).length > 0 ? normalized : undefined;
 }
 
+function normalizeModel(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed.slice(0, 128) : undefined;
+}
+
+function isThoughtsThread(tabId: unknown): tabId is string {
+  return typeof tabId === 'string' && tabId.startsWith('thoughts-');
+}
+
+function inferBackendFromModel(model: string | undefined): 'codex' | 'claude' | 'openclaw' | undefined {
+  const normalized = model?.toLowerCase();
+  if (!normalized) return undefined;
+  if (normalized.includes('openclaw')) return 'openclaw';
+  if (normalized.includes('claude')) return 'claude';
+  if (normalized.includes('codex') || normalized.startsWith('gpt')) return 'codex';
+  return undefined;
+}
+
+function inferBackendFromSessionIds(
+  sessionIds: Record<string, string | null> | undefined,
+): 'codex' | 'claude' | undefined {
+  if (sessionIds?.claude) return 'claude';
+  if (sessionIds?.codex) return 'codex';
+  return undefined;
+}
+
+function defaultModelForBackend(
+  backend: 'codex' | 'claude' | 'openclaw' | undefined | null,
+): string | undefined {
+  if (backend === 'claude') return 'claude-code';
+  if (backend === 'codex') return 'codex';
+  if (backend === 'openclaw') return 'openclaw';
+  return undefined;
+}
+
 export async function GET(request: NextRequest) {
   const tabId = request.nextUrl.searchParams.get('tabId');
   if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
@@ -136,10 +172,12 @@ export async function POST(request: NextRequest) {
   let mobileRevealRequestedAt: string | null | undefined;
   let orchestratorSessionIds: Record<string, string | null> | undefined;
   let orchestratorSessionUpdatedAt: string | null | undefined;
+  let model: string | undefined;
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
     starred = existing.starred || false;
     pinned = existing.pinned === true;
+    model = normalizeModel(existing.model);
     title = existing.title;
     planText = normalizePlanText(existing.planText);
     repoName = existing.repoName;
@@ -158,10 +196,22 @@ export async function POST(request: NextRequest) {
   const nextArchivedAt = body.archivedAt !== undefined
     ? normalizeNullableDate(body.archivedAt) ?? null
     : archivedAt ?? null;
+  const nextSessionIds = normalizeSessionIds(body.orchestratorSessionIds) ?? orchestratorSessionIds ?? {};
+  const explicitBackend = normalizeBackend(body.backend);
+  const nextBackend = explicitBackend
+    ?? backend
+    ?? inferBackendFromSessionIds(nextSessionIds)
+    ?? inferBackendFromModel(normalizeModel(body.model) ?? model)
+    ?? (isThoughtsThread(body.tabId) ? 'claude' : undefined)
+    ?? null;
+  const nextModel = normalizeModel(body.model)
+    ?? model
+    ?? defaultModelForBackend(nextBackend)
+    ?? (isThoughtsThread(body.tabId) && nextBackend !== 'openclaw' ? 'claude-code' : undefined);
 
   writeFileSync(filePath, JSON.stringify({
     messages,
-    model: body.model,
+    model: nextModel,
     savedAt: new Date().toISOString(),
     starred: body.starred ?? starred,
     pinned: body.pinned ?? pinned,
@@ -171,13 +221,13 @@ export async function POST(request: NextRequest) {
     repoPath: body.repoPath ?? repoPath,
     repoBranch: body.repoBranch ?? repoBranch,
     remoteUrl: body.remoteUrl ?? remoteUrl ?? null,
-    backend: normalizeBackend(body.backend) ?? backend ?? null,
+    backend: nextBackend,
     agent: normalizeAgent(body.agent) ?? agent ?? null,
     archivedAt: nextArchivedAt,
     orchestratorVisible,
     mobileCreatedAt,
     mobileRevealRequestedAt,
-    orchestratorSessionIds: normalizeSessionIds(body.orchestratorSessionIds) ?? orchestratorSessionIds ?? {},
+    orchestratorSessionIds: nextSessionIds,
     orchestratorSessionUpdatedAt: normalizeNullableDate(body.orchestratorSessionUpdatedAt) ?? orchestratorSessionUpdatedAt ?? null,
   }));
 
