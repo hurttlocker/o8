@@ -1,6 +1,5 @@
 import { getOrCreateWsToken } from '@/lib/ws-auth';
-
-const WS_PORT = Number(process.env.WS_PORT ?? 3002);
+import { resolvePortInfo } from '@/lib/panel/api-port';
 
 interface SpawnBridgeTerminalRequest {
   sessionName: string;
@@ -19,7 +18,8 @@ interface SpawnBridgeTerminalResponse {
 }
 
 function bridgeUrl(path: string) {
-  return `http://127.0.0.1:${WS_PORT}${path}`;
+  const { wsPort } = resolvePortInfo();
+  return `http://127.0.0.1:${wsPort}${path}`;
 }
 
 export async function spawnBridgeTerminalSession(payload: SpawnBridgeTerminalRequest) {

@@ -42,7 +42,7 @@
 
 import { readFileSync, watch, existsSync } from 'node:fs';
 import { basename, join, resolve } from 'node:path';
-import { execSync, execFile } from 'node:child_process';
+import { execSync, execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { homedir } from 'node:os';
@@ -976,6 +976,22 @@ function resolveTmuxBinary() {
     }).trim() || 'tmux';
   } catch {
     return 'tmux';
+  }
+}
+
+function tmuxSessionExists(sessionName: string) {
+  const target = sessionName.trim();
+  if (!target) return false;
+
+  try {
+    execFileSync(resolveTmuxBinary(), ['has-session', '-t', target], {
+      timeout: 2000,
+      stdio: 'ignore',
+      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+    });
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -3069,8 +3085,17 @@ function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM
 
   // 2. Try killing tmux session directly (if PTY already detached but tmux lives)
   try {
-    execSync(`tmux has-session -t ${sessionName} 2>/dev/null`, { timeout: 2000 });
-    execSync(`tmux kill-session -t ${sessionName}`, { timeout: 3000 });
+    const tmuxBin = resolveTmuxBinary();
+    execFileSync(tmuxBin, ['has-session', '-t', sessionName], {
+      timeout: 2000,
+      stdio: 'ignore',
+      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+    });
+    execFileSync(tmuxBin, ['kill-session', '-t', sessionName], {
+      timeout: 3000,
+      stdio: 'ignore',
+      env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+    });
     console.log(`[ws-server] Killed tmux session: ${sessionName}`);
     broadcastLifecycle(sessionName, 'killed');
     return;
@@ -3214,7 +3239,9 @@ const httpServer = createServer((req, res) => {
     }
     const parsed = new URL(req.url, `http://127.0.0.1:${WS_PORT}`);
     const sessionName = parsed.searchParams.get('session') ?? '';
-    const alive = sessionName ? terminalAttachments.has(sessionName) : false;
+    const alive = sessionName
+      ? terminalAttachments.has(sessionName) || tmuxSessionExists(sessionName)
+      : false;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ alive }));
     return;
