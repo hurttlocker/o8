@@ -453,6 +453,24 @@ The `mcp__o8__*` tool family is the orchestrator's primary interface. Mission/di
 
 **OpenAI strict-mode caveat (v0.1.142 fix):** every tool's `inputSchema` top-level MUST be a plain `{ type: 'object', properties, required }` — no `oneOf` / `anyOf` / `allOf` / `not` siblings. OpenAI's strict function-calling spec rejects them and the whole turn 400s when any OpenAI-backed MCP client (Codex CLI, Cursor strict mode) loads the tool list. Validate inputs in the handler, not in the schema.
 
+### Merge-failure escalation chain (5 layers, operator-locked 2026-05-25)
+
+When a packet's post-rebase typecheck fails during `approve_and_merge`, recovery escalates through five layers — cheap automatic at the bottom, expensive human at the top. The lane never silently stalls; every failure has a defined next step.
+
+| Layer | Trigger | Cost | Who decides | Code |
+|---|---|---|---|---|
+| **1. Auto-rerun (cap 1)** | tsc fails on merge | 1 Codex turn | system | `handlePostRebaseTypecheckFailure` in `lane/worktree-side-merge.ts` — counts `typecheck_auto_retry` events since last `session_launched`; if 0, fires `rerunWithFeedback(packetId, tscOutput)` fire-and-forget |
+| **2. Escalate to orchestrator** | layer 1 also fails | $0 | system → orchestrator | Same helper sets lane to `awaiting_orchestrator` with structured `blockedReason` + full tsc output as `typecheck_escalation` event payload (≤4KB truncated). Surfaces in `o8_status` automatically. |
+| **3. Steer warm session** | orchestrator picks "fix it where it sits" | 1 cheap steer (warm thread) | orchestrator | `mcp__o8__steer_packet({packetId, message})` — reuses Codex `exec resume <threadId>`, model already has packet context. Cheaper + faster than layer 4. |
+| **4. Fresh redispatch** | orchestrator picks "start over" or layer 3 fails | full new Codex worker | orchestrator | Existing `mcp__o8__rerun_with_feedback({packetId, feedback})` |
+| **5. Human approval card** | orchestrator gives up | $0 | operator | Operator can always intervene via `o8_status` inbox; orchestrator surfaces a card explicitly to flag "I tried 1-4, your call" |
+
+**Cost ceiling per failed merge:** 1 extra Codex turn (layer 1) before any human or orchestrator-attention escalation. Past that, the escalation cost is bounded by the orchestrator's decision budget — not runaway retry.
+
+**Counter reset rule:** layer 1's retry counter only includes events newer than the lane's most recent `session_launched`. So `reset_packet` → dispatch starts the counter fresh.
+
+**For the orchestrator (Claude in chat OR external MCP client):** when `o8_status` surfaces a packet at `awaiting_orchestrator` with a `typecheck_escalated:*` event, prefer `steer_packet` first (layer 3, warm session). If steering fails or the session is genuinely dead (no `sessionKey` on lane), fall through to `rerun_with_feedback` (layer 4). Reserve human escalation for cases where the diff itself is fundamentally wrong and no amount of nudging will fix it.
+
 ## Development Workflow
 
 ### Working on o8 (self-hosting)
