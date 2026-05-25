@@ -380,13 +380,19 @@ function normalizeRepoStorageKey(repoPath: string | null | undefined) {
   return (repoPath ?? '').trim().replace(/\/+$/, '');
 }
 
-function orchestratorPreludeStorageKey(repoPath: string) {
-  return `${ORCHESTRATOR_PRELUDE_STORAGE_PREFIX}${normalizeRepoStorageKey(repoPath)}`;
+function normalizeThreadStorageKey(threadId: string | null | undefined) {
+  const trimmed = threadId?.trim() ?? '';
+  return trimmed.startsWith('thoughts-') ? trimmed.replace(/[^a-zA-Z0-9_-]/g, '_') : '';
 }
 
-function readPreludeQueue(repoPath: string) {
+function orchestratorPreludeStorageKey(repoPath: string, threadId?: string | null) {
+  const threadKey = normalizeThreadStorageKey(threadId);
+  return `${ORCHESTRATOR_PRELUDE_STORAGE_PREFIX}${normalizeRepoStorageKey(repoPath)}${threadKey ? `:${threadKey}` : ''}`;
+}
+
+function readPreludeQueue(repoPath: string, threadId?: string | null) {
   if (typeof window === 'undefined') return [] as StoredOrchestratorPrelude[];
-  const raw = window.localStorage.getItem(orchestratorPreludeStorageKey(repoPath));
+  const raw = window.localStorage.getItem(orchestratorPreludeStorageKey(repoPath, threadId));
   if (!raw) return [];
   try {
     const parsed = JSON.parse(raw) as StoredOrchestratorPrelude[];
@@ -398,9 +404,9 @@ function readPreludeQueue(repoPath: string) {
   }
 }
 
-function writePreludeQueue(repoPath: string, items: StoredOrchestratorPrelude[]) {
+function writePreludeQueue(repoPath: string, items: StoredOrchestratorPrelude[], threadId?: string | null) {
   if (typeof window === 'undefined') return;
-  const key = orchestratorPreludeStorageKey(repoPath);
+  const key = orchestratorPreludeStorageKey(repoPath, threadId);
   if (items.length === 0) {
     window.localStorage.removeItem(key);
     return;
@@ -449,6 +455,7 @@ export function queueOrchestratorSessionPrelude(
   repoPath: string | null | undefined,
   text: string,
   mode: 'append' | 'replace' = 'append',
+  threadId?: string | null,
 ) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   const trimmed = text.trim();
@@ -457,30 +464,36 @@ export function queueOrchestratorSessionPrelude(
     id: `prelude-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
     text: trimmed,
   } satisfies StoredOrchestratorPrelude;
-  const queue = mode === 'replace' ? [nextItem] : [...readPreludeQueue(normalizedRepoPath), nextItem];
-  writePreludeQueue(normalizedRepoPath, queue);
+  const queue = mode === 'replace' ? [nextItem] : [...readPreludeQueue(normalizedRepoPath, threadId), nextItem];
+  writePreludeQueue(normalizedRepoPath, queue, threadId);
 }
 
-export function hasQueuedOrchestratorSessionPrelude(repoPath: string | null | undefined) {
+export function hasQueuedOrchestratorSessionPrelude(repoPath: string | null | undefined, threadId?: string | null) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   if (!normalizedRepoPath || typeof window === 'undefined') return false;
-  if (readPreludeQueue(normalizedRepoPath).length > 0) return true;
+  if (readPreludeQueue(normalizedRepoPath, threadId).length > 0) return true;
+  if (threadId && readPreludeQueue(normalizedRepoPath).length > 0) return true;
   return Boolean(window.localStorage.getItem(`${LEGACY_AUTO_COMPACT_STORAGE_PREFIX}${normalizedRepoPath}`));
 }
 
-export function clearQueuedOrchestratorSessionPrelude(repoPath: string | null | undefined) {
+export function clearQueuedOrchestratorSessionPrelude(repoPath: string | null | undefined, threadId?: string | null) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   if (!normalizedRepoPath || typeof window === 'undefined') return;
-  writePreludeQueue(normalizedRepoPath, []);
+  writePreludeQueue(normalizedRepoPath, [], threadId);
+  if (threadId) writePreludeQueue(normalizedRepoPath, []);
   window.localStorage.removeItem(`${LEGACY_AUTO_COMPACT_STORAGE_PREFIX}${normalizedRepoPath}`);
 }
 
-export function consumeOrchestratorSessionPrelude(repoPath: string | null | undefined) {
+export function consumeOrchestratorSessionPrelude(repoPath: string | null | undefined, threadId?: string | null) {
   const normalizedRepoPath = normalizeRepoStorageKey(repoPath);
   if (!normalizedRepoPath || typeof window === 'undefined') return null;
 
-  const queue = readPreludeQueue(normalizedRepoPath);
-  writePreludeQueue(normalizedRepoPath, []);
+  const queue = [
+    ...readPreludeQueue(normalizedRepoPath, threadId),
+    ...(threadId ? readPreludeQueue(normalizedRepoPath) : []),
+  ];
+  writePreludeQueue(normalizedRepoPath, [], threadId);
+  if (threadId) writePreludeQueue(normalizedRepoPath, []);
 
   const legacyKey = `${LEGACY_AUTO_COMPACT_STORAGE_PREFIX}${normalizedRepoPath}`;
   const legacyPrelude = window.localStorage.getItem(legacyKey);

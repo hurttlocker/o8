@@ -1158,7 +1158,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       replaceTranscript: orchStream.replaceTranscript,
       compactNow: orchStream.compactNow,
       resetRemoteSession,
-      queuePrelude: (prelude, mode) => queueOrchestratorSessionPrelude(resolvedRepoPath, prelude, mode),
+      queuePrelude: (prelude, mode) => queueOrchestratorSessionPrelude(resolvedRepoPath, prelude, mode, threadIdRef.current),
       searchArchive: (query, limit) => searchOrchestratorArchive(resolvedRepoPath, query, limit),
       fetchTelemetry: async () => {
         const snapshot = await orchStream.fetchTelemetrySnapshot();

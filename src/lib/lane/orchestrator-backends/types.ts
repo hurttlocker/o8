@@ -27,6 +27,8 @@ export interface OrchestratorTurnOptions {
   permissionMode?: 'full' | 'plan';
   thinkingEffort?: ThinkingEffort;
   model?: string;
+  /** UI/history thread id (thoughts-*), used to isolate backend session identity. */
+  threadId?: string | null;
   /**
    * openclaw agent id for the turn — openclaw backend only, ignored by codex /
    * claude. Omitted → the backend's default agent. See docs/openclaw-integration.md.
@@ -49,13 +51,15 @@ export interface OrchestratorBackend {
   /**
    * Look up the repo's session WITHOUT creating one — null if none exists.
    * `agent` selects the openclaw agent (openclaw backend only).
+   * `threadId` scopes built-in Claude/Codex sessions to one persisted chat.
    */
-  peekSession(repoPath: string, agent?: string): OrchestratorSessionInfo | null;
+  peekSession(repoPath: string, agent?: string, threadId?: string | null): OrchestratorSessionInfo | null;
   /**
    * Ensure a session exists for the repo, creating/recovering as needed.
    * `agent` selects the openclaw agent (openclaw backend only).
+   * `threadId` scopes built-in Claude/Codex sessions to one persisted chat.
    */
-  ensureSession(repoPath: string, agent?: string): OrchestratorSessionInfo;
+  ensureSession(repoPath: string, agent?: string, threadId?: string | null): OrchestratorSessionInfo;
   /**
    * Run one orchestrator turn. Ensures the session, spawns the backend, and
    * streams `OrchestratorEvent`s to `onEvent`. Resolves when the turn ends.

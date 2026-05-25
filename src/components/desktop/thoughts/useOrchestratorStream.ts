@@ -243,6 +243,7 @@ export function useOrchestratorStream(
       messagesRef,
       payload,
       repoPath: activeRepoPath,
+      threadId: threadIdRef.current,
       setMessages: syncMessages,
       setRunningTotal: updateRunningTotal,
       setTokenCount,
@@ -308,7 +309,7 @@ export function useOrchestratorStream(
       clearTimeout(transitionStripTimerRef.current);
       transitionStripTimerRef.current = null;
     }
-    clearQueuedOrchestratorSessionPrelude(repoPathRef.current);
+    clearQueuedOrchestratorSessionPrelude(repoPathRef.current, threadIdRef.current);
     emitTokenUsage({ repoPath: repoPathRef.current, tokenCount: 0, runningTotal: 0 });
   }, [connected, resetFirstTurnPlanCapture, syncMessages, updateRunningTotal]);
 
@@ -575,7 +576,7 @@ export function useOrchestratorStream(
     if (!repoPath) return;
     if (runningTotal < ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR) autoCompactArmedRef.current = true;
     if (status !== 'ready' || runningTotal < ORCHESTRATOR_AUTO_COMPACT_THRESHOLD || autoCompactInFlightRef.current || !autoCompactArmedRef.current) return;
-    if (hasQueuedOrchestratorSessionPrelude(repoPath)) return;
+    if (hasQueuedOrchestratorSessionPrelude(repoPath, threadIdRef.current)) return;
     autoCompactInFlightRef.current = true;
     autoCompactArmedRef.current = false;
     let started = false;
@@ -716,7 +717,7 @@ export function useOrchestratorStream(
             + ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS
             + approxTokens(message);
           if (postCompactProjection >= ORCHESTRATOR_FORCE_COMPACT_THRESHOLD) {
-            clearQueuedOrchestratorSessionPrelude(activeRepoPath);
+            clearQueuedOrchestratorSessionPrelude(activeRepoPath, threadIdRef.current);
             throw new Error(`Context is still above the 85% safety cap after compaction. Re-send this message:\n\n${message}`);
           }
           planCaptureSource = primed.transcript;
@@ -756,7 +757,7 @@ export function useOrchestratorStream(
       setStatus('busy');
 
       let outboundMessage = message;
-      const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath);
+      const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath, threadIdRef.current);
       if (resumePrelude) {
         outboundMessage = `${resumePrelude}\n\nOperator message:\n${message}`;
       }

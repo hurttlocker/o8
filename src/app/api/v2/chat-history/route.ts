@@ -49,6 +49,22 @@ function normalizeAgent(value: unknown): string | undefined {
   return trimmed ? trimmed.slice(0, 128) : undefined;
 }
 
+function normalizeSessionIds(value: unknown): Record<string, string | null> | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const normalized: Record<string, string | null> = {};
+  for (const [key, rawSessionId] of Object.entries(value as Record<string, unknown>)) {
+    if (!key) continue;
+    if (rawSessionId === null) {
+      normalized[key] = null;
+      continue;
+    }
+    if (typeof rawSessionId !== 'string') continue;
+    const sessionId = rawSessionId.trim();
+    if (sessionId) normalized[key] = sessionId;
+  }
+  return Object.keys(normalized).length > 0 ? normalized : undefined;
+}
+
 export async function GET(request: NextRequest) {
   const tabId = request.nextUrl.searchParams.get('tabId');
   if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
@@ -72,6 +88,8 @@ export async function GET(request: NextRequest) {
       backend: null,
       agent: null,
       archivedAt: null,
+      orchestratorSessionIds: null,
+      orchestratorSessionUpdatedAt: null,
       exists: false,
     });
   }
@@ -116,6 +134,8 @@ export async function POST(request: NextRequest) {
   let orchestratorVisible: boolean | undefined;
   let mobileCreatedAt: string | null | undefined;
   let mobileRevealRequestedAt: string | null | undefined;
+  let orchestratorSessionIds: Record<string, string | null> | undefined;
+  let orchestratorSessionUpdatedAt: string | null | undefined;
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
     starred = existing.starred || false;
@@ -132,6 +152,8 @@ export async function POST(request: NextRequest) {
     orchestratorVisible = existing.orchestratorVisible === true ? true : undefined;
     mobileCreatedAt = normalizeNullableDate(existing.mobileCreatedAt);
     mobileRevealRequestedAt = normalizeNullableDate(existing.mobileRevealRequestedAt);
+    orchestratorSessionIds = normalizeSessionIds(existing.orchestratorSessionIds);
+    orchestratorSessionUpdatedAt = normalizeNullableDate(existing.orchestratorSessionUpdatedAt);
   } catch { /* new file */ }
   const nextArchivedAt = body.archivedAt !== undefined
     ? normalizeNullableDate(body.archivedAt) ?? null
@@ -155,6 +177,8 @@ export async function POST(request: NextRequest) {
     orchestratorVisible,
     mobileCreatedAt,
     mobileRevealRequestedAt,
+    orchestratorSessionIds: normalizeSessionIds(body.orchestratorSessionIds) ?? orchestratorSessionIds ?? {},
+    orchestratorSessionUpdatedAt: normalizeNullableDate(body.orchestratorSessionUpdatedAt) ?? orchestratorSessionUpdatedAt ?? null,
   }));
 
   return NextResponse.json({ ok: true });
@@ -193,6 +217,10 @@ export async function PATCH(request: NextRequest) {
   if (body.backend !== undefined) data.backend = normalizeBackend(body.backend) ?? null;
   if (body.agent !== undefined) data.agent = normalizeAgent(body.agent) ?? null;
   if (body.archivedAt !== undefined) data.archivedAt = normalizeNullableDate(body.archivedAt) ?? null;
+  if (body.orchestratorSessionIds !== undefined) data.orchestratorSessionIds = normalizeSessionIds(body.orchestratorSessionIds) ?? {};
+  if (body.orchestratorSessionUpdatedAt !== undefined) {
+    data.orchestratorSessionUpdatedAt = normalizeNullableDate(body.orchestratorSessionUpdatedAt) ?? null;
+  }
 
   writeFileSync(filePath, JSON.stringify(data));
   return NextResponse.json({ ok: true });

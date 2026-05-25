@@ -17,6 +17,11 @@ async function resolveRepoPath(value: unknown): Promise<string | null> {
   return repos.length === 1 ? repos[0]?.localPath?.trim() ?? null : null;
 }
 
+function normalizeThreadId(value: unknown): string | null {
+  const trimmed = typeof value === 'string' ? value.trim() : '';
+  return trimmed.startsWith('thoughts-') ? trimmed : null;
+}
+
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
@@ -33,7 +38,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = requestOrchestratorSessionReset(repoPath);
+    const result = requestOrchestratorSessionReset(repoPath, normalizeThreadId(record?.threadId));
     return operatorSuccess(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to reset orchestrator session.';
