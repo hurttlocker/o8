@@ -5,6 +5,7 @@ import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
+import { archiveMissionsExcept, getMissionRecord, recordMission } from '@/lib/db/missions-store';
 import {
   latestTranscriptEventAt,
   readSessionTranscriptEvents,
@@ -178,6 +179,31 @@ export async function createMission(input: CreateMissionInput) {
   log(`Created mission ${missionId} with ${persisted.packets.length} packets.`);
   logBranchPreparation(branchPreparation, missionId);
 
+  // Archive this mission in SQLite so get_mission_status can serve queries
+  // for it later, even after a subsequent createMission overwrites the
+  // file-based "current" mission. Lane/packet status is reconstructed live
+  // via the lanes table. Non-fatal — file path still works on failure.
+  try {
+    const totalWaves = Math.max(1, ...Array.from(waves.values()));
+    recordMission({
+      id: missionId,
+      repoPath,
+      runtime: workerRouting.selectedRuntime,
+      prompt: persisted.prompt,
+      summary: persisted.summary,
+      constraints: input.constraints,
+      packetMeta: persisted.packets.map((packet) => ({
+        id: packet.id,
+        title: packet.title,
+        referenceLabel: packet.referenceLabel,
+      })),
+      totalWaves,
+    });
+    archiveMissionsExcept(missionId);
+  } catch (error) {
+    log(`Failed to archive mission ${missionId} to SQLite (file path still works): ${error instanceof Error ? error.message : String(error)}`);
+  }
+
   // #747 — Per-packet routing recommendation snapshot. Logs the runtime the
   // recommender would have picked next to the operator's actual choice. We
   // never override the user's selection — this is observability so we can see
@@ -328,9 +354,137 @@ async function readTranscriptActivityBySession(
   return new Map(pairs);
 }
 
+/**
+ * Build a lite mission status snapshot from the SQLite archive + live lanes.
+ *
+ * Used by `getMissionStatus` when the requested mission isn't the current
+ * file-based active mission. Packet wave grouping, queue/release states, and
+ * review results aren't reconstructed (we don't archive that depth) — just
+ * the lane lifecycle (status, branch, last event), which is the answer to
+ * "is my parallel mission done yet?"
+ */
+function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').MissionRecord) {
+  const lanesByPacket = new Map<string, ReturnType<typeof findLaneByPacket>>();
+  for (const meta of record.packetMeta) {
+    lanesByPacket.set(meta.id, findLaneByPacket(meta.id));
+  }
+
+  const inferPacketStatus = (lane: ReturnType<typeof findLaneByPacket>): string => {
+    if (!lane) return 'unknown';
+    switch (lane.status) {
+      case 'completed':
+      case 'archived':
+        return 'completed';
+      case 'reviewing':
+        return 'awaiting_review';
+      case 'merging':
+        return 'merging';
+      case 'failed':
+      case 'recovering':
+        return 'failed';
+      case 'launching':
+      case 'running':
+        return 'running';
+      case 'awaiting_input':
+      case 'awaiting_orchestrator':
+        return 'blocked';
+      case 'idle':
+      case 'paused':
+        return lane.status;
+      default:
+        return 'unknown';
+    }
+  };
+
+  const packets = record.packetMeta.map((meta) => {
+    const lane = lanesByPacket.get(meta.id) ?? null;
+    return {
+      id: meta.id,
+      referenceLabel: meta.referenceLabel,
+      title: meta.title,
+      wave: 1,
+      status: inferPacketStatus(lane),
+      queueState: lane ? 'released' : 'unknown',
+      releaseState: lane ? 'released' : 'pending',
+      blockedBy: [] as string[],
+      blockedReason: null,
+      lane: lane ? {
+        laneId: lane.id,
+        sessionKey: lane.sessionKey,
+        runtime: lane.runtime,
+        status: lane.status,
+        branch: lane.branch,
+        repoPath: lane.worktreePath ?? lane.repoPath,
+        lastEventAt: lane.lastEventAt,
+        lastLifecycleEventAt: lane.lastEventAt,
+        lastTranscriptAt: null,
+        lastActivityAt: lane.lastEventAt,
+        lastActivityLabel: lane.lastEventLabel,
+        transcriptUnsupportedReason: null,
+        lastEventLabel: lane.lastEventLabel,
+      } : null,
+      review: null,
+    };
+  });
+
+  const agents = record.packetMeta
+    .map((meta) => {
+      const lane = lanesByPacket.get(meta.id) ?? null;
+      if (!lane) return null;
+      return {
+        packetId: meta.id,
+        laneId: lane.id,
+        sessionKey: lane.sessionKey,
+        label: lane.label,
+        runtime: lane.runtime,
+        status: lane.status,
+        branch: lane.branch,
+        repoPath: lane.worktreePath ?? lane.repoPath,
+        lastEventAt: lane.lastEventAt,
+        lastLifecycleEventAt: lane.lastEventAt,
+        lastTranscriptAt: null,
+        lastActivityAt: lane.lastEventAt,
+        lastActivityLabel: lane.lastEventLabel,
+        transcriptUnsupportedReason: null,
+        lastEventLabel: lane.lastEventLabel,
+      };
+    })
+    .filter((agent): agent is NonNullable<typeof agent> => agent !== null);
+
+  return {
+    missionId: record.id,
+    prompt: record.prompt,
+    summary: record.summary,
+    repoPath: record.repoPath,
+    runtime: record.runtime,
+    constraints: record.constraints,
+    currentWave: 1,
+    totalWaves: record.totalWaves,
+    packets,
+    agents,
+    blockers: [] as Array<{ packetId: string; blockedBy: string[]; reason: string | null }>,
+    historical: true,
+  };
+}
+
 export async function getMissionStatus(input: MissionStatusInput) {
   const state = currentMissionState();
-  normalizeMissionSelection(state, input.missionId);
+  const requestedMissionId = input.missionId?.trim();
+  const currentMissionId = (state.missionId ?? '').trim();
+  const isCurrent = !requestedMissionId || requestedMissionId === currentMissionId;
+
+  // Historical mission path — the requested mission isn't the current one,
+  // but it may still be in the SQLite archive. Rebuild a lite snapshot from
+  // the mission record + live lanes table.
+  if (!isCurrent) {
+    const record = getMissionRecord(requestedMissionId);
+    if (!record) {
+      // Preserve the legacy error so callers that depended on the throw
+      // still get a clear "no such mission" signal.
+      throw new Error(`Mission mismatch. Current mission is ${currentMissionId || '(none)'}, requested ${requestedMissionId}.`);
+    }
+    return buildHistoricalMissionStatus(record);
+  }
 
   const graph = buildDependencyGraph(state.packets);
   const dag = buildDagMetadata(state.packets);
