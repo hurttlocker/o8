@@ -1009,9 +1009,36 @@ function DashboardInner() {
   const mobileRevealCursorRef = useRef(new Date(Date.now() - 3000).toISOString());
   useEffect(() => {
     if (typeof window === 'undefined') return;
+    const seen = new Set<string>();
     let disposed = false;
     let inFlight = false;
-    const seen = new Set<string>();
+
+    const openRevealRequest = (requestedAt: string | null, thread: MobileOrchestratorThread | undefined) => {
+      if (!requestedAt || !thread?.id || !thread.title) return;
+      if (Date.parse(requestedAt) > Date.parse(mobileRevealCursorRef.current)) {
+        mobileRevealCursorRef.current = requestedAt;
+      }
+      const seenKey = `${thread.id}:${requestedAt}`;
+      if (seen.has(seenKey)) return;
+      seen.add(seenKey);
+      handleOpenHistoryChatFromPanel(
+        thread.id,
+        thread.title,
+        historyRepoContextFromMobileThread(thread),
+      );
+    };
+
+    const handleThreadEvent = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        event?: string;
+        data?: { requestedAt?: string; thread?: MobileOrchestratorThread };
+      }>).detail;
+      if (detail?.event !== 'reveal') return;
+      openRevealRequest(
+        typeof detail.data?.requestedAt === 'string' ? detail.data.requestedAt : null,
+        detail.data?.thread,
+      );
+    };
 
     const pollMobileRevealRequests = async () => {
       if (disposed || inFlight) return;
@@ -1024,19 +1051,9 @@ function DashboardInner() {
         };
         const requests = Array.isArray(data.requests) ? data.requests : [];
         for (const request of requests) {
-          const requestedAt = typeof request.requestedAt === 'string' ? request.requestedAt : null;
-          const thread = request.thread;
-          if (!requestedAt || !thread?.id || !thread.title) continue;
-          if (Date.parse(requestedAt) > Date.parse(mobileRevealCursorRef.current)) {
-            mobileRevealCursorRef.current = requestedAt;
-          }
-          const seenKey = `${thread.id}:${requestedAt}`;
-          if (seen.has(seenKey)) continue;
-          seen.add(seenKey);
-          handleOpenHistoryChatFromPanel(
-            thread.id,
-            thread.title,
-            historyRepoContextFromMobileThread(thread),
+          openRevealRequest(
+            typeof request.requestedAt === 'string' ? request.requestedAt : null,
+            request.thread,
           );
         }
       } catch {
@@ -1046,11 +1063,13 @@ function DashboardInner() {
       }
     };
 
+    window.addEventListener('o8:orchestrator-threads', handleThreadEvent);
     void pollMobileRevealRequests();
     const timer = window.setInterval(pollMobileRevealRequests, 1500);
     return () => {
       disposed = true;
       window.clearInterval(timer);
+      window.removeEventListener('o8:orchestrator-threads', handleThreadEvent);
     };
   }, [handleOpenHistoryChatFromPanel]);
 
