@@ -226,7 +226,7 @@ async function createRebaseConflictApproval(
     reviewSummary: command.reviewSummary,
     title: `Rebase conflict: ${lane.label}`,
     description: `Worktree-side rebase failed before main was touched: ${error.message}${conflictList}\n\nResolve the rebase in ${error.worktreePath}, or choose a conflict strategy and retry. o8 will not fall back to merging this packet into the operator checkout.`,
-    summary: `Rebase conflict on ${lane.branch} → ${lane.baseBranch}. ${files.length} file${files.length === 1 ? '' : 's'} conflicting.`,
+    summary: `Rebase conflict on ${lane.branch} -> ${lane.baseBranch}. ${files.length} file${files.length === 1 ? '' : 's'} conflicting.`,
     risk: 'high',
     policyRuleId: 'rebase_conflict_escalation',
     metadata: {
@@ -260,7 +260,7 @@ async function createFastForwardFailureApproval(
     ? `Cannot fast-forward ${lane.baseBranch}: operator working-tree changes would be overwritten.`
     : failureCategory === 'non-fast-forward'
       ? `Cannot fast-forward ${lane.baseBranch}: the rebased packet head is no longer ahead of the current base.`
-      : `Fast-forward of ${lane.branch} → ${lane.baseBranch} failed: ${message}`;
+      : `Fast-forward of ${lane.branch} -> ${lane.baseBranch} failed: ${message}`;
 
   return createLaneActionApproval(lane, actor, {
     verb: 'merge',
@@ -443,7 +443,7 @@ export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): P
     const updated = getLane(command.laneId);
     const mergeNote = pushedToOrigin
       ? `Rebased ${lane.branch} onto ${lane.baseBranch}, fast-forwarded ${lane.baseBranch}, and pushed to origin.${decompositionNote}`
-      : `Rebased ${lane.branch} onto ${lane.baseBranch} and fast-forwarded ${lane.baseBranch} LOCALLY — push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${decompositionNote}`;
+      : `Rebased ${lane.branch} onto ${lane.baseBranch} and fast-forwarded ${lane.baseBranch} LOCALLY - push to origin failed: ${pushError ?? 'unknown error'}. Run \`git push origin ${lane.baseBranch}\` to ship the commit.${decompositionNote}`;
     return {
       ok: true,
       laneId: command.laneId,
