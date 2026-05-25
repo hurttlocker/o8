@@ -26,6 +26,7 @@ import {
 } from '@/lib/worktree/manager';
 
 const execFileAsync = promisify(execFile);
+const BASE_ADVANCED_RETRY_LIMIT = 3;
 
 type MergeCommand = Extract<LaneCommand, { verb: 'merge' }>;
 
@@ -291,6 +292,19 @@ async function createFastForwardFailureApproval(
   });
 }
 
+function createFetchUnreachableResult(
+  input: WorktreeSideMergeInput,
+  error: WorktreeFetchUnreachableError,
+): LaneCommandResult {
+  const { lane, command } = input;
+  setLaneStatus(command.laneId, 'reviewing', 'system', 'fetch_unreachable');
+  return {
+    ok: false,
+    laneId: command.laneId,
+    note: `Cannot refresh ${lane.baseBranch} before rebase: ${error.message}`,
+  };
+}
+
 /**
  * Maximum bytes of tsc output we stuff into event payloads / blockedReason.
  * The head of the diagnostic is what the orchestrator needs to reason about;
@@ -418,6 +432,91 @@ async function handlePostRebaseTypecheckFailure(
   };
 }
 
+async function fetchOriginBaseForBaseDriftRetry(
+  cwd: string,
+  baseBranch: string,
+  actualBranch: string,
+): Promise<void> {
+  try {
+    await git(cwd, ['fetch', 'origin', baseBranch, '--quiet'], { timeout: 60_000 });
+  } catch (error) {
+    const fetchErrorMessage = gitErrorMessage(error);
+    throw new WorktreeFetchUnreachableError({
+      baseBranch,
+      worktreePath: cwd,
+      branch: actualBranch,
+      localRefAgeMs: Number.POSITIVE_INFINITY,
+      fetchErrorMessage,
+      message: `fetch origin ${baseBranch} failed while retrying base-moved merge in ${cwd}: ${fetchErrorMessage}`,
+    });
+  }
+}
+
+async function retryBaseAdvancedAfterRebase(
+  input: WorktreeSideMergeInput,
+  opts: {
+    mgr: ReturnType<typeof getWorktreeManager>;
+    worktreePath: string;
+    actualBranch: string;
+    rebaseStrategy?: WorktreeRebaseStrategy;
+    integrationRef: string;
+    originBaseRef: string;
+  },
+): Promise<LaneCommandResult | null> {
+  const { lane, command } = input;
+  let lastOriginBaseRef = opts.originBaseRef;
+
+  for (let attempt = 1; attempt <= BASE_ADVANCED_RETRY_LIMIT; attempt += 1) {
+    const attemptLabel = `${attempt}/${BASE_ADVANCED_RETRY_LIMIT}`;
+    console.warn(`[lane-merge] ${lastOriginBaseRef} advanced after rebase for ${opts.actualBranch}; auto-rebasing retry ${attemptLabel}.`);
+
+    try {
+      await fetchOriginBaseForBaseDriftRetry(lane.repoPath, lane.baseBranch, opts.actualBranch);
+      await fetchOriginBaseForBaseDriftRetry(opts.worktreePath, lane.baseBranch, opts.actualBranch);
+      await opts.mgr.rebaseOntoMain(opts.worktreePath, { baseBranch: lane.baseBranch, branchName: opts.actualBranch, strategy: opts.rebaseStrategy });
+      console.log(`[lane-merge] Rebased ${opts.actualBranch} onto latest ${lane.baseBranch} after base-moved retry ${attemptLabel}`);
+    } catch (error) {
+      if (error instanceof WorktreeRebaseConflictError) {
+        return createRebaseConflictApproval(input, error);
+      }
+      if (error instanceof WorktreeFetchUnreachableError) {
+        return createFetchUnreachableResult(input, error);
+      }
+      throw error;
+    }
+
+    const typecheck = await runLaneRebaseTypecheck({ cwd: opts.worktreePath, actualBranch: opts.actualBranch, logPrefix: 'lane-merge' });
+    if (!typecheck.ok) {
+      return handlePostRebaseTypecheckFailure(input, typecheck.output);
+    }
+
+    await fetchWorkerHeadIntoMainRepo(lane.repoPath, opts.worktreePath, opts.actualBranch, opts.integrationRef);
+    try {
+      await fetchOriginBaseForBaseDriftRetry(lane.repoPath, lane.baseBranch, opts.actualBranch);
+    } catch (error) {
+      if (error instanceof WorktreeFetchUnreachableError) {
+        return createFetchUnreachableResult(input, error);
+      }
+      throw error;
+    }
+
+    const originBaseRef = await refExists(lane.repoPath, opts.originBaseRef)
+      ? opts.originBaseRef
+      : null;
+    if (!originBaseRef || await isAncestor(lane.repoPath, originBaseRef, opts.integrationRef)) {
+      console.log(`[lane-merge] ${opts.actualBranch} includes ${originBaseRef ?? lane.baseBranch} after base-moved retry ${attemptLabel}`);
+      return null;
+    }
+    lastOriginBaseRef = originBaseRef;
+  }
+
+  setLaneStatus(command.laneId, 'reviewing', 'system', 'base_advanced_after_rebase');
+  return createFastForwardFailureApproval(
+    input,
+    new Error(`not possible to fast-forward: ${lastOriginBaseRef} advanced after ${BASE_ADVANCED_RETRY_LIMIT} auto-rebase attempts for ${opts.actualBranch}.`),
+  );
+}
+
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
   const { lane, command, actor } = input;
   const worktreePath = lane.worktreePath;
@@ -496,12 +595,7 @@ export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): P
         return createRebaseConflictApproval(input, error);
       }
       if (error instanceof WorktreeFetchUnreachableError) {
-        setLaneStatus(command.laneId, 'reviewing', 'system', 'fetch_unreachable');
-        return {
-          ok: false,
-          laneId: command.laneId,
-          note: `Cannot refresh ${lane.baseBranch} before rebase: ${error.message}`,
-        };
+        return createFetchUnreachableResult(input, error);
       }
       throw error;
     }
@@ -528,12 +622,15 @@ export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): P
       await fetchWorkerHeadIntoMainRepo(lane.repoPath, worktreePath, actualBranch, integrationRef);
       const originBaseRef = await refreshOriginBaseBestEffort(lane.repoPath, lane.baseBranch);
       if (originBaseRef && !(await isAncestor(lane.repoPath, originBaseRef, integrationRef))) {
-        setLaneStatus(command.laneId, 'reviewing', 'system', 'base_advanced_after_rebase');
-        return {
-          ok: false,
-          laneId: command.laneId,
-          note: `${originBaseRef} advanced after the worktree rebase. Retry merge so ${actualBranch} rebases onto the newest ${lane.baseBranch}.`,
-        };
+        const retryResult = await retryBaseAdvancedAfterRebase(input, {
+          mgr,
+          worktreePath,
+          actualBranch,
+          rebaseStrategy,
+          integrationRef,
+          originBaseRef,
+        });
+        if (retryResult) return retryResult;
       }
 
       const mainCheckoutBranch = await currentBranch(lane.repoPath);
