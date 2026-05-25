@@ -372,6 +372,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const orchStream = useOrchestratorStream(isOrchestratorMode && orchestrationSettingsLoaded && !isChatMode ? resolvedRepoPath : null, {
     seededPlanText: planText,
     hasHistory: chatMessages.length > 0,
+    threadId,
   });
 
   useEffect(() => {

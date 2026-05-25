@@ -107,7 +107,7 @@ interface ActiveTurnState {
  */
 export function useOrchestratorStream(
   repoPath: string | null,
-  options?: { seededPlanText?: string | null; hasHistory?: boolean },
+  options?: { seededPlanText?: string | null; hasHistory?: boolean; threadId?: string | null },
 ): OrchestratorStreamResult {
   const [messages, setMessages] = useState<MobileTranscriptEntry[]>([]);
   const [planText, setPlanText] = useState<string | null>(null);
@@ -127,6 +127,9 @@ export function useOrchestratorStream(
   statusRef.current = status;
   const repoPathRef = useRef(repoPath);
   repoPathRef.current = repoPath;
+  const threadId = options?.threadId ?? null;
+  const threadIdRef = useRef<string | null>(threadId);
+  threadIdRef.current = threadId;
   const runningTotalRef = useRef(runningTotal);
   runningTotalRef.current = runningTotal;
   const mountedRef = useRef(false);
@@ -433,6 +436,7 @@ export function useOrchestratorStream(
       ws.send(JSON.stringify({
         type: 'orchestrator-subscribe',
         repoPath: repoPathRef.current,
+        ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
       }));
 
       console.log('[orchestrator-stream] Connected, subscribing...');
@@ -487,6 +491,15 @@ export function useOrchestratorStream(
       // onclose will fire after this
     };
   }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, healStaleBusyState]);
+
+  useEffect(() => {
+    if (!repoPath || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({
+      type: 'orchestrator-subscribe',
+      repoPath,
+      ...(threadId ? { threadId } : {}),
+    }));
+  }, [repoPath, threadId]);
 
   // Connect on mount / repoPath change
   useEffect(() => {
@@ -642,7 +655,11 @@ export function useOrchestratorStream(
     if (!activeRepoPath) return;
     const ws = wsRef.current;
     if (ws?.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'orchestrator-interrupt', repoPath: activeRepoPath }));
+      ws.send(JSON.stringify({
+        type: 'orchestrator-interrupt',
+        repoPath: activeRepoPath,
+        ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
+      }));
     }
     if (statusRef.current === 'busy') {
       const nextStatus = connected ? 'ready' : 'connecting';
@@ -746,6 +763,7 @@ export function useOrchestratorStream(
       const payload = JSON.stringify({
         type: 'orchestrator-send',
         repoPath: activeRepoPath,
+        ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
         message: outboundMessage,
         permissionMode,
         ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
