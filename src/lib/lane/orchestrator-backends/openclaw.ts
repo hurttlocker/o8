@@ -28,6 +28,8 @@ import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { publishRealtimeMutation } from '@/lib/realtime/publisher';
+import type { RealtimeMutationRecord } from '@/lib/realtime/types';
 import type {
   OrchestratorBackend,
   OrchestratorSessionInfo,
@@ -59,6 +61,8 @@ interface OpenclawAgentResult extends OpenclawPayloadBlock {
   status?: string;
   result?: OpenclawPayloadBlock;
 }
+
+let openclawRealtimeMutationSeq = 0;
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -570,6 +574,46 @@ function thinkingFlag(effort: ThinkingEffort | undefined): string | null {
   return effort;
 }
 
+function publishOpenclawRealtimeEvent(
+  session: OpenclawOrchestratorSession,
+  event: OrchestratorEvent,
+  threadId: string | null,
+): void {
+  const base = {
+    repoPath: session.repoPath,
+    threadId,
+    backend: 'openclaw' as const,
+    agent: session.agentId,
+  };
+  const realtime = event.type === 'text'
+    ? { event: 'output' as const, action: 'orchestrator-output', status: 'completed' as const, note: `openclaw assistant output (${event.text.length} chars)`, data: { ...base, text: event.text, thinking: false } }
+    : event.type === 'error'
+      ? { event: 'error' as const, action: 'orchestrator-error', status: 'failed' as const, note: event.error.slice(0, 240), data: { ...base, error: event.error } }
+      : event.type === 'done'
+        ? { event: 'status' as const, action: 'orchestrator-status', status: 'completed' as const, note: 'openclaw orchestrator turn completed', data: { ...base, status: 'ready' as const, sessionId: event.sessionId, cost: event.cost } }
+        : null;
+  if (!realtime) return;
+
+  const createdAt = new Date().toISOString();
+  const mutation = {
+    mutationId: `openclaw-${realtime.event}-${Date.now()}-${openclawRealtimeMutationSeq += 1}`,
+    source: 'server',
+    action: realtime.action,
+    status: realtime.status,
+    runtime: 'openclaw',
+    surfaceId: session.sessionName,
+    sessionKey: session.sessionName,
+    repoPath: session.repoPath,
+    note: realtime.note,
+    createdAt,
+    settledAt: createdAt,
+    channel: 'orchestrator',
+    event: realtime.event,
+    data: realtime.data,
+  } as RealtimeMutationRecord;
+  void publishRealtimeMutation({ mutation, fresh: true });
+}
+
 // ── Send turn ────────────────────────────────────────────────────────────────
 
 async function sendToOpenclawOrchestrator(
@@ -588,6 +632,7 @@ async function sendToOpenclawOrchestrator(
   }
 
   session.status = 'busy';
+  const emitEvent = (event: OrchestratorEvent) => { onEvent(event); publishOpenclawRealtimeEvent(session, event, options.threadId ?? null); };
 
   try {
     const gatewayPort = await ensureOpenclawGatewayPort();
@@ -595,8 +640,8 @@ async function sendToOpenclawOrchestrator(
     await ensureOpenclawGateway(gatewayPort);
   } catch (err) {
     session.status = 'dead';
-    onEvent({ type: 'error', error: err instanceof Error ? err.message : String(err) });
-    onEvent({ type: 'done', sessionId: session.sessionName, cost: null });
+    emitEvent({ type: 'error', error: err instanceof Error ? err.message : String(err) });
+    emitEvent({ type: 'done', sessionId: session.sessionName, cost: null });
     return;
   }
 
@@ -629,7 +674,7 @@ async function sendToOpenclawOrchestrator(
       // Surface the kill to the chat — mirrors orchestrator-session.ts so the
       // user sees a small terminating note instead of a silent freeze.
       const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
-      onEvent({
+      emitEvent({
         type: 'error',
         error: `Orchestrator hit the ${minutes}-minute turn limit and was terminated. Re-send your message to continue — or break the task into a tighter brief so it fits.`,
       });
@@ -672,7 +717,7 @@ async function sendToOpenclawOrchestrator(
       detachUserAbortListener();
       session.status = 'dead';
       session.proc = null;
-      onEvent({ type: 'error', error: err.message });
+      emitEvent({ type: 'error', error: err.message });
       promiseReject(err);
     });
 
@@ -710,24 +755,24 @@ async function sendToOpenclawOrchestrator(
         }
         console.log(`[openclaw-diag] resultBlock keys=[${Object.keys(resultBlock).join(',')}] payloads=${(resultBlock.payloads ?? []).length} textLen=${text.length}`);
         if (text) {
-          onEvent({ type: 'text', text });
+          emitEvent({ type: 'text', text });
         } else if (code === 0) {
-          onEvent({ type: 'error', error: `openclaw returned no assistant text: ${trimmed.slice(0, 500)}` });
+          emitEvent({ type: 'error', error: `openclaw returned no assistant text: ${trimmed.slice(0, 500)}` });
         }
       } else if (code === 0) {
         // Exited clean but stdout wasn't parseable JSON — surface it so the
         // turn isn't silently empty.
-        onEvent({ type: 'error', error: `openclaw returned unparseable output: ${trimmed.slice(0, 500)}` });
+        emitEvent({ type: 'error', error: `openclaw returned unparseable output: ${trimmed.slice(0, 500)}` });
       }
 
       if (code !== 0) {
-        onEvent({
+        emitEvent({
           type: 'error',
           error: stderr.trim().slice(0, 500) || `openclaw exited with code ${code}`,
         });
       }
 
-      onEvent({ type: 'done', sessionId: session.sessionName, cost: null });
+      emitEvent({ type: 'done', sessionId: session.sessionName, cost: null });
       promiseResolve();
     });
   });
