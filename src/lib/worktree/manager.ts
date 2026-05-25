@@ -1059,6 +1059,28 @@ export class WorktreeManager {
 
       const settingsPath = path.join(hooksDir, 'settings.json');
       await writeFile(settingsPath, JSON.stringify(settings, null, 2), 'utf8');
+
+      // Add .claude/ to the worktree's LOCAL git exclude so the injected
+      // settings.json never shows up in `git status`, `git add -A`, or any
+      // agent's diff. Without this, every Codex/Gemini/opencode packet
+      // commits the file by accident (observed on o8-site #8 and #9) — the
+      // file then ships scope-creep that has to be reverted in review.
+      // Writing to .git/info/exclude is local-only; never affects the
+      // upstream .gitignore or other worktrees.
+      try {
+        const excludePath = path.join(worktreePath, '.git', 'info', 'exclude');
+        let existing = '';
+        try { existing = await readFile(excludePath, 'utf8'); } catch { /* file may not exist yet */ }
+        if (!existing.split('\n').some((line) => line.trim() === '.claude/')) {
+          const next = existing.endsWith('\n') || existing.length === 0
+            ? `${existing}.claude/\n`
+            : `${existing}\n.claude/\n`;
+          await mkdir(path.dirname(excludePath), { recursive: true });
+          await writeFile(excludePath, next, 'utf8');
+        }
+      } catch {
+        // Non-fatal — the worktree still works, just may leak the file.
+      }
     } catch {
       // Best-effort — don't block worktree creation if hook injection fails
       console.log('[worktree] hook injection failed (non-fatal)');
