@@ -91,6 +91,7 @@ import {
   handleHistory,
   handleLaneEvents,
   handleSend,
+  handleSteerPacket,
   handleStatus,
   handleTranscript,
 } from '@/lib/mcp/operator-handlers/status';
@@ -493,6 +494,7 @@ const TOOLS: McpTool[] = [
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_history'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_lane_events'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_packet_transcript'),
+  ...STATUS_TOOLS.filter((t) => t.name === 'steer_packet'),
   ...CORTEX_TOOLS,
   ...SPEC_TOOLS,
   ...O8_WEBVIEW_TOOLS,
@@ -531,6 +533,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_history: handleHistory,
   o8_lane_events: handleLaneEvents,
   o8_packet_transcript: handleTranscript,
+  steer_packet: handleSteerPacket,
   cortex_propose_observation: handleProposeObservation,
   cortex_ask: handleAsk,
   o8_spec_read: handleSpecRead,
