@@ -749,6 +749,8 @@ interface OrchestratorSubscription {
   clientId: string;
   repoPath: string;
   sessionName: string;
+  /** Optional UI/history thread id (thoughts-*). Keeps same-repo chats isolated. */
+  threadId: string | null;
   /** Which orchestrator backend this subscription is for. */
   backend: OrchestratorBackendId;
   /** openclaw agent id (openclaw backend only; '' for codex/claude). */
@@ -777,6 +779,15 @@ function orchestratorSubKey(clientId: string, backend: OrchestratorBackendId, ag
 /** Composite key for `orchestratorInflightAborts` (`agent` is '' for codex/claude). */
 function orchestratorAbortKey(repoPath: string, backend: OrchestratorBackendId, agent: string): string {
   return `${repoPath}::${backend}::${agent}`;
+}
+
+function resolveMsgThreadId(msg: Record<string, unknown>): string | null {
+  const raw = typeof msg.threadId === 'string' ? msg.threadId.trim() : '';
+  return raw.startsWith('thoughts-') ? raw : null;
+}
+
+function orchestratorRouteSessionName(sessionName: string, threadId: string | null): string {
+  return threadId ? `${sessionName}::thread:${threadId}` : sessionName;
 }
 
 /**
@@ -2228,13 +2239,16 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
   const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
   const agentId = resolveMsgAgentId(msg, backend.id);
   const agentTag = agentId || undefined;
+  const threadId = resolveMsgThreadId(msg);
 
   try {
     const session = backend.ensureSession(repoPath, agentTag);
+    const routeSessionName = orchestratorRouteSessionName(session.sessionName, threadId);
     orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
       clientId: client.id,
       repoPath,
-      sessionName: session.sessionName,
+      sessionName: routeSessionName,
+      threadId,
       backend: backend.id,
       agent: agentId,
     });
@@ -2247,14 +2261,14 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
     send(client, {
       channel: 'orchestrator',
       event: 'status',
-      data: { status: session.status, repoPath, sessionName: session.sessionName, backend: backend.id, agent: agentTag },
+      data: { status: session.status, repoPath, sessionName: routeSessionName, threadId, backend: backend.id, agent: agentTag },
     });
-    console.log(`[ws-server] Client ${client.id} subscribed to orchestrator (${backend.id}${agentId ? `/${agentId}` : ''}) for ${repoPath}`);
+    console.log(`[ws-server] Client ${client.id} subscribed to orchestrator (${backend.id}${agentId ? `/${agentId}` : ''}${threadId ? ` thread ${threadId}` : ''}) for ${repoPath}`);
   } catch (err) {
     send(client, {
       channel: 'orchestrator',
       event: 'error',
-      data: { error: err instanceof Error ? err.message : 'Failed to start orchestrator session', repoPath, backend: backend.id, agent: agentTag },
+      data: { error: err instanceof Error ? err.message : 'Failed to start orchestrator session', repoPath, threadId, backend: backend.id, agent: agentTag },
     });
   }
 }
@@ -2278,6 +2292,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
   const agentId = resolveMsgAgentId(msg, backend.id);
   const agentTag = agentId || undefined;
+  const threadId = resolveMsgThreadId(msg);
   const abortKey = orchestratorAbortKey(repoPath, backend.id, agentId);
 
   // #624 — Declared outside try so the catch can also release the entry.
@@ -2286,7 +2301,10 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   try {
     console.log(`[ws-server][orchestrator] Routing chat via ${backend.label}${agentId ? ` (agent ${agentId})` : ''}`);
 
-    const sessionName = backend.ensureSession(repoPath, agentTag).sessionName;
+    const sessionName = orchestratorRouteSessionName(
+      backend.ensureSession(repoPath, agentTag).sessionName,
+      threadId,
+    );
     const sendTurn = (
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
@@ -2297,6 +2315,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       clientId: client.id,
       repoPath,
       sessionName,
+      threadId,
       backend: backend.id,
       agent: agentId,
     });
@@ -2308,7 +2327,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     broadcastToOrchestratorSession(sessionName, JSON.stringify({
       channel: 'orchestrator',
       event: 'status',
-      data: { status: 'busy', repoPath, backend: backend.id, agent: agentTag },
+      data: { status: 'busy', repoPath, threadId, backend: backend.id, agent: agentTag },
     }));
 
     // #624 — Attach an AbortController for this turn. Defensively abort any
@@ -2340,7 +2359,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'output',
-            data: { text: event.text, repoPath, thinking: false, backend: backend.id, agent: agentTag },
+            data: { text: event.text, repoPath, threadId, thinking: false, backend: backend.id, agent: agentTag },
           });
           break;
 
@@ -2348,7 +2367,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'output',
-            data: { text: event.text, repoPath, thinking: true, backend: backend.id, agent: agentTag },
+            data: { text: event.text, repoPath, threadId, thinking: true, backend: backend.id, agent: agentTag },
           });
           break;
 
@@ -2356,7 +2375,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'tool-use',
-            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, backend: backend.id, agent: agentTag },
+            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend: backend.id, agent: agentTag },
           });
           break;
 
@@ -2370,6 +2389,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
               output: event.output,
               toolUseId: event.id ?? null,
               repoPath,
+              threadId,
               backend: backend.id,
               agent: agentTag,
             },
@@ -2380,7 +2400,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
-            data: { status: 'ready', repoPath, backend: backend.id, agent: agentTag },
+            data: { status: 'ready', repoPath, threadId, backend: backend.id, agent: agentTag },
           });
           break;
 
@@ -2388,7 +2408,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'error',
-            data: { error: event.error, repoPath, backend: backend.id, agent: agentTag },
+            data: { error: event.error, repoPath, threadId, backend: backend.id, agent: agentTag },
           });
           break;
       }
@@ -2411,7 +2431,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     send(client, {
       channel: 'orchestrator',
       event: 'error',
-      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath, backend: backend.id, agent: agentTag },
+      data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath, threadId, backend: backend.id, agent: agentTag },
     });
   }
 }
@@ -2449,9 +2469,10 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
   const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
   const agentId = resolveMsgAgentId(msg, backend.id);
   const agentTag = agentId || undefined;
+  const threadId = resolveMsgThreadId(msg);
   const session = backend.peekSession(repoPath, agentTag);
   const status = session?.status ?? 'dead';
-  const sessionName = session?.sessionName ?? null;
+  const sessionName = session ? orchestratorRouteSessionName(session.sessionName, threadId) : null;
 
   send(client, {
     channel: 'orchestrator',
@@ -2460,6 +2481,7 @@ async function handleOrchestratorStatus(client: ClientState, msg: Record<string,
       status,
       repoPath,
       sessionName,
+      threadId,
       backend: backend.id,
       agent: agentTag,
     },
