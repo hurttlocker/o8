@@ -1,9 +1,9 @@
 import type { AgentSummary, EventSeverity } from '@/lib/fleet/types';
 import { approvalSeverity, listApprovals, toMobileApprovalCard } from '@/lib/approvals/store';
 import type { ApprovalRecord } from '@/lib/approvals/types';
-import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import { listIdeLlmChatSessions } from '@/lib/runtime/ide-llm-chat-registry';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getWorkspaceReviewSnapshot } from '@/lib/review/workspace';
 import type { MobileControlAction, MobileInboxItem, MobileInboxSnapshot, MobileReviewFocus } from '@/lib/mobile/types';
 import { invalidateMobileBootstrapBroker } from '@/lib/render/bootstrap';
@@ -113,6 +113,32 @@ function shouldExposeMobileSession(agent: AgentSummary) {
   }
 
   return agent.runtime === 'codex' || agent.runtime === 'claude-code';
+}
+
+async function stripDeadTerminalSessions(sessions: AgentSummary[]): Promise<AgentSummary[]> {
+  return Promise.all(sessions.map(async (session) => {
+    const tmuxSession = session.tmuxSession?.trim();
+    if (!tmuxSession) return session;
+
+    const alive = await isBridgeSessionAlive(tmuxSession);
+    if (alive) return session;
+
+    return {
+      ...session,
+      tmuxSession: undefined,
+      runtimeSurface: session.runtimeSurface
+        ? {
+            ...session.runtimeSurface,
+            capabilities: {
+              ...session.runtimeSurface.capabilities,
+              attach: false,
+              interrupt: false,
+              resize: false,
+            },
+          }
+        : undefined,
+    };
+  }));
 }
 
 function mobileSessionIdentity(agent: AgentSummary) {
@@ -293,7 +319,9 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
     };
   }
 
-  const orderedSessions = sessions
+  const liveCheckedSessions = await stripDeadTerminalSessions(sessions);
+
+  const orderedSessions = liveCheckedSessions
     .map((session, index) => ({ session, index }))
     .sort((left, right) => {
       const priorityDiff = mobileSessionPriority(right.session) - mobileSessionPriority(left.session);
