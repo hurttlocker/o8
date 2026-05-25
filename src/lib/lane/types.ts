@@ -181,7 +181,12 @@ export type LaneEventVerb =
   | 'agent_report'
   | 'zombie_reap'
   | 'merge_head_drift'
-  | 'runtime_drift';
+  | 'runtime_drift'
+  // Post-rebase typecheck escalation (#1108):
+  // typecheck_auto_retry — layer 1 fired a programmatic rerun_with_feedback
+  // typecheck_escalation — layer 2 promoted the lane to awaiting_orchestrator
+  | 'typecheck_auto_retry'
+  | 'typecheck_escalation';
 
 export type AgentReportReason =
   | 'needs_clarification'
