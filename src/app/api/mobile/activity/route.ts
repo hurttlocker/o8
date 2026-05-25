@@ -56,6 +56,34 @@ interface RepoTarget {
   name: string;
 }
 
+type PreviewContext = {
+  protocol: string;
+  hostname: string;
+  apiHost: string;
+};
+
+function previewContextFromRequest(request: Request): PreviewContext {
+  const url = new URL(request.url);
+  const forwardedHost = request.headers.get('x-forwarded-host');
+  const host = forwardedHost || request.headers.get('host') || url.host;
+  const hostname = host.split(':')[0] || url.hostname;
+  return {
+    protocol: url.protocol || 'http:',
+    hostname,
+    apiHost: host,
+  };
+}
+
+function previewUrlForRepo(repoName: string, context: PreviewContext): string | undefined {
+  if (repoName === 'cortex-ide') {
+    return `${context.protocol}//${context.apiHost}/dashboard`;
+  }
+  if (repoName === 'o8-mobile') {
+    return `${context.protocol}//${context.hostname}:8081/.sim`;
+  }
+  return undefined;
+}
+
 /**
  * Repos to scan. Prefers o8's registry (`~/.o8/repos.json`); when the registry
  * is empty or unreadable (fresh install), falls back to the current working
@@ -97,7 +125,10 @@ async function resolveBranch(repoRoot: string): Promise<string | null> {
  * than one parent is a merge. Returns [] on any git failure (missing repo,
  * not a git dir, detached state).
  */
-async function collectRepoCommits(repo: RepoTarget): Promise<MobileActivityEvent[]> {
+async function collectRepoCommits(
+  repo: RepoTarget,
+  previewContext: PreviewContext,
+): Promise<MobileActivityEvent[]> {
   let stdout: string;
   try {
     const result = await execFileAsync(
@@ -139,6 +170,7 @@ async function collectRepoCommits(repo: RepoTarget): Promise<MobileActivityEvent
         kind: isMerge ? 'merge' : 'commit',
         title: subject.trim() || '(no commit message)',
         detail: branch ? `${branch} · ${shortHash}` : shortHash,
+        previewUrl: previewUrlForRepo(repo.name, previewContext),
         repo: repo.name,
         timestamp,
       };
@@ -153,7 +185,7 @@ async function collectRepoCommits(repo: RepoTarget): Promise<MobileActivityEvent
  * not a reconstructed transition history. Isolated behind its own try/catch:
  * any failure here must not affect the commit feed.
  */
-async function collectPacketEvents(): Promise<MobileActivityEvent[]> {
+async function collectPacketEvents(previewContext: PreviewContext): Promise<MobileActivityEvent[]> {
   try {
     // Lazy import — keeps the orchestrator control-plane (and its deps) off
     // the hot path when this bonus source is not reachable.
@@ -192,14 +224,17 @@ async function collectPacketEvents(): Promise<MobileActivityEvent[]> {
         const detail = packet.lastEventLabel?.trim()
           || (branch ? `${branch} → main` : undefined);
 
+        const repo = packet.workspaceTargetPath
+          ? path.basename(packet.workspaceTargetPath)
+          : undefined;
+
         return {
           id: `packet:${packet.id}`,
           kind,
           title: title.slice(0, 160),
           detail,
-          repo: packet.workspaceTargetPath
-            ? path.basename(packet.workspaceTargetPath)
-            : undefined,
+          repo,
+          previewUrl: repo ? previewUrlForRepo(repo, previewContext) : undefined,
           timestamp,
         };
       })
@@ -210,15 +245,16 @@ async function collectPacketEvents(): Promise<MobileActivityEvent[]> {
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
     const repos = await resolveRepoTargets();
+    const previewContext = previewContextFromRequest(request);
 
     // Commits across all repos run in parallel; one failing repo cannot sink
     // the feed (allSettled + per-repo try/catch inside collectRepoCommits).
     const [commitResults, packetEvents] = await Promise.all([
-      Promise.allSettled(repos.map((repo) => collectRepoCommits(repo))),
-      collectPacketEvents(),
+      Promise.allSettled(repos.map((repo) => collectRepoCommits(repo, previewContext))),
+      collectPacketEvents(previewContext),
     ]);
 
     const events: MobileActivityEvent[] = [];
