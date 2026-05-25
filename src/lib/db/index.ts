@@ -506,6 +506,27 @@ function ensureTables(sqlite: Database.Database): void {
       last_event_label TEXT
     );
 
+    -- Parallel-mission registry. File at ~/.o8/orchestrator-state.json
+    -- still owns the single active-mission lifecycle; this table archives
+    -- every mission so get_mission_status can serve queries for earlier
+    -- missions whose file representation has been overwritten. Packet
+    -- status is reconstructed by joining packet_meta_json against the
+    -- live lanes table (lanes are mission-agnostic).
+    CREATE TABLE IF NOT EXISTS missions (
+      id TEXT PRIMARY KEY,
+      repo_path TEXT NOT NULL,
+      runtime TEXT NOT NULL DEFAULT 'codex',
+      prompt TEXT NOT NULL DEFAULT '',
+      summary TEXT NOT NULL DEFAULT '',
+      constraints TEXT NOT NULL DEFAULT '',
+      packet_meta_json TEXT NOT NULL DEFAULT '[]',
+      total_waves INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL,
+      archived_at INTEGER
+    );
+    CREATE INDEX IF NOT EXISTS missions_created_at_idx ON missions(created_at DESC);
+
     CREATE TABLE IF NOT EXISTS dispatch_rules (
       id TEXT PRIMARY KEY,
       repo_path TEXT NOT NULL,
