@@ -32,6 +32,13 @@ import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 
 const DEFAULT_LIMIT = 20;
 
+interface OutcomeQueryIntent {
+  since?: string;
+  before?: string;
+  runtime?: string;
+  packetsOnly: boolean;
+  shippedOnly: boolean;
+}
 interface OutcomeRow {
   id: string;
   repo_path: string;
@@ -97,6 +104,56 @@ function isOwnershipQuestion(question: string): boolean {
     // "repo X" / "project X" naming probes
     /\bproject\s+\w+/.test(lower)
   );
+}
+
+function canonicalRepoPathForScope(repoPath: string): string {
+  const resolved = path.resolve(repoPath);
+  const marker = `${path.sep}.cortex-worktrees${path.sep}`;
+  const markerIdx = resolved.indexOf(marker);
+  return markerIdx > 0 ? resolved.slice(0, markerIdx) : resolved;
+}
+
+function isoLocalDay(offsetDays: number): string {
+  const d = new Date();
+  d.setDate(d.getDate() + offsetDays);
+  d.setHours(0, 0, 0, 0);
+  return d.toISOString();
+}
+
+function detectOutcomeQueryIntent(question: string): OutcomeQueryIntent | null {
+  const lower = question.toLowerCase();
+  const outcomeSignal =
+    /\bpackets?\b/.test(lower) ||
+    /\bship(?:ped)?\b/.test(lower) ||
+    /\bmerged?\b/.test(lower) ||
+    /\bsession outcomes?\b/.test(lower);
+  if (!outcomeSignal) return null;
+
+  let runtime: string | undefined;
+  if (/\bcodex\b/.test(lower)) runtime = 'codex';
+  else if (/\bclaude(?: code)?\b/.test(lower)) runtime = 'claude-code';
+  else if (/\bgemini\b/.test(lower)) runtime = 'gemini';
+  else if (/\bopencode\b/.test(lower)) runtime = 'opencode';
+
+  let since: string | undefined;
+  let before: string | undefined;
+  if (/\byesterday\b/.test(lower)) {
+    since = isoLocalDay(-1);
+    before = isoLocalDay(0);
+  } else if (/\btoday\b/.test(lower)) {
+    since = isoLocalDay(0);
+    before = isoLocalDay(1);
+  } else if (/\bthis week\b/.test(lower)) {
+    since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+  }
+
+  return {
+    since,
+    before,
+    runtime,
+    packetsOnly: /\bpackets?\b/.test(lower),
+    shippedOnly: /\bship(?:ped)?\b/.test(lower) || /\bmerged?\b/.test(lower),
+  };
 }
 
 // ── Repo registry (sync read) ────────────────────────────────────────────────
@@ -299,25 +356,45 @@ export async function sqlRetriever(input: RetrieverInput): Promise<RetrieverResu
     const params: Array<string | number> = [];
     const where: string[] = ['so.valid_to IS NULL'];
     const orderParams: Array<string | number> = [];
+    const scopedRepoPath = input.repoPath ? canonicalRepoPathForScope(input.repoPath) : null;
+    const outcomeIntent = detectOutcomeQueryIntent(input.question);
 
-    if (input.repoPath) {
-      const active = getActiveProjectScopeForRepoSync(input.repoPath);
+    if (scopedRepoPath) {
+      const active = getActiveProjectScopeForRepoSync(scopedRepoPath);
       if (active.repoInActiveProject && active.repoPaths.length > 0) {
         const scopedRepoPaths = Array.from(new Set([
-          path.resolve(input.repoPath),
+          path.resolve(scopedRepoPath),
           ...active.repoPaths.map((repoPath) => path.resolve(repoPath)),
         ]));
         where.push(`so.repo_path IN (${scopedRepoPaths.map(() => '?').join(',')})`);
         params.push(...scopedRepoPaths);
-        orderParams.push(path.resolve(input.repoPath));
+        orderParams.push(path.resolve(scopedRepoPath));
       } else {
         where.push('so.repo_path = ?');
-        params.push(input.repoPath);
+        params.push(scopedRepoPath);
       }
     }
     if (input.projectId) {
       where.push('so.project_id = ?');
       params.push(input.projectId);
+    }
+    if (outcomeIntent?.runtime) {
+      where.push('so.runtime = ?');
+      params.push(outcomeIntent.runtime);
+    }
+    if (outcomeIntent?.since) {
+      where.push('datetime(so.completed_at) >= datetime(?)');
+      params.push(outcomeIntent.since);
+    }
+    if (outcomeIntent?.before) {
+      where.push('datetime(so.completed_at) < datetime(?)');
+      params.push(outcomeIntent.before);
+    }
+    if (outcomeIntent?.packetsOnly) {
+      where.push("so.packet_id IS NOT NULL AND so.packet_id != ''");
+    }
+    if (outcomeIntent?.shippedOnly) {
+      where.push("so.outcome = 'succeeded'");
     }
 
     // LEFT JOIN to github_pull_requests via the head branch matching the
@@ -381,6 +458,7 @@ export async function sqlRetriever(input: RetrieverInput): Promise<RetrieverResu
           prNumber: record.pr_number,
           prTitle: record.pr_title,
           prUrl: record.pr_url,
+          retrievalIntent: outcomeIntent ? 'recent_session_outcomes' : undefined,
         },
         score: 1,
       });
