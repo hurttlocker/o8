@@ -1,5 +1,6 @@
 'use client';
 
+import { Folder as IconoirFolder } from 'iconoir-react';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { ChevronDown, ChevronRight } from '../../../lucide-shims';
 import { REPO_FOCUS_FONT } from '../../utils';
@@ -106,7 +107,7 @@ export function SectionLabel({
   );
 }
 
-function RepoGroupLabel({ label, trailing }: { label: string; trailing?: React.ReactNode }) {
+function RepoGroupLabel({ label, trailing, noIcon = false }: { label: string; trailing?: React.ReactNode; noIcon?: boolean }) {
   return (
     <div
       style={{
@@ -115,18 +116,31 @@ function RepoGroupLabel({ label, trailing }: { label: string; trailing?: React.R
         gap: 6,
         minHeight: 22,
         paddingTop: 10,
-        paddingRight: 12,
+        paddingRight: 10,
         paddingBottom: 3,
         paddingLeft: 12,
         color: 'var(--t-text-faint)',
         fontFamily: REPO_FOCUS_FONT,
       }}
     >
-      {/* Invisible chevron slot — keeps cortex-ide / o8-site labels
-          aligned with the chevron-prefixed SectionLabel headers below
-          (Spawned agents, Archived). Same width as the lucide chevron
-          (11px) so labels start at the same x position. */}
-      <span aria-hidden style={{ width: 11, flexShrink: 0 }} />
+      {/* Folder glyph (or empty spacer for non-repo groups like
+          Conversations) — Antigravity-style repo-prefix. Sized to match
+          the 11px chevron in adjacent SectionLabel headers (Spawned
+          agents, Archived) so labels start at the same x position. */}
+      <span
+        aria-hidden
+        style={{
+          width: 11,
+          height: 11,
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          color: 'var(--t-text-faint)',
+          flexShrink: 0,
+        }}
+      >
+        {noIcon ? null : <IconoirFolder width={11} height={11} color="currentColor" strokeWidth={1.6} />}
+      </span>
       <span
         style={{
           flex: 1,

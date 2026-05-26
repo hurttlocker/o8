@@ -22,6 +22,7 @@ import { FooterPorts } from './desktop-status-bar/footer-ports';
 import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
 import { DeviceMobileIcon, FolderPlusIcon, GearSixIcon } from './desktop-status-bar/status-bar-icons';
 import { Terminal as TablerTerminal } from './tabler-shims';
+import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { SettingsQuickDrawer } from './SettingsQuickDrawer';
 import type { BottomPanelSurfaceKind } from './ContextualPanel';
 
@@ -432,8 +433,8 @@ function StatusBottomPanelControl({
               }}
             >
               <span style={{ color: 'var(--t-text-secondary)' }}>{option.icon(18)}</span>
-              <span style={{ fontSize: 12.5, fontWeight: 750 }}>{option.label}</span>
-              <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--t-text-muted)' }}>{option.detail}</span>
+              <span style={{ fontSize: 13, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>{option.label}</span>
+              <span style={{ fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-muted)' }}>{option.detail}</span>
             </button>
           ))}
         </div>
@@ -448,44 +449,23 @@ function TerminalGlyph({ size = 14 }: { size?: number }) {
   return <TablerTerminal size={size} strokeWidth={2} />;
 }
 
+// Locked Iconoir picks per hurttlocker.md — same set used in O8Panel's
+// RightUtilityLauncher so both surfaces share an icon vocabulary.
+
 function FilesGlyph({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z" />
-      <path d="M2 10h20" />
-    </svg>
-  );
+  return <Folder width={size} height={size} color="currentColor" strokeWidth={1.6} />;
 }
 
 function ChatGlyph({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
-      <path d="M8 9h8" />
-      <path d="M8 13h5" />
-    </svg>
-  );
+  return <CircleSpark width={size} height={size} color="currentColor" strokeWidth={1.6} />;
 }
 
 function BrowserGlyph({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <circle cx="12" cy="12" r="10" />
-      <path d="M2 12h20" />
-      <path d="M12 2a15.3 15.3 0 0 1 0 20" />
-      <path d="M12 2a15.3 15.3 0 0 0 0 20" />
-    </svg>
-  );
+  return <Internet width={size} height={size} color="currentColor" strokeWidth={1.6} />;
 }
 
 function ReviewGlyph({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-      <path d="M14 2v6h6" />
-      <path d="m9 15 2 2 4-5" />
-    </svg>
-  );
+  return <DoubleCheck width={size} height={size} color="currentColor" strokeWidth={1.6} />;
 }
 
 /** `?` button — opens the keyboard-shortcuts reference. Sits at the
