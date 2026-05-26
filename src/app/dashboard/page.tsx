@@ -216,7 +216,11 @@ function BottomCenterTerminalToggle({ active, onClick }: { active: boolean; onCl
 
 function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
   if (!raw) return null;
-  if (raw === 'files' || raw === 'diff' || raw === 'changes') return 'workspace';
+  // Legacy migrations — 'diff' and 'changes' were old labels for what's
+  // now the Workspace tab. 'files' used to be the same, but is now a
+  // distinct surface in the launcher (see O8Panel RIGHT_UTILITY_TABS),
+  // so we let it pass through to the new kind instead of remapping.
+  if (raw === 'diff' || raw === 'changes') return 'workspace';
   if (raw === 'prs') return 'activity';
   if (
     raw === 'workspace'
@@ -224,6 +228,11 @@ function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
     || raw === 'activity'
     || raw === 'inbox'
     || raw === 'spec'
+    || raw === 'launcher'
+    || raw === 'files'
+    || raw === 'side-chat'
+    || raw === 'review'
+    || raw === 'terminal'
   ) {
     return raw;
   }
@@ -3725,6 +3734,7 @@ function DashboardInner() {
                           onSelectAllRepos={handleSelectO8AllRepos}
                           previews={workspacePreviews}
                           activeTab={o8ActiveTab}
+                          onActiveTabChange={setO8ActiveTab}
                           selectedFile={scopedO8SelectedFile}
                           onSelectedFileChange={handleO8SelectedFileChange}
                           prNumber={o8PrNumber}
