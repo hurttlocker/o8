@@ -76,9 +76,6 @@ export function PacketRow({
         alignItems: 'center',
         gap: 10,
         borderWidth: 0,
-        borderBottomWidth: 1,
-        borderBottomStyle: 'solid',
-        borderBottomColor: 'var(--t-divider-subtle)',
         background: active ? 'var(--t-input-bg)' : 'transparent',
         color: 'var(--t-text)',
         cursor: sessionKey ? 'pointer' : 'default',
@@ -92,10 +89,10 @@ export function PacketRow({
     >
       <RuntimeIcon runtime={packet.runtime} />
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: 12.5, fontWeight: 560, letterSpacing: '-0.01em', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ display: 'block', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {packet.referenceLabel ? `${packet.referenceLabel}: ${packet.title}` : packet.title}
         </span>
-        <span style={{ display: 'block', marginTop: 3, color: 'var(--t-text-faint)', fontSize: 10.5 }}>
+        <span style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
           {packetTimeLabel(packet)}
         </span>
       </span>
@@ -122,9 +119,6 @@ export function SessionRow({
         alignItems: 'center',
         gap: 10,
         borderWidth: 0,
-        borderBottomWidth: 1,
-        borderBottomStyle: 'solid',
-        borderBottomColor: 'var(--t-divider-subtle)',
         background: 'transparent',
         color: 'var(--t-text)',
         cursor: 'pointer',
@@ -136,12 +130,11 @@ export function SessionRow({
         paddingLeft: 24,
       }}
     >
-      <RuntimeIcon runtime={session.runtime} />
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: 12, fontWeight: 540, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ display: 'block', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {session.name || session.runtime || 'Agent'}
         </span>
-        <span style={{ display: 'block', marginTop: 2, color: 'var(--t-text-faint)', fontSize: 10.5 }}>
+        <span style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
           {session.branch || 'workspace'} · {formatElapsed(session.lastActivityAt ?? session.lastEventAt)} idle
         </span>
       </span>

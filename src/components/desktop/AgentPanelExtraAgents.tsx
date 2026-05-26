@@ -32,6 +32,7 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
+import { ChevronDown, ChevronRight } from '@/components/desktop/lucide-shims';
 
 // ── Types ──
 
@@ -177,11 +178,11 @@ function buildRows(
 
   for (const lane of lanes) {
     const origin = classifyOrigin(lane.runtime, lane.ownership);
-    if (origin === 'CLI') {
-      // CLI rows already render inside repo cards via the per-branch feed.
-      if (lane.sessionKey) seenSessionKeys.add(lane.sessionKey);
-      continue;
-    }
+    // CLI lanes (MCP-dispatched codex packets, etc.) were previously
+    // skipped on the assumption that the per-branch repo-card feed
+    // already surfaced them — but that path doesn't pick up packets
+    // sitting in reviewing / awaiting_input, leaving the operator with
+    // no way to see what got spawned. Surface them here too.
     const status = classifyStatus(lane.status);
     if (lane.sessionKey) seenSessionKeys.add(lane.sessionKey);
     rows.push({
@@ -321,7 +322,10 @@ function ExtraAgentRowView({
   row: ExtraAgentRow;
   onSelectSession?: (sessionKey: string) => void;
 }) {
-  const statusColor = STATUS_COLORS[row.status];
+  // Status colors retired — Spawned agents rows now use the same motion
+  // vocabulary as the chat rows above (gray pulse for active, gray ring
+  // for idle). Keeps the panel visually unified.
+  const isActive = row.status === 'running' || row.status === 'waiting';
   const canFocus = Boolean(row.sessionKey && onSelectSession);
   const handleClick = useCallback(() => {
     if (row.sessionKey) onSelectSession?.(row.sessionKey);
@@ -358,36 +362,20 @@ function ExtraAgentRowView({
         e.currentTarget.style.background = 'transparent';
       }}
     >
-      <span
-        style={{
-          width: 6,
-          height: 6,
-          borderRadius: '50%',
-          background: statusColor,
-          flexShrink: 0,
-        }}
-      />
-      <span
-        style={{
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 18,
-          height: 18,
-          flexShrink: 0,
-          color: 'var(--t-text-muted)',
-        }}
-      >
-        <RuntimeGlyph runtime={row.runtime} />
-      </span>
+      {isActive ? (
+        <span className="o8-pulse-circle" aria-label="Working" title="Working" style={{ width: 5, height: 5 }} />
+      ) : (
+        <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5 }} />
+      )}
       <span
         style={{
           flex: 1,
           minWidth: 0,
-          fontSize: 12,
-          fontWeight: 440,
+          fontSize: 13.5,
+          fontWeight: 300,
           color: 'var(--t-text)',
-          letterSpacing: '-0.005em',
+          letterSpacing: '-0.1px',
+          lineHeight: 1.25,
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -398,9 +386,10 @@ function ExtraAgentRowView({
           <span
             style={{
               marginLeft: 6,
-              fontSize: 11,
+              fontSize: 9.5,
               color: 'var(--t-text-muted)',
-              fontWeight: 400,
+              fontWeight: 260,
+              letterSpacing: '-0.4px',
             }}
           >
             {row.subtitle}
@@ -412,52 +401,120 @@ function ExtraAgentRowView({
   );
 }
 
-function GroupHeader({ label, count }: { label: string; count: number }) {
-  return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 6,
-        paddingTop: 8,
-        paddingRight: 14,
-        paddingBottom: 3,
-        paddingLeft: 14,
-        fontFamily: FONT,
-      }}
-    >
+function GroupHeader({
+  label,
+  count,
+  collapsible = false,
+  collapsed = false,
+  onToggle,
+}: {
+  label: string;
+  count: number;
+  collapsible?: boolean;
+  collapsed?: boolean;
+  onToggle?: () => void;
+}) {
+  const body = (
+    <>
+      {collapsible ? (
+        collapsed ? (
+          <ChevronRight size={11} strokeWidth={2} style={{ color: 'var(--t-text-faint)' }} />
+        ) : (
+          <ChevronDown size={11} strokeWidth={2} style={{ color: 'var(--t-text-faint)' }} />
+        )
+      ) : (
+        // Invisible chevron slot — keeps per-repo headers aligned with the
+        // collapsible Spawned agents / Archived chevron-prefixed headers.
+        <span aria-hidden style={{ width: 11, flexShrink: 0 }} />
+      )}
       <span
         style={{
-          fontSize: 9,
-          fontWeight: 600,
-          color: 'var(--t-text-muted)',
-          textTransform: 'uppercase',
-          letterSpacing: '0.08em',
+          flex: 1,
+          minWidth: 0,
+          fontSize: 10,
+          fontWeight: 300,
+          color: 'var(--t-text-faint)',
+          letterSpacing: '-0.1px',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
         }}
       >
         {label}
       </span>
       <span
         style={{
-          fontSize: 9,
-          fontWeight: 600,
+          fontSize: 10,
+          fontWeight: 300,
           color: 'var(--t-text-faint)',
           fontFamily: '"SF Mono", ui-monospace, monospace',
+          flexShrink: 0,
         }}
       >
         {count}
       </span>
-    </div>
+    </>
   );
+
+  const commonStyle = {
+    display: 'flex',
+    alignItems: 'center',
+    gap: 6,
+    paddingTop: 8,
+    paddingRight: 12,
+    paddingBottom: 3,
+    paddingLeft: 12,
+    fontFamily: FONT,
+  };
+
+  if (collapsible && onToggle) {
+    return (
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={!collapsed}
+        title={collapsed ? `Show ${label.toLowerCase()}` : `Hide ${label.toLowerCase()}`}
+        style={{
+          ...commonStyle,
+          width: '100%',
+          borderWidth: 0,
+          background: 'transparent',
+          cursor: 'pointer',
+          outline: 'none',
+          textAlign: 'left',
+        }}
+      >
+        {body}
+      </button>
+    );
+  }
+
+  return <div style={commonStyle}>{body}</div>;
 }
 
 // ── Main component ──
+
+const COLLAPSED_KEY = 'o8:agent-panel:spawned-agents-collapsed';
 
 function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsProps) {
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false;
+    return window.localStorage.getItem(COLLAPSED_KEY) === '1';
+  });
   const abortRef = useRef<AbortController | null>(null);
+
+  const toggleCollapsed = useCallback(() => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      if (typeof window !== 'undefined') {
+        window.localStorage.setItem(COLLAPSED_KEY, next ? '1' : '0');
+      }
+      return next;
+    });
+  }, []);
 
   const fetchData = useCallback(async () => {
     abortRef.current?.abort();
@@ -466,7 +523,10 @@ function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsPro
 
     try {
       const [lanesRes, snapshotRes, reposRes] = await Promise.allSettled([
-        fetch('/api/lanes?active=true', { signal: controller.signal }),
+        // No `active=true` filter — operator wants every spawned agent
+        // visible regardless of state (reviewing / awaiting_input / idle /
+        // failed). Was hiding the entire backlog of MCP-dispatched packets.
+        fetch('/api/lanes', { signal: controller.signal }),
         fetch('/api/command-center/snapshot', { signal: controller.signal }),
         fetch('/api/panel/repos', { signal: controller.signal }),
       ]);
@@ -509,6 +569,8 @@ function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsPro
 
   if (groups.length === 0) return null;
 
+  const totalRowCount = groups.reduce((sum, group) => sum + group.rows.length, 0);
+
   return (
     <section
       style={{
@@ -521,7 +583,14 @@ function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsPro
         marginTop: 4,
       }}
     >
-      {groups.map((group) => (
+      <GroupHeader
+        label="Spawned agents"
+        count={totalRowCount}
+        collapsible
+        collapsed={collapsed}
+        onToggle={toggleCollapsed}
+      />
+      {!collapsed ? groups.map((group) => (
         <div key={group.key}>
           <GroupHeader label={group.label} count={group.rows.length} />
           {group.rows.map((row) => (
@@ -532,7 +601,7 @@ function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsPro
             />
           ))}
         </div>
-      ))}
+      )) : null}
     </section>
   );
 }

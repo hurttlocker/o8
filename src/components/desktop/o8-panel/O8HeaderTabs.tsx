@@ -1,5 +1,6 @@
 'use client';
 
+import { PageEdit } from 'iconoir-react';
 import type { O8Tab } from './types';
 
 // ── Inline SVG icons (Tauri webview doesn't reliably render React icon components) ──
@@ -56,7 +57,9 @@ const O8_TABS: O8TabDef[] = [
   { id: 'workspace', label: 'Workspace', icon: (c) => <IconWorkspace size={15} color={c} /> },
   { id: 'activity', label: 'Activity', icon: (c) => <IconActivity size={15} color={c} /> },
   { id: 'inbox', label: 'Inbox', icon: (c) => <IconInbox size={15} color={c} /> },
-  { id: 'spec', label: 'o8.md', icon: (c) => <IconFiles size={15} color={c} /> },
+  // Iconoir PageEdit — operator-locked for the o8.md spec tab. Document
+  // with a pencil reads as "the spec the agent is annotating."
+  { id: 'spec', label: 'o8.md', icon: (c) => <PageEdit width={15} height={15} color={c} strokeWidth={2} /> },
 ];
 
 function O8TabPill({

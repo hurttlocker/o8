@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { ChevronRight, Copy, Send } from '../lucide-shims';
+import { Internet } from 'iconoir-react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 
 interface PortGroup {
@@ -324,14 +325,15 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
               onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
               onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
             >
-              <span
-                style={{
-                  width: 6,
-                  height: 6,
-                  borderRadius: 3,
-                  background: 'var(--t-success)',
-                  flexShrink: 0,
-                }}
+              {/* Iconoir Internet — operator-locked glyph for web ports.
+                  Globe with cursor arrow telegraphs "click to open in
+                  browser" better than the abstract green square. */}
+              <Internet
+                width={13}
+                height={13}
+                color="var(--t-success)"
+                strokeWidth={2}
+                style={{ flexShrink: 0 }}
               />
               <span style={{ flex: 1 }}>{portLabel(port)}</span>
               <span

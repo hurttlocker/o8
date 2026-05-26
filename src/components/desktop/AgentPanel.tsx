@@ -12,8 +12,22 @@ import { AddRepoDialog } from './repo-registry/AddRepoDialog';
 import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
 import { useProjects, type ProjectRecord } from './repo-registry/useProjects';
-import { ChevronDown, Folder, MessageSquare, Play, Plus, Search, Sparkles, Terminal, Zap, type LucideIcon } from './lucide-shims';
+import { ChevronDown, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
+import { AutoFlash, FolderSettings, InputSearch } from 'iconoir-react';
 import { repoSlugFromRemote } from './canvas-utils';
+
+// ── Iconoir → Lucide-shaped adapters ──────────────────────────────────
+// MiniAgentPanelAction wants a LucideIcon (size + strokeWidth). Iconoir
+// uses width/height. Tiny wrappers keep the AgentPanel callsite clean.
+const FolderIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
+  <FolderSettings width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
+);
+const SearchIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
+  <InputSearch width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
+);
+const AutomationsIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
+  <AutoFlash width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
+);
 import {
   AgentPanelEmptyState,
   SidebarSection,
@@ -300,11 +314,17 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           scrollbarWidth: 'none',
           msOverflowStyle: 'none',
           WebkitOverflowScrolling: 'touch',
-          paddingTop: effectiveTitlebarSpacerHeight > 10 ? 2 : 0,
+          paddingTop: effectiveTitlebarSpacerHeight > 10 ? 14 : 12,
           paddingBottom: 18,
           display: 'flex',
           flexDirection: 'column',
           gap: 0,
+          // Symmetric fade — top edge softens against the navigation
+          // section above, bottom edge fades into the button dock below.
+          // Matches the o8.md panel pattern; 16px top + 32px bottom keeps
+          // the bottom dock visually anchored while letting the top blend.
+          maskImage: 'linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 32px), transparent 100%)',
+          WebkitMaskImage: 'linear-gradient(to bottom, transparent 0px, black 16px, black calc(100% - 32px), transparent 100%)',
         } as CSSProperties}
         className="hide-scrollbar"
       >
@@ -410,6 +430,10 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             groupMode="flat"
             showKindInMeta
             packets={orchestratorMissionState?.packets ?? orchestratorPackets}
+            // Spawned agents lands between the active chats and the
+            // Archived section per operator's hierarchy: chats →
+            // spawned → archived. Same data source as before.
+            slotBeforeArchived={<AgentPanelExtraAgents onSelectSession={onSelectSession} />}
           />
         </section>
 
@@ -419,11 +443,6 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             tab open. The repo list above is the primary panel content;
             discovered agent sessions appear inline on branch rows when
             they exist. */}
-
-        {/* #627 fold-in — non-CLI origin agents (MCP, Mobile, Webhook,
-            Cloud) grouped by their bound repo, with a final "Other" group
-            for cross-repo agents. Renders nothing when absent. */}
-        <AgentPanelExtraAgents onSelectSession={onSelectSession} />
 
         {/* Repo focus is no longer an overlay — when focusActive, the
             AgentPanel returns LeftPanelRepoFocus inline above (the column
@@ -503,7 +522,7 @@ function MiniAgentPanelHeader({
           />
         ) : null}
         <MiniAgentPanelAction
-          icon={Search}
+          icon={SearchIcon}
           label="Search"
           onClick={() => {
             setSessionMenuOpen(false);
@@ -512,7 +531,7 @@ function MiniAgentPanelHeader({
           disabled={!onSearch}
         />
         <MiniAgentPanelAction
-          icon={Zap}
+          icon={AutomationsIcon}
           label="Automations"
           onClick={() => {
             setSessionMenuOpen(false);
@@ -524,7 +543,7 @@ function MiniAgentPanelHeader({
           }}
         />
         <MiniAgentPanelAction
-          icon={Folder}
+          icon={FolderIcon}
           label="Projects"
           active={projectsOpen}
           disclosure
@@ -660,9 +679,10 @@ function MiniSessionMenuItem({
         <span
           style={{
             display: 'block',
-            fontSize: 12,
-            lineHeight: '15px',
-            fontWeight: 520,
+            fontSize: 13.5,
+            lineHeight: 1.25,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -673,10 +693,11 @@ function MiniSessionMenuItem({
         <span
           style={{
             display: 'block',
-            marginTop: 1,
-            fontSize: 10.5,
-            lineHeight: '13px',
-            fontWeight: 400,
+            marginTop: 4,
+            fontSize: 9.5,
+            lineHeight: 1.25,
+            fontWeight: 260,
+            letterSpacing: '-0.4px',
             color: 'var(--t-text-muted)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -756,10 +777,10 @@ function MiniAgentPanelAction({
         <span
           style={{
             display: 'block',
-            fontSize: 12.5,
-            lineHeight: '15px',
-            fontWeight: 500,
-            letterSpacing: 0,
+            fontSize: 13.5,
+            lineHeight: 1.25,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -900,10 +921,10 @@ function MiniProjectsMenu({
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
-                    fontSize: 12,
-                    lineHeight: '15px',
-                    fontWeight: active ? 620 : 520,
-                    letterSpacing: 0,
+                    fontSize: 13.5,
+                    lineHeight: 1.25,
+                    fontWeight: active ? 440 : 300,
+                    letterSpacing: '-0.1px',
                   }}
                 >
                   {project.name}
@@ -911,9 +932,10 @@ function MiniProjectsMenu({
                 <span
                   style={{
                     color: 'var(--t-text-faint)',
-                    fontSize: 10.5,
-                    lineHeight: '14px',
-                    fontWeight: 500,
+                    fontSize: 9.5,
+                    lineHeight: 1.25,
+                    fontWeight: 260,
+                    letterSpacing: '-0.4px',
                     flexShrink: 0,
                   }}
                 >
@@ -1009,10 +1031,10 @@ function MiniProjectsMenu({
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
-                            fontSize: 11.5,
-                            lineHeight: '14px',
-                            fontWeight: 500,
-                            letterSpacing: 0,
+                            fontSize: 12.5,
+                            lineHeight: 1.25,
+                            fontWeight: 300,
+                            letterSpacing: '-0.1px',
                           }}
                         >
                           {label}
@@ -1026,7 +1048,7 @@ function MiniProjectsMenu({
           );
         })
       ) : (
-        <div style={{ padding: '8px 7px', color: 'var(--t-text-faint)', fontSize: 11.5, lineHeight: '15px' }}>
+        <div style={{ padding: '8px 7px', color: 'var(--t-text-faint)', fontSize: 12.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>
           No projects yet
         </div>
       )}
@@ -1051,10 +1073,10 @@ function MiniProjectsMenu({
           paddingLeft: 30,
           textAlign: 'left',
           fontFamily: 'var(--font-sans-system)',
-          fontSize: 11.5,
-          lineHeight: '15px',
-          fontWeight: 560,
-          letterSpacing: 0,
+          fontSize: 13,
+          lineHeight: 1.25,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
           transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
         onMouseEnter={(event) => {
@@ -1089,10 +1111,10 @@ function MiniProjectsMenu({
           paddingLeft: 30,
           textAlign: 'left',
           fontFamily: 'var(--font-sans-system)',
-          fontSize: 11.5,
-          lineHeight: '15px',
-          fontWeight: 560,
-          letterSpacing: 0,
+          fontSize: 13,
+          lineHeight: 1.25,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
           transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
         onMouseEnter={(event) => {

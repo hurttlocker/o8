@@ -15,13 +15,17 @@
  * tabs.
  */
 
-import { memo, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChromeButton } from './chrome/ChromeButton';
 import { MergeActionCluster } from './MergeActionCluster';
 import { FooterPorts } from './desktop-status-bar/footer-ports';
 import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
 import { DeviceMobileIcon, FolderPlusIcon, GearSixIcon } from './desktop-status-bar/status-bar-icons';
+import { Terminal as TablerTerminal } from './tabler-shims';
 import { SettingsQuickDrawer } from './SettingsQuickDrawer';
+import type { BottomPanelSurfaceKind } from './ContextualPanel';
+
+const COLLAPSED_LEFT_FOOTER_WIDTH = 34;
 
 interface DesktopStatusBarProps {
   branchName: string | null;
@@ -45,6 +49,7 @@ interface DesktopStatusBarProps {
    *  column next to the branch label. */
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
+  onOpenBottomPanelSurface?: (surface: BottomPanelSurfaceKind) => void;
   /** Open the keyboard-shortcuts reference overlay (also bound to ⌘/). */
   onOpenShortcuts?: () => void;
 }
@@ -55,6 +60,7 @@ function DesktopStatusBarBase({
   repoRemoteUrl = null,
   bottomPanelVisible = false,
   onToggleBottomPanel,
+  onOpenBottomPanelSurface,
   onOpenShortcuts,
   leftColumnWidth,
   rightColumnWidth,
@@ -67,6 +73,12 @@ function DesktopStatusBarBase({
   const settingsButtonRef = useRef<HTMLDivElement | null>(null);
   const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
   const [settingsAnchorRect, setSettingsAnchorRect] = useState<DOMRect | null>(null);
+  const leftFooterCollapsed = !compact && (leftColumnWidth ?? 0) <= 0;
+  const leftFooterWidth = compact
+    ? 'auto'
+    : leftFooterCollapsed
+      ? COLLAPSED_LEFT_FOOTER_WIDTH
+      : leftColumnWidth;
 
   const syncSettingsAnchor = useCallback(() => {
     setSettingsAnchorRect(settingsButtonRef.current?.getBoundingClientRect() ?? null);
@@ -130,7 +142,7 @@ function DesktopStatusBarBase({
           panel content and footer buttons. */}
       <div
         style={{
-          width: compact ? 'auto' : leftColumnWidth,
+          width: leftFooterWidth,
           flexShrink: 0,
           display: 'flex',
           // Buffer mirrors the panel card's: 5px on left/right/bottom,
@@ -157,9 +169,9 @@ function DesktopStatusBarBase({
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            gap: 6,
-            paddingLeft: 10,
-            paddingRight: 10,
+            gap: leftFooterCollapsed ? 0 : 6,
+            paddingLeft: leftFooterCollapsed ? 0 : 10,
+            paddingRight: leftFooterCollapsed ? 0 : 10,
             background: 'var(--t-panel-solid)',
             borderTopLeftRadius: 0,
             borderTopRightRadius: 0,
@@ -189,7 +201,7 @@ function DesktopStatusBarBase({
             onClose={closeSettingsDrawer}
             onOpenSettings={openFullSettings}
           />
-          {!compact ? (
+          {!compact && !leftFooterCollapsed ? (
             <>
               <ChromeButton
                 icon={<DeviceMobileIcon size={14} />}
@@ -229,9 +241,10 @@ function DesktopStatusBarBase({
           compact={compact}
         />
         {!compact && onToggleBottomPanel ? (
-          <StatusTerminalToggle
+          <StatusBottomPanelControl
             active={bottomPanelVisible}
-            onClick={onToggleBottomPanel}
+            onToggle={onToggleBottomPanel}
+            onOpenSurface={onOpenBottomPanelSurface}
           />
         ) : null}
       </div>
@@ -256,40 +269,222 @@ function DesktopStatusBarBase({
 
 export const DesktopStatusBar = memo(DesktopStatusBarBase);
 
-/** Terminal toggle pill that lives alongside the branch label in the
- *  status bar's center column. Chrome-less by design — just the icon,
- *  hover tints the background. Operator wanted it down here next to
- *  "main" rather than floating mid-workspace. */
-function StatusTerminalToggle({ active, onClick }: { active: boolean; onClick: () => void }) {
+const BOTTOM_PANEL_OPTIONS: Array<{
+  id: BottomPanelSurfaceKind;
+  label: string;
+  detail: string;
+  icon: (size?: number) => ReactNode;
+}> = [
+  { id: 'files', label: 'Files', detail: 'Browse project files', icon: (size = 14) => <FilesGlyph size={size} /> },
+  { id: 'side-chat', label: 'Side chat', detail: 'Start a side conversation', icon: (size = 14) => <ChatGlyph size={size} /> },
+  { id: 'browser', label: 'Browser', detail: 'Open a website', icon: (size = 14) => <BrowserGlyph size={size} /> },
+  { id: 'review', label: 'Review', detail: 'View code changes', icon: (size = 14) => <ReviewGlyph size={size} /> },
+  { id: 'terminal', label: 'Terminal', detail: 'Start an interactive shell', icon: (size = 14) => <TerminalGlyph size={size} /> },
+];
+
+/** Bottom panel control modeled after the Codex bottom-panel affordance:
+ *  primary click toggles the drawer, chevron opens the surface picker. */
+function StatusBottomPanelControl({
+  active,
+  onToggle,
+  onOpenSurface,
+}: {
+  active: boolean;
+  onToggle: () => void;
+  onOpenSurface?: (surface: BottomPanelSurfaceKind) => void;
+}) {
   const [hovered, setHovered] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handlePointer = (event: MouseEvent) => {
+      if (menuRef.current?.contains(event.target as Node)) return;
+      setMenuOpen(false);
+    };
+    const handleKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    document.addEventListener('mousedown', handlePointer);
+    document.addEventListener('keydown', handleKey);
+    return () => {
+      document.removeEventListener('mousedown', handlePointer);
+      document.removeEventListener('keydown', handleKey);
+    };
+  }, [menuOpen]);
+
+  const openSurface = (surface: BottomPanelSurfaceKind) => {
+    setMenuOpen(false);
+    onOpenSurface?.(surface);
+  };
+
   return (
-    <button
-      type="button"
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      aria-label="Toggle terminal"
-      title="Toggle terminal (⌘J)"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 22,
-        height: 22,
-        borderRadius: 6,
-        borderWidth: 0,
-        background: hovered ? 'var(--t-hover)' : 'transparent',
-        color: active ? 'var(--t-accent)' : 'var(--t-text-secondary)',
-        cursor: 'pointer',
-        padding: 0,
-        transition: 'background 120ms ease, color 120ms ease',
-      }}
-    >
-      <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="m4 17 6-6-6-6" />
-        <line x1="12" x2="20" y1="19" y2="19" />
-      </svg>
-    </button>
+    <div ref={menuRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+      <div
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          height: 26,
+          borderRadius: 8,
+          background: hovered || menuOpen ? 'var(--t-hover)' : 'transparent',
+          color: active ? 'var(--t-accent)' : 'var(--t-text-secondary)',
+          transition: 'background 120ms ease, color 120ms ease',
+          overflow: 'hidden',
+        }}
+      >
+        <button
+          type="button"
+          onClick={onToggle}
+          aria-label="Toggle bottom panel"
+          title="Toggle bottom panel"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 28,
+            height: 26,
+            borderWidth: 0,
+            background: 'transparent',
+            color: 'inherit',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          <TerminalGlyph size={14} />
+        </button>
+        <button
+          type="button"
+          onClick={() => setMenuOpen((open) => !open)}
+          aria-label="Choose bottom panel surface"
+          title="Choose bottom panel surface"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 22,
+            height: 26,
+            borderWidth: 0,
+            borderLeft: '1px solid var(--t-divider-subtle)',
+            background: 'transparent',
+            color: 'inherit',
+            cursor: 'pointer',
+            padding: 0,
+          }}
+        >
+          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
+      </div>
+
+      {menuOpen ? (
+        <div
+          role="menu"
+          style={{
+            position: 'absolute',
+            bottom: 34,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            width: 520,
+            display: 'grid',
+            gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+            gap: 8,
+            padding: 10,
+            borderRadius: 14,
+            background: 'var(--t-panel-solid)',
+            border: '1px solid var(--t-panel-border)',
+            boxShadow: 'var(--t-panel-shadow), 0 18px 44px rgba(15, 23, 42, 0.20)',
+            zIndex: 120,
+          }}
+        >
+          {BOTTOM_PANEL_OPTIONS.map((option) => (
+            <button
+              key={option.id}
+              type="button"
+              role="menuitem"
+              onClick={() => openSurface(option.id)}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 8,
+                minHeight: 96,
+                borderRadius: 10,
+                border: '1px solid transparent',
+                background: 'color-mix(in srgb, var(--t-panel) 70%, transparent)',
+                color: 'var(--t-text)',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-sans-system)',
+                textAlign: 'center',
+                padding: 10,
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = 'var(--t-hover)';
+                event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = 'color-mix(in srgb, var(--t-panel) 70%, transparent)';
+                event.currentTarget.style.borderColor = 'transparent';
+              }}
+            >
+              <span style={{ color: 'var(--t-text-secondary)' }}>{option.icon(18)}</span>
+              <span style={{ fontSize: 12.5, fontWeight: 750 }}>{option.label}</span>
+              <span style={{ fontSize: 11, lineHeight: 1.35, color: 'var(--t-text-muted)' }}>{option.detail}</span>
+            </button>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function TerminalGlyph({ size = 14 }: { size?: number }) {
+  // Tabler Terminal2 — operator-locked icon for the bottom-area
+  // terminal affordance. See Hurttlocker.md§"Icon vocabulary".
+  return <TablerTerminal size={size} strokeWidth={2} />;
+}
+
+function FilesGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z" />
+      <path d="M2 10h20" />
+    </svg>
+  );
+}
+
+function ChatGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
+      <path d="M8 9h8" />
+      <path d="M8 13h5" />
+    </svg>
+  );
+}
+
+function BrowserGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 0 1 0 20" />
+      <path d="M12 2a15.3 15.3 0 0 0 0 20" />
+    </svg>
+  );
+}
+
+function ReviewGlyph({ size = 14 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2v6h6" />
+      <path d="m9 15 2 2 4-5" />
+    </svg>
   );
 }
 

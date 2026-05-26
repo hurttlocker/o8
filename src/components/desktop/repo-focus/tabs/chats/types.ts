@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession, RepoFocusRepo } from '../../types';
@@ -49,6 +50,10 @@ export interface ChatsTabProps {
   groupMode?: 'sections' | 'flat';
   showKindInMeta?: boolean;
   packets?: OrchestratorPacket[];
+  /** Optional slot rendered between the active chats list and the Archived
+   *  section so callers can interleave related content (e.g. the Spawned
+   *  agents section) without it being pushed below Archived. */
+  slotBeforeArchived?: ReactNode;
 }
 
 export interface HistoryActionMenuState {

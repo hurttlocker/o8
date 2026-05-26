@@ -87,11 +87,6 @@ interface WorkspaceHeaderStripProps {
   onSpawnOrchestrator?: () => void;
   onSpawnChat?: () => void;
   onSpawnTerminal?: () => void;
-  /** Right-click handler on the play button — operator-driven power
-   *  feature: secondary-click ▶ opens the current workspace AS a split
-   *  pane. The split-button affordance is hidden under this gesture
-   *  rather than promoted as a primary toolbar icon. */
-  onPlayContextMenu?: () => void;
 }
 
 export function WorkspaceHeaderStrip({
@@ -110,7 +105,6 @@ export function WorkspaceHeaderStrip({
   onSpawnOrchestrator,
   onSpawnChat,
   onSpawnTerminal,
-  onPlayContextMenu,
   headerTabs,
   headerActiveTabId,
   projectContextRailAvailable = false,
@@ -197,7 +191,6 @@ export function WorkspaceHeaderStrip({
                 onSpawnOrchestrator={onSpawnOrchestrator}
                 onSpawnChat={onSpawnChat}
                 onSpawnTerminal={onSpawnTerminal}
-                onContextMenu={onPlayContextMenu}
               />
             ) : null}
             {onToggleBottomPanel ? (
@@ -601,13 +594,11 @@ function HeaderPlayButton({
   onSpawnOrchestrator,
   onSpawnChat,
   onSpawnTerminal,
-  onContextMenu,
   ariaSuffix,
 }: {
   onSpawnOrchestrator?: () => void;
   onSpawnChat?: () => void;
   onSpawnTerminal?: () => void;
-  onContextMenu?: () => void;
   /** Disambiguates the aria-label when two play buttons coexist in a
    *  split (e.g. "New tab (left pane)") — without this Playwright and
    *  other a11y tooling hit strict-mode duplicate-label violations. */
@@ -645,19 +636,13 @@ function HeaderPlayButton({
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
-        onContextMenu={(event) => {
-          if (!onContextMenu) return;
-          event.preventDefault();
-          setOpen(false);
-          onContextMenu();
-        }}
         onMouseEnter={() => setHovered(true)}
         onMouseLeave={() => setHovered(false)}
         aria-label={ariaSuffix ? `New tab (${ariaSuffix})` : 'New tab'}
         aria-haspopup="menu"
         aria-expanded={open}
         aria-controls={menuId}
-        title={onContextMenu ? 'New tab (⌘T) · right-click to split' : 'New tab (⌘T)'}
+        title="New tab (⌘T)"
         style={{
           // Matched to HeaderIconPill: 26 tall, 7px radius, transparent →
           // var(--t-hover) on hover. Keeps the accent color since play is

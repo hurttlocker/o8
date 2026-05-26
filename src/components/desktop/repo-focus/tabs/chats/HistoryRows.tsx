@@ -18,6 +18,36 @@ import type { ArchivedLaneRow, ChatHistoryItem, HistoryRowTone } from './types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../../types';
 
+// Merged-state glyph — Claude-style purple branch-merge mark. Static (no
+// animation) so it sits quietly alongside the gray rings, but the color
+// breaks the gray rhythm enough to catch the eye on a long list. Sized
+// to match the 5px ring footprint so the row alignment stays clean.
+function MergedGlyph() {
+  return (
+    <span
+      aria-label="Merged"
+      title="Merged"
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 9,
+        height: 9,
+        flexShrink: 0,
+        color: '#8b5cf6',
+      }}
+    >
+      <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <circle cx="3" cy="3" r="1.5" />
+        <circle cx="3" cy="9" r="1.5" />
+        <circle cx="9" cy="6" r="1.5" />
+        <path d="M3 4.5v3" />
+        <path d="M4.5 3c0 1.5 1.5 3 3 3" />
+      </svg>
+    </span>
+  );
+}
+
 export function ArchivedLaneCompactRow({
   lane,
   onSelectSession,
@@ -50,9 +80,6 @@ export function ArchivedLaneCompactRow({
         display: 'flex',
         alignItems: 'center',
         gap: 8,
-        borderBottomWidth: 1,
-        borderBottomStyle: 'solid',
-        borderBottomColor: 'var(--t-divider-subtle)',
         background: hovered && !disabled ? 'var(--t-hover)' : 'transparent',
         color: 'var(--t-text)',
         cursor: disabled ? 'default' : 'pointer',
@@ -97,10 +124,10 @@ export function ArchivedLaneCompactRow({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontSize: 11.5,
-          fontWeight: 500,
-          letterSpacing: '-0.005em',
-          lineHeight: 1.3,
+          fontSize: 13.5,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
+          lineHeight: 1.25,
           color: 'var(--t-text-muted)',
         }}
       >
@@ -124,9 +151,6 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
         display: 'flex',
         alignItems: 'center',
         gap: compact ? 6 : 8,
-        borderBottomWidth: 1,
-        borderBottomStyle: 'solid',
-        borderBottomColor: 'var(--t-divider-subtle)',
         background: 'transparent',
         color: 'var(--t-text)',
         textAlign: 'left',
@@ -156,9 +180,10 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
         <span
           style={{
             display: 'block',
-            fontSize: compact ? 11.25 : 12,
-            lineHeight: compact ? '15px' : '16px',
-            fontWeight: 500,
+            fontSize: 13.5,
+            lineHeight: 1.25,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -169,10 +194,12 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
         <span
           style={{
             display: 'block',
-            marginTop: 1,
+            marginTop: 4,
             color: 'var(--t-text-faint)',
-            fontSize: compact ? 9.75 : 10.25,
-            lineHeight: compact ? '12px' : '13px',
+            fontSize: 9.5,
+            lineHeight: 1.25,
+            fontWeight: 260,
+            letterSpacing: '-0.4px',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -211,6 +238,7 @@ export function HistoryChatRow({
     { text: formatElapsedAgo(item.modifiedAt), status: false },
   ].filter((part): part is { text: string; status: boolean } => Boolean(part?.text));
   const shimmerStatus = rowTone.key === 'running' || rowTone.key === 'review';
+  const mergedStatus = rowTone.key === 'merged';
 
   return (
     <div
@@ -238,9 +266,6 @@ export function HistoryChatRow({
         display: 'flex',
         alignItems: 'center',
         gap: compact ? 6 : 8,
-        borderBottomWidth: 1,
-        borderBottomStyle: 'solid',
-        borderBottomColor: rowTone.border,
         background: active ? rowTone.background : hovered ? 'var(--t-hover)' : rowTone.background,
         color: 'var(--t-text)',
         cursor: disabled ? 'default' : 'pointer',
@@ -248,41 +273,40 @@ export function HistoryChatRow({
         textAlign: 'left',
         outline: 'none',
         fontFamily: REPO_FOCUS_FONT,
-        paddingTop: compact ? 2 : 5,
+        paddingTop: 5,
         paddingRight: compact ? 10 : 12,
-        paddingBottom: compact ? 2 : 5,
+        paddingBottom: 5,
         paddingLeft: compact ? 10 : 12,
         transition: 'background 180ms ease, opacity 180ms ease',
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: compact ? 16 : 20,
-          height: compact ? 16 : 20,
-          borderRadius: compact ? 5 : 6,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          background: rowTone.iconBackground,
-          color: rowTone.iconColor,
-        }}
-      >
-        <RuntimeHistoryIcon item={item} size={compact ? 11 : 14} />
-      </span>
+      {shimmerStatus ? (
+        // Motion vocab B — chat has an active running/reviewing packet.
+        <span className="o8-pulse-circle" aria-label="Agent working" title="Agent working" />
+      ) : mergedStatus ? (
+        // Motion vocab: merged → distinctive purple branch glyph that
+        // catches the eye against the gray rings everywhere else.
+        <MergedGlyph />
+      ) : (
+        // Motion vocab A — every idle chat carries the tiny ring so the
+        // pulse / merged glyph reads as a state change against a baseline.
+        <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5 }} />
+      )}
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
           className={active ? 'o8-text-shimmer' : undefined}
           style={{
             display: 'block',
-            fontSize: compact ? 10.75 : 12,
-            lineHeight: compact ? '13px' : '16px',
-            fontWeight: 400,
+            fontSize: 13.5,
+            lineHeight: 1.25,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            ...(active ? shimmerTextStyle('var(--t-text)', 'var(--t-accent)') : {}),
+            // Focused-row title shimmer — flare at 95% white-ish so the
+            // sweep reads against the dark base text without going blue.
+            ...(active ? shimmerTextStyle('var(--t-text)', 'rgba(120, 130, 145, 0.95)') : {}),
           }}
         >
           {item.title}
@@ -291,10 +315,12 @@ export function HistoryChatRow({
           <span
             style={{
               display: 'block',
-              marginTop: 1,
+              marginTop: 4,
               color: 'var(--t-text-faint)',
-              fontSize: compact ? 9.75 : 10.25,
-              lineHeight: compact ? '12px' : '13px',
+              fontSize: 9.5,
+              lineHeight: 1.25,
+              fontWeight: 260,
+              letterSpacing: '-0.4px',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
@@ -333,22 +359,9 @@ export function CompactSessionRow({
   const metaLabel = automation
     ? `${session.branch || 'workspace'} · automation · ${session.status}`
     : `${session.branch || 'workspace'} · ${formatElapsed(session.lastActivityAt ?? session.lastEventAt)} idle`;
-  const runtimeItem: ChatHistoryItem = {
-    tabId: session.sessionKey,
-    title: session.name,
-    preview: '',
-    empty: false,
-    messageCount: 0,
-    model: session.runtime,
-    savedAt: session.lastEventAt,
-    modifiedAt: session.lastEventAt,
-    starred: false,
-    pinned: false,
-    repoName: null,
-    repoPath: session.workspace,
-    repoBranch: session.branch,
-    remoteUrl: null,
-  };
+  // Motion vocabulary: running → pulse (B), anything else → ring (A) since
+  // the row only renders for live sessions in the first place ("alive").
+  const isRunning = (session.status ?? '').toLowerCase() === 'running';
   return (
     <button
       type="button"
@@ -360,9 +373,6 @@ export function CompactSessionRow({
         alignItems: 'center',
         gap: 7,
         borderWidth: 0,
-        borderBottomWidth: 1,
-        borderBottomStyle: 'solid',
-        borderBottomColor: 'var(--t-divider-subtle)',
         background: 'transparent',
         color: 'var(--t-text)',
         cursor: 'pointer',
@@ -375,26 +385,16 @@ export function CompactSessionRow({
         paddingLeft: 10,
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: 18,
-          height: 18,
-          borderRadius: 6,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          color: 'var(--t-text-muted)',
-        }}
-      >
-        <RuntimeHistoryIcon item={runtimeItem} size={13} />
-      </span>
+      {isRunning ? (
+        <span className="o8-pulse-circle" aria-label="Working" title="Working" style={{ width: 5, height: 5 }} />
+      ) : (
+        <span className="o8-static-ring" aria-label="Idle session" title="Idle session" style={{ width: 5, height: 5 }} />
+      )}
       <span style={{ flex: 1, minWidth: 0 }}>
-        <span style={{ display: 'block', fontSize: 11.25, lineHeight: '15px', fontWeight: 400, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ display: 'block', fontSize: 13.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {session.name || session.runtime || 'Agent'}
         </span>
-        <span style={{ display: 'block', marginTop: 1, color: 'var(--t-text-faint)', fontSize: 9.75, lineHeight: '12px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ display: 'block', marginTop: 4, color: 'var(--t-text-faint)', fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {metaLabel}
         </span>
       </span>
