@@ -66,6 +66,7 @@ import {
   appendMobileOrchestratorUserMessage,
   listMobileOrchestratorRevealRequests,
   listMobileOrchestratorThreads,
+  upsertMobileOrchestratorAssistantMessage,
   writeOrchestratorBackendSessionId,
 } from './lib/mobile/orchestrator-thread-history';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
@@ -2316,6 +2317,44 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   // #624 — Declared outside try so the catch can also release the entry.
   let turnController: AbortController | null = null;
 
+  // Durable assistant persistence for canonical thoughts-* threads. Even if
+  // the mobile preview sheet closes or no full /chat client is open, the
+  // streamed assistant text is appended to ~/.o8/chat-history/<thread>.json
+  // so the next list/restore sees it. Stable messageId across deltas means
+  // a later client POST that replaces the array can't double-write.
+  const isThreadBacked = typeof threadId === 'string' && threadId.startsWith('thoughts-');
+  const assistantMessageId = isThreadBacked ? `assistant-${Date.now()}` : null;
+  const assistantStartedAtMs = Date.now();
+  let assistantTextAccum = '';
+  let lastPersistedAssistantText = '';
+
+  const persistAssistantText = (sessionId: string | null) => {
+    if (!isThreadBacked || !assistantMessageId) return;
+    if (!assistantTextAccum || assistantTextAccum === lastPersistedAssistantText) return;
+    try {
+      const updatedThread = upsertMobileOrchestratorAssistantMessage({
+        tabId: threadId,
+        repoPath,
+        messageId: assistantMessageId,
+        content: assistantTextAccum,
+        backend: backend.id,
+        sessionId,
+        model: model ?? null,
+        timestampMs: assistantStartedAtMs,
+      });
+      lastPersistedAssistantText = assistantTextAccum;
+      if (updatedThread) {
+        broadcast({
+          channel: 'orchestrator-threads',
+          event: 'upsert',
+          data: { thread: updatedThread },
+        });
+      }
+    } catch (err) {
+      console.warn('[ws-server][orchestrator] failed to persist assistant message', err);
+    }
+  };
+
   try {
     console.log(`[ws-server][orchestrator] Routing chat via ${backend.label}${agentId ? ` (agent ${agentId})` : ''}`);
 
@@ -2392,6 +2431,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
 
       switch (event.type) {
         case 'text':
+          if (isThreadBacked) {
+            assistantTextAccum += event.text;
+          }
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'output',
@@ -2436,6 +2478,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           if (threadId && event.sessionId && (backend.id === 'claude' || backend.id === 'codex')) {
             writeOrchestratorBackendSessionId(threadId, backend.id, event.sessionId);
           }
+          persistAssistantText(event.sessionId ?? null);
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'status',
@@ -2444,6 +2487,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           break;
 
         case 'error':
+          persistAssistantText(null);
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'error',
@@ -2467,6 +2511,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     if (turnController && orchestratorInflightAborts.get(abortKey) === turnController) {
       orchestratorInflightAborts.delete(abortKey);
     }
+    // Save any partial assistant text accumulated before the failure so
+    // mobile listings still show what arrived rather than a blank turn.
+    persistAssistantText(null);
     send(client, {
       channel: 'orchestrator',
       event: 'error',
