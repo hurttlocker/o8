@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What Is This
 
-**o8** (formerly Cortex IDE) is a Next.js 16 + Tauri v2 desktop app — **the governance layer for autonomous engineering teams**. Approvals, audit, organizational memory, and mobile operator control across any AI provider. Claude is the orchestrator/brain; Codex is the workhorse executing tasks in worktrees. It runs two agent runtimes (Codex, Claude Code) through a universal CLI-based adapter interface, with separate desktop and mobile surfaces.
+**o8** (formerly Cortex IDE) is a Next.js 16 + Tauri v2 desktop app — **the governance layer for autonomous engineering teams**. Approvals, audit, organizational memory, and mobile operator control across any AI provider.
+
+**Shipping runtime pattern (v1):** Claude Code orchestrates, Codex works. Specifically — Claude Code running as an interactive **REPL** spawn (subscription-billed; **not** `claude -p` print mode, which was retired in epic #1066 because it billed against the Agent SDK pool) is the orchestrator; Codex GPT-5.5 xhigh is the worker that runs in isolated worktrees. Gemini and opencode adapters are wired in code for future expansion but are not the primary dispatch path. All four runtimes route through a universal CLI-based adapter interface (`src/lib/runtimes/`), with separate desktop and mobile surfaces.
 
 See `docs/o8-product-brief.md` for the full product vision, monetization, and Karpathy alignment.
 
@@ -55,22 +57,30 @@ Runs on push/PR to `main`: TypeCheck → Lint → Build (Node 22, `npm ci`). Bui
 
 **Karpathy lens (Software 3.0).** Control plane, not an editor. Intent over instruction. Observable agents. Human oversight as a feature, not a bottleneck.
 
+**hurttlocker lens (eye ergonomics).** Tune icons, font weights, stroke widths, and contrast for the human eye — not for the design system's defaults. If the spec says weight 400 but it reads thin and strainy at our actual density, bump it. If a Lucide icon disappears against the chrome, swap libraries (Tabler / Iconoir) until it reads. Sustained, all-day legibility beats spec fidelity. When in doubt, ship what's comfortable to *look at for eight hours*, not what matches a Figma frame. **Locked typography + icon + layout values live in [`hurttlocker.md`](./hurttlocker.md)** — read it before changing any row geometry, font weight, or chrome icon. Symlinked to `~/hurttlocker.md` for cross-project reference.
+
 **Design language.** See [`DESIGN.md`](./DESIGN.md) for the authoritative palette, typography, layout primitives, and motif vocabulary. Sister spec: `o8-site/THEME.md` for the marketing side. Read DESIGN.md before styling any new surface; read THEME.md before touching the landing.
 
 ## Architecture
 
 ### Desktop Layout (`src/app/dashboard/page.tsx`)
 ```
-┌─────────────────────────────────────────────────┐
-│ TitleBar (44px, drag region, traffic lights)     │
-├─────────────────────────────────────────────────┤
-│ SessionTimeline (36px, day-level activity)        │
-├──────┬──────────────────────┬───────────────────┤
-│ Nav  │    AgentPanel (left)  │  Center Workspace │ Chat │
-│ Rail │    or IntentCanvas    │  (Canvas/Settings) │      │
-│ 56px │    or SettingsPage    │                    │      │
-└──────┴──────────────────────┴───────────────────┘
+┌────────────────────────────────────────────────────────────────────┐
+│ TitleBar  (drag region · traffic lights · Agents / Alerts buttons)  │
+├────────────────────────────────────────────────────────────────────┤
+│ SessionTimeline  (36px · OFF by default since epic #1089)            │
+├──────────────────────┬──────────────────────────┬──────────────────┤
+│   AgentPanel (left)   │  TileContainer (center)  │  O8Panel (right) │
+│   resizable column    │  WorkspaceTerminal tiles │  440px default   │
+│   project drawer +    │  with per-column strips  │  Pulse / Browser │
+│   LeftPanelProject…   │  (tab pills, no global   │  PRs / Inbox /   │
+│                       │   titlebar inside tiles) │  Activity / o8.md│
+├──────────────────────┴──────────────────────────┴──────────────────┤
+│ DesktopStatusBar  (Settings · Ports · Add-repo · Terminal · Theme)   │
+└────────────────────────────────────────────────────────────────────┘
 ```
+
+**NavRail was retired** (epic #1089) — Agents / Alerts buttons live in TitleBar; Settings / Ports / Add-repo live in DesktopStatusBar. Each WorkspaceTerminal tile inside TileContainer owns its own column strip (tab pills, kind switcher) — there is no longer one global title bar for tiles. LLM chat is a tab kind (`llm-chat`) inside WorkspaceTerminal, not a separate right column.
 
 ### Runtime Adapter System (`src/lib/runtimes/`)
 
@@ -96,7 +106,7 @@ Separate process on port 3002 (proxied via Next.js rewrite at `/ws`). Multiplexe
 
 Channel semantics matter:
 - **LOSSY** channels (`chat` deltas, `terminal` data, `pong`): intermediate messages dropped under backpressure
-- **DURABLE** channels (`inbox`, `history`, `review`, `conflicts`): queued, with safety-net polling fallback (8–10s)
+- **DURABLE** channels (`inbox`, `history`, `review`, `conflicts`, `lane-lifecycle`, `agent-lifecycle`, `cortex-changes`): queued, with safety-net polling fallback (8–10s)
 
 Backpressure: 64KB buffer limit, max 32 queued messages, 50ms flush interval.
 
@@ -110,11 +120,11 @@ These are **completely separate codebases** by design. No shared components. Mob
 
 SQLite via better-sqlite3 + Drizzle ORM. Data dir: `~/.o8/` (override: `CORTEX_IDE_DATA_DIR`). WAL mode, normal sync, FK constraints on. Schema auto-migrates on first `getDb()` call — markers at `~/.o8/.db-migrated-v*`.
 
-Core tables: users, api_keys (AES-256-GCM encrypted), usage_logs, subscriptions, sessions, teams, team_members, waitlist, session_outcomes (Cortex v2 ledger), lanes, approvals, watched_agents, github_*.
+Core tables (current schema): `users`, `api_keys` (AES-256-GCM encrypted), `usage_logs`, `subscriptions`, `sessions`, `teams`, `team_members`, `waitlist`, `session_outcomes` (Cortex v2 ledger), `lanes`, `lane_events`, `approvals`, `approval_events`, `watched_agents`, `chat_history`, `automations`, `dispatch_rules`, `external_mcp_servers`, `push_subscriptions`, `review_queue`, `supervisor_inbox`, `worker_events` / `worker_runs` / `worker_tokens`, `github_installations` / `github_repositories` / `github_issues` / `github_pull_requests` / `github_sync_state`. FTS5 indexes on comments, docs, facts (migrations v14–v20). Source: `src/lib/db/schema.ts`.
 
 ### Theming (`src/lib/theme/`)
 
-CSS variable system with 60+ tokens per theme. Three themes: `light`, `dark`, `midnight`. `ThemeProvider` applies vars to `<html>` root, persists to localStorage (`cortex-theme` key). Components reference `var(--t-*)` tokens inside inline styles.
+CSS variable system with 60+ tokens per theme. **Two shipping themes: `light` and `midnight`** (legacy `dark` was removed; users on `dark` auto-remap via `LEGACY_THEME_IDS`). Architecture is **two-axis: palette × surface** — `palette` ∈ {light, midnight, ...} controls the color tokens; `surface` ∈ {glass, solid} controls whether the chrome bleeds the macOS vibrancy backdrop or paints opaque (accessibility / vestibular path). `ThemeProvider` applies vars to `<html>` root, persists to localStorage. Components reference `var(--t-*)` tokens inside inline styles.
 
 **Never hardcode rgba colors for theme surfaces.** Use `var(--t-bg-card)`, `var(--t-panel)`, `var(--t-input-bg)`, etc. A hardcoded `rgba(255, 255, 255, 0.56)` renders as a huge light-gray blob in midnight — see commit 929ffdf for the repo-registry sweep.
 
@@ -124,19 +134,20 @@ CSS variable system with 60+ tokens per theme. Three themes: `light`, `dark`, `m
 
 1. `process.env.O8_API_PORT` (set by sidecar)
 2. `process.env.PORT` (Next server runtime)
-3. `~/.o8/api-port` file (standalone MCP processes)
-4. Legacy default `3001` (dev workflow)
+3. `process.env.O8_DEV_FRONTEND_URL` (dev-bridge mode — prod app launched against a separate Next dev server, this URL is the source of truth)
+4. `~/.o8/api-port` file (standalone MCP processes)
+5. Legacy default `3001` (dev workflow)
 
 Server-side TS: `import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port'`. MCP servers that run as standalone node processes duplicate a small `resolveApiBase()` helper because they can't import from `@/lib`.
 
 ### API security (`src/middleware.ts`)
 
-Global Next middleware runs in Node runtime and gates these prefixes on loopback origin + bearer token: `/api/panel/`, `/api/orchestrator/`, `/api/directives`, `/api/cortex/`, `/api/runtime/`, `/api/lanes`, `/api/worktrees`, `/api/review/`, `/api/board/`, `/api/command-center/`, `/api/claude-code/`, `/api/codex/`, `/api/operator/`, `/api/setup/`.
+Global Next middleware runs in Node runtime and gates these prefixes on loopback origin + bearer token (source: `GATED_PREFIXES` in `src/middleware.ts`): `/api/panel/`, `/api/orchestrator/`, `/api/directives`, `/api/cortex/`, `/api/runtime/`, `/api/lanes`, `/api/worktrees`, `/api/review/`, `/api/board/`, `/api/command-center/`, `/api/claude-code/`, `/api/codex/`, `/api/operator/`, `/api/setup/`, `/api/v2/chat`, `/api/projects`, `/api/automations`, `/api/repo-spec`, `/api/dictation/`, `/api/mobile/push/`.
 
 - Loopback (`127.0.0.1`, `localhost`, `tauri://localhost`, `same-origin`) passes automatically.
 - Cross-origin must present `Authorization: Bearer <ws-token>` matching `~/.o8/ws-token` exactly.
-- Allowlist: `/api/setup/*` GET only, `/api/v2/auth/*`, `/api/panel/github-device/*`, `/api/panel/status` — read-only allowlist so first-run and OAuth handshakes work.
-- **Never add a new route that touches agent/repo state without going through this gate.** If you need public access, put it under `/api/setup/*` as a GET-only endpoint.
+- `ALLOWLIST_READ_ONLY` (GET passes without auth): `/api/setup/*`, `/api/v2/auth/*`, `/api/panel/github-device/*`, `/api/panel/github-auth/*`, `/api/panel/status`, `/api/mobile/push/public-key`. `ALLOWLIST_ANY_METHOD` (passes regardless of verb): `/api/panel/github-auth/*` callback.
+- **Never add a new route that touches agent/repo state without going through this gate.** If you need public access, put it under `/api/setup/*` as a GET-only endpoint, or add an explicit allowlist entry. Update both this section and `src/middleware.ts` together.
 
 ### MCP servers (`src/lib/mcp/`)
 
@@ -146,15 +157,19 @@ Two stdio MCP servers expose o8 to Claude Desktop / Claude Code:
 
 #### Webview control tools (`o8_view_*`)
 
-The operator MCP server also exposes 7 tools for controlling the running o8 webview directly:
+The operator MCP server also exposes 12 tools for controlling the running o8 webview directly:
 
 - `o8_view_screenshot` — capture the current window as PNG base64
 - `o8_view_snapshot` — numbered accessibility tree for element discovery
 - `o8_view_click` — click by ref or coordinates
 - `o8_view_type` — type into focused element
+- `o8_view_press_key` — keypress (Enter, Tab, ArrowDown, etc.)
+- `o8_view_scroll` — scroll the page or a specific element
 - `o8_view_read` — visible text of the page
 - `o8_view_eval` — run JS in the webview
 - `o8_view_navigate` — push a new route via history.pushState
+- `o8_view_active_route` — report current route + URL state
+- `o8_view_console_errors` — read recent console errors from the webview
 - `o8_view_wait_for` — poll until a CSS selector resolves (optional text substring match), caps at 25s
 
 These wrap a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock` exposed by the Tauri `dev-mcp-plugin` feature. Signed/prod builds always include the socket. Dev builds need `cargo tauri dev --features dev-mcp-plugin`.
@@ -181,9 +196,16 @@ The Rust shell runs pre-flight checks before spawning any Node process:
 
 `tauri-plugin-mcp` is optional — build with `cargo tauri dev --features dev-mcp-plugin` only if you want the AI-agent-driven webview testing plugin. Default builds don't need it.
 
-### Cortex Memory Integration
+### Cortex v2 (organizational memory)
 
-`src/lib/cortex/client.ts` wraps the `~/bin/cortex` CLI binary. Three client variants: `LocalCortexClient` (exec), `CloudCortexClient` (HTTPS), `HybridCortexClient`.
+`src/lib/cortex/` is the **in-process Cortex v2 memory subsystem** — it is *not* a wrapper around an external `~/bin/cortex` binary (that older shim was removed). Two layers, both SQLite-backed (`session_outcomes` ledger + directives tables in `~/.o8/`):
+
+- **Directives** (explicit): operator-authored rules stored in `directives/`. Surfaced to the orchestrator at session start. Mergeable across repos via `directive-merges.ts`, with cross-repo proposals (`cross-repo-proposer.ts`).
+- **Session ledger** (implicit): every completed packet writes a `session_outcomes` row (success / partial / failure + summary + changed files + fix pattern). The auto-directive `proposer.ts` (#746) scans this ledger and surfaces candidate directives to the operator when the same fix-pattern recurs ≥ 3× in 14 days. Operator accepts/dismisses — never autonomous writes.
+
+Supporting machinery: `compactor.ts` + `compactor-scheduler.ts` (ledger pruning), `decay.ts` (relevance decay over time), `embeddings.ts` (Cortex v2 deliberately kills vector search for the directive path but keeps embeddings for the QA cascade), `indexer/`, `ingest/`, `qa/` (Q&A cascade with classifier + composer + haiku-adapter), `spec-ingest.ts` (o8.md ingestion). FTS5 migrations v14–v20 power text search.
+
+See [[cortex_v2_architecture]] memory for the design thesis (why kill vector search) and the Karpathy alignment.
 
 ### Orchestrator Architecture (current — May 2026)
 
@@ -191,19 +213,20 @@ The Rust shell runs pre-flight checks before spawning any Node process:
 
 A fresh workspace has two default tabs: `Orchestrator` (`kind: 'orchestrator'`) and the assistant chat (`kind: 'llm-chat'`). Both render inside `WorkspaceTerminal`. The full set of tab kinds lives in `workspace-terminal/types.ts`: `'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator'`. ⚠️ Naming gotcha: `kind: 'chat'` is a SINGLE-RUNTIME CLI session (Codex / Gemini / opencode), NOT the casual chat tab — the casual chat is `kind: 'llm-chat'`.
 
-The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a two-pane layout:
+The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a single chat surface (the standalone left history sidebar was retired; thread state now persists via `orchestrator-thread-restore.ts` localStorage helpers):
 
 ```
-┌──────────┬───────────────────────┐
-│ History  │      Chat             │
-│ (260px)  │  ThoughtsChatPanel    │
-│ (toggle) │  + SessionVisualizer  │
-└──────────┴───────────────────────┘
+┌───────────────────────────────────┐
+│  ThoughtsChatPanel                 │
+│  + SessionVisualizer (when active) │
+│  + OrchestratorEmptyState (idle)   │
+└───────────────────────────────────┘
 ```
 
-- **Left sidebar**: `OrchestratorHistorySidebar.tsx` — past orchestrator threads grouped by day, hover-reveal trash-icon delete. Collapsed by default, `cortex-ide:orchestrator:history-open` localStorage key.
-- **Center**: `ThoughtsChatPanel` with `emptyStateOverride={<OrchestratorEmptyState/>}` — the empty state shows the greeting + 4 quick-action cards. When agent sessions exist, `SessionVisualizer` renders a horizontal strip above the chat.
+- **Body**: `ThoughtsChatPanel` with `emptyStateOverride={<OrchestratorEmptyState/>}` — the empty state shows the greeting + 6 quick-action cards (review-pending, ship-status, token-spend, dispatch, recent-changes, attention). When agent sessions exist, `SessionVisualizer` renders a horizontal strip above the chat.
+- **Thread restore**: `orchestrator-thread-restore.ts` persists the last-active thread id + title under `o8:last-orchestrator-thread-id` / `o8:last-orchestrator-thread-title` localStorage keys so the tab spawns with the right label on first paint (no flash from "Orchestrator" to "o8.v1").
 - **Permission chip** (Full access / Read-only) persists per-tab to localStorage `cortex-ide:orchestrator-permission:tab:<tabId>`.
+- **Past threads** live on the mobile API surface (`/api/mobile/orchestrator/threads`) — desktop reaches the history list through there too. No dedicated desktop sidebar component anymore.
 
 **Mission Control / Packets / Issues** no longer render as a right-side panel inside the Orchestrator tab. They live distributed across:
 - **O8Panel right side** (`O8Panel.tsx`) — Activity tab shows recent commits / PRs / deployments. Inbox tab. PRs tab routes to `PrPanel`. Pulse / Browser / o8.md / Workspace round out the 7 right-panel tabs.
@@ -231,10 +254,10 @@ The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a two-pane la
 | `src/app/dashboard/page.tsx` | Main layout orchestrator. Wraps TileContainer in `OrchestratorDataProvider`. |
 | `src/components/desktop/AgentPanel.tsx` | Agent fleet view: repo-grouped cards, status groups, activity feed, issues, PRs, CI, deploys. |
 | `src/components/desktop/LLMChat.tsx` | Chat panel with LLM conversation (the **Assistant** tab). |
-| `src/components/desktop/workspace-terminal/OrchestratorTab.tsx` | The **Orchestrator** tab — two-pane layout: History sidebar (collapsible) + chat body. |
-| `src/components/desktop/OrchestratorEmptyState.tsx` | Empty-state greeting + 4 quick-action cards for the Orchestrator. |
-| `src/components/desktop/OrchestratorHistorySidebar.tsx` | Left sidebar — past orchestrator threads with delete. |
+| `src/components/desktop/workspace-terminal/OrchestratorTab.tsx` | The **Orchestrator** tab — single chat surface (ThoughtsChatPanel + SessionVisualizer when active). Thread state persisted via `orchestrator-thread-restore.ts`. |
+| `src/components/desktop/OrchestratorEmptyState.tsx` | Empty-state greeting + 6 quick-action cards for the Orchestrator. |
 | `src/components/desktop/SessionVisualizer.tsx` | Horizontal strip of active agent sessions, shown inside the Orchestrator tab when agents exist. |
+| `src/components/desktop/workspace-terminal/orchestrator-thread-restore.ts` | localStorage helpers — restore last-active orchestrator thread id/title across reloads. |
 | `src/components/desktop/thoughts/ThoughtsChatPanel.tsx` | Chat transcript + composer for the orchestrator and CLI lanes. Supports `emptyStateOverride` + `fillInput`/`sendNow` imperative methods. |
 | `src/components/desktop/O8Panel.tsx` | Right-side wide panel — 7 tabs (Pulse / Workspace / Browser / PRs / Inbox / Activity / o8.md). Default width 440px, resizable. |
 | `src/components/desktop/pr-panel/PrPanel.tsx` | Cursor-style PR review surface — header + tabs (Changes / Checks / Commits / Reviews). Mounted inside O8Panel's PRs tab. |
@@ -245,34 +268,37 @@ The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a two-pane la
 
 ### API Routes (`src/app/api/`)
 
-All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key families:
-- `/api/panel/*` — Desktop panel data (repos, commits, PRs, issues, CI, deploys, terminals, search, analytics, approvals, workspaces)
-- `/api/v2/*` — v2 API layer: auth (GitHub OAuth), chat (streaming), chat-history, cortex (context/config/recall/action), files, keys, proxy/llm
-- `/api/mobile/*` — Mobile inbox, history, Cortex memory
-- `/api/command-center/*` — Fleet snapshot, bootstrap
-- `/api/board/*` — Task board endpoints
-- `/api/worktrees/*` — Git worktree management (merge, conflicts)
-- `/api/review/*` — Code review workflow (commit, push)
-- `/api/setup/*` — First-run setup wizard (config detection)
-- `/api/claude-code/*`, `/api/codex/*` — Per-runtime endpoints
+All routes use `force-dynamic`. **26 top-level families** (count via `ls src/app/api/`). The middleware gates the dangerous ones — see API security above. Families, grouped by purpose:
+
+- **Desktop / panel**: `/api/panel/*` (repos, commits, PRs, issues, CI, deploys, terminals, search, analytics, approvals, workspaces, github-device, github-auth)
+- **v2 surface**: `/api/v2/*` (auth/GitHub OAuth, chat streaming, chat-history, cortex context/config/recall, files, keys, proxy/llm)
+- **Mobile**: `/api/mobile/*` (inbox, history, push subscriptions, orchestrator threads)
+- **Orchestrator / lanes / runtimes**: `/api/orchestrator/*`, `/api/lanes/*`, `/api/runtime/*`, `/api/operator/*`, `/api/claude-code/*`, `/api/codex/*`
+- **Worktrees / review**: `/api/worktrees/*` (merge, conflicts), `/api/review/*` (commit, push)
+- **Fleet ops**: `/api/command-center/*` (fleet snapshot, bootstrap), `/api/projects/*`, `/api/board/*`, `/api/tasks/*`, `/api/worker/*`
+- **Cortex memory + spec**: `/api/cortex/*`, `/api/repo-spec/*` (powers `o8_spec_*` MCP tools)
+- **Integrations**: `/api/github/*`, `/api/browser/*`, `/api/connectors/*`, `/api/cloud/*`, `/api/automations/*`
+- **Voice + accessibility**: `/api/dictation/*`, `/api/tts/*`
+- **Setup**: `/api/setup/*` (first-run wizard — only family with read-only public allowlist)
+
+If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `ALLOWLIST_READ_ONLY`) in `src/middleware.ts`.
 
 ### Library Domains (`src/lib/`)
 
-37+ feature domains. Key ones:
-- `runtimes` — Adapter registry (Codex, Claude Code)
-- `runtime` — IDE session registries: `ide-session-registry.ts`, `ide-llm-chat-registry.ts`, `ide-terminal-state.ts`, `ide-surface-state.ts`, `actions.ts`, `inventory.ts`
-- `llm` — LLM subsystem: `tools.ts` (tool definitions), `memory.ts` (memory management), `chat-history-store.ts` (persistent storage), `context.ts`
-- `approvals` — Approval workflows for LLM actions (`store.ts`, `types.ts`, `llm.ts`)
-- `workspace` — Workspace lifecycle management and persistence
-- `worktree` — Git worktree management (conflicts, launch, manager)
-- `board` — Task board state and types
-- `cortex` — Memory recall/import client
-- `db` — Drizzle schema + SQLite
-- `theme` — CSS variable system
-- `panel` — Panel auth (loopback host checking + token verification)
-- `mobile` — Mobile-specific: inbox filter, sounds, types
-- `terminal` — PTY/tmux tab state
-- `connectors` — External service connectors
+**~74 feature domains.** This grew fast; the canonical list is `ls src/lib/`. Don't try to enumerate every dir here — point at it and call out the load-bearing ones:
+
+- **Runtime layer**: `runtimes/` (4 adapters: codex, claude-code, gemini, opencode), `runtime/` (IDE session registries, actions, inventory), per-runtime dirs `codex/`, `claude-code/`, `gemini/`, `opencode/`.
+- **Dispatch + lanes**: `lane/` (single-lane logic incl. `worktree-side-merge.ts` + `codex-orchestrator-session.ts`), `lanes/` (multi-lane fleet view), `dispatch/`, `supervisor/`, `intake/`.
+- **Orchestrator**: `orchestrator/` (types, backends, runtime-capabilities, auto-compact), `agents/`.
+- **Cortex v2**: `cortex/` (see "Cortex v2" section above — directives, ledger, qa, embeddings, indexer, ingest).
+- **LLM / chat / approvals**: `llm/` (tools, memory, chat-history-store, context), `chat/`, `approvals/` (store, types, llm gates).
+- **Workspace + git**: `workspace/`, `worktree/`, `workspace-terminal/`, `git/`, `github/`, `github-broker/`, `repos/`.
+- **Data layer**: `db/` (Drizzle schema, migrations, sessions, usage, missions-store), `query/`, `events/`, `realtime/`.
+- **MCP + spec**: `mcp/` (operator + cortex MCP servers, handlers), `o8md/` (o8.md ingestion + review), `spec/`.
+- **UI infra**: `theme/`, `desktop/`, `tiles/`, `pretext/`, `skeleton/`, `render/`, `transcripts/`, `diff/`, `json-render/`.
+- **Surfaces**: `mobile/`, `panel/`, `command-center/`, `projects/`, `tasks/`, `board/`, `review/`, `operator/`, `slash-commands/`.
+- **Integrations + services**: `connectors/`, `cloud/`, `automations/`, `tts/`, `dictation/`, `push/`, `tauri/`, `terminal/`, `browser/`, `workflows/`, `worker/`.
+- **Infra utilities**: `auth/`, `setup/`, `api/`, `appearance/`, `alerts/`, `ftux/`, `fleet/`, `hooks/`, `diagnostics/`, `perf/`, `usage/`, `util/`, `codebase-memory/`, `demo/`.
 
 ## Critical Rules
 
@@ -299,7 +325,7 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 
 ### ALWAYS
 - **`npx tsc --noEmit` before every commit**
-- **Dispatch smoke-test pattern: use `tsx <script>`, never `tsx -e "import(...)"`.** `tsx -e` resolves local TS modules as a CommonJS namespace and only exposes `default` / `module.exports` — named exports silently return `undefined` at runtime. For fresh-DB verification: `cat > /tmp/smoke.ts <<'EOF' ... EOF` then `CORTEX_IDE_DATA_DIR=$(mktemp -d) npx tsx /tmp/smoke.ts`. Tracked in #568.
+- **Dispatch smoke-test pattern: use `tsx <script>`, never `tsx -e "import(...)"`.** `tsx -e` resolves local TS modules as a CommonJS namespace and only exposes `default` / `module.exports` — named exports silently return `undefined` at runtime. For fresh-DB verification: `cat > /tmp/smoke.ts <<'EOF' ... EOF` then `CORTEX_IDE_DATA_DIR=$(mktemp -d) npx tsx /tmp/smoke.ts`. Originally tracked + fixed in #568 (closed).
 - **Respect the 800-line file ceiling** — if your changes would push a file past 800 lines, decompose first. Extract helpers, hooks, or modules before adding new logic. Layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) are explicitly waived.
 - **Apple HIG**: 44px touch targets, 14px card radii, spring curves
 - **`as React.CSSProperties`** when using vendor-prefixed or non-standard CSS props
@@ -311,20 +337,16 @@ All routes use `force-dynamic`. 16+ feature domains, 120+ route files. Key famil
 
 ## Design Constants
 
-```
-Colors:
-  accent: #2563eb (blue)         brand: #ef4444 (red)
-  bg: #f5f7fb                    panel: rgba(255,255,255,0.82)
-  text: #111827                  muted: #5b6475
-  Status: running=#22c55e, idle=#9ca3af
-  Timeline: coding=#2563eb, thinking=#93c5fd, testing=#f59e0b, error=#ef4444
+**Don't reference a constants block here — the values have changed multiple times and the spec files are the source of truth.** Read in this order:
 
-Radii: 14px cards, 12px buttons/containers, 10px pills, 8px tags
-Touch: 44px minimum targets
-Spring: stiffness 400, damping 30 (framer-motion)
-Letter spacing: -0.01em body, -0.02em headings, -0.03em hero
-Font: system-ui, SF Mono/Menlo for monospace
-```
+1. **[`hurttlocker.md`](./hurttlocker.md)** — operator-locked typography, icon vocabulary, layout primitives, hover patterns, row geometry. The locked spec for every list/row/chrome surface.
+2. **[`DESIGN.md`](./DESIGN.md)** — palette, design language, motif vocabulary.
+3. **`src/lib/theme/`** — actual `--t-*` token values per palette × surface combination.
+
+Stable invariants that *don't* live in the spec files (because they're framework rules, not design choices):
+- **Apple HIG**: 44px minimum touch targets.
+- **Spring curves**: framer-motion `stiffness: 400, damping: 30` is the default for component motion.
+- **Theme tokens, never raw rgba** on theme-able surfaces (see Critical Rules).
 
 ## Environment Variables
 
@@ -385,51 +407,27 @@ The production build includes the `tauri-plugin-mcp` Rust crate via the `dev-mcp
 
 **Known seam issue:** `o8_view_eval` and `o8_view_snapshot` sometimes time out when the webview's JS main thread is busy (streaming orchestrator response, Next.js hydration). `o8_view_screenshot` and `o8_view_navigate` always work because they run on the Rust side. Work around by taking screenshots + clicking via raw coordinates.
 
-## Theme System (current state, April 13)
+## Theme System (current state)
 
-**Two shipping themes: `light` and `midnight`. Dark was removed** — legacy users on `dark` auto-remap to `midnight` via `LEGACY_THEME_IDS` in `src/lib/theme/context.tsx`.
+**Two shipping palettes: `light` and `midnight`.** Legacy `dark` is gone (auto-remaps to `midnight` via `LEGACY_THEME_IDS` in `src/lib/theme/context.tsx`). The full architecture is **palette × surface** — see Theming under Architecture above.
 
 ### Shape of both themes
 
-Both use **translucent glass chrome over the macOS vibrancy backdrop**. The `ThemeProvider` forces `--t-chrome`, `--t-bg-gradient`, `--t-chrome-nav` to `transparent` in Tauri for any theme — the difference between light and midnight is the RGBA tint of the *other* panel tokens that paint on top of the vibrancy.
-
-| Surface | Light | Midnight |
-|---|---|---|
-| Chrome (vibrancy-passthrough) | `transparent` | `transparent` |
-| `--t-panel` | `rgba(255, 255, 255, 0.58)` | `rgba(62, 68, 78, 0.36)` |
-| `--t-bg` | `rgba(250, 251, 253, 0.62)` | `rgba(22, 25, 30, 0.56)` |
-| **Workspace / chat / terminal** | **solid `#ffffff`** | **solid `#1a1e24` / `#16191e`** |
-| `--t-text` | `#0f172a` (dark) | `#e8ecf2` (light) |
+Both use **translucent glass chrome over the macOS vibrancy backdrop** (when `surface=glass`). `ThemeProvider` forces `--t-chrome`, `--t-bg-gradient`, `--t-chrome-nav` to `transparent` in Tauri for any palette — the difference between light and midnight is the RGBA tint of the *other* panel tokens that paint on top of the vibrancy. The `surface=solid` axis (accessibility / vestibular path) replaces those translucent tints with opaque values.
 
 ### The workspace/center is always solid, never glass
 
-`--t-chat-surface-bg`, `--t-canvas-bg`, `--t-terminal-bg` are pinned to solid colors in both themes. The LLM chat panel in `LLMChatLayout.tsx` paints `background: var(--t-chat-surface-bg)` over itself, so the center content area never bleeds the vibrancy. That's intentional — code/chat/terminal text needs a stable paper surface.
+`--t-chat-surface-bg`, `--t-canvas-bg`, `--t-terminal-bg` are pinned to solid colors in every palette × surface combination. The LLM chat panel paints `background: var(--t-chat-surface-bg)` over itself, so the center content area never bleeds the vibrancy. Code / chat / terminal text needs a stable paper surface.
 
-### Macos vibrancy material
+### macOS vibrancy material
 
-`src-tauri/src/lib.rs` currently applies `NSVisualEffectMaterial::HudWindow` unconditionally at startup. HudWindow is dark, so light-tinted RGBA panels look silver-grey rather than white. This is a known tradeoff — a dynamic material swap (Rust side, via a theme-change event) would let Light use `NSVisualEffectMaterial::Sidebar` or `HeaderView` (adaptive or light-only).
+`src-tauri/src/lib.rs` applies `NSVisualEffectMaterial::HudWindow` at startup. HudWindow is dark, so light-tinted RGBA panels read silver-grey rather than white. A dynamic material swap (Rust side, theme-change event) to let Light use `NSVisualEffectMaterial::Sidebar` or `HeaderView` is still pending — tracked in [[theme_two_axis_architecture]] memory.
 
-### Open visual work (for a new agent picking this up)
+### Iterating on theme work
 
-**User's immediate ask (April 13 evening):**
+The installed app has `dev-mcp-plugin` enabled. Use `mcp__o8__o8_view_screenshot` after each tweak. Ship with `npm run ship` after each change — ~2 min to build + upload + auto-update. Don't rely on `cargo tauri dev` — the user daily-drives the prod build, so that's where the feedback loop lives.
 
-> In Light mode, the background of the white workspace is correct. But the buttons in the left sidebar and right Changes panel are hard to read — they should be transparent (glass) with white font. The vibrancy-bled chrome reads darker than the workspace, so button labels need to flip to white text ON the dark glass chrome while the workspace keeps dark text.
-
-This is a two-text-palette problem. Light mode currently uses a single `--t-text: #0f172a` for everything, which is correct for the white workspace but wrong for the darker glass chrome overlay.
-
-**Proposed fix (unvalidated — verify visually with the user before shipping):**
-
-1. In `light` theme, leave `--t-text-*` as dark (they're read by components inside the white chat surface)
-2. Add or repurpose **chrome-specific text tokens** that are light-colored in both themes:
-   - `--t-chrome-text` / `--t-chrome-text-secondary` / `--t-chrome-text-muted`
-   - Light: near-white values (`#ffffff`, `rgba(255,255,255,0.78)`, etc.)
-   - Midnight: existing `--t-text-*` values
-3. Update sidebar (`NavRail / WorkspacesPanel`), header (status bar, command palette), footer (port chips, issue badges), right panel (Changes / Commit) to reference `var(--t-chrome-text-*)` instead of `var(--t-text-*)`
-4. `LLMChatLayout.tsx` already overrides `--t-text` to chat-surface-text inside the chat card — make sure that override still wins
-
-Alternative path: swap the vibrancy material to something lighter (`NSVisualEffectMaterial::Sidebar`) for light theme via a Rust-side event. Cleaner long-term but needs more Rust plumbing.
-
-**How to iterate:** the installed app has the `dev-mcp-plugin` Cargo feature enabled. Use `mcp__o8__o8_view_screenshot` after each theme tweak. Ship with `npm run ship` after each change — takes ~2 min to build + upload + auto-update. Don't rely on `cargo tauri dev` — the user daily-drives the prod build so that's where the feedback loop lives.
+For exact token values and row/typography geometry, **always** read [`hurttlocker.md`](./hurttlocker.md) first — it's the operator-locked spec.
 
 ## Orchestrator Model
 
@@ -440,8 +438,6 @@ Alternative path: swap the vibrancy material to something lighter (`NSVisualEffe
 - The orchestrator (whichever LLM) spawns Codex / Gemini agents in isolated worktrees via the `mcp__o8__*` mission/dispatch tools — never executes coding work directly.
 - Before any agent merge, the orchestrator reviews the diff (`mcp__o8__o8_merge_preview` → `submit_review` → `approve_and_merge`).
 - Codex orchestrator session uses `src/lib/lane/codex-orchestrator-session.ts` (shipped v0.1.135). Spawns `codex exec --json -c model=gpt-5.5 -c model_reasoning_effort=xhigh` and maps the JSON stream (`thread.started` / `item.completed` / `turn.completed`) into the same `OrchestratorEvent` contract the Claude path emits.
-
-**Known regression while #1045 is open:** Codex auto-review writes verdicts to the log but cannot call `lane_command` MCP to create approval cards. Until #1045 (Codex MCP plumbing) lands, the operator either toggles ON for Claude orchestrator OR merges manually from the worktree.
 
 ### Agent-side CLI (the `o8` binary)
 
@@ -529,4 +525,4 @@ Using subagents saves main context and runs cheaper models on tasks that don't n
 - `docs/runtime-adapter-contract.md` — AgentRuntime interface evolution
 - `docs/performance-architecture-principles.md` — Render speed, bootstrap, streaming
 
-<!-- Last reviewed: 2026-04-28 (gemini 3.1-pro test) -->
+<!-- Last reviewed: 2026-05-26 (full staleness pass — runtime model, layout diagram, theme system, design constants → hurttlocker.md, Cortex v2 rewrite, WS channels, port resolution, middleware GATED_PREFIXES, webview tools 7→12, OrchestratorHistorySidebar removal, DB tables, API families 10→26, lib domains 13→74) -->
