@@ -1,12 +1,16 @@
 'use client';
 
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { DoubleCheck } from 'iconoir-react';
 import { useTheme } from '@/lib/theme/context';
 import { O8SpecEditor } from './O8SpecEditor';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
 
 interface O8SpecPaneProps {
   repoPath?: string | null;
+  /** Slot for the Ask-o8 chat trigger so it sits IN the toolbar next to
+   *  Ask-to-review + Settings rather than floating below the header. */
+  toolbarSlot?: ReactNode;
 }
 
 const SAVE_DEBOUNCE_MS = 800;
@@ -47,7 +51,7 @@ function countChangedLines(base: string, next: string) {
   };
 }
 
-export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
+export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
   const [content, setContent] = useState('');
   const [loadedContent, setLoadedContent] = useState('');
   const [loading, setLoading] = useState(true);
@@ -325,14 +329,14 @@ export function O8SpecPane({ repoPath }: O8SpecPaneProps) {
             {reviewing ? 'o8 is reading your notes…' : status}
           </div>
         </div>
+        {toolbarSlot}
         <TitleBarButton
           label="Ask o8 to review"
           onClick={requestReview}
-          icon={(
-            <svg width={15} height={15} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-              <path d="M12 2.4l1.7 6.4 6.4 1.7-6.4 1.7L12 18.6l-1.7-6.4L3.9 10.5l6.4-1.7z" />
-            </svg>
-          )}
+          // Iconoir DoubleCheck — operator-locked for the "Ask o8 to
+          // review" affordance. Two checks reads as "agent verified" /
+          // "AI-validated" better than the old sparkle mark.
+          icon={<DoubleCheck width={15} height={15} color="currentColor" strokeWidth={2} />}
         />
         <div style={{ position: 'relative', flexShrink: 0, display: 'inline-flex' }}>
           <TitleBarButton

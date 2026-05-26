@@ -11,11 +11,11 @@
  */
 
 import { memo, useCallback, useEffect, useState } from 'react';
+import { GitBranch } from './tabler-shims';
 import {
   Check,
   Bookmark,
   Copy,
-  GitBranch,
   Pause,
   Play,
   RotateCcw,

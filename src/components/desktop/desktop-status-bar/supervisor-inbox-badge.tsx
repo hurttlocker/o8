@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
-import { WarningCircleIcon } from './status-bar-icons';
+import { Mail, MailOpen } from 'iconoir-react';
 
 export function SupervisorInboxBadge() {
   const [humanRequiredCount, setHumanRequiredCount] = useState(0);
@@ -97,7 +97,14 @@ export function SupervisorInboxBadge() {
       onMouseEnter={(e) => { if (!active) e.currentTarget.style.background = 'var(--t-hover)'; }}
       onMouseLeave={(e) => { if (!active) e.currentTarget.style.background = 'transparent'; }}
     >
-      <WarningCircleIcon size={12} filled={active} />
+      {/* Iconoir Mail / MailOpen — operator-locked. Closed envelope when
+          something needs attention (unread), open envelope when inbox is
+          quiet. Reads more "inbox" than the old warning circle. */}
+      {active ? (
+        <Mail width={13} height={13} color="currentColor" strokeWidth={2} />
+      ) : (
+        <MailOpen width={13} height={13} color="currentColor" strokeWidth={2} />
+      )}
       <span
         style={{
           minWidth: 14,

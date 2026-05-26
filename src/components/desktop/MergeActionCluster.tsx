@@ -1,7 +1,8 @@
 'use client';
 
 import { memo, useCallback, useEffect, useRef, useState } from 'react';
-import { ChevronDown, ExternalLink, GitBranch, Loader2 } from './lucide-shims';
+import { ChevronDown, ExternalLink, Loader2 } from './lucide-shims';
+import { GitBranch } from './tabler-shims';
 import { formatBranchDisplayName } from './repo-registry/shared';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 
