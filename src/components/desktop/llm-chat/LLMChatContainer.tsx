@@ -54,7 +54,8 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
   const [isUserScrolledUp, setIsUserScrolledUp] = useState(false), [showTypingIndicator, setShowTypingIndicator] = useState(false), [issuePickerOpen, setIssuePickerOpen] = useState(false), [applyModal, setApplyModal] = useState<{ code: string; language: string } | null>(null);
   const [applyPath, setApplyPath] = useState(''), [applyStatus, setApplyStatus] = useState<'idle' | 'applying' | 'done' | 'error'>('idle'), [applyFileSuggestions, setApplyFileSuggestions] = useState<Array<{ path: string }>>([]), [applyFileIndex, setApplyFileIndex] = useState(0), [queuedContextCards, setQueuedContextCards] = useState<QueuedContextCard[]>([]);
 
-  const { pendingFiles: droppedFiles, dragOver, clearPendingFiles: clearDroppedFiles, dragHandlers } = useFileDrop({ enablePaste: false });
+  const dragHostRef = useRef<HTMLDivElement>(null);
+  const { pendingFiles: droppedFiles, dragOver, clearPendingFiles: clearDroppedFiles, dragHandlers } = useFileDrop({ enablePaste: false, hostRef: dragHostRef });
 
   const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), handledDraftInjectionRef = useRef<string | null>(null), scrollRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null), abortRef = useRef<AbortController | null>(null), fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -792,6 +793,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
 
   return (
     <LLMChatLayout
+      dragHostRef={dragHostRef}
       dragOver={dragOver}
       onContainerDragOver={dragHandlers.onDragOver}
       onContainerDragLeave={dragHandlers.onDragLeave}
