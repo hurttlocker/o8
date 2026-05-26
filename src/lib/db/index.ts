@@ -11,7 +11,7 @@
 
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { migrateDataDirOnce } from '@/lib/data-dir-migration';
@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 24;
+const DB_SCHEMA_VERSION = 25;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -160,6 +160,13 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // Schema v24 — `automations.last_error_message` so the UI can surface WHY a
   // failed run errored (not just the boolean status). Idempotent column-add.
   ensureAutomationsErrorColumn(sqlite);
+  // Schema v25 (#1099) — `app_state` table for top-level kv state +
+  // `projects.color` / `projects.sort_order` columns. Drops the JSON ledger
+  // sidecar at `~/.o8/projects.json` as the source of truth for activeProjectId,
+  // color, and ordering. Migration reads existing JSON into SQLite once.
+  ensureAppStateTable(sqlite);
+  ensureProjectsLedgerColumns(sqlite);
+  migrateProjectsLedgerJsonIfNeeded(sqlite);
 }
 
 function ensureAutomationsTable(sqlite: Database.Database): void {
@@ -193,6 +200,115 @@ function ensureAutomationsTable(sqlite: Database.Database): void {
 function ensureAutomationsErrorColumn(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'automations', 'last_error_message')) {
     sqlite.exec('ALTER TABLE automations ADD COLUMN last_error_message TEXT');
+  }
+}
+
+// ── #1099 — projects ledger migration to SQLite ──
+
+/**
+ * Schema v25 — generic top-level key/value table. First consumer is the
+ * `active_project_id` row that replaces the same field in
+ * `~/.o8/projects.json`. Anything else that's "one row globally" (e.g.
+ * dismissed-tour flags, last-used-runtime hints) can live here too.
+ */
+function ensureAppStateTable(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS app_state (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+  `);
+}
+
+/**
+ * Schema v25 — projects ledger persistence. `color` is the curated palette
+ * entry for the project dot; `sort_order` preserves the JSON ledger's array
+ * order so the UI ordering survives the migration. Both nullable so existing
+ * rows inserted by `createProject` don't break.
+ */
+function ensureProjectsLedgerColumns(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'projects', 'color')) {
+    sqlite.exec('ALTER TABLE projects ADD COLUMN color TEXT');
+  }
+  if (!tableColumnExists(sqlite, 'projects', 'sort_order')) {
+    sqlite.exec('ALTER TABLE projects ADD COLUMN sort_order INTEGER DEFAULT 0');
+  }
+}
+
+/**
+ * One-time JSON → SQLite migration for `~/.o8/projects.json` (#1099).
+ * Reads the legacy ledger and upserts `color` + `sort_order` onto matching
+ * SQLite projects (matched by id first, then by slug) plus writes
+ * `active_project_id` into `app_state`. Marker file
+ * `.db-migrated-projects-ledger-v1` guards against re-run.
+ *
+ * Failure-tolerant: a bad JSON file or missing project row logs + skips
+ * rather than failing the boot. The reader in `repos/projects.ts` falls
+ * back to the JSON file when SQLite has no migrated data, so the operator
+ * never sees a regression from a hiccupped migration.
+ */
+function migrateProjectsLedgerJsonIfNeeded(sqlite: Database.Database): void {
+  const markerPath = path.join(DATA_DIR, '.db-migrated-projects-ledger-v1');
+  if (existsSync(markerPath)) return;
+
+  const jsonPath = path.join(DATA_DIR, 'projects.json');
+  if (!existsSync(jsonPath)) {
+    // Fresh install — no JSON to migrate. Mark done so we don't re-check.
+    try { writeFileSync(markerPath, new Date().toISOString()); } catch { /* best effort */ }
+    return;
+  }
+
+  try {
+    const raw = readFileSync(jsonPath, 'utf8');
+    const parsed = JSON.parse(raw) as {
+      projects?: Array<{ id?: string; name?: string; color?: string }>;
+      activeProjectId?: string;
+    };
+    const projects = Array.isArray(parsed.projects) ? parsed.projects : [];
+
+    const updateById = sqlite.prepare(
+      'UPDATE projects SET color = COALESCE(color, ?), sort_order = ? WHERE id = ?',
+    );
+    const updateBySlug = sqlite.prepare(
+      'UPDATE projects SET color = COALESCE(color, ?), sort_order = ? WHERE slug = ?',
+    );
+
+    let migrated = 0;
+    projects.forEach((entry, index) => {
+      const color = typeof entry.color === 'string' && entry.color ? entry.color : null;
+      const sortOrder = index;
+      // Try id match first (SQLite project id), then slug match (slugified
+      // name) for ledger-only rows that pre-date the SQLite projects table.
+      if (entry.id && typeof entry.id === 'string') {
+        const res = updateById.run(color, sortOrder, entry.id);
+        if (res.changes > 0) { migrated += 1; return; }
+      }
+      if (entry.name && typeof entry.name === 'string') {
+        const slug = entry.name
+          .normalize('NFKD')
+          .replace(/[̀-ͯ]/g, '')
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-+|-+$/g, '')
+          .slice(0, 60);
+        const res = updateBySlug.run(color, sortOrder, slug);
+        if (res.changes > 0) { migrated += 1; return; }
+      }
+    });
+
+    if (typeof parsed.activeProjectId === 'string' && parsed.activeProjectId) {
+      const now = Date.now();
+      sqlite.prepare(
+        `INSERT INTO app_state (key, value, updated_at) VALUES ('active_project_id', ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ).run(parsed.activeProjectId, now);
+    }
+
+    console.log(`[db] migrated projects ledger: ${migrated}/${projects.length} rows, active=${parsed.activeProjectId ?? '(none)'}`);
+    try { writeFileSync(markerPath, new Date().toISOString()); } catch { /* best effort */ }
+  } catch (err) {
+    console.warn(`[db] projects ledger migration failed (will retry next boot): ${err instanceof Error ? err.message : String(err)}`);
   }
 }
 
