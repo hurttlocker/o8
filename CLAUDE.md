@@ -152,7 +152,7 @@ Global Next middleware runs in Node runtime and gates these prefixes on loopback
 ### MCP servers (`src/lib/mcp/`)
 
 Two stdio MCP servers expose o8 to Claude Desktop / Claude Code:
-- `operator-mcp-server.ts` — user-facing tools: `o8_status`, `o8_send`, `o8_approve`, `o8_reject`, `o8_history`, `create_mission`, `dispatch_mission`, `get_mission_status`, `submit_review`, `approve_and_merge`, `reset_packet`, `retry_packet`, the `o8_view_*` webview control tools, plus the `o8_spec_*` o8.md review tools (`o8_spec_read`, `o8_spec_review_index`, `o8_spec_pending_feedback`, `o8_spec_validate`, `o8_spec_comment`, `o8_spec_reply`, `o8_spec_resolve` — handlers in `operator-handlers/spec.ts`, all thin calls to `/api/repo-spec`). These let external Claude read + annotate a repo's `o8.md`; per the review inversion the operator authors o8.md and agents only annotate, so no overwrite tool is exposed. Mirrored by the `o8 spec …` CLI group (see AGENTS.md).
+- `operator-mcp-server.ts` — user-facing tools: `o8_status`, `o8_send`, `o8_approve`, `o8_reject`, `o8_history`, `create_mission`, `dispatch_mission`, `get_mission_status`, `submit_review`, `approve_and_merge`, `reset_packet`, `retry_packet`, `steer_packet` (#1129, layer-3 escalation), `cortex_ask` (#915, Engineering Brain Q&A — 90s timeout override), the `o8_view_*` webview control tools, plus the `o8_spec_*` o8.md review tools (`o8_spec_read`, `o8_spec_review_index`, `o8_spec_pending_feedback`, `o8_spec_validate`, `o8_spec_comment`, `o8_spec_reply`, `o8_spec_resolve` — handlers in `operator-handlers/spec.ts`, all thin calls to `/api/repo-spec`). These let external Claude read + annotate a repo's `o8.md`; per the review inversion the operator authors o8.md and agents only annotate, so no overwrite tool is exposed. Mirrored by the `o8 spec …` CLI group (see AGENTS.md).
 - `cortex-mcp-server.ts` — internal tools spawned by orchestrator Claude Code sessions (fleet/issues/PRs/approvals/agents)
 
 #### Webview control tools (`o8_view_*`)
@@ -203,9 +203,18 @@ The Rust shell runs pre-flight checks before spawning any Node process:
 - **Directives** (explicit): operator-authored rules stored in `directives/`. Surfaced to the orchestrator at session start. Mergeable across repos via `directive-merges.ts`, with cross-repo proposals (`cross-repo-proposer.ts`).
 - **Session ledger** (implicit): every completed packet writes a `session_outcomes` row (success / partial / failure + summary + changed files + fix pattern). The auto-directive `proposer.ts` (#746) scans this ledger and surfaces candidate directives to the operator when the same fix-pattern recurs ≥ 3× in 14 days. Operator accepts/dismisses — never autonomous writes.
 
-Supporting machinery: `compactor.ts` + `compactor-scheduler.ts` (ledger pruning), `decay.ts` (relevance decay over time), `embeddings.ts` (Cortex v2 deliberately kills vector search for the directive path but keeps embeddings for the QA cascade), `indexer/`, `ingest/`, `qa/` (Q&A cascade with classifier + composer + haiku-adapter), `spec-ingest.ts` (o8.md ingestion). FTS5 migrations v14–v20 power text search.
+Supporting machinery: `compactor.ts` + `compactor-scheduler.ts` (ledger pruning, weekly digest cron with `--digest-to` markdown output for #970 phase 2), `decay.ts` (relevance decay over time), `embeddings.ts` (Cortex v2 deliberately kills vector search for the directive path but keeps embeddings for the QA cascade), `indexer/`, `ingest/`, `qa/` (Q&A cascade with classifier + composer + haiku-adapter), `spec-ingest.ts` + `ingest/repo-docs.ts` (spec ingestion at repo connect). FTS5 migrations v14–v20 power text search. `session_outcomes` rows now stamp a `mergedClean` boolean when a worktree merge lands without operator edits — distinguishes "agent shipped clean" from "agent shipped but needed touch-up."
 
-See [[cortex_v2_architecture]] memory for the design thesis (why kill vector search) and the Karpathy alignment.
+**Spec ingestion feedback loop — important.** At repo connect, `spec-ingest.ts` ingests `ROOT_SPEC_FILES = ['README.md', 'CLAUDE.md', 'AGENTS.md', 'DESIGN.md', 'THEME.md']` (plus `docs/*.md`) and converts them into directives that the Engineering Brain retrieves against. **This means editing CLAUDE.md immediately changes what the Brain answers about the repo.** When updating this file (or AGENTS.md / DESIGN.md / THEME.md), consider that the change is also a documentation update visible to the Brain's Q&A surface — and to any orchestrator that calls `cortex_ask`. Write for both audiences.
+
+#### Engineering Brain (Q&A surface)
+
+Built on top of the Cortex v2 substrate, the **Engineering Brain** is the operator-facing Q&A layer:
+
+- **UI surface**: `src/components/desktop/o8-panel/workspace-rail/O8ScratchChat.tsx` — the "Ask the Brain" composer lives in the Review-panel rail. Has a premium dot + cost-hint legend (#1125) and surfaces structured citations from retrieval.
+- **API**: `/api/panel/o8-scratch-chat`. Cross-process callers (including the orchestrator) use the `cortex_ask` MCP tool (#915) on the operator MCP server.
+- **Retrieval**: H3-level chunking on long specs (#1120), BM25 with directive-first ranking for Class A "design/convention" questions (#1119/#1122), session_outcomes surfaced for "what shipped" questions (#e1c2579a).
+- **LLM routing — billing-sensitive**: Anthropic Sonnet/Haiku tiers are routed through the **Claude REPL spawn** (subscription pool, #1124), *not* through `/api/v2/proxy/llm` or OpenRouter. Cold-start mitigation: OpenRouter classifier pool is warmed at boot (#1123). The "never use `ai` SDK" rule still applies for non-Brain LLM calls.
 
 ### Orchestrator Architecture (current — May 2026)
 
@@ -224,6 +233,7 @@ The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a single chat
 ```
 
 - **Body**: `ThoughtsChatPanel` with `emptyStateOverride={<OrchestratorEmptyState/>}` — the empty state shows the greeting + 6 quick-action cards (review-pending, ship-status, token-spend, dispatch, recent-changes, attention). When agent sessions exist, `SessionVisualizer` renders a horizontal strip above the chat.
+- **Inline transcript blocks (Codex-borrow)**: orchestrator turns get rolled-up `TurnSummaryCard` ("Worked for X min", #1096) and `ChatActionCard` ("Edited N files" + Undo/Review, #1095) inline blocks. Tool-call pill clusters auto-collapse after 3+ calls (`fix(chat): collapse tool-call pill cluster by default after 3+ calls`).
 - **Thread restore**: `orchestrator-thread-restore.ts` persists the last-active thread id + title under `o8:last-orchestrator-thread-id` / `o8:last-orchestrator-thread-title` localStorage keys so the tab spawns with the right label on first paint (no flash from "Orchestrator" to "o8.v1").
 - **Permission chip** (Full access / Read-only) persists per-tab to localStorage `cortex-ide:orchestrator-permission:tab:<tabId>`.
 - **Past threads** live on the mobile API surface (`/api/mobile/orchestrator/threads`) — desktop reaches the history list through there too. No dedicated desktop sidebar component anymore.
@@ -261,6 +271,10 @@ The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a single chat
 | `src/components/desktop/thoughts/ThoughtsChatPanel.tsx` | Chat transcript + composer for the orchestrator and CLI lanes. Supports `emptyStateOverride` + `fillInput`/`sendNow` imperative methods. |
 | `src/components/desktop/O8Panel.tsx` | Right-side wide panel — 7 tabs (Pulse / Workspace / Browser / PRs / Inbox / Activity / o8.md). Default width 440px, resizable. |
 | `src/components/desktop/pr-panel/PrPanel.tsx` | Cursor-style PR review surface — header + tabs (Changes / Checks / Commits / Reviews). Mounted inside O8Panel's PRs tab. |
+| `src/components/desktop/review/ReviewPanel.tsx` | Dedicated Review surface (epic #1085) — Codex-style, one continuous diff, no file-list rail. Mounted in O8Panel's `review` mode. Hosts `O8ScratchChat` (Engineering Brain composer) in its rail. |
+| `src/components/desktop/o8-panel/workspace-rail/O8ScratchChat.tsx` | "Ask the Brain" composer — Engineering Brain Q&A surface with structured citations, premium dot + cost-hint legend. |
+| `src/components/desktop/thoughts/chat-panel/TurnSummaryCard.tsx` | Inline "Worked for X min" rolled-up transcript card (#1096 Codex borrow). |
+| `src/components/desktop/thoughts/chat-panel/ChatActionCard.tsx` | Inline "Edited N files" action card with Undo/Review (#1095 Codex borrow). |
 | `src/components/desktop/repo-focus/LeftPanelProjectFocus.tsx` | Project drawer in the left sidebar — surfaces AgentsTab (live + archived packets), Context, Spec, Files. |
 | `src/components/desktop/dictation/DictationHost.tsx` | Push-to-talk voice input — mounted at dashboard level. Hosts the pill overlay + Ctrl+Z hold shortcut. Mic button lives next to Send in the composer. |
 | `src/components/desktop/Canvas.tsx` | Bottom workspace: issue viewer, transcript viewer, file viewer, timeline. |
@@ -431,13 +445,17 @@ For exact token values and row/typography geometry, **always** read [`hurttlocke
 
 ## Orchestrator Model
 
-**Claude OR Codex orchestrates. Codex is the workhorse either way.** Updated semantics as of v0.1.135 (epic #1044):
+**Three orchestrator backends. Codex is the workhorse regardless of which orchestrator drove the turn.** Backend selection is registry-based — `src/lib/lane/orchestrator-backends/registry.ts` keys on `OrchestratorBackend` (`'claude' | 'codex' | 'openclaw'`); the `inAppOrchestratorEnabled` operator toggle (Settings → Operator Defaults → 07) is the legacy two-path switch, and the registry now extends that with openclaw as a third option.
 
-- The `inAppOrchestratorEnabled` operator toggle (Settings → Operator Defaults → 07) is **OFF by default**. Off = Codex GPT-5.5 xhigh is the orchestrator backend (free for ChatGPT Plus / Codex sub users, no Anthropic SDK draw). On = Claude Opus 4.7 (bills the user's Agent SDK pool).
-- Same dual-path applies to: auto-review (`lane/auto-review.ts`), GitHub intake (`intake/github-intake.ts`), Q&A cascade (`cortex/qa/classifier.ts` + `composer.ts`), heal-bot (`supervisor/heal-bot.ts`), auto-compact (`orchestrator/auto-compact.ts`), and the post-commit distill hook (`scripts/distill-commit.ts`).
-- The orchestrator (whichever LLM) spawns Codex / Gemini agents in isolated worktrees via the `mcp__o8__*` mission/dispatch tools — never executes coding work directly.
-- Before any agent merge, the orchestrator reviews the diff (`mcp__o8__o8_merge_preview` → `submit_review` → `approve_and_merge`).
-- Codex orchestrator session uses `src/lib/lane/codex-orchestrator-session.ts` (shipped v0.1.135). Spawns `codex exec --json -c model=gpt-5.5 -c model_reasoning_effort=xhigh` and maps the JSON stream (`thread.started` / `item.completed` / `turn.completed`) into the same `OrchestratorEvent` contract the Claude path emits.
+| Backend | When | Billing | Implementation |
+|---|---|---|---|
+| **Claude Code REPL** | Toggle ON (Opus 4.7) | Agent SDK pool | `lane/codex-orchestrator-session.ts` peer + Claude REPL spawn (interactive `--input-format stream-json`, *not* `claude -p` — that was retired in #1066) |
+| **Codex GPT-5.5 xhigh** | Toggle OFF (default) | ChatGPT Plus / Codex sub (no Anthropic draw) | `lane/codex-orchestrator-session.ts` — `codex exec --json -c model=gpt-5.5 -c model_reasoning_effort=xhigh`, maps `thread.started` / `item.completed` / `turn.completed` JSON stream into `OrchestratorEvent` contract |
+| **openclaw** | Mobile-first / governed copies | Sub-billed via openclaw | `lane/orchestrator-backends/openclaw.ts` — spawns `openclaw --profile o8 agent --json` once per turn. Critical: dispatches Codex workers **through the o8 operator MCP** (`o8__dispatch_mission`), not openclaw's native `sessions_spawn` — that tool is `tools.deny`-stripped on the governed `o8` profile, per the structural fix for #1075 (orchestrator-runtime ≠ worker-runtime). Streaming limitation: openclaw `agent --json` returns one final JSON blob, so no live tool/thinking deltas. See `docs/openclaw-integration.md`. |
+
+Same multi-path applies to: auto-review (`lane/auto-review.ts`), GitHub intake (`intake/github-intake.ts`), Q&A cascade (`cortex/qa/classifier.ts` + `composer.ts`), heal-bot (`supervisor/heal-bot.ts`), auto-compact (`orchestrator/auto-compact.ts`), and the post-commit distill hook (`scripts/distill-commit.ts`).
+
+The orchestrator (whichever backend) spawns Codex / Gemini agents in isolated worktrees via the `mcp__o8__*` mission/dispatch tools — never executes coding work directly. Before any agent merge, the orchestrator reviews the diff (`mcp__o8__o8_merge_preview` → `submit_review` → `approve_and_merge`).
 
 ### Agent-side CLI (the `o8` binary)
 
@@ -460,6 +478,8 @@ When a packet's post-rebase typecheck fails during `approve_and_merge`, recovery
 | **3. Steer warm session** | orchestrator picks "fix it where it sits" | 1 cheap steer (warm thread) | orchestrator | `mcp__o8__steer_packet({packetId, message})` — reuses Codex `exec resume <threadId>`, model already has packet context. Cheaper + faster than layer 4. |
 | **4. Fresh redispatch** | orchestrator picks "start over" or layer 3 fails | full new Codex worker | orchestrator | Existing `mcp__o8__rerun_with_feedback({packetId, feedback})` |
 | **5. Human approval card** | orchestrator gives up | $0 | operator | Operator can always intervene via `o8_status` inbox; orchestrator surfaces a card explicitly to flag "I tried 1-4, your call" |
+
+**Lane states involved.** While layers 1–2 run, the lane sits in `recovering` (lane detached from active session, retry pending). On layer-2 escalation it flips to `awaiting_orchestrator`. On layer-5 it flips to `awaiting_human`. A separate but related path — `base-moved` — fires when `main` advances during the awaiting-approval window: layer-1-equivalent auto-rebase + retry runs once before bubbling up (#1130).
 
 **Cost ceiling per failed merge:** 1 extra Codex turn (layer 1) before any human or orchestrator-attention escalation. Past that, the escalation cost is bounded by the orchestrator's decision budget — not runaway retry.
 
@@ -524,5 +544,8 @@ Using subagents saves main context and runs cheaper models on tasks that don't n
 - `docs/system-architecture.md` — Mermaid diagram of the full system
 - `docs/runtime-adapter-contract.md` — AgentRuntime interface evolution
 - `docs/performance-architecture-principles.md` — Render speed, bootstrap, streaming
+- `docs/api.md` — Comprehensive `/api/*` route reference (closes #927)
+- `docs/openclaw-integration.md` — openclaw orchestrator backend integration details + v1 streaming limitations
+- `docs/vocabulary.md` — Canonical glossary (`runtime` / `agent` / `session` / `packet` / `lane` / `mission` / `review` / `approval`). MCP tool names + DB columns frozen; UI label divergences documented inline.
 
-<!-- Last reviewed: 2026-05-26 (full staleness pass — runtime model, layout diagram, theme system, design constants → hurttlocker.md, Cortex v2 rewrite, WS channels, port resolution, middleware GATED_PREFIXES, webview tools 7→12, OrchestratorHistorySidebar removal, DB tables, API families 10→26, lib domains 13→74) -->
+<!-- Last reviewed: 2026-05-26 (full staleness pass + closed-issues sweep — runtime model, layout diagram, theme system, design constants → hurttlocker.md, Cortex v2 rewrite + Engineering Brain + spec-ingest feedback loop, WS channels, port resolution, middleware GATED_PREFIXES, webview tools 7→12, OrchestratorHistorySidebar removal, DB tables, API families 10→26, lib domains 13→74, three orchestrator backends incl. openclaw, ReviewPanel + TurnSummaryCard + ChatActionCard, cortex_ask MCP tool, recovering lane state, docs/api.md + docs/openclaw-integration.md) -->
