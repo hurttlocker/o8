@@ -5,6 +5,7 @@ import { readFile, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
+import { getSqlite } from '@/lib/db';
 import { readRepoPathRegistry } from './repo-path-registry';
 import {
   addRepoToProject,
@@ -112,6 +113,124 @@ function ensureDir() {
   }
 }
 
+// ── #1099 Phase 2 — SQLite overlay for ledger metadata ──
+
+interface SqliteProjectMeta {
+  byId: Map<string, { color: string | null; sortOrder: number | null }>;
+  bySlug: Map<string, { color: string | null; sortOrder: number | null }>;
+  activeProjectId: string | null;
+}
+
+/**
+ * Sync-read the color / sort_order / active_project_id values from SQLite.
+ * Returns null on any error so the caller falls back to the JSON ledger —
+ * we never want a SQLite hiccup to nuke the project switcher.
+ */
+function readSqliteProjectMeta(): SqliteProjectMeta | null {
+  try {
+    const sqlite = getSqlite();
+    const rows = sqlite.prepare(
+      'SELECT id, slug, color, sort_order FROM projects',
+    ).all() as Array<{ id: string; slug: string; color: string | null; sort_order: number | null }>;
+    const byId = new Map<string, { color: string | null; sortOrder: number | null }>();
+    const bySlug = new Map<string, { color: string | null; sortOrder: number | null }>();
+    for (const row of rows) {
+      const entry = { color: row.color, sortOrder: row.sort_order };
+      byId.set(row.id, entry);
+      bySlug.set(row.slug, entry);
+    }
+    const activeRow = sqlite.prepare(
+      "SELECT value FROM app_state WHERE key = 'active_project_id' LIMIT 1",
+    ).get() as { value: string } | undefined;
+    return {
+      byId,
+      bySlug,
+      activeProjectId: activeRow?.value ?? null,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Overlay SQLite-canonical metadata (color, sort_order, active_project_id)
+ * onto a JSON-sourced ledger. Behavior-preserving when SQLite has no data
+ * for a project — that project keeps its JSON values.
+ */
+function overlayLedgerWithSqliteMeta(ledger: ProjectsLedger): ProjectsLedger {
+  const meta = readSqliteProjectMeta();
+  if (!meta || (meta.byId.size === 0 && !meta.activeProjectId)) return ledger;
+
+  // Decorate each project with the SQLite color when present. Look up by id
+  // first (the SQLite id), then by slug (handles ledger-only rows like the
+  // legacy 'default' that pre-date the SQLite project surface).
+  const decorated = ledger.projects.map((project) => {
+    const slugCandidate = projectNameToSlug(project.name);
+    const matched = meta.byId.get(project.id) ?? meta.bySlug.get(slugCandidate);
+    if (!matched) return project;
+    const color = matched.color && PROJECT_COLOR_PALETTE.includes(matched.color as ProjectColor)
+      ? matched.color as ProjectColor
+      : project.color;
+    return { ...project, color, _sortOrder: matched.sortOrder ?? undefined } as ProjectRecord & { _sortOrder?: number };
+  });
+
+  // Stable sort by SQLite sort_order when present (ledger projects without a
+  // sort_order keep their relative order — append after the sorted block).
+  const withOrder = decorated.filter((p): p is ProjectRecord & { _sortOrder: number } => (
+    typeof (p as { _sortOrder?: number })._sortOrder === 'number'
+  ));
+  const withoutOrder = decorated.filter((p) => typeof (p as { _sortOrder?: number })._sortOrder !== 'number');
+  withOrder.sort((a, b) => a._sortOrder - b._sortOrder);
+  const projects = [...withOrder, ...withoutOrder].map((entry) => {
+    // Strip the transient _sortOrder field before returning.
+    const { _sortOrder: _unused, ...rest } = entry as ProjectRecord & { _sortOrder?: number };
+    void _unused;
+    return rest;
+  });
+
+  return {
+    projects,
+    activeProjectId: meta.activeProjectId ?? ledger.activeProjectId,
+  };
+}
+
+/**
+ * Write the migrated metadata (color, sort_order, active_project_id) back to
+ * SQLite alongside the JSON write. Best-effort — failures log and continue
+ * so the JSON write remains the operator-visible source of truth.
+ */
+function writeSqliteProjectMeta(ledger: ProjectsLedger): void {
+  try {
+    const sqlite = getSqlite();
+    const now = Date.now();
+    const updateById = sqlite.prepare(
+      'UPDATE projects SET color = ?, sort_order = ? WHERE id = ?',
+    );
+    const updateBySlug = sqlite.prepare(
+      'UPDATE projects SET color = ?, sort_order = ? WHERE slug = ?',
+    );
+    ledger.projects.forEach((project, index) => {
+      if (project.id.startsWith('repo:')) return;
+      const color = project.color ?? null;
+      const sortOrder = index;
+      const res = updateById.run(color, sortOrder, project.id);
+      if (res.changes === 0) {
+        updateBySlug.run(color, sortOrder, projectNameToSlug(project.name));
+      }
+    });
+    if (ledger.activeProjectId) {
+      sqlite.prepare(
+        `INSERT INTO app_state (key, value, updated_at) VALUES ('active_project_id', ?, ?)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+      ).run(ledger.activeProjectId, now);
+    }
+  } catch (err) {
+    console.warn(
+      `[projects] SQLite metadata write failed (JSON persisted normally): ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
 async function readRawLedger(): Promise<ProjectsLedger | null> {
   try {
     const raw = await readFile(PROJECTS_PATH, 'utf8');
@@ -133,7 +252,10 @@ async function readRawLedger(): Promise<ProjectsLedger | null> {
     const activeProjectId = typeof parsed.activeProjectId === 'string' && parsed.activeProjectId
       ? parsed.activeProjectId
       : projects[0]!.id;
-    return { projects, activeProjectId };
+    // #1099 Phase 2 — overlay SQLite-canonical metadata (color, sort_order,
+    // active_project_id). SQLite is the source of truth for these 3 fields;
+    // the JSON read keeps providing project shape + membership history.
+    return overlayLedgerWithSqliteMeta({ projects, activeProjectId });
   } catch {
     return null;
   }
@@ -148,6 +270,10 @@ async function writeLedger(ledger: ProjectsLedger) {
     projects: ledger.projects.filter((p) => !p.id.startsWith('repo:')),
   };
   await writeFile(PROJECTS_PATH, JSON.stringify(persistable, null, 2), 'utf8');
+  // #1099 Phase 2 — mirror the migrated metadata into SQLite so the overlay
+  // reads see fresh values. Best-effort: the JSON write is the authoritative
+  // surface; SQLite failure logs + continues.
+  writeSqliteProjectMeta(persistable);
 }
 
 async function bootstrapDefaultLedger(): Promise<ProjectsLedger> {
@@ -290,7 +416,8 @@ export function getProjectsLedgerSync(): ProjectsLedger {
     const activeProjectId = typeof parsed.activeProjectId === 'string' && parsed.activeProjectId
       ? parsed.activeProjectId
       : projects[0]!.id;
-    return { projects, activeProjectId };
+    // #1099 Phase 2 — same SQLite overlay as the async readRawLedger.
+    return overlayLedgerWithSqliteMeta({ projects, activeProjectId });
   } catch {
     return {
       projects: [{
