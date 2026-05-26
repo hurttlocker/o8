@@ -1,6 +1,8 @@
 'use client';
 
 import { useCallback, useEffect, useState } from 'react';
+import { isTauri } from '@/lib/tauri/bridge';
+import { useTauriFileDrop } from './use-tauri-file-drop';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
@@ -9,6 +11,12 @@ export interface DroppedFile {
   mimeType: string;
   content: string; // base64
   preview?: string; // ObjectURL for images
+  /**
+   * Absolute path on disk, populated when the file arrived through the
+   * Tauri drag-drop bridge (Finder → app). Undefined for HTML5 drops and
+   * pastes — those have no path.
+   */
+  absolutePath?: string;
 }
 
 export interface UseFileDropOptions {
@@ -16,6 +24,16 @@ export interface UseFileDropOptions {
   maxFiles?: number;
   /** Listen for window-level paste events */
   enablePaste?: boolean;
+  /**
+   * Element to hit-test Tauri drag-drop events against. When provided AND
+   * running in Tauri, the hook subscribes to the Rust drag-drop bridge
+   * (see #1136) and routes drops landing inside this element through
+   * `read_dropped_file`, populating DroppedFile.absolutePath.
+   *
+   * Omit to keep legacy HTML5-only behavior (used by mobile AgentPanelChat
+   * and other surfaces that don't need absolute paths).
+   */
+  hostRef?: React.RefObject<HTMLElement | null>;
 }
 
 export interface UseFileDropResult {
@@ -32,12 +50,30 @@ export interface UseFileDropResult {
   };
 }
 
+interface ReadDroppedFileResult {
+  name: string;
+  mimeType: string;
+  contentBase64: string;
+  size: number;
+}
+
+async function readDroppedFileViaTauri(path: string): Promise<ReadDroppedFileResult | null> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    return await invoke<ReadDroppedFileResult>('read_dropped_file', { path });
+  } catch (err) {
+    console.warn(`[file-drop] read_dropped_file failed for ${path}`, err);
+    return null;
+  }
+}
+
 export function useFileDrop(options?: UseFileDropOptions): UseFileDropResult {
   const maxFiles = options?.maxFiles ?? 10;
   const enablePaste = options?.enablePaste ?? true;
+  const hostRef = options?.hostRef;
 
   const [pendingFiles, setPendingFiles] = useState<DroppedFile[]>([]);
-  const [dragOver, setDragOver] = useState(false);
+  const [htmlDragOver, setHtmlDragOver] = useState(false);
 
   const processFiles = useCallback((files: FileList | File[]) => {
     Array.from(files).forEach((file) => {
@@ -59,17 +95,58 @@ export function useFileDrop(options?: UseFileDropOptions): UseFileDropResult {
     });
   }, [maxFiles]);
 
+  // #1136 Tauri drag-drop bridge. When hostRef is provided AND running in
+  // Tauri, subscribe to the Rust bridge and route drops through
+  // `read_dropped_file`. Skipped entirely otherwise — HTML5 path handles
+  // browser-only use (mobile PWA) and internal-only drags.
+  const tauriEnabled = Boolean(hostRef) && isTauri();
+  const handleTauriDrop = useCallback(
+    (paths: string[]) => {
+      void (async () => {
+        for (const path of paths) {
+          const result = await readDroppedFileViaTauri(path);
+          if (!result) continue;
+          const preview = result.mimeType.startsWith('image/')
+            ? `data:${result.mimeType};base64,${result.contentBase64}`
+            : undefined;
+          setPendingFiles((prev) => {
+            if (prev.length >= maxFiles) return prev;
+            return [
+              ...prev,
+              {
+                name: result.name,
+                mimeType: result.mimeType,
+                content: result.contentBase64,
+                preview,
+                absolutePath: path,
+              },
+            ];
+          });
+        }
+      })();
+    },
+    [maxFiles],
+  );
+
+  const { dragOver: tauriDragOver } = useTauriFileDrop({
+    hostRef: (hostRef ?? { current: null }) as React.RefObject<HTMLElement | null>,
+    onDrop: handleTauriDrop,
+    disabled: !tauriEnabled,
+  });
+
+  const dragOver = htmlDragOver || tauriDragOver;
+
   const removePendingFile = useCallback((index: number) => {
     setPendingFiles((prev) => {
       const f = prev[index];
-      if (f?.preview) URL.revokeObjectURL(f.preview);
+      if (f?.preview && f.preview.startsWith('blob:')) URL.revokeObjectURL(f.preview);
       return prev.filter((_, i) => i !== index);
     });
   }, []);
 
   const clearPendingFiles = useCallback(() => {
     setPendingFiles((prev) => {
-      prev.forEach((f) => { if (f.preview) URL.revokeObjectURL(f.preview); });
+      prev.forEach((f) => { if (f.preview && f.preview.startsWith('blob:')) URL.revokeObjectURL(f.preview); });
       return [];
     });
   }, []);
@@ -77,19 +154,19 @@ export function useFileDrop(options?: UseFileDropOptions): UseFileDropResult {
   const onDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setDragOver(true);
+    setHtmlDragOver(true);
   }, []);
 
   const onDragLeave = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setDragOver(false);
+    setHtmlDragOver(false);
   }, []);
 
   const onDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    setDragOver(false);
+    setHtmlDragOver(false);
     if (e.dataTransfer.files.length > 0) processFiles(e.dataTransfer.files);
   }, [processFiles]);
 
