@@ -1,4 +1,4 @@
-export { parseReviewFindings } from '@/lib/orchestrator/review-finding-input';
+export { parseReviewFindings, parseDirectivesApplied, parseDirectivesViolated } from '@/lib/orchestrator/review-finding-input';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 // ── Types ──

@@ -87,6 +87,17 @@ export interface OrchestratorPacketReviewFinding {
   fixSuggestion?: string | null;
 }
 
+export interface OrchestratorPacketReviewDirectiveViolation {
+  /** Directive identifier — title from front matter, filename, or first-line slug. */
+  directive: string;
+  /** File path where the violation was found, relative to the repo root. */
+  file?: string | null;
+  /** Line number of the violating change. */
+  line?: number | null;
+  /** Optional short code snippet (single line) showing the violation. */
+  snippet?: string | null;
+}
+
 export interface OrchestratorPacketReview {
   approved: boolean;
   findings: OrchestratorPacketReviewFinding[];
@@ -94,6 +105,17 @@ export interface OrchestratorPacketReview {
   reviewedHeadSha?: string | null;
   summary: string;
   auditApprovalId?: string | null;
+  /**
+   * #732 — Directives the review verified were respected by the diff. Names
+   * align with directive titles / filenames returned by `get_packet_scope`.
+   */
+  directivesApplied?: string[];
+  /**
+   * #732 — Directives the review found contradicted by the diff. Each entry
+   * names the directive plus the offending file:line so the operator can
+   * jump straight to the violation.
+   */
+  directivesViolated?: OrchestratorPacketReviewDirectiveViolation[];
 }
 
 /**
