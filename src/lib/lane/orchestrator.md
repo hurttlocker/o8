@@ -74,9 +74,17 @@ VERDICT #<issue> — <approve | reject | needs-follow-up>
 Lane: <laneId>
 Diff summary: <2-3 sentences of what changed>
 Typecheck: <pass | fail + specific error>
+Directives applied: <comma list of directives the diff respected, or "none">
+Directives violated: <bullet list of `<directive> @ <file>:<line>`, or "none">
 Concerns: <bullet list, or "none">
 Next action: <approve_and_merge | cortex_steer_agent with nudge | reject with reason>
 ```
+
+**Directive surfacing (#732):** before writing the VERDICT, call `get_packet_scope({packetId})` — the response includes a `directives` array filtered to the packet's repo. For each directive, decide whether the diff RESPECTED it (applied) or CONTRADICTED it (violated). When you call `submit_review`, pass:
+- `directivesApplied: ['<directive-title-or-filename>', ...]` — names the orchestrator verified the diff held to.
+- `directivesViolated: [{directive, file, line, snippet?}, ...]` — names plus the offending file:line.
+
+Omit either field when nothing applies. The Packet Review Card surfaces them as `✓ APPLIED` / `⚠ VIOLATED` rows, making governance enforcement visible to the operator.
 
 If you verified the work but the governance tools can't reach the approval yet (permissions, ordering), still write the VERDICT block and name the exact command you would run — the user will fire it. The verdict IS the deliverable. Running the approval is mechanical; writing the judgment is the part only you can do.
 

@@ -32,6 +32,8 @@ import {
   errorText,
   jsonResult,
   optionalString,
+  parseDirectivesApplied,
+  parseDirectivesViolated,
   parseIssueList,
   parseMissionRuntime,
   parseReviewFindings,
@@ -71,8 +73,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         runtime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'opencode'],
-          description: 'Requested runtime hint for all mission packets. Production currently launches Codex and preserves this as routing metadata.',
+          enum: ['codex'],
+          description: 'Worker runtime for all mission packets. Codex is the only supported worker — Claude runs as the orchestrator (REPL via stream-json) and never as a packet worker. Gemini and opencode are not currently dispatchable.',
         },
         workerIntent: {
           type: 'string',
@@ -255,8 +257,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'opencode'],
-          description: 'Future runtime hint. Preserved in routing metadata; production still selects Codex.',
+          enum: ['codex'],
+          description: 'Worker runtime hint. Codex is the only supported worker today.',
         },
         model: {
           type: 'string',
@@ -352,8 +354,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: ['codex', 'claude-code', 'gemini', 'opencode'],
-          description: 'Future runtime hint. Preserved in routing metadata; production still selects Codex.',
+          enum: ['codex'],
+          description: 'Worker runtime hint. Codex is the only supported worker today.',
         },
         projectId: {
           type: 'string',
@@ -587,6 +589,25 @@ export const MISSION_TOOLS: McpTool[] = [
         reviewedHeadSha: {
           type: 'string',
           description: 'Optional worktree HEAD SHA that was reviewed. If omitted, o8 captures the lane worktree HEAD at review time.',
+        },
+        directivesApplied: {
+          type: 'array',
+          description: '#732 — Directives the diff RESPECTED. List the directive title or filename (as returned by get_packet_scope). Surfaces in the Packet Review Card so the operator can see governance enforcement.',
+          items: { type: 'string' },
+        },
+        directivesViolated: {
+          type: 'array',
+          description: '#732 — Directives the diff CONTRADICTED. Each entry names the directive plus the offending file:line. Surfaces in the Packet Review Card as warning rows.',
+          items: {
+            type: 'object',
+            properties: {
+              directive: { type: 'string', description: 'Directive title or filename (from get_packet_scope).' },
+              file: { type: 'string', description: 'Path of the file where the violation was found.' },
+              line: { type: 'number', description: 'Line number of the violating change.' },
+              snippet: { type: 'string', description: 'Optional one-line snippet showing the violation.' },
+            },
+            required: ['directive'],
+          },
         },
       },
       required: ['packetId', 'findings', 'approved'],
@@ -1230,6 +1251,8 @@ export async function handleSubmitReview(args: Record<string, unknown>): Promise
       findings: parseReviewFindings(args.findings),
       approved: args.approved,
       reviewedHeadSha: optionalString(args, 'reviewedHeadSha') || undefined,
+      directivesApplied: parseDirectivesApplied(args.directivesApplied),
+      directivesViolated: parseDirectivesViolated(args.directivesViolated),
     });
     return jsonResult(result);
   } catch (error) {
