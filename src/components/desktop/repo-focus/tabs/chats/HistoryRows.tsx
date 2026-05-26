@@ -1,7 +1,6 @@
 'use client';
 
 import { useState, type MouseEvent } from 'react';
-import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { CheckCircle2 } from '../../../lucide-shims';
 import { formatElapsed, REPO_FOCUS_FONT } from '../../utils';
 import { HISTORY_ROW_TONES } from './constants';
@@ -87,36 +86,13 @@ export function ArchivedLaneCompactRow({
         textAlign: 'left',
         outline: 'none',
         fontFamily: REPO_FOCUS_FONT,
-        paddingTop: 2,
-        paddingRight: 10,
-        paddingBottom: 2,
-        paddingLeft: 10,
+        paddingTop: 5,
+        paddingRight: 13,
+        paddingBottom: 5,
+        paddingLeft: 37,
         transition: 'background 180ms ease',
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: 16,
-          height: 16,
-          borderRadius: 5,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          color: 'var(--t-text-muted)',
-        }}
-      >
-        {lane.runtime === 'claude-code' ? (
-          <ClaudeIcon size={12} />
-        ) : lane.runtime === 'gemini' ? (
-          <GeminiIcon size={12} />
-        ) : lane.runtime === 'opencode' ? (
-          <OpenCodeIcon size={12} />
-        ) : (
-          <CodexIcon size={12} />
-        )}
-      </span>
       <span
         style={{
           flex: 1,
@@ -132,6 +108,25 @@ export function ArchivedLaneCompactRow({
         }}
       >
         {lane.label}
+      </span>
+      {/* Match active chat rows — timestamp + 5px static ring in a
+          flex container so the ring sits at the same column as the
+          ring on active chats above. No runtime brand logo; the
+          Archived header tells the operator everything here is dormant. */}
+      <span
+        style={{
+          flexShrink: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          color: 'var(--t-text-faint)',
+          fontSize: 9.5,
+          fontWeight: 260,
+          letterSpacing: '-0.4px',
+        }}
+      >
+        <span>{formatElapsedAgo(lane.updatedAt)}</span>
+        <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5 }} />
       </span>
     </div>
   );
@@ -156,26 +151,13 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
         textAlign: 'left',
         fontFamily: REPO_FOCUS_FONT,
         paddingTop: compact ? 2 : 5,
-        paddingRight: compact ? 10 : 12,
+        paddingRight: compact ? 12 : 14,
         paddingBottom: compact ? 2 : 5,
-        paddingLeft: compact ? 10 : 12,
+        // Align with HistoryChatRow's chat-text X (37) so merged packets
+        // and active chats sit on the same vertical column.
+        paddingLeft: 37,
       }}
     >
-      <span
-        aria-hidden
-        style={{
-          width: compact ? 16 : 20,
-          height: compact ? 16 : 20,
-          borderRadius: compact ? 5 : 6,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexShrink: 0,
-          color: '#16a34a',
-        }}
-      >
-        <CheckCircle2 size={compact ? 13 : 14} strokeWidth={2.1} />
-      </span>
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
           style={{
@@ -191,22 +173,40 @@ export function MergedPacketRow({ packet, compact }: { packet: OrchestratorPacke
         >
           {packet.title}
         </span>
-        <span
-          style={{
-            display: 'block',
-            marginTop: 4,
-            color: 'var(--t-text-faint)',
-            fontSize: 9.5,
-            lineHeight: 1.25,
-            fontWeight: 260,
-            letterSpacing: '-0.4px',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-          }}
-        >
-          {meta}
-        </span>
+        {!compact ? (
+          <span
+            style={{
+              display: 'block',
+              marginTop: 4,
+              color: 'var(--t-text-faint)',
+              fontSize: 9.5,
+              lineHeight: 1.25,
+              fontWeight: 260,
+              letterSpacing: '-0.4px',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {meta.replace(/ · Merged.*$/, '')}
+          </span>
+        ) : null}
+      </span>
+      <span
+        aria-hidden
+        style={{
+          flexShrink: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          color: '#16a34a',
+          fontSize: 9.5,
+          fontWeight: 260,
+          letterSpacing: '-0.4px',
+        }}
+      >
+        {releasedAt ? <span>{formatElapsedAgo(releasedAt)}</span> : null}
+        <CheckCircle2 size={compact ? 13 : 14} strokeWidth={2.1} />
       </span>
     </div>
   );
@@ -274,24 +274,15 @@ export function HistoryChatRow({
         outline: 'none',
         fontFamily: REPO_FOCUS_FONT,
         paddingTop: 5,
-        paddingRight: compact ? 10 : 12,
+        paddingRight: compact ? 12 : 14,
         paddingBottom: 5,
-        paddingLeft: compact ? 10 : 12,
+        // Indented to align with top-nav text X (MiniAgentPanelAction =
+        // paddingLeft 12 + 17 icon + 8 gap = 37). Folder icon on repo
+        // header sits at X=12, so chats nest visually under their group.
+        paddingLeft: 37,
         transition: 'background 180ms ease, opacity 180ms ease',
       }}
     >
-      {shimmerStatus ? (
-        // Motion vocab B — chat has an active running/reviewing packet.
-        <span className="o8-pulse-circle" aria-label="Agent working" title="Agent working" />
-      ) : mergedStatus ? (
-        // Motion vocab: merged → distinctive purple branch glyph that
-        // catches the eye against the gray rings everywhere else.
-        <MergedGlyph />
-      ) : (
-        // Motion vocab A — every idle chat carries the tiny ring so the
-        // pulse / merged glyph reads as a state change against a baseline.
-        <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5 }} />
-      )}
       <span style={{ flex: 1, minWidth: 0 }}>
         <span
           className={active ? 'o8-text-shimmer' : undefined}
@@ -311,7 +302,7 @@ export function HistoryChatRow({
         >
           {item.title}
         </span>
-        {metaParts.length > 0 ? (
+        {metaParts.length > 0 && !compact ? (
           <span
             style={{
               display: 'block',
@@ -326,23 +317,41 @@ export function HistoryChatRow({
               whiteSpace: 'nowrap',
             }}
           >
-            {metaParts.map((part, index) => (
-              <span key={`${part.text}-${index}`}>
-                {index > 0 ? <span>{' · '}</span> : null}
-                <span
-                  className={part.status && shimmerStatus ? 'o8-text-shimmer' : undefined}
-                  style={part.status ? {
-                    color: rowTone.iconColor,
-                    fontWeight: 650,
-                    ...(shimmerStatus ? shimmerTextStyle(rowTone.iconColor, 'var(--t-text)') : {}),
-                  } : undefined}
-                >
-                  {part.text}
+            {metaParts
+              .filter((part) => !(part.status && rowTone.label)) // status moves to trailing slot
+              .map((part, index) => (
+                <span key={`${part.text}-${index}`}>
+                  {index > 0 ? <span>{' · '}</span> : null}
+                  <span>{part.text}</span>
                 </span>
-              </span>
-            ))}
+              ))}
           </span>
         ) : null}
+      </span>
+      {/* Trailing meta — Antigravity-style: timestamp + status indicator
+          live on the right edge so the title can breathe at the left. */}
+      <span
+        style={{
+          flexShrink: 0,
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: 6,
+          color: 'var(--t-text-faint)',
+          fontSize: 9.5,
+          fontWeight: 260,
+          letterSpacing: '-0.4px',
+        }}
+      >
+        {compact ? (
+          <span>{formatElapsedAgo(item.modifiedAt)}</span>
+        ) : null}
+        {shimmerStatus ? (
+          <span className="o8-pulse-circle" aria-label="Agent working" title="Agent working" />
+        ) : mergedStatus ? (
+          <MergedGlyph />
+        ) : (
+          <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5 }} />
+        )}
       </span>
     </div>
   );
@@ -380,16 +389,11 @@ export function CompactSessionRow({
         outline: 'none',
         fontFamily: REPO_FOCUS_FONT,
         paddingTop: 4,
-        paddingRight: 10,
+        paddingRight: 12,
         paddingBottom: 4,
-        paddingLeft: 10,
+        paddingLeft: 37,
       }}
     >
-      {isRunning ? (
-        <span className="o8-pulse-circle" aria-label="Working" title="Working" style={{ width: 5, height: 5 }} />
-      ) : (
-        <span className="o8-static-ring" aria-label="Idle session" title="Idle session" style={{ width: 5, height: 5 }} />
-      )}
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontSize: 13.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {session.name || session.runtime || 'Agent'}
@@ -398,6 +402,11 @@ export function CompactSessionRow({
           {metaLabel}
         </span>
       </span>
+      {isRunning ? (
+        <span className="o8-pulse-circle" aria-label="Working" title="Working" style={{ width: 5, height: 5, flexShrink: 0 }} />
+      ) : (
+        <span className="o8-static-ring" aria-label="Idle session" title="Idle session" style={{ width: 5, height: 5, flexShrink: 0 }} />
+      )}
     </button>
   );
 }

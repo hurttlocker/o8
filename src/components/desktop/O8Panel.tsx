@@ -9,7 +9,8 @@
 
 import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import type React from 'react';
-import { CircleSpark } from 'iconoir-react';
+import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
+import { Terminal as TablerTerminal } from '@/components/desktop/tabler-shims';
 import { O8ActivityPane } from './O8ActivityPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8InboxPane } from './O8InboxPane';
@@ -72,50 +73,32 @@ interface O8PanelProps {
   termWsConnected?: boolean;
 }
 
+// Locked icon picks per hurttlocker.md — Iconoir for chrome that needs
+// distinct semantic glyphs, Tabler for Terminal (tighter geometry at
+// small sizes). FilesIcon uses Iconoir Folder; ChatIcon stays on
+// CircleSpark (already locked for scratch chat); BrowserIcon uses
+// Iconoir Internet (globe + cursor, matches the ports-popover web row);
+// ReviewIcon uses Iconoir DoubleCheck (two checks reads as "AI-validated");
+// TerminalIcon delegates to the Tabler shim.
+
 function FilesIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z" />
-      <path d="M2 10h20" />
-    </svg>
-  );
+  return <Folder width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
 }
 
 function ChatIcon({ size = 18 }: { size?: number }) {
-  // Iconoir CircleSpark — operator-locked for the side / scratch chat surface.
-  // The circle + spark reads as "spark a quick thought" — fits scratch-chat
-  // semantics better than a generic chat bubble.
-  return <CircleSpark width={size} height={size} color="currentColor" strokeWidth={2} style={{ display: 'block', flexShrink: 0 }} />;
+  return <CircleSpark width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
 }
 
 function BrowserIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="10" />
-      <path d="M2 12h20" />
-      <path d="M12 2a15.3 15.3 0 0 1 0 20" />
-      <path d="M12 2a15.3 15.3 0 0 0 0 20" />
-    </svg>
-  );
+  return <Internet width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
 }
 
 function ReviewIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-      <path d="M14 2v6h6" />
-      <path d="m9 15 2 2 4-5" />
-    </svg>
-  );
+  return <DoubleCheck width={size} height={size} color="currentColor" strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
 }
 
 function TerminalIcon({ size = 18 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <polyline points="4 17 10 11 4 5" />
-      <line x1="12" x2="20" y1="19" y2="19" />
-    </svg>
-  );
+  return <TablerTerminal size={size} strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
 }
 
 function PlusIcon({ size = 16 }: { size?: number }) {
@@ -316,25 +299,54 @@ function RightUtilityTabStrip({
 }
 
 function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab) => void }) {
+  const [panelHeight, setPanelHeight] = useState<number | null>(null);
+  const measureRef = useCallback((node: HTMLDivElement | null) => {
+    if (!node) return;
+    setPanelHeight(node.clientHeight);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver((entries) => {
+      const entry = entries[0];
+      if (entry) setPanelHeight(entry.contentRect.height);
+    });
+    observer.observe(node);
+    // Cleanup handled by callback-ref re-fire when node changes.
+  }, []);
+  // Available height per card after subtracting padding + gaps. Targets a
+  // taller card on big screens; compact rows when the panel is short
+  // (e.g. split layouts) — never overflows into a scroll.
+  const padding = 28; // 14 top + 14 bottom
+  const gapsTotal = 6 * 4; // 5 cards = 4 gaps × 6px
+  const usable = Math.max(0, (panelHeight ?? 600) - padding - gapsTotal);
+  const fairShare = usable / RIGHT_UTILITY_TABS.length;
+  const cardHeight = Math.max(48, Math.min(96, fairShare));
+  const compact = cardHeight < 64;
+  const iconSize = compact ? 14 : 16;
+  const iconBoxSize = compact ? 26 : 30;
+  const labelSize = compact ? 12.5 : 13.5;
+  const metaSize = compact ? 9 : 9.5;
   return (
-    <div style={{
-      flex: 1,
-      minHeight: 0,
-      overflow: 'auto',
-      background: 'var(--t-bg)',
-      paddingTop: 30,
-      paddingRight: 24,
-      paddingBottom: 30,
-      paddingLeft: 24,
-    }}>
+    <div
+      ref={measureRef}
+      style={{
+        flex: 1,
+        minHeight: 0,
+        overflow: 'hidden',
+        background: 'var(--t-bg)',
+        paddingTop: 14,
+        paddingRight: 14,
+        paddingBottom: 14,
+        paddingLeft: 14,
+      }}
+    >
       <div style={{
         width: '100%',
-        maxWidth: 420,
+        height: '100%',
+        maxWidth: 460,
         marginLeft: 'auto',
         marginRight: 'auto',
-        display: 'grid',
-        gridTemplateColumns: '1fr',
-        gap: 14,
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 6,
       }}>
         {RIGHT_UTILITY_TABS.map((tab) => {
           const Icon = tab.icon;
@@ -344,19 +356,22 @@ function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab) => vo
               type="button"
               onClick={() => onOpen(tab.id)}
               style={{
-                minHeight: 112,
+                minHeight: cardHeight,
+                flex: 1,
                 display: 'flex',
-                flexDirection: 'column',
+                flexDirection: 'row',
                 alignItems: 'center',
-                justifyContent: 'center',
-                gap: 10,
-                borderRadius: 8,
+                gap: 12,
+                paddingTop: compact ? 8 : 12,
+                paddingRight: 14,
+                paddingBottom: compact ? 8 : 12,
+                paddingLeft: 14,
+                borderRadius: 10,
                 border: '1px solid var(--t-divider-subtle)',
                 background: 'var(--t-panel)',
                 color: 'var(--t-text)',
                 cursor: 'pointer',
-                textAlign: 'center',
-                boxShadow: '0 16px 32px rgba(15, 23, 42, 0.04)',
+                textAlign: 'left',
               }}
               onMouseEnter={(event) => {
                 event.currentTarget.style.background = 'var(--t-panel-hover)';
@@ -367,12 +382,27 @@ function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab) => vo
                 event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
               }}
             >
-              <span style={{ color: 'var(--t-text-secondary)', display: 'inline-flex' }}>
-                {Icon({ size: 25 })}
+              <span style={{
+                width: iconBoxSize,
+                height: iconBoxSize,
+                borderRadius: 8,
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--t-text-secondary)',
+                background: 'var(--t-input-bg)',
+                border: '1px solid var(--t-divider-subtle)',
+                flexShrink: 0,
+              }}>
+                {Icon({ size: iconSize })}
               </span>
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
-                <span style={{ fontSize: 18, fontWeight: 750, letterSpacing: 0 }}>{tab.label}</span>
-                <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text-muted)', letterSpacing: 0 }}>{tab.description}</span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0, flex: 1 }}>
+                <span style={{ fontSize: labelSize, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px' }}>
+                  {tab.label}
+                </span>
+                <span style={{ fontSize: metaSize, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-muted)' }}>
+                  {tab.description}
+                </span>
               </span>
             </button>
           );

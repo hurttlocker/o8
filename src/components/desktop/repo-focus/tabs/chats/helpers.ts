@@ -38,9 +38,24 @@ export function historyRepoLabel(item: ChatHistoryItem): string {
   return pathDisplayName(item.repoPath) || savedName || 'project';
 }
 
+/**
+ * Sentinel returned by historyRepoGroupLabel when a chat has no
+ * recognized repo association (item.repoPath is empty AND nothing in
+ * the registry matches). ChatsTab renders these under a "Conversations"
+ * section at the bottom, separate from the project-grouped chats —
+ * Antigravity-style.
+ */
+export const CONVERSATIONS_GROUP_KEY = '__conversations__';
+
 export function historyRepoGroupLabel(item: ChatHistoryItem, repos: RepoFocusRepo[]): string {
   const matchedRepo = repos.find((repo) => historyBelongsToRepo(item, repo));
-  return matchedRepo?.name ?? historyRepoLabel(item);
+  if (matchedRepo) return matchedRepo.name;
+  const repoPath = (item.repoPath ?? '').trim();
+  const repoName = (item.repoName ?? '').trim();
+  // No registered repo match AND no explicit repoPath/repoName ⇒
+  // free-floating chat. Drop it into the Conversations bucket.
+  if (!repoPath && !repoName) return CONVERSATIONS_GROUP_KEY;
+  return historyRepoLabel(item);
 }
 
 export function normalizeRemoteUrl(value: string | null | undefined): string {

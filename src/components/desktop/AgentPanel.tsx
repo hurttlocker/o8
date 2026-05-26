@@ -13,14 +13,14 @@ import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
 import { useProjects, type ProjectRecord } from './repo-registry/useProjects';
 import { ChevronDown, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
-import { AutoFlash, FolderSettings, InputSearch } from 'iconoir-react';
+import { AutoFlash, Delivery, InputSearch } from 'iconoir-react';
 import { repoSlugFromRemote } from './canvas-utils';
 
 // ── Iconoir → Lucide-shaped adapters ──────────────────────────────────
 // MiniAgentPanelAction wants a LucideIcon (size + strokeWidth). Iconoir
 // uses width/height. Tiny wrappers keep the AgentPanel callsite clean.
 const FolderIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
-  <FolderSettings width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
+  <Delivery width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
 );
 const SearchIcon: LucideIcon = ({ size = 24, strokeWidth = 2, color = 'currentColor' }) => (
   <InputSearch width={size} height={size} strokeWidth={Number(strokeWidth)} color={color} />
@@ -645,12 +645,12 @@ function MiniSessionMenuItem({
         outline: 'none',
         display: 'grid',
         gridTemplateColumns: '21px minmax(0, 1fr)',
-        gap: 8,
+        gap: 10,
         alignItems: 'center',
         paddingTop: 7,
-        paddingRight: 18,
+        paddingRight: 10,
         paddingBottom: 7,
-        paddingLeft: 18,
+        paddingLeft: 10,
         textAlign: 'left',
         fontFamily: 'var(--font-sans-system)',
         transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -743,11 +743,11 @@ function MiniAgentPanelAction({
         outline: 'none',
         display: 'flex',
         alignItems: 'center',
-        gap: 8,
+        gap: 10,
         paddingTop: 3,
-        paddingRight: 18,
+        paddingRight: 10,
         paddingBottom: 3,
-        paddingLeft: 18,
+        paddingLeft: 10,
         textAlign: 'left',
         fontFamily: 'var(--font-sans-system)',
         transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
