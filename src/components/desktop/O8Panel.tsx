@@ -470,6 +470,25 @@ export function O8Panel({
     return () => window.removeEventListener('o8:open-file', handler);
   }, [onOpenFile]);
 
+  // #1095 — ChatActionCard's Review button dispatches `o8:focus-review` so the
+  // panel flips to the Review tab and (optionally) scrolls to the first file
+  // the turn touched. Mirrors the `o8:open-file` precedent above.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ repoPath?: string | null; file?: string | null }>).detail ?? {};
+      if (detail.repoPath && detail.repoPath !== repoPath) {
+        onRepoPathChange?.(detail.repoPath);
+      }
+      onActiveTabChange?.('review');
+      if (typeof detail.file === 'string' && detail.file) {
+        setLocalSelectedFile(detail.file);
+        onSelectedFileChange?.(detail.file);
+      }
+    };
+    window.addEventListener('o8:focus-review', handler);
+    return () => window.removeEventListener('o8:focus-review', handler);
+  }, [onActiveTabChange, onRepoPathChange, onSelectedFileChange, repoPath]);
+
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
     if (tab === 'files') {
       return (
