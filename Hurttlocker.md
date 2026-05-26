@@ -55,7 +55,52 @@ Hover reveals delete / archive / context-menu actions — never default-visible.
 
 ## Section-label alignment
 
-All section/group labels render at `paddingLeft: 14`. That includes `SectionLabel` ("Open now" / "Archived"), `RepoGroupLabel` (per-repo "cortex-ide"), and `GroupHeader` ("Spawned agents", per-repo subhead). Row text uses `paddingLeft: compact ? 10 : 12` — a 2–4 px tighter indent than the labels above them. This creates the soft hierarchy: labels sit slightly indented from row content rather than the reverse.
+Antigravity-pass column system (locked 2026-05-26):
+
+- **Icon column (x=12, ish):** top-nav row icons (Play / Search / Automations / Delivery), repo folder glyphs, GroupHeader chevrons + folder glyphs. All sit with their left edge at the same paddingLeft (10–12 px depending on row type).
+- **Text column (x=37):** chat-row titles, spawned-agent titles, packet titles, top-nav text. Three different row types (HistoryChatRow, ExtraAgentRowView, the top-nav action) compute different paddingLeft values because their leading icon column widths differ — but they all land at the same text X (37 px). Tweaking any leading geometry means re-doing the paddingLeft math.
+- **Section labels (x=29):** RepoGroupLabel / GroupHeader headers sit between the icon and text columns — `paddingLeft 12 + 11 px chevron-or-folder slot + 6 px gap = 29`. Less indent than rows, more indent than nothing — the headers visually "own" the rows below.
+
+---
+
+## Right-rail alignment (locked 2026-05-26)
+
+Operator demands **pixel-perfect alignment** on the right edge of the agent panel. Anything that isn't on the column reads as misaligned to him — there is no "close enough."
+
+The right rail has three locked vertical columns:
+
+| X | What sits here | How it gets there |
+|---|---|---|
+| **235** | Top-nav chevrons (New session / Projects), filter-list icon (group picker on RepoGroupLabel) | Top-nav button `paddingRight: 10` + chevron at flex-end. RepoGroupLabel `paddingRight: 10` + ChatGroupPicker button `justifyContent: 'flex-end'` so its 12 px icon's right edge equals its 18 px button's right edge. |
+| **233** | Active chat ring / pulse, spawned-agent ring, timestamps (`10h ago` etc.) | HistoryChatRow + ExtraAgentRowView `paddingRight: 12`. Trailing meta is a flex span with `gap: 6` — the ring sits at the end of that span. |
+| **232** | Archived ring | ArchivedLaneCompactRow `paddingRight: 13` — explicitly 1 px left of the chat ring at 233, so archived reads as quietly "set aside" rather than identical to live chats. |
+
+### Why x=235 is special
+
+Chevrons + the FilterList icon have visible glyph centers that sit slightly LEFT of their SVG bounding box's right edge. Putting their bounding box at x=233 makes them *visually* read 1–3 px LEFT of the rings. Bumping to x=235 lands the visible pixels on the same column as the rings. Operator's eye picks up the difference at one glance — don't trust the math, measure the rendered pixel.
+
+### How to verify after any change
+
+Open the agent panel, then in the webview console:
+
+```js
+const m = (el) => Math.round(el.getBoundingClientRect().right * 10) / 10;
+const r = document.querySelector('.o8-static-ring');
+const f = document.querySelector('button[aria-label="Change chat grouping"] svg');
+const c = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim()==='New session').querySelectorAll('svg');
+console.table({ ring: m(r), filter: m(f), chevron: m(c[c.length-1]) });
+```
+
+Expected: `ring 233, filter 235, chevron 235`. If any value drifts, find the paddingRight that changed and snap it back.
+
+### Files that own the columns
+
+| Surface | File |
+|---|---|
+| Top-nav rows + chevrons | `AgentPanel.tsx` — `MiniAgentPanelRow`, `MiniAgentPanelAction` |
+| Repo group header + filter | `repo-focus/tabs/chats/shared.tsx` — `RepoGroupLabel` + `repo-focus/tabs/chats/ChatGroupPicker.tsx` |
+| Chat / spawned / archived rows | `repo-focus/tabs/chats/HistoryRows.tsx` — `HistoryChatRow`, `MergedPacketRow`, `CompactSessionRow`, `ArchivedLaneCompactRow` |
+| Spawned agents row | `AgentPanelExtraAgents.tsx` — `ExtraAgentRowView` |
 
 ---
 
@@ -65,9 +110,10 @@ All section/group labels render at `paddingLeft: 14`. That includes `SectionLabe
 |---|---|---|
 | Row vertical padding | 5 px top + 5 px bottom | All chat / agent / packet rows |
 | Row gap between rows | 0 px | Separators removed — rows touch, hover background is the only inter-row affordance |
-| Section label paddingLeft | 14 px | Aligns `Open now` / `Archived` / per-repo headers / `Spawned agents` |
-| Row paddingLeft | 10 (compact) / 12 px | Row text indents tighter than labels above |
-| Row paddingRight | 10 (compact) / 12 px | Symmetric |
+| Section label paddingLeft | 12 px | Aligns RepoGroupLabel / GroupHeader / SectionLabel |
+| Row paddingLeft | 37 px | Chat / spawned / archived rows — aligns row text X with top-nav text X (see Section-label alignment above) |
+| Row paddingRight | 12 px (chats / spawned), 13 px (archived) | Right rail alignment column at x=233 / 232 (see Right-rail alignment) |
+| Top-nav paddingLeft / paddingRight | 10 / 10 px | MiniAgentPanelRow + MiniAgentPanelAction — chevron at x=235 |
 
 ### Mask gradient (scroll fade)
 

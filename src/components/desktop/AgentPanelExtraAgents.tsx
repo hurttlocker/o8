@@ -30,7 +30,8 @@
  * repo cards via useAgentPanelState's runtime inventory feed.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { Folder as IconoirFolder } from 'iconoir-react';
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 import { ChevronDown, ChevronRight } from '@/components/desktop/lucide-shims';
 
@@ -318,9 +319,11 @@ function RuntimeGlyph({ runtime }: { runtime: string }) {
 function ExtraAgentRowView({
   row,
   onSelectSession,
+  onOpenMenu,
 }: {
   row: ExtraAgentRow;
   onSelectSession?: (sessionKey: string) => void;
+  onOpenMenu?: (event: ReactMouseEvent, row: ExtraAgentRow) => void;
 }) {
   // Status colors retired — Spawned agents rows now use the same motion
   // vocabulary as the chat rows above (gray pulse for active, gray ring
@@ -336,14 +339,22 @@ function ExtraAgentRowView({
       type="button"
       disabled={!canFocus}
       onClick={handleClick}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onOpenMenu?.(event, row);
+      }}
       title={canFocus ? `Focus ${row.name}` : row.name}
       style={{
         width: '100%',
         minHeight: 28,
         paddingTop: 5,
         paddingBottom: 5,
-        paddingLeft: 14,
-        paddingRight: 14,
+        // Aligned with HistoryChatRow chat-text X (37) so spawned agents
+        // share the same left rail as project chats above. paddingRight
+        // matches HistoryChatRow (12) so trailing motion rings sit on
+        // the same vertical column.
+        paddingLeft: 37,
+        paddingRight: 12,
         borderWidth: 0,
         background: 'transparent',
         display: 'flex',
@@ -362,11 +373,6 @@ function ExtraAgentRowView({
         e.currentTarget.style.background = 'transparent';
       }}
     >
-      {isActive ? (
-        <span className="o8-pulse-circle" aria-label="Working" title="Working" style={{ width: 5, height: 5 }} />
-      ) : (
-        <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5 }} />
-      )}
       <span
         style={{
           flex: 1,
@@ -397,6 +403,11 @@ function ExtraAgentRowView({
         ) : null}
       </span>
       <OriginChip origin={row.origin} />
+      {isActive ? (
+        <span className="o8-pulse-circle" aria-label="Working" title="Working" style={{ width: 5, height: 5, flexShrink: 0 }} />
+      ) : (
+        <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5, flexShrink: 0 }} />
+      )}
     </button>
   );
 }
@@ -409,7 +420,7 @@ function GroupHeader({
   onToggle,
 }: {
   label: string;
-  count: number;
+  count?: number;
   collapsible?: boolean;
   collapsed?: boolean;
   onToggle?: () => void;
@@ -423,9 +434,23 @@ function GroupHeader({
           <ChevronDown size={11} strokeWidth={2} style={{ color: 'var(--t-text-faint)' }} />
         )
       ) : (
-        // Invisible chevron slot — keeps per-repo headers aligned with the
-        // collapsible Spawned agents / Archived chevron-prefixed headers.
-        <span aria-hidden style={{ width: 11, flexShrink: 0 }} />
+        // Folder glyph for repo sub-headers (cortex-ide, o8-site under
+        // Spawned agents). Matches the main repo header's folder icon
+        // so all repo names carry the same prefix vocabulary.
+        <span
+          aria-hidden
+          style={{
+            width: 11,
+            height: 11,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--t-text-faint)',
+            flexShrink: 0,
+          }}
+        >
+          <IconoirFolder width={11} height={11} color="currentColor" strokeWidth={1.6} />
+        </span>
       )}
       <span
         style={{
@@ -442,17 +467,19 @@ function GroupHeader({
       >
         {label}
       </span>
-      <span
-        style={{
-          fontSize: 10,
-          fontWeight: 300,
-          color: 'var(--t-text-faint)',
-          fontFamily: '"SF Mono", ui-monospace, monospace',
-          flexShrink: 0,
-        }}
-      >
-        {count}
-      </span>
+      {typeof count === 'number' ? (
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 300,
+            color: 'var(--t-text-faint)',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+            flexShrink: 0,
+          }}
+        >
+          {count}
+        </span>
+      ) : null}
     </>
   );
 
@@ -496,15 +523,53 @@ function GroupHeader({
 
 const COLLAPSED_KEY = 'o8:agent-panel:spawned-agents-collapsed';
 
+interface ActionMenuState {
+  x: number;
+  y: number;
+  row: ExtraAgentRow;
+}
+
 function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsProps) {
   const [lanes, setLanes] = useState<LaneSummary[]>([]);
   const [agents, setAgents] = useState<AgentSummary[]>([]);
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
+  const [actionMenu, setActionMenu] = useState<ActionMenuState | null>(null);
+  const [archivedSessionKeys, setArchivedSessionKeys] = useState<Set<string>>(() => new Set());
+  const [busy, setBusy] = useState(false);
   const [collapsed, setCollapsed] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     return window.localStorage.getItem(COLLAPSED_KEY) === '1';
   });
   const abortRef = useRef<AbortController | null>(null);
+
+  const handleArchive = useCallback(async (row: ExtraAgentRow) => {
+    if (!row.sessionKey) return;
+    const sessionKey = row.sessionKey;
+    setArchivedSessionKeys((prev) => {
+      if (prev.has(sessionKey)) return prev;
+      const next = new Set(prev);
+      next.add(sessionKey);
+      return next;
+    });
+    setBusy(true);
+    try {
+      await fetch('/api/runtime/archive', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ sessionKey }),
+      });
+    } catch {
+      // Roll back the optimistic hide so operator can retry.
+      setArchivedSessionKeys((prev) => {
+        if (!prev.has(sessionKey)) return prev;
+        const next = new Set(prev);
+        next.delete(sessionKey);
+        return next;
+      });
+    } finally {
+      setBusy(false);
+    }
+  }, []);
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed((prev) => {
@@ -565,11 +630,13 @@ function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsPro
   }, [fetchData]);
 
   const rows = useMemo(() => buildRows(lanes, agents), [lanes, agents]);
-  const groups = useMemo(() => groupRows(rows, repos), [rows, repos]);
+  const visibleRows = useMemo(
+    () => rows.filter((row) => !(row.sessionKey && archivedSessionKeys.has(row.sessionKey))),
+    [rows, archivedSessionKeys],
+  );
+  const groups = useMemo(() => groupRows(visibleRows, repos), [visibleRows, repos]);
 
   if (groups.length === 0) return null;
-
-  const totalRowCount = groups.reduce((sum, group) => sum + group.rows.length, 0);
 
   return (
     <section
@@ -585,24 +652,177 @@ function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsPro
     >
       <GroupHeader
         label="Spawned agents"
-        count={totalRowCount}
         collapsible
         collapsed={collapsed}
         onToggle={toggleCollapsed}
       />
       {!collapsed ? groups.map((group) => (
         <div key={group.key}>
-          <GroupHeader label={group.label} count={group.rows.length} />
+          <GroupHeader label={group.label} />
           {group.rows.map((row) => (
             <ExtraAgentRowView
               key={row.key}
               row={row}
               onSelectSession={onSelectSession}
+              onOpenMenu={(event, targetRow) => {
+                setActionMenu({ x: event.clientX, y: event.clientY, row: targetRow });
+              }}
             />
           ))}
         </div>
       )) : null}
+      {actionMenu ? (
+        <ExtraAgentActionMenu
+          state={actionMenu}
+          busy={busy}
+          canFocus={Boolean(actionMenu.row.sessionKey && onSelectSession)}
+          onClose={() => setActionMenu(null)}
+          onFocus={() => {
+            if (actionMenu.row.sessionKey) onSelectSession?.(actionMenu.row.sessionKey);
+            setActionMenu(null);
+          }}
+          onArchive={() => {
+            void handleArchive(actionMenu.row);
+            setActionMenu(null);
+          }}
+        />
+      ) : null}
     </section>
+  );
+}
+
+function ExtraAgentActionMenu({
+  state,
+  busy,
+  canFocus,
+  onClose,
+  onFocus,
+  onArchive,
+}: {
+  state: ActionMenuState;
+  busy: boolean;
+  canFocus: boolean;
+  onClose: () => void;
+  onFocus: () => void;
+  onArchive: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const menuWidth = 190;
+  const menuHeight = 130;
+  const panelRect = typeof document === 'undefined'
+    ? null
+    : document.querySelector('[data-o8-agent-panel="true"]')?.getBoundingClientRect() ?? null;
+  const viewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight;
+  const boundaryLeft = panelRect?.left ?? 0;
+  const boundaryRight = panelRect?.right ?? viewportWidth;
+  const boundaryTop = panelRect?.top ?? 0;
+  const boundaryBottom = panelRect?.bottom ?? viewportHeight;
+  const minLeft = boundaryLeft + 8;
+  const maxLeft = Math.max(minLeft, boundaryRight - menuWidth - 8);
+  const left = Math.min(Math.max(state.x, minLeft), maxLeft);
+  const minTop = boundaryTop + 8;
+  const maxTop = Math.max(minTop, boundaryBottom - menuHeight - 8);
+  const top = Math.min(Math.max(state.y, minTop), maxTop);
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close spawned agent action menu"
+        onClick={onClose}
+        style={{ position: 'fixed', inset: 0, zIndex: 58, border: 0, background: 'transparent', cursor: 'default' }}
+      />
+      <div
+        style={{
+          position: 'fixed',
+          left,
+          top,
+          zIndex: 59,
+          width: menuWidth,
+          borderRadius: 13,
+          border: '1px solid var(--t-divider-subtle)',
+          background: 'color-mix(in srgb, var(--t-bg-elevated, #ffffff) 86%, transparent)',
+          boxShadow: '0 18px 48px rgba(15, 23, 42, 0.12)',
+          backdropFilter: 'blur(18px) saturate(145%)',
+          WebkitBackdropFilter: 'blur(18px) saturate(145%)',
+          padding: 7,
+          color: 'var(--t-text)',
+        }}
+      >
+        <div style={{ padding: '4px 7px 7px' }}>
+          <div style={{ fontSize: 11.25, lineHeight: '15px', fontWeight: 620, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {state.row.name}
+          </div>
+          <div style={{ marginTop: 1, color: 'var(--t-text-faint)', fontSize: 10, lineHeight: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {state.row.subtitle || state.row.runtime}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <ExtraAgentMenuRow label="Open" disabled={!canFocus || busy} onClick={onFocus} />
+          <ExtraAgentMenuRow label="Archive" disabled={busy || !state.row.sessionKey} onClick={onArchive} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ExtraAgentMenuRow({
+  label,
+  disabled = false,
+  danger = false,
+  onClick,
+}: {
+  label: string;
+  disabled?: boolean;
+  danger?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      style={{
+        width: '100%',
+        minHeight: 29,
+        borderRadius: 9,
+        border: 0,
+        background: 'transparent',
+        color: disabled ? 'var(--t-text-faint)' : danger ? '#dc2626' : 'var(--t-text-muted)',
+        cursor: disabled ? 'default' : 'pointer',
+        textAlign: 'left',
+        paddingTop: 0,
+        paddingRight: 9,
+        paddingBottom: 0,
+        paddingLeft: 9,
+        fontSize: 11.25,
+        lineHeight: '15px',
+        fontWeight: danger ? 620 : 560,
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+      onMouseEnter={(event) => {
+        if (disabled) return;
+        event.currentTarget.style.background = 'var(--t-hover)';
+        event.currentTarget.style.color = danger ? '#dc2626' : 'var(--t-text)';
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = 'transparent';
+        event.currentTarget.style.color = disabled ? 'var(--t-text-faint)' : danger ? '#dc2626' : 'var(--t-text-muted)';
+      }}
+    >
+      {label}
+    </button>
   );
 }
 

@@ -11,6 +11,7 @@ import { SessionRow } from './AgentRows';
 import { ChatGroupPicker } from './chats/ChatGroupPicker';
 import { HISTORY_ROW_TONES } from './chats/constants';
 import {
+  CONVERSATIONS_GROUP_KEY,
   historyBelongsToRepo,
   historyRepoContext,
   historyRepoGroupLabel,
@@ -269,8 +270,10 @@ export function ChatsTab({
   const flatHistoryRepoGroups = useMemo<RepoHistoryGroup[]>(() => {
     const groups = new Map<string, RepoHistoryGroup>();
     for (const item of flatHistoryItems) {
-      const label = historyRepoGroupLabel(item, targetRepos);
-      const key = label.toLowerCase();
+      const rawLabel = historyRepoGroupLabel(item, targetRepos);
+      const isConversational = rawLabel === CONVERSATIONS_GROUP_KEY;
+      const key = isConversational ? CONVERSATIONS_GROUP_KEY : rawLabel.toLowerCase();
+      const label = isConversational ? 'Conversations' : rawLabel;
       const existing = groups.get(key);
       if (existing) {
         existing.items.push(item);
@@ -278,7 +281,13 @@ export function ChatsTab({
         groups.set(key, { key, label, items: [item] });
       }
     }
-    return [...groups.values()];
+    // Conversations bucket — free-floating chats not tied to a registered
+    // repo — sorts to the bottom, Antigravity-style.
+    return [...groups.values()].sort((a, b) => {
+      if (a.key === CONVERSATIONS_GROUP_KEY) return 1;
+      if (b.key === CONVERSATIONS_GROUP_KEY) return -1;
+      return 0;
+    });
   }, [flatHistoryItems, targetRepos]);
 
   // Date-bucket grouping — Today / Yesterday / This week / Older.
@@ -392,25 +401,21 @@ export function ChatsTab({
         fontFamily: REPO_FOCUS_FONT,
       }}
     >
-      {/* "Open now" label removed per Hurttlocker pass — active sessions
-          (automation / live agents) now render inline with chats so the
-          3-dot working indicator on those rows carries the "this is
-          active" signal instead of a separate section header. */}
-      {displayedSessions.map((session) => (
-        compact ? (
-          <CompactSessionRow
-            key={session.sessionKey}
-            session={session}
-            onSelectSession={onSelectSession}
-          />
-        ) : (
+      {/* Top-level live sessions block — hidden in compact (AgentPanel)
+          mode because automation sessions already render under the
+          Spawned agents → <repo> group below. Showing them here too
+          caused a visible Daily standup duplication at the top of the
+          panel. Non-compact callers (full repo focus view) still get
+          the active-session header for context. */}
+      {!compact ? (
+        displayedSessions.map((session) => (
           <SessionRow
             key={session.sessionKey}
             session={session}
             onSelectSession={onSelectSession}
           />
-        )
-      ))}
+        ))
+      ) : null}
 
       {groupMode === 'flat' && flatHistoryItems.length > 0 ? (
         <div>
@@ -462,10 +467,12 @@ export function ChatsTab({
                   const repoArchivedLanes = archivedLanesByRepoKey.get(group.key) ?? [];
                   const archivedExpanded = archivedLanesExpanded.has(group.key);
                   const isLast = index === flatHistoryRepoGroups.length - 1;
+                  const isConversations = group.key === CONVERSATIONS_GROUP_KEY;
                   return (
                     <div key={group.key}>
                       <RepoGroupLabel
                         label={group.label}
+                        noIcon={isConversations}
                         trailing={index === 0 ? <ChatGroupPicker mode={chatGroupBy} onChange={updateChatGroupBy} /> : null}
                       />
                       {group.items.map((item) => (
@@ -491,7 +498,6 @@ export function ChatsTab({
                           <SectionLabel
                             label="Archived"
                             compact={compact}
-                            count={repoArchivedLanes.length}
                             collapsed={!archivedExpanded}
                             onToggle={() => toggleArchivedLanes(group.key)}
                           />
@@ -590,7 +596,6 @@ export function ChatsTab({
           <SectionLabel
             label="Archived"
             compact={compact}
-            count={visibleArchivedHistory.length}
             collapsed={collapsedGroups.archived}
             onToggle={() => toggleGroup('archived')}
           />

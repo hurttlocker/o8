@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useId, useRef, useState } from 'react';
+import { FilterList } from 'iconoir-react';
 import { REPO_FOCUS_FONT } from '../../utils';
 
 /** Group-by picker — vertical-sliders icon rendered inline at the
@@ -51,7 +52,10 @@ export function ChatGroupPicker({
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          justifyContent: 'center',
+          // Right-align the glyph so its right edge sits on the same
+          // vertical column as the chat-row rings + chevrons in the
+          // top-nav above (per operator's alignment ask).
+          justifyContent: 'flex-end',
           width: 18,
           height: 18,
           borderRadius: 4,
@@ -64,15 +68,9 @@ export function ChatGroupPicker({
           transition: 'background 120ms ease, color 120ms ease',
         }}
       >
-        {/* Vertical sliders — matches Claude's filter icon affordance */}
-        <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <line x1="7" y1="4" x2="7" y2="14" />
-          <line x1="7" y1="18" x2="7" y2="20" />
-          <line x1="17" y1="4" x2="17" y2="10" />
-          <line x1="17" y1="14" x2="17" y2="20" />
-          <circle cx="7" cy="16" r="2" />
-          <circle cx="17" cy="12" r="2" />
-        </svg>
+        {/* Iconoir FilterList — matches hurttlocker chrome vocabulary. */}
+        <FilterList width={12} height={12} color="currentColor" strokeWidth={1.8} />
+
       </button>
       {/* Always-mounted (display toggles) so agents can enumerate the
           grouping options from the DOM without opening first. */}
