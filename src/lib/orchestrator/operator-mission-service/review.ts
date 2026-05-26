@@ -47,8 +47,10 @@ function buildPacketReview(
   summary: string,
   reviewedHeadSha?: string,
   auditApprovalId?: string | null,
+  directivesApplied?: string[],
+  directivesViolated?: SubmitReviewInput['directivesViolated'],
 ): OrchestratorPacketReview {
-  return {
+  const review: OrchestratorPacketReview = {
     approved,
     findings: findings.map((finding) => ({
       file: finding.file,
@@ -67,6 +69,20 @@ function buildPacketReview(
     summary,
     auditApprovalId: auditApprovalId?.trim() || null,
   };
+
+  if (directivesApplied && directivesApplied.length > 0) {
+    review.directivesApplied = directivesApplied.slice();
+  }
+  if (directivesViolated && directivesViolated.length > 0) {
+    review.directivesViolated = directivesViolated.map((entry) => ({
+      directive: entry.directive,
+      file: entry.file ?? null,
+      line: typeof entry.line === 'number' ? entry.line : null,
+      snippet: entry.snippet ?? null,
+    }));
+  }
+
+  return review;
 }
 
 export function mapReviewSummary(packet: OrchestratorPacket) {
@@ -175,7 +191,15 @@ export async function submitPacketReview(input: SubmitReviewInput) {
       packets: state.packets.map((candidate) => candidate.id === packet.id
         ? {
             ...candidate,
-            review: buildPacketReview(input.findings, input.approved, summary, reviewedHeadSha, auditApprovalId),
+            review: buildPacketReview(
+              input.findings,
+              input.approved,
+              summary,
+              reviewedHeadSha,
+              auditApprovalId,
+              input.directivesApplied,
+              input.directivesViolated,
+            ),
           }
         : candidate),
     }));

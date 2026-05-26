@@ -85,3 +85,58 @@ export function parseReviewFindings(value: unknown): OrchestratorReviewFinding[]
     };
   });
 }
+
+/**
+ * #732 — submit_review accepts an optional `directivesApplied: string[]`. The
+ * orchestrator names each directive it verified the diff respected. Invalid
+ * entries (non-strings, empty) are dropped silently — directive surfacing is
+ * additive metadata; it should not fail an otherwise-valid review.
+ */
+export function parseDirectivesApplied(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const cleaned: string[] = [];
+  for (const entry of value) {
+    if (typeof entry !== 'string') continue;
+    const trimmed = entry.trim();
+    if (trimmed) cleaned.push(trimmed);
+  }
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+export interface ParsedDirectiveViolation {
+  directive: string;
+  file?: string;
+  line?: number | null;
+  snippet?: string;
+}
+
+/**
+ * #732 — submit_review accepts an optional `directivesViolated` array. Each
+ * entry must at minimum name the directive; file/line/snippet are optional
+ * but recommended. Same permissive-drop philosophy as parseDirectivesApplied.
+ */
+export function parseDirectivesViolated(value: unknown): ParsedDirectiveViolation[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value)) return undefined;
+  const cleaned: ParsedDirectiveViolation[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== 'object') continue;
+    const entry = raw as Record<string, unknown>;
+    const directive = typeof entry.directive === 'string' ? entry.directive.trim() : '';
+    if (!directive) continue;
+    const file = typeof entry.file === 'string' ? entry.file.trim() : '';
+    const snippet = typeof entry.snippet === 'string' ? entry.snippet.trim() : '';
+    const lineRaw = entry.line;
+    const line = typeof lineRaw === 'number' && Number.isFinite(lineRaw) && lineRaw >= 1
+      ? Math.floor(lineRaw)
+      : undefined;
+    cleaned.push({
+      directive,
+      ...(file ? { file } : {}),
+      ...(line !== undefined ? { line } : {}),
+      ...(snippet ? { snippet } : {}),
+    });
+  }
+  return cleaned.length > 0 ? cleaned : undefined;
+}

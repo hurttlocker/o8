@@ -40,6 +40,15 @@ export interface SubmitReviewInput {
   findings: OrchestratorReviewFinding[];
   approved: boolean;
   reviewedHeadSha?: string;
+  /** #732 — Directives the review verified were respected by the diff. */
+  directivesApplied?: string[];
+  /** #732 — Directives the review found contradicted by the diff. */
+  directivesViolated?: Array<{
+    directive: string;
+    file?: string;
+    line?: number | null;
+    snippet?: string;
+  }>;
 }
 
 export interface ApproveAndMergeInput {

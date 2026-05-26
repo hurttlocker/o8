@@ -68,6 +68,9 @@ export function ReviewPane({ packet, onActionComplete }: {
   const [actionNote, setActionNote] = useState<string | null>(null);
 
   const reviewSummary = packet.review?.summary?.trim() ?? '';
+  const directivesApplied = packet.review?.directivesApplied ?? [];
+  const directivesViolated = packet.review?.directivesViolated ?? [];
+  const hasDirectiveSurfacing = directivesApplied.length > 0 || directivesViolated.length > 0;
 
   const callAction = useCallback(async (
     kind: 'merge' | 'respec' | 'kill',
@@ -154,6 +157,103 @@ export function ReviewPane({ packet, onActionComplete }: {
           fontFamily: FONT_FAMILY,
         }}>
           {reviewSummary}
+        </div>
+      ) : null}
+
+      {hasDirectiveSurfacing ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+          <div style={{
+            fontSize: 9.5,
+            fontWeight: 700,
+            letterSpacing: '0.04em',
+            color: 'var(--t-text-faint)',
+            fontFamily: FONT_FAMILY,
+            textTransform: 'uppercase',
+          }}>
+            Directives
+          </div>
+          {directivesApplied.map((directive) => (
+            <div
+              key={`applied:${directive}`}
+              style={{
+                paddingTop: 4,
+                paddingRight: 8,
+                paddingBottom: 4,
+                paddingLeft: 8,
+                borderRadius: 8,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'var(--t-tone-success-border)',
+                background: 'var(--t-tone-success-bg)',
+                color: 'var(--t-tone-success)',
+                fontSize: 10.5,
+                fontFamily: FONT_FAMILY,
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 6,
+              }}
+            >
+              <span aria-hidden="true" style={{ fontWeight: 800 }}>✓</span>
+              <span style={{ fontWeight: 700 }}>APPLIED</span>
+              <span style={{ color: 'var(--t-text-secondary)' }}>{directive}</span>
+            </div>
+          ))}
+          {directivesViolated.map((violation, idx) => {
+            const locator = violation.file
+              ? typeof violation.line === 'number'
+                ? `${violation.file}:${violation.line}`
+                : violation.file
+              : null;
+            return (
+              <div
+                key={`violated:${violation.directive}:${idx}`}
+                style={{
+                  paddingTop: 4,
+                  paddingRight: 8,
+                  paddingBottom: 4,
+                  paddingLeft: 8,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: 'var(--t-tone-fail-border)',
+                  background: 'var(--t-tone-fail-bg)',
+                  color: 'var(--t-tone-fail)',
+                  fontSize: 10.5,
+                  fontFamily: FONT_FAMILY,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'baseline', gap: 6 }}>
+                  <span aria-hidden="true" style={{ fontWeight: 800 }}>⚠</span>
+                  <span style={{ fontWeight: 700 }}>VIOLATED</span>
+                  <span style={{ color: 'var(--t-text-secondary)' }}>{violation.directive}</span>
+                  {locator ? (
+                    <span style={{
+                      marginLeft: 'auto',
+                      color: 'var(--t-text-muted)',
+                      fontSize: 10,
+                      fontFamily: FONT_FAMILY,
+                    }}>
+                      {locator}
+                    </span>
+                  ) : null}
+                </div>
+                {violation.snippet ? (
+                  <code style={{
+                    fontSize: 10,
+                    color: 'var(--t-text-muted)',
+                    fontFamily: 'SF Mono, Menlo, Monaco, monospace',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                  }}>
+                    {violation.snippet}
+                  </code>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
       ) : null}
 
