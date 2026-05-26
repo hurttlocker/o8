@@ -1739,39 +1739,115 @@ fn http_get_local(path: &str) -> Option<String> {
     Some(raw[body_start..].to_string())
 }
 
-/// Count lanes whose status is `reviewing` (the user-facing "awaiting review"
-/// state). Falls back to 0 on any parse / network error — the badge just
-/// shows nothing rather than a stale value.
-fn count_awaiting_review() -> u32 {
-    let Some(body) = http_get_local("/api/lanes?active=true") else { return 0 };
-    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else { return 0 };
-    let Some(lanes) = json.get("lanes").and_then(|v| v.as_array()) else { return 0 };
-    lanes
-        .iter()
-        .filter(|lane| {
-            lane.get("status")
-                .and_then(|s| s.as_str())
-                .map(|s| s == "reviewing")
-                .unwrap_or(false)
-        })
-        .count() as u32
+/// One awaiting-review lane projected for the tray dropdown. `id` is the
+/// lane id so the click handler can route back through `tray:focus-lane`.
+#[derive(Clone)]
+struct AwaitingLane {
+    id: String,
+    label: String,
+    repo: String,
 }
 
-/// Spawn a long-lived background thread that polls the lanes API every 5s
-/// and pushes the awaiting-review count to the tray badge. Light enough to
-/// run continuously — one tiny HTTP request, no JSON deserialization beyond
-/// pulling out a status string per lane.
+/// Fetch lanes whose status is `reviewing`, projected for the tray dropdown.
+/// Falls back to an empty list on any parse / network error so the menu
+/// degrades to the static `Show / Quick Dispatch / Quit` entries.
+fn fetch_awaiting_lanes() -> Vec<AwaitingLane> {
+    let Some(body) = http_get_local("/api/lanes?active=true") else { return Vec::new() };
+    let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else { return Vec::new() };
+    let Some(lanes) = json.get("lanes").and_then(|v| v.as_array()) else { return Vec::new() };
+    lanes
+        .iter()
+        .filter_map(|lane| {
+            let status = lane.get("status").and_then(|s| s.as_str())?;
+            if status != "reviewing" { return None; }
+            let id = lane.get("id").and_then(|s| s.as_str())?.to_string();
+            let label = lane.get("label").and_then(|s| s.as_str()).unwrap_or("Untitled").to_string();
+            let repo_path = lane.get("repoPath").and_then(|s| s.as_str()).unwrap_or("");
+            let repo = repo_path.trim_end_matches('/').rsplit('/').next().unwrap_or("").to_string();
+            Some(AwaitingLane { id, label, repo })
+        })
+        .collect()
+}
+
+/// Truncate a label for the tray menu. macOS menus render long titles fine
+/// but the dropdown gets unwieldy past ~60 chars — pull back to 48 with an
+/// ellipsis so each row stays scannable.
+fn truncate_label(label: &str) -> String {
+    const MAX: usize = 48;
+    if label.chars().count() <= MAX { return label.to_string() }
+    let truncated: String = label.chars().take(MAX - 1).collect();
+    format!("{}…", truncated.trim_end())
+}
+
+/// Build the tray dropdown menu given the current awaiting-review set.
+/// Layout: `<packet> · <repo>` rows, separator, `Show o8`, `Quick Dispatch`,
+/// separator, `Quit`. When the set is empty the per-packet rows are skipped
+/// and the menu collapses to the static three.
+fn build_tray_menu(app: &AppHandle, lanes: &[AwaitingLane]) -> tauri::Result<Menu<tauri::Wry>> {
+    let show = MenuItem::with_id(app, "show", "Show o8", true, None::<&str>)?;
+    let dispatch = MenuItem::with_id(app, "dispatch", "Quick Dispatch", true, Some("CmdOrCtrl+Shift+O"))?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit o8", true, None::<&str>)?;
+
+    if lanes.is_empty() {
+        return Menu::with_items(app, &[&show, &dispatch, &separator, &quit]);
+    }
+
+    let menu = Menu::new(app)?;
+    for lane in lanes {
+        let title = if lane.repo.is_empty() {
+            truncate_label(&lane.label)
+        } else {
+            format!("{} · {}", truncate_label(&lane.label), lane.repo)
+        };
+        let item = MenuItem::with_id(app, format!("lane:{}", lane.id), title, true, None::<&str>)?;
+        menu.append(&item)?;
+    }
+    menu.append(&PredefinedMenuItem::separator(app)?)?;
+    menu.append(&show)?;
+    menu.append(&dispatch)?;
+    menu.append(&separator)?;
+    menu.append(&quit)?;
+    Ok(menu)
+}
+
+/// Swap the tray's menu to reflect the current awaiting-review set.
+/// Called from the poller when the set changes. Errors are logged + skipped
+/// so a transient menu-build hiccup never kills the poller thread.
+fn apply_tray_menu(app: &AppHandle, lanes: &[AwaitingLane]) {
+    let Ok(guard) = tray_handle().lock() else { return };
+    let Some(tray) = guard.as_ref() else { return };
+    match build_tray_menu(app, lanes) {
+        Ok(menu) => {
+            if let Err(err) = tray.set_menu(Some(menu)) {
+                log::warn!("[tray-menu] set_menu failed: {}", err);
+            }
+        }
+        Err(err) => log::warn!("[tray-menu] build_tray_menu failed: {}", err),
+    }
+}
+
+/// Spawn a long-lived background thread that polls the lanes API every 5s,
+/// updates the badge count, and rebuilds the tray dropdown to list each
+/// awaiting-review packet by title + repo. Light enough to run continuously
+/// — one tiny HTTP request per tick.
 fn spawn_tray_badge_poller(app: AppHandle) {
     std::thread::spawn(move || {
-        let mut last_count: u32 = u32::MAX; // force first emit
+        let mut last_signature: Option<String> = None;
         loop {
-            let count = count_awaiting_review();
-            if count != last_count {
+            let lanes = fetch_awaiting_lanes();
+            let count = lanes.len() as u32;
+            // Signature = count + sorted lane id list. Rebuild menu only when
+            // the set itself changes — avoids churn when nothing happened.
+            let mut ids: Vec<&str> = lanes.iter().map(|l| l.id.as_str()).collect();
+            ids.sort();
+            let signature = format!("{}:{}", count, ids.join(","));
+
+            if Some(&signature) != last_signature.as_ref() {
                 apply_tray_badge(count);
-                // Mirror to the frontend so any UI badge can stay synced
-                // without doing its own poll.
+                apply_tray_menu(&app, &lanes);
                 let _ = app.emit("tray-badge-changed", count);
-                last_count = count;
+                last_signature = Some(signature);
             }
             std::thread::sleep(std::time::Duration::from_secs(5));
         }
@@ -2264,7 +2340,8 @@ pub fn run() {
                 .show_menu_on_left_click(false)
                 .tooltip("o8")
                 .on_menu_event(|app, event| {
-                    match event.id.as_ref() {
+                    let id = event.id.as_ref();
+                    match id {
                         "show" => {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
@@ -2278,6 +2355,18 @@ pub fn run() {
                         }
                         "quit" => {
                             app.exit(0);
+                        }
+                        lane if lane.starts_with("lane:") => {
+                            // #731 — dynamic lane row click. Surface the
+                            // window so the operator sees the review queue,
+                            // then emit a Tauri event the frontend can pick
+                            // up to scroll the AgentPanel to the lane.
+                            if let Some(window) = app.get_webview_window("main") {
+                                let _ = window.show();
+                                let _ = window.set_focus();
+                            }
+                            let lane_id = &lane["lane:".len()..];
+                            let _ = app.emit("tray:focus-lane", lane_id.to_string());
                         }
                         _ => {}
                     }
