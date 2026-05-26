@@ -15,6 +15,7 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
   onLinkedIssueChange?: (issue: LinkedIssueRef | null) => void;
   preferredRepo?: PreferredRepoContext | null;
   dragOver?: boolean;
+  dragHostRef?: React.RefObject<HTMLDivElement | null>;
   onContainerDragOver?: (e: React.DragEvent) => void;
   onContainerDragLeave?: (e: React.DragEvent) => void;
   onContainerDrop?: (e: React.DragEvent) => void;
@@ -26,6 +27,7 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
     onLinkedIssueChange,
     preferredRepo,
     dragOver,
+    dragHostRef,
     onContainerDragOver,
     onContainerDragLeave,
     onContainerDrop,
@@ -137,6 +139,7 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
 
   return (
     <div
+      ref={dragHostRef}
       onDragOver={onContainerDragOver}
       onDragLeave={onContainerDragLeave}
       onDrop={onContainerDrop}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState, type DragEvent } from 'react';
+import { useCallback, useEffect, useState, type DragEvent, type RefObject } from 'react';
 import { useFileDrop } from '@/lib/hooks/use-file-drop';
 
 export interface ThoughtsAttachedImage {
@@ -15,7 +15,12 @@ export interface ThoughtsComposerDragHandlers {
   onDrop: (event: DragEvent) => void;
 }
 
-export function useThoughtsComposerAttachments() {
+export interface UseThoughtsComposerAttachmentsOptions {
+  /** Optional ref to hit-test Tauri drag-drop events against (see #1136). */
+  hostRef?: RefObject<HTMLElement | null>;
+}
+
+export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAttachmentsOptions) {
   const [attachedImages, setAttachedImages] = useState<ThoughtsAttachedImage[]>([]);
   const [attachedFiles, setAttachedFiles] = useState<string[]>([]);
   const {
@@ -24,7 +29,7 @@ export function useThoughtsComposerAttachments() {
     processFiles,
     clearPendingFiles,
     dragHandlers,
-  } = useFileDrop({ enablePaste: false });
+  } = useFileDrop({ enablePaste: false, hostRef: options?.hostRef });
 
   useEffect(() => {
     if (pendingFiles.length === 0) return;

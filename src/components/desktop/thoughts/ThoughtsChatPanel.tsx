@@ -354,6 +354,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
   const { persistThread, persistThreadNow, cancelPendingPersist } = usePersistChatThread(resolvedRepoPath);
   const thinkingEffort: ThinkingEffort = thinkingOverride ?? (adaptiveThinkingEnabled ? 'adaptive' : 'max');
+  const composerDropHostRef = useRef<HTMLDivElement>(null);
   const {
     attachedImages,
     addAttachedImage,
@@ -364,7 +365,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     removeAttachedImage,
     removeAttachedFile,
     clearAttachments,
-  } = useThoughtsComposerAttachments();
+  } = useThoughtsComposerAttachments({ hostRef: composerDropHostRef });
 
   const isSingleMode = orchestrationMode === 'single';
   const isChatMode = orchestrationMode === 'chat';
@@ -1772,6 +1773,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ) : null}
 
       <div
+        ref={composerDropHostRef}
         onDragOver={attachmentDragHandlers.onDragOver}
         onDragLeave={attachmentDragHandlers.onDragLeave}
         onDrop={attachmentDragHandlers.onDrop}

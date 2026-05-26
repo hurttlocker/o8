@@ -1323,6 +1323,129 @@ fn record_console_error(message: String, source: String, lineno: u32) {
     buffer.since_last_fetch = buffer.since_last_fetch.saturating_add(1);
 }
 
+// ── #1136 read_dropped_file ──
+//
+// Backing command for the Tauri drag-drop bridge. The frontend receives
+// paths via the `o8:tauri-file-drop` window event (emitted from
+// on_window_event below), then calls this command to read the bytes.
+// Done in Rust (not behind an HTTP route) so there is no auth surface
+// to abuse — invokes are scoped to the webview origin.
+
+const DROPPED_FILE_MAX_BYTES: u64 = 5 * 1024 * 1024;
+
+#[derive(Serialize)]
+struct DroppedFileResult {
+    name: String,
+    #[serde(rename = "mimeType")]
+    mime_type: String,
+    #[serde(rename = "contentBase64")]
+    content_base64: String,
+    size: u64,
+}
+
+fn base64_encode_standard(data: &[u8]) -> String {
+    const TABLE: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut out = String::with_capacity((data.len() + 2) / 3 * 4);
+    let mut i = 0;
+    while i < data.len() {
+        let b0 = data[i] as u32;
+        let b1 = if i + 1 < data.len() { data[i + 1] as u32 } else { 0 };
+        let b2 = if i + 2 < data.len() { data[i + 2] as u32 } else { 0 };
+        out.push(TABLE[((b0 >> 2) & 0x3f) as usize] as char);
+        out.push(TABLE[(((b0 << 4) | (b1 >> 4)) & 0x3f) as usize] as char);
+        if i + 1 < data.len() {
+            out.push(TABLE[(((b1 << 2) | (b2 >> 6)) & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        if i + 2 < data.len() {
+            out.push(TABLE[(b2 & 0x3f) as usize] as char);
+        } else {
+            out.push('=');
+        }
+        i += 3;
+    }
+    out
+}
+
+fn mime_for_extension(name: &str) -> &'static str {
+    let ext = name.rsplit('.').next().unwrap_or("").to_lowercase();
+    match ext.as_str() {
+        "png" => "image/png",
+        "jpg" | "jpeg" => "image/jpeg",
+        "gif" => "image/gif",
+        "webp" => "image/webp",
+        "svg" => "image/svg+xml",
+        "heic" | "heif" => "image/heic",
+        "bmp" => "image/bmp",
+        "ico" => "image/x-icon",
+        "pdf" => "application/pdf",
+        "json" => "application/json",
+        "md" | "markdown" | "mdx" => "text/markdown",
+        "txt" | "log" | "csv" | "tsv" => "text/plain",
+        "html" | "htm" => "text/html",
+        "css" => "text/css",
+        "js" | "mjs" | "cjs" => "application/javascript",
+        "ts" | "tsx" | "jsx" => "text/typescript",
+        "py" => "text/x-python",
+        "rs" => "text/x-rust",
+        "go" => "text/x-go",
+        "java" => "text/x-java",
+        "rb" => "text/x-ruby",
+        "sh" | "bash" | "zsh" => "application/x-sh",
+        "yaml" | "yml" => "application/yaml",
+        "toml" => "application/toml",
+        "xml" => "application/xml",
+        _ => "application/octet-stream",
+    }
+}
+
+#[tauri::command]
+fn read_dropped_file(path: String) -> Result<DroppedFileResult, String> {
+    // Whitelist: must be a regular file within $HOME. Blocks /etc/*,
+    // /var/log/*, /private/var/db/*, and anything an operator could be
+    // tricked into "dropping" via a malicious link or page.
+    let home = std::env::var("HOME").map_err(|_| "HOME not set".to_string())?;
+    let path_buf = std::path::PathBuf::from(&path);
+    let canonical = path_buf
+        .canonicalize()
+        .map_err(|e| format!("canonicalize failed: {}", e))?;
+    let home_canonical = std::path::PathBuf::from(&home)
+        .canonicalize()
+        .map_err(|e| format!("canonicalize $HOME failed: {}", e))?;
+    if !canonical.starts_with(&home_canonical) {
+        return Err(format!("path outside $HOME: {}", canonical.display()));
+    }
+
+    let metadata = std::fs::metadata(&canonical)
+        .map_err(|e| format!("stat failed: {}", e))?;
+    if !metadata.is_file() {
+        return Err("path is not a regular file".to_string());
+    }
+    if metadata.len() > DROPPED_FILE_MAX_BYTES {
+        return Err(format!(
+            "file too large: {} bytes (max {})",
+            metadata.len(),
+            DROPPED_FILE_MAX_BYTES
+        ));
+    }
+
+    let bytes = std::fs::read(&canonical).map_err(|e| format!("read failed: {}", e))?;
+    let name = canonical
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "dropped".to_string());
+    let mime_type = mime_for_extension(&name).to_string();
+    let content_base64 = base64_encode_standard(&bytes);
+
+    Ok(DroppedFileResult {
+        name,
+        mime_type,
+        content_base64,
+        size: metadata.len(),
+    })
+}
+
 /// #932 — host-app `mcp_result` command. Lives in the main app (NOT the
 /// plugin) because plugin invokes were silently denied by the ACL across
 /// every capability scoping we tried. The main-app `record_console_error`
@@ -2314,6 +2437,7 @@ pub fn run() {
             set_tray_badge,
             notify_review_ready,
             record_console_error,
+            read_dropped_file,
             mcp_result,
             o8_view_console_errors,
             o8_view_active_route,
@@ -2427,13 +2551,53 @@ pub fn run() {
                 }
 
                 window.on_window_event(move |event| {
-                    if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                        // Hide instead of close — agents keep working
-                        api.prevent_close();
-                        if let Some(w) = app_handle.get_webview_window("main") {
-                            let _ = w.hide();
+                    match event {
+                        tauri::WindowEvent::CloseRequested { api, .. } => {
+                            // Hide instead of close — agents keep working
+                            api.prevent_close();
+                            if let Some(w) = app_handle.get_webview_window("main") {
+                                let _ = w.hide();
+                            }
+                            let _ = app_handle.emit("window-hidden", ());
                         }
-                        let _ = app_handle.emit("window-hidden", ());
+                        // #1136 — bridge OS-level drag-drop into the webview as
+                        // window CustomEvents. With dragDropEnabled: true in
+                        // tauri.conf.json, HTML5 drop events no longer fire for
+                        // EXTERNAL drags (Finder → app), so this is the only
+                        // path that lets composers receive Finder file paths.
+                        // Internal webview drags (tile reorder, etc.) still
+                        // work through normal HTML5.
+                        tauri::WindowEvent::DragDrop(drag) => match drag {
+                            tauri::DragDropEvent::Enter { paths, position } => {
+                                let payload = serde_json::json!({
+                                    "paths": paths.iter()
+                                        .map(|p| p.to_string_lossy().into_owned())
+                                        .collect::<Vec<_>>(),
+                                    "position": { "x": position.x, "y": position.y },
+                                });
+                                let _ = app_handle.emit("o8:tauri-file-drop-enter", payload);
+                            }
+                            tauri::DragDropEvent::Over { position } => {
+                                let payload = serde_json::json!({
+                                    "position": { "x": position.x, "y": position.y },
+                                });
+                                let _ = app_handle.emit("o8:tauri-file-drop-over", payload);
+                            }
+                            tauri::DragDropEvent::Drop { paths, position } => {
+                                let payload = serde_json::json!({
+                                    "paths": paths.iter()
+                                        .map(|p| p.to_string_lossy().into_owned())
+                                        .collect::<Vec<_>>(),
+                                    "position": { "x": position.x, "y": position.y },
+                                });
+                                let _ = app_handle.emit("o8:tauri-file-drop", payload);
+                            }
+                            tauri::DragDropEvent::Leave => {
+                                let _ = app_handle.emit("o8:tauri-file-drop-leave", ());
+                            }
+                            _ => {}
+                        },
+                        _ => {}
                     }
                 });
             }
