@@ -556,6 +556,31 @@ export class WorktreeManager {
         throw err;
       }
 
+      // #1132 — Reset to HEAD so operator WIP can't leak into the agent's
+      // commit. Cheap belt-and-braces against any path that could have
+      // injected modifications between the clone and the agent dispatch
+      // (race window, transient hydration artifacts, future code changes).
+      // `git reset --hard HEAD` zeroes any tracked-file modifications and
+      // `git clean -fd` removes any stray untracked files. Both are no-ops
+      // on a properly clean tree, so this is safe to apply unconditionally
+      // and only adds work when there's actually drift to fix.
+      // Ignored files (.env, node_modules) are intentionally preserved —
+      // hydration / bootstrap fills those next.
+      try {
+        await execFileAsync('git', ['reset', '--hard', 'HEAD'], {
+          cwd: worktreePath,
+          timeout: 15_000,
+        });
+        await execFileAsync('git', ['clean', '-fd'], {
+          cwd: worktreePath,
+          timeout: 15_000,
+        });
+      } catch (err) {
+        console.warn(
+          `[worktree] HEAD reset after CoW clone failed (continuing): ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+
       const info: WorktreeInfo = {
         id: taskId,
         path: worktreePath,
