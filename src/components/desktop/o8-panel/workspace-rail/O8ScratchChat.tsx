@@ -11,6 +11,7 @@ import {
   Trash,
   X,
 } from '@phosphor-icons/react';
+import { CircleSpark } from 'iconoir-react';
 import { MarkdownRender } from '../markdown-render';
 import { useOrchestratorData } from '../../orchestrator-data-context';
 
@@ -132,23 +133,17 @@ function compactPath(path?: string | null) {
 }
 
 function AskO8Icon({ size = 16, color = O8_ICON_INACTIVE }: { size?: number; color?: string }) {
+  // Iconoir CircleSpark — operator-locked for the Ask-o8 chat trigger
+  // across every O8 panel surface. Circle + spark reads as "spark a
+  // question to o8" cleanly.
   return (
-    <svg
+    <CircleSpark
       width={size}
       height={size}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke={color}
-      strokeWidth="2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      aria-hidden="true"
-      focusable="false"
+      color={color}
+      strokeWidth={2}
       style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}
-    >
-      <path d="M12 3.5l1.7 4.8 4.8 1.7-4.8 1.7-1.7 4.8-1.7-4.8-4.8-1.7 4.8-1.7L12 3.5z" />
-      <path d="M19 15l.7 2 .3.3 2 .7-2 .7-.3.3-.7 2-.7-2-.3-.3-2-.7 2-.7.3-.3.7-2z" />
-    </svg>
+    />
   );
 }
 

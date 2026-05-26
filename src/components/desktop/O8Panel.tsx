@@ -7,7 +7,9 @@
  * Modeled after Cursor 3's right panel, adapted for governance.
  */
 
-import { useEffect } from 'react';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import type React from 'react';
+import { CircleSpark } from 'iconoir-react';
 import { O8ActivityPane } from './O8ActivityPane';
 import { O8BrowserPane } from './O8BrowserPane';
 import { O8InboxPane } from './O8InboxPane';
@@ -16,10 +18,23 @@ import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { ReviewPanel } from './review/ReviewPanel';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import { ProjectChangesOverview } from './o8-panel/ProjectChangesOverview';
+import { AllFilesTree } from './o8-panel/workspace-rail/AllFilesTree';
+import { FileViewer } from './o8-panel/workspace-rail/FileViewer';
+import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from './ContextualPanel';
 import type { O8Tab } from './o8-panel/types';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
+
+const LazyOrchestratorTab = lazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })));
+
+type RightUtilityTab = Extract<O8Tab, 'files' | 'side-chat' | 'browser' | 'review' | 'terminal'>;
+
+const RIGHT_UTILITY_TAB_IDS: RightUtilityTab[] = ['files', 'side-chat', 'browser', 'review', 'terminal'];
+
+function isRightUtilityTab(tab: O8Tab): tab is RightUtilityTab {
+  return RIGHT_UTILITY_TAB_IDS.includes(tab as RightUtilityTab);
+}
 
 interface O8PanelProps {
   repoPath?: string | null;
@@ -35,6 +50,7 @@ interface O8PanelProps {
   prRepo?: string | null;
   repoSlug?: string | null;
   activeTab?: O8Tab | null;
+  onActiveTabChange?: (tab: O8Tab) => void;
   selectedFile?: string | null;
   browserUrl?: string | null;
   // Bubbles the browser pane's active URL up so the TitleBar Browser
@@ -46,16 +62,402 @@ interface O8PanelProps {
   onSelectCommit?: (hash: string, meta?: Record<string, string>) => void;
   onSelectPR?: (prNumber: number, repo?: string) => void;
   onSelectIssue?: (issueNumber: number, repo?: string) => void;
+  registerContextualPanelHandle?: (tileId: string, handle: ContextualPanelHandle | null) => void;
+  sendTerminalCreate?: ContextualPanelProps['sendTerminalCreate'];
+  sendTerminalAttach?: ContextualPanelProps['sendTerminalAttach'];
+  sendTerminalInput?: ContextualPanelProps['sendTerminalInput'];
+  sendTerminalResize?: ContextualPanelProps['sendTerminalResize'];
+  sendTerminalDetach?: ContextualPanelProps['sendTerminalDetach'];
+  sendAgentKill?: ContextualPanelProps['sendAgentKill'];
+  termWsConnected?: boolean;
+}
+
+function FilesIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z" />
+      <path d="M2 10h20" />
+    </svg>
+  );
+}
+
+function ChatIcon({ size = 18 }: { size?: number }) {
+  // Iconoir CircleSpark — operator-locked for the side / scratch chat surface.
+  // The circle + spark reads as "spark a quick thought" — fits scratch-chat
+  // semantics better than a generic chat bubble.
+  return <CircleSpark width={size} height={size} color="currentColor" strokeWidth={2} style={{ display: 'block', flexShrink: 0 }} />;
+}
+
+function BrowserIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="10" />
+      <path d="M2 12h20" />
+      <path d="M12 2a15.3 15.3 0 0 1 0 20" />
+      <path d="M12 2a15.3 15.3 0 0 0 0 20" />
+    </svg>
+  );
+}
+
+function ReviewIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
+      <path d="M14 2v6h6" />
+      <path d="m9 15 2 2 4-5" />
+    </svg>
+  );
+}
+
+function TerminalIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <polyline points="4 17 10 11 4 5" />
+      <line x1="12" x2="20" y1="19" y2="19" />
+    </svg>
+  );
+}
+
+function PlusIcon({ size = 16 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 5v14" />
+      <path d="M5 12h14" />
+    </svg>
+  );
+}
+
+function XIcon({ size = 12 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18 6 6 18" />
+      <path d="m6 6 12 12" />
+    </svg>
+  );
+}
+
+function SurfaceEmptyState({
+  icon,
+  title,
+  detail,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  detail: string;
+}) {
+  return (
+    <div style={{
+      flex: 1,
+      minHeight: 0,
+      display: 'flex',
+      flexDirection: 'column',
+      alignItems: 'center',
+      justifyContent: 'center',
+      gap: 10,
+      color: 'var(--t-text-muted)',
+      background: 'var(--t-bg)',
+      textAlign: 'center',
+      padding: 24,
+    }}>
+      <div style={{
+        width: 42,
+        height: 42,
+        borderRadius: 14,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: 'var(--t-text-secondary)',
+        background: 'var(--t-input-bg)',
+        border: '1px solid var(--t-divider-subtle)',
+      }}>
+        {icon}
+      </div>
+      <div style={{ fontSize: 13, fontWeight: 750, color: 'var(--t-text)' }}>{title}</div>
+      <div style={{ maxWidth: 360, fontSize: 12, lineHeight: 1.5 }}>{detail}</div>
+    </div>
+  );
+}
+
+interface RightUtilityDefinition {
+  id: RightUtilityTab;
+  label: string;
+  description: string;
+  icon: (props: { size?: number }) => React.ReactNode;
+}
+
+const RIGHT_UTILITY_TABS: RightUtilityDefinition[] = [
+  { id: 'files', label: 'Files', description: 'Browse project files', icon: FilesIcon },
+  { id: 'side-chat', label: 'Side chat', description: 'Start a side conversation', icon: ChatIcon },
+  { id: 'browser', label: 'Browser', description: 'Open a website', icon: BrowserIcon },
+  { id: 'review', label: 'Review', description: 'View code changes', icon: ReviewIcon },
+  { id: 'terminal', label: 'Terminal', description: 'Start an interactive shell', icon: TerminalIcon },
+];
+
+const RIGHT_UTILITY_BY_ID = Object.fromEntries(
+  RIGHT_UTILITY_TABS.map((tab) => [tab.id, tab]),
+) as Record<RightUtilityTab, RightUtilityDefinition>;
+
+function RightUtilityTabStrip({
+  tabs,
+  activeTab,
+  onOpenLauncher,
+  onSelect,
+  onClose,
+}: {
+  tabs: RightUtilityTab[];
+  activeTab: O8Tab;
+  onOpenLauncher: () => void;
+  onSelect: (tab: RightUtilityTab) => void;
+  onClose: (tab: RightUtilityTab) => void;
+}) {
+  return (
+    <div style={{
+      display: 'flex',
+      alignItems: 'center',
+      gap: 6,
+      minHeight: 44,
+      paddingTop: 8,
+      paddingRight: 10,
+      paddingBottom: 8,
+      paddingLeft: 10,
+      borderBottom: '1px solid var(--t-divider)',
+      background: 'var(--t-bg)',
+      flexShrink: 0,
+    }}>
+      <button
+        type="button"
+        onClick={onOpenLauncher}
+        aria-label="Open right panel tab picker"
+        title="Open tab picker"
+        style={{
+          width: 28,
+          height: 28,
+          borderRadius: 8,
+          border: 'none',
+          background: activeTab === 'launcher' ? 'var(--t-panel-hover)' : 'transparent',
+          color: activeTab === 'launcher' ? 'var(--t-text)' : 'var(--t-text-muted)',
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          cursor: 'pointer',
+          flexShrink: 0,
+        }}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-panel-hover)'; }}
+        onMouseLeave={(event) => { event.currentTarget.style.background = activeTab === 'launcher' ? 'var(--t-panel-hover)' : 'transparent'; }}
+      >
+        <PlusIcon size={15} />
+      </button>
+
+      <div style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 5,
+        minWidth: 0,
+        flex: 1,
+        overflowX: 'auto',
+        overflowY: 'hidden',
+      }}>
+        {tabs.map((tab) => {
+          const def = RIGHT_UTILITY_BY_ID[tab];
+          const Icon = def.icon;
+          const active = activeTab === tab;
+          return (
+            <button
+              key={tab}
+              type="button"
+              onClick={() => onSelect(tab)}
+              aria-label={def.label}
+              style={{
+                height: 28,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 7,
+                paddingTop: 0,
+                paddingRight: 8,
+                paddingBottom: 0,
+                paddingLeft: 9,
+                borderRadius: 9,
+                border: '1px solid transparent',
+                background: active ? 'var(--t-panel-hover)' : 'transparent',
+                color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+              onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'var(--t-hover)'; }}
+              onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent'; }}
+            >
+              {Icon({ size: 13 })}
+              <span style={{ fontSize: 12, fontWeight: active ? 700 : 600, whiteSpace: 'nowrap' }}>
+                {def.label}
+              </span>
+              <span
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onClose(tab);
+                }}
+                style={{
+                  width: 16,
+                  height: 16,
+                  borderRadius: 5,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--t-text-faint)',
+                }}
+              >
+                <XIcon size={10} />
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab) => void }) {
+  return (
+    <div style={{
+      flex: 1,
+      minHeight: 0,
+      overflow: 'auto',
+      background: 'var(--t-bg)',
+      paddingTop: 30,
+      paddingRight: 24,
+      paddingBottom: 30,
+      paddingLeft: 24,
+    }}>
+      <div style={{
+        width: '100%',
+        maxWidth: 420,
+        marginLeft: 'auto',
+        marginRight: 'auto',
+        display: 'grid',
+        gridTemplateColumns: '1fr',
+        gap: 14,
+      }}>
+        {RIGHT_UTILITY_TABS.map((tab) => {
+          const Icon = tab.icon;
+          return (
+            <button
+              key={tab.id}
+              type="button"
+              onClick={() => onOpen(tab.id)}
+              style={{
+                minHeight: 112,
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: 10,
+                borderRadius: 8,
+                border: '1px solid var(--t-divider-subtle)',
+                background: 'var(--t-panel)',
+                color: 'var(--t-text)',
+                cursor: 'pointer',
+                textAlign: 'center',
+                boxShadow: '0 16px 32px rgba(15, 23, 42, 0.04)',
+              }}
+              onMouseEnter={(event) => {
+                event.currentTarget.style.background = 'var(--t-panel-hover)';
+                event.currentTarget.style.borderColor = 'var(--t-divider)';
+              }}
+              onMouseLeave={(event) => {
+                event.currentTarget.style.background = 'var(--t-panel)';
+                event.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+              }}
+            >
+              <span style={{ color: 'var(--t-text-secondary)', display: 'inline-flex' }}>
+                {Icon({ size: 25 })}
+              </span>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+                <span style={{ fontSize: 18, fontWeight: 750, letterSpacing: 0 }}>{tab.label}</span>
+                <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text-muted)', letterSpacing: 0 }}>{tab.description}</span>
+              </span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 // ── Main Component ──
 
-export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, allRepos = false, onSelectAllRepos, previews = [], onEditWithAI, onOpenFile, prNumber, prRepo, repoSlug, activeTab: externalTab, selectedFile, browserUrl, onBrowserActiveUrlChange, onSelectCommit, onSelectIssue }: O8PanelProps) {
+export function O8Panel({
+  repoPath,
+  registeredRepos = [],
+  onRepoPathChange,
+  allRepos = false,
+  onSelectAllRepos,
+  previews = [],
+  onEditWithAI,
+  onOpenFile,
+  prNumber,
+  prRepo,
+  repoSlug,
+  activeTab: externalTab,
+  onActiveTabChange,
+  selectedFile,
+  browserUrl,
+  onBrowserActiveUrlChange,
+  onSelectedFileChange,
+  onSelectCommit,
+  onSelectIssue,
+  registerContextualPanelHandle,
+  sendTerminalCreate,
+  sendTerminalAttach,
+  sendTerminalInput,
+  sendTerminalResize,
+  sendTerminalDetach,
+  sendAgentKill,
+  termWsConnected = false,
+}: O8PanelProps) {
   const activeTab = externalTab ?? 'activity';
+  const activeUtilityTab = isRightUtilityTab(activeTab) ? activeTab : null;
+  const utilityShellActive = activeTab === 'launcher' || activeUtilityTab !== null;
+  const [utilityTabs, setUtilityTabs] = useState<RightUtilityTab[]>([]);
+  const [localSelectedFile, setLocalSelectedFile] = useState<string | null>(null);
   // The shared O8RepoSelector in the workspace header owns repo switching now,
   // so hide ReviewPanel's built-in dropdown: a single-entry list trips its own
   // `registeredRepos.length > 1` guard and keeps the inline selector hidden.
   const reviewRepos = registeredRepos.filter((r) => r.localPath === repoPath);
+  const repoLabel = useMemo(() => (
+    registeredRepos.find((repo) => repo.localPath === repoPath)?.name
+    ?? repoPath?.split('/').filter(Boolean).pop()
+    ?? null
+  ), [registeredRepos, repoPath]);
+  const dirtyFiles = useMemo(() => new Set<string>(), []);
+  const selectedUtilityFile = selectedFile ?? localSelectedFile;
+  const renderedUtilityTabs = activeUtilityTab && !utilityTabs.includes(activeUtilityTab)
+    ? [...utilityTabs, activeUtilityTab]
+    : utilityTabs;
+
+  const openRightUtilityTab = useCallback((tab: RightUtilityTab) => {
+    setUtilityTabs((prev) => (prev.includes(tab) ? prev : [...prev, tab]));
+    onActiveTabChange?.(tab);
+  }, [onActiveTabChange]);
+
+  const closeRightUtilityTab = useCallback((tab: RightUtilityTab) => {
+    setUtilityTabs((prev) => {
+      const remaining = prev.filter((entry) => entry !== tab);
+      if (activeTab === tab) {
+        const currentIndex = prev.indexOf(tab);
+        const next = remaining[Math.min(currentIndex, remaining.length - 1)] ?? null;
+        onActiveTabChange?.(next ?? 'launcher');
+      }
+      return remaining;
+    });
+  }, [activeTab, onActiveTabChange]);
+
+  const handleSelectUtilityFile = useCallback((path: string) => {
+    setLocalSelectedFile(path);
+    onSelectedFileChange?.(path);
+  }, [onSelectedFileChange]);
+
+  const handleRightContextualPanelRef = useCallback((handle: ContextualPanelHandle | null) => {
+    registerContextualPanelHandle?.('right-utility-panel', handle);
+  }, [registerContextualPanelHandle]);
 
   // Phase 3 — file paths clicked in agent chat dispatch `o8:open-file`;
   // route them to the dashboard's openInspectorTab via the onOpenFile prop.
@@ -67,6 +469,105 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, allR
     window.addEventListener('o8:open-file', handler);
     return () => window.removeEventListener('o8:open-file', handler);
   }, [onOpenFile]);
+
+  const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
+    if (tab === 'files') {
+      return (
+        <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(210px, 34%) minmax(0, 1fr)', background: 'var(--t-bg)' }}>
+          <div style={{ minWidth: 0, minHeight: 0, display: 'flex', borderRight: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
+            <AllFilesTree
+              repoPath={repoPath}
+              selectedFile={selectedUtilityFile}
+              dirtyFiles={dirtyFiles}
+              onSelectFile={handleSelectUtilityFile}
+            />
+          </div>
+          <FileViewer repoPath={repoPath} selectedFile={selectedUtilityFile} />
+        </div>
+      );
+    }
+
+    if (tab === 'side-chat') {
+      return (
+        <Suspense fallback={<SurfaceEmptyState icon={<ChatIcon size={18} />} title="Loading side chat" detail="Preparing a repo-aware conversation in the right panel." />}>
+          <LazyOrchestratorTab
+            tabId="right-side-chat"
+            active={active}
+            repoPath={repoPath ?? null}
+            repoLabel={repoLabel}
+            initialMode="fleet"
+            acceptHistoryThreadLoads={false}
+            restoreLastThread={false}
+            publishWorkspaceThread={false}
+            persistLastThread={false}
+            projectContextRailVisible={false}
+          />
+        </Suspense>
+      );
+    }
+
+    if (tab === 'browser') {
+      return (
+        <O8BrowserPane
+          previews={previews}
+          onEditWithAI={onEditWithAI}
+          onOpenFile={onOpenFile}
+          navigateToUrl={browserUrl}
+          onActiveUrlChange={onBrowserActiveUrlChange}
+        />
+      );
+    }
+
+    if (tab === 'review') {
+      if (!repoPath) {
+        return (
+          <SurfaceEmptyState
+            icon={<ReviewIcon size={18} />}
+            title="No repository selected"
+            detail="Select or register a repo before opening review in the right panel."
+          />
+        );
+      }
+      return (
+        <ReviewPanel
+          repoPath={repoPath}
+          registeredRepos={reviewRepos}
+          onRepoPathChange={onRepoPathChange}
+          selectedFile={selectedUtilityFile}
+        />
+      );
+    }
+
+    if (sendTerminalCreate && sendTerminalAttach && sendTerminalInput && sendTerminalResize && sendTerminalDetach && sendAgentKill) {
+      return (
+        <ContextualPanel
+          ref={handleRightContextualPanelRef}
+          sendTerminalCreate={sendTerminalCreate}
+          sendTerminalAttach={sendTerminalAttach}
+          sendTerminalInput={sendTerminalInput}
+          sendTerminalResize={sendTerminalResize}
+          sendTerminalDetach={sendTerminalDetach}
+          sendAgentKill={sendAgentKill}
+          termWsConnected={termWsConnected}
+          repoPath={repoPath}
+          repoLabel={repoLabel}
+          registeredRepos={registeredRepos}
+          previews={previews}
+          onRepoPathChange={onRepoPathChange}
+          panelLabel="Right Panel"
+          onClose={() => onActiveTabChange?.('launcher')}
+        />
+      );
+    }
+
+    return (
+      <SurfaceEmptyState
+        icon={<TerminalIcon size={18} />}
+        title="Terminal unavailable"
+        detail="The terminal bridge is not connected for this right panel."
+      />
+    );
+  };
 
   return (
     <div
@@ -86,9 +587,12 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, allR
           sibling — same restore-after-rework pattern). Mounts once per panel;
           internal Cmd+E hotkey + button click open the floating dialog. The
           review/workspace tab owns its compact toolbar trigger inside
-          ReviewPanel; Activity/PR detail and o8.md/spec suppress it to keep
-          local toolbars clear. */}
-      {activeTab !== 'workspace' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' ? (
+          ReviewPanel; Activity/PR detail suppress it to keep local toolbars
+          clear. o8.md/spec also suppresses the floating overlay — the
+          Ask-o8 chat trigger renders inline in the spec pane's own
+          toolbar (passed via toolbarSlot below) so all three buttons
+          (Ask-o8 chat, Ask-to-review, Settings) sit in one row. */}
+      {!utilityShellActive && activeTab !== 'workspace' && activeTab !== 'spec' && activeTab !== 'activity' && activeTab !== 'prs' ? (
         <div style={{ position: 'absolute', top: 8, right: 12, zIndex: 5 }}>
           <O8ScratchChat
             repoPath={repoPath}
@@ -99,6 +603,36 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, allR
       ) : null}
 
       {/* Tab content — all tabs stay mounted to preserve state */}
+      {utilityShellActive ? (
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <RightUtilityTabStrip
+            tabs={renderedUtilityTabs}
+            activeTab={activeTab}
+            onOpenLauncher={() => onActiveTabChange?.('launcher')}
+            onSelect={(tab) => onActiveTabChange?.(tab)}
+            onClose={closeRightUtilityTab}
+          />
+          {activeTab === 'launcher' ? (
+            <RightUtilityLauncher onOpen={openRightUtilityTab} />
+          ) : null}
+          {renderedUtilityTabs.map((tab) => (
+            <div
+              key={tab}
+              aria-hidden={activeUtilityTab !== tab}
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: activeUtilityTab === tab ? 'flex' : 'none',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                background: 'var(--t-bg)',
+              }}
+            >
+              {renderUtilitySurface(tab, activeUtilityTab === tab)}
+            </div>
+          ))}
+        </div>
+      ) : null}
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'workspace' ? 'flex' : 'none', flexDirection: 'column' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, paddingRight: 12, paddingBottom: 8, paddingLeft: 12, borderBottom: '1px solid var(--t-divider)', flexShrink: 0 }}>
           <O8RepoSelector
@@ -116,7 +650,7 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, allR
           <ReviewPanel repoPath={repoPath} registeredRepos={reviewRepos} onRepoPathChange={onRepoPathChange} selectedFile={selectedFile ?? null} />
         )}
       </div>
-      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' ? 'flex' : 'none', flexDirection: 'column' }}>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' && !utilityShellActive ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'activity' || activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
@@ -126,7 +660,16 @@ export function O8Panel({ repoPath, registeredRepos = [], onRepoPathChange, allR
         <O8InboxPane />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'spec' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8SpecPane repoPath={repoPath} />
+        <O8SpecPane
+          repoPath={repoPath}
+          toolbarSlot={(
+            <O8ScratchChat
+              repoPath={repoPath}
+              selectedFile={selectedFile ?? null}
+              surface="diff"
+            />
+          )}
+        />
       </div>
     </div>
   );

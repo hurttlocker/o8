@@ -54,6 +54,7 @@ export function ChatsTab({
   showLiveSessions = true,
   groupMode = 'sections',
   packets = [],
+  slotBeforeArchived,
 }: ChatsTabProps) {
   const [historyItems, setHistoryItems] = useState<ChatHistoryItem[]>([]);
   const [archivedHistoryItems, setArchivedHistoryItems] = useState<ChatHistoryItem[]>([]);
@@ -391,9 +392,10 @@ export function ChatsTab({
         fontFamily: REPO_FOCUS_FONT,
       }}
     >
-      {displayedSessions.length > 0 ? (
-        <SectionLabel label="Open now" compact={compact} />
-      ) : null}
+      {/* "Open now" label removed per Hurttlocker pass — active sessions
+          (automation / live agents) now render inline with chats so the
+          3-dot working indicator on those rows carries the "this is
+          active" signal instead of a separate section header. */}
       {displayedSessions.map((session) => (
         compact ? (
           <CompactSessionRow
@@ -459,6 +461,7 @@ export function ChatsTab({
                 flatHistoryRepoGroups.map((group, index) => {
                   const repoArchivedLanes = archivedLanesByRepoKey.get(group.key) ?? [];
                   const archivedExpanded = archivedLanesExpanded.has(group.key);
+                  const isLast = index === flatHistoryRepoGroups.length - 1;
                   return (
                     <div key={group.key}>
                       <RepoGroupLabel
@@ -477,6 +480,12 @@ export function ChatsTab({
                           onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                         />
                       ))}
+                      {/* Slot renders inside the LAST repo group, after the
+                          chats but BEFORE this repo's inline Archived
+                          section. Keeps the operator's hierarchy
+                          (chats → spawned → archived) for the compact
+                          flat-repos path where Archived is per-repo. */}
+                      {isLast ? slotBeforeArchived : null}
                       {repoArchivedLanes.length > 0 ? (
                         <>
                           <SectionLabel
@@ -567,6 +576,14 @@ export function ChatsTab({
           )}
         </div>
       )) : null}
+
+      {/* Only render the outer slot when it wasn't already rendered inside
+          the flat-compact-repos branch (which is the AgentPanel mount).
+          That branch injects the slot inside its last repo group so the
+          per-repo Archived can still sit below Spawned agents. */}
+      {!(compact && chatGroupBy === 'repo' && flatHistoryRepoGroups.length > 0)
+        ? slotBeforeArchived
+        : null}
 
       {showArchivedHistory ? (
         <div>

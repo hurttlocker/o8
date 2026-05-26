@@ -226,16 +226,29 @@ function SessionPillBase({
             minWidth: 0,
           }}
         >
-          <span
-            style={{
-              width: 5,
-              height: 5,
-              borderRadius: '50%',
-              background: statusColor,
-              flexShrink: 0,
-              boxShadow: session.status === 'running' ? `0 0 0 2px ${statusColor}22` : 'none',
-            }}
-          />
+          {session.status === 'idle' ? (
+            // Motion vocab A — static outline ring. Says "alive, quiet".
+            <span
+              className="o8-static-ring"
+              style={{ width: 6, height: 6, borderColor: statusColor, opacity: 1 }}
+            />
+          ) : session.status === 'running' ? (
+            // Motion vocab B — single pulsing circle. Says "working now".
+            <span
+              className="o8-pulse-circle"
+              style={{ width: 6, height: 6, background: statusColor }}
+            />
+          ) : (
+            <span
+              style={{
+                width: 5,
+                height: 5,
+                borderRadius: '50%',
+                background: statusColor,
+                flexShrink: 0,
+              }}
+            />
+          )}
           <span
             style={{
               fontSize: 9,

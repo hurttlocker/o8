@@ -1,6 +1,7 @@
 'use client';
 
 import type { CSSProperties, ReactNode } from 'react';
+import { FolderPlus, MobileDevMode } from 'iconoir-react';
 
 interface StatusBarIconProps {
   size?: number;
@@ -38,20 +39,18 @@ export function GearSixIcon(props: StatusBarIconProps) {
   );
 }
 
-export function FolderPlusIcon(props: StatusBarIconProps) {
-  return (
-    <PhosphorSvg {...props}>
-      <path d="M216,68H133.39l-26-29.29a20,20,0,0,0-15-6.71H40A20,20,0,0,0,20,52V200.62A19.41,19.41,0,0,0,39.38,220H216.89A19.13,19.13,0,0,0,236,200.89V88A20,20,0,0,0,216,68ZM90.61,56l10.67,12H44V56ZM212,196H44V92H212Zm-72-76v12h12a12,12,0,0,1,0,24H140v12a12,12,0,0,1-24,0V156H104a12,12,0,0,1,0-24h12V120a12,12,0,0,1,24,0Z" />
-    </PhosphorSvg>
-  );
+export function FolderPlusIcon({ size = 15, color = 'currentColor', style }: StatusBarIconProps) {
+  // Iconoir FolderPlus (folder-plus) — operator-locked. The plus mark sits
+  // outside the folder body which reads better at 14-15px than the Phosphor
+  // version that crammed the plus inside the folder.
+  return <FolderPlus width={size} height={size} color={color} strokeWidth={2} style={style} />;
 }
 
-export function DeviceMobileIcon(props: StatusBarIconProps) {
-  return (
-    <PhosphorSvg {...props}>
-      <path d="M176,12H80A28,28,0,0,0,52,40V216a28,28,0,0,0,28,28h96a28,28,0,0,0,28-28V40A28,28,0,0,0,176,12ZM76,76H180V180H76Zm4-40h96a4,4,0,0,1,4,4V52H76V40A4,4,0,0,1,80,36Zm96,184H80a4,4,0,0,1-4-4V204H180v12A4,4,0,0,1,176,220Z" />
-    </PhosphorSvg>
-  );
+export function DeviceMobileIcon({ size = 15, color = 'currentColor', style }: StatusBarIconProps) {
+  // Iconoir MobileDevMode — operator-locked. The <> marker inside the phone
+  // body reads as "dev / pairing mode" which matches what the dock button
+  // actually does (open the mobile pairing surface).
+  return <MobileDevMode width={size} height={size} color={color} strokeWidth={2} style={style} />;
 }
 
 export function WarningCircleIcon({ filled = false, ...props }: StatusBarIconProps & { filled?: boolean }) {

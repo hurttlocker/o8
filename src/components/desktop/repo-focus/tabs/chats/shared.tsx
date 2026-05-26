@@ -34,14 +34,13 @@ export function SectionLabel({
 }) {
   const commonStyle = {
     paddingTop: compact ? 7 : 10,
-    paddingRight: compact ? 10 : 12,
+    paddingRight: 12,
     paddingBottom: compact ? 4 : 5,
-    paddingLeft: compact ? 10 : 12,
-    fontSize: compact ? 9.5 : 10.5,
-    lineHeight: compact ? '12px' : '14px',
-    fontWeight: 600,
-    letterSpacing: '0.08em',
-    textTransform: 'uppercase' as const,
+    paddingLeft: 12,
+    fontSize: 10,
+    lineHeight: '14px',
+    fontWeight: 300,
+    letterSpacing: '-0.1px',
     color: 'var(--t-text-faint)',
     fontFamily: REPO_FOCUS_FONT,
   };
@@ -116,13 +115,18 @@ function RepoGroupLabel({ label, trailing }: { label: string; trailing?: React.R
         gap: 6,
         minHeight: 22,
         paddingTop: 10,
-        paddingRight: 8,
+        paddingRight: 12,
         paddingBottom: 3,
-        paddingLeft: 14,
+        paddingLeft: 12,
         color: 'var(--t-text-faint)',
         fontFamily: REPO_FOCUS_FONT,
       }}
     >
+      {/* Invisible chevron slot — keeps cortex-ide / o8-site labels
+          aligned with the chevron-prefixed SectionLabel headers below
+          (Spawned agents, Archived). Same width as the lucide chevron
+          (11px) so labels start at the same x position. */}
+      <span aria-hidden style={{ width: 11, flexShrink: 0 }} />
       <span
         style={{
           flex: 1,
@@ -130,11 +134,10 @@ function RepoGroupLabel({ label, trailing }: { label: string; trailing?: React.R
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontSize: 9.5,
-          lineHeight: '12px',
-          fontWeight: 700,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
+          fontSize: 10,
+          lineHeight: '14px',
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
         }}
       >
         {label}

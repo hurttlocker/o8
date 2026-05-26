@@ -1824,8 +1824,68 @@ button.workflow-file-item.workflow-file-item-active {
   }
 }
 
+/* Three-dot working indicator — staggered fade, light gray. Legacy,
+   kept for the motion lab. Production uses .o8-pulse-circle now. */
+@keyframes o8-dot-pulse {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.85); }
+  40%           { opacity: 1;    transform: scale(1); }
+}
+
+.o8-dot-shimmer {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.o8-dot-shimmer > span {
+  width: 3px;
+  height: 3px;
+  border-radius: 50%;
+  background: var(--t-text-faint, #9ca3af);
+  animation: o8-dot-pulse 1.4s ease-in-out infinite;
+}
+
+.o8-dot-shimmer > span:nth-child(2) { animation-delay: 0.18s; }
+.o8-dot-shimmer > span:nth-child(3) { animation-delay: 0.36s; }
+
+/* Motion vocabulary B — single pulsing circle. Solid dot, breathing.
+   Says "agent working now" on chat rows / any per-row working signal.
+   Filled-vs-hollow distinguishes from the static outline ring (A). */
+@keyframes o8-pulse-circle {
+  0%, 100% { opacity: 0.35; transform: scale(0.85); }
+  50%      { opacity: 1;    transform: scale(1.05); }
+}
+
+.o8-pulse-circle {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--t-text-faint, #9ca3af);
+  flex-shrink: 0;
+  animation: o8-pulse-circle 1.4s ease-in-out infinite;
+}
+
+/* Motion vocabulary A — static outline ring. Hollow, no animation.
+   Says "session alive, no work right now." */
+.o8-static-ring {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1px solid var(--t-text-faint, #9ca3af);
+  background: transparent;
+  flex-shrink: 0;
+  opacity: 0.65;
+}
+
 @media (prefers-reduced-motion: reduce) {
-  .o8-text-shimmer {
+  .o8-text-shimmer,
+  .o8-dot-shimmer > span,
+  .o8-pulse-circle {
     animation: none !important;
   }
+  .o8-dot-shimmer > span { opacity: 0.6 !important; }
+  .o8-pulse-circle { opacity: 0.7 !important; }
 }

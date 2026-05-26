@@ -159,7 +159,7 @@ import {
 } from '@/lib/tiles/operations';
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
-const DEFAULT_LEFT_PANEL_WIDTH = 240;
+const DEFAULT_LEFT_PANEL_WIDTH = 250;
 const FOCUS_LEFT_PANEL_WIDTH = 320;
 const CONTROL_ROOM_WIDTH = 760; // wide "control-room mode" — Control tab opens the left panel wide for the two-column layout
 const MIN_RIGHT_PANEL_WIDTH = 240;
@@ -1854,21 +1854,6 @@ function DashboardInner() {
     })();
   }, [activeTileId, flashWorkspaceTab, setActiveTileId, waitForWorkspaceTerminalTarget, workspaceTerminalPreferredRepo]);
 
-  const handleSplitWorkspaceFromHeader = useCallback(() => {
-    // Cap at 1 split (max 2 workspace panes). The split is a power
-    // feature now reached via right-clicking the play button — refuse
-    // further splits to keep the layout sane on typical screen widths.
-    if (workspaceActiveMap.size >= 2) return;
-    const activeNode = activeTileId ? findTile(tileLayout.root, activeTileId) : null;
-    const activeWorkspaceLeaf = activeNode?.type === 'leaf' && activeNode.content.kind === 'terminal'
-      ? activeNode
-      : null;
-    const fallbackWorkspaceLeaf = findLeafByContentKind(tileLayout.root, 'terminal');
-    const targetLeaf = activeWorkspaceLeaf ?? fallbackWorkspaceLeaf;
-    if (!targetLeaf) return;
-    handleSplitTile(targetLeaf.id, 'vertical');
-  }, [activeTileId, handleSplitTile, tileLayout.root, workspaceActiveMap.size]);
-
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     setRightPanelKind('review');
     setChatVisible(true);
@@ -3561,7 +3546,6 @@ function DashboardInner() {
           onSpawnOrchestrator={isSingleWorkspace ? handleSpawnOrchestrator : undefined}
           onSpawnChat={isSingleWorkspace ? handleSpawnChat : undefined}
           onSpawnTerminal={isSingleWorkspace ? handleSpawnTerminal : undefined}
-          onPlayContextMenu={isSingleWorkspace ? handleSplitWorkspaceFromHeader : undefined}
         />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
