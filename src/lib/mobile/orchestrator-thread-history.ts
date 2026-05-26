@@ -14,8 +14,10 @@ export interface OrchestratorThreadRevealRequest {
 }
 
 type ChatHistoryMessage = {
+  id?: string;
   role?: string;
   content?: string;
+  timestamp?: number;
 };
 
 type OrchestratorHistoryRecord = {
@@ -255,6 +257,71 @@ export function createMobileOrchestratorThread(input: {
 
   writeHistoryRecord(tabId, record);
   return projectThread(tabId, record, now);
+}
+
+export function appendMobileOrchestratorUserMessage(input: {
+  tabId: string | null | undefined;
+  repoPath: string;
+  message: string;
+  backend?: MobileOrchestratorBackend | null;
+}): MobileOrchestratorThread | null {
+  const tabId = input.tabId;
+  if (!tabId?.startsWith('thoughts-')) return null;
+
+  const content = input.message.trim();
+  if (!content) return readProjectedThread(tabId);
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const existing = readHistoryRecord(tabId) ?? {
+    messages: [],
+    savedAt: nowIso,
+    model: modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
+    starred: false,
+    pinned: false,
+    title: content.slice(0, 60).replace(/\n/g, ' ') + (content.length > 60 ? '...' : ''),
+    repoPath: input.repoPath,
+    repoName: repoNameFromPath(input.repoPath),
+    backend: input.backend ?? DEFAULT_BACKEND,
+    agent: null,
+    archivedAt: null,
+    orchestratorVisible: true,
+    orchestratorSessionIds: {},
+    orchestratorSessionUpdatedAt: null,
+  };
+  const messages = Array.isArray(existing.messages) ? existing.messages : [];
+  const last = messages[messages.length - 1];
+  const alreadyLastUserMessage = last?.role === 'user' && last.content === content;
+  const nextMessages = alreadyLastUserMessage
+    ? messages
+    : [
+      ...messages,
+      {
+        id: `user-${now.getTime()}`,
+        role: 'user',
+        content,
+        timestamp: now.getTime(),
+      },
+    ];
+
+  writeHistoryRecord(tabId, {
+    ...existing,
+    messages: nextMessages,
+    model: existing.model ?? modelForBackend(input.backend ?? DEFAULT_BACKEND) ?? DEFAULT_MODEL,
+    savedAt: nowIso,
+    title: trimTitle(existing.title, content),
+    repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()
+      ? existing.repoPath
+      : input.repoPath,
+    repoName: typeof existing.repoName === 'string' && existing.repoName.trim()
+      ? existing.repoName
+      : repoNameFromPath(input.repoPath),
+    backend: normalizeBackend(existing.backend) ?? input.backend ?? DEFAULT_BACKEND,
+    mobileRevealRequestedAt: nowIso,
+    orchestratorVisible: true,
+  });
+
+  return readProjectedThread(tabId);
 }
 
 export function readOrchestratorBackendSessionId(
