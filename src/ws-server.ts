@@ -63,6 +63,7 @@ import { getBrowserProvider } from './lib/browser/inventory';
 import type { CommandCenterSnapshot } from './lib/command-center/snapshot';
 import type { MobileInboxSnapshot, MobileOrchestratorThread, MobileTranscriptEntry } from './lib/mobile/types';
 import {
+  appendMobileOrchestratorUserMessage,
   listMobileOrchestratorRevealRequests,
   listMobileOrchestratorThreads,
   writeOrchestratorBackendSessionId,
@@ -2322,6 +2323,24 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
       backend.ensureSession(repoPath, agentTag, threadId).sessionName,
       threadId,
     );
+    const updatedThread = appendMobileOrchestratorUserMessage({
+      tabId: threadId,
+      repoPath,
+      message,
+      backend: backend.id,
+    });
+    if (updatedThread) {
+      broadcast({
+        channel: 'orchestrator-threads',
+        event: 'upsert',
+        data: { thread: updatedThread },
+      });
+      broadcast({
+        channel: 'orchestrator-threads',
+        event: 'reveal',
+        data: { requestedAt: updatedThread.lastMessageAt, thread: updatedThread },
+      });
+    }
     const sendTurn = (
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
