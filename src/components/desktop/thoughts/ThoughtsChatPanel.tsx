@@ -45,6 +45,7 @@ import { useOrchestratorStream } from './useOrchestratorStream';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
+import type { TurnSummary } from './chat-panel/TurnSummaryCard';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
 import { loadOrchestrationMode, persistOrchestrationMode, type ChatModelId, type OrchestrationMode } from '@/components/desktop/orchestrator/ModePicker';
@@ -1099,6 +1100,113 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     onChatSummary(text);
   }, [chatMessages, displayMessages, isChatMode, isOrchestratorMode, onChatSummary]);
 
+  // #1095 / #1096 — turn-end summary card. Tracks the turn lifecycle so the
+  // ChatMessageList can render the rolled-up TurnSummaryCard (with the inner
+  // ChatActionCard for "Edited N files" + Review/Undo) right after the last
+  // assistant message of the turn.
+  const [turnSummary, setTurnSummary] = useState<TurnSummary | null>(null);
+  const turnStartRef = useRef<
+    | { startedAt: number; messageCountAtStart: number; runningTotalAtStart: number }
+    | null
+  >(null);
+  const prevOrchStatusRef = useRef<typeof orchStream.status>(orchStream.status);
+  useEffect(() => {
+    if (!isOrchestratorMode || isChatMode) {
+      prevOrchStatusRef.current = orchStream.status;
+      return;
+    }
+    const prev = prevOrchStatusRef.current;
+    const next = orchStream.status;
+    prevOrchStatusRef.current = next;
+
+    if (prev !== 'busy' && next === 'busy') {
+      // New turn started — clear stale summary and snapshot the baseline.
+      setTurnSummary(null);
+      turnStartRef.current = {
+        startedAt: Date.now(),
+        messageCountAtStart: displayMessages.length,
+        runningTotalAtStart: orchStream.runningTotal,
+      };
+      return;
+    }
+
+    if (prev === 'busy' && next === 'ready') {
+      const start = turnStartRef.current;
+      if (!start) return;
+      const newEntries = displayMessages.slice(start.messageCountAtStart);
+      if (newEntries.length === 0) return;
+
+      const toolNamesAll: string[] = [];
+      let toolCount = 0;
+      let lastAssistantId: string | null = null;
+      for (const entry of newEntries) {
+        if (entry.role === 'assistant') lastAssistantId = entry.id;
+        if (entry.toolCalls?.length) {
+          for (const call of entry.toolCalls) {
+            toolCount += 1;
+            const name = call.name?.trim();
+            if (name) toolNamesAll.push(name);
+          }
+        }
+      }
+      if (!lastAssistantId) return;
+
+      const distinctNames: string[] = [];
+      const seen = new Set<string>();
+      for (const name of toolNamesAll) {
+        if (!seen.has(name)) {
+          seen.add(name);
+          distinctNames.push(name);
+        }
+      }
+
+      const elapsedMs = Math.max(0, Date.now() - start.startedAt);
+      const tokensUsed = Math.max(0, orchStream.runningTotal - start.runningTotalAtStart);
+      const baseSummary: TurnSummary = {
+        assistantMessageId: lastAssistantId,
+        elapsedMs,
+        toolCount,
+        toolNames: distinctNames.slice(0, 3),
+        toolNameTotal: distinctNames.length,
+        filesEditedCount: 0,
+        filePaths: [],
+        tokensUsed,
+        repoPath: resolvedRepoPath ?? null,
+      };
+      setTurnSummary(baseSummary);
+      turnStartRef.current = null;
+
+      if (resolvedRepoPath) {
+        const repoForFetch = resolvedRepoPath;
+        const targetAssistantId = lastAssistantId;
+        void (async () => {
+          try {
+            const response = await fetch(`/api/review/workspace?workspace=${encodeURIComponent(repoForFetch)}&strictBranch=1`);
+            if (!response.ok) return;
+            const snapshot = await response.json() as { changedFiles?: Array<{ path?: string }> };
+            const paths = (snapshot.changedFiles ?? [])
+              .map((file) => file?.path)
+              .filter((p): p is string => typeof p === 'string' && p.length > 0);
+            setTurnSummary((prevSummary) => (
+              prevSummary && prevSummary.assistantMessageId === targetAssistantId
+                ? { ...prevSummary, filesEditedCount: paths.length, filePaths: paths }
+                : prevSummary
+            ));
+          } catch {
+            // Swallow — card still shows the elapsed/tools/tokens summary.
+          }
+        })();
+      }
+    }
+  }, [displayMessages, isChatMode, isOrchestratorMode, orchStream.runningTotal, orchStream.status, resolvedRepoPath]);
+
+  // Clear the summary when the thread changes — stale cards from a prior
+  // thread should not bleed into the new one.
+  useEffect(() => {
+    setTurnSummary(null);
+    turnStartRef.current = null;
+  }, [threadId, resolvedRepoPath, isOrchestratorMode, isChatMode]);
+
   // #587 — publish live transcript + running token total into the context
   // residency provider so the ContextInspector side panel (mounted at the
   // OrchestratorTab level) can render rows without prop-drilling.
@@ -1698,6 +1806,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           onSelectSuggestion={(chip) => { sendNow(chip); }}
           onDismissSuggestions={dismissSuggestedReplies}
           onRestoreSuggestions={restoreSuggestedReplies}
+          turnSummary={turnSummary}
         />
       </div>
 

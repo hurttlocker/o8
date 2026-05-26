@@ -3,6 +3,7 @@
 import { Fragment, forwardRef } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { SuggestedReplies } from '../SuggestedReplies';
+import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 interface ChatMessageListProps {
@@ -36,6 +37,10 @@ interface ChatMessageListProps {
   // message even if `suggestedReplies` is empty. Indicates a fetch is in
   // flight or just failed, so the user knows chips were attempted.
   suggestedRepliesPending?: boolean;
+  // #1095/#1096 — when the orchestrator finishes a turn that touched files or
+  // ran tools, the parent passes a TurnSummary anchored to the closing
+  // assistant message. The card renders inline directly after that message.
+  turnSummary?: TurnSummary | null;
 }
 
 export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(function ChatMessageList({
@@ -59,6 +64,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   suggestedRepliesCollapsed = false,
   onRestoreSuggestions,
   suggestedRepliesPending = false,
+  turnSummary = null,
 }, chatEndRef) {
   // Phase 4 — chips strip renders when EITHER chips arrived OR a fetch is in
   // flight / just failed (placeholder). Both share the same anchor under the
@@ -139,6 +145,9 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
                 isLast={index === displayMessages.length - 1 && !displayWaiting}
                 repoPath={repoPath}
               />
+              {turnSummary && msg.id === turnSummary.assistantMessageId ? (
+                <TurnSummaryCard summary={turnSummary} />
+              ) : null}
               {showChipsHere ? (
                 <SuggestedReplies
                   chips={suggestedReplies ?? []}
