@@ -324,6 +324,110 @@ export function appendMobileOrchestratorUserMessage(input: {
   return readProjectedThread(tabId);
 }
 
+export function upsertMobileOrchestratorAssistantMessage(input: {
+  tabId: string | null | undefined;
+  repoPath: string;
+  messageId: string;
+  content: string;
+  backend?: MobileOrchestratorBackend | null;
+  sessionId?: string | null;
+  model?: string | null;
+  timestampMs?: number;
+}): MobileOrchestratorThread | null {
+  const tabId = input.tabId;
+  if (!tabId?.startsWith('thoughts-')) return null;
+
+  const content = input.content;
+  if (!content || !content.trim()) return null;
+
+  const existing = readHistoryRecord(tabId);
+  if (!existing) {
+    // The user-message helper writes the record first. If it's missing here,
+    // we skip rather than orphan an assistant-only record on disk.
+    return null;
+  }
+
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const timestamp = typeof input.timestampMs === 'number' ? input.timestampMs : now.getTime();
+  const messages = Array.isArray(existing.messages) ? existing.messages : [];
+
+  const existingIndex = messages.findIndex((m) => m?.id === input.messageId);
+  let nextMessages: ChatHistoryMessage[];
+  if (existingIndex >= 0) {
+    nextMessages = messages.slice();
+    nextMessages[existingIndex] = {
+      ...nextMessages[existingIndex],
+      role: 'assistant',
+      content,
+    };
+  } else {
+    // Defensive: if the most recent assistant message has identical content,
+    // a full chat client likely POSTed the same turn already. Don't append a
+    // duplicate; just refresh metadata via the savedAt write below.
+    const last = messages[messages.length - 1];
+    if (last?.role === 'assistant' && last.content === content) {
+      nextMessages = messages;
+    } else {
+      nextMessages = [
+        ...messages,
+        {
+          id: input.messageId,
+          role: 'assistant',
+          content,
+          timestamp,
+        },
+      ];
+    }
+  }
+
+  const explicitBackend = normalizeBackend(input.backend);
+  const nextBackend = explicitBackend
+    ?? normalizeBackend(existing.backend)
+    ?? inferBackendFromSessionIds(existing)
+    ?? DEFAULT_BACKEND;
+
+  const nextSessionIds = normalizeSessionIds(existing.orchestratorSessionIds);
+  let sessionIdsTouched = false;
+  if ((nextBackend === 'claude' || nextBackend === 'codex')
+    && typeof input.sessionId === 'string'
+    && input.sessionId.trim()
+  ) {
+    const trimmed = input.sessionId.trim();
+    if (nextSessionIds[nextBackend] !== trimmed) {
+      nextSessionIds[nextBackend] = trimmed;
+      sessionIdsTouched = true;
+    }
+  }
+
+  const explicitModel = typeof input.model === 'string' && input.model.trim()
+    ? input.model.trim()
+    : null;
+  const nextModel = explicitModel
+    ?? (typeof existing.model === 'string' && existing.model.trim() ? existing.model.trim() : null)
+    ?? modelForBackend(nextBackend)
+    ?? DEFAULT_MODEL;
+
+  writeHistoryRecord(tabId, {
+    ...existing,
+    messages: nextMessages,
+    model: nextModel,
+    backend: nextBackend,
+    savedAt: nowIso,
+    repoPath: typeof existing.repoPath === 'string' && existing.repoPath.trim()
+      ? existing.repoPath
+      : input.repoPath,
+    repoName: typeof existing.repoName === 'string' && existing.repoName.trim()
+      ? existing.repoName
+      : repoNameFromPath(input.repoPath),
+    orchestratorSessionIds: nextSessionIds,
+    orchestratorSessionUpdatedAt: sessionIdsTouched ? nowIso : existing.orchestratorSessionUpdatedAt ?? null,
+    orchestratorVisible: existing.orchestratorVisible === false ? false : true,
+  });
+
+  return readProjectedThread(tabId);
+}
+
 export function readOrchestratorBackendSessionId(
   tabId: string | null | undefined,
   backend: 'claude' | 'codex',
