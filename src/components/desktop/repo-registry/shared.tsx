@@ -810,10 +810,11 @@ export function GlassModal({
           <div style={{ minWidth: 0 }}>
             <div
               style={{
-                fontSize: 15,
-                fontWeight: 700,
+                fontSize: 16,
+                fontWeight: 400,
                 color: 'var(--t-text)',
-                letterSpacing: '-0.02em',
+                letterSpacing: '-0.2px',
+                lineHeight: 1.25,
               }}
             >
               {title}
@@ -822,7 +823,9 @@ export function GlassModal({
               <div
                 style={{
                   marginTop: 4,
-                  fontSize: 12,
+                  fontSize: 13,
+                  fontWeight: 300,
+                  letterSpacing: '-0.1px',
                   lineHeight: 1.45,
                   color: 'var(--t-text-muted)',
                 }}
