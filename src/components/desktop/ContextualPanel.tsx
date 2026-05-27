@@ -11,20 +11,12 @@
  * Repo-owned inspectors and task surfaces belong in repo-scoped workspace panes.
  */
 
-import { Suspense, forwardRef, lazy, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import type React from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
-import { O8BrowserPane } from '@/components/desktop/O8BrowserPane';
-import { AllFilesTree } from '@/components/desktop/o8-panel/workspace-rail/AllFilesTree';
-import { FileViewer } from '@/components/desktop/o8-panel/workspace-rail/FileViewer';
-import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
-import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
-import type { RepoRegistryEntry } from '@/lib/repos/types';
-
-const LazyOrchestratorTab = lazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })));
 
 // ── CLI Agents (terminal only, no chat modes) ──
 
@@ -59,11 +51,7 @@ export interface ContextualPanelHandle {
   getSession: () => string | null;
   /** Ensure a terminal exists, then run the command inside it. */
   runCommand: (command: string) => void;
-  /** Open or focus one of the bottom panel's non-terminal utility surfaces. */
-  openSurface: (surface: BottomPanelSurfaceKind) => void;
 }
-
-export type BottomPanelSurfaceKind = 'files' | 'side-chat' | 'browser' | 'review' | 'terminal';
 
 export interface ContextualPanelProps {
   sendTerminalCreate: (cols: number, rows: number, requestId?: string) => void;
@@ -73,13 +61,7 @@ export interface ContextualPanelProps {
   sendTerminalDetach: (sessionName: string) => void;
   sendAgentKill: (sessionName: string, signal?: 'SIGTERM' | 'SIGINT') => void;
   termWsConnected: boolean;
-  repoPath?: string | null;
-  repoLabel?: string | null;
-  registeredRepos?: RepoRegistryEntry[];
-  previews?: DetectedLocalhostPreview[];
-  onRepoPathChange?: (repoPath: string) => void;
   onSplitVertical?: () => void;
-  panelLabel?: string;
   onClose: () => void;
 }
 
@@ -104,46 +86,6 @@ function TerminalIcon({ size = 14 }: { size?: number }) {
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <polyline points="4 17 10 11 4 5" />
       <line x1="12" x2="20" y1="19" y2="19" />
-    </svg>
-  );
-}
-
-function FilesIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7l-2-2H4a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2Z" />
-      <path d="M2 10h20" />
-    </svg>
-  );
-}
-
-function ChatIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M21 15a4 4 0 0 1-4 4H8l-5 3V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4Z" />
-      <path d="M8 9h8" />
-      <path d="M8 13h5" />
-    </svg>
-  );
-}
-
-function BrowserIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <circle cx="12" cy="12" r="10" />
-      <path d="M2 12h20" />
-      <path d="M12 2a15.3 15.3 0 0 1 0 20" />
-      <path d="M12 2a15.3 15.3 0 0 0 0 20" />
-    </svg>
-  );
-}
-
-function ReviewIcon({ size = 14 }: { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" />
-      <path d="M14 2v6h6" />
-      <path d="m9 15 2 2 4-5" />
     </svg>
   );
 }
@@ -402,178 +344,13 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
 
 // ── Main Component ──
 
-interface BottomPanelSurface {
-  id: BottomPanelSurfaceKind;
-  label: string;
-  description: string;
-  icon: (props: { size?: number }) => React.ReactNode;
-}
-
-const BOTTOM_PANEL_SURFACES: BottomPanelSurface[] = [
-  { id: 'files', label: 'Files', description: 'Browse project files', icon: FilesIcon },
-  { id: 'side-chat', label: 'Side chat', description: 'Start a side conversation', icon: ChatIcon },
-  { id: 'browser', label: 'Browser', description: 'Open a website', icon: BrowserIcon },
-  { id: 'review', label: 'Review', description: 'View code changes', icon: ReviewIcon },
-  { id: 'terminal', label: 'Terminal', description: 'Start an interactive shell', icon: TerminalIcon },
-];
-
-const SURFACE_LABELS = Object.fromEntries(
-  BOTTOM_PANEL_SURFACES.map((surface) => [surface.id, surface.label]),
-) as Record<BottomPanelSurfaceKind, string>;
-
 interface ContextualPanelTab {
   id: string;
   label: string;
-  kind: BottomPanelSurfaceKind;
-  agentId?: CliAgent['id'];
+  agentId: CliAgent['id'];
   tmuxSession: string | null;
   createdAt: number;
   lastActivity: number;
-}
-
-function SurfaceEmptyState({
-  icon,
-  title,
-  detail,
-}: {
-  icon: React.ReactNode;
-  title: string;
-  detail: string;
-}) {
-  return (
-    <div style={{
-      flex: 1,
-      minHeight: 0,
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      gap: 10,
-      color: 'var(--t-text-muted)',
-      background: 'var(--t-bg)',
-      textAlign: 'center',
-      padding: 24,
-    }}>
-      <div style={{
-        width: 42,
-        height: 42,
-        borderRadius: 14,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        color: 'var(--t-text-secondary)',
-        background: 'var(--t-input-bg)',
-        border: '1px solid var(--t-divider-subtle)',
-      }}>
-        {icon}
-      </div>
-      <div style={{ fontSize: 13, fontWeight: 750, color: 'var(--t-text)' }}>{title}</div>
-      <div style={{ maxWidth: 360, fontSize: 12, lineHeight: 1.5 }}>{detail}</div>
-    </div>
-  );
-}
-
-function BottomUtilitySurface({
-  kind,
-  tabId,
-  active,
-  repoPath,
-  repoLabel,
-  registeredRepos,
-  previews,
-  selectedFile,
-  dirtyFiles,
-  onSelectFile,
-  onRepoPathChange,
-  onOpenFilesSurface,
-}: {
-  kind: Exclude<BottomPanelSurfaceKind, 'terminal'>;
-  tabId: string;
-  active: boolean;
-  repoPath: string | null;
-  repoLabel: string | null;
-  registeredRepos: RepoRegistryEntry[];
-  previews: DetectedLocalhostPreview[];
-  selectedFile: string | null;
-  dirtyFiles: Set<string>;
-  onSelectFile: (path: string) => void;
-  onRepoPathChange?: (repoPath: string) => void;
-  onOpenFilesSurface: () => void;
-}) {
-  if (kind === 'files') {
-    return (
-      <div style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(210px, 30%) minmax(0, 1fr)', background: 'var(--t-bg)' }}>
-        <div style={{ minWidth: 0, minHeight: 0, display: 'flex', borderRight: '1px solid var(--t-divider-subtle)', background: 'var(--t-panel)' }}>
-          <AllFilesTree
-            repoPath={repoPath}
-            selectedFile={selectedFile}
-            dirtyFiles={dirtyFiles}
-            onSelectFile={onSelectFile}
-          />
-        </div>
-        <FileViewer repoPath={repoPath} selectedFile={selectedFile} />
-      </div>
-    );
-  }
-
-  if (kind === 'side-chat') {
-    return (
-      <Suspense fallback={<SurfaceEmptyState icon={<ChatIcon size={18} />} title="Loading side chat" detail="Preparing a repo-aware conversation in the bottom panel." />}>
-        <LazyOrchestratorTab
-          tabId={tabId}
-          active={active}
-          repoPath={repoPath}
-          repoLabel={repoLabel}
-          initialMode="fleet"
-          acceptHistoryThreadLoads={false}
-          restoreLastThread={false}
-          publishWorkspaceThread={false}
-          persistLastThread={false}
-          projectContextRailVisible={false}
-        />
-      </Suspense>
-    );
-  }
-
-  if (kind === 'browser') {
-    return (
-      <O8BrowserPane
-        previews={previews}
-        onOpenFile={(filePath) => {
-          onSelectFile(filePath);
-          onOpenFilesSurface();
-        }}
-      />
-    );
-  }
-
-  if (kind === 'review') {
-    if (!repoPath) {
-      return (
-        <SurfaceEmptyState
-          icon={<ReviewIcon size={18} />}
-          title="No repository selected"
-          detail="Select or register a repo before opening review in the bottom panel."
-        />
-      );
-    }
-    return (
-      <ReviewPanel
-        repoPath={repoPath}
-        registeredRepos={registeredRepos}
-        onRepoPathChange={onRepoPathChange}
-        selectedFile={selectedFile}
-      />
-    );
-  }
-
-  return (
-    <SurfaceEmptyState
-      icon={<FilesIcon size={18} />}
-      title={repoLabel ?? 'Bottom panel'}
-      detail="Choose a bottom panel surface from the plus menu."
-    />
-  );
 }
 
 export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanelProps>(
@@ -585,13 +362,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       sendTerminalResize,
       sendTerminalDetach,
       termWsConnected,
-      repoPath = null,
-      repoLabel = null,
-      registeredRepos = [],
-      previews = [],
-      onRepoPathChange,
       onSplitVertical,
-      panelLabel = 'Bottom Panel',
       onClose,
     },
     ref,
@@ -599,7 +370,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
     const [tabs, setTabs] = useState<ContextualPanelTab[]>([]);
     const [activeTabId, setActiveTabId] = useState<string>('');
     const [addMenuOpen, setAddMenuOpen] = useState(false);
-    const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const opencodeEnabled = useExperimentalOpencodeFlag();
     const visibleAgents = opencodeEnabled ? CLI_AGENTS : CLI_AGENTS.filter((a) => a.id !== 'opencode');
     const pendingTabIdsRef = useRef<string[]>([]);
@@ -610,8 +380,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
     const tabsRef = useRef<ContextualPanelTab[]>([]);
     const xtermRefs = useRef<Map<string, XtermPanelHandle>>(new Map());
     const addMenuRef = useRef<HTMLDivElement>(null);
-    const dirtyFiles = useMemo(() => new Set<string>(), []);
-    const panelLabelLower = panelLabel.toLowerCase();
 
     useEffect(() => { tabsRef.current = tabs; }, [tabs]);
 
@@ -621,7 +389,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       const nextTab: ContextualPanelTab = {
         id: `bottom-tab-${tabCountRef.current}`,
         label: agent.label,
-        kind: 'terminal',
         agentId: agent.id,
         tmuxSession: null,
         createdAt: now,
@@ -639,42 +406,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       setActiveTabId(nextTab.id);
       sendTerminalCreate(120, 30, requestId);
     }, [sendTerminalCreate]);
-
-    const createSurfaceTab = useCallback((surface: Exclude<BottomPanelSurfaceKind, 'terminal'>) => {
-      const existing = tabsRef.current.find((tab) => tab.kind === surface);
-      if (existing) {
-        setActiveTabId(existing.id);
-        return existing.id;
-      }
-
-      tabCountRef.current += 1;
-      const now = Date.now();
-      const nextTab: ContextualPanelTab = {
-        id: `bottom-${surface}-${tabCountRef.current}`,
-        label: SURFACE_LABELS[surface],
-        kind: surface,
-        tmuxSession: null,
-        createdAt: now,
-        lastActivity: now,
-      };
-      setTabs((prev) => [...prev, nextTab]);
-      setActiveTabId(nextTab.id);
-      return nextTab.id;
-    }, []);
-
-    const openSurface = useCallback((surface: BottomPanelSurfaceKind) => {
-      setAddMenuOpen(false);
-      if (surface === 'terminal') {
-        const existingTerminal = tabsRef.current.find((tab) => tab.kind === 'terminal' && tab.tmuxSession);
-        if (existingTerminal) {
-          setActiveTabId(existingTerminal.id);
-          return existingTerminal.id;
-        }
-        createBottomTab(CLI_AGENTS[0]);
-        return null;
-      }
-      return createSurfaceTab(surface);
-    }, [createBottomTab, createSurfaceTab]);
 
     // Close add menu on outside click
     useEffect(() => {
@@ -744,22 +475,22 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       setTermExited: (sessionName: string) => {
         xtermRefs.current.get(sessionName)?.setExited();
       },
-      getSession: () => tabsRef.current.find((entry) => entry.id === activeTabId && entry.kind === 'terminal')?.tmuxSession ?? null,
+      getSession: () => tabsRef.current.find((entry) => entry.id === activeTabId)?.tmuxSession ?? null,
       runCommand: (command: string) => {
-        const activeTab = tabsRef.current.find((entry) => entry.id === activeTabId && entry.kind === 'terminal');
+        const activeTab = tabsRef.current.find((entry) => entry.id === activeTabId);
         if (activeTab?.tmuxSession) {
           sendTerminalInput(activeTab.tmuxSession, command + '\n');
           return;
         }
 
-        const existingShell = tabsRef.current.find((entry) => entry.kind === 'terminal' && entry.agentId === 'shell' && entry.tmuxSession);
+        const existingShell = tabsRef.current.find((entry) => entry.agentId === 'shell' && entry.tmuxSession);
         if (existingShell?.tmuxSession) {
           setActiveTabId(existingShell.id);
           sendTerminalInput(existingShell.tmuxSession, command + '\n');
           return;
         }
 
-        const pendingShell = tabsRef.current.find((entry) => entry.kind === 'terminal' && entry.agentId === 'shell' && !entry.tmuxSession);
+        const pendingShell = tabsRef.current.find((entry) => entry.agentId === 'shell' && !entry.tmuxSession);
         if (pendingShell) {
           pendingCommandsRef.current.set(pendingShell.id, command);
           setActiveTabId(pendingShell.id);
@@ -768,26 +499,21 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
 
         createBottomTab(CLI_AGENTS[0], command);
       },
-      openSurface,
-    }), [activeTabId, createBottomTab, openSurface, sendTerminalInput]);
+    }), [activeTabId, createBottomTab, sendTerminalInput]);
 
     const handleCreateTab = useCallback((agent: CliAgent) => {
       setAddMenuOpen(false);
       createBottomTab(agent);
     }, [createBottomTab]);
 
-    const handleCreateSurface = useCallback((surface: BottomPanelSurfaceKind) => {
-      openSurface(surface);
-    }, [openSurface]);
-
     const handleCloseTab = useCallback((tabId: string) => {
       const tab = tabsRef.current.find((entry) => entry.id === tabId);
       if (!tab) return;
 
-      if (tab.kind === 'terminal' && tab.tmuxSession) {
+      if (tab.tmuxSession) {
         sendTerminalDetach(tab.tmuxSession);
         xtermRefs.current.delete(tab.tmuxSession);
-      } else if (tab.kind === 'terminal') {
+      } else {
         pendingTabIdsRef.current = pendingTabIdsRef.current.filter((entry) => entry !== tabId);
         pendingAgentsRef.current.delete(tabId);
         pendingCommandsRef.current.delete(tabId);
@@ -820,9 +546,9 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
         display: 'flex',
         flexDirection: 'column',
         overflow: 'hidden',
-        background: 'var(--t-bg)',
+        background: 'var(--t-terminal-bg, #16191e)',
       }}>
-        {/* Header bar — single-line bottom panel chrome */}
+        {/* Header bar — single-line global operator chrome */}
         <div style={{
           display: 'flex',
           alignItems: 'center',
@@ -854,7 +580,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
               color: 'var(--t-text)',
               whiteSpace: 'nowrap',
             }}>
-              {panelLabel}
+              Global Terminal
             </span>
           </div>
 
@@ -868,12 +594,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
             overflowY: 'hidden',
           }}>
             {tabs.map((tab) => {
-              const agent = tab.kind === 'terminal'
-                ? CLI_AGENTS.find((entry) => entry.id === tab.agentId) ?? CLI_AGENTS[0]
-                : null;
-              const SurfaceIcon = tab.kind === 'terminal'
-                ? null
-                : BOTTOM_PANEL_SURFACES.find((entry) => entry.id === tab.kind)?.icon ?? FilesIcon;
+              const agent = CLI_AGENTS.find((entry) => entry.id === tab.agentId) ?? CLI_AGENTS[0];
               const isActive = tab.id === activeTabId;
               return (
                 <button
@@ -900,11 +621,9 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                     flexShrink: 0,
                   }}
                 >
-                  {agent
-                    ? (agent.id === 'shell'
-                        ? <AgentDot color={agent.color} />
-                        : <AgentGlyph agentId={agent.id} size={12} />)
-                    : SurfaceIcon?.({ size: 12 })}
+                  {agent.id === 'shell'
+                    ? <AgentDot color={agent.color} />
+                    : <AgentGlyph agentId={agent.id} size={12} />}
                   <span style={{
                     fontSize: 12,
                     fontWeight: isActive ? 600 : 500,
@@ -941,7 +660,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
             <button
               type="button"
               onClick={() => setAddMenuOpen((prev) => !prev)}
-              aria-label={`Add ${panelLabelLower} tab`}
+              aria-label="Add terminal tab"
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
@@ -966,7 +685,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 position: 'absolute',
                 top: 'calc(100% + 6px)',
                 right: 0,
-                width: 420,
+                width: 220,
                 borderRadius: 14,
                 background: 'var(--t-panel)',
                 backdropFilter: 'blur(24px) saturate(1.6)',
@@ -979,70 +698,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 paddingLeft: 4,
                 zIndex: 400,
               } as React.CSSProperties}>
-                <div style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'repeat(2, minmax(0, 1fr))',
-                  gap: 4,
-                  paddingBottom: 6,
-                  borderBottom: '1px solid var(--t-divider-subtle)',
-                  marginBottom: 4,
-                }}>
-                  {BOTTOM_PANEL_SURFACES.map((surface) => {
-                    const SurfaceIcon = surface.icon;
-                    return (
-                      <button
-                        key={surface.id}
-                        type="button"
-                        onClick={() => handleCreateSurface(surface.id)}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 10,
-                          minHeight: 58,
-                          paddingTop: 9,
-                          paddingRight: 10,
-                          paddingBottom: 9,
-                          paddingLeft: 10,
-                          borderRadius: 10,
-                          border: '1px solid transparent',
-                          background: 'transparent',
-                          cursor: 'pointer',
-                          textAlign: 'left',
-                        }}
-                        onMouseEnter={(e) => {
-                          e.currentTarget.style.background = 'var(--t-hover)';
-                          e.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
-                        }}
-                        onMouseLeave={(e) => {
-                          e.currentTarget.style.background = 'transparent';
-                          e.currentTarget.style.borderColor = 'transparent';
-                        }}
-                      >
-                        <span style={{
-                          width: 28,
-                          height: 28,
-                          borderRadius: 9,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          color: 'var(--t-text-secondary)',
-                          background: 'var(--t-input-bg)',
-                          flexShrink: 0,
-                        }}>
-                          {SurfaceIcon({ size: 15 })}
-                        </span>
-                        <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                          <span style={{ fontSize: 12.5, lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
-                            {surface.label}
-                          </span>
-                          <span style={{ fontSize: 9.5, lineHeight: 1.25, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                            {surface.description}
-                          </span>
-                        </span>
-                      </button>
-                    );
-                  })}
-                </div>
                 {visibleAgents.map((agent) => (
                   <button
                     key={agent.id}
@@ -1128,7 +783,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
           <button
             type="button"
             onClick={onClose}
-            aria-label={`Close ${panelLabelLower}`}
+            aria-label="Close global terminal"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -1151,11 +806,11 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
           </button>
         </div>
 
-        {/* Panel body */}
+        {/* Terminal body */}
         {tabs.length > 0 ? (
           <div style={{ flex: 1, position: 'relative', overflow: 'hidden', display: 'flex', flexDirection: 'column' }}>
             {tabs.map((tab) => (
-              tab.kind === 'terminal' && tab.tmuxSession ? (
+              tab.tmuxSession ? (
                 <BottomXtermPanel
                   key={tab.tmuxSession}
                   ref={(handle) => {
@@ -1169,7 +824,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                   sendTerminalDetach={sendTerminalDetach}
                   visible={tab.id === activeTabId}
                 />
-              ) : tab.kind === 'terminal' ? (
+              ) : (
                 <div
                   key={tab.id}
                   style={{
@@ -1185,34 +840,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                 >
                   <TerminalIcon size={18} />
                   Connecting...
-                </div>
-              ) : (
-                <div
-                  key={tab.id}
-                  aria-hidden={tab.id !== activeTabId}
-                  style={{
-                    display: tab.id === activeTabId ? 'flex' : 'none',
-                    flex: 1,
-                    minHeight: 0,
-                    height: '100%',
-                    background: 'var(--t-bg)',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <BottomUtilitySurface
-                    kind={tab.kind}
-                    tabId={tab.id}
-                    active={tab.id === activeTabId}
-                    repoPath={repoPath}
-                    repoLabel={repoLabel}
-                    registeredRepos={registeredRepos}
-                    previews={previews}
-                    selectedFile={selectedFile}
-                    dirtyFiles={dirtyFiles}
-                    onSelectFile={setSelectedFile}
-                    onRepoPathChange={onRepoPathChange}
-                    onOpenFilesSurface={() => createSurfaceTab('files')}
-                  />
                 </div>
               )
             ))}
