@@ -309,9 +309,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
                 <motion.button
                   type="button"
                   onClick={() => controller.handleRestoreLatestCheckpoint(controller.activeTab!.id)}
-                  whileHover={{ scale: 1.03 }}
-                  whileTap={{ scale: 0.97 }}
-                  transition={{ type: 'spring', stiffness: 480, damping: 22, mass: 0.5 }}
+                  transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
                   style={{
                     display: 'inline-flex',
                     alignItems: 'center',
@@ -339,9 +337,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
               <motion.button
                 type="button"
                 onClick={() => window.location.reload()}
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
-                transition={{ type: 'spring', stiffness: 480, damping: 22, mass: 0.5 }}
+                transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
                 style={{
                   display: 'inline-flex',
                   alignItems: 'center',

@@ -469,11 +469,9 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
                       }}
                       onMouseEnter={(e) => {
                         if (resolvingId === approval.id) return;
-                        e.currentTarget.style.transform = 'translateY(-1px)';
                         e.currentTarget.style.boxShadow = '0 14px 22px rgba(22, 163, 74, 0.24)';
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'translateY(0)';
                         e.currentTarget.style.boxShadow = '0 10px 18px rgba(22, 163, 74, 0.18)';
                       }}
                     >
@@ -502,11 +500,9 @@ export const SidebarApprovalCard = memo(function SidebarApprovalCard({
                       }}
                       onMouseEnter={(e) => {
                         if (resolvingId === approval.id) return;
-                        e.currentTarget.style.transform = 'translateY(-1px)';
                         e.currentTarget.style.background = 'rgba(239, 68, 68, 0.10)';
                       }}
                       onMouseLeave={(e) => {
-                        e.currentTarget.style.transform = 'translateY(0)';
                         e.currentTarget.style.background = 'rgba(239, 68, 68, 0.06)';
                       }}
                     >
