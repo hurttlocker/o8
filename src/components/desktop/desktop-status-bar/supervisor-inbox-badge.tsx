@@ -56,14 +56,12 @@ export function SupervisorInboxBadge() {
   }, [refresh]);
 
   const active = humanRequiredCount > 0;
-  // DESIGN.md §06.7 — flat. Active uses the warning-soft fill (informational
-  // emphasis, not a chrome-btn boxy bg). Inactive is transparent; the
-  // surrounding footer card chrome already overrides --t-chrome-btn-bg to
-  // transparent, but we set it explicitly here so the component stands on
-  // its own when consumed outside the card.
-  const background = active ? 'var(--t-warning-soft)' : 'transparent';
-  const countBackground = active ? 'var(--t-warning)' : 'transparent';
-  const countColor = active ? 'var(--t-warning-contrast)' : 'var(--t-text-muted)';
+  // 2026-05-27 — operator wants no full-pill orange fill on active. Only
+  // the Mail icon + the count number carry the warning color so the badge
+  // feels informational, not alarming. Outer button stays transparent.
+  const background = 'transparent';
+  const countBackground = 'transparent';
+  const countColor = active ? 'var(--t-warning)' : 'var(--t-text-muted)';
 
   const openInboxTab = () => {
     if (typeof window === 'undefined') return;
