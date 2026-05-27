@@ -4395,6 +4395,7 @@ function DashboardInner() {
         compact={compactShell}
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
+        onOpenBottomPanelSurface={handleOpenBottomPanelSurface}
         onOpenShortcuts={() => setShortcutsOpen(true)}
         leftColumnWidth={showSidebarColumn ? (leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth) : 0}
         rightColumnWidth={showRightPanelColumn ? (rightPanelKind === 'o8' ? o8Width : rightWidth) : 0}
