@@ -41,6 +41,7 @@ import { basename, join, relative } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { getSqlite } from '@/lib/db';
 import { refreshDirectiveFts } from '@/lib/db/v14-fts5-migration';
+import { captionImagesInSpec } from '@/lib/cortex/spec-image-captions';
 
 const ROOT_SPEC_FILES = ['README.md', 'CLAUDE.md', 'AGENTS.md', 'DESIGN.md', 'THEME.md'] as const;
 const SPEC_SUBDIRS = ['docs'] as const;
@@ -387,6 +388,15 @@ export async function ingestRepoSpecs(repoPath: string, repoSlug?: string): Prom
     }
     const relPath = relative(repoPath, filePath);
     const fileSlug = slugify(relPath.replace(/\.md$/i, '')) || 'spec';
+
+    // Inline `**[image: <caption>]**` after each markdown image so BM25
+    // retrieval can match visual references (#1131). Cached by mtime+path
+    // in ~/.o8/spec-image-captions.json; cache hits cost nothing.
+    try {
+      raw = await captionImagesInSpec(filePath, raw);
+    } catch (err) {
+      console.warn(`[spec-ingest] image captioning skipped for ${filePath}:`, err);
+    }
 
     const sections = chunkMarkdown(raw);
     if (sections.length === 0) continue;
