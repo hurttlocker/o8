@@ -33,6 +33,7 @@ import {
   ActivityIcon,
   InfoIcon,
   SlidersIcon,
+  SETTINGS_CONTENT_MAX_WIDTH,
 } from './settings/shared';
 import { GitHubTab } from './settings/GitHubTab';
 import { APIKeysTab } from './settings/APIKeysTab';
@@ -353,8 +354,22 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
       </div>
 
-      {/* Right content — full width */}
-      <div style={{ flex: 1, minWidth: 0 }}>
+      {/* Right content — grid column capped at SETTINGS_CONTENT_MAX_WIDTH
+          (1400) and centered, so wide monitors render an editorial
+          margin:auto frame instead of left-aligned content with a sea of
+          cream on the right. The grid track sizing means tab bodies
+          already-styled with maxWidth: SETTINGS_CONTENT_MAX_WIDTH still
+          stretch to the full track width because grid items default to
+          justify-self: stretch. 2026-05-27. */}
+      <div
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'grid',
+          gridTemplateColumns: `minmax(0, ${SETTINGS_CONTENT_MAX_WIDTH}px)`,
+          justifyContent: 'center',
+        }}
+      >
         {activeTab === 'connectors' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
             <GitHubTab
