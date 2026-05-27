@@ -654,7 +654,18 @@ function OrchestratorTabInner({
   const emptyKindLocked = lockedMode === 'chat';
   const handleEmptyKindChange = useCallback((next: OrchestratorEmptyKind) => {
     if (!spawnHandlers || emptyKindLocked) return;
-    spawnHandlers.updateTabMode(tabId, { mode: next === 'chat' ? 'chat' : 'fleet' });
+    const mode: 'fleet' | 'chat' = next === 'chat' ? 'chat' : 'fleet';
+    // Persist on the tab (so restore picks it up) AND dispatch the
+    // event the active ThoughtsChatPanel listens for so its internal
+    // orchestrationMode state flips immediately — otherwise the
+    // composer's model label sticks on the Orchestrator's model
+    // (e.g. "Opus 4.7") after toggling to Chat.
+    spawnHandlers.updateTabMode(tabId, { mode });
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('o8:set-orchestration-mode', {
+        detail: { mode },
+      }));
+    }
   }, [emptyKindLocked, spawnHandlers, tabId]);
 
   // Resolve the active workspace target for the Project chip label.
