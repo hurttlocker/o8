@@ -671,6 +671,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             permissionMode={permissionMode}
             onTogglePermission={onTogglePermission}
             repoLabel={showReasoningControls ? repoLabel : null}
+            displayMessagesCount={displayMessagesCount}
             working={isOrchestratorMode && displayWaiting}
             onStop={isOrchestratorMode ? onStop : undefined}
             onUploadDiskFiles={onUploadDiskFiles}
