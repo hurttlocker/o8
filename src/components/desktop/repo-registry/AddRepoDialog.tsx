@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState, type CSSProperties, type ReactNode } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { ProjectRole } from '@/lib/projects/types';
 import { AlertCircle, CheckCircle2, FolderOpen, GitBranch, Globe, Loader2 } from '../lucide-shims';
 import {
@@ -151,6 +151,7 @@ export function AddRepoDialog({
   onClose,
   onRepoAdded,
   onProjectsChanged,
+  initialMode,
 }: {
   open: boolean;
   projects: ProjectRecord[];
@@ -158,6 +159,11 @@ export function AddRepoDialog({
   onClose: () => void;
   onRepoAdded?: (repo: RepoRegistryEntry) => void | Promise<void>;
   onProjectsChanged?: () => void | Promise<void>;
+  // Hint passed by the empty-state Project chip's submenu:
+  //   - 'existing' → auto-open the system folder picker on dialog mount
+  //   - 'scratch'  → focus the path input with a "new folder" hint
+  // Both flows still funnel through the same validate → register path.
+  initialMode?: 'scratch' | 'existing';
 }) {
   const [repoPathInput, setRepoPathInput] = useState('');
   const [validating, setValidating] = useState(false);
@@ -234,6 +240,22 @@ export function AddRepoDialog({
     setRepoPathInput(folderPath);
     await validateRepoPath(folderPath);
   }, [validateRepoPath]);
+
+  // Honor the submenu's intent: when the operator picked "Use an
+  // existing folder" we auto-pop the system folder picker on open so
+  // they don't have to click Browse. "Start from scratch" leaves the
+  // input focused with a hint placeholder for them to type a new path.
+  const autoBrowsedRef = useRef(false);
+  useEffect(() => {
+    if (!open) {
+      autoBrowsedRef.current = false;
+      return;
+    }
+    if (initialMode === 'existing' && !autoBrowsedRef.current) {
+      autoBrowsedRef.current = true;
+      void browse();
+    }
+  }, [open, initialMode, browse]);
 
   const linkRepoToProject = useCallback(async (repo: RepoRegistryEntry) => {
     if (!selectedProject) return;

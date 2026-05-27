@@ -442,10 +442,21 @@ function DashboardInner() {
       const detail = (event as CustomEvent<{ tabId?: string; threadId?: string | null }>).detail;
       if (!detail?.tabId) return;
       threadIdByTabRef.current.set(detail.tabId, detail.threadId ?? null);
+      // Sidebar shimmer should follow the active workspace tab. Clicking
+      // a workspace tab pill activates that tab → its OrchestratorTab
+      // fires this event when its loaded thread settles → we sync
+      // activeSessionKey so the matching sidebar row shimmers + sits
+      // highlighted. Without this the shimmer is pinned to the last
+      // SIDEBAR click and diverges from the actually-displayed thread.
+      // (The auto-fallback effect upstream guards `llm-chat:` keys so
+      // this update isn't overwritten on the next render.)
+      if (detail.threadId) {
+        setActiveSessionKey(`llm-chat:${detail.threadId}`);
+      }
     };
     window.addEventListener('o8:workspace-thread-id', handler as EventListener);
     return () => window.removeEventListener('o8:workspace-thread-id', handler as EventListener);
-  }, []);
+  }, [setActiveSessionKey]);
 
   const handleTitleRenameSubmit = useCallback(async (newTitle: string) => {
     // The header strip flipped its label into an inline input and the
@@ -1005,9 +1016,20 @@ function DashboardInner() {
               detail: { tabId, historyTabId },
             }));
           };
+          // When the OrchestratorTab is already mounted + active, its
+          // o8:load-history-thread listener is registered and a single
+          // dispatch suffices. The 120/420ms retries are only needed when
+          // the tab is being newly-activated — without them, the listener
+          // can mount AFTER our first dispatch and miss it. The redundant
+          // trampoline used to flicker the transcript on already-open
+          // chats (3x load × ~80ms each). Cooldown in handleLoadThread
+          // keeps the retries cheap even when they do fire.
+          const tabAlreadyActive = snapshot.activeTabId === tabId;
           loadThread();
-          window.setTimeout(loadThread, 120);
-          window.setTimeout(loadThread, 420);
+          if (!tabAlreadyActive) {
+            window.setTimeout(loadThread, 120);
+            window.setTimeout(loadThread, 420);
+          }
         }
       } catch {
         // Best-effort sidebar navigation; the workspace terminal may still be mounting.
@@ -2869,6 +2891,12 @@ function DashboardInner() {
 
   useEffect(() => {
     if (!activeSessionKey || selectedSessionAgent || paletteAgents.length === 0) return;
+    // Sidebar chat-history clicks set activeSessionKey to `llm-chat:<tabId>`
+    // — these are chat-thread selections, not CLI session selections, so a
+    // palette agent will never match. Without this guard the fallback below
+    // overwrites the chat-thread selection with a CLI session key on the
+    // very next render, killing the active-row shimmer + highlight.
+    if (activeSessionKey.startsWith('llm-chat:')) return;
     const fallbackSession = paletteAgents.find((agent) => agent.isCurrentSession) ?? paletteAgents[0];
     if (!fallbackSession || fallbackSession.sessionKey === activeSessionKey) return;
     setActiveSessionKey(fallbackSession.sessionKey);

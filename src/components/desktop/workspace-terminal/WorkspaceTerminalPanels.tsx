@@ -94,6 +94,7 @@ function WorkspaceTerminalPanelsBase({
               initialThreadId={tab.id.startsWith('thoughts-') ? tab.id : undefined}
               projectContextRailVisible={projectContextRailVisible}
               onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
+              restoreLastThread={!tab.freshSpawn}
             />
           </Suspense>
         ) : tab.kind === 'llm-chat' ? (

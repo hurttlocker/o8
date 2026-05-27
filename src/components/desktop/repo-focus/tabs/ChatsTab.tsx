@@ -68,7 +68,11 @@ export function ChatsTab({
   // icon on a group header opens a Group by / Sort by popover.
   type ChatGroupBy = 'repo' | 'date' | 'flat';
   const CHAT_GROUP_BY_KEY = 'o8:chat-group-by';
-  const [chatGroupBy, setChatGroupBy] = useState<ChatGroupBy>('repo');
+  // Default to ChatGPT/Claude-desktop style time grouping. Users who
+  // explicitly picked 'repo' via the FilterList picker keep their choice
+  // via the localStorage hydration below; this only changes the default
+  // for fresh installs / users who never opened the picker.
+  const [chatGroupBy, setChatGroupBy] = useState<ChatGroupBy>('date');
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const stored = window.localStorage.getItem(CHAT_GROUP_BY_KEY);
@@ -84,6 +88,20 @@ export function ChatsTab({
   }, []);
   const [loading, setLoading] = useState(true);
   const [busyHistoryIds, setBusyHistoryIds] = useState<Set<string>>(() => new Set());
+  // Optimistic click-time map — clicking a chat in the sidebar should
+  // bubble it to the top of the Today bucket immediately, before the file
+  // mtime updates from the server. Keyed by tabId, value = Date.now() of
+  // the click. Used to override item.modifiedAt in the sort comparator
+  // when building date / repo / flat groups.
+  const [clickedAtByTab, setClickedAtByTab] = useState<Record<string, number>>({});
+  const markClickedAt = useCallback((tabId: string) => {
+    setClickedAtByTab((prev) => ({ ...prev, [tabId]: Date.now() }));
+  }, []);
+  const effectiveModifiedAtMs = useCallback((item: ChatHistoryItem) => {
+    const ts = Date.parse(item.modifiedAt);
+    const clicked = clickedAtByTab[item.tabId] ?? 0;
+    return Math.max(Number.isFinite(ts) ? ts : 0, clicked);
+  }, [clickedAtByTab]);
   const [collapsedGroups, setCollapsedGroups] = useState<Record<HistoryGroupKey, boolean>>({
     chat: false,
     orchestrator: false,
@@ -264,9 +282,16 @@ export function ChatsTab({
   const displayedSessions = limit ? shownSessions.slice(0, Math.min(shownSessions.length, limit)) : shownSessions;
   const remainingHistorySlots = limit ? Math.max(0, limit - displayedSessions.length) : Number.POSITIVE_INFINITY;
   const flatHistoryItems = useMemo(() => {
-    if (!Number.isFinite(remainingHistorySlots)) return visibleFlatHistory;
-    return visibleFlatHistory.slice(0, Math.max(0, remainingHistorySlots));
-  }, [remainingHistorySlots, visibleFlatHistory]);
+    // Sort by effective modifiedAt desc (mtime OR most-recent click,
+    // whichever is later) so clicked chats bubble to the top of the
+    // Today bucket immediately. This makes the time-grouped sidebar
+    // feel like ChatGPT: open a chat → it pops to top.
+    const sorted = [...visibleFlatHistory].sort((a, b) => (
+      effectiveModifiedAtMs(b) - effectiveModifiedAtMs(a)
+    ));
+    if (!Number.isFinite(remainingHistorySlots)) return sorted;
+    return sorted.slice(0, Math.max(0, remainingHistorySlots));
+  }, [effectiveModifiedAtMs, remainingHistorySlots, visibleFlatHistory]);
   const flatHistoryRepoGroups = useMemo<RepoHistoryGroup[]>(() => {
     const groups = new Map<string, RepoHistoryGroup>();
     for (const item of flatHistoryItems) {
@@ -290,38 +315,45 @@ export function ChatsTab({
     });
   }, [flatHistoryItems, targetRepos]);
 
-  // Date-bucket grouping — Today / Yesterday / This week / Older.
+  // Date-bucket grouping — ChatGPT/Claude-desktop pattern:
+  // Today / Yesterday / Previous 7 Days / Previous 30 Days / Older.
   // Used when chatGroupBy === 'date'. Same shape as repo groups so the
   // render loop can stay generic.
   const flatHistoryDateGroups = useMemo<RepoHistoryGroup[]>(() => {
     const today: ChatHistoryItem[] = [];
     const yesterday: ChatHistoryItem[] = [];
-    const thisWeek: ChatHistoryItem[] = [];
+    const prev7: ChatHistoryItem[] = [];
+    const prev30: ChatHistoryItem[] = [];
     const older: ChatHistoryItem[] = [];
 
     const now = new Date();
     const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
     const startOfYesterday = startOfToday - 24 * 60 * 60 * 1000;
-    const startOfWeek = startOfToday - 7 * 24 * 60 * 60 * 1000;
+    const startOfPrev7 = startOfToday - 7 * 24 * 60 * 60 * 1000;
+    const startOfPrev30 = startOfToday - 30 * 24 * 60 * 60 * 1000;
 
     for (const item of flatHistoryItems) {
-      const ts = Date.parse(item.modifiedAt);
-      if (!Number.isFinite(ts)) {
+      // Use effective time (max of mtime + click time) so a fresh click
+      // promotes the item into the Today bucket.
+      const ts = effectiveModifiedAtMs(item);
+      if (!ts) {
         older.push(item);
         continue;
       }
       if (ts >= startOfToday) today.push(item);
       else if (ts >= startOfYesterday) yesterday.push(item);
-      else if (ts >= startOfWeek) thisWeek.push(item);
+      else if (ts >= startOfPrev7) prev7.push(item);
+      else if (ts >= startOfPrev30) prev30.push(item);
       else older.push(item);
     }
     const groups: RepoHistoryGroup[] = [];
     if (today.length > 0) groups.push({ key: 'today', label: 'Today', items: today });
     if (yesterday.length > 0) groups.push({ key: 'yesterday', label: 'Yesterday', items: yesterday });
-    if (thisWeek.length > 0) groups.push({ key: 'this-week', label: 'This week', items: thisWeek });
+    if (prev7.length > 0) groups.push({ key: 'prev-7', label: 'Previous 7 days', items: prev7 });
+    if (prev30.length > 0) groups.push({ key: 'prev-30', label: 'Previous 30 days', items: prev30 });
     if (older.length > 0) groups.push({ key: 'older', label: 'Older', items: older });
     return groups;
-  }, [flatHistoryItems]);
+  }, [flatHistoryItems, effectiveModifiedAtMs]);
 
   // Group archived lanes by the same repo-label key used by
   // flatHistoryRepoGroups so we can render them inline under each repo.
@@ -436,7 +468,7 @@ export function ChatsTab({
                       disabled={!onOpenHistoryChat}
                       active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                       tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                      onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                      onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                       onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                     />
                   ))}
@@ -456,7 +488,7 @@ export function ChatsTab({
                         disabled={!onOpenHistoryChat}
                         active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                         tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                        onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                        onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                         onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                       />
                     ))}
@@ -483,7 +515,7 @@ export function ChatsTab({
                           disabled={!onOpenHistoryChat}
                           active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                           tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                          onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                          onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                           onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                         />
                       ))}
@@ -531,7 +563,7 @@ export function ChatsTab({
                   disabled={!onOpenHistoryChat}
                   active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                   tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                  onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                  onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                   onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
                 />
               ))}
@@ -575,7 +607,7 @@ export function ChatsTab({
                 disabled={!onOpenHistoryChat}
                 active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                 tone={packetStateTone(pickHistoryPacket(item, visiblePackets))}
-                onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                 onOpenMenu={(event) => setHistoryActionMenu({ item, archived: false, x: event.clientX, y: event.clientY })}
               />
             ))
@@ -583,11 +615,15 @@ export function ChatsTab({
         </div>
       )) : null}
 
-      {/* Only render the outer slot when it wasn't already rendered inside
-          the flat-compact-repos branch (which is the AgentPanel mount).
-          That branch injects the slot inside its last repo group so the
-          per-repo Archived can still sit below Spawned agents. */}
-      {!(compact && chatGroupBy === 'repo' && flatHistoryRepoGroups.length > 0)
+      {/* Spawned agents (workers / packets) live ONLY under the repo-grouped
+          view — the operator keeps them separate from chat history. In repo
+          mode the flat-compact-repos branch already injects them inline at
+          the end of each repo group (so per-repo Archived sits below). In
+          date/flat modes we deliberately drop them: the time-grouped view
+          is for chats, not work units. Packets remain reachable via
+          AgentPanel groups + LeftPanelProjectFocus AgentsTab. */}
+      {chatGroupBy === 'repo'
+        && !(compact && flatHistoryRepoGroups.length > 0)
         ? slotBeforeArchived
         : null}
 
@@ -608,7 +644,7 @@ export function ChatsTab({
                 disabled={!onOpenHistoryChat}
                 active={activeSessionKey === item.tabId || activeSessionKey === `llm-chat:${item.tabId}`}
                 tone={HISTORY_ROW_TONES.neutral}
-                onOpen={() => onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item))}
+                onOpen={() => { markClickedAt(item.tabId); onOpenHistoryChat?.(item.tabId, item.title, historyRepoContext(item)); }}
                 onOpenMenu={(event) => setHistoryActionMenu({ item, archived: true, x: event.clientX, y: event.clientY })}
               />
             ))

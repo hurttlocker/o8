@@ -30,7 +30,10 @@ import {
 } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import {
   OrchestratorEmptyState,
+  OrchestratorComposerBelow,
   timeOfDayGreeting,
+  type WorktreeMode,
+  type OrchestratorEmptyKind,
 } from '@/components/desktop/OrchestratorEmptyState';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
 import { QuickActionPalette } from '@/components/desktop/orchestrator/QuickActionPalette';
@@ -74,6 +77,14 @@ interface OrchestratorTabProps {
   // text in chat mode so the tab strip can show a 3-word summary instead
   // of the generic "Chat" label.
   onChatSummary?: (text: string) => void;
+  /** Bottom/auxiliary mounts should not claim workspace history routing. */
+  acceptHistoryThreadLoads?: boolean;
+  /** Disable restoring the last top-level orchestrator thread for isolated mounts. */
+  restoreLastThread?: boolean;
+  /** Disable broadcasting workspace-thread id changes from isolated mounts. */
+  publishWorkspaceThread?: boolean;
+  /** Disable updating the global last-active orchestrator thread. */
+  persistLastThread?: boolean;
 }
 
 function permissionStorageKey(tabId: string): string {
@@ -222,6 +233,10 @@ function OrchestratorTabInner({
   initialThreadId,
   projectContextRailVisible = true,
   onChatSummary,
+  acceptHistoryThreadLoads = true,
+  restoreLastThread = true,
+  publishWorkspaceThread = true,
+  persistLastThread = true,
 }: OrchestratorTabProps) {
   const data = useOrchestratorData();
   const spawnHandlers = useWorkspaceSpawn();
@@ -269,16 +284,25 @@ function OrchestratorTabInner({
   useEffect(() => {
     if (typeof window === 'undefined') return;
     if (!active) return;
+    if (!publishWorkspaceThread) return;
     window.dispatchEvent(new CustomEvent('o8:workspace-thread-id', {
       detail: { tabId, threadId: chatChromeState.threadId },
     }));
-  }, [active, tabId, chatChromeState.threadId]);
+  }, [active, publishWorkspaceThread, tabId, chatChromeState.threadId]);
 
   // When the loaded thread changes, fetch the chat-history record and
   // sync its title into the workspace tab's label so the header strip
   // reads the operator's chosen name (e.g. "o8.v1") instead of the
   // default "Orchestrator". Mirrors what handleTitleRenameSubmit does
   // after a rename, but reactive to thread switches + reload restores.
+  //
+  // When the new thread has no title yet (fresh "New session" click —
+  // no chat-history record OR record without a title), reset the
+  // workspace tab label to the "Orchestrator" sentinel so the previous
+  // thread's label doesn't bleed through into the new conversation.
+  // workspaceConversationHeaderLabel + the tab strip both treat
+  // "Orchestrator" as a fallthrough → recompute from messages /
+  // workspaceTabPrimaryLabel.
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const threadId = chatChromeState.threadId;
@@ -287,21 +311,48 @@ function OrchestratorTabInner({
     (async () => {
       try {
         const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`);
-        if (!res.ok || cancelled) return;
-        const data = await res.json();
-        const title = typeof data?.title === 'string' && data.title.trim() ? data.title.trim() : null;
-        if (cancelled || !title) return;
-        // Persist the title alongside the threadId so the next reload
-        // can pre-set tab.label at tab-creation time (no "Orchestrator"
-        // flash before the chat-history fetch completes).
-        if (active) writeLastOrchestratorThread(threadId, title);
+        if (cancelled) return;
+        const data = res.ok ? await res.json() : null;
+        // Match the /list endpoint's title resolution: data.title wins,
+        // but fall back to the first user-message snippet so a saved
+        // conversation without an explicit `title` field still surfaces
+        // a meaningful tab label (without this, an orchestrator thread
+        // with real content but no title field flashes back to
+        // 'Orchestrator' on every reload — that's what the operator
+        // saw in dogfood after clicking a named thread).
+        const explicitTitle = typeof data?.title === 'string' && data.title.trim() ? data.title.trim() : null;
+        const firstUserMsg = Array.isArray(data?.messages)
+          ? data.messages.find((m: { role?: string; content?: string }) => m?.role === 'user' && typeof m?.content === 'string' && m.content.trim())
+          : null;
+        const fallbackTitle = firstUserMsg?.content
+          ? firstUserMsg.content.slice(0, 60).replace(/\n/g, ' ') + (firstUserMsg.content.length > 60 ? '...' : '')
+          : null;
+        const title = explicitTitle ?? fallbackTitle;
+        if (cancelled) return;
+        if (title) {
+          // Persist the title alongside the threadId so the next reload
+          // can pre-set tab.label at tab-creation time (no "Orchestrator"
+          // flash before the chat-history fetch completes).
+          if (active && persistLastThread) writeLastOrchestratorThread(threadId, title);
+          window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
+            detail: { tabId, threadId, title },
+          }));
+          return;
+        }
+        // Truly empty thread (no title + no messages) — emit the
+        // kind-aware spawn default so the previous thread's label
+        // doesn't stick on the workspace tab pill. llm-chat tabs
+        // (lockedMode='chat') get 'Chat'; orchestrator tabs get
+        // 'Orchestrator'. Matches buildNewLlmChatTab + the orchestrator
+        // tab's spawn defaults so the workspace pill reads consistently.
+        const freshLabel = lockedMode === 'chat' ? 'Chat' : 'Orchestrator';
         window.dispatchEvent(new CustomEvent('o8:chat-history-updated', {
-          detail: { tabId, threadId, title },
+          detail: { tabId, threadId, title: freshLabel },
         }));
       } catch { /* silent */ }
     })();
     return () => { cancelled = true; };
-  }, [active, tabId, chatChromeState.threadId]);
+  }, [active, persistLastThread, tabId, chatChromeState.threadId, lockedMode]);
 
   // Persist the last-active orchestrator thread id globally so dev
   // reloads drop the operator back into their last conversation. Only
@@ -311,6 +362,7 @@ function OrchestratorTabInner({
   // the whole point of the restore.
   useEffect(() => {
     if (!active) return;
+    if (!persistLastThread) return;
     if (!chatChromeState.hasMessages) return;
     if (chatChromeState.threadId) {
       // Don't clear the title here — only the threadId update fires this
@@ -318,7 +370,11 @@ function OrchestratorTabInner({
       // tuple write. Pass `undefined` to leave the stored title alone.
       writeLastOrchestratorThread(chatChromeState.threadId);
     }
-  }, [active, chatChromeState.threadId, chatChromeState.hasMessages]);
+  }, [active, persistLastThread, chatChromeState.threadId, chatChromeState.hasMessages]);
+
+  // (First-message side-effects useEffect is declared further down,
+  // AFTER worktreeMode / pickedBranch / activeWorkspaceTarget so the
+  // hook reads concrete values, not undefined refs.)
 
   // On mount, if no explicit initialThreadId was passed (which is the
   // case for default Orchestrator tabs spawned on first launch / reload),
@@ -334,6 +390,7 @@ function OrchestratorTabInner({
   const restoredThreadRef = useRef<string | null>(null);
   const [isRestoringThread, setIsRestoringThread] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
+    if (!restoreLastThread) return false;
     // Only orchestrator tabs in default mode (no explicit initialThreadId)
     // participate in the restore path.
     if (initialThreadId) return false;
@@ -341,6 +398,7 @@ function OrchestratorTabInner({
   });
   useEffect(() => {
     if (!active) return;
+    if (!restoreLastThread) return;
     if (initialThreadId) return; // explicit thread wins
     const restored = readLastOrchestratorThreadId();
     if (!restored) return;
@@ -364,7 +422,7 @@ function OrchestratorTabInner({
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, [active, initialThreadId]);
+  }, [active, initialThreadId, restoreLastThread]);
 
   // Drop the restoring flag once messages arrive (hasMessages flips
   // true). Also bail out if the restore has been running for ~3s —
@@ -483,13 +541,18 @@ function OrchestratorTabInner({
     const handleLoadHistoryThread = (event: Event) => {
       const detail = (event as CustomEvent<{ tabId?: string; historyTabId?: string }>).detail;
       if (!detail?.historyTabId) return;
-      if (detail.tabId && detail.tabId !== tabId && !active) return;
+      if (!acceptHistoryThreadLoads) return;
+      if (detail.tabId) {
+        if (detail.tabId !== tabId) return;
+      } else if (!active) {
+        return;
+      }
       chatPanelRef.current?.loadThread(detail.historyTabId);
       window.setTimeout(() => chatPanelRef.current?.focusInput(), 40);
     };
     window.addEventListener('o8:load-history-thread', handleLoadHistoryThread);
     return () => window.removeEventListener('o8:load-history-thread', handleLoadHistoryThread);
-  }, [active, tabId]);
+  }, [acceptHistoryThreadLoads, active, tabId]);
 
   const handleQuickAction = useCallback((prompt: string) => {
     chatPanelRef.current?.sendNow(prompt);
@@ -569,15 +632,174 @@ function OrchestratorTabInner({
     ? orchestratorRuntimeTone(initialSingleRuntime ?? 'codex').label
     : 'O8 Operator';
 
+  // Worktree mode for the compose-first empty state. Defaults to
+  // 'new-worktree' so the operator's governance ethos (don't dirty main
+  // unless asked) lands by default; flips to 'local' for quick chats.
+  // Local-state for v1 — persistence onto the tab is a follow-up once
+  // dispatch reads this on first agent spawn.
+  const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>('new-worktree');
+  // Optimistic branch override for the empty-state Branch chip. Real
+  // branch checkout fires on first message (when the operator has
+  // committed to this conversation); here we just track the operator's
+  // intent so the chip label reflects the chosen branch immediately.
+  const [pickedBranch, setPickedBranch] = useState<string | null>(null);
+
+  // Kind toggle on the empty state. lockedMode='chat' = llm-chat tab,
+  // can't pivot. Otherwise: 'chat' if the tab's current mode is chat,
+  // else 'orchestrator'. Flipping kind calls the existing mode
+  // persistence path so the tab state actually moves.
+  const emptyKind: OrchestratorEmptyKind = lockedMode === 'chat' || initialMode === 'chat'
+    ? 'chat'
+    : 'orchestrator';
+  const emptyKindLocked = lockedMode === 'chat';
+  const handleEmptyKindChange = useCallback((next: OrchestratorEmptyKind) => {
+    if (!spawnHandlers || emptyKindLocked) return;
+    spawnHandlers.updateTabMode(tabId, { mode: next === 'chat' ? 'chat' : 'fleet' });
+  }, [emptyKindLocked, spawnHandlers, tabId]);
+
+  // Resolve the active workspace target for the Project chip label.
+  const activeWorkspaceTarget = useMemo(() => (
+    data?.workspaceTargets?.find((target) => target.localPath === (repoPath ?? '')) ?? null
+  ), [data?.workspaceTargets, repoPath]);
+  const projectLabel = repoLabel ?? activeWorkspaceTarget?.repoName ?? null;
+  const branchLabel = pickedBranch ?? activeWorkspaceTarget?.branch?.trim() ?? 'main';
+  // Reset the local override whenever the target repo changes — the
+  // chip otherwise sticks to the prior repo's branch name.
+  useEffect(() => {
+    setPickedBranch(null);
+  }, [activeWorkspaceTarget?.localPath]);
+
+  // First-message side-effects — fires once when the chat goes from
+  // empty → has messages. The compose-first empty state lets the
+  // operator pick a Worktree mode + Branch up front; when they finally
+  // send the first message we "lock in" those choices:
+  //   - Branch picked ≠ repo's current branch → checkout it.
+  //   - Worktree mode 'new-worktree' → POST /api/worktrees to provision
+  //     a fresh worktree for this chat (taskName derived from threadId
+  //     so the directory name is stable). Store the resulting path on
+  //     the tab so downstream dispatches can read tab.worktreePath and
+  //     route the agent's cwd into the worktree.
+  //   - Always persist the operator's worktreeMode choice to the tab.
+  // All network calls are fire-and-forget; failures log to console.
+  const lockedInRef = useRef(false);
+  useEffect(() => {
+    if (lockedInRef.current) return;
+    if (!chatChromeState.hasMessages) return;
+    lockedInRef.current = true;
+    if (pickedBranch && repoPath
+        && pickedBranch.trim()
+        && pickedBranch !== (activeWorkspaceTarget?.branch ?? 'main')) {
+      void fetch('/api/panel/branches/checkout', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ path: repoPath, branch: pickedBranch }),
+      }).catch((error) => {
+        console.error('[empty-state] branch checkout failed', error);
+      });
+    }
+    if (spawnHandlers) {
+      // Persist the worktree mode first so a reload during the POST
+      // still has the chosen value on the tab.
+      spawnHandlers.updateTabMode(tabId, { worktreeMode });
+    }
+    if (worktreeMode === 'new-worktree' && repoPath) {
+      const threadSuffix = (chatChromeState.threadId ?? `tab-${tabId}`).slice(-12);
+      const taskName = `orchestrator-${threadSuffix}`;
+      void (async () => {
+        try {
+          const res = await fetch('/api/worktrees', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              repo: repoPath,
+              agentType: 'orchestrator',
+              taskName,
+              baseBranch: pickedBranch ?? activeWorkspaceTarget?.branch ?? 'main',
+              managed: true,
+            }),
+          });
+          if (!res.ok) {
+            console.error('[empty-state] worktree POST failed', res.status, await res.text());
+            return;
+          }
+          const data = (await res.json()) as { worktree?: { path?: string } };
+          const worktreePath = data.worktree?.path;
+          if (worktreePath && spawnHandlers) {
+            spawnHandlers.updateTabMode(tabId, { worktreePath });
+          }
+        } catch (error) {
+          console.error('[empty-state] worktree provisioning failed', error);
+        }
+      })();
+    }
+  }, [
+    chatChromeState.hasMessages,
+    chatChromeState.threadId,
+    pickedBranch,
+    repoPath,
+    activeWorkspaceTarget?.branch,
+    worktreeMode,
+    spawnHandlers,
+    tabId,
+  ]);
+
+  const handleEmptySelectProject = useCallback((target: { localPath: string; repoName: string }) => {
+    // Switching project on a fresh empty tab — dispatch the existing
+    // o8:select-workspace-scope event the dashboard listens for. If the
+    // tab has already received its first message this branch is
+    // unreachable (the empty state itself is gone).
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('o8:select-workspace-scope', {
+      detail: { repoPath: target.localPath, repoName: target.repoName },
+    }));
+  }, []);
+  const handleEmptyAddProject = useCallback((mode?: 'scratch' | 'existing') => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow', { detail: { mode } }));
+  }, []);
+  const handleEmptyWorkWithoutProject = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('o8:select-workspace-scope', {
+      detail: { repoPath: null, repoName: null },
+    }));
+  }, []);
+
   const emptyStateNode = useMemo(
     () => (
       <OrchestratorEmptyState
         greeting={greeting}
         runtimeLabel={runtimeLabel}
         onActionClick={handleQuickAction}
+        repoPath={repoPath ?? null}
+        repoLabel={projectLabel}
+        workspaceTargets={data?.workspaceTargets ?? []}
+        onSelectProject={handleEmptySelectProject}
+        onAddProject={handleEmptyAddProject}
+        onWorkWithoutProject={handleEmptyWorkWithoutProject}
+        worktreeMode={worktreeMode}
+        onWorktreeModeChange={setWorktreeMode}
+        branch={branchLabel}
+        kind={emptyKind}
+        kindLocked={emptyKindLocked}
+        onKindChange={handleEmptyKindChange}
       />
     ),
-    [greeting, runtimeLabel, handleQuickAction],
+    [
+      greeting,
+      runtimeLabel,
+      handleQuickAction,
+      repoPath,
+      projectLabel,
+      data?.workspaceTargets,
+      handleEmptySelectProject,
+      handleEmptyAddProject,
+      handleEmptyWorkWithoutProject,
+      worktreeMode,
+      branchLabel,
+      emptyKind,
+      emptyKindLocked,
+      handleEmptyKindChange,
+    ],
   );
 
   // Restoring shimmer — swaps in for the "Good morning" empty state
@@ -650,6 +872,19 @@ function OrchestratorTabInner({
       onTogglePermission={handleTogglePermission}
       repoLabel={repoLabel}
       emptyStateOverride={emptyOrShimmerNode}
+      composerBelowSlot={(
+        <OrchestratorComposerBelow
+          worktreeMode={worktreeMode}
+          onWorktreeModeChange={setWorktreeMode}
+          branch={branchLabel}
+          repoPath={repoPath ?? null}
+          onBranchChange={setPickedBranch}
+          kind={emptyKind}
+          kindLocked={emptyKindLocked}
+          onKindChange={handleEmptyKindChange}
+          onActionClick={handleQuickAction}
+        />
+      )}
       showInlineExport={false}
       lockedMode={lockedMode}
       initialMode={initialMode}

@@ -274,10 +274,18 @@ export const TabBar = memo(function TabBar({
           }}
         >
           {tabs.map((tab) => {
+            // An orchestrator tab is "permanent" (no close X) only when
+            // it's the ONLY fleet-mode orchestrator tab — closing the
+            // last one would leave the workspace without a default
+            // orchestrator surface. Once the operator spawns a second
+            // via + New session, BOTH become closable so they can clean
+            // up duplicates. Single-mode orchestrators (Claude/Codex/
+            // Gemini chooser tabs) are always closable regardless.
+            const orchestratorTabCount = tabs.reduce((count, t) => count + (t.kind === 'orchestrator' && t.mode !== 'single' ? 1 : 0), 0);
             const isActive = tab.id === activeTabId;
             const isOrchestrator = tab.kind === 'orchestrator';
             const isSingleRuntimeTab = isOrchestrator && tab.mode === 'single';
-            const isPermanentOrchestrator = isOrchestrator && tab.mode !== 'single';
+            const isPermanentOrchestrator = isOrchestrator && tab.mode !== 'single' && orchestratorTabCount <= 1;
             const rawLabel = workspaceTabPrimaryLabel(tab);
             const chatTabMeta = describeWorkspaceChatTab(tab);
             const packetTitle = tab.orchestrationPacket?.title ?? null;

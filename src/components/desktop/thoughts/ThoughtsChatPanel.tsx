@@ -156,6 +156,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onTogglePermission?: () => void;
   repoLabel?: string | null;
   emptyStateOverride?: React.ReactNode;
+  // Slot rendered BELOW the composer input when no messages have
+  // landed yet. The OrchestratorEmptyState surface uses this for the
+  // Worktree / Branch / Kind chip row (Antigravity / Cortex pattern).
+  // Disappears once the first message renders (handled in caller).
+  composerBelowSlot?: React.ReactNode;
   showInlineExport?: boolean;
   footerMeterSlot?: React.ReactNode;
   composerLeadingExtras?: React.ReactNode;
@@ -215,6 +220,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onTogglePermission,
   repoLabel,
   emptyStateOverride,
+  composerBelowSlot,
   showInlineExport = true,
   footerMeterSlot,
   composerLeadingExtras,
@@ -349,6 +355,19 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [singleRuntimeSpawning, setSingleRuntimeSpawning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
+  // Sidebar trampoline guard. Three concurrent callers race here:
+  //   1. page.tsx handleOpenHistoryChatFromPanel dispatches o8:load-history-thread (up to 3× via the late-mount retries)
+  //   2. OrchestratorTab.tsx restoreLastThread effect calls loadThread on activation
+  //   3. OrchestratorTab.tsx initialThreadId effect calls loadThread when the prop changes
+  // Each call re-fetches the transcript and resets orchStream — duplicate
+  // fetches cause visible flicker AND lose in-flight streaming state.
+  // `inFlightLoadKeyRef` blocks ALL re-entry while a load for the same
+  // tabId is fetching. `lastLoadKeyRef` + `lastLoadAtRef` add an 800 ms
+  // post-completion cooldown so the dispatch retries hitting the listener
+  // after the load settles are also dropped.
+  const inFlightLoadKeyRef = useRef<string | null>(null);
+  const lastLoadKeyRef = useRef<string | null>(null);
+  const lastLoadAtRef = useRef<number>(0);
   const exportFeedbackTimerRef = useRef<number | null>(null);
   const [resolvedRepoPath, setResolvedRepoPath] = useState<string | null>(repoPathProp ?? null);
   const [exportState, setExportState] = useState<'idle' | 'copying' | 'copied' | 'error'>('idle');
@@ -432,6 +451,24 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
   }, []);
+
+  // Listen for the empty-state Project chip's selection. Only the
+  // currently OPEN panel responds (gated on `open`) so a multi-tab
+  // workspace doesn't fan the picker click out to every tab. Empty
+  // path = "don't work in a project" → clears resolvedRepoPath.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!open) return;
+    const onScope = (event: Event) => {
+      const detail = (event as CustomEvent<{ repoPath?: string | null }>).detail;
+      const nextPath = typeof detail?.repoPath === 'string' && detail.repoPath.trim()
+        ? detail.repoPath
+        : '';
+      handleSelectComposerRepoPath(nextPath);
+    };
+    window.addEventListener('o8:select-workspace-scope', onScope as EventListener);
+    return () => window.removeEventListener('o8:select-workspace-scope', onScope as EventListener);
+  }, [handleSelectComposerRepoPath, open]);
 
   // ── Resolve repo path for orchestrator stream ──
   useEffect(() => {
@@ -995,6 +1032,19 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   );
 
   const handleLoadThread = useCallback(async (tabId: string) => {
+    // Sidebar trampoline guard — see refs declaration above. Three layers:
+    //   1. If a load for THIS tabId is in flight, drop the re-entry.
+    //   2. If a load for THIS tabId just settled within 800 ms, drop too
+    //      (covers the page.tsx 120/420 ms dispatch retries).
+    //   3. Otherwise proceed and claim both refs for the duration.
+    const now = Date.now();
+    if (inFlightLoadKeyRef.current === tabId) return;
+    if (lastLoadKeyRef.current === tabId && now - lastLoadAtRef.current < 800) {
+      return;
+    }
+    inFlightLoadKeyRef.current = tabId;
+    lastLoadKeyRef.current = tabId;
+    lastLoadAtRef.current = now;
     try {
       const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`);
       if (!res.ok) return;
@@ -1018,6 +1068,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setTimeout(() => inputRef.current?.focus(), 50);
     } catch {
       // silent
+    } finally {
+      // Clear in-flight only if we still own the slot for this tabId —
+      // a late-completing load shouldn't unblock a newer load that
+      // already claimed the slot for a different tabId.
+      if (inFlightLoadKeyRef.current === tabId) {
+        inFlightLoadKeyRef.current = null;
+      }
     }
   }, [clearPolling, orchStream]);
 
@@ -1820,6 +1877,25 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         thoughtsBodyBackground={thoughtsBodyBackground}
       />
 
+      <div
+        // Compose-first slide motion. When the transcript has no messages
+        // (empty-state surface visible), lift the composer up toward the
+        // chip row so the operator types right next to their selectors —
+        // Codex / Cortex pattern. On first message the transform eases
+        // back to 0 and the composer settles into its normal bottom
+        // resting position with the transcript filling above. Honor
+        // prefers-reduced-motion. Sticky position lets the transform
+        // animate from screen-center toward the top of the bottom
+        // anchor without breaking the flex column layout.
+        style={{
+          flexShrink: 0,
+          transform: displayMessages.length === 0
+            ? 'translateY(-28vh)'
+            : 'translateY(0)',
+          transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)',
+          willChange: 'transform',
+        }}
+      >
       <ComposerArea
         ref={inputRef}
         input={input}
@@ -1881,6 +1957,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         selectedRepoPath={resolvedRepoPath}
         onSelectRepoPath={handleSelectComposerRepoPath}
       />
+      {displayMessages.length === 0 && composerBelowSlot ? composerBelowSlot : null}
+      </div>
     </>
   );
 });
