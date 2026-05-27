@@ -677,25 +677,10 @@ interface ClientState {
   flushTimer: ReturnType<typeof setInterval> | null;
 }
 
-const EMPTY_MOBILE_INBOX: MobileInboxSnapshot = {
-  generatedAt: '',
-  mode: 'live',
-  sourceLabel: 'Local runtime websocket bridge',
-  note: 'Live runtime updates come from the local Codex and Claude Code inventory.',
-  sessions: [],
-  approvals: [],
-  items: [],
-  summary: {
-    alerts: 0,
-    approvals: 0,
-    reviewItems: 0,
-    activeRuns: 0,
-  },
-};
-
-async function getMobileInboxSnapshot(_options: { fresh?: boolean } = {}) {
-  void _options;
-  return EMPTY_MOBILE_INBOX;
+async function getMobileInboxSnapshot(options: { fresh?: boolean } = {}) {
+  const searchParams = new URLSearchParams();
+  if (options.fresh) searchParams.set('fresh', '1');
+  return fetchNextJson<MobileInboxSnapshot>('/api/mobile/inbox', { searchParams });
 }
 
 async function getSessionTranscript(_sessionKey: string, _limit: number, _fresh: boolean) {
@@ -1944,6 +1929,11 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
 async function publishMobileInboxRealtimeSnapshot(fresh = false) {
   try {
     const inbox = await getMobileInboxSnapshot({ fresh });
+    void import('@/lib/mobile/live-activity-push')
+      .then(({ syncMobileLiveActivities }) => syncMobileLiveActivities(inbox))
+      .catch((error) => {
+        console.warn('[ws-server] live activity sync failed:', error instanceof Error ? error.message : 'unknown');
+      });
     const fingerprint = fingerprintInboxSnapshot(inbox);
     if (fingerprint === lastRealtimeFingerprint.mobileInbox) return;
     lastRealtimeFingerprint.mobileInbox = fingerprint;
@@ -2668,6 +2658,14 @@ function startPollingLoops() {
     if (activeClients.length === 0) return;
     void Promise.allSettled(activeClients.map((c) => syncClientInbox(c)));
   }, SAFETY_NET_INBOX_MS);
+
+  // ActivityKit remote updates must keep flowing after the phone suspends and
+  // the websocket disappears. This low-frequency loop reuses the mobile inbox
+  // fingerprint/signature path and only sends APNs when the Live Activity
+  // payload changed.
+  setInterval(() => {
+    void publishMobileInboxRealtimeSnapshot(false);
+  }, 30_000);
 
   // Safety-net history poll — reduced frequency since chat.done triggers immediate push
   setInterval(() => {

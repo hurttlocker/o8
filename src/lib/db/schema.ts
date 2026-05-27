@@ -607,6 +607,33 @@ export const pushSubscriptions = sqliteTable('push_subscriptions', {
 }));
 
 // ══════════════════════════════════════════════════════════════════
+//  Mobile Live Activity Tokens — ActivityKit push updates
+// ══════════════════════════════════════════════════════════════════
+
+export const mobileLiveActivityTokens = sqliteTable('mobile_live_activity_tokens', {
+  /** ActivityKit push token hex string for one active Live Activity. */
+  pushToken: text('push_token').primaryKey(),
+  /** Native ActivityKit id, when the client can observe it. */
+  activityId: text('activity_id'),
+  /** App bundle id used to build the APNs liveactivity topic. */
+  bundleId: text('bundle_id').notNull(),
+  /** APNs environment for this token. */
+  environment: text('environment', { enum: ['sandbox', 'production'] }).notNull().default('sandbox'),
+  /** Optional human label for diagnostics. */
+  deviceLabel: text('device_label'),
+  /** Last payload signature pushed to avoid duplicate APNs updates. */
+  lastSignature: text('last_signature'),
+  /** Last successful delivery timestamp (ms epoch). */
+  lastDeliveredAt: integer('last_delivered_at'),
+  /** Consecutive APNs delivery failures. */
+  failureCount: integer('failure_count').notNull().default(0),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+  updatedAt: text('updated_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  updatedAtIdx: index('idx_mobile_live_activity_tokens_updated_at').on(table.updatedAt),
+}));
+
+// ══════════════════════════════════════════════════════════════════
 //  Automations — scheduled / on-demand agent runs
 //  (Superset-style; see [[borrow_conductor_steer_queue]] sibling memory.)
 // ══════════════════════════════════════════════════════════════════
