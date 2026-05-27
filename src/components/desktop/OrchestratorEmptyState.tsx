@@ -119,15 +119,15 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
         display: 'flex',
         flex: 1,
         minHeight: 0,
-        alignItems: 'flex-start',
+        // Center the heading + project chip vertically in the available
+        // empty area so the layout adapts to a shrunken workspace
+        // (e.g. when the bottom panel is open). The previous
+        // paddingTop: 14vh + composer translateY(-28vh) pattern was
+        // viewport-relative and overshot whenever the workspace lost
+        // vertical space to other surfaces.
+        alignItems: 'center',
         justifyContent: 'center',
-        // Title + Project chip pinned to the top of the empty area so
-        // the composer (which translates upward from its bottom resting
-        // position) lands in the middle of the canvas WITHOUT overlapping
-        // the title. The composer's translateY value and this padding
-        // together establish the visual rhythm: top header → composer
-        // (lifted middle) → below-composer chips + actions.
-        paddingTop: '14vh',
+        paddingTop: 24,
         paddingRight: 24,
         paddingBottom: 24,
         paddingLeft: 24,

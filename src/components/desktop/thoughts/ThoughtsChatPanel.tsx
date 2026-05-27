@@ -1918,22 +1918,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       />
 
       <div
-        // Compose-first slide motion. When the transcript has no messages
-        // (empty-state surface visible), lift the composer up toward the
-        // chip row so the operator types right next to their selectors —
-        // Codex / Cortex pattern. On first message the transform eases
-        // back to 0 and the composer settles into its normal bottom
-        // resting position with the transcript filling above. Honor
-        // prefers-reduced-motion. Sticky position lets the transform
-        // animate from screen-center toward the top of the bottom
-        // anchor without breaking the flex column layout.
+        // Composer stays at its natural bottom-of-column rest position.
+        // The previous translateY(-28vh) lift was viewport-relative and
+        // overshot whenever the workspace was squished by the bottom
+        // panel — the composer floated above the empty-state heading
+        // instead of below it. Empty-state vertical centering now lives
+        // inside OrchestratorEmptyState (flex: center) so the layout
+        // adapts to any workspace height without absolute viewport math.
         style={{
           flexShrink: 0,
-          transform: displayMessages.length === 0
-            ? 'translateY(-28vh)'
-            : 'translateY(0)',
-          transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)',
-          willChange: 'transform',
         }}
       >
       <ComposerArea

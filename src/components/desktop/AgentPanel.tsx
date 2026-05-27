@@ -4,6 +4,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
+import { UpdateCard } from './UpdateCard';
 import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
 import { ChatsTab } from './repo-focus/tabs/ChatsTab';
 import { useLeftPanelProjectFocus } from './repo-focus/useLeftPanelProjectFocus';
@@ -261,6 +262,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           onOpenHistoryChat={onOpenHistoryChat}
           onOpenSpecInWorkspace={onOpenSpecInWorkspace}
         />
+        <UpdateCard />
         {addRepoDialog}
       </div>
     );
@@ -450,6 +452,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             widens). Nothing else to render here. */}
 
       </div>
+      <UpdateCard />
       {addRepoDialog}
     </div>
   );
