@@ -89,9 +89,10 @@ function fieldStyle(): CSSProperties {
     background: 'var(--t-input-bg)',
     color: 'var(--t-text)',
     fontFamily: 'var(--font-sans-system)',
-    fontSize: 12,
-    lineHeight: '16px',
-    fontWeight: 450,
+    fontSize: 13.5,
+    lineHeight: '18px',
+    fontWeight: 300,
+    letterSpacing: '-0.1px',
     outline: 'none',
   };
 }
@@ -113,9 +114,10 @@ function smallButtonStyle(disabled = false): CSSProperties {
     paddingBottom: 7,
     paddingLeft: 10,
     fontFamily: 'var(--font-sans-system)',
-    fontSize: 11.5,
-    lineHeight: '15px',
-    fontWeight: 600,
+    fontSize: 12,
+    lineHeight: '16px',
+    fontWeight: 300,
+    letterSpacing: '-0.1px',
     whiteSpace: 'nowrap',
     opacity: disabled ? 0.58 : 1,
   };
@@ -136,11 +138,11 @@ function primaryButtonStyle(disabled = false): CSSProperties {
     color: 'var(--t-accent)',
     fontSize: 12,
     lineHeight: '16px',
-    fontWeight: 700,
+    fontWeight: 400,
+    letterSpacing: '-0.1px',
     cursor: disabled ? 'not-allowed' : 'pointer',
     opacity: disabled ? 0.55 : 1,
     fontFamily: 'var(--font-sans-system)',
-    letterSpacing: 0,
   };
 }
 
@@ -331,18 +333,19 @@ export function AddRepoDialog({
       open={open}
       onClose={close}
       title="Add repository"
-      subtitle="Register a checkout, then optionally place it inside a project so agents inherit the right scope."
+      subtitle="Pick a folder. We'll register it and offer to add it to a project."
       width={620}
     >
       <div style={{ display: 'flex', flexDirection: 'column', gap: 9 }}>
         <label
           htmlFor="add-repo-path"
           style={{
-            fontSize: 11,
+            fontSize: 10,
             lineHeight: '14px',
-            fontWeight: 650,
-            color: 'var(--t-text-secondary)',
-            letterSpacing: 0,
+            fontWeight: 300,
+            color: 'var(--t-text-muted)',
+            letterSpacing: 0.6,
+            textTransform: 'uppercase',
           }}
         >
           Folder
@@ -350,7 +353,11 @@ export function AddRepoDialog({
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'minmax(0, 1fr) auto auto',
+            // Scan column only takes width once a folder is in the input —
+            // before that it stays hidden, so the layout is just "input + Browse".
+            gridTemplateColumns: repoPathInput.trim()
+              ? 'minmax(0, 1fr) auto auto'
+              : 'minmax(0, 1fr) auto',
             gap: 8,
             alignItems: 'center',
           }}
@@ -383,19 +390,26 @@ export function AddRepoDialog({
             <FolderOpen size={13} strokeWidth={2} />
             Browse
           </button>
-          <button
-            type="button"
-            onClick={() => { void validateRepoPath(repoPathInput); }}
-            disabled={!repoPathInput.trim() || validating || adding}
-            style={smallButtonStyle(!repoPathInput.trim() || validating || adding)}
-          >
-            {validating ? (
-              <Loader2 size={13} strokeWidth={2.2} style={{ animation: 'spin 900ms linear infinite' }} />
-            ) : (
-              <GitBranch size={13} strokeWidth={2} />
-            )}
-            Scan
-          </button>
+          {/* Scan is only meaningful after a folder is in the input. Hiding
+              it until then keeps the empty state clean — operator caught
+              the orphan disabled chip on 2026-05-27. Title tooltip explains
+              the action when it surfaces. */}
+          {repoPathInput.trim() ? (
+            <button
+              type="button"
+              onClick={() => { void validateRepoPath(repoPathInput); }}
+              disabled={validating || adding}
+              title="Detect git repo metadata for this folder"
+              style={smallButtonStyle(validating || adding)}
+            >
+              {validating ? (
+                <Loader2 size={13} strokeWidth={2.2} style={{ animation: 'spin 900ms linear infinite' }} />
+              ) : (
+                <GitBranch size={13} strokeWidth={2} />
+              )}
+              Scan
+            </button>
+          ) : null}
         </div>
       </div>
 
@@ -429,11 +443,11 @@ export function AddRepoDialog({
             <div style={{ minWidth: 0, flex: 1 }}>
               <div
                 style={{
-                  fontSize: 14,
-                  lineHeight: '18px',
-                  fontWeight: 650,
+                  fontSize: 13.5,
+                  lineHeight: 1.25,
+                  fontWeight: 300,
                   color: 'var(--t-text)',
-                  letterSpacing: 0,
+                  letterSpacing: '-0.1px',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -444,10 +458,12 @@ export function AddRepoDialog({
               <div
                 title={validationResult.localPath}
                 style={{
-                  marginTop: 2,
-                  fontSize: 11,
-                  lineHeight: '14px',
-                  color: 'var(--t-text-muted)',
+                  marginTop: 4,
+                  fontSize: 9.5,
+                  fontWeight: 260,
+                  letterSpacing: '-0.4px',
+                  lineHeight: 1.25,
+                  color: 'var(--t-text-faint)',
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
@@ -480,7 +496,7 @@ export function AddRepoDialog({
           }}
         >
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-            <span style={{ fontSize: 11, lineHeight: '14px', fontWeight: 650, color: 'var(--t-text-secondary)' }}>
+            <span style={{ fontSize: 10, lineHeight: '14px', fontWeight: 300, color: 'var(--t-text-muted)', letterSpacing: 0.6, textTransform: 'uppercase' }}>
               Project placement
             </span>
             <select
@@ -502,7 +518,7 @@ export function AddRepoDialog({
             </select>
           </label>
           <label style={{ display: 'flex', flexDirection: 'column', gap: 6, minWidth: 0 }}>
-            <span style={{ fontSize: 11, lineHeight: '14px', fontWeight: 650, color: 'var(--t-text-secondary)' }}>
+            <span style={{ fontSize: 10, lineHeight: '14px', fontWeight: 300, color: 'var(--t-text-muted)', letterSpacing: 0.6, textTransform: 'uppercase' }}>
               Role
             </span>
             <select
@@ -561,7 +577,8 @@ export function AddRepoDialog({
             color: 'var(--t-text-secondary)',
             fontSize: 12,
             lineHeight: '16px',
-            fontWeight: 600,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             cursor: adding ? 'default' : 'pointer',
             opacity: adding ? 0.5 : 1,
             fontFamily: 'var(--font-sans-system)',
@@ -575,7 +592,7 @@ export function AddRepoDialog({
           disabled={!repoPathInput.trim() || validating || adding}
           style={primaryButtonStyle(!repoPathInput.trim() || validating || adding)}
         >
-          {adding ? 'Adding...' : selectedProject ? `Add to ${selectedProject.name}` : 'Add repository'}
+          {adding ? 'Adding…' : selectedProject ? `Add to ${selectedProject.name}` : 'Add'}
         </button>
       </div>
     </GlassModal>
@@ -606,10 +623,10 @@ function RepoChip({
         border: '1px solid var(--t-divider-subtle)',
         background: 'var(--t-input-bg)',
         color: muted ? 'var(--t-text-faint)' : 'var(--t-text-secondary)',
-        fontSize: 10.5,
-        lineHeight: '13px',
-        fontWeight: 600,
-        letterSpacing: 0,
+        fontSize: 11,
+        lineHeight: '14px',
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
       }}
     >
       <span style={{ flexShrink: 0, display: 'inline-flex' }}>{icon}</span>
