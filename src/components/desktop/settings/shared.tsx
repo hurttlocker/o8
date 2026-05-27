@@ -68,7 +68,12 @@ export const APP_FONT_STACK = 'var(--font-sans-system)';
 export const MONO_FONT_STACK = '"iA Writer Mono", "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace';
 
 // Outer width cap for settings tab content. One knob — widen to fill more of a wide screen.
-export const SETTINGS_CONTENT_MAX_WIDTH = 1080;
+// Operator request 2026-05-27: settings should occupy the full app on wide monitors,
+// not stop at 1080 with a sea of empty cream to the right. '100%' delegates to the
+// parent flex container (which is `flex: 1` after the 200px nav rail), so the content
+// stretches to whatever the viewport gives it. Per-card max-widths still apply where
+// long prose would otherwise become unreadable.
+export const SETTINGS_CONTENT_MAX_WIDTH: string | number = '100%';
 
 // Rams × o8-site editorial tokens — paper, ink, one orange. See o8_design_language.md.
 export const RAMS_ACCENT = '#FF5A1F';
