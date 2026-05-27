@@ -186,12 +186,10 @@ export const AgentTurnGroup = memo(function AgentTurnGroup({
                       animation: 'sidebarSourceCardIn 220ms ease-out',
                     }}
                     onMouseEnter={(e) => {
-                      e.currentTarget.style.transform = 'translateY(-1px)';
                       e.currentTarget.style.boxShadow = 'var(--t-panel-shadow)';
                       e.currentTarget.style.background = THEME_PANEL_GLASS;
                     }}
                     onMouseLeave={(e) => {
-                      e.currentTarget.style.transform = 'translateY(0)';
                       e.currentTarget.style.boxShadow = expandedSourceId === card.id ? 'var(--t-panel-shadow)' : 'none';
                       e.currentTarget.style.background = expandedSourceId === card.id ? THEME_PANEL_GLASS : THEME_BG_CARD;
                     }}

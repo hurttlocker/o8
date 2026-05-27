@@ -25,7 +25,6 @@ export function TimelineButton({ icon, label, onClick }: { icon: ReactNode; labe
       onMouseEnter={(e) => {
         e.currentTarget.style.background = 'var(--t-accent-soft)';
         e.currentTarget.style.borderColor = 'var(--t-accent-border)';
-        e.currentTarget.style.transform = 'translateY(-1px)';
       }}
       onMouseLeave={(e) => {
         e.currentTarget.style.background = 'var(--t-panel-hover)';
