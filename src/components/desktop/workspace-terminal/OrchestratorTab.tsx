@@ -689,6 +689,37 @@ function OrchestratorTabInner({
     setPickedBranch(null);
   }, [activeWorkspaceTarget?.localPath]);
 
+  // Broadcast the active orchestrator tab's worktree selection so the
+  // bottom DesktopStatusBar pill can reflect the operator's pick (branch +
+  // worktree mode) instead of the project's HEAD branch. Fires when this
+  // tab is the active workspace tab; clears when it isn't. Dashboard-level
+  // listener stores the latest signal and prefers it over project state
+  // when assembling the pill's branchName.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!active) return;
+    window.dispatchEvent(new CustomEvent('o8:orchestrator-worktree-selection', {
+      detail: {
+        tabId,
+        repoPath: effectiveRepoPath,
+        branch: branchLabel,
+        worktreeMode,
+      },
+    }));
+  }, [active, tabId, effectiveRepoPath, branchLabel, worktreeMode]);
+
+  // When this orchestrator tab loses focus, emit a clear signal so the
+  // dashboard listener drops this tab's override (the next active tab
+  // will publish its own). Without this the pill could stick to a
+  // worktree chosen in a now-background tab.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (active) return;
+    window.dispatchEvent(new CustomEvent('o8:orchestrator-worktree-selection-clear', {
+      detail: { tabId },
+    }));
+  }, [active, tabId]);
+
   // First-message side-effects — fires once when the chat goes from
   // empty → has messages. The compose-first empty state lets the
   // operator pick a Worktree mode + Branch up front; when they finally
