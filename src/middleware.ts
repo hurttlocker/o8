@@ -145,6 +145,9 @@ const GATED_PREFIXES = [
   // Push subscription writes mutate stored push endpoints + can fan out test
   // notifications. /api/mobile/push/public-key is read-only allow-listed above.
   '/api/mobile/push/',
+  // ActivityKit Live Activity tokens are per-device credentials. Mobile sends
+  // the paired ws-token; do not expose registration/sync cross-origin.
+  '/api/mobile/live-activity/',
   // Send-to-mobile URL push (#782). Loopback writes from the desktop chip
   // pass; cross-origin must present the bearer token.
   '/api/mobile/push-url',

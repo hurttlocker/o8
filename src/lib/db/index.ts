@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 25;
+const DB_SCHEMA_VERSION = 26;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -114,6 +114,7 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureExternalMcpServerColumns(sqlite);
   ensureLaneHeartbeatColumns(sqlite);
   ensurePushSubscriptionsTable(sqlite);
+  ensureMobileLiveActivityTokensTable(sqlite);
   ensureProjectsTables(sqlite);
   ensureProjectScopeColumns(sqlite);
   // #915 sub-1 — Schema v14 — Q&A retrieval foundation. FTS5 virtual tables
@@ -793,6 +794,21 @@ function ensureTables(sqlite: Database.Database): void {
     );
     CREATE INDEX IF NOT EXISTS idx_push_subscriptions_created_at ON push_subscriptions(created_at);
 
+    -- Schema v26 — ActivityKit Live Activity push tokens for o8-mobile.
+    CREATE TABLE IF NOT EXISTS mobile_live_activity_tokens (
+      push_token TEXT PRIMARY KEY,
+      activity_id TEXT,
+      bundle_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT 'sandbox',
+      device_label TEXT,
+      last_signature TEXT,
+      last_delivered_at INTEGER,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_mobile_live_activity_tokens_updated_at ON mobile_live_activity_tokens(updated_at);
+
     -- Schema v13 — Projects (epic #899). Operator-curated repo groupings that
     -- replace the Jaccard-based cross-repo proposer (#748). project_repos.role
     -- is free-form text in the DB; the curated set lives in src/lib/projects/types.ts.
@@ -1132,6 +1148,29 @@ function ensurePushSubscriptionsTable(sqlite: Database.Database): void {
       updated_at TEXT NOT NULL DEFAULT (datetime('now'))
     );
     CREATE INDEX IF NOT EXISTS idx_push_subscriptions_created_at ON push_subscriptions(created_at);
+  `);
+}
+
+/**
+ * Schema v26 — ActivityKit Live Activity push tokens for o8-mobile.
+ * ActivityKit tokens are per Live Activity and are different from Web Push
+ * subscriptions, so keep them in a dedicated table and prune on APNs 400/410.
+ */
+function ensureMobileLiveActivityTokensTable(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS mobile_live_activity_tokens (
+      push_token TEXT PRIMARY KEY,
+      activity_id TEXT,
+      bundle_id TEXT NOT NULL,
+      environment TEXT NOT NULL DEFAULT 'sandbox',
+      device_label TEXT,
+      last_signature TEXT,
+      last_delivered_at INTEGER,
+      failure_count INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_mobile_live_activity_tokens_updated_at ON mobile_live_activity_tokens(updated_at);
   `);
 }
 
