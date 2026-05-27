@@ -309,6 +309,25 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       persistOrchestrationMode(workspaceModeKey, next, singleRuntime);
     }
   }, [lockedMode, onModePersist, singleRuntime, workspaceModeKey]);
+
+  // Empty-state Kind chip lives outside this component but needs to
+  // flip the same orchestrationMode state the in-composer ModeChip
+  // owns — otherwise toggling to Chat in the chip leaves the composer
+  // pill row still showing the Orchestrator's model. Window event is
+  // the loose-coupling bridge; gated on `open` so only the active
+  // panel responds.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (!open) return;
+    const onSetMode = (event: Event) => {
+      const detail = (event as CustomEvent<{ mode?: OrchestrationMode }>).detail;
+      if (!detail?.mode) return;
+      handleSelectOrchestrationMode(detail.mode);
+    };
+    window.addEventListener('o8:set-orchestration-mode', onSetMode as EventListener);
+    return () => window.removeEventListener('o8:set-orchestration-mode', onSetMode as EventListener);
+  }, [handleSelectOrchestrationMode, open]);
+
   const handleSelectSingleRuntime = useCallback((next: OrchestratorRuntime) => {
     setSingleRuntime(next);
     if (onModePersist) {
@@ -440,7 +459,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     () => workspaceTargets.find((target) => target.localPath === resolvedRepoPath) ?? null,
     [resolvedRepoPath, workspaceTargets],
   );
-  const composerRepoLabel = selectedWorkspaceTarget?.label
+  // When the empty-state surface is showing, the Project chip above
+  // the composer already owns the repo selector — duplicating it
+  // inside the composer pill row reads as visual redundancy (operator
+  // dogfood call). Hide it until messages arrive; on first message
+  // the composer slides down to its bottom rest and the repo chip
+  // reappears in the pill row so the operator can re-target during
+  // the conversation. Final `composerRepoLabel` is derived further
+  // down (after `displayMessages`) so the check matches what the
+  // empty-state slot uses.
+  const composerRepoLabelBase = selectedWorkspaceTarget?.label
     ?? repoLabel
     ?? repoPathLabel(resolvedRepoPath);
   const handleSelectComposerRepoPath = useCallback((next: string) => {
@@ -1086,6 +1114,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (!isOrchestratorMode || isChatMode) return chatMessages;
     return orchStream.messages.length > 0 ? orchStream.messages : chatMessages;
   }, [chatMessages, isChatMode, isOrchestratorMode, orchStream.messages]);
+  // See `composerRepoLabelBase` for the rationale — derived here so
+  // the empty-state check matches the empty-state-override condition.
+  const composerRepoLabel = displayMessages.length === 0 ? null : composerRepoLabelBase;
   const displayWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : (waitingForReply || (isSingleMode && singleRuntimeSpawning));
   const displayPlanText = isOrchestratorMode && !isChatMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
