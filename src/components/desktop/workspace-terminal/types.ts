@@ -82,6 +82,25 @@ export interface TerminalTab {
   // or model-tier preference. Empty/undefined = use the env-configured
   // chain.
   chatOpenrouterModel?: string;
+  // True for tabs spawned via "+ New session" (a deliberate user action).
+  // The boot-restore path leaves this undefined so the saved last-thread
+  // gets re-loaded; fresh user-spawned tabs skip the restore and start
+  // with the spawn-default label so two clicks on "+ New session" don't
+  // produce two tabs named after the operator's previous thread.
+  freshSpawn?: boolean;
+  // Empty-state Worktree chip choice — persisted on the tab so the
+  // operator's pick survives reloads while the chat is still empty.
+  // 'local' = work directly against the repo's main checkout; 'new-
+  // worktree' = provision a fresh git worktree at first dispatch.
+  // Read by the dispatch path to decide whether to call POST /api/
+  // worktrees when an agent is spawned from this orchestrator chat.
+  worktreeMode?: 'local' | 'new-worktree';
+  // When `worktreeMode === 'new-worktree'` AND the operator has sent
+  // the first message, the orchestrator chat provisions a worktree
+  // upfront and stores its absolute path here. Downstream dispatches
+  // from this tab can read `worktreePath` and route the agent's cwd
+  // into the worktree, so all the chat's work stays on one branch.
+  worktreePath?: string;
 }
 
 export type LocalhostPreview = DetectedLocalhostPreview;

@@ -26,6 +26,8 @@ export interface WorkspaceSpawnHandlers {
       singleRuntime?: OrchestratorRuntime;
       chatModelId?: ChatModelId;
       chatOpenrouterModel?: string | null;
+      worktreeMode?: 'local' | 'new-worktree';
+      worktreePath?: string;
     },
   ) => void;
 }

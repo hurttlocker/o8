@@ -318,13 +318,17 @@ export function useWorkspaceTerminalController(
     chatModelId: 'o8-default',
   }), []);
 
-  const createDefaultOrchestratorTab = useCallback((): TerminalTab => {
-    // Pre-set tab.label from the saved last-active orchestrator title
-    // when one exists in localStorage. Without this the header reads
-    // "Orchestrator" for 1-2s on cold reload before the title-sync
-    // effect fetches chat-history and dispatches the rename event.
-    // Falls back to 'Orchestrator' default when no saved title.
-    const savedTitle = readLastOrchestratorThreadTitle();
+  const createDefaultOrchestratorTab = useCallback((options?: { fresh?: boolean }): TerminalTab => {
+    // For the boot-restore path: pre-set tab.label from the saved last-
+    // active orchestrator title when one exists in localStorage. Without
+    // this the header reads "Orchestrator" for 1-2s on cold reload before
+    // the title-sync effect fetches chat-history and dispatches the
+    // rename event.
+    // For "+ New session" spawns (fresh=true): skip the restore so the
+    // operator gets a true blank tab labeled "Orchestrator" — clicking
+    // New session twice shouldn't duplicate the previous thread's name.
+    const fresh = options?.fresh ?? false;
+    const savedTitle = fresh ? null : readLastOrchestratorThreadTitle();
     return {
       id: createWorkspaceTabId('orchestrator'),
       label: savedTitle ?? 'Orchestrator',
@@ -334,6 +338,7 @@ export function useWorkspaceTerminalController(
       createdAt: Date.now(),
       lastActivity: Date.now(),
       mode: 'fleet',
+      ...(fresh ? { freshSpawn: true } : {}),
     };
   }, []);
 
@@ -373,7 +378,10 @@ export function useWorkspaceTerminalController(
   }, [createDefaultChatTab, setActiveTabIdFromUser]);
 
   const spawnOrchestratorTab = useCallback((): string => {
-    const newTab = createDefaultOrchestratorTab();
+    // User-initiated spawn via + New session — pass fresh=true so the
+    // tab gets a clean 'Orchestrator' label and skips the boot-time
+    // last-thread restore (see createDefaultOrchestratorTab comments).
+    const newTab = createDefaultOrchestratorTab({ fresh: true });
     const nextTabs = [...tabsRef.current, newTab];
     tabsRef.current = nextTabs;
     setTabs(nextTabs);
@@ -388,6 +396,8 @@ export function useWorkspaceTerminalController(
       singleRuntime?: OrchestratorRuntime;
       chatModelId?: ChatModelId;
       chatOpenrouterModel?: string | null;
+      worktreeMode?: 'local' | 'new-worktree';
+      worktreePath?: string;
     },
   ) => {
     setTabs((previous) => previous.map((tab) => {
@@ -400,6 +410,8 @@ export function useWorkspaceTerminalController(
         // null clears the override; string sets it.
         next.chatOpenrouterModel = patch.chatOpenrouterModel ?? undefined;
       }
+      if (patch.worktreeMode !== undefined) next.worktreeMode = patch.worktreeMode;
+      if (patch.worktreePath !== undefined) next.worktreePath = patch.worktreePath;
       return next;
     }));
   }, []);

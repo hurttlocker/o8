@@ -23,7 +23,7 @@ const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
 function readDismissedVersion() {
   if (typeof window === 'undefined') return null;
   try {
-    return window.sessionStorage.getItem(SESSION_DISMISS_KEY);
+    return window.localStorage.getItem(SESSION_DISMISS_KEY);
   } catch {
     return null;
   }
@@ -67,7 +67,7 @@ export function UpdateBanner() {
     const version = update?.version ?? '';
     setDismissed(version);
     try {
-      window.sessionStorage.setItem(SESSION_DISMISS_KEY, version);
+      window.localStorage.setItem(SESSION_DISMISS_KEY, version);
     } catch {
       /* ignore */
     }

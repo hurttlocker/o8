@@ -216,6 +216,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
       onClose={() => setAddRepoDialogOpen(false)}
       onRepoAdded={handleRepoAdded}
       onProjectsChanged={projects.refresh}
+      initialMode={addRepoIntent?.mode ?? undefined}
     />
   );
 
