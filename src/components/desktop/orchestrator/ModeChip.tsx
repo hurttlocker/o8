@@ -3,11 +3,15 @@
 /**
  * ModeChip — compact mode selector that lives in the composer footer.
  *
- * Replaces the full-card ModePicker render that used to take over the
- * composer area as soon as the user typed. The chip is one line, never
- * blocks typing, and opens a small popover on click with the four
- * routing options (Fleet stays on this tab; Single/Chat spawn a new
- * tab in that mode).
+ * Operator decision 2026-05-27: inside an orchestrator-kind tab this
+ * chip toggles "Fleet orchestration" (spawn sub-agents, default) vs
+ * "Single agent" (talk to the orchestrator solo, no dispatch). The
+ * Orchestrator-vs-Chat decision is made on the empty-state Kind toggle
+ * once per tab; once a tab is locked in, this chip stays in-tab and
+ * never spawns a new one.
+ *
+ * Chat-kind (llm-chat) tabs MUST NOT mount this chip — see callsite
+ * gate in ThoughtsChatPanel (chip hides when lockedMode is set).
  */
 
 import { useEffect, useRef, useState } from 'react';
@@ -18,12 +22,12 @@ interface ModeChipProps {
   selectedMode: OrchestrationMode;
   selectedSingleRuntime: OrchestratorRuntime;
   onSelectFleet: () => void;
+  onSelectSingle: () => void;
   /**
-   * Kept for backwards-compatible call sites + legacy single-mode tabs that
-   * already exist on disk. The picker UI no longer surfaces a single-runtime
-   * section (operator decision 2026-05-23 — only Fleet and Chat are exposed
-   * in the picker; existing single-mode tabs still render their label
-   * correctly via chipLabel fallback).
+   * Kept for backwards-compatible call sites that still pass these
+   * handlers in (legacy single-runtime spawn flows). The chip itself
+   * no longer offers a "spawn new tab" path — Fleet vs Single is an
+   * in-tab toggle now. These props are reserved for future use.
    */
   onSpawnSingleTab?: (runtime: OrchestratorRuntime) => void;
   onSpawnChatTab?: () => void;
@@ -32,9 +36,13 @@ interface ModeChipProps {
 const FONT_FAMILY = 'var(--font-sans-system)';
 
 function chipLabel(mode: OrchestrationMode, runtime: OrchestratorRuntime): string {
-  if (mode === 'fleet') return 'Fleet';
-  if (mode === 'chat') return 'Chat';
-  // Legacy single-mode label — capitalize the runtime id.
+  if (mode === 'fleet') return 'Fleet orchestration';
+  if (mode === 'single') return 'Single agent';
+  // Legacy 'chat' literal — should never render here under the new
+  // gating, but if it does (stale tab record), fall back to the
+  // runtime label so we never paint a bare 'Chat' inside an
+  // orchestrator-kind tab.
+  if (mode === 'chat') return 'Single agent';
   return runtime.charAt(0).toUpperCase() + runtime.slice(1);
 }
 
@@ -42,7 +50,7 @@ export function ModeChip({
   selectedMode,
   selectedSingleRuntime,
   onSelectFleet,
-  onSpawnChatTab,
+  onSelectSingle,
 }: ModeChipProps) {
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -92,9 +100,8 @@ export function ModeChip({
     setOpen(false);
   };
 
-  const handlePickChat = () => {
-    if (!onSpawnChatTab) return;
-    onSpawnChatTab();
+  const handlePickSingle = () => {
+    onSelectSingle();
     setOpen(false);
   };
 
@@ -181,19 +188,16 @@ export function ModeChip({
               <PopoverRow
                 active={selectedMode === 'fleet'}
                 title="Fleet orchestration"
-                detail="Stay on this tab · Claude routes Codex in waves."
+                detail="Orchestrator dispatches sub-agents in worktrees."
                 onClick={handlePickFleet}
                 glyph={<FleetGlyph />}
               />
-
-              <PopoverSectionLabel>Chat · spawns new tab</PopoverSectionLabel>
               <PopoverRow
-                active={selectedMode === 'chat'}
-                title="Chat with o8"
-                detail="No dispatch · model picker in tab."
-                onClick={handlePickChat}
-                glyph={<ChatGlyph />}
-                disabled={!onSpawnChatTab}
+                active={selectedMode === 'single'}
+                title="Single agent"
+                detail="Talk to the orchestrator solo · no dispatch."
+                onClick={handlePickSingle}
+                glyph={<SingleGlyph />}
               />
             </div>,
             document.body,
@@ -316,10 +320,12 @@ function FleetGlyph() {
   );
 }
 
-function ChatGlyph() {
+function SingleGlyph() {
+  // One node — visual counterpart to FleetGlyph's three-node fan-out.
   return (
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-      <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
+      <circle cx="12" cy="12" r="3" />
+      <circle cx="12" cy="12" r="8" />
     </svg>
   );
 }

@@ -1978,6 +1978,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
                 selectedMode={orchestrationMode}
                 selectedSingleRuntime={singleRuntime}
                 onSelectFleet={() => handleSelectOrchestrationMode('fleet')}
+                onSelectSingle={() => handleSelectOrchestrationMode('single')}
                 onSpawnSingleTab={onSpawnSingleTab}
                 onSpawnChatTab={onSpawnChatTab}
               />
