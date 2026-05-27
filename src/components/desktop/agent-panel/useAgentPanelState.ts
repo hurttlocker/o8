@@ -481,7 +481,25 @@ export function useAgentPanelState({
       ? 'Commits, PRs, and CI runs stream here once agents are active.'
       : 'Commits, PRs, and CI runs stream here once a repo is attached.');
   const activitySummary = compactActivitySummaryLabel(latestEventSummary);
-  const addRepoIntent = addRepoIntentNonce > 0 ? { nonce: addRepoIntentNonce } : null;
+  const [addRepoIntentMode, setAddRepoIntentMode] = useState<'scratch' | 'existing' | null>(null);
+  const addRepoIntent = addRepoIntentNonce > 0
+    ? { nonce: addRepoIntentNonce, mode: addRepoIntentMode }
+    : null;
+  // Listen for the empty-state Project picker's "Add new project" action.
+  // The submenu detail carries `mode: 'scratch' | 'existing'` so the
+  // dialog can auto-pop the folder picker (existing) or focus the path
+  // input with a "new folder" hint (scratch). Other call sites (status
+  // bar, etc.) bump setAddRepoIntentNonce directly without a mode.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const onOpen = (event: Event) => {
+      const detail = (event as CustomEvent<{ mode?: 'scratch' | 'existing' }>).detail;
+      setAddRepoIntentMode(detail?.mode ?? null);
+      setAddRepoIntentNonce((n) => n + 1);
+    };
+    window.addEventListener('o8:open-add-repo-flow', onOpen as EventListener);
+    return () => window.removeEventListener('o8:open-add-repo-flow', onOpen as EventListener);
+  }, []);
   const [titlebarSpacerHeight, setTitlebarSpacerHeight] = useState(10);
   useEffect(() => { if (isTauri()) setTitlebarSpacerHeight(38); }, []);
   const currentLaunchRepoPath = hasSelectedRepo ? (selectedRepoLocalPath ?? repoLocalPath) : repoLocalPath;
