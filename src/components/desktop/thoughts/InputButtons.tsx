@@ -684,6 +684,7 @@ export function InputButtons({
   permissionMode,
   onTogglePermission,
   repoLabel,
+  displayMessagesCount = 0,
   working = false,
   onStop,
   onUploadDiskFiles,
@@ -710,6 +711,12 @@ export function InputButtons({
   permissionMode?: 'full' | 'plan';
   onTogglePermission?: () => void;
   repoLabel?: string | null;
+  /**
+   * Transcript size in the parent panel. When > 0 the chat is no longer
+   * in its empty state, so the in-composer repo chip is hidden (the repo
+   * is locked in for the conversation — Codex behavior).
+   */
+  displayMessagesCount?: number;
   working?: boolean;
   onStop?: () => void;
   onUploadDiskFiles?: (files: FileList | File[]) => void;
@@ -722,6 +729,7 @@ export function InputButtons({
   inlineMeterSlot?: ReactNode;
 }) {
   const canSubmit = Boolean(input.trim());
+  const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
 
   return (
     <div style={{
@@ -742,8 +750,10 @@ export function InputButtons({
         />
       ) : null}
 
-      {/* Repo / workspace target */}
-      {repoLabel ? (
+      {/* Repo / workspace target — only on the empty state. Once a chat
+          has messages, the repo is locked in for the conversation
+          (Codex behavior) and the chip becomes redundant noise. */}
+      {showRepoChip ? (
         <>
           <span style={{ color: 'var(--t-text-faint)' }}>·</span>
           <RepoTargetChip
@@ -757,7 +767,7 @@ export function InputButtons({
 
       {inlineLeadingExtras ? (
         <>
-          {modelLabel || repoLabel ? <span style={{ color: 'var(--t-text-faint)' }}>·</span> : null}
+          {modelLabel || showRepoChip ? <span style={{ color: 'var(--t-text-faint)' }}>·</span> : null}
           <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, flexShrink: 0 }}>
             {inlineLeadingExtras}
           </span>
