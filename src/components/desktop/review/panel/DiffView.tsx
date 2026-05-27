@@ -27,8 +27,8 @@ function LocalCommentComposer({
     <div style={{ paddingTop: 9, paddingRight: 14, paddingBottom: 10, paddingLeft: 48, background: 'var(--t-bg-card)' }}>
       <div style={{ overflow: 'hidden', borderRadius: 14, border: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg)', boxShadow: '0 10px 26px rgba(15, 23, 42, 0.08)' }}>
         <div style={{ display: 'flex', alignItems: 'center', minHeight: 38, paddingLeft: 12, paddingRight: 12, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-          <span style={{ flex: 1, fontFamily: UI_FONT, fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>Local comment</span>
-          <span style={{ fontFamily: UI_FONT, fontSize: 11, fontWeight: 650, color: 'var(--t-text-muted)' }}>Comment on line {label}</span>
+          <span style={{ flex: 1, fontFamily: UI_FONT, fontSize: 13.5, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>Local comment</span>
+          <span style={{ fontFamily: UI_FONT, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>Comment on line {label}</span>
         </div>
         <textarea
           value={value}
@@ -58,7 +58,7 @@ function LocalCommentComposer({
           <button
             type="button"
             onClick={onCancel}
-            style={{ height: 28, paddingLeft: 10, paddingRight: 10, border: 'none', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12, fontWeight: 650, cursor: 'pointer' }}
+            style={{ height: 28, paddingLeft: 10, paddingRight: 10, border: 'none', borderRadius: 8, background: 'transparent', color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', cursor: 'pointer' }}
             onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
           >
@@ -68,7 +68,7 @@ function LocalCommentComposer({
             type="button"
             onClick={onSave}
             disabled={!value.trim()}
-            style={{ height: 28, paddingLeft: 12, paddingRight: 12, border: 'none', borderRadius: 8, background: value.trim() ? 'var(--t-text)' : 'var(--t-hover)', color: value.trim() ? 'var(--t-bg)' : 'var(--t-text-faint)', fontFamily: UI_FONT, fontSize: 12, fontWeight: 750, cursor: value.trim() ? 'pointer' : 'default' }}
+            style={{ height: 28, paddingLeft: 12, paddingRight: 12, border: 'none', borderRadius: 8, background: value.trim() ? 'var(--t-text)' : 'var(--t-hover)', color: value.trim() ? 'var(--t-bg)' : 'var(--t-text-faint)', fontFamily: UI_FONT, fontSize: 11.5, fontWeight: 400, letterSpacing: '-0.1px', cursor: value.trim() ? 'pointer' : 'default' }}
           >
             Comment
           </button>
@@ -83,8 +83,8 @@ function LocalCommentNote({ comment }: { comment: LocalDiffComment }) {
     <div style={{ paddingTop: 7, paddingRight: 14, paddingBottom: 7, paddingLeft: 48, background: 'var(--t-bg-card)' }}>
       <div style={{ borderRadius: 11, border: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-subtle)', paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-          <span style={{ fontFamily: UI_FONT, fontSize: 11, fontWeight: 800, color: 'var(--t-text)' }}>Local comment</span>
-          <span style={{ fontFamily: MONO_FONT, fontSize: 10, color: 'var(--t-text-muted)' }}>{comment.label}</span>
+          <span style={{ fontFamily: UI_FONT, fontSize: 11.5, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>Local comment</span>
+          <span style={{ fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{comment.label}</span>
         </div>
         <div style={{ whiteSpace: 'pre-wrap', fontFamily: UI_FONT, fontSize: 12, lineHeight: '18px', color: 'var(--t-text)' }}>{comment.body}</div>
       </div>

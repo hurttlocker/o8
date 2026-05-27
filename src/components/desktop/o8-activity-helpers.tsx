@@ -318,8 +318,9 @@ export function itemSubline(item: ActivityItem): React.ReactNode {
               borderRadius: 4,
               background: `#${label.color}18`,
               color: `#${label.color}`,
-              fontSize: 11,
-              fontWeight: 600,
+              fontSize: 9.5,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
               fontFamily: 'var(--font-sans-system)',
             }}
           >
@@ -399,18 +400,20 @@ export function useExpandDetails() {
 // ── Expanded row detail content ──
 
 const DETAIL_LABEL_STYLE: React.CSSProperties = {
-  fontSize: 11,
-  fontWeight: 600,
+  fontSize: 9,
+  fontWeight: 300,
   color: 'var(--t-text-faint)',
   textTransform: 'uppercase',
-  letterSpacing: '0.06em',
+  letterSpacing: '0.04em',
   marginBottom: 4,
 };
 
 const DETAIL_ROW_STYLE: React.CSSProperties = {
   fontSize: 12,
-  color: 'var(--t-text-muted)',
-  lineHeight: '16px',
+  fontWeight: 300,
+  letterSpacing: '-0.1px',
+  color: 'var(--t-text-faint)',
+  lineHeight: 1.45,
   fontFamily: 'var(--font-sans-system)',
 };
 
@@ -419,7 +422,7 @@ function DetailPill({ label, color }: { label: string; color: string }) {
   return (
     <span style={{
       paddingTop: 1, paddingRight: 6, paddingBottom: 1, paddingLeft: 6,
-      borderRadius: 6, fontSize: 11, fontWeight: 600,
+      borderRadius: 6, fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.1px',
       background,
       color,
     }}>
@@ -443,7 +446,8 @@ function DetailActionButton({ label, onClick }: { label: string; onClick: () => 
         cursor: 'pointer',
         fontFamily: 'var(--font-sans-system)',
         fontSize: 11,
-        fontWeight: 650,
+        fontWeight: 350,
+        letterSpacing: '-0.1px',
         paddingTop: 0,
         paddingRight: 9,
         paddingBottom: 0,
@@ -469,10 +473,10 @@ export function renderExpandedDetail(
       <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div style={DETAIL_LABEL_STYLE}>Commit</div>
         <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
-          <span style={{ color: 'var(--t-text-secondary)', fontWeight: 600 }}>{item.hash}</span>
+          <span style={{ color: 'var(--t-text-secondary)', fontWeight: 300, letterSpacing: '-0.1px' }}>{item.hash}</span>
           <span style={{ color: 'var(--t-text-faint)' }}>{item.age}</span>
         </div>
-        <div style={{ color: 'var(--t-text)', fontSize: 14, lineHeight: '19px', fontWeight: 400, fontFamily: 'var(--font-sans-system)' }}>
+        <div style={{ color: 'var(--t-text)', fontSize: 13.5, lineHeight: 1.45, fontWeight: 300, letterSpacing: '-0.1px', fontFamily: 'var(--font-sans-system)' }}>
           {item.message}
         </div>
       </div>
@@ -511,7 +515,7 @@ export function renderExpandedDetail(
           <div style={{ ...DETAIL_ROW_STYLE, color: 'var(--t-text-faint)' }}>Loading...</div>
         ) : null}
         <div style={{ ...DETAIL_ROW_STYLE, fontFamily: 'var(--font-sans-system)' }}>
-          <span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{item.author}</span>
+          <span style={{ fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text-secondary)' }}>{item.author}</span>
           <span style={{ color: 'var(--t-text-faint)' }}> on </span>
           <span style={{ color: 'var(--t-text-secondary)' }}>{item.branch}</span>
         </div>
@@ -547,7 +551,7 @@ export function renderExpandedDetail(
           <div style={{ ...DETAIL_ROW_STYLE, color: 'var(--t-text-faint)' }}>Loading...</div>
         ) : null}
         {detail?.summaryLine ? (
-          <div style={{ ...DETAIL_ROW_STYLE, color: ACTIVITY_COLORS.danger, fontWeight: 600 }}>
+          <div style={{ ...DETAIL_ROW_STYLE, color: ACTIVITY_COLORS.danger, fontWeight: 350 }}>
             {detail.summaryLine.slice(0, 200)}
           </div>
         ) : null}
@@ -565,12 +569,12 @@ export function renderExpandedDetail(
           ))}
         </div>
         {item.body ? (
-          <div style={{ fontSize: 14, color: 'var(--t-text-muted)', lineHeight: '19px', fontWeight: 400, fontFamily: 'var(--font-sans-system)' }}>
+          <div style={{ fontSize: 13.5, color: 'var(--t-text-faint)', lineHeight: 1.45, fontWeight: 300, letterSpacing: '-0.1px', fontFamily: 'var(--font-sans-system)' }}>
             {item.body.slice(0, 200)}{item.body.length > 200 ? '...' : ''}
           </div>
         ) : null}
         <div style={{ ...DETAIL_ROW_STYLE, display: 'flex', gap: 8, fontFamily: 'var(--font-sans-system)' }}>
-          {item.author ? <span><span style={{ fontWeight: 600, color: 'var(--t-text-secondary)' }}>{item.author}</span></span> : null}
+          {item.author ? <span><span style={{ fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text-secondary)' }}>{item.author}</span></span> : null}
           {item.assignees.length > 0 ? <span style={{ color: 'var(--t-text-faint)' }}>{item.assignees.join(', ')}</span> : null}
           {item.comments > 0 ? <span>{item.comments} comment{item.comments === 1 ? '' : 's'}</span> : null}
         </div>
@@ -590,8 +594,9 @@ export function itemBadge(item: ActivityItem): React.ReactNode {
         paddingBottom: 1,
         paddingLeft: 6,
         borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 600,
+        fontSize: 9,
+        fontWeight: 300,
+        letterSpacing: '0.04em',
         flexShrink: 0,
         marginTop: 4,
         background: item.state === 'merged' ? ACTIVITY_COLORS.mergeBg : item.state === 'open' ? ACTIVITY_COLORS.successBg : ACTIVITY_COLORS.dangerBg,
@@ -611,8 +616,9 @@ export function itemBadge(item: ActivityItem): React.ReactNode {
         paddingBottom: 1,
         paddingLeft: 6,
         borderRadius: 999,
-        fontSize: 11,
-        fontWeight: 600,
+        fontSize: 9,
+        fontWeight: 300,
+        letterSpacing: '0.04em',
         flexShrink: 0,
         marginTop: 4,
         background: item.state === 'open' ? ACTIVITY_COLORS.successBg : ACTIVITY_COLORS.mergeBg,

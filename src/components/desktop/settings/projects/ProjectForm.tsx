@@ -166,7 +166,7 @@ export function ProjectForm({
         <div style={{
           fontFamily: APP_FONT_STACK,
           fontSize: 18,
-          fontWeight: 650,
+          fontWeight: 350,
           letterSpacing: '-0.025em',
           color: 'var(--t-text)',
           lineHeight: 1.15,

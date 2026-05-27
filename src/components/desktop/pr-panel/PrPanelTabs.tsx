@@ -143,8 +143,8 @@ function PrTabButton({
         cursor: 'pointer',
         fontFamily: UI_FONT,
         fontSize: 11,
-        fontWeight: 600,
-        letterSpacing: '-0.005em',
+        fontWeight: 350,
+        letterSpacing: '-0.1px',
         transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}
       onMouseEnter={(e) => {
@@ -159,8 +159,9 @@ function PrTabButton({
       {spec.count !== null ? (
         <span
           style={{
-            fontSize: 11,
-            fontWeight: 600,
+            fontSize: 9.5,
+            fontWeight: 260,
+            letterSpacing: '-0.4px',
             color: countColor,
             fontVariantNumeric: 'tabular-nums',
           }}

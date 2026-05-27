@@ -33,8 +33,8 @@ const TAB_GAP = 4;
 // Codex-style flat tabs: no paper-card chrome, active = subtle pill,
 // inactive = transparent text + icon only. Tighter density so the
 // bar fits inline without competing with the workspace below.
-const FLAT_TAB_HEIGHT = 30;
-const FLAT_TAB_RADIUS = 8;
+const FLAT_TAB_HEIGHT = 26;
+const FLAT_TAB_RADIUS = 7;
 
 function formatDispatchedAt(epochMs: number): string {
   try {
@@ -335,7 +335,7 @@ export const TabBar = memo(function TabBar({
               : 'none';
             const tabTextColor = hasStateColor
               ? stateScheme.tabText
-              : (isActive ? 'var(--t-text)' : 'var(--t-text-secondary)');
+              : (isActive ? 'var(--t-text)' : 'var(--t-text-muted)');
             // Border lives only on tabs with state OR on the active tab —
             // inactive neutral tabs are pure text. Separator between
             // adjacent tabs comes from the wrapping strip, not each row.
@@ -376,25 +376,26 @@ export const TabBar = memo(function TabBar({
                   boxSizing: 'border-box',
                   height: FLAT_TAB_HEIGHT,
                   minHeight: FLAT_TAB_HEIGHT,
-                  paddingTop: 4,
-                  paddingBottom: 4,
-                  paddingLeft: 10,
-                  paddingRight: 8,
+                  paddingTop: 0,
+                  paddingBottom: 0,
+                  paddingLeft: 9,
+                  paddingRight: 9,
                   marginTop: 0,
                   marginBottom: 0,
                   marginLeft: 0,
                   marginRight: 0,
-                  borderWidth: 1,
+                  borderWidth: hasStateColor && isActive ? 1 : 0,
                   borderStyle: 'solid',
                   borderColor: tabBorderColor,
                   borderRadius: FLAT_TAB_RADIUS,
                   background: tabBackground,
                   boxShadow: tabBoxShadow,
                   color: tabTextColor,
-                  fontSize: 11.5,
-                  fontWeight: isActive ? 560 : 500,
+                  fontSize: 12,
+                  fontWeight: 300,
                   fontFamily: 'var(--font-sans-system)',
-                  letterSpacing: '-0.01em',
+                  letterSpacing: '-0.1px',
+                  lineHeight: 1.25,
                   cursor: 'pointer',
                   whiteSpace: 'nowrap',
                   transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',

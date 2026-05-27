@@ -282,7 +282,7 @@ export function RepoChip({
       }}
     >
       <FolderGlyph size={11} />
-      <span style={{ fontWeight: 500 }}>{repoName}</span>
+      <span style={{ fontWeight: 300 }}>{repoName}</span>
       <button
         type="button"
         onClick={() => { if (!popoverDisabled) setOpenPopover((prev) => !prev); }}
@@ -301,7 +301,7 @@ export function RepoChip({
           color: role ? roleColor(role) : RAMS_INK_QUIET,
           fontFamily: MONO_FONT_STACK,
           fontSize: 9.5,
-          fontWeight: 600,
+          fontWeight: 350,
           letterSpacing: '0.08em',
           textTransform: 'uppercase',
           cursor: popoverDisabled ? 'default' : 'pointer',

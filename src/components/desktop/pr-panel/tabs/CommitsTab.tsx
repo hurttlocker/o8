@@ -22,10 +22,10 @@ export const CommitsTab = memo(function CommitsTab({ prNumber }: CommitsTabProps
         paddingRight: 14,
       }}
     >
-      <div style={{ fontSize: 12, color: 'var(--t-text)', fontWeight: 600 }}>
+      <div style={{ fontSize: 13.5, color: 'var(--t-text)', fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>
         Commits
       </div>
-      <div style={{ fontSize: 12, color: 'var(--t-text-muted)', lineHeight: 1.5 }}>
+      <div style={{ fontSize: 13, color: 'var(--t-text-faint)', fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45 }}>
         Commit history for PR #{prNumber} is not yet wired into this panel. The
         upstream API needs a follow-up endpoint to expose commits.
       </div>

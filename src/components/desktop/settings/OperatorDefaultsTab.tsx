@@ -120,7 +120,7 @@ function Row({ label, description, source, right, disabledReason }: {
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
           <span style={{
             fontSize: 14,
-            fontWeight: 500,
+            fontWeight: 300,
             color: 'var(--t-text)',
             letterSpacing: '-0.01em',
           }}>
@@ -223,7 +223,7 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
           background: RAMS_CONTROL_BG,
           color: 'var(--t-text)',
           fontSize: 13,
-          fontWeight: 600,
+          fontWeight: 350,
           textAlign: 'left',
           cursor: disabled ? 'not-allowed' : 'pointer',
           fontFamily: APP_FONT_STACK,
@@ -444,7 +444,7 @@ export function OperatorDefaultsTab() {
           <span style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 11,
-            fontWeight: 500,
+            fontWeight: 300,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             color: '#ef4444',
@@ -512,7 +512,7 @@ export function OperatorDefaultsTab() {
                 {active ? <CornerBrackets /> : null}
                 <span style={{
                   fontSize: 14,
-                  fontWeight: 500,
+                  fontWeight: 300,
                   color: active ? RAMS_ACCENT : 'var(--t-text)',
                   letterSpacing: '-0.01em',
                 }}>

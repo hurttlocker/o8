@@ -76,8 +76,9 @@ function PreviewToggle({
               color: active ? 'var(--t-accent)' : 'var(--t-text-muted)',
               cursor: 'pointer',
               fontFamily: UI_FONT,
-              fontSize: 10.5,
-              fontWeight: 750,
+              fontSize: 11,
+              fontWeight: 350,
+              letterSpacing: '-0.1px',
               paddingTop: 0,
               paddingRight: 8,
               paddingBottom: 0,
@@ -292,7 +293,7 @@ export function FileViewer({
     return (
       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 12, color: 'var(--t-text-muted)', fontFamily: UI_FONT }}>
         <FileIcon size={32} />
-        <span style={{ fontSize: 13, fontWeight: 650 }}>Select a file to view</span>
+        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Select a file to view</span>
       </div>
     );
   }
@@ -301,7 +302,7 @@ export function FileViewer({
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
       {dirty || error || canTogglePreview ? (
         <div style={{ minHeight: 34, display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-card)', paddingTop: 0, paddingRight: 12, paddingBottom: 0, paddingLeft: 12, fontFamily: UI_FONT }}>
-          <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-muted)', fontSize: 11, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          <span style={{ flex: 1, minWidth: 0, color: error ? 'var(--t-brand-red)' : 'var(--t-text-faint)', fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {error ?? (dirty ? 'Modified' : fileKind === 'markdown' ? 'Markdown preview' : 'SVG preview')}
           </span>
           {canTogglePreview ? <PreviewToggle mode={viewMode} onModeChange={handleViewModeChange} /> : null}
@@ -319,7 +320,8 @@ export function FileViewer({
                 cursor: saving ? 'wait' : 'pointer',
                 fontFamily: UI_FONT,
                 fontSize: 11,
-                fontWeight: 750,
+                fontWeight: 400,
+                letterSpacing: '-0.1px',
                 opacity: saving ? 0.72 : 1,
                 paddingTop: 0,
                 paddingRight: 10,

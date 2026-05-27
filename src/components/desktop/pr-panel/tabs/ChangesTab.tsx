@@ -187,7 +187,7 @@ export const ChangesTab = memo(function ChangesTab({ files, totalAdditions, tota
           background: 'var(--t-bg-card)',
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
           {files.length} File{files.length === 1 ? '' : 's'} Changed
         </span>
         <DiffStatBadge additions={totalAdditions} deletions={totalDeletions} />

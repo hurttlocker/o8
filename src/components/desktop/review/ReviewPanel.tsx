@@ -226,7 +226,8 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
                 color: scopeOpen ? 'var(--t-text)' : 'var(--t-text-muted)',
                 fontFamily: UI_FONT,
                 fontSize: 12,
-                fontWeight: 650,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
                 cursor: 'pointer',
               }}
               onMouseEnter={(event) => { if (!scopeOpen) event.currentTarget.style.background = REVIEW_CONTROL_BG_ACTIVE; }}

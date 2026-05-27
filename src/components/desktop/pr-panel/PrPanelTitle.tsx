@@ -49,18 +49,18 @@ export const PrPanelTitle = memo(function PrPanelTitle({
         borderBottom: '1px solid var(--t-divider-subtle)',
       }}
     >
-      <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)', letterSpacing: '-0.01em', lineHeight: 1.35 }}>
+      <div style={{ fontSize: 15, fontWeight: 350, color: 'var(--t-text)', letterSpacing: '-0.1px', lineHeight: 1.25 }}>
         {title}
-        <span style={{ color: 'var(--t-text-muted)', fontWeight: 400, marginLeft: 6 }}>#{prNumber}</span>
+        <span style={{ color: 'var(--t-text-faint)', fontWeight: 300, marginLeft: 6 }}>#{prNumber}</span>
       </div>
 
       {bullets.length > 0 ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
           <div
             style={{
-              fontSize: 10,
-              fontWeight: 600,
-              color: 'var(--t-text-muted)',
+              fontSize: 9,
+              fontWeight: 300,
+              color: 'var(--t-text-faint)',
               textTransform: 'uppercase',
               letterSpacing: '0.04em',
             }}
@@ -104,7 +104,8 @@ export const PrPanelTitle = memo(function PrPanelTitle({
                 padding: 0,
                 color: 'var(--t-accent)',
                 fontSize: 11,
-                fontWeight: 600,
+                fontWeight: 350,
+                letterSpacing: '-0.1px',
                 cursor: 'pointer',
                 alignSelf: 'flex-start',
               }}

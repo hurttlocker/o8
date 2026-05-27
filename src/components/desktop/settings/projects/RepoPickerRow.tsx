@@ -101,7 +101,7 @@ export function RepoPickerRow({
         }}
       >
         <FolderGlyph size={12} />
-        <span style={{ fontFamily: APP_FONT_STACK, fontSize: 12.5, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.005em' }}>
+        <span style={{ fontFamily: APP_FONT_STACK, fontSize: 12.5, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.005em' }}>
           {repo.name}
         </span>
         <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, color: RAMS_INK_QUIET, marginLeft: 4, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
@@ -128,7 +128,7 @@ export function RepoPickerRow({
             color: isMain ? '#1d4ed8' : RAMS_INK_QUIET,
             fontFamily: MONO_FONT_STACK,
             fontSize: 9.5,
-            fontWeight: 650,
+            fontWeight: 350,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
             cursor: isMain ? 'default' : 'pointer',
@@ -158,7 +158,7 @@ export function RepoPickerRow({
             color: role ? roleColor(role) : RAMS_INK_QUIET,
             fontFamily: MONO_FONT_STACK,
             fontSize: 10,
-            fontWeight: 600,
+            fontWeight: 350,
             letterSpacing: '0.08em',
             textTransform: 'uppercase',
             cursor: 'pointer',

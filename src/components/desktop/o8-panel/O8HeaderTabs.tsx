@@ -122,8 +122,9 @@ function O8TabPill({
         <span
           style={{
             fontSize: 12,
-            fontWeight: 600,
-            letterSpacing: '-0.01em',
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            lineHeight: 1.25,
             fontFamily: 'var(--font-sans-system)',
             whiteSpace: 'nowrap',
           }}

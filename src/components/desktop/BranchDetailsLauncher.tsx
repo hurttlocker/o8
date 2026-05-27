@@ -6,8 +6,8 @@ import { useOrchestratorData } from '@/components/desktop/orchestrator-data-cont
 import { useWorkspaceChanges } from './o8-panel/workspace-rail/ChangesList';
 import type { OrchestratorPacket, OrchestratorRuntime, OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 
-const ROW_HEIGHT = 32;
-const CHECK_ROW_HEIGHT = 28;
+const ROW_HEIGHT = 28;
+const CHECK_ROW_HEIGHT = 24;
 
 function pickActivePacket(packets: OrchestratorPacket[] | undefined, selectedId: string | null | undefined): OrchestratorPacket | null {
   if (!packets || packets.length === 0) return null;
@@ -190,15 +190,15 @@ function Card({ children }: { children: ReactNode }) {
   return (
     <div
       style={{
-        borderRadius: 18,
+        borderRadius: 12,
         borderWidth: 1,
         borderStyle: 'solid',
-        borderColor: 'color-mix(in srgb, var(--t-border-subtle, var(--t-border)) 78%, transparent)',
-        background: 'color-mix(in srgb, var(--t-bg-card) 88%, transparent)',
-        paddingTop: 9,
-        paddingBottom: 7,
-        paddingLeft: 6,
-        paddingRight: 6,
+        borderColor: 'color-mix(in srgb, var(--t-border-subtle, var(--t-border)) 55%, transparent)',
+        background: 'color-mix(in srgb, var(--t-bg-card) 70%, transparent)',
+        paddingTop: 6,
+        paddingBottom: 4,
+        paddingLeft: 4,
+        paddingRight: 4,
         display: 'flex',
         flexDirection: 'column',
       }}
@@ -218,14 +218,15 @@ function StaticHeader({
       style={{
         display: 'flex',
         alignItems: 'center',
-        minHeight: 28,
+        minHeight: 22,
         paddingLeft: 10,
         paddingRight: 10,
         paddingBottom: 4,
-        fontSize: 13,
-        fontWeight: 520,
-        letterSpacing: '-0.005em',
-        color: 'var(--t-text-muted)',
+        fontSize: 10,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
+        lineHeight: '14px',
+        color: 'var(--t-text-faint)',
       }}
     >
       {label}
@@ -257,18 +258,19 @@ function SectionHeader({
         alignItems: 'center',
         gap: 6,
         width: '100%',
-        minHeight: 30,
+        minHeight: 24,
         paddingLeft: 10,
         paddingRight: 10,
         paddingTop: 0,
         paddingBottom: 4,
         border: 0,
-        borderRadius: 10,
+        borderRadius: 8,
         background: 'transparent',
-        fontSize: 13,
-        fontWeight: 520,
-        letterSpacing: '-0.005em',
-        color: 'var(--t-text-muted)',
+        fontSize: 10,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
+        lineHeight: '14px',
+        color: 'var(--t-text-faint)',
         fontFamily: 'inherit',
         textAlign: 'left',
         cursor: 'pointer',
@@ -295,9 +297,10 @@ function SectionHeader({
       {hint ? (
         <span
           style={{
-            fontWeight: 500,
-            color: 'var(--t-text-muted)',
-            opacity: 0.6,
+            fontSize: 9.5,
+            fontWeight: 260,
+            letterSpacing: '-0.4px',
+            color: 'var(--t-text-faint)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
@@ -334,9 +337,9 @@ function DiffStats({ additions, deletions }: { additions: number; deletions: num
         display: 'inline-flex',
         alignItems: 'center',
         gap: 6,
-        fontSize: 12.5,
-        fontWeight: 520,
-        letterSpacing: '-0.01em',
+        fontSize: 9.5,
+        fontWeight: 300,
+        letterSpacing: '-0.2px',
         fontVariantNumeric: 'tabular-nums',
       }}
     >
@@ -356,26 +359,26 @@ function ProgressRow({ label, done, muted }: { label: string; done: boolean; mut
         display: 'flex',
         alignItems: 'center',
         gap: 9,
-        color: muted ? 'var(--t-text-muted)' : 'var(--t-text-secondary)',
-        fontSize: 12.5,
-        fontWeight: 500,
-        lineHeight: 1.35,
-        letterSpacing: '-0.005em',
+        color: muted ? 'var(--t-text-faint)' : 'var(--t-text)',
+        fontSize: 13.5,
+        fontWeight: 300,
+        lineHeight: 1.25,
+        letterSpacing: '-0.1px',
       }}
     >
       <span
         style={{
-          width: 14,
-          height: 14,
+          width: 12,
+          height: 12,
           borderRadius: 999,
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
           flexShrink: 0,
-          color: done ? 'var(--t-bg-card)' : 'var(--t-text-muted)',
+          color: done ? 'var(--t-bg-card)' : 'var(--t-text-faint)',
           background: done
             ? 'color-mix(in srgb, var(--t-text-muted) 72%, transparent)'
-            : 'color-mix(in srgb, var(--t-text-muted) 12%, transparent)',
+            : 'color-mix(in srgb, var(--t-text-muted) 10%, transparent)',
         }}
       >
         {done ? <CheckIcon /> : null}
@@ -397,9 +400,10 @@ const ROW_BASE: CSSProperties = {
   background: 'transparent',
   cursor: 'pointer',
   textAlign: 'left',
-  fontSize: 13,
-  fontWeight: 520,
-  letterSpacing: '-0.005em',
+  fontSize: 13.5,
+  fontWeight: 300,
+  letterSpacing: '-0.1px',
+  lineHeight: 1.25,
   color: 'var(--t-text)',
   fontFamily: 'inherit',
 };
@@ -435,7 +439,7 @@ function Row({
     >
       <span style={{ display: 'inline-flex', flexShrink: 0, color: muted ? 'var(--t-text-muted)' : 'var(--t-text-secondary)' }}>{icon}</span>
       <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
-      {detail ? <span style={{ color: 'var(--t-text-muted)', fontWeight: 450, whiteSpace: 'nowrap' }}>{detail}</span> : null}
+      {detail ? <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', whiteSpace: 'nowrap' }}>{detail}</span> : null}
     </button>
   );
 }
