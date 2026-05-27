@@ -907,7 +907,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                     : SurfaceIcon?.({ size: 12 })}
                   <span style={{
                     fontSize: 12,
-                    fontWeight: isActive ? 600 : 500,
+                    fontWeight: 300,
+                    letterSpacing: '-0.1px',
                     whiteSpace: 'nowrap',
                   }}>
                     {tab.label}
