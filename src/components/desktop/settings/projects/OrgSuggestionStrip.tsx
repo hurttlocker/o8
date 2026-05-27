@@ -52,7 +52,7 @@ export function OrgSuggestionStrip({
       <span style={{
         fontFamily: MONO_FONT_STACK,
         fontSize: 9.5,
-        fontWeight: 500,
+        fontWeight: 300,
         letterSpacing: '0.18em',
         textTransform: 'uppercase',
         color: RAMS_ACCENT,

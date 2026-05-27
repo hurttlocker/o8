@@ -30,7 +30,7 @@ import { specImageDropPaste } from './spec-image-upload';
 import { specImageRender, specRepoPathCompartment, specRepoPathFacet } from './spec-image-widget';
 
 const HAND = "'Caveat', ui-rounded, cursive";
-const PROSE = "'Inter', system-ui, sans-serif";
+const PROSE = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, system-ui, sans-serif";
 const RAIL_W = 220;
 
 // A block spacer that reserves vertical room in the prose so a margin note can
@@ -171,20 +171,20 @@ const reviewField = StateField.define<{ deco: DecorationSet; atomic: DecorationS
 });
 
 const mdHighlight = HighlightStyle.define([
-  { tag: tags.heading1, fontSize: '21px', fontWeight: '600', color: 'var(--o8ed-ink)' },
-  { tag: tags.heading2, fontSize: '12px', fontWeight: '600', color: 'var(--o8ed-ink-soft)', textTransform: 'uppercase', letterSpacing: '0.06em' },
-  { tag: tags.heading3, fontSize: '14px', fontWeight: '600', color: 'var(--o8ed-ink-soft)' },
-  { tag: tags.strong, fontWeight: '600', color: 'var(--o8ed-ink)' },
+  { tag: tags.heading1, fontSize: '18px', fontWeight: '400', letterSpacing: '-0.2px', color: 'var(--o8ed-ink)' },
+  { tag: tags.heading2, fontSize: '10px', fontWeight: '300', color: 'var(--o8ed-ink-faint)', textTransform: 'uppercase', letterSpacing: '0.04em' },
+  { tag: tags.heading3, fontSize: '13.5px', fontWeight: '400', letterSpacing: '-0.1px', color: 'var(--o8ed-ink-soft)' },
+  { tag: tags.strong, fontWeight: '500', color: 'var(--o8ed-ink)' },
   { tag: tags.emphasis, fontStyle: 'italic' },
   { tag: tags.link, color: 'var(--o8ed-orange)', textDecoration: 'underline' },
-  { tag: tags.monospace, fontFamily: "'SF Mono', Menlo, monospace", fontSize: '12.5px' },
+  { tag: tags.monospace, fontFamily: "'SF Mono', Menlo, monospace", fontSize: '12px' },
 ]);
 
 // height:auto + scroller overflow visible → the editor grows to content so the
 // PARENT scrolls; margin notes positioned in the same (scroll-shared) space.
 const editorTheme = EditorView.theme({
   '&': { backgroundColor: 'transparent', color: 'var(--o8ed-ink)', height: 'auto' },
-  '.cm-scroller': { fontFamily: PROSE, fontSize: '14.5px', lineHeight: '1.65', overflow: 'visible' },
+  '.cm-scroller': { fontFamily: PROSE, fontSize: '13.5px', fontWeight: '300', letterSpacing: '-0.1px', lineHeight: '1.55', overflow: 'visible' },
   '.cm-content': { paddingTop: '22px', paddingBottom: '26px', paddingLeft: '4px', caretColor: 'var(--o8ed-orange)' },
   '.cm-line': { paddingLeft: '0', paddingRight: '8px' },
   '&.cm-focused': { outline: 'none' },
@@ -476,7 +476,7 @@ function MarginNote({ note, onResolve, onResolveComment, onReply }: {
     <div style={{ opacity: resolved ? 0.4 : 1 }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
         <span style={{ width: 12, height: 0, borderTop: '1px dotted var(--o8ed-ink-faint)', flexShrink: 0, marginLeft: -14 }} />
-        <span style={{ fontFamily: PROSE, fontSize: 9.5, fontWeight: 600, letterSpacing: '0.08em', textTransform: 'uppercase', color: isAI ? 'var(--o8ed-orange)' : 'var(--o8ed-ink-faint)' }}>
+        <span style={{ fontFamily: PROSE, fontSize: 9, fontWeight: 300, letterSpacing: '0.05em', textTransform: 'uppercase', color: isAI ? 'var(--o8ed-orange)' : 'var(--o8ed-ink-faint)' }}>
           {isAI ? 'o8' : 'you'}
         </span>
         {resolved ? <span style={{ fontFamily: PROSE, fontSize: 9, color: 'var(--o8ed-ink-faint)' }}>resolved</span> : null}
@@ -521,7 +521,7 @@ function MarginNote({ note, onResolve, onResolveComment, onReply }: {
 function NoteChip({ label, tone, onClick }: { label: string; tone: 'add' | 'muted'; onClick: () => void }) {
   const color = tone === 'add' ? 'var(--o8ed-add)' : 'var(--o8ed-ink-faint)';
   return (
-    <button type="button" onClick={onClick} style={{ cursor: 'pointer', fontFamily: PROSE, fontSize: 10.5, fontWeight: 600, color, background: 'transparent', border: `1px solid ${color}`, borderRadius: 6, paddingTop: 2, paddingBottom: 2, paddingLeft: 8, paddingRight: 8, filter: 'saturate(0.55)' }}>
+    <button type="button" onClick={onClick} style={{ cursor: 'pointer', fontFamily: PROSE, fontSize: 10.5, fontWeight: 350, letterSpacing: '-0.1px', color, background: 'transparent', border: `1px solid ${color}`, borderRadius: 6, paddingTop: 2, paddingBottom: 2, paddingLeft: 8, paddingRight: 8, filter: 'saturate(0.55)' }}>
       {label}
     </button>
   );

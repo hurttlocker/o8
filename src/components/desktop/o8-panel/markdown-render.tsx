@@ -16,7 +16,7 @@ function inline(text: string): ReactNode[] {
     const index = match.index ?? 0;
     if (index > last) nodes.push(text.slice(last, index));
     if (value.startsWith('**')) {
-      nodes.push(<strong key={index} style={{ fontWeight: 700 }}>{value.slice(2, -2)}</strong>);
+      nodes.push(<strong key={index} style={{ fontWeight: 500 }}>{value.slice(2, -2)}</strong>);
     } else if (value.startsWith('*')) {
       nodes.push(<em key={index}>{value.slice(1, -1)}</em>);
     } else if (value.startsWith('`')) {
@@ -106,7 +106,7 @@ function renderMarkdownLines(text: string, keyPrefix: string): ReactNode[] {
       const level = heading[1]?.length ?? 1;
       const size = level === 1 ? 22 : level === 2 ? 18 : level === 3 ? 15 : 13;
       const Tag = `h${Math.min(level, 4)}` as 'h1' | 'h2' | 'h3' | 'h4';
-      blocks.push(<Tag key={k} style={{ marginTop: level === 1 ? 4 : 18, marginBottom: 8, fontFamily: UI_FONT, fontSize: size, lineHeight: 1.25, color: 'var(--t-text)', fontWeight: 700 }}>{inline(heading[2] ?? '')}</Tag>);
+      blocks.push(<Tag key={k} style={{ marginTop: level === 1 ? 4 : 18, marginBottom: 8, fontFamily: UI_FONT, fontSize: size, lineHeight: 1.25, color: 'var(--t-text)', fontWeight: 400, letterSpacing: '-0.2px' }}>{inline(heading[2] ?? '')}</Tag>);
       return;
     }
 
@@ -153,7 +153,8 @@ function ViewButton({ active, label, onClick }: { active: boolean; label: string
         cursor: 'pointer',
         fontFamily: UI_FONT,
         fontSize: 11,
-        fontWeight: 600,
+        fontWeight: 350,
+        letterSpacing: '-0.1px',
         minHeight: 26,
         paddingTop: 0,
         paddingRight: 10,
@@ -193,7 +194,7 @@ function FencedHtmlBlock({ code, theme }: { code: string; theme: HtmlStylePalett
   return (
     <div style={{ marginTop: 12, marginBottom: 12, border: '1px solid var(--t-divider-subtle)', borderRadius: 14, overflow: 'hidden', background: 'var(--t-bg-subtle)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 36, paddingLeft: 10, paddingRight: 10, borderBottom: '1px solid var(--t-divider-subtle)', fontFamily: UI_FONT }}>
-        <span style={{ flex: 1, color: 'var(--t-text-muted)', fontSize: 11, fontWeight: 600, letterSpacing: 0.4, textTransform: 'uppercase' }}>html</span>
+        <span style={{ flex: 1, color: 'var(--t-text-faint)', fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase' }}>html</span>
         <ViewButton active={view === 'preview'} label="Preview" onClick={() => setView('preview')} />
         <ViewButton active={view === 'source'} label="Source" onClick={() => setView('source')} />
       </div>
@@ -243,7 +244,7 @@ export function MarkdownRender({ content }: { content: string }) {
   const segments = useMemo(() => segmentize(content), [content]);
 
   return (
-    <div style={{ fontFamily: UI_FONT, fontSize: 13, lineHeight: 1.6, color: 'var(--t-text)' }}>
+    <div style={{ fontFamily: UI_FONT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.55, color: 'var(--t-text)' }}>
       {segments.map((seg, i) => {
         if (seg.kind === 'md') {
           return <div key={`s:${i}`}>{renderMarkdownLines(seg.text, `s${i}`)}</div>;

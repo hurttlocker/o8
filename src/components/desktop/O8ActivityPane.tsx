@@ -470,19 +470,20 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   background: active ? ACTIVITY_COLORS.accentBg : 'transparent',
                   color: active ? ACTIVITY_COLORS.accent : 'var(--t-text-muted)',
                   fontSize: 11,
-                  fontWeight: 600,
+                  fontWeight: 350,
                   cursor: 'pointer',
                   fontFamily: 'var(--font-sans-system)',
                   transition: 'all 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  letterSpacing: 0,
+                  letterSpacing: '-0.1px',
                 }}
               >
                 {tab.icon(active ? ACTIVITY_COLORS.accent : 'var(--t-text-muted)')}
                 {tab.label}
                 {count > 0 && tab.key !== 'all' ? (
                   <span style={{
-                    fontSize: 11,
-                    fontWeight: 600,
+                    fontSize: 9.5,
+                    fontWeight: 260,
+                    letterSpacing: '-0.4px',
                     color: active ? ACTIVITY_COLORS.accent : 'var(--t-text-faint)',
                     fontFamily: 'var(--font-sans-system)',
                   }}>
@@ -551,11 +552,11 @@ export const O8ActivityPane = memo(function O8ActivityPane({
               </span>
               <span
                 style={{
-                  fontSize: 11,
-                  fontWeight: 600,
+                  fontSize: 9,
+                  fontWeight: 300,
                   textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
-                  color: unreadProposalCount > 0 ? 'var(--t-accent)' : 'var(--t-text-muted)',
+                  letterSpacing: '0.04em',
+                  color: unreadProposalCount > 0 ? 'var(--t-accent)' : 'var(--t-text-faint)',
                   flex: 1,
                   minWidth: 0,
                 }}
@@ -573,9 +574,9 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                     borderRadius: 999,
                     background: 'var(--t-accent)',
                     color: '#fff',
-                    fontSize: 10.5,
-                    fontWeight: 700,
-                    letterSpacing: '0.01em',
+                    fontSize: 9.5,
+                    fontWeight: 350,
+                    letterSpacing: '-0.1px',
                     flexShrink: 0,
                   }}
                 >
@@ -591,9 +592,10 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                     paddingLeft: 6,
                     borderRadius: 999,
                     background: 'var(--t-hover)',
-                    color: 'var(--t-text-muted)',
-                    fontSize: 11,
-                    fontWeight: 600,
+                    color: 'var(--t-text-faint)',
+                    fontSize: 9.5,
+                    fontWeight: 260,
+                    letterSpacing: '-0.4px',
                     flexShrink: 0,
                   }}
                 >
@@ -622,11 +624,11 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             paddingTop: 32,
             paddingBottom: 32,
             textAlign: 'center',
-            fontSize: 14,
-            fontWeight: 400,
-            color: 'var(--t-text-muted)',
-            lineHeight: '19px',
-            letterSpacing: 0,
+            fontSize: 13,
+            fontWeight: 300,
+            color: 'var(--t-text-faint)',
+            lineHeight: 1.45,
+            letterSpacing: '-0.1px',
           }}>
             Loading activity...
           </div>
@@ -635,11 +637,11 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             paddingTop: 32,
             paddingBottom: 32,
             textAlign: 'center',
-            fontSize: 14,
-            fontWeight: 400,
-            color: 'var(--t-text-muted)',
-            lineHeight: '19px',
-            letterSpacing: 0,
+            fontSize: 13,
+            fontWeight: 300,
+            color: 'var(--t-text-faint)',
+            lineHeight: 1.45,
+            letterSpacing: '-0.1px',
           }}>
             {effectiveRepo
               ? `No ${filter === 'all' ? '' : filter + ' '}activity yet for ${shortRepoLabel(effectiveRepo)}.`
@@ -654,11 +656,11 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                 paddingRight: 14,
                 paddingBottom: 4,
                 paddingLeft: 14,
-                fontSize: 11,
-                fontWeight: 600,
+                fontSize: 9,
+                fontWeight: 300,
                 color: 'var(--t-text-faint)',
                 textTransform: 'uppercase',
-                letterSpacing: '0.06em',
+                letterSpacing: '0.04em',
               }}>
                 {group.label}
               </div>
@@ -737,19 +739,19 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                       {/* Content */}
                       <div style={{ flex: 1, minWidth: 0 }}>
                         <div style={{
-                          fontSize: 14, color: 'var(--t-text)',
+                          fontSize: 13.5, color: 'var(--t-text)',
                           overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                          lineHeight: '19px', fontWeight: 400,
+                          lineHeight: 1.25, fontWeight: 300, letterSpacing: '-0.1px',
                         }}>
                           {itemTitle(item)}
                         </div>
                         <div style={{
                           display: 'flex', alignItems: 'center', gap: 6,
-                          marginTop: 1, fontSize: 12,
-                          fontWeight: 400,
-                          color: 'var(--t-text-muted)',
+                          marginTop: 3, fontSize: 9.5,
+                          fontWeight: 260, letterSpacing: '-0.4px',
+                          color: 'var(--t-text-faint)',
                           fontFamily: 'var(--font-sans-system)',
-                          lineHeight: '16px',
+                          lineHeight: 1.25,
                         }}>
                           {itemSubline(item)}
                         </div>

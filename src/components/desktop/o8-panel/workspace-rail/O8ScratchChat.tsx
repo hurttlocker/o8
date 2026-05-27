@@ -686,8 +686,8 @@ export function O8ScratchChat({
               <AskO8Icon size={14} color="var(--t-accent)" />
             </div>
             <div style={{ flex: 1, minWidth: 0 }}>
-              <div style={{ color: 'var(--t-text)', fontSize: 12, fontWeight: 800, lineHeight: '16px' }}>Ask o8</div>
-              <div style={{ color: 'var(--t-text-muted)', fontFamily: MONO_FONT, fontSize: 10, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              <div style={{ color: 'var(--t-text)', fontSize: 13.5, fontWeight: 350, letterSpacing: '-0.1px', lineHeight: 1.25 }}>Ask o8</div>
+              <div style={{ color: 'var(--t-text-faint)', fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.2px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>
                 {surface} / {scopeLabel}
               </div>
             </div>
@@ -724,7 +724,7 @@ export function O8ScratchChat({
 
           <div ref={scrollRef} className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: expanded ? 300 : 170, maxHeight: expanded ? 560 : 380, overflow: 'auto', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12 }}>
             {messages.length === 0 ? (
-              <div style={{ borderRadius: 14, border: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-subtle)', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, color: 'var(--t-text-muted)', fontSize: 12, lineHeight: '18px' }}>
+              <div style={{ borderRadius: 14, border: '1px solid var(--t-divider-subtle)', background: 'var(--t-bg-subtle)', paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12, color: 'var(--t-text-faint)', fontSize: 13, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45 }}>
                 {selectedFile
                   ? 'Ask about the current file or diff. This is read-only; edits go through the orchestrator.'
                   : 'Ask about the workspace changes (branch, diffstat, recent commits). This is read-only; edits go through the orchestrator.'}
@@ -745,8 +745,10 @@ export function O8ScratchChat({
                       paddingRight: 10,
                       paddingBottom: 9,
                       paddingLeft: 10,
-                      fontSize: 12,
-                      lineHeight: '18px',
+                      fontSize: 13,
+                      fontWeight: 300,
+                      letterSpacing: '-0.1px',
+                      lineHeight: 1.45,
                       overflowWrap: 'anywhere',
                     }}
                   >
@@ -772,9 +774,9 @@ export function O8ScratchChat({
                                     background: 'var(--t-divider-subtle)',
                                     color: 'var(--t-text-muted)',
                                     fontFamily: MONO_FONT,
-                                    fontSize: 10,
-                                    fontWeight: 700,
-                                    letterSpacing: '-0.01em',
+                                    fontSize: 9.5,
+                                    fontWeight: 300,
+                                    letterSpacing: '-0.2px',
                                     cursor: citation.url ? 'pointer' : 'default',
                                   }}
                                   onClick={() => {
@@ -798,7 +800,7 @@ export function O8ScratchChat({
           </div>
 
           {error || handoffNote ? (
-            <div style={{ borderTop: '1px solid var(--t-divider-subtle)', color: error ? 'var(--t-brand-red)' : 'var(--t-terminal-ansi-bright-green, #16a34a)', fontSize: 11, fontWeight: 700, paddingTop: 8, paddingRight: 12, paddingBottom: 0, paddingLeft: 12 }}>
+            <div style={{ borderTop: '1px solid var(--t-divider-subtle)', color: error ? 'var(--t-brand-red)' : 'var(--t-terminal-ansi-bright-green, #16a34a)', fontSize: 11, fontWeight: 350, letterSpacing: '-0.1px', paddingTop: 8, paddingRight: 12, paddingBottom: 0, paddingLeft: 12 }}>
               {error ?? handoffNote}
             </div>
           ) : null}
@@ -827,8 +829,10 @@ export function O8ScratchChat({
                 background: 'var(--t-input-bg)',
                 color: 'var(--t-text)',
                 fontFamily: UI_FONT,
-                fontSize: 12,
-                lineHeight: '18px',
+                fontSize: 13,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                lineHeight: 1.45,
                 paddingTop: 9,
                 paddingRight: 10,
                 paddingBottom: 9,
@@ -852,7 +856,8 @@ export function O8ScratchChat({
                   gap: 6,
                   fontFamily: UI_FONT,
                   fontSize: 11,
-                  fontWeight: 750,
+                  fontWeight: 350,
+                  letterSpacing: '-0.1px',
                   paddingTop: 0,
                   paddingRight: 10,
                   paddingBottom: 0,
@@ -881,7 +886,8 @@ export function O8ScratchChat({
                   gap: 6,
                   fontFamily: UI_FONT,
                   fontSize: 11,
-                  fontWeight: 750,
+                  fontWeight: 350,
+                  letterSpacing: '-0.1px',
                   paddingTop: 0,
                   paddingRight: 10,
                   paddingBottom: 0,
@@ -915,7 +921,8 @@ export function O8ScratchChat({
                   gap: 6,
                   fontFamily: UI_FONT,
                   fontSize: 11,
-                  fontWeight: 750,
+                  fontWeight: 350,
+                  letterSpacing: '-0.1px',
                   paddingTop: 0,
                   paddingRight: 10,
                   paddingBottom: 0,
@@ -989,9 +996,9 @@ export function O8ScratchChat({
                 marginTop: 6,
                 fontFamily: UI_FONT,
                 fontSize: 9.5,
-                fontWeight: 500,
+                fontWeight: 260,
                 color: 'var(--t-text-faint, #94a3b8)',
-                letterSpacing: '-0.005em',
+                letterSpacing: '-0.4px',
               }}
             >
               <span>Send · Summary · Orchestrator: free models</span>
@@ -1039,7 +1046,8 @@ const actionButtonBaseStyle: CSSProperties = {
   paddingLeft: 8,
   fontFamily: UI_FONT,
   fontSize: 11,
-  fontWeight: 750,
+  fontWeight: 350,
+  letterSpacing: '-0.1px',
   flexShrink: 0,
 };
 

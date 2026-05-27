@@ -231,7 +231,7 @@ export function AllFilesTree({
 
   return (
     <div style={{ display: 'flex', flex: 1, minHeight: 0, flexDirection: 'column', overflow: 'hidden' }}>
-      <div style={{ flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-muted)', fontFamily: MONO_FONT, fontSize: 11, fontWeight: 700, letterSpacing: 0, paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10 }}>
+      <div style={{ flexShrink: 0, borderBottom: '1px solid var(--t-divider-subtle)', color: 'var(--t-text-faint)', fontFamily: MONO_FONT, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', paddingTop: 8, paddingRight: 10, paddingBottom: 8, paddingLeft: 10 }}>
         {repoName}
       </div>
       <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingTop: 3, paddingBottom: 3 }}>

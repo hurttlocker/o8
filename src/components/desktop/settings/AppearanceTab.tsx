@@ -184,7 +184,7 @@ function PalettePreviewCard({
           gap: 12,
         }}
       >
-        <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+        <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
           {palette.name.toLowerCase()}
         </div>
         <div
@@ -279,7 +279,7 @@ function TransparencyOptionRow({
           style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 11.5,
-            fontWeight: 500,
+            fontWeight: 300,
             letterSpacing: '0.04em',
             textTransform: 'uppercase',
             color: active ? RAMS_ACCENT : 'var(--t-text)',
@@ -382,7 +382,7 @@ function DictationInputModeToggle() {
                 style={{
                   fontFamily: MONO_FONT_STACK,
                   fontSize: 11.5,
-                  fontWeight: 500,
+                  fontWeight: 300,
                   letterSpacing: '0.04em',
                   textTransform: 'uppercase',
                   color: active ? RAMS_ACCENT : 'var(--t-text)',
@@ -461,7 +461,7 @@ function TimelineVisibilityToggle() {
                 style={{
                   fontFamily: MONO_FONT_STACK,
                   fontSize: 11.5,
-                  fontWeight: 500,
+                  fontWeight: 300,
                   letterSpacing: '0.04em',
                   textTransform: 'uppercase',
                   color: active ? RAMS_ACCENT : 'var(--t-text)',

@@ -294,9 +294,10 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
               color: surface === 'solid' ? 'var(--t-chat-surface-text)' : 'var(--t-text)',
-              fontSize: 13,
-              fontWeight: 650,
-              letterSpacing: '-0.01em',
+              fontSize: 13.5,
+              fontWeight: 350,
+              letterSpacing: '-0.1px',
+              lineHeight: 1.25,
             }}>
               Workspace Notes
             </div>
@@ -307,7 +308,9 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
                 alignItems: 'center',
                 gap: 6,
                 fontFamily: MONO_FONT,
-                fontSize: 11,
+                fontSize: 9.5,
+                fontWeight: 300,
+                letterSpacing: '-0.2px',
                 fontVariantNumeric: 'tabular-nums',
                 flexShrink: 0,
               }}
@@ -318,13 +321,14 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
             </div>
           </div>
           <div style={{
-            marginTop: 2,
+            marginTop: 3,
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            color: error ? 'var(--t-brand-red)' : reviewing ? noteColor : 'var(--t-chat-surface-text-muted)',
-            fontSize: 11,
-            fontWeight: 600,
+            color: error ? 'var(--t-brand-red)' : reviewing ? noteColor : 'var(--t-text-faint)',
+            fontSize: 9.5,
+            fontWeight: 260,
+            letterSpacing: '-0.4px',
           }}>
             {reviewing ? 'o8 is reading your notes…' : status}
           </div>
@@ -359,7 +363,7 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
                 boxShadow: '0 10px 30px rgba(0, 0, 0, 0.22)',
                 color: isLight ? '#1a1e24' : '#e8ecf2',
               }}>
-                <div style={{ fontSize: 10.5, fontWeight: 700, letterSpacing: '0.06em', textTransform: 'uppercase', color: isLight ? '#8a93a3' : '#9aa3b2', marginBottom: 10 }}>Note color</div>
+                <div style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: isLight ? '#8a93a3' : '#9aa3b2', marginBottom: 10 }}>Note color</div>
                 <div
                   onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); pickHue(((e.clientX - r.left) / r.width) * 360); }}
                   onPointerMove={(e) => { if (e.buttons === 1) { const r = e.currentTarget.getBoundingClientRect(); pickHue(((e.clientX - r.left) / r.width) * 360); } }}
@@ -389,9 +393,9 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 12 }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
                     <span style={{ width: 14, height: 14, borderRadius: 4, background: noteColor, flexShrink: 0, border: '1px solid rgba(128, 128, 128, 0.4)' }} />
-                    <span style={{ fontSize: 11, color: isLight ? '#5b6475' : '#9aa3b2' }}>{customColor == null ? 'Default' : 'Custom'}</span>
+                    <span style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: isLight ? '#5b6475' : '#9aa3b2' }}>{customColor == null ? 'Default' : 'Custom'}</span>
                   </div>
-                  <button type="button" onClick={resetColor} style={{ cursor: 'pointer', background: 'transparent', border: 'none', paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0, fontSize: 11, fontWeight: 600, color: isLight ? '#2563eb' : '#8ab4ff' }}>Reset</button>
+                  <button type="button" onClick={resetColor} style={{ cursor: 'pointer', background: 'transparent', border: 'none', paddingTop: 0, paddingBottom: 0, paddingLeft: 0, paddingRight: 0, fontSize: 11, fontWeight: 350, letterSpacing: '-0.1px', color: isLight ? '#2563eb' : '#8ab4ff' }}>Reset</button>
                 </div>
               </div>
             </>

@@ -71,7 +71,7 @@ export function ResetConfirmModal({
         <div style={{
           fontFamily: MONO_FONT_STACK,
           fontSize: 10,
-          fontWeight: 500,
+          fontWeight: 300,
           letterSpacing: '0.22em',
           textTransform: 'uppercase',
           color: '#d94f3a',
@@ -81,7 +81,7 @@ export function ResetConfirmModal({
         </div>
         <div style={{
           fontSize: 18,
-          fontWeight: 500,
+          fontWeight: 300,
           color: 'var(--t-text)',
           letterSpacing: '-0.02em',
           marginBottom: 14,
@@ -163,7 +163,7 @@ export function ResetConfirmModal({
             <span style={{
               fontFamily: MONO_FONT_STACK,
               fontSize: 11,
-              fontWeight: 500,
+              fontWeight: 300,
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
               color: '#ef4444',
@@ -228,7 +228,7 @@ export function ResetDoneModal({
         <div style={{
           fontFamily: MONO_FONT_STACK,
           fontSize: 10,
-          fontWeight: 500,
+          fontWeight: 300,
           letterSpacing: '0.22em',
           textTransform: 'uppercase',
           color: RAMS_ACCENT,
@@ -238,7 +238,7 @@ export function ResetDoneModal({
         </div>
         <div style={{
           fontSize: 18,
-          fontWeight: 500,
+          fontWeight: 300,
           color: 'var(--t-text)',
           letterSpacing: '-0.02em',
           marginBottom: 12,

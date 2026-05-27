@@ -126,7 +126,7 @@ export function GitHubTab({
           <span style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 11,
-            fontWeight: 500,
+            fontWeight: 300,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             color: RAMS_ACCENT,
@@ -153,7 +153,7 @@ export function GitHubTab({
             <AccountAvatar login={activeAccount.login} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 15, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                <span style={{ fontSize: 15, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
                   {activeAccount.login}
                 </span>
                 <BracketLabel tone="quiet">active</BracketLabel>
@@ -242,7 +242,7 @@ export function GitHubTab({
               <div style={{
                 fontFamily: MONO_FONT_STACK,
                 fontSize: 22,
-                fontWeight: 500,
+                fontWeight: 300,
                 color: 'var(--t-text)',
                 letterSpacing: '0.18em',
                 marginTop: 8,
@@ -417,7 +417,7 @@ export function GitHubTab({
           }}>
             <span style={{
               fontSize: 15,
-              fontWeight: 500,
+              fontWeight: 300,
               color: 'var(--t-text)',
               letterSpacing: '-0.01em',
             }}>
@@ -610,7 +610,7 @@ function primaryLinkStyle(disabled: boolean): React.CSSProperties {
     background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 600,
+    fontWeight: 350,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
@@ -636,7 +636,7 @@ function quietActionStyle(disabled: boolean): React.CSSProperties {
     background: disabled ? 'transparent' : RAMS_CONTROL_BG,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 600,
+    fontWeight: 350,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: 'var(--t-text-secondary)',

@@ -81,9 +81,10 @@ const CheckRow = memo(function CheckRow({ check, bucket }: { check: PrCheck; buc
             borderRadius: 7,
             border: 'none',
             background: 'transparent',
-            color: 'var(--t-text-secondary, var(--t-text-muted))',
+            color: 'var(--t-text-faint)',
             fontSize: 10,
-            fontWeight: 600,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             cursor: 'pointer',
             transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}
@@ -144,8 +145,8 @@ export const ChecksTab = memo(function ChecksTab({ checks }: ChecksTabProps) {
             >
               <span
                 style={{
-                  fontSize: 10,
-                  fontWeight: 700,
+                  fontSize: 9,
+                  fontWeight: 300,
                   letterSpacing: '0.04em',
                   textTransform: 'uppercase',
                   color: bucketColor(bucket),
@@ -153,7 +154,7 @@ export const ChecksTab = memo(function ChecksTab({ checks }: ChecksTabProps) {
               >
                 {bucketLabel(bucket)}
               </span>
-              <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontVariantNumeric: 'tabular-nums' }}>
+              <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', fontVariantNumeric: 'tabular-nums' }}>
                 {items.length}
               </span>
             </div>

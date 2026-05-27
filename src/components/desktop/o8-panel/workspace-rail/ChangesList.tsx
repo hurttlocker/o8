@@ -220,10 +220,10 @@ export function ChangesList({
           fontFamily: UI_FONT,
         }}
       >
-        <span style={{ color: 'var(--t-text-secondary)', fontSize: 10.5, fontWeight: 750 }}>
+        <span style={{ color: 'var(--t-text-faint)', fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px' }}>
           {changes.files.length} {changes.files.length === 1 ? 'file' : 'files'}
         </span>
-        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: MONO_FONT, fontSize: 10, fontWeight: 750 }}>
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px' }}>
           <span style={{ color: 'var(--t-terminal-ansi-bright-green, #22c55e)' }}>+{changes.totalAdditions}</span>
           <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{changes.totalDeletions}</span>
         </span>
@@ -258,9 +258,10 @@ export function ChangesList({
               color: selected ? 'var(--t-text)' : 'var(--t-text-secondary)',
               cursor: 'pointer',
               fontFamily: UI_FONT,
-              fontSize: 11.25,
-              fontWeight: 650,
-              letterSpacing: 0,
+              fontSize: 13.5,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
+              lineHeight: 1.25,
               paddingTop: 4,
               paddingRight: 8,
               paddingBottom: 4,
@@ -309,21 +310,21 @@ export function ChangesList({
               </span>
             </span>
             <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: selected ? 'var(--t-text)' : 'var(--t-text-secondary)', fontSize: 11.5 }}>
+              <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: selected ? 'var(--t-text)' : 'var(--t-text)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>
                 {name}
               </span>
               {directory ? (
-                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-faint)', fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 500 }}>
+                <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--t-text-faint)', fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px' }}>
                   {directory}
                 </span>
               ) : null}
             </span>
             <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0, fontFamily: MONO_FONT }}>
               {(file.additions ?? 0) > 0 ? (
-                <span style={{ color: 'var(--t-terminal-ansi-bright-green, #22c55e)', fontSize: 9.5, fontWeight: 700 }}>+{file.additions}</span>
+                <span style={{ color: 'var(--t-terminal-ansi-bright-green, #22c55e)', fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px' }}>+{file.additions}</span>
               ) : null}
               {(file.deletions ?? 0) > 0 ? (
-                <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)', fontSize: 9.5, fontWeight: 700 }}>-{file.deletions}</span>
+                <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)', fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px' }}>-{file.deletions}</span>
               ) : null}
             </span>
           </button>

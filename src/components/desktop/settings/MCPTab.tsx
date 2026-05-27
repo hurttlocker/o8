@@ -324,7 +324,7 @@ export function MCPTab() {
         }}>
           <div style={{
             fontSize: 13,
-            fontWeight: 500,
+            fontWeight: 300,
             color: 'var(--t-text)',
             marginBottom: 4,
             letterSpacing: '-0.005em',
@@ -332,7 +332,7 @@ export function MCPTab() {
             <span style={{
               fontFamily: MONO_FONT_STACK,
               fontSize: 11,
-              fontWeight: 500,
+              fontWeight: 300,
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
               color: '#ef4444',
@@ -453,11 +453,11 @@ export function MCPTab() {
             <div style={{
               marginTop: 14,
             }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', marginBottom: 4 }}>
+              <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', marginBottom: 4 }}>
                 <span style={{
                   fontFamily: MONO_FONT_STACK,
                   fontSize: 11,
-                  fontWeight: 500,
+                  fontWeight: 300,
                   letterSpacing: '0.12em',
                   textTransform: 'uppercase',
                   color: '#f59e0b',
@@ -480,11 +480,11 @@ export function MCPTab() {
             <div style={{
               marginTop: 14,
             }}>
-              <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', marginBottom: 4 }}>
+              <div style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', marginBottom: 4 }}>
                 <span style={{
                   fontFamily: MONO_FONT_STACK,
                   fontSize: 11,
-                  fontWeight: 500,
+                  fontWeight: 300,
                   letterSpacing: '0.12em',
                   textTransform: 'uppercase',
                   color: RAMS_INK_QUIET,
@@ -535,7 +535,7 @@ export function MCPTab() {
                   color: copied ? RAMS_ACCENT : 'var(--t-text-muted)',
                   fontSize: 11,
                   fontFamily: MONO_FONT_STACK,
-                  fontWeight: 600,
+                  fontWeight: 350,
                   letterSpacing: '0.04em',
                   textTransform: 'uppercase',
                   cursor: 'pointer',
@@ -608,7 +608,7 @@ function Disclosure({
         <span style={{ display: 'inline-flex', color: 'var(--t-text-muted)' }}>
           {open ? <ChevronDown size={13} strokeWidth={2} /> : <ChevronRight size={13} strokeWidth={2} />}
         </span>
-        <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+        <span style={{ fontSize: 13, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
           {title}
         </span>
         {subtitle ? (
@@ -915,7 +915,7 @@ function accentActionStyle(disabled: boolean): React.CSSProperties {
     background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 600,
+    fontWeight: 350,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
@@ -940,7 +940,7 @@ function quietActionStyle(disabled: boolean): React.CSSProperties {
     background: disabled ? 'transparent' : RAMS_CONTROL_BG,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 600,
+    fontWeight: 350,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: 'var(--t-text-muted)',

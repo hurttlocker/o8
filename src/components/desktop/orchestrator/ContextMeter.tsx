@@ -264,7 +264,7 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
           paddingLeft: 14,
         }}
       >
-        <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: '0', color: 'var(--t-text)' }}>
+        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
           Context
         </span>
         <button
@@ -304,8 +304,10 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
           paddingLeft: 14,
           paddingRight: 14,
           paddingBottom: 8,
-          fontSize: 11.5,
-          color: 'var(--t-text-muted)',
+          fontSize: 10,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
+          color: 'var(--t-text-faint)',
           fontFamily: MONO_STACK,
           fontVariantNumeric: 'tabular-nums',
         }}
@@ -385,11 +387,14 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
-                paddingTop: 8,
+                paddingTop: 6,
                 paddingRight: 14,
-                paddingBottom: 8,
+                paddingBottom: 6,
                 paddingLeft: 14,
-                fontSize: 12,
+                fontSize: 13.5,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                lineHeight: 1.25,
                 color: empty ? 'var(--t-text-faint)' : 'var(--t-text)',
                 opacity: dim ? 0.45 : 1,
                 transition: 'opacity 140ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -413,8 +418,10 @@ const ContextPopover = forwardRef<HTMLDivElement, ContextPopoverProps>(function 
                 style={{
                   fontFamily: MONO_STACK,
                   fontVariantNumeric: 'tabular-nums',
-                  fontSize: 11.5,
-                  color: empty ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
+                  fontSize: 9.5,
+                  fontWeight: 260,
+                  letterSpacing: '-0.4px',
+                  color: empty ? 'var(--t-text-faint)' : 'var(--t-text-faint)',
                 }}
               >
                 {meterLabel(row.tokens)}

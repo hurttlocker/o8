@@ -86,7 +86,7 @@ export function ProjectsPanel() {
           <div style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 10.5,
-            fontWeight: 600,
+            fontWeight: 350,
             letterSpacing: '0.2em',
             textTransform: 'uppercase',
             color: RAMS_INK_QUIET,
@@ -290,7 +290,7 @@ function RuntimeContextPanel({
           <div style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 10,
-            fontWeight: 650,
+            fontWeight: 350,
             letterSpacing: '0.16em',
             textTransform: 'uppercase',
             color: RAMS_INK_QUIET,
@@ -301,7 +301,7 @@ function RuntimeContextPanel({
           <div style={{
             fontFamily: APP_FONT_STACK,
             fontSize: 16,
-            fontWeight: 650,
+            fontWeight: 350,
             color: 'var(--t-text)',
             letterSpacing: '-0.02em',
           }}>
@@ -311,7 +311,7 @@ function RuntimeContextPanel({
         <div style={{
           fontFamily: MONO_FONT_STACK,
           fontSize: 10,
-          fontWeight: 650,
+          fontWeight: 350,
           letterSpacing: '0.1em',
           textTransform: 'uppercase',
           color: staleCount > 0 ? '#b45309' : RAMS_INK_QUIET,
@@ -430,7 +430,7 @@ function ProjectCapability({ label, value, muted }: { label: string; value: stri
       <div style={{
         fontFamily: MONO_FONT_STACK,
         fontSize: 9.5,
-        fontWeight: 600,
+        fontWeight: 350,
         letterSpacing: '0.14em',
         textTransform: 'uppercase',
         color: RAMS_INK_QUIET,
@@ -441,7 +441,7 @@ function ProjectCapability({ label, value, muted }: { label: string; value: stri
       <div style={{
         fontFamily: APP_FONT_STACK,
         fontSize: 13,
-        fontWeight: 600,
+        fontWeight: 350,
         color: muted ? RAMS_INK_QUIET : 'var(--t-text)',
         overflow: 'hidden',
         textOverflow: 'ellipsis',
@@ -499,7 +499,7 @@ function ProjectsEmptyState({ onCreate }: { onCreate: () => void }) {
             color: RAMS_ACCENT,
             fontFamily: MONO_FONT_STACK,
             fontSize: 11.5,
-            fontWeight: 500,
+            fontWeight: 300,
             letterSpacing: '0.06em',
             textTransform: 'uppercase',
             cursor: 'pointer',

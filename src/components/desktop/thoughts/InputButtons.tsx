@@ -263,7 +263,7 @@ function ModelThinkingChip({
           transition: 'background 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 500, letterSpacing: '0' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.1px' }}>
           {modelLabel}
         </span>
         <ThinkingBars effort={effort} active={open || effort === 'max'} />
@@ -300,9 +300,9 @@ function ModelThinkingChip({
             fontFamily: 'var(--font-sans-system)',
           }}
         >
-          <div style={{ paddingLeft: 5, paddingRight: 5, paddingBottom: 5, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-            <div style={{ fontSize: 10.5, fontWeight: 500, color: 'var(--t-text)', lineHeight: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</div>
-            <div style={{ marginTop: 1, fontSize: 9.5, fontWeight: 400, color: 'var(--t-text-muted)', lineHeight: '11px' }}>Thinking</div>
+          <div style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 6, borderBottom: '1px solid var(--t-divider-subtle)' }}>
+            <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</div>
+            <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Thinking</div>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {options.map((option) => {
@@ -343,8 +343,8 @@ function ModelThinkingChip({
                   }}
                 >
                   <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
-                    <span style={{ fontSize: 11.5, fontWeight: active ? 500 : 400, lineHeight: '14px' }}>{EFFORT_LABELS[option]}</span>
-                    <span style={{ fontSize: 9, fontWeight: 400, color: active ? 'var(--t-accent)' : 'var(--t-text-muted)', lineHeight: '11px' }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>{EFFORT_LABELS[option]}</span>
+                    <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '-0.2px', color: active ? 'var(--t-accent)' : 'var(--t-text-faint)', lineHeight: 1.25 }}>
                       {option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`}
                     </span>
                   </span>
@@ -520,8 +520,8 @@ function RepoTargetChip({
           outline: focused && canSelect ? '2px solid rgba(37, 99, 235, 0.14)' : 'none',
           outlineOffset: 1,
           fontSize: 10.5,
-          fontWeight: 500,
-          letterSpacing: '-0.005em',
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
           whiteSpace: 'nowrap',
           fontFamily: 'var(--font-sans-system)',
           transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), border-color 180ms cubic-bezier(0.22, 1, 0.36, 1), color 180ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -594,10 +594,10 @@ function RepoTargetChip({
                     fontFamily: 'var(--font-sans-system)',
                   }}
                 >
-                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 700 }}>
+                  <span style={{ minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px' }}>
                     {group.label}
                   </span>
-                  <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace" }}>
+                  <span style={{ fontSize: 9, fontWeight: 300, color: 'var(--t-text-faint)', letterSpacing: '-0.1px' }}>
                     {group.targets.length === 1 ? '1 target' : `${group.targets.length} targets`}
                   </span>
                 </div>
@@ -634,16 +634,16 @@ function RepoTargetChip({
                         fontFamily: 'var(--font-sans-system)',
                       }}
                     >
-                      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
-                        <span style={{ fontSize: 11.5, fontWeight: 650, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                           {targetLabel}
                         </span>
-                        <span style={{ fontSize: 9.5, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace" }}>
+                        <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace" }}>
                           {compactRepoPath(target.localPath)}
                         </span>
                       </span>
                       <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-                        <span style={{ fontSize: 9.5, color: active ? 'var(--t-accent)' : 'var(--t-text-faint)', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace" }}>
+                        <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px', color: active ? 'var(--t-accent)' : 'var(--t-text-faint)', fontFamily: "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace" }}>
                           {target.isWorktree ? 'worktree' : 'base'}
                         </span>
                         <span

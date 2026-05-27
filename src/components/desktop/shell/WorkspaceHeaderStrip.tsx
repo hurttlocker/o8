@@ -476,14 +476,15 @@ function HeaderPill({
           : hovered
             ? 'var(--t-hover)'
             : 'transparent',
-        color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
         cursor: 'pointer',
         whiteSpace: 'nowrap',
         flexShrink: 0,
         fontFamily: 'var(--font-sans-system)',
-        fontSize: 11.5,
-        fontWeight: active ? 560 : 500,
-        letterSpacing: '-0.005em',
+        fontSize: 12,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
+        lineHeight: 1.25,
         transition: 'background 120ms ease, color 120ms ease',
       }}
       onClick={() => onSelect(tab.id)}
@@ -843,9 +844,10 @@ function TitleMenuItem({ label, onClick }: { label: string; onClick: () => void 
         paddingBottom: 6,
         paddingLeft: 12,
         paddingRight: 12,
-        fontSize: 12,
-        fontWeight: 500,
-        letterSpacing: 0,
+        fontSize: 13.5,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
+        lineHeight: 1.25,
         fontFamily: 'var(--font-sans-system)',
       }}
     >

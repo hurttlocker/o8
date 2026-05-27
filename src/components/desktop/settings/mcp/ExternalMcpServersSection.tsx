@@ -281,7 +281,7 @@ export function ExternalMcpServersSection() {
                         ? <Globe size={13} strokeWidth={1.8} />
                         : <Terminal size={13} strokeWidth={1.8} />}
                     </span>
-                    <span style={{ fontWeight: 500 }}>{candidate.name ?? 'unnamed'}</span>
+                    <span style={{ fontWeight: 300 }}>{candidate.name ?? 'unnamed'}</span>
                     <span style={{
                       fontFamily: MONO_FONT,
                       fontSize: 11,
@@ -320,7 +320,7 @@ export function ExternalMcpServersSection() {
             <span style={{
               fontFamily: MONO_FONT_STACK,
               fontSize: 11,
-              fontWeight: 500,
+              fontWeight: 300,
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
               color: note.ok ? '#22c55e' : '#ef4444',
@@ -341,7 +341,7 @@ export function ExternalMcpServersSection() {
             <span style={{
               fontFamily: MONO_FONT_STACK,
               fontSize: 11,
-              fontWeight: 500,
+              fontWeight: 300,
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
               color: '#ef4444',
@@ -602,7 +602,7 @@ function ServerRow({
           <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{
               fontSize: 14,
-              fontWeight: 500,
+              fontWeight: 300,
               color: 'var(--t-text)',
               letterSpacing: '-0.01em',
             }}>
@@ -794,7 +794,7 @@ function transportPillStyle(active: boolean): React.CSSProperties {
     minWidth: 44,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 600,
+    fontWeight: 350,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: active ? RAMS_ACCENT : 'var(--t-text-secondary)',
@@ -824,7 +824,7 @@ function parseButtonStyle(disabled: boolean): React.CSSProperties {
     background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 600,
+    fontWeight: 350,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
@@ -850,7 +850,7 @@ function submitButtonStyle(disabled: boolean): React.CSSProperties {
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 500,
+    fontWeight: 300,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     cursor: disabled ? 'default' : 'pointer',
@@ -874,7 +874,7 @@ function quietActionStyle(disabled: boolean): React.CSSProperties {
     background: disabled ? 'transparent' : RAMS_CONTROL_BG,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 600,
+    fontWeight: 350,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: 'var(--t-text-secondary)',
@@ -899,7 +899,7 @@ function rowLinkStyle(disabled: boolean): React.CSSProperties {
     background: disabled ? 'transparent' : RAMS_CONTROL_BG,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11,
-    fontWeight: 600,
+    fontWeight: 350,
     letterSpacing: '0.04em',
     textTransform: 'uppercase',
     color: disabled ? RAMS_INK_QUIET : 'var(--t-text-secondary)',

@@ -187,7 +187,7 @@ export function CloudWorkersTab() {
           <span style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 11,
-            fontWeight: 500,
+            fontWeight: 300,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             color: '#ef4444',
@@ -244,7 +244,7 @@ export function CloudWorkersTab() {
               <span style={{
                 fontFamily: MONO_FONT_STACK,
                 fontSize: 11,
-                fontWeight: 500,
+                fontWeight: 300,
                 letterSpacing: '0.12em',
                 textTransform: 'uppercase',
                 color: RAMS_ACCENT,
@@ -343,7 +343,7 @@ export function CloudWorkersTab() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div style={{ minWidth: 0, flex: '1 1 420px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                      <span style={{ fontSize: 14, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
                         {key.label || 'Untitled key'}
                       </span>
                       <BracketLabel tone="quiet">{key.teamId}</BracketLabel>
@@ -508,7 +508,7 @@ function accentLinkStyle(disabled: boolean): React.CSSProperties {
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 500,
+    fontWeight: 300,
     letterSpacing: '0.04em',
     textTransform: 'uppercase' as const,
     cursor: disabled ? 'default' : 'pointer',

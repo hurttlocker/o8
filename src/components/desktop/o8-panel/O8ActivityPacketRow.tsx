@@ -359,13 +359,14 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
-              fontSize: 14,
+              fontSize: 13.5,
               color: 'var(--t-text)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              lineHeight: '19px',
-              fontWeight: 400,
+              lineHeight: 1.25,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
             }}
           >
             {packet.title}
@@ -375,12 +376,13 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              marginTop: 1,
-              fontSize: 12,
-              fontWeight: 400,
-              color: 'var(--t-text-muted)',
+              marginTop: 3,
+              fontSize: 9.5,
+              fontWeight: 260,
+              letterSpacing: '-0.4px',
+              color: 'var(--t-text-faint)',
               fontFamily: 'var(--font-sans-system)',
-              lineHeight: '16px',
+              lineHeight: 1.25,
             }}
           >
             <span>{runtimeMeta.label}</span>
@@ -406,8 +408,8 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
             paddingBottom: 1,
             paddingLeft: 6,
             borderRadius: 999,
-            fontSize: 11,
-            fontWeight: 600,
+            fontSize: 9,
+            fontWeight: 300,
             flexShrink: 0,
             marginTop: 4,
             background: `${statusMeta.color}1a`,

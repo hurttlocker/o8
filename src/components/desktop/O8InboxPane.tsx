@@ -249,20 +249,20 @@ export function O8InboxPane() {
       >
         <div
           style={{
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.1em',
+            fontSize: 9,
+            fontWeight: 300,
+            letterSpacing: '0.04em',
             textTransform: 'uppercase',
             color: 'var(--t-text-faint)',
-            marginBottom: 2,
+            marginBottom: 4,
           }}
         >
           Governance
         </div>
-        <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--t-text)', marginBottom: 2 }}>
+        <div style={{ fontSize: 15, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)', marginBottom: 3 }}>
           Incident Queue
         </div>
-        <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)', marginBottom: 10 }}>
           Deduped agent failures that still need operator attention.
         </div>
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -343,32 +343,33 @@ export function O8InboxPane() {
                           ? 'var(--t-accent)'
                           : 'var(--t-text-secondary)',
                       fontSize: 9,
-                      fontWeight: 700,
+                      fontWeight: 300,
+                      letterSpacing: '0.04em',
                     }}
                   >
                     {KIND_LABELS[item.kind]}
                   </span>
-                  <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--t-text-secondary)' }}>
+                  <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', color: 'var(--t-text-faint)' }}>
                     {STATUS_LABELS[item.status]}
                   </span>
                   {verificationKind ? (
-                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--t-text-faint)' }}>
+                    <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', color: 'var(--t-text-faint)' }}>
                       {verificationKind}
                     </span>
                   ) : null}
                   {item.repeatCount > 1 ? (
-                    <span style={{ fontSize: 9, fontWeight: 700, color: 'var(--t-text-faint)' }}>
+                    <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', color: 'var(--t-text-faint)' }}>
                       x{item.repeatCount}
                     </span>
                   ) : null}
-                  <span style={{ fontSize: 9, color: 'var(--t-text-faint)', marginLeft: 'auto' }}>
+                  <span style={{ fontSize: 9, fontWeight: 260, letterSpacing: '-0.2px', color: 'var(--t-text-faint)', marginLeft: 'auto' }}>
                     {formatTimestamp(item.lastSeenAt)}
                   </span>
                 </div>
-                <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)', marginBottom: 3 }}>
+                <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)', marginBottom: 4, lineHeight: 1.25 }}>
                   {packetLabel(item)}
                 </div>
-                <div style={{ fontSize: 11, lineHeight: 1.45, color: 'var(--t-text-secondary)', marginBottom: 6 }}>
+                <div style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)', marginBottom: 6 }}>
                   {item.errorExcerpt}
                 </div>
                 {transcriptPreview ? (
@@ -550,10 +551,11 @@ function FilterChip({
         border: 'none',
         background: active ? activeBackground : 'transparent',
         color,
-        fontSize: 10,
-        fontWeight: 700,
+        fontSize: 11,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
         cursor: 'pointer',
-        lineHeight: 1,
+        lineHeight: 1.25,
         whiteSpace: 'nowrap',
         transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
       }}

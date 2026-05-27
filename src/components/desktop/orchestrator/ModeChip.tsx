@@ -125,8 +125,8 @@ export function ModeChip({
           cursor: 'pointer',
           fontFamily: FONT_FAMILY,
           fontSize: 10.5,
-          fontWeight: 500,
-          letterSpacing: '-0.005em',
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
           whiteSpace: 'nowrap',
           transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
@@ -211,11 +211,11 @@ function PopoverSectionLabel({ children }: { children: React.ReactNode }) {
         paddingRight: 8,
         paddingBottom: 4,
         paddingLeft: 8,
-        fontSize: 9.5,
-        fontWeight: 700,
-        color: 'var(--t-text-muted)',
+        fontSize: 9,
+        fontWeight: 300,
+        color: 'var(--t-text-faint)',
         textTransform: 'uppercase',
-        letterSpacing: '0.06em',
+        letterSpacing: '0.04em',
       }}
     >
       {children}
@@ -273,18 +273,21 @@ function PopoverRow({ active, title, detail, onClick, glyph, disabled }: Popover
       <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span
           style={{
-            fontSize: 12,
-            fontWeight: 600,
+            fontSize: 13.5,
+            fontWeight: 300,
             color: 'var(--t-text)',
-            letterSpacing: '-0.005em',
+            letterSpacing: '-0.1px',
+            lineHeight: 1.25,
           }}
         >
           {title}
         </span>
         <span
           style={{
-            fontSize: 10.5,
-            color: 'var(--t-text-muted)',
+            fontSize: 10,
+            fontWeight: 300,
+            color: 'var(--t-text-faint)',
+            letterSpacing: '-0.1px',
             lineHeight: 1.35,
           }}
         >

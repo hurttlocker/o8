@@ -204,8 +204,9 @@ function UsageLine({
       <span
         style={{
           color: TEXT,
-          fontSize: 10.5,
-          fontWeight: 520,
+          fontSize: 12,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
           whiteSpace: 'nowrap',
           display: 'inline-flex',
           alignItems: 'center',
@@ -218,10 +219,10 @@ function UsageLine({
         </span>
         {label}
       </span>
-      <span style={{ color: MUTED, fontSize: 10.5, fontWeight: 480, whiteSpace: 'nowrap' }}>
+      <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', whiteSpace: 'nowrap' }}>
         {value}
       </span>
-      <span style={{ color: FAINT, fontFamily: MONO, fontSize: 9.5, whiteSpace: 'nowrap' }}>
+      <span style={{ color: FAINT, fontFamily: MONO, fontSize: 9, fontWeight: 260, letterSpacing: '-0.2px', whiteSpace: 'nowrap' }}>
         {reset}
       </span>
       <MiniBar percent={percent} tone={tone} />
@@ -397,9 +398,10 @@ export function SettingsQuickDrawer({
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
-                  color: MUTED,
-                  fontSize: 10,
-                  fontWeight: 500,
+                  color: 'var(--t-text-faint)',
+                  fontSize: 9.5,
+                  fontWeight: 260,
+                  letterSpacing: '-0.4px',
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -410,8 +412,10 @@ export function SettingsQuickDrawer({
               <div
                 style={{
                   color: TEXT,
-                  fontSize: 12,
-                  fontWeight: 560,
+                  fontSize: 13.5,
+                  fontWeight: 300,
+                  letterSpacing: '-0.1px',
+                  lineHeight: 1.25,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -426,7 +430,7 @@ export function SettingsQuickDrawer({
 
           <RowButton onClick={onOpenSettings}>
             <IconFrame><Settings2 size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontWeight: 540 }}>Settings</span>
+            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Settings</span>
           </RowButton>
 
           <div style={separatorStyle()} />
@@ -438,7 +442,7 @@ export function SettingsQuickDrawer({
             }}
           >
             <IconFrame><Gauge size={13} /></IconFrame>
-            <span style={{ flex: 1, color: TEXT, fontWeight: 540 }}>Usage remaining</span>
+            <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Usage remaining</span>
             <span
               style={{
                 color: MUTED,
@@ -484,8 +488,9 @@ export function SettingsQuickDrawer({
                     background: SUBTLE_BG,
                     color: TEXT,
                     fontFamily: FONT,
-                    fontSize: 10.5,
-                    fontWeight: 540,
+                    fontSize: 11,
+                    fontWeight: 300,
+                    letterSpacing: '-0.1px',
                     display: 'inline-flex',
                     alignItems: 'center',
                     justifyContent: 'center',

@@ -36,7 +36,8 @@ const SPLIT_FACE: CSSProperties = {
   color: 'var(--t-text)',
   fontFamily: UI_FONT,
   fontSize: 12,
-  fontWeight: 650,
+  fontWeight: 350,
+  letterSpacing: '-0.1px',
   cursor: 'pointer',
 };
 
@@ -120,7 +121,8 @@ function ComposerButton({ label, primary, disabled, onClick }: { label: string; 
         color: primary ? '#ffffff' : 'var(--t-text-muted)',
         fontFamily: UI_FONT,
         fontSize: 11.5,
-        fontWeight: 650,
+        fontWeight: 350,
+  letterSpacing: '-0.1px',
         cursor: disabled ? 'default' : 'pointer',
         opacity: disabled ? 0.6 : 1,
       }}
@@ -281,7 +283,8 @@ export function ReviewGitActions({
           color: onDefaultBranch ? 'var(--t-text-faint)' : 'var(--t-text)',
           fontFamily: UI_FONT,
           fontSize: 12,
-          fontWeight: 650,
+          fontWeight: 350,
+  letterSpacing: '-0.1px',
           cursor: onDefaultBranch ? 'not-allowed' : 'pointer',
           opacity: onDefaultBranch ? 0.55 : 1,
         }}

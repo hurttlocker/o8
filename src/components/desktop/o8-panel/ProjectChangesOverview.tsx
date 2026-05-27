@@ -73,16 +73,16 @@ function RepoChangesGroup({ repo, onPick }: { repo: RepoRegistryEntry; onPick: (
         }}>
           <IconFolder size={12} color="var(--t-text-secondary)" />
         </span>
-        <span style={{ fontSize: 12.5, fontWeight: 650, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1, minWidth: 0 }}>
           {repo.name}
         </span>
         {hasChanges ? (
-          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: MONO_FONT, fontSize: 10, fontWeight: 750, flexShrink: 0 }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px', flexShrink: 0 }}>
             <span style={{ color: 'var(--t-terminal-ansi-bright-green, #22c55e)' }}>+{changes.totalAdditions}</span>
             <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{changes.totalDeletions}</span>
           </span>
         ) : null}
-        <span style={{ fontSize: 10.5, fontWeight: 600, color: 'var(--t-text-faint)', flexShrink: 0, fontFamily: UI_FONT }}>
+        <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', flexShrink: 0, fontFamily: UI_FONT }}>
           {summary}
         </span>
       </button>
@@ -115,15 +115,15 @@ function RepoChangesGroup({ repo, onPick }: { repo: RepoRegistryEntry; onPick: (
                 onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
                 onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
               >
-                <span style={{ fontSize: 11.5, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0, maxWidth: '60%' }}>
+                <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0, maxWidth: '60%' }}>
                   {name}
                 </span>
                 {dir ? (
-                  <span style={{ fontSize: 10.5, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>
+                  <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0, flex: 1 }}>
                     {dir}
                   </span>
                 ) : <span style={{ flex: 1 }} />}
-                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 700, flexShrink: 0 }}>
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.2px', flexShrink: 0 }}>
                   {file.additions ? <span style={{ color: 'var(--t-terminal-ansi-bright-green, #22c55e)' }}>+{file.additions}</span> : null}
                   {file.deletions ? <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{file.deletions}</span> : null}
                 </span>
@@ -150,7 +150,7 @@ export function ProjectChangesOverview({
 
   if (sortedRepos.length === 0) {
     return (
-      <div style={{ paddingTop: 16, paddingRight: 14, paddingBottom: 16, paddingLeft: 14, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 11.5 }}>
+      <div style={{ paddingTop: 16, paddingRight: 14, paddingBottom: 16, paddingLeft: 14, color: 'var(--t-text-faint)', fontFamily: UI_FONT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>
         No repos in this project.
       </div>
     );

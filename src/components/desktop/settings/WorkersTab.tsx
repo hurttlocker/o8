@@ -262,7 +262,7 @@ export function WorkersTab() {
           <span style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 11,
-            fontWeight: 500,
+            fontWeight: 300,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             color: '#ef4444',
@@ -318,7 +318,7 @@ export function WorkersTab() {
               <span style={{
                 fontFamily: MONO_FONT_STACK,
                 fontSize: 11,
-                fontWeight: 500,
+                fontWeight: 300,
                 letterSpacing: '0.12em',
                 textTransform: 'uppercase',
                 color: RAMS_ACCENT,
@@ -421,7 +421,7 @@ export function WorkersTab() {
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12, flexWrap: 'wrap' }}>
                   <div style={{ minWidth: 0, flex: '1 1 420px', display: 'flex', flexDirection: 'column', gap: 6 }}>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                      <span style={{ fontSize: 14, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
                         {token.label || 'Untitled token'}
                       </span>
                       <BracketLabel tone="quiet">{token.scope}</BracketLabel>
@@ -546,7 +546,7 @@ export function WorkersTab() {
               }}>
                 <div style={{ minWidth: 0, flex: '1 1 360px' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap', marginBottom: 4 }}>
-                    <span style={{ fontSize: 14, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                    <span style={{ fontSize: 14, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
                       {token.label || 'Untitled token'}
                     </span>
                     {token.hasActiveRuns ? <BracketLabel tone="accent">active</BracketLabel> : null}
@@ -593,7 +593,7 @@ export function WorkersTab() {
           }}
         >
           <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
-            <div style={{ fontSize: 14, fontWeight: 500, color: 'var(--t-text)', marginBottom: 4, letterSpacing: '-0.01em' }}>
+            <div style={{ fontSize: 14, fontWeight: 300, color: 'var(--t-text)', marginBottom: 4, letterSpacing: '-0.01em' }}>
               Enable on next launch
             </div>
             <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
@@ -659,7 +659,7 @@ export function WorkersTab() {
             <span style={{
               fontFamily: MONO_FONT_STACK,
               fontSize: 11,
-              fontWeight: 500,
+              fontWeight: 300,
               letterSpacing: '0.12em',
               textTransform: 'uppercase',
               color: '#f59e0b',
@@ -761,7 +761,7 @@ function accentLinkStyle(disabled: boolean): React.CSSProperties {
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 500,
+    fontWeight: 300,
     letterSpacing: '0.04em',
     textTransform: 'uppercase' as const,
     cursor: disabled ? 'default' : 'pointer',
