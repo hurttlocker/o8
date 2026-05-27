@@ -643,6 +643,12 @@ function OrchestratorTabInner({
   // committed to this conversation); here we just track the operator's
   // intent so the chip label reflects the chosen branch immediately.
   const [pickedBranch, setPickedBranch] = useState<string | null>(null);
+  // "Don't work in a project" override — the Project chip's clear
+  // action doesn't have a way to wipe tab.repo from this layer, so we
+  // track the operator's intent locally and let the empty-state
+  // surface render with no project context. Resets to false the
+  // moment the operator picks another project.
+  const [scopeCleared, setScopeCleared] = useState(false);
 
   // Kind toggle on the empty state. lockedMode='chat' = llm-chat tab,
   // can't pivot. Otherwise: 'chat' if the tab's current mode is chat,
@@ -670,9 +676,12 @@ function OrchestratorTabInner({
 
   // Resolve the active workspace target for the Project chip label.
   const activeWorkspaceTarget = useMemo(() => (
-    data?.workspaceTargets?.find((target) => target.localPath === (repoPath ?? '')) ?? null
-  ), [data?.workspaceTargets, repoPath]);
-  const projectLabel = repoLabel ?? activeWorkspaceTarget?.repoName ?? null;
+    scopeCleared
+      ? null
+      : (data?.workspaceTargets?.find((target) => target.localPath === (repoPath ?? '')) ?? null)
+  ), [data?.workspaceTargets, repoPath, scopeCleared]);
+  const projectLabel = scopeCleared ? null : (repoLabel ?? activeWorkspaceTarget?.repoName ?? null);
+  const effectiveRepoPath = scopeCleared ? null : (repoPath ?? null);
   const branchLabel = pickedBranch ?? activeWorkspaceTarget?.branch?.trim() ?? 'main';
   // Reset the local override whenever the target repo changes — the
   // chip otherwise sticks to the prior repo's branch name.
@@ -685,12 +694,11 @@ function OrchestratorTabInner({
   // operator pick a Worktree mode + Branch up front; when they finally
   // send the first message we "lock in" those choices:
   //   - Branch picked ≠ repo's current branch → checkout it.
-  //   - Worktree mode 'new-worktree' → POST /api/worktrees to provision
-  //     a fresh worktree for this chat (taskName derived from threadId
-  //     so the directory name is stable). Store the resulting path on
-  //     the tab so downstream dispatches can read tab.worktreePath and
-  //     route the agent's cwd into the worktree.
-  //   - Always persist the operator's worktreeMode choice to the tab.
+  //   - Worktree mode → persist on the tab so any downstream dispatch
+  //     (mcp__o8__dispatch_mission) reads tab.worktreeMode and
+  //     provisions a worktree at THAT point, not now. Provisioning
+  //     upfront for a pure brainstorm chat was wasteful and the create
+  //     call hung the chat pipeline on cortex-sized repos (#1142).
   // All network calls are fire-and-forget; failures log to console.
   const lockedInRef = useRef(false);
   useEffect(() => {
@@ -709,43 +717,10 @@ function OrchestratorTabInner({
       });
     }
     if (spawnHandlers) {
-      // Persist the worktree mode first so a reload during the POST
-      // still has the chosen value on the tab.
       spawnHandlers.updateTabMode(tabId, { worktreeMode });
-    }
-    if (worktreeMode === 'new-worktree' && repoPath) {
-      const threadSuffix = (chatChromeState.threadId ?? `tab-${tabId}`).slice(-12);
-      const taskName = `orchestrator-${threadSuffix}`;
-      void (async () => {
-        try {
-          const res = await fetch('/api/worktrees', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              repo: repoPath,
-              agentType: 'orchestrator',
-              taskName,
-              baseBranch: pickedBranch ?? activeWorkspaceTarget?.branch ?? 'main',
-              managed: true,
-            }),
-          });
-          if (!res.ok) {
-            console.error('[empty-state] worktree POST failed', res.status, await res.text());
-            return;
-          }
-          const data = (await res.json()) as { worktree?: { path?: string } };
-          const worktreePath = data.worktree?.path;
-          if (worktreePath && spawnHandlers) {
-            spawnHandlers.updateTabMode(tabId, { worktreePath });
-          }
-        } catch (error) {
-          console.error('[empty-state] worktree provisioning failed', error);
-        }
-      })();
     }
   }, [
     chatChromeState.hasMessages,
-    chatChromeState.threadId,
     pickedBranch,
     repoPath,
     activeWorkspaceTarget?.branch,
@@ -755,10 +730,12 @@ function OrchestratorTabInner({
   ]);
 
   const handleEmptySelectProject = useCallback((target: { localPath: string; repoName: string }) => {
-    // Switching project on a fresh empty tab — dispatch the existing
-    // o8:select-workspace-scope event the dashboard listens for. If the
-    // tab has already received its first message this branch is
-    // unreachable (the empty state itself is gone).
+    // Switching project on a fresh empty tab — clear the no-project
+    // override (if it was set) so the chosen project actually surfaces
+    // in the title + chip, then dispatch the existing scope-select
+    // event the dashboard listens for. After first message the empty
+    // state is gone so this path is unreachable.
+    setScopeCleared(false);
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent('o8:select-workspace-scope', {
       detail: { repoPath: target.localPath, repoName: target.repoName },
@@ -769,6 +746,11 @@ function OrchestratorTabInner({
     window.dispatchEvent(new CustomEvent('o8:open-add-repo-flow', { detail: { mode } }));
   }, []);
   const handleEmptyWorkWithoutProject = useCallback(() => {
+    // Local override — tab.repo isn't directly mutable from this
+    // layer, but the empty-state surface respects `scopeCleared` so
+    // the title flips to "your workspace" and the chip reads "No
+    // project". Picking another project resets this.
+    setScopeCleared(true);
     if (typeof window === 'undefined') return;
     window.dispatchEvent(new CustomEvent('o8:select-workspace-scope', {
       detail: { repoPath: null, repoName: null },
@@ -781,7 +763,7 @@ function OrchestratorTabInner({
         greeting={greeting}
         runtimeLabel={runtimeLabel}
         onActionClick={handleQuickAction}
-        repoPath={repoPath ?? null}
+        repoPath={effectiveRepoPath}
         repoLabel={projectLabel}
         workspaceTargets={data?.workspaceTargets ?? []}
         onSelectProject={handleEmptySelectProject}
@@ -888,7 +870,7 @@ function OrchestratorTabInner({
           worktreeMode={worktreeMode}
           onWorktreeModeChange={setWorktreeMode}
           branch={branchLabel}
-          repoPath={repoPath ?? null}
+          repoPath={effectiveRepoPath}
           onBranchChange={setPickedBranch}
           kind={emptyKind}
           kindLocked={emptyKindLocked}
