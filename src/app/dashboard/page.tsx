@@ -24,7 +24,7 @@ import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
 import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
 import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
-import { useProjects } from '@/components/desktop/repo-registry/useProjects';
+import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { ApprovalBanner } from '@/components/desktop/ApprovalBanner';
@@ -51,6 +51,7 @@ import { fetchOnce } from '@/lib/panel/fetch-cache';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { MobileInboxSnapshot, MobileOrchestratorThread } from '@/lib/mobile/types';
+import type { AgentSummary } from '@/lib/fleet/types';
 import type {
   OrchestratorLaneBinding,
   OrchestratorLaneSnapshot,
@@ -159,7 +160,7 @@ import {
 } from '@/lib/tiles/operations';
 import type { TileContentKind, TileLayout, TileLeafNode } from '@/lib/tiles/types';
 
-const DEFAULT_LEFT_PANEL_WIDTH = 250;
+const DEFAULT_LEFT_PANEL_WIDTH = 300;
 const FOCUS_LEFT_PANEL_WIDTH = 320;
 const CONTROL_ROOM_WIDTH = 760; // wide "control-room mode" — Control tab opens the left panel wide for the two-column layout
 const MIN_RIGHT_PANEL_WIDTH = 240;
@@ -211,6 +212,299 @@ function BottomCenterTerminalToggle({ active, onClick }: { active: boolean; onCl
         <line x1="12" x2="20" y1="19" y2="19" />
       </svg>
     </button>
+  );
+}
+
+/**
+ * SidebarHoverPreviewBody — content shown inside the drop-from-top overlay
+ * when the AgentPanel column is collapsed and the operator hovers the left
+ * edge. Renders a condensed snapshot of the same data the full sidebar
+ * surfaces — active project + repo list + live packets + sessions — so the
+ * operator can scan and click through chats without expanding the panel.
+ *
+ * Kept intentionally lightweight (no useEffect-driven fetches, no expensive
+ * memoization) since the parent `AnimatePresence` mounts/unmounts it on
+ * every hover-enter. The data props are already-computed snapshots from
+ * DashboardInner, so re-renders are cheap.
+ */
+interface SidebarHoverPreviewBodyProps {
+  projects: ProjectRecord[];
+  activeProjectId: string | null;
+  repos: RepoRegistryEntry[];
+  packets: OrchestratorPacket[];
+  sessions: AgentSummary[];
+  activeSessionKey: string | null;
+  onOpenFullPanel: () => void;
+  onSelectSession: (sessionKey: string) => void;
+}
+
+function SidebarHoverPreviewBody({
+  projects,
+  activeProjectId,
+  repos,
+  packets,
+  sessions,
+  activeSessionKey,
+  onOpenFullPanel,
+  onSelectSession,
+}: SidebarHoverPreviewBodyProps) {
+  const activeProject = projects.find((p) => p.id === activeProjectId) ?? projects[0] ?? null;
+  const livePackets = packets.filter((p) => p.status !== 'released' && p.status !== 'archived');
+  const previewPackets = livePackets.slice(0, 5);
+  const previewSessions = sessions.slice(0, 6);
+
+  // Hurttlocker spec — system stack only, no Inter; chrome rows clamp at
+  // fontWeight 400, section labels at 300 and 10px tracked uppercase, row
+  // titles at 13.5/300/-0.1px.
+  const sectionLabelStyle: React.CSSProperties = {
+    display: 'block',
+    paddingLeft: 14,
+    paddingRight: 14,
+    paddingTop: 8,
+    paddingBottom: 4,
+    fontSize: 10,
+    fontWeight: 300,
+    letterSpacing: 0.6,
+    textTransform: 'uppercase',
+    color: 'var(--t-text-muted)',
+  };
+  const rowTitleStyle: React.CSSProperties = {
+    fontSize: 13.5,
+    fontWeight: 300,
+    letterSpacing: -0.1,
+    color: 'var(--t-text)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  };
+  const rowMetaStyle: React.CSSProperties = {
+    fontSize: 11,
+    fontWeight: 300,
+    color: 'var(--t-text-muted)',
+    whiteSpace: 'nowrap',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+  };
+
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+      }}
+    >
+      {/* Header — project name + open-full-panel affordance */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          gap: 10,
+          paddingLeft: 14,
+          paddingRight: 12,
+          paddingTop: 12,
+          paddingBottom: 10,
+          borderBottom: '1px solid var(--t-divider-subtle)',
+          flexShrink: 0,
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <span
+            style={{
+              fontSize: 10,
+              fontWeight: 300,
+              letterSpacing: 0.6,
+              textTransform: 'uppercase',
+              color: 'var(--t-text-muted)',
+            }}
+          >
+            Project
+          </span>
+          <span
+            style={{
+              fontSize: 13.5,
+              fontWeight: 400,
+              letterSpacing: -0.1,
+              color: 'var(--t-text)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {activeProject?.name ?? 'No project'}
+          </span>
+        </div>
+        <button
+          type="button"
+          onClick={onOpenFullPanel}
+          aria-label="Open full sidebar"
+          title="Open full sidebar"
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            height: 26,
+            minWidth: 26,
+            paddingLeft: 8,
+            paddingRight: 8,
+            borderWidth: 0,
+            borderRadius: 7,
+            background: 'transparent',
+            color: 'var(--t-text-secondary)',
+            cursor: 'pointer',
+            fontSize: 11,
+            fontWeight: 300,
+            letterSpacing: 0.2,
+            fontFamily: 'inherit',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; e.currentTarget.style.color = 'var(--t-text)'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
+        >
+          Open
+        </button>
+      </div>
+
+      {/* Scrollable body — repos / packets / sessions sections */}
+      <div
+        className="cortex-themed-scroll"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          paddingBottom: 8,
+        }}
+      >
+        {repos.length > 0 && (
+          <>
+            <span style={sectionLabelStyle}>Repos</span>
+            {repos.slice(0, 6).map((repo) => (
+              <div
+                key={repo.id}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  paddingLeft: 14,
+                  paddingRight: 14,
+                  paddingTop: 6,
+                  paddingBottom: 6,
+                  minHeight: 28,
+                }}
+              >
+                <span style={rowTitleStyle}>{repo.name}</span>
+                {repo.readiness?.currentBranch ? (
+                  <span style={{ ...rowMetaStyle, marginLeft: 'auto' }}>{repo.readiness.currentBranch}</span>
+                ) : null}
+              </div>
+            ))}
+            {repos.length > 6 ? (
+              <div style={{ ...rowMetaStyle, paddingLeft: 14, paddingTop: 4, paddingBottom: 4 }}>
+                +{repos.length - 6} more
+              </div>
+            ) : null}
+          </>
+        )}
+
+        {previewPackets.length > 0 && (
+          <>
+            <span style={sectionLabelStyle}>Active packets</span>
+            {previewPackets.map((packet) => (
+              <div
+                key={packet.id}
+                style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  paddingLeft: 14,
+                  paddingRight: 14,
+                  paddingTop: 6,
+                  paddingBottom: 6,
+                  minHeight: 32,
+                }}
+              >
+                <span style={rowTitleStyle}>{packet.title || packet.referenceLabel || packet.id}</span>
+                <span style={rowMetaStyle}>
+                  {packet.status}
+                  {packet.branchTarget ? ` · ${packet.branchTarget}` : ''}
+                </span>
+              </div>
+            ))}
+            {livePackets.length > previewPackets.length ? (
+              <div style={{ ...rowMetaStyle, paddingLeft: 14, paddingTop: 4, paddingBottom: 4 }}>
+                +{livePackets.length - previewPackets.length} more
+              </div>
+            ) : null}
+          </>
+        )}
+
+        {previewSessions.length > 0 && (
+          <>
+            <span style={sectionLabelStyle}>Chats</span>
+            {previewSessions.map((session) => {
+              const isActive = activeSessionKey === session.sessionKey;
+              const label = session.surfaceLabel || session.name || session.sessionKey;
+              return (
+                <button
+                  key={session.sessionKey}
+                  type="button"
+                  onClick={() => onSelectSession(session.sessionKey)}
+                  style={{
+                    display: 'flex',
+                    width: '100%',
+                    alignItems: 'center',
+                    gap: 8,
+                    paddingLeft: 14,
+                    paddingRight: 14,
+                    paddingTop: 8,
+                    paddingBottom: 8,
+                    minHeight: 36,
+                    background: isActive ? 'var(--t-input-bg)' : 'transparent',
+                    borderWidth: 0,
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: 'inherit',
+                    color: 'inherit',
+                  }}
+                  onMouseEnter={(e) => { if (!isActive) e.currentTarget.style.background = 'var(--t-hover)'; }}
+                  onMouseLeave={(e) => { if (!isActive) e.currentTarget.style.background = 'transparent'; }}
+                >
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+                    <span style={rowTitleStyle}>{label}</span>
+                    {session.currentTask ? (
+                      <span style={rowMetaStyle}>{session.currentTask}</span>
+                    ) : null}
+                  </div>
+                </button>
+              );
+            })}
+            {sessions.length > previewSessions.length ? (
+              <div style={{ ...rowMetaStyle, paddingLeft: 14, paddingTop: 4, paddingBottom: 4 }}>
+                +{sessions.length - previewSessions.length} more
+              </div>
+            ) : null}
+          </>
+        )}
+
+        {repos.length === 0 && previewPackets.length === 0 && previewSessions.length === 0 && (
+          <div
+            style={{
+              paddingLeft: 14,
+              paddingRight: 14,
+              paddingTop: 16,
+              paddingBottom: 16,
+              fontSize: 12,
+              fontWeight: 300,
+              color: 'var(--t-text-muted)',
+            }}
+          >
+            No active work — open the full sidebar to start.
+          </div>
+        )}
+      </div>
+    </div>
   );
 }
 
@@ -329,6 +623,17 @@ function DashboardInner() {
   } = session;
 
   const [leftWidth, setLeftWidth] = useState(DEFAULT_LEFT_PANEL_WIDTH);
+
+  // ── Sidebar hover-preview state ──
+  // When the AgentPanel is collapsed (sidebarVisible === false), hovering the
+  // left-edge rail drops a detail panel down from the top of the screen
+  // (Spotify mini-player ↔ full-player pattern). Click on the rail still
+  // performs the regular slide-out behavior; the hover-preview is a separate,
+  // overlay-only surface that auto-retracts on hover-leave (with a small
+  // dismiss delay so brief mouse-outs don't flicker) or any outside click.
+  const [sidebarPreviewOpen, setSidebarPreviewOpen] = useState(false);
+  const sidebarPreviewLeaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const sidebarPreviewOverlayRef = useRef<HTMLDivElement | null>(null);
 
   // Active-workspace map — each WorkspaceTerminalRoot broadcasts via
   // 'o8:workspace-active-label' with its stable workspaceId. We track
@@ -2674,6 +2979,57 @@ function DashboardInner() {
     document.addEventListener('mouseup', onUp);
   }, [leftWidth]);
 
+  // ── Sidebar hover-preview open/close ──
+  // Open immediately on hover-enter; close on hover-leave with a 220ms grace
+  // window so brief mouse-outs (cursor crossing a sub-element, scrollbar nudge)
+  // don't dismiss. Both the trigger zone and the overlay share these helpers
+  // so moving the cursor between them never flickers the panel away.
+  const cancelSidebarPreviewClose = useCallback(() => {
+    if (sidebarPreviewLeaveTimerRef.current) {
+      clearTimeout(sidebarPreviewLeaveTimerRef.current);
+      sidebarPreviewLeaveTimerRef.current = null;
+    }
+  }, []);
+  const openSidebarPreview = useCallback(() => {
+    cancelSidebarPreviewClose();
+    setSidebarPreviewOpen(true);
+  }, [cancelSidebarPreviewClose]);
+  const scheduleSidebarPreviewClose = useCallback(() => {
+    cancelSidebarPreviewClose();
+    sidebarPreviewLeaveTimerRef.current = setTimeout(() => {
+      setSidebarPreviewOpen(false);
+      sidebarPreviewLeaveTimerRef.current = null;
+    }, 220);
+  }, [cancelSidebarPreviewClose]);
+  // Outside-click dismiss + cleanup on unmount.
+  useEffect(() => {
+    if (!sidebarPreviewOpen) return;
+    const handleClick = (event: MouseEvent) => {
+      const overlay = sidebarPreviewOverlayRef.current;
+      if (!overlay) return;
+      if (event.target instanceof Node && overlay.contains(event.target)) return;
+      setSidebarPreviewOpen(false);
+    };
+    // mousedown so the dismiss fires before any focus changes from the
+    // underlying click target — same pattern as the right-rail popovers.
+    window.addEventListener('mousedown', handleClick, true);
+    return () => window.removeEventListener('mousedown', handleClick, true);
+  }, [sidebarPreviewOpen]);
+  useEffect(() => () => {
+    if (sidebarPreviewLeaveTimerRef.current) {
+      clearTimeout(sidebarPreviewLeaveTimerRef.current);
+    }
+  }, []);
+  // When the sidebar re-expands (click on the toggle, ⌘B shortcut, etc.) the
+  // hover-preview becomes redundant — collapse it immediately so we don't end
+  // up with both surfaces visible at once.
+  useEffect(() => {
+    if (sidebarVisible && sidebarPreviewOpen) {
+      cancelSidebarPreviewClose();
+      setSidebarPreviewOpen(false);
+    }
+  }, [sidebarVisible, sidebarPreviewOpen, cancelSidebarPreviewClose]);
+
   // ── Right drag handle ──
   const startRightDrag = useCallback((e: React.MouseEvent) => {
     e.preventDefault();
@@ -3460,14 +3816,16 @@ function DashboardInner() {
             // Allow the inner card's drop shadow to escape the column box.
             overflow: 'visible',
             position: 'relative',
-            // Claude-style floating card. 5px buffer on top/left/right;
-            // bottom is 0 because the DesktopStatusBar's left section
-            // renders directly below as the second half of the SAME
-            // visual card (flat-bottom panel + flat-top footer, divider
-            // between them).
-            paddingTop: 5,
-            paddingLeft: 5,
-            paddingRight: 5,
+            // Claude-style floating card. 9px buffer on top/left/right
+            // (5px base + 4px operator-requested breathing room from the
+            // window edges 2026-05-27). Bottom stays 0 because the
+            // DesktopStatusBar's left section renders directly below as
+            // the second half of the SAME visual card (flat-bottom panel
+            // + flat-top footer, divider between them) — adding a gap
+            // here would break the merged-card design.
+            paddingTop: 9,
+            paddingLeft: 9,
+            paddingRight: 9,
             paddingBottom: 0,
           }}
         >
@@ -3509,6 +3867,11 @@ function DashboardInner() {
           <LeftHeaderStrip
             sidebarVisible={sidebarVisible}
             onToggleSidebar={() => setSidebarVisible(v => !v)}
+            // Compensate for the +4 paddingTop bump on the AgentPanel card
+            // (5 → 9 for outer breathing room) so the toggle pill stays at
+            // the same window-y as the WorkspaceHeaderStrip pill when the
+            // sidebar toggles open ↔ closed. Without this it jumps 4px.
+            togglePillYNudge={-6}
           />
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <GuidedDiscoveryHalo active={showAgentPanelFtux} borderRadius={20} />
@@ -3903,6 +4266,103 @@ function DashboardInner() {
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
       <AlertToast alerts={activeAlerts} compact={compactShell} onAction={handleAlertAction} />
+
+      {/* ── Sidebar hover-preview trigger + drop overlay (collapsed only) ──
+          When the AgentPanel column is hidden, we keep a thin invisible hot
+          zone along the left edge. Hovering it drops a detail panel from the
+          top of the screen — same content shape as the open sidebar, but
+          condensed and overlaid (not pushing layout). Click on the workspace
+          toggle pill keeps the existing slide-from-left full open. */}
+      {!showSidebarColumn && !compactShell && (
+        <>
+          <div
+            data-mcp-scope="agent-panel-hover-trigger"
+            onMouseEnter={openSidebarPreview}
+            onMouseLeave={scheduleSidebarPreviewClose}
+            style={{
+              position: 'fixed',
+              // Below the title bar / toggle pill (which sits around y=10-30
+              // inside the WorkspaceHeaderStrip) so click-to-open on the pill
+              // is never blocked by the hover hot zone.
+              top: 44,
+              left: 0,
+              width: 18,
+              // Stop short of the status bar so chrome buttons there stay
+              // hover-able without flashing the preview.
+              bottom: 36,
+              zIndex: 90,
+              cursor: 'default',
+            }}
+          />
+          <AnimatePresence initial={false}>
+            {sidebarPreviewOpen && (
+              <motion.div
+                key="sidebar-hover-preview"
+                ref={sidebarPreviewOverlayRef}
+                initial={{ y: '-100%', opacity: 0 }}
+                animate={{ y: 0, opacity: 1 }}
+                exit={{ y: '-100%', opacity: 0 }}
+                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                onMouseEnter={openSidebarPreview}
+                onMouseLeave={scheduleSidebarPreviewClose}
+                data-mcp-scope="agent-panel-hover-preview"
+                style={{
+                  position: 'fixed',
+                  top: 8,
+                  left: 8,
+                  width: Math.min(Math.max(leftWidth + 60, 320), 440),
+                  maxHeight: 'calc(100vh - 80px)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  borderRadius: 14,
+                  // Surface-aware paint — mirrors the AgentPanel card in
+                  // dashboard so the preview reads consistently in both
+                  // glass and solid modes. In glass we scope light ink on
+                  // the subtree (matches commit 53f13374); in solid we
+                  // paint cream paper + keep the dark-ink palette.
+                  background: isGlassSurface ? 'rgba(20, 24, 32, 0.78)' : 'var(--t-panel-solid)',
+                  backdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
+                  WebkitBackdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
+                  boxShadow: '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)',
+                  border: isGlassSurface
+                    ? '1px solid rgba(255, 255, 255, 0.08)'
+                    : '1px solid var(--t-divider-subtle)',
+                  zIndex: 200,
+                  fontFamily: 'var(--font-sans-system)',
+                  ...(isGlassSurface ? {
+                    ['--t-text' as string]: '#e8ecf2',
+                    ['--t-text-strong' as string]: '#f5f8fc',
+                    ['--t-text-secondary' as string]: '#bcc5d0',
+                    ['--t-text-muted' as string]: '#8b95a3',
+                    ['--t-text-faint' as string]: '#5f6b7a',
+                    ['--t-hover' as string]: 'rgba(255, 255, 255, 0.06)',
+                    ['--t-input-bg' as string]: 'rgba(255, 255, 255, 0.06)',
+                    ['--t-divider-subtle' as string]: 'rgba(255, 255, 255, 0.08)',
+                  } : {}),
+                } as React.CSSProperties}
+              >
+                <SidebarHoverPreviewBody
+                  projects={dashboardProjects.ledger?.projects ?? []}
+                  activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
+                  repos={activeProjectRepoEntries}
+                  packets={activePackets}
+                  sessions={ideWorkspaceSessionsForSidebar}
+                  activeSessionKey={activeSessionKey ?? null}
+                  onOpenFullPanel={() => {
+                    setSidebarPreviewOpen(false);
+                    setSidebarVisible(true);
+                  }}
+                  onSelectSession={(key) => {
+                    setSidebarPreviewOpen(false);
+                    handleSelectSession(key);
+                  }}
+                />
+              </motion.div>
+            )}
+          </AnimatePresence>
+        </>
+      )}
       </div>{/* end main layout */}
 
       {/* ── Bottom chrome: transparent status strip with branch + chrome buttons ──

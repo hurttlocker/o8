@@ -20,10 +20,13 @@ interface SidebarTogglePillProps {
   sidebarVisible?: boolean;
   onClick?: () => void;
   /**
-   * Per-context vertical nudge (px). Defaults to -4 for LeftHeaderStrip
-   * (32px strip, paddingTop=5 card). WorkspaceHeaderStrip passes -5 so the
-   * pill lands at the SAME window-y when the sidebar collapses and the
-   * toggle migrates over there — without this it jumps 1px on toggle.
+   * Per-context vertical nudge (px). Default -2 fits the LeftHeaderStrip
+   * baseline (32px strip, paddingTop=5 card — the original /preview/shell
+   * lab geometry). WorkspaceHeaderStrip passes -3 so the pill lands at the
+   * SAME window-y when the sidebar collapses and the toggle migrates over
+   * there. The production dashboard now passes -6 from LeftHeaderStrip
+   * because the AgentPanel card's paddingTop bumped from 5 → 9 for outer
+   * breathing room (2026-05-27).
    */
   yNudge?: number;
 }
