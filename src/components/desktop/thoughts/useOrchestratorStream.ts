@@ -107,7 +107,20 @@ interface ActiveTurnState {
  */
 export function useOrchestratorStream(
   repoPath: string | null,
-  options?: { seededPlanText?: string | null; hasHistory?: boolean; threadId?: string | null },
+  options?: {
+    seededPlanText?: string | null;
+    hasHistory?: boolean;
+    threadId?: string | null;
+    /**
+     * Called when the hook synchronously mints a threadId inside `send()`
+     * because the parent hasn't supplied one yet (first-message-on-empty-tab
+     * path). The parent MUST update its own threadId state in response so the
+     * next render keeps both sides aligned. Without this, ws-server's
+     * `isThreadBacked` guard skips assistant-message persistence and the reply
+     * silently drops on reload. See bug investigation 2026-05-27.
+     */
+    onThreadIdMint?: (threadId: string) => void;
+  },
 ): OrchestratorStreamResult {
   const [messages, setMessages] = useState<MobileTranscriptEntry[]>([]);
   const [planText, setPlanText] = useState<string | null>(null);
@@ -129,7 +142,13 @@ export function useOrchestratorStream(
   repoPathRef.current = repoPath;
   const threadId = options?.threadId ?? null;
   const threadIdRef = useRef<string | null>(threadId);
-  threadIdRef.current = threadId;
+  // Only mirror the parent-supplied threadId when it is set. If the hook has
+  // already minted an id inside send() (because the parent's state hadn't
+  // landed yet), don't wipe it on the next render — the parent's eventual
+  // setThreadId call will replace it with the same value via onThreadIdMint.
+  if (threadId) threadIdRef.current = threadId;
+  const onThreadIdMintRef = useRef(options?.onThreadIdMint);
+  onThreadIdMintRef.current = options?.onThreadIdMint;
   const runningTotalRef = useRef(runningTotal);
   runningTotalRef.current = runningTotal;
   const mountedRef = useRef(false);
@@ -756,6 +775,18 @@ export function useOrchestratorStream(
       statusRef.current = 'busy';
       setStatus('busy');
 
+      // Mint a threadId synchronously if the parent's state hasn't landed
+      // yet. ws-server uses `threadId.startsWith('thoughts-')` to decide
+      // whether to persist the assistant reply — without an id here, the
+      // turn streams to the open client but never lands in
+      // ~/.o8/chat-history/<id>.json, so a reload shows the user message
+      // alone with no reply. Notify the parent so its `threadId` state
+      // catches up on the next render.
+      if (!threadIdRef.current) {
+        const minted = `thoughts-${Date.now()}`;
+        threadIdRef.current = minted;
+        try { onThreadIdMintRef.current?.(minted); } catch { /* parent owns the consequence */ }
+      }
       let outboundMessage = message;
       const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath, threadIdRef.current);
       if (resumePrelude) {

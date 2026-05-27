@@ -413,6 +413,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     seededPlanText: planText,
     hasHistory: chatMessages.length > 0,
     threadId,
+    // Empty-state first-message path: the hook mints a thoughts-* id inside
+    // send() so ws-server can persist the assistant reply. Mirror it into
+    // our local state + ref so the post-send persist effect (line ~972)
+    // skips its own mint and the next render syncs the WS subscription.
+    onThreadIdMint: useCallback((id: string) => {
+      if (threadIdRef.current === id) return;
+      threadIdRef.current = id;
+      setThreadId(id);
+    }, []),
   });
 
   useEffect(() => {
