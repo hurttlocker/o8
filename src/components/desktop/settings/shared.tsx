@@ -258,11 +258,11 @@ export function SettingsTabSectionHeader({ children }: { children: React.ReactNo
     <div
       style={{
         fontFamily: MONO_FONT_STACK,
-        fontSize: 9.5,
-        fontWeight: 500,
+        fontSize: 9,
+        fontWeight: 300,
         color: RAMS_INK_QUIET,
         textTransform: 'uppercase',
-        letterSpacing: '0.18em',
+        letterSpacing: '0.12em',
         paddingTop: 14,
         paddingRight: 14,
         paddingBottom: 6,
@@ -303,8 +303,8 @@ export function TabButton({ label, icon, active, onClick, comingSoon = false }: 
         borderColor: active ? RAMS_CONTROL_ACTIVE_BORDER : 'transparent',
         background: active ? RAMS_CONTROL_ACTIVE_BG : 'transparent',
         color: active ? RAMS_ACCENT : 'var(--t-text-secondary)',
-        fontSize: 13,
-        fontWeight: active ? 600 : 500,
+        fontSize: 13.5,
+        fontWeight: active ? 400 : 300,
         cursor: 'pointer',
         textAlign: 'left',
         fontFamily: APP_FONT_STACK,
@@ -360,7 +360,7 @@ export function TabHeading({ title, subtitle }: { title: string; subtitle?: stri
       <h1 style={{
         fontFamily: APP_FONT_STACK,
         fontSize: 28,
-        fontWeight: 500,
+        fontWeight: 300,
         color: 'var(--t-text)',
         letterSpacing: '-0.04em',
         lineHeight: 1.05,
@@ -372,9 +372,9 @@ export function TabHeading({ title, subtitle }: { title: string; subtitle?: stri
       {subtitle ? (
         <p style={{
           fontFamily: APP_FONT_STACK,
-          fontSize: 14,
-          fontWeight: 400,
-          color: 'var(--t-text-secondary)',
+          fontSize: 13.5,
+          fontWeight: 300,
+          color: 'var(--t-text-faint)',
           lineHeight: 1.55,
           margin: 0,
           maxWidth: 640,
@@ -413,9 +413,9 @@ export function SectionLabel({ number, children }: { number: string; children: R
       alignItems: 'baseline',
       gap: 10,
       fontFamily: MONO_FONT_STACK,
-      fontSize: 11,
-      fontWeight: 500,
-      letterSpacing: '0.22em',
+      fontSize: 10,
+      fontWeight: 300,
+      letterSpacing: '0.14em',
       textTransform: 'uppercase',
       color: 'var(--t-text-secondary)',
       marginBottom: 14,
@@ -462,9 +462,9 @@ export function SettingsToggleButton({
         color: disabled ? RAMS_INK_QUIET : checked ? RAMS_ACCENT : 'var(--t-text-secondary)',
         cursor: disabled ? 'not-allowed' : 'pointer',
         fontFamily: MONO_FONT_STACK,
-        fontSize: 11.5,
-        fontWeight: 600,
-        letterSpacing: '0.04em',
+        fontSize: 10,
+        fontWeight: 300,
+        letterSpacing: '0.06em',
         textTransform: 'uppercase',
         whiteSpace: 'nowrap',
         transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -538,9 +538,9 @@ export function RamsButton({
         color: disabled ? RAMS_INK_QUIET : tone,
         cursor: disabled || busy ? 'default' : 'pointer',
         fontFamily: MONO_FONT_STACK,
-        fontSize: 11.5,
-        fontWeight: 500,
-        letterSpacing: '0.02em',
+        fontSize: 10,
+        fontWeight: 300,
+        letterSpacing: '0.04em',
         textTransform: 'uppercase',
         whiteSpace: 'nowrap',
         flexShrink: 0,
@@ -639,11 +639,11 @@ export function ScopeBadge({ scope }: { scope: string }) {
       paddingBottom: 2,
       paddingLeft: 8,
       borderRadius: 6,
-      fontSize: 10,
-      fontWeight: 600,
+      fontSize: 9,
+      fontWeight: 300,
       background: THEME_ACCENT_SOFT,
       color: THEME_ACCENT,
-      letterSpacing: '0.01em',
+      letterSpacing: '0.04em',
     }}>
       {scope}
     </span>
@@ -676,7 +676,7 @@ export function ScopeDiagnostic({
       border: `1px solid ${tone.border}`,
     }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
-        <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--t-text)' }}>{title}</span>
+        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>{title}</span>
         <span style={{
           paddingTop: 2,
           paddingRight: 7,
@@ -685,15 +685,15 @@ export function ScopeDiagnostic({
           borderRadius: 999,
           background: `${tone.pill}22`,
           color: tone.text,
-          fontSize: 10,
-          fontWeight: 700,
-          letterSpacing: '0.01em',
+          fontSize: 9,
+          fontWeight: 300,
+          letterSpacing: '0.04em',
           marginLeft: 'auto',
         }}>
           {tone.label}
         </span>
       </div>
-      <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.45 }}>
+      <div style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)', lineHeight: 1.45 }}>
         {detail}
       </div>
     </div>
@@ -772,7 +772,8 @@ export function QuickLink({
         background: 'var(--t-panel)',
         color: 'var(--t-text-secondary)',
         fontSize: 11,
-        fontWeight: 600,
+        fontWeight: 350,
+        letterSpacing: '-0.1px',
         textDecoration: 'none',
       }}
     >

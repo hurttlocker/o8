@@ -924,25 +924,28 @@ function OrchestratorTabInner({
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            paddingTop: 7,
+            paddingTop: 6,
             paddingRight: 14,
-            paddingBottom: 7,
+            paddingBottom: 6,
             paddingLeft: 14,
             borderBottomWidth: '0.5px',
             borderBottomStyle: 'solid',
             borderBottomColor: 'var(--t-divider-subtle)',
             background: 'var(--t-panel-hover)',
-            color: 'var(--t-text-secondary)',
+            color: 'var(--t-text-faint)',
             fontSize: 11,
-            fontWeight: 600,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            lineHeight: 1.35,
             flexShrink: 0,
           }}
         >
-          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ opacity: 0.8 }}>
             <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
             <path d="M7 11V7a5 5 0 0 1 10 0v4" />
           </svg>
-          Read-only mode — Claude will inspect but cannot modify files or run side-effecting commands.
+          <span style={{ color: 'var(--t-text-muted)' }}>Read-only mode</span>
+          <span> — Claude will inspect but cannot modify files or run side-effecting commands.</span>
         </div>
       ) : null}
 

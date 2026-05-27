@@ -198,7 +198,7 @@ export function APIKeysTab() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
                       <span style={{
                         fontSize: 15,
-                        fontWeight: 500,
+                        fontWeight: 300,
                         color: 'var(--t-text)',
                         letterSpacing: '-0.01em',
                       }}>
@@ -420,7 +420,7 @@ export function APIKeysTab() {
           <div style={{ flex: 1, minWidth: 0, maxWidth: 560 }}>
             <div style={{
               fontSize: 14,
-              fontWeight: 500,
+              fontWeight: 300,
               color: 'var(--t-text)',
               letterSpacing: '-0.01em',
               marginBottom: 6,
@@ -499,7 +499,7 @@ function accentLinkStyle(disabled: boolean): React.CSSProperties {
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 500,
+    fontWeight: 300,
     letterSpacing: '0.04em',
     textTransform: 'uppercase' as const,
     cursor: disabled ? 'default' : 'pointer',

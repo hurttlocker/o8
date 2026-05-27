@@ -19,16 +19,32 @@ font-family: var(--font-sans-system);
 
 ---
 
-## Typography tokens (locked)
+## Typography tokens (locked — GLOBAL, every surface)
+
+**This table is canonical for every chrome surface in o8 and any project we build going forward.** If the surface has text, it should land in one of these rows or read as a deliberate exception. Operator-locked 2026-05-27 after the o8-panel + popover + workspace-tab sweep brought the entire app into spec.
 
 | Role | Size | Weight | Letter-spacing | Line-height | Notes |
 |---|---|---|---|---|---|
-| **Row title** (chat row, agent row, packet row) | 13.5 px | **300** | **−0.1 px** | **1.25** | Light weight is load-bearing — drops the visual noise that a 400-weight body would carry. |
-| **Row meta** (subtitle under title) | 9.5 px | **260** | **−0.4 px** | **1.25** | Very thin, very tight. Reads as a soft second-tier label, not as competing content. |
-| **Section label** (Open now / Archived / Spawned agents / per-repo) | 10 px | **300** | **−0.1 px** | 14 px | NO uppercase, NO bold. Soft gray (`var(--t-text-faint)`). |
+| **Row title** (chat row, agent row, packet row, popover row, file row) | 13.5 px | **300** | **−0.1 px** | **1.25** | Light weight is load-bearing — drops the visual noise that a 400-weight body would carry. |
+| **Row meta** (subtitle under title, path subline, owner badge, timestamp, hash, count) | 9.5 px | **260** | **−0.4 px** | **1.25** | Very thin, very tight. Reads as a soft second-tier label, not as competing content. |
+| **Section label** (Open now / Archived / Spawned agents / Progress / Environment / TODAY / Proposed directives) | 10 px (or 9 px uppercase) | **300** | **−0.1 px** (or 0.04em if uppercase) | 14 px | NO bold. Uppercase is fine but always small + thin + faint (`var(--t-text-faint)`). |
+| **Chrome label inline** (composer chips, mode chips, tab pills, toolbar buttons) | 11–12 px | **300** | **−0.1 px** | **1.25** | Active state distinguished by background + color, NEVER by going bold. |
+| **Tab pill** (workspace tab, O8 panel header tab) | 12 px | **300** | **−0.1 px** | **1.25** | Height **26**, radius **7**, no border. Active = subtle bg fill (`var(--t-input-bg)`), inactive = transparent → hover. |
+| **Body text** (markdown body, notes editor body, message bubble) | 13–13.5 px | **300** | **−0.1 px** | **1.45–1.55** | System stack — never `Inter`-locked. |
+| **Heading** (MD h1) | 18 px | **400** | **−0.2 px** | 1.25 | Was 21/700 — light + tight reads as editorial not blog. |
+| **Heading** (MD h3) | 13.5 px | **400** | **−0.1 px** | 1.25 |  |
+| **Strong** (markdown `**bold**`) | inherit | **500** | inherit | inherit | Never 600+. 500 is the cap for inline emphasis. |
+| **Banner / status text** (Reconnecting, Read-only mode, Loading…) | 11 px | **300–400** | **−0.1 px** | 1.35 | Strong label part can ride at 400 if it's a one-word severity; body sub always 300/faint. |
 | **Computed CSS spec** for sliders → code | see below | | | | The lab's "Computed CSS" pane is the source of truth. |
 
-The numbers above are not negotiable for the chat-row pattern. They came out of a long visual tuning session against a Claude desktop reference, then got committed across every list surface in [`src/components/desktop/`](src/components/desktop/).
+### The two anti-patterns
+
+These are bugs, not choices:
+
+1. **`fontWeight: 500/520/540/560/600/650/700/750/800` anywhere on chrome.** Cap is 500 (used only for inline `<strong>`). Tab pills, popover headers, row titles, section labels, badges — all 300. Active state never bumps weight.
+2. **Hard-coded `'Inter'` (or any webfont).** Always system stack via `var(--font-sans-system)`. The PROSE constant in `O8SpecEditor` was the last holdout — fixed 2026-05-27. SF Pro's variable axis renders 300 as a true thin where Inter renders it as 400-equivalent on macOS.
+
+The numbers above are not negotiable. They came out of a long visual tuning session against a Claude desktop reference, then got committed across every list surface in [`src/components/desktop/`](src/components/desktop/).
 
 ### Where each token lives in code
 

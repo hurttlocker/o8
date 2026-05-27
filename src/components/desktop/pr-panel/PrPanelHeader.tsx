@@ -83,8 +83,9 @@ export const PrPanelHeader = memo(function PrPanelHeader({
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-divider-subtle)',
-            fontSize: 11,
-            fontWeight: 600,
+            fontSize: 10.5,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             color: 'var(--t-text)',
             fontFamily: MONO_FONT,
           }}
@@ -104,9 +105,9 @@ export const PrPanelHeader = memo(function PrPanelHeader({
             borderRadius: 999,
             background: pill.bg,
             color: pill.color,
-            fontSize: 10,
-            fontWeight: 700,
-            letterSpacing: '0.02em',
+            fontSize: 9,
+            fontWeight: 300,
+            letterSpacing: '0.04em',
             textTransform: 'uppercase',
           }}
         >

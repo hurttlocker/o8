@@ -228,10 +228,10 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
               paddingRight: 8,
               paddingBottom: 6,
               paddingLeft: 8,
-              fontSize: 11,
-              fontWeight: 600,
+              fontSize: 10,
+              fontWeight: 300,
               color: 'var(--t-text-faint)',
-              letterSpacing: 0,
+              letterSpacing: '-0.1px',
             }}
           >
             {total} active port{total === 1 ? '' : 's'}
@@ -313,8 +313,10 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
                 borderRadius: 6,
                 background: 'transparent',
                 color: 'var(--t-text)',
-                fontSize: 12,
-                fontWeight: 500,
+                fontSize: 13.5,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                lineHeight: 1.25,
                 cursor: 'pointer',
                 textAlign: 'left',
                 fontFamily: 'var(--font-sans-system)',
@@ -338,8 +340,9 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
               <span style={{ flex: 1 }}>{portLabel(port)}</span>
               <span
                 style={{
-                  fontSize: 11,
-                  fontWeight: 600,
+                  fontSize: 9.5,
+                  fontWeight: 260,
+                  letterSpacing: '-0.2px',
                   color: 'var(--t-text-faint)',
                   fontFamily: '"SF Mono", ui-monospace, monospace',
                 }}

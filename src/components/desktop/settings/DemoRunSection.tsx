@@ -180,7 +180,7 @@ export function DemoRunSection({ sectionNumber }: { sectionNumber: string }) {
         <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
           <div style={{
             fontSize: 14,
-            fontWeight: 500,
+            fontWeight: 300,
             color: 'var(--t-text)',
             marginBottom: 4,
             letterSpacing: '-0.01em',
@@ -237,7 +237,7 @@ export function DemoRunSection({ sectionNumber }: { sectionNumber: string }) {
           <span style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 11,
-            fontWeight: 500,
+            fontWeight: 300,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             color: '#ef4444',
@@ -444,7 +444,7 @@ function StatusPill({ tone }: { tone: { label: string; pill: string } }) {
     <span style={{
       fontFamily: MONO_FONT_STACK,
       fontSize: 10,
-      fontWeight: 500,
+      fontWeight: 300,
       letterSpacing: '0.14em',
       color: tone.pill,
       paddingTop: 2,
@@ -517,7 +517,7 @@ function runButtonStyle(busy: boolean): React.CSSProperties {
     color: busy ? RAMS_INK_QUIET : RAMS_ACCENT,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 500,
+    fontWeight: 300,
     letterSpacing: '0.04em',
     textTransform: 'uppercase' as const,
     cursor: busy ? 'default' : 'pointer',

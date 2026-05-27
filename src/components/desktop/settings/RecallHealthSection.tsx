@@ -175,7 +175,7 @@ export function RecallHealthSection() {
           <span style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 11,
-            fontWeight: 500,
+            fontWeight: 300,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             color: '#ef4444',

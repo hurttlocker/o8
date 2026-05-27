@@ -155,8 +155,8 @@ function SurfaceEmptyState({
       }}>
         {icon}
       </div>
-      <div style={{ fontSize: 13, fontWeight: 750, color: 'var(--t-text)' }}>{title}</div>
-      <div style={{ maxWidth: 360, fontSize: 12, lineHeight: 1.5 }}>{detail}</div>
+      <div style={{ fontSize: 13.5, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>{title}</div>
+      <div style={{ maxWidth: 360, fontSize: 13, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)' }}>{detail}</div>
     </div>
   );
 }

@@ -68,7 +68,7 @@ export function AboutTab() {
           <div style={{
             fontFamily: MONO_FONT_STACK,
             fontSize: 32,
-            fontWeight: 500,
+            fontWeight: 300,
             color: 'var(--t-text)',
             letterSpacing: '0.02em',
             lineHeight: 1,
@@ -265,7 +265,7 @@ function accentLinkStyle(disabled: boolean): React.CSSProperties {
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
     fontFamily: MONO_FONT_STACK,
     fontSize: 11.5,
-    fontWeight: 500,
+    fontWeight: 300,
     letterSpacing: '0.04em',
     textTransform: 'uppercase' as const,
     cursor: disabled ? 'default' : 'pointer',

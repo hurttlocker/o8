@@ -44,8 +44,8 @@ function FilesDrawer({
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, minHeight: 44, paddingTop: 8, paddingRight: 10, paddingBottom: 7, paddingLeft: 12, borderBottom: '1px solid var(--t-divider-subtle)', flexShrink: 0 }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontFamily: UI_FONT, fontSize: 12, fontWeight: 700, color: 'var(--t-text)', lineHeight: '16px' }}>Files</div>
-          <div style={{ fontFamily: UI_FONT, fontSize: 10.5, fontWeight: 600, color: 'var(--t-text-muted)', lineHeight: '14px' }}>{files.length} changed</div>
+          <div style={{ fontFamily: UI_FONT, fontSize: 13.5, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)', lineHeight: 1.25 }}>Files</div>
+          <div style={{ fontFamily: UI_FONT, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', lineHeight: 1.25, marginTop: 2 }}>{files.length} changed</div>
         </div>
         <button
           type="button"
@@ -141,8 +141,8 @@ function FilesDrawer({
               onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent'; }}
             >
               <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: UI_FONT, fontSize: 12, fontWeight: 650, lineHeight: '16px', color: 'var(--t-text)' }}>{name}</span>
-                {folder ? <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: MONO_FONT, fontSize: 10.5, lineHeight: '14px', color: 'var(--t-text-muted)' }}>{folder}</span> : null}
+                <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: UI_FONT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, color: 'var(--t-text)' }}>{name}</span>
+                {folder ? <span style={{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: MONO_FONT, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', marginTop: 2 }}>{folder}</span> : null}
               </span>
               <DiffStatBadge additions={file.additions ?? 0} deletions={file.deletions ?? 0} />
             </button>

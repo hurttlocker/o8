@@ -452,16 +452,16 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
           <line x1="2" y1="12" x2="22" y2="12" />
           <path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
         </svg>
-        <span style={{ color: 'var(--t-text-muted)', fontSize: 13 }}>No active previews</span>
+        <span style={{ color: 'var(--t-text-faint)', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>No active previews</span>
         <button
           type="button"
           onClick={addNewTab}
           style={{
             display: 'inline-flex', alignItems: 'center', gap: 6,
-            paddingTop: 6, paddingRight: 14, paddingBottom: 6, paddingLeft: 14,
-            borderRadius: 8, border: '1px solid var(--t-divider)',
+            paddingTop: 5, paddingRight: 12, paddingBottom: 5, paddingLeft: 12,
+            borderRadius: 8, border: '1px solid var(--t-divider-subtle)',
             background: 'var(--t-hover)', color: 'var(--t-text)',
-            fontSize: 12, fontWeight: 500, cursor: 'pointer',
+            fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', cursor: 'pointer',
           }}
         >
           + New Tab
@@ -509,7 +509,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
               </svg>
               <span style={{
                 flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                fontSize: 11, fontWeight: 500,
+                fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px',
                 color: isActive ? 'var(--t-text)' : 'var(--t-text-muted)',
               }}>
                 {tab.title}

@@ -107,7 +107,7 @@ export function ProjectCard({
           <div style={{
             fontFamily: APP_FONT_STACK,
             fontSize: 18,
-            fontWeight: 650,
+            fontWeight: 350,
             color: 'var(--t-text)',
             letterSpacing: '-0.02em',
             lineHeight: 1.2,
@@ -198,7 +198,7 @@ export function ProjectCard({
                   <span style={{
                     fontFamily: MONO_FONT_STACK,
                     fontSize: 9,
-                    fontWeight: 650,
+                    fontWeight: 350,
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase',
                     color: '#1d4ed8',
@@ -271,7 +271,7 @@ export function ProjectCard({
                   <div style={{
                     fontFamily: APP_FONT_STACK,
                     fontSize: 12,
-                    fontWeight: 600,
+                    fontWeight: 350,
                     color: 'var(--t-text)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -296,7 +296,7 @@ export function ProjectCard({
                   <span style={{
                     fontFamily: MONO_FONT_STACK,
                     fontSize: 9.5,
-                    fontWeight: 650,
+                    fontWeight: 350,
                     letterSpacing: '0.1em',
                     textTransform: 'uppercase',
                     color: lock.stale ? '#b45309' : RAMS_INK_QUIET,
@@ -322,7 +322,7 @@ export function ProjectCard({
                         paddingLeft: 7,
                         fontFamily: MONO_FONT_STACK,
                         fontSize: 9,
-                        fontWeight: 650,
+                        fontWeight: 350,
                         letterSpacing: '0.08em',
                         textTransform: 'uppercase',
                         opacity: archivingLaneId === lock.laneId ? 0.55 : 1,
@@ -422,7 +422,7 @@ function ProjectContextSection({
             minWidth: 0,
             fontFamily: MONO_FONT_STACK,
             fontSize: 10,
-            fontWeight: 600,
+            fontWeight: 350,
             letterSpacing: '0.14em',
             textTransform: 'uppercase',
             color: RAMS_INK_QUIET,
@@ -449,7 +449,7 @@ function ProjectContextSection({
               paddingLeft: 8,
               fontFamily: MONO_FONT_STACK,
               fontSize: 9.5,
-              fontWeight: 650,
+              fontWeight: 350,
               letterSpacing: '0.1em',
               textTransform: 'uppercase',
             }}

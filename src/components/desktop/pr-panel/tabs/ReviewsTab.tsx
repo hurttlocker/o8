@@ -60,7 +60,7 @@ const CommentRow = memo(function CommentRow({ comment }: { comment: CombinedComm
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: 11,
-          fontWeight: 700,
+          fontWeight: 400,
           flexShrink: 0,
         }}
       >
@@ -68,8 +68,8 @@ const CommentRow = memo(function CommentRow({ comment }: { comment: CombinedComm
       </div>
       <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--t-text)' }}>{comment.author}</span>
-          <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{formatTime(comment.createdAt)}</span>
+          <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>{comment.author}</span>
+          <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>{formatTime(comment.createdAt)}</span>
           {comment.kind === 'review' && comment.path ? (
             <span
               style={{
@@ -88,9 +88,11 @@ const CommentRow = memo(function CommentRow({ comment }: { comment: CombinedComm
         </div>
         <div
           style={{
-            fontSize: 12,
-            color: 'var(--t-text-secondary, var(--t-text-muted))',
-            lineHeight: 1.5,
+            fontSize: 13,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            color: 'var(--t-text)',
+            lineHeight: 1.45,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
           }}
@@ -144,7 +146,7 @@ export const ReviewsTab = memo(function ReviewsTab({ reviewComments, issueCommen
             background: 'var(--t-bg-card)',
           }}
         >
-          <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Latest review:</span>
+          <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>Latest review:</span>
           <span
             style={{
               display: 'inline-flex',
@@ -155,10 +157,10 @@ export const ReviewsTab = memo(function ReviewsTab({ reviewComments, issueCommen
               borderRadius: 999,
               background: pill.bg,
               color: pill.color,
-              fontSize: 10,
-              fontWeight: 700,
+              fontSize: 9,
+              fontWeight: 300,
               textTransform: 'uppercase',
-              letterSpacing: '0.02em',
+              letterSpacing: '0.04em',
             }}
           >
             {pill.label}

@@ -114,7 +114,7 @@ function analyticsControlStyle(active: boolean, disabled = false): React.CSSProp
     minHeight: 32,
     fontFamily: APP_FONT_STACK,
     fontSize: 12,
-    fontWeight: 650,
+    fontWeight: 350,
     color: active ? 'var(--t-text)' : RAMS_INK_QUIET,
     background: active ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
     border: `1px solid ${active ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER}`,
@@ -170,7 +170,7 @@ const MetricCell = memo(function MetricCell({
       <div style={{
         fontFamily: MONO_FONT_STACK,
         fontSize: 22,
-        fontWeight: 500,
+        fontWeight: 300,
         color: accent ? RAMS_ACCENT : 'var(--t-text)',
         letterSpacing: '-0.03em',
         lineHeight: 1.1,
@@ -372,7 +372,7 @@ const BreakdownRows = memo(function BreakdownRows({
               <span style={{
                 fontFamily: MONO_FONT_STACK,
                 fontSize: 13,
-                fontWeight: 500,
+                fontWeight: 300,
                 color: 'var(--t-text)',
                 fontVariantNumeric: 'tabular-nums',
                 flexShrink: 0,
@@ -497,7 +497,7 @@ const ModelRows = memo(function ModelRows({ byModel }: { byModel: ModelBreakdown
               <span style={{
                 fontFamily: MONO_FONT_STACK,
                 fontSize: 12,
-                fontWeight: 500,
+                fontWeight: 300,
                 color: 'var(--t-text)',
                 fontVariantNumeric: 'tabular-nums',
                 minWidth: 60,
@@ -657,7 +657,7 @@ const TopSessionsRows = memo(function TopSessionsRows({ sessions }: { sessions: 
             <span style={{
               fontFamily: MONO_FONT_STACK,
               fontSize: 12,
-              fontWeight: 500,
+              fontWeight: 300,
               color: 'var(--t-text)',
               width: 70,
               textAlign: 'right',
