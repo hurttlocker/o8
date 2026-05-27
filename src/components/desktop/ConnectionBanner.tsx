@@ -144,9 +144,7 @@ function ConnectionBannerBase({ connectionState }: ConnectionBannerProps) {
             <motion.button
               type="button"
               onClick={handleRetry}
-              whileHover={{ scale: 1.03 }}
-              whileTap={{ scale: 0.97 }}
-              transition={{ type: 'spring', stiffness: 480, damping: 22, mass: 0.5 }}
+              transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
               style={{
                 height: 28,
                 paddingLeft: 12,

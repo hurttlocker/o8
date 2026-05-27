@@ -352,13 +352,11 @@ function WorkspaceChatPaneBase({
                     onMouseEnter={(event) => {
                       event.currentTarget.style.borderColor = THEME_ACCENT_BORDER;
                       event.currentTarget.style.background = THEME_ACCENT_SOFT;
-                      event.currentTarget.style.transform = 'translateY(-1px)';
                       event.currentTarget.style.boxShadow = `0 2px 8px ${THEME_ACCENT_RING}`;
                     }}
                     onMouseLeave={(event) => {
                       event.currentTarget.style.borderColor = 'var(--t-panel-border)';
                       event.currentTarget.style.background = THEME_BG_CARD;
-                      event.currentTarget.style.transform = 'translateY(0)';
                       event.currentTarget.style.boxShadow = 'none';
                     }}
                   >
