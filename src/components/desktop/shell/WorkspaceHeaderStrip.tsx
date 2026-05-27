@@ -23,6 +23,12 @@ interface WorkspaceHeaderStripProps {
   /** Sidebar toggle — shown only when a handler is provided (left column collapsed). */
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
+  /** When the sidebar is collapsed, hovering the toggle pill drops the
+   *  hover-preview overlay (Claude pattern). These handlers wire that
+   *  trigger to the same callbacks the overlay itself uses, so moving
+   *  between pill and overlay doesn't dismiss. 2026-05-27. */
+  onSidebarHoverEnter?: () => void;
+  onSidebarHoverLeave?: () => void;
   /** Terminal toggle — shown only when a handler is provided. */
   bottomPanelVisible?: boolean;
   onToggleBottomPanel?: () => void;
@@ -93,6 +99,8 @@ export function WorkspaceHeaderStrip({
   leadingInset = false,
   sidebarVisible = true,
   onToggleSidebar,
+  onSidebarHoverEnter,
+  onSidebarHoverLeave,
   bottomPanelVisible = true,
   onToggleBottomPanel,
   onSplitWorkspacePanel,
@@ -136,6 +144,8 @@ export function WorkspaceHeaderStrip({
             <SidebarTogglePill
               sidebarVisible={sidebarVisible}
               onClick={onToggleSidebar}
+              onHoverEnter={onSidebarHoverEnter}
+              onHoverLeave={onSidebarHoverLeave}
               // Workspace strip is 36 tall starting at y=4; the left card's
               // strip is 32 starting at y=5. +1 offset (vs the left default)
               // keeps the pill at the same window-y across the sidebar
