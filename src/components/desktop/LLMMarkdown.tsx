@@ -994,15 +994,22 @@ export function renderLLMMarkdown(text: string, opts?: {
       i++; continue;
     }
 
-    // Empty line
+    // Empty line — explicit `\n\n` paragraph break in the source. 14px gives
+    // a clear visual rest between sections so things like "Diff summary:"
+    // don't smash into the paragraph above. Bumped from 8 → 14 on
+    // 2026-05-27 for professional spacing across all chats.
     if (!line.trim()) {
-      nodes.push(<div key={`br-${i}`} style={{ height: 8 }} />);
+      nodes.push(<div key={`br-${i}`} style={{ height: 14 }} />);
       i++; continue;
     }
 
-    // Regular paragraph
+    // Regular paragraph — marginBottom: 8 so consecutive paragraphs ALWAYS
+    // separate cleanly even when the source has no blank line between them.
+    // Combined with the empty-line spacer, an explicit `\n\n` reads as a
+    // strong section break (~22px); adjacent sentences without a blank
+    // still get the 8px breathing room.
     nodes.push(
-      <div key={`p-${i}`} style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--t-text)' }}>
+      <div key={`p-${i}`} style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--t-text)', marginBottom: 8 }}>
         {renderInline(line)}
       </div>
     );
