@@ -466,6 +466,56 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:workspace-thread-id', handler as EventListener);
   }, [setActiveSessionKey]);
 
+  // Bottom DesktopStatusBar pill — branch + lane state.
+  //
+  // The pill defaults to the project's HEAD branch (globalRepo readiness),
+  // but each OrchestratorTab's empty-state lets the operator pick a
+  // worktree mode + branch. When an orchestrator tab is active and has
+  // surfaced a selection, mirror that branch in the pill so MergeAction
+  // Cluster's PR lookup + ready/push/merge state badge follows the
+  // operator's worktree pick instead of the repo HEAD.
+  //
+  // Set on `o8:orchestrator-worktree-selection`, cleared on
+  // `o8:orchestrator-worktree-selection-clear` (the broadcasting tab
+  // dispatches the clear when it loses focus). When no orchestrator tab
+  // is active, this is null and the pill falls back to project state.
+  const [orchestratorWorktreeSelection, setOrchestratorWorktreeSelection] = useState<{
+    tabId: string;
+    repoPath: string | null;
+    branch: string;
+    worktreeMode: 'local' | 'new-worktree';
+  } | null>(null);
+  useEffect(() => {
+    const handleSelection = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        tabId?: string;
+        repoPath?: string | null;
+        branch?: string;
+        worktreeMode?: 'local' | 'new-worktree';
+      }>).detail;
+      if (!detail?.tabId || !detail.branch || !detail.worktreeMode) return;
+      setOrchestratorWorktreeSelection({
+        tabId: detail.tabId,
+        repoPath: detail.repoPath ?? null,
+        branch: detail.branch,
+        worktreeMode: detail.worktreeMode,
+      });
+    };
+    const handleClear = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string }>).detail;
+      if (!detail?.tabId) return;
+      setOrchestratorWorktreeSelection((current) => (
+        current && current.tabId === detail.tabId ? null : current
+      ));
+    };
+    window.addEventListener('o8:orchestrator-worktree-selection', handleSelection as EventListener);
+    window.addEventListener('o8:orchestrator-worktree-selection-clear', handleClear as EventListener);
+    return () => {
+      window.removeEventListener('o8:orchestrator-worktree-selection', handleSelection as EventListener);
+      window.removeEventListener('o8:orchestrator-worktree-selection-clear', handleClear as EventListener);
+    };
+  }, []);
+
   const handleTitleRenameSubmit = useCallback(async (newTitle: string) => {
     // The header strip flipped its label into an inline input and the
     // operator committed a new value. PATCH the chat-history record
@@ -3855,9 +3905,27 @@ function DashboardInner() {
       <AlertToast alerts={activeAlerts} compact={compactShell} onAction={handleAlertAction} />
       </div>{/* end main layout */}
 
-      {/* ── Bottom chrome: transparent status strip with branch + chrome buttons ── */}
+      {/* ── Bottom chrome: transparent status strip with branch + chrome buttons ──
+          The pill defaults to the project's HEAD branch. When the active
+          orchestrator tab has a worktree pick that targets the same repo,
+          the pill mirrors that branch so MergeActionCluster's PR + lane
+          state (ready / push / merge) tracks the operator's pick. */}
       <DesktopStatusBar
-        branchName={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
+        branchName={(() => {
+          const projectBranch = globalRepoEntry?.readiness?.currentBranch
+            ?? globalRepoBranch
+            ?? workspaceTerminalPreferredRepo?.branch
+            ?? null;
+          const sel = orchestratorWorktreeSelection;
+          // Only override when the orchestrator's pick targets the same
+          // repo as the bottom-status context. Cross-repo picks fall back
+          // to the project branch so the pill doesn't surface PRs from a
+          // different repo than the chrome buttons point at.
+          if (!sel) return projectBranch;
+          const projectPath = globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null;
+          if (sel.repoPath && projectPath && sel.repoPath !== projectPath) return projectBranch;
+          return sel.branch || projectBranch;
+        })()}
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
         compact={compactShell}
