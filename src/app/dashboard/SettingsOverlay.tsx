@@ -14,12 +14,17 @@ export function SettingsOverlay({
   return (
     <div
       style={{
-        position: 'absolute',
+        // Fixed so the panel spans the FULL app viewport regardless of
+        // which column it was mounted in. Previously this was position:
+        // absolute inside the workspace column, leaving the AgentPanel
+        // and right O8Panel rails visible alongside settings — wasteful
+        // on wide monitors. 2026-05-27.
+        position: 'fixed',
         top: 0,
         right: 0,
         bottom: 0,
         left: 0,
-        zIndex: 45,
+        zIndex: 220,
         display: 'flex',
         paddingTop: SETTINGS_OVERLAY_INSET,
         paddingRight: SETTINGS_OVERLAY_INSET,
