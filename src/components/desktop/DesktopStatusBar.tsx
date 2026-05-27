@@ -160,6 +160,11 @@ function DesktopStatusBarBase({
           // Centered cluster — buttons sit in the middle of the footer, not
           // crammed left like a traditional status bar.
           //
+          // When the sidebar column is collapsed (leftFooterCollapsed=true)
+          // we drop the solid paper card entirely — just the gear icon
+          // floats in transparent space. The merged-card design only makes
+          // sense when there's a panel above to merge with. 2026-05-27.
+          //
           // Token overrides flatten any chrome-btn-styled descendants (the
           // SupervisorInboxBadge especially renders a solid white pill with
           // shadow in its inactive state — those tokens are appropriate over
@@ -173,13 +178,13 @@ function DesktopStatusBarBase({
             gap: leftFooterCollapsed ? 0 : 6,
             paddingLeft: leftFooterCollapsed ? 0 : 10,
             paddingRight: leftFooterCollapsed ? 0 : 10,
-            background: 'var(--t-panel-solid)',
+            background: leftFooterCollapsed ? 'transparent' : 'var(--t-panel-solid)',
             borderTopLeftRadius: 0,
             borderTopRightRadius: 0,
-            borderBottomLeftRadius: 14,
-            borderBottomRightRadius: 14,
-            borderTop: '0.5px solid var(--t-divider-subtle)',
-            boxShadow: '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+            borderBottomLeftRadius: leftFooterCollapsed ? 0 : 14,
+            borderBottomRightRadius: leftFooterCollapsed ? 0 : 14,
+            borderTop: leftFooterCollapsed ? 'none' : '0.5px solid var(--t-divider-subtle)',
+            boxShadow: leftFooterCollapsed ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
             ['--t-chrome-btn-bg' as string]: 'transparent',
             ['--t-chrome-btn-shadow' as string]: 'none',
             ['--t-chrome-btn-hover-bg' as string]: 'var(--t-hover)',
