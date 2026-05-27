@@ -218,8 +218,21 @@ function DesktopStatusBarBase({
                 size={22}
                 radius={6}
               />
-              <FooterPorts onPortPreview={onPortPreview} />
-              <SupervisorInboxBadge />
+              {/* Ports count + supervisor inbox merged as one cluster — both pills
+                  share dims (26h / 7r / 11/300 chrome label) and the wrapper has
+                  flexShrink:0 + gap:4 so they stay locked together when the panel
+                  width changes. Per operator note 2026-05-27. */}
+              <div
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  flexShrink: 0,
+                }}
+              >
+                <FooterPorts onPortPreview={onPortPreview} />
+                <SupervisorInboxBadge />
+              </div>
             </>
           ) : null}
         </div>
