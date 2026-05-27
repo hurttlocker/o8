@@ -19,7 +19,7 @@ import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
 import { ThemeProvider, useTheme } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
-import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
+import type { BottomPanelSurfaceKind, ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
 import { PanelHeaderStrip } from '@/components/desktop/shell/PanelHeaderStrip';
@@ -2599,6 +2599,26 @@ function DashboardInner() {
     runCommand();
   }, [ensureTileKind, getPreferredContextualPanelHandle]);
 
+  // ── Open a non-terminal surface in the bottom panel ──
+  const handleOpenBottomPanelSurface = useCallback((surface: BottomPanelSurfaceKind) => {
+    const tileId = ensureTileKind('contextual-panel', {
+      direction: 'horizontal',
+      preferredKinds: ['terminal', 'contextual-panel', 'preview'],
+      ratio: 0.68,
+    });
+    const open = (attempt = 0) => {
+      const handle = getPreferredContextualPanelHandle(tileId);
+      if (handle) {
+        handle.openSurface(surface);
+        return;
+      }
+      if (attempt < 8) {
+        window.setTimeout(() => open(attempt + 1), 50);
+      }
+    };
+    open();
+  }, [ensureTileKind, getPreferredContextualPanelHandle]);
+
   // ── Alert action: navigate to agent session ──
   const handleAlertAction = useCallback((alert: import('@/lib/alerts/types').Alert) => {
     if (alert.sessionKey) {
@@ -4305,7 +4325,12 @@ function DashboardInner() {
                   // overlay is a 1:1 stand-in for the real panel — no
                   // condensed copy. Default 300px (DEFAULT_LEFT_PANEL_WIDTH).
                   width: leftWidth,
-                  maxHeight: 'calc(100vh - 90px)',
+                  // Explicit height — without it the overlay sizes to the
+                  // AgentPanel's intrinsic content height (which collapses
+                  // to ~48 px because AgentPanel's children use flex: 1).
+                  // Pin the rail to (viewport − traffic-light gap − bottom
+                  // gutter) so it matches the open AgentPanel column.
+                  height: 'calc(100vh - 90px)',
                   display: 'flex',
                   flexDirection: 'column',
                   overflow: 'hidden',
