@@ -29,14 +29,24 @@ interface SidebarTogglePillProps {
    * breathing room (2026-05-27).
    */
   yNudge?: number;
+  /**
+   * Optional hover handlers — used by WorkspaceHeaderStrip when sidebar is
+   * collapsed to drop the hover-preview overlay from the toggle pill itself
+   * (Claude-style). LeftHeaderStrip doesn't pass these — its pill only
+   * toggles. 2026-05-27.
+   */
+  onHoverEnter?: () => void;
+  onHoverLeave?: () => void;
 }
 
-export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = -2 }: SidebarTogglePillProps) {
+export function SidebarTogglePill({ sidebarVisible = true, onClick, yNudge = -2, onHoverEnter, onHoverLeave }: SidebarTogglePillProps) {
   const active = sidebarVisible;
   return (
     <motion.button
       type="button"
       onClick={onClick}
+      onMouseEnter={onHoverEnter}
+      onMouseLeave={onHoverLeave}
       aria-label="Toggle sidebar"
       title="Toggle sidebar (⌘B)"
       data-no-drag

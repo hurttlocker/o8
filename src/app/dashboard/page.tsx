@@ -3816,16 +3816,17 @@ function DashboardInner() {
             // Allow the inner card's drop shadow to escape the column box.
             overflow: 'visible',
             position: 'relative',
-            // Claude-style floating card. 9px buffer on top/left/right
-            // (5px base + 4px operator-requested breathing room from the
-            // window edges 2026-05-27). Bottom stays 0 because the
-            // DesktopStatusBar's left section renders directly below as
-            // the second half of the SAME visual card (flat-bottom panel
-            // + flat-top footer, divider between them) — adding a gap
-            // here would break the merged-card design.
-            paddingTop: 9,
-            paddingLeft: 9,
-            paddingRight: 9,
+            // Claude-style floating card. 5px buffer on top/left/right.
+            // Bottom stays 0 because the DesktopStatusBar's left section
+            // renders directly below as the second half of the SAME
+            // visual card (flat-bottom panel + flat-top footer, divider
+            // between them) — adding a gap here would break the
+            // merged-card design. (The +4px breathing-room bump from
+            // 2026-05-27 was reverted same day — it shifted the toggle
+            // pill 4px right when sidebar opens, breaking header alignment.)
+            paddingTop: 5,
+            paddingLeft: 5,
+            paddingRight: 5,
             paddingBottom: 0,
           }}
         >
@@ -3867,11 +3868,6 @@ function DashboardInner() {
           <LeftHeaderStrip
             sidebarVisible={sidebarVisible}
             onToggleSidebar={() => setSidebarVisible(v => !v)}
-            // Compensate for the +4 paddingTop bump on the AgentPanel card
-            // (5 → 9 for outer breathing room) so the toggle pill stays at
-            // the same window-y as the WorkspaceHeaderStrip pill when the
-            // sidebar toggles open ↔ closed. Without this it jumps 4px.
-            togglePillYNudge={-6}
           />
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <GuidedDiscoveryHalo active={showAgentPanelFtux} borderRadius={20} />
@@ -4005,6 +4001,8 @@ function DashboardInner() {
           leadingInset={!showSidebarColumn}
           sidebarVisible={sidebarVisible}
           onToggleSidebar={!showSidebarColumn && !compactShell ? () => setSidebarVisible(v => !v) : undefined}
+          onSidebarHoverEnter={!showSidebarColumn && !compactShell ? openSidebarPreview : undefined}
+          onSidebarHoverLeave={!showSidebarColumn && !compactShell ? scheduleSidebarPreviewClose : undefined}
           rightPanelOpen={showRightPanelColumn}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
           headerLabel={workspaceHeaderActive.label}
@@ -4275,25 +4273,6 @@ function DashboardInner() {
           toggle pill keeps the existing slide-from-left full open. */}
       {!showSidebarColumn && !compactShell && (
         <>
-          <div
-            data-mcp-scope="agent-panel-hover-trigger"
-            onMouseEnter={openSidebarPreview}
-            onMouseLeave={scheduleSidebarPreviewClose}
-            style={{
-              position: 'fixed',
-              // Below the title bar / toggle pill (which sits around y=10-30
-              // inside the WorkspaceHeaderStrip) so click-to-open on the pill
-              // is never blocked by the hover hot zone.
-              top: 44,
-              left: 0,
-              width: 18,
-              // Stop short of the status bar so chrome buttons there stay
-              // hover-able without flashing the preview.
-              bottom: 36,
-              zIndex: 90,
-              cursor: 'default',
-            }}
-          />
           <AnimatePresence initial={false}>
             {sidebarPreviewOpen && (
               <motion.div
