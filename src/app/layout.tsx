@@ -2,7 +2,6 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import NavigationBridge from '@/components/NavigationBridge';
-import { UpdateBanner } from '@/components/desktop/UpdateBanner';
 
 export const metadata: Metadata = {
   title: 'o8',
@@ -50,7 +49,10 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           }}
         />
         <NavigationBridge />
-        <UpdateBanner />
+        {/* UpdateBanner removed — the inline UpdateCard renders inside
+            AgentPanel above the chrome icons (cortex-ide/AgentPanel.tsx).
+            That stops it from covering the workspace tab strip + reconnect
+            banner when an update lands. */}
         {children}
         <script
           dangerouslySetInnerHTML={{
