@@ -589,8 +589,8 @@ export function AddRepoDialog({
         <button
           type="button"
           onClick={() => { void addRepo(); }}
-          disabled={!repoPathInput.trim() || validating || adding}
-          style={primaryButtonStyle(!repoPathInput.trim() || validating || adding)}
+          disabled={!repoPathInput.trim() || validating || adding || !!validationError}
+          style={primaryButtonStyle(!repoPathInput.trim() || validating || adding || !!validationError)}
         >
           {adding ? 'Adding…' : selectedProject ? `Add to ${selectedProject.name}` : 'Add'}
         </button>
