@@ -3545,6 +3545,85 @@ function DashboardInner() {
   const showRightPanelColumn = chatVisible && !compactShell;
   const workspaceInset = compactShell ? 2 : 4;
 
+  // Same AgentPanel element drives both the in-column mount AND the hover-
+  // preview overlay. Only one of the two ever renders at a time (in-column
+  // when sidebar is expanded, overlay when collapsed + hovered) so this is
+  // a single AgentPanel mount that relocates between trees on transition.
+  // Keeps the overlay's content 1:1 with the real panel — no condensed copy.
+  const agentPanelElement = (
+    <AgentPanel
+      activeSessionKey={activeSessionKey ?? null}
+      selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
+      selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
+      selectedRepoLocalPath={globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null}
+      activeWorkspacePath={activeWorkspace ?? null}
+      activeWorkspaceTabKind={activeWorkspaceTabKind}
+      onFocusOrchestratorTab={() => {
+        for (const handle of workspaceTerminalHandlesRef.current.values()) {
+          const snap = handle.getTabsSnapshot();
+          const orchTab = snap.tabs.find((tab) => tab.kind === 'orchestrator');
+          if (orchTab) {
+            handle.focusTab(orchTab.id);
+            window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId: orchTab.id } }));
+            return;
+          }
+        }
+      }}
+      onFocusAssistantTab={() => {
+        let fallbackHandle: TerminalTabHandle | null = null;
+        for (const handle of workspaceTerminalHandlesRef.current.values()) {
+          fallbackHandle ??= handle;
+          const snap = handle.getTabsSnapshot();
+          const assistantTab = snap.tabs.find((tab) => tab.kind === 'llm-chat');
+          if (assistantTab) {
+            handle.focusTab(assistantTab.id);
+            window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId: assistantTab.id } }));
+            return;
+          }
+        }
+        if (fallbackHandle) {
+          const tabId = fallbackHandle.openLlmChatSession({
+            repo: workspaceTerminalPreferredRepo ?? undefined,
+            label: 'Chat',
+          });
+          window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
+        }
+      }}
+      onCreateWorkspaceOrchestrator={handleCreateWorkspaceOrchestrator}
+      onCreateWorkspaceChat={handleCreateWorkspaceChat}
+      onCreateWorkspaceTerminal={handleCreateWorkspaceTerminal}
+      onOpenCommandPalette={handlePaletteOpen}
+      onOpenProjectManagement={() => handleOpenSettingsTab('projects')}
+      selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
+      onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
+      onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
+      onSelectSession={handleSelectSession}
+      onOpenHistoryChat={handleOpenHistoryChatFromPanel}
+      onSelectRepo={handleAlignToRepo}
+      onSelectIssue={handleSelectIssue}
+      onSelectCommit={handleSelectCommit}
+      onSelectPR={handleSelectPR}
+      onReviewPR={handleReviewPR}
+      onRepoAdded={handleRepoAddedFromPanel}
+      onRepoRemoved={handleRepoRemoved}
+      onOpenSpecInWorkspace={handleOpenSpecInWorkspace}
+      onExpandWorkspace={handleExpandWorkspace}
+      onSelectFile={handleSelectFile}
+      onOpenCI={handleOpenCI}
+      onCreateIssue={handleCreateIssue}
+      onOpenGitLog={handleOpenGitLog}
+      onOpenDeploy={handleOpenDeploy}
+      onAgentsUpdate={handleAgentsUpdate}
+      onAgentKill={sendAgentKill}
+      lifecycleEvents={lifecycleEvents}
+      orchestratorPackets={activePackets}
+      orchestratorMissionState={thoughtsMissionState}
+      registeredRepos={activeProjectRepoEntries}
+      ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
+      leftPanelFocus={leftPanelFocus}
+    />
+  );
+
   return (
     <DictationHost>
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
@@ -3877,77 +3956,7 @@ function DashboardInner() {
             title="Live agent sessions appear here"
             body="When you dispatch work, Cortex expands this rail and keeps the active session card within reach."
           />
-          <AgentPanel
-            activeSessionKey={activeSessionKey ?? null}
-            selectedRepo={globalRepo ?? repoSlugFromRemote(workspaceTerminalPreferredRepo?.remoteUrl)}
-            selectedRepoBranch={globalRepoEntry?.readiness?.currentBranch ?? globalRepoBranch ?? workspaceTerminalPreferredRepo?.branch ?? null}
-            selectedRepoLocalPath={globalRepoEntry?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null}
-            activeWorkspacePath={activeWorkspace ?? null}
-            activeWorkspaceTabKind={activeWorkspaceTabKind}
-            onFocusOrchestratorTab={() => {
-              for (const handle of workspaceTerminalHandlesRef.current.values()) {
-                const snap = handle.getTabsSnapshot();
-                const orchTab = snap.tabs.find((tab) => tab.kind === 'orchestrator');
-                if (orchTab) {
-                  handle.focusTab(orchTab.id);
-                  window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId: orchTab.id } }));
-                  return;
-                }
-              }
-            }}
-            onFocusAssistantTab={() => {
-              let fallbackHandle: TerminalTabHandle | null = null;
-              for (const handle of workspaceTerminalHandlesRef.current.values()) {
-                fallbackHandle ??= handle;
-                const snap = handle.getTabsSnapshot();
-                const assistantTab = snap.tabs.find((tab) => tab.kind === 'llm-chat');
-                if (assistantTab) {
-                  handle.focusTab(assistantTab.id);
-                  window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId: assistantTab.id } }));
-                  return;
-                }
-              }
-              if (fallbackHandle) {
-                const tabId = fallbackHandle.openLlmChatSession({
-                  repo: workspaceTerminalPreferredRepo ?? undefined,
-                  label: 'Chat',
-                });
-                window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
-              }
-            }}
-            onCreateWorkspaceOrchestrator={handleCreateWorkspaceOrchestrator}
-            onCreateWorkspaceChat={handleCreateWorkspaceChat}
-            onCreateWorkspaceTerminal={handleCreateWorkspaceTerminal}
-            onOpenCommandPalette={handlePaletteOpen}
-            onOpenProjectManagement={() => handleOpenSettingsTab('projects')}
-            selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
-            onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
-            onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
-            onSelectSession={handleSelectSession}
-            onOpenHistoryChat={handleOpenHistoryChatFromPanel}
-            onSelectRepo={handleAlignToRepo}
-            onSelectIssue={handleSelectIssue}
-            onSelectCommit={handleSelectCommit}
-            onSelectPR={handleSelectPR}
-            onReviewPR={handleReviewPR}
-            onRepoAdded={handleRepoAddedFromPanel}
-            onRepoRemoved={handleRepoRemoved}
-            onOpenSpecInWorkspace={handleOpenSpecInWorkspace}
-            onExpandWorkspace={handleExpandWorkspace}
-            onSelectFile={handleSelectFile}
-            onOpenCI={handleOpenCI}
-            onCreateIssue={handleCreateIssue}
-            onOpenGitLog={handleOpenGitLog}
-            onOpenDeploy={handleOpenDeploy}
-            onAgentsUpdate={handleAgentsUpdate}
-            onAgentKill={sendAgentKill}
-            lifecycleEvents={lifecycleEvents}
-            orchestratorPackets={activePackets}
-            orchestratorMissionState={thoughtsMissionState}
-            registeredRepos={activeProjectRepoEntries}
-            ideWorkspaceSessions={ideWorkspaceSessionsForSidebar}
-            leftPanelFocus={leftPanelFocus}
-          />
+          {agentPanelElement}
           </div>
           </div>
         </motion.div>
@@ -4287,10 +4296,16 @@ function DashboardInner() {
                 data-mcp-scope="agent-panel-hover-preview"
                 style={{
                   position: 'fixed',
-                  top: 8,
+                  // Below the traffic lights (drawn at y ~13–30) so the
+                  // overlay reads as professional drop chrome, not as a
+                  // layer that fights the OS controls. 2026-05-27.
+                  top: 44,
                   left: 8,
-                  width: Math.min(Math.max(leftWidth + 60, 320), 440),
-                  maxHeight: 'calc(100vh - 80px)',
+                  // Match the actual AgentPanel column width so the
+                  // overlay is a 1:1 stand-in for the real panel — no
+                  // condensed copy. Default 300px (DEFAULT_LEFT_PANEL_WIDTH).
+                  width: leftWidth,
+                  maxHeight: 'calc(100vh - 90px)',
                   display: 'flex',
                   flexDirection: 'column',
                   overflow: 'hidden',
@@ -4321,22 +4336,7 @@ function DashboardInner() {
                   } : {}),
                 } as React.CSSProperties}
               >
-                <SidebarHoverPreviewBody
-                  projects={dashboardProjects.ledger?.projects ?? []}
-                  activeProjectId={dashboardProjects.ledger?.activeProjectId ?? null}
-                  repos={activeProjectRepoEntries}
-                  packets={activePackets}
-                  sessions={ideWorkspaceSessionsForSidebar}
-                  activeSessionKey={activeSessionKey ?? null}
-                  onOpenFullPanel={() => {
-                    setSidebarPreviewOpen(false);
-                    setSidebarVisible(true);
-                  }}
-                  onSelectSession={(key) => {
-                    setSidebarPreviewOpen(false);
-                    handleSelectSession(key);
-                  }}
-                />
+                {agentPanelElement}
               </motion.div>
             )}
           </AnimatePresence>
