@@ -173,7 +173,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
       ref={anchorRef}
       onMouseEnter={showPopover}
       onMouseLeave={scheduleHide}
-      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}
+      style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', flexShrink: 0 }}
     >
       <button
         type="button"
@@ -183,16 +183,18 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
-          minWidth: 42,
-          height: 28,
-          paddingLeft: 8,
-          paddingRight: 8,
-          borderRadius: 8,
+          minWidth: 36,
+          height: 26,
+          paddingLeft: 7,
+          paddingRight: 7,
+          borderRadius: 7,
           borderWidth: 0,
+          flexShrink: 0,
           background: 'var(--t-success-soft)',
           color: 'var(--t-success)',
-          fontSize: 10,
-          fontWeight: 700,
+          fontSize: 11,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
           fontFamily: '"SF Mono", ui-monospace, monospace',
           cursor: 'pointer',
           lineHeight: 1,
