@@ -11,9 +11,18 @@ import { SidebarTogglePill } from './SidebarTogglePill';
 interface LeftHeaderStripProps {
   sidebarVisible?: boolean;
   onToggleSidebar?: () => void;
+  /**
+   * Forwarded to SidebarTogglePill so callers can compensate when the
+   * containing card's paddingTop changes. Default -2 matches the original
+   * 5px paddingTop card. The production dashboard now passes -6 because the
+   * card's paddingTop was bumped from 5 → 9 for outer breathing room
+   * (2026-05-27) and we want the pill to stay at the same window-y as the
+   * WorkspaceHeaderStrip pill when the sidebar collapses.
+   */
+  togglePillYNudge?: number;
 }
 
-export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar }: LeftHeaderStripProps) {
+export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar, togglePillYNudge }: LeftHeaderStripProps) {
   return (
     <ColumnHeaderStrip
       drag
@@ -35,6 +44,7 @@ export function LeftHeaderStrip({ sidebarVisible = true, onToggleSidebar }: Left
           <SidebarTogglePill
             sidebarVisible={sidebarVisible}
             onClick={onToggleSidebar}
+            yNudge={togglePillYNudge}
           />
         </>
       }
