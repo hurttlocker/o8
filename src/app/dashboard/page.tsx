@@ -17,7 +17,7 @@ import type { CanvasTab } from '@/components/desktop/Canvas';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
 import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
-import { ThemeProvider } from '@/lib/theme/context';
+import { ThemeProvider, useTheme } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
@@ -269,6 +269,14 @@ function DashboardInner() {
   // and markDashboardInteractive() (scheduled below on the next idle tick)
   // to produce the [perf] bootstrap log.
   markDashboardFirstRender();
+
+  // Glass vs solid axis: in glass mode the AgentPanel card paints nothing
+  // and shadows its descendants with midnight-palette ink so dark vibrancy
+  // shows through with legible light text (matches the right O8Panel
+  // approach). In solid mode the card keeps --t-panel-solid (the proper
+  // opaque paper) with the normal dark-on-cream tokens.
+  const { surface: themeSurface } = useTheme();
+  const isGlassSurface = themeSurface === 'glass';
 
   const [inTauri, setInTauri] = useState(false);
   useEffect(() => {
@@ -3428,12 +3436,25 @@ function DashboardInner() {
               borderTopRightRadius: 14,
               borderBottomLeftRadius: 0,
               borderBottomRightRadius: 0,
-              background: 'var(--t-panel-solid)',
-              // Soft elevation so the card reads as lifted off the chrome
-              // without becoming heavy. Tuned for both themes (alpha is
-              // small enough that it disappears into the dark backdrop).
-              boxShadow: '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
-            }}
+              // Surface axis branches here:
+              //   - solid: --t-panel-solid (the proper opaque cream paper)
+              //     so dark-ink text reads on its own surface.
+              //   - glass: paint nothing + shadow descendants with light
+              //     ink tokens so the panel reads as glass over macOS
+              //     vibrancy (matches the right O8Panel approach).
+              background: isGlassSurface ? 'transparent' : 'var(--t-panel-solid)',
+              boxShadow: isGlassSurface ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+              ...(isGlassSurface ? {
+                ['--t-text' as string]: '#e8ecf2',
+                ['--t-text-strong' as string]: '#f5f8fc',
+                ['--t-text-secondary' as string]: '#bcc5d0',
+                ['--t-text-muted' as string]: '#8b95a3',
+                ['--t-text-faint' as string]: '#5f6b7a',
+                ['--t-hover' as string]: 'rgba(255, 255, 255, 0.05)',
+                ['--t-input-bg' as string]: 'rgba(255, 255, 255, 0.06)',
+                ['--t-divider-subtle' as string]: 'rgba(255, 255, 255, 0.06)',
+              } : {}),
+            } as React.CSSProperties}
           >
           <LeftHeaderStrip
             sidebarVisible={sidebarVisible}

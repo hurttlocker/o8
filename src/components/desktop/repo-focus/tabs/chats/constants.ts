@@ -56,6 +56,11 @@ export const HISTORY_ROW_TONES: Record<HistoryToneKey, HistoryRowTone> = {
   active: {
     key: 'active',
     accent: 'transparent',
+    // Uses --t-input-bg which the AgentPanel card scopes per surface:
+    //   - solid: --t-input-bg = rgba(244, 242, 237, 0.7) — cream pill (paper)
+    //   - glass: scoped to rgba(255, 255, 255, 0.06) on the panel card so the
+    //     selected row reads as a subtle white-tint highlight over vibrancy
+    //     instead of a bright cream block (matches the o8.md tab approach).
     background: 'var(--t-input-bg)',
     border: 'var(--t-divider-subtle)',
     iconBackground: 'color-mix(in srgb, var(--t-accent) 10%, transparent)',
