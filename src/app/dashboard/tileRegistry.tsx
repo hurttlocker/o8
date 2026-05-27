@@ -425,6 +425,14 @@ export function createTileRegistry({
           sendTerminalDetach={sendTerminalDetach}
           sendAgentKill={sendAgentKill}
           termWsConnected={termWsConnected}
+          repoPath={workspaceTerminalPreferredRepo?.localPath ?? globalRepoEntries[0]?.localPath ?? null}
+          repoLabel={workspaceTerminalPreferredRepo?.name ?? globalRepoEntries[0]?.name ?? null}
+          registeredRepos={globalRepoEntries}
+          previews={workspacePreviews}
+          onRepoPathChange={(repoPath) => {
+            const repo = globalRepoEntries.find((entry) => entry.localPath === repoPath);
+            if (repo) void handleSelectRegisteredRepo(repo.id);
+          }}
           onSplitVertical={() => handleSplitTile(tileId, 'vertical')}
           onClose={() => handleCloseTile(tileId)}
         />
