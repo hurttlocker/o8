@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs';
-import { join, resolve, sep } from 'node:path';
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { extname, join, resolve, sep } from 'node:path';
 import { createHash } from 'node:crypto';
 
 export const runtime = 'nodejs';
@@ -26,6 +26,19 @@ const EXT_BY_MIME: Record<string, string> = {
   'image/svg+xml': 'svg',
 };
 
+/** Lowercase extension → canonical extension + MIME pair. Used by the
+ *  `srcPath` branch (Finder-drag drops that come in as absolute paths via
+ *  Tauri's drag-drop bridge rather than a multipart body). */
+const PATH_EXT_TO_MIME: Record<string, { ext: string; mime: string }> = {
+  '.png':  { ext: 'png',  mime: 'image/png' },
+  '.jpg':  { ext: 'jpg',  mime: 'image/jpeg' },
+  '.jpeg': { ext: 'jpg',  mime: 'image/jpeg' },
+  '.gif':  { ext: 'gif',  mime: 'image/gif' },
+  '.webp': { ext: 'webp', mime: 'image/webp' },
+  '.avif': { ext: 'avif', mime: 'image/avif' },
+  '.svg':  { ext: 'svg',  mime: 'image/svg+xml' },
+};
+
 function repoDir(repoPath: string): string | null {
   if (!repoPath || typeof repoPath !== 'string' || !existsSync(repoPath)) return null;
   try {
@@ -48,13 +61,49 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ ok: false, error: 'repoPath invalid' }, { status: 400 });
   }
 
-  const mime = (request.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
-  const ext = EXT_BY_MIME[mime];
-  if (!ext) {
-    return NextResponse.json({ ok: false, error: `unsupported image type: ${mime || '(none)'}` }, { status: 415 });
+  // Two ingest paths:
+  //  - body bytes (the original POST shape — paste, programmatic upload,
+  //    and the HTML5-drop fallback). `Content-Type` carries the MIME.
+  //  - `?srcPath=<absolute path>` (the Tauri drag-drop bridge — Tauri
+  //    intercepts Finder→app drops and gives JS only the file path, not
+  //    a File. The server reads the bytes from disk on the local FS).
+  const srcPath = request.nextUrl.searchParams.get('srcPath');
+
+  let buf: Buffer;
+  let ext: string;
+  let rawName: string;
+
+  if (srcPath) {
+    if (!existsSync(srcPath) || !statSync(srcPath).isFile()) {
+      return NextResponse.json({ ok: false, error: 'srcPath not a readable file' }, { status: 400 });
+    }
+    const pathExt = extname(srcPath).toLowerCase();
+    const mapped = PATH_EXT_TO_MIME[pathExt];
+    if (!mapped) {
+      return NextResponse.json({ ok: false, error: `unsupported image extension: ${pathExt || '(none)'}` }, { status: 415 });
+    }
+    try {
+      buf = readFileSync(srcPath);
+    } catch (err) {
+      return NextResponse.json({ ok: false, error: err instanceof Error ? err.message : 'read failed' }, { status: 500 });
+    }
+    ext = mapped.ext;
+    rawName = srcPath.split('/').pop() ?? 'image';
+  } else {
+    const mime = (request.headers.get('content-type') ?? '').split(';')[0].trim().toLowerCase();
+    const mappedExt = EXT_BY_MIME[mime];
+    if (!mappedExt) {
+      return NextResponse.json({ ok: false, error: `unsupported image type: ${mime || '(none)'}` }, { status: 415 });
+    }
+    buf = Buffer.from(await request.arrayBuffer());
+    ext = mappedExt;
+    try {
+      rawName = decodeURIComponent(request.headers.get('x-filename') ?? '');
+    } catch {
+      rawName = '';
+    }
   }
 
-  const buf = Buffer.from(await request.arrayBuffer());
   if (buf.byteLength === 0) {
     return NextResponse.json({ ok: false, error: 'empty body' }, { status: 400 });
   }
@@ -65,12 +114,6 @@ export async function POST(request: NextRequest) {
   // Hash for uniqueness; slug is human-readable context. Re-dropping the exact
   // same file (same name + bytes) is idempotent — the write below is skipped.
   const hash = createHash('sha256').update(buf).digest('hex').slice(0, 10);
-  let rawName = '';
-  try {
-    rawName = decodeURIComponent(request.headers.get('x-filename') ?? '');
-  } catch {
-    rawName = '';
-  }
   const fileName = `${slugifyStem(rawName)}-${hash}.${ext}`;
 
   const assetsDir = join(repoPath, ASSETS_DIR);
