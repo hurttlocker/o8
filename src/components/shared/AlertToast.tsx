@@ -140,6 +140,7 @@ export const AlertToast = memo(function AlertToast({
                 : 'translateX(0) scale(1)',
               transition:
                 'opacity 300ms ease, transform 300ms cubic-bezier(0.32, 0.72, 0, 1)',
+              fontFamily: 'var(--font-sans-system)',
             }}
             onClick={() => {
               if (onAction) onAction(alert);
@@ -150,8 +151,10 @@ export const AlertToast = memo(function AlertToast({
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
-                  fontSize: 13,
-                  fontWeight: 600,
+                  // Hurttlocker row title: 13.5/300/-0.1px (was 13/600).
+                  fontSize: 13.5,
+                  fontWeight: 300,
+                  letterSpacing: '-0.1px',
                   color: '#0f172a',
                   lineHeight: 1.3,
                 }}
@@ -160,9 +163,12 @@ export const AlertToast = memo(function AlertToast({
               </div>
               <div
                 style={{
-                  fontSize: 12,
+                  // Hurttlocker meta: 9.5/260/-0.4 (was 12/normal).
+                  fontSize: 9.5,
+                  fontWeight: 260,
+                  letterSpacing: '-0.4px',
                   color: '#475569',
-                  lineHeight: 1.3,
+                  lineHeight: 1.35,
                   marginTop: 2,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
