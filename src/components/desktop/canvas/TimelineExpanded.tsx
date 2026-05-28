@@ -1,6 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/exhaustive-deps -- preserved from legacy Canvas.tsx extraction */
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { motion } from 'framer-motion';
 import type { AgentSummary } from '@/lib/fleet/types';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
 import { formatAge } from '@/components/desktop/canvas-utils';
@@ -451,12 +452,30 @@ export function TimelineExpanded() {
                 </span>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: isCompact ? 10 : 14 }}>
-                {agentBreakdown.map((entry) => {
+                {agentBreakdown.map((entry, laneIndex) => {
                   const context = liveSessionContext.get(entry.agent);
                   const runtimePalette = sessionReplayRuntimePalette(context?.runtime);
                   return (
-                    <div
+                    <motion.div
                       key={entry.agent}
+                      // Entrance: stagger fade + slide-up so the lanes
+                      // cascade in when the Session Replay page loads.
+                      // Hover: brighten the border + a quiet ambient
+                      // glow — no translate (flat-doctrine), the card
+                      // sits still and the chrome warms instead.
+                      initial={{ opacity: 0, y: 8 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      transition={{
+                        delay: 0.04 + laneIndex * 0.06,
+                        type: 'spring',
+                        stiffness: 280,
+                        damping: 28,
+                        mass: 0.7,
+                      }}
+                      whileHover={{
+                        borderColor: 'var(--t-divider, var(--t-text-muted))',
+                        boxShadow: 'inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 4px 18px rgba(15, 23, 42, 0.08)',
+                      }}
                       style={{
                         borderRadius: isCompact ? 14 : 16,
                         border: '1px solid var(--t-panel-border)',
@@ -591,7 +610,7 @@ export function TimelineExpanded() {
                           );
                         })}
                       </div>
-                    </div>
+                    </motion.div>
                   );
                 })}
               </div>
