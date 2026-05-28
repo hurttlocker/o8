@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, type Dispatch, type RefObject, type SetStateAction } from 'react';
-import type { NavSection } from '@/components/desktop/NavRail';
+import type { NavSection } from '@/app/dashboard/types';
 
 export function useSettingsOverlayDismiss({
   activeNavSection,
