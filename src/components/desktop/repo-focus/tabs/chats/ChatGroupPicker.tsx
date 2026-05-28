@@ -38,7 +38,7 @@ export function ChatGroupPicker({
   }, [open]);
 
   return (
-    <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-flex', flexShrink: 0 }}>
+    <div ref={wrapperRef} style={{ position: 'relative', display: 'inline-flex', flexShrink: 0, marginRight: -1 }}>
       <button
         type="button"
         onClick={() => setOpen((v) => !v)}
