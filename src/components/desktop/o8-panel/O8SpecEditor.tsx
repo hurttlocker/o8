@@ -26,8 +26,9 @@ import { markdown } from '@codemirror/lang-markdown';
 import { syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 import { tags } from '@lezer/highlight';
 import { extractRoughdraftReviewIndex } from '@/lib/o8md/rfm';
-import { specImageDropPaste } from './spec-image-upload';
+import { handleImagePathsViaTauri, specImageDropPaste } from './spec-image-upload';
 import { specImageRender, specRepoPathCompartment, specRepoPathFacet } from './spec-image-widget';
+import { useTauriFileDrop } from '@/lib/hooks/use-tauri-file-drop';
 
 const HAND = "'Caveat', ui-rounded, cursive";
 const PROSE = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, system-ui, sans-serif";
@@ -217,6 +218,23 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
   // path without rebuilding the editor when the operator switches repos.
   const repoPathRef = useRef(repoPath);
   repoPathRef.current = repoPath;
+
+  // Tauri's drag-drop bridge — Finder→app drops are intercepted by Tauri
+  // (dragDropEnabled: true) so the CodeMirror HTML5 `drop` extension below
+  // never sees them in the prod app. Subscribe to the Rust-side bridge here
+  // and upload via the `?srcPath=` ingest path on /api/repo-spec/asset.
+  // Paste keeps working through the native webview paste event.
+  useTauriFileDrop({
+    hostRef,
+    onDrop: (paths, coords) => {
+      const repo = repoPathRef.current;
+      const view = viewRef.current;
+      if (!repo || !view) return;
+      const pos = view.posAtCoords({ x: coords.x, y: coords.y }) ?? view.state.selection.main.head;
+      handleImagePathsViaTauri(view, repo, pos, paths);
+    },
+  });
+
   const [notes, setNotes] = useState<NoteLayout[]>([]);
   // Caveat is a webfont. Until it loads the rail paints in a fallback (wider,
   // taller) font — wrong glyphs AND the char-count collision estimate (tuned
