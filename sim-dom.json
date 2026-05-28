@@ -1,0 +1,722 @@
+[
+  {
+    "tag": "HTML",
+    "cls": "",
+    "id": "",
+    "text": "\n\n\nSimulator - iPhone 17 Pro\n\n*,*::befor",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "HEAD",
+    "cls": "",
+    "id": "",
+    "text": "\n\n\nSimulator - iPhone 17 Pro\n\n*,*::befor",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "META",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "META",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "TITLE",
+    "cls": "",
+    "id": "",
+    "text": "Simulator - iPhone 17 Pro",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "LINK",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "STYLE",
+    "cls": "",
+    "id": "",
+    "text": "*,*::before,*::after{box-sizing:border-b",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "STYLE",
+    "cls": "",
+    "id": "",
+    "text": "/*! tailwindcss v4.1.14 | MIT License | ",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "BODY",
+    "cls": "",
+    "id": "",
+    "text": "\niPhone 17 ProiOS 26.4\n            \n    ",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "root",
+    "text": "iPhone 17 ProiOS 26.4\n            \n     ",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "flex flex-col items-center justify-center h-screen bg-page py-6 pl-6 gap-3 font-system box-border",
+    "id": "",
+    "text": "iPhone 17 ProiOS 26.4\n            \n     ",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "flex flex-col items-center gap-3 min-w-0",
+    "id": "",
+    "text": "iPhone 17 ProiOS 26.4\n            \n     ",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "",
+    "text": "iPhone 17 ProiOS 26.4",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "relative",
+    "id": "",
+    "text": "iPhone 17 ProiOS 26.4",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "",
+    "text": "iPhone 17 ProiOS 26.4",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "BUTTON",
+    "cls": "",
+    "id": "",
+    "text": "iPhone 17 ProiOS 26.4",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "SPAN",
+    "cls": "",
+    "id": "",
+    "text": "iPhone 17 Pro",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "svg",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "polyline",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "SPAN",
+    "cls": "",
+    "id": "",
+    "text": "iOS 26.4",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "BUTTON",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": "Reload React Native bundle",
+    "src": null
+  },
+  {
+    "tag": "svg",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "BUTTON",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": "Home",
+    "src": null
+  },
+  {
+    "tag": "svg",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "BUTTON",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": "Show accessibility overlay",
+    "src": null
+  },
+  {
+    "tag": "svg",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "BUTTON",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": "Rotate device",
+    "src": null
+  },
+  {
+    "tag": "svg",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "relative max-h-full",
+    "id": "",
+    "text": "\n            \n            @keyframes ser",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "IMG",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "IMG",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": "blob:http://localhost:8081/ad47624f-1b57-4bf9-94c5-dfed4b84fbe1"
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "",
+    "id": "",
+    "text": "\n            \n            @keyframes ser",
+    "role": "separator",
+    "aria": "Resize simulator width. Drag the corner or use Left and Right Arrow keys; hold Shift for larger steps.",
+    "src": null
+  },
+  {
+    "tag": "svg",
+    "cls": {},
+    "id": "",
+    "text": "\n            \n            @keyframes ser",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "defs",
+    "cls": {},
+    "id": "",
+    "text": "\n            \n            @keyframes ser",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "filter",
+    "cls": {},
+    "id": "serve-sim-rz-bh-P0-0",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "feGaussianBlur",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "feMerge",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "feMergeNode",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "filter",
+    "cls": {},
+    "id": "serve-sim-rz-bd-P0-0",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "feGaussianBlur",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "feMerge",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "feMergeNode",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "style",
+    "cls": {},
+    "id": "",
+    "text": "\n            \n            @keyframes ser",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "g",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "g",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "g",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "g",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "absolute right-3 bottom-3 z-20 pointer-events-none select-none rounded-lg px-2.5 py-1 text-[11.5px] font-mono leading-none tracking-wide text-white/95 bg-[rgba(20,22,28,0.78)] shadow-[0_1px_2px_rgba(0,0,0,0.18),0_6px_18px_rgba(0,0,0,0.28),inset_0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-md backdrop-saturate-150 whitespace-nowrap",
+    "id": "",
+    "text": "280 × 609",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "SPAN",
+    "cls": "opacity-60 mx-0.5",
+    "id": "",
+    "text": "×",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "DIV",
+    "cls": "fixed top-3 right-3 flex flex-col gap-1 p-1 bg-panel-bg border border-white/8 rounded-[10px] backdrop-blur-[12px] [-webkit-backdrop-filter:blur(12px)] [transition:opacity_0.18s_ease] z-40 opacity-100 pointer-events-auto",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "BUTTON",
+    "cls": "w-[30px] h-[30px] flex items-center justify-center bg-transparent border-none rounded-md text-[#8e8e93] cursor-pointer [transition:background_0.15s_ease,color_0.15s_ease] hover:bg-white/8 hover:text-white",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": "Open tools panel",
+    "src": null
+  },
+  {
+    "tag": "svg",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "rect",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "line",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "BUTTON",
+    "cls": "w-[30px] h-[30px] flex items-center justify-center bg-transparent border-none rounded-md text-[#8e8e93] cursor-pointer [transition:background_0.15s_ease,color_0.15s_ease] hover:bg-white/8 hover:text-white",
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": "Open WebKit DevTools",
+    "src": null
+  },
+  {
+    "tag": "svg",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "circle",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  },
+  {
+    "tag": "path",
+    "cls": {},
+    "id": "",
+    "text": "",
+    "role": null,
+    "aria": null,
+    "src": null
+  }
+]

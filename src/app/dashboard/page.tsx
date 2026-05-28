@@ -35,9 +35,9 @@ import {
   REQUEST_ADD_REPO_EVENT,
   type OpenSettingsTabDetail,
 } from '@/lib/desktop/events';
-import { ApprovalQueuePanel } from '@/components/desktop/ApprovalQueuePanel';
+// ApprovalQueuePanel retired — was only consumed by the dead workspace-side-panel ReviewTab.
 // AnalyticsPage lazy-loaded below
-import type { WorkspaceSidePanelRepo } from '@/components/desktop/WorkspaceSidePanel';
+import type { WorkspaceSidePanelRepo } from './types';
 import type { O8Tab } from '@/components/desktop/o8-panel/types';
 import {
   markDashboardScriptStart,
