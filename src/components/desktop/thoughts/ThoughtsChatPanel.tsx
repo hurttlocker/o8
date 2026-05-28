@@ -1852,7 +1852,21 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [handleCopyMarkdown]);
 
   return (
-    <>
+    <div
+      style={{
+        // containerType: 'size' makes `cqh` resolve to the local chat
+        // column instead of the viewport — the compose-first composer
+        // lift uses `translateY(-32cqh)` which now scales with the
+        // workspace area (shrinks when the bottom panel is open).
+        // 'display: contents' would skip layout — we need a real flex
+        // column so the chat list + composer flow correctly.
+        containerType: 'size',
+        display: 'flex',
+        flexDirection: 'column',
+        flex: 1,
+        minHeight: 0,
+      } as React.CSSProperties}
+    >
       {displayMessages.length > 0 && showInlineExport ? (
         <div
           style={{
@@ -1918,15 +1932,30 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       />
 
       <div
-        // Composer stays at its natural bottom-of-column rest position.
-        // The previous translateY(-28vh) lift was viewport-relative and
-        // overshot whenever the workspace was squished by the bottom
-        // panel — the composer floated above the empty-state heading
-        // instead of below it. Empty-state vertical centering now lives
-        // inside OrchestratorEmptyState (flex: center) so the layout
-        // adapts to any workspace height without absolute viewport math.
+        // Compose-first lift — when the transcript is empty, the composer
+        // rises from its bottom-of-column rest position so the operator
+        // types in the middle of the canvas (Codex / Cortex pattern). On
+        // first message it eases back to 0 and the transcript fills the
+        // space above.
+        //
+        // Lift is expressed in `cqh` (container query height) rather than
+        // `vh` so the translation scales with the actual workspace area
+        // — when the bottom panel halves the workspace, the lift halves
+        // too. The parent ThoughtsChatPanel root carries
+        // `containerType: 'size'` (set below) to make `cqh` resolve to
+        // the local column, not the viewport.
+        //
+        // 32cqh on a full ~960 px workspace ≈ 307 px (the original
+        // -28vh on a 1001 px viewport landed at ~280 px). On a 600 px
+        // workspace (bottom panel open) it drops to ~192 px and the
+        // composer no longer overshoots the empty-state heading.
         style={{
           flexShrink: 0,
+          transform: displayMessages.length === 0
+            ? 'translateY(-32cqh)'
+            : 'translateY(0)',
+          transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)',
+          willChange: 'transform',
         }}
       >
       <ComposerArea
@@ -1993,6 +2022,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       />
       {displayMessages.length === 0 && composerBelowSlot ? composerBelowSlot : null}
       </div>
-    </>
+    </div>
   );
 });
