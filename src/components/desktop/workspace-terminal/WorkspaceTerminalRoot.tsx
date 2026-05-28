@@ -3,7 +3,8 @@
 
 import { forwardRef, useEffect, useId, useMemo, useState } from 'react';
 import { motion } from 'framer-motion';
-import { RotateCcw } from '../lucide-shims';
+// RotateCcw shim removed with the in-workspace reconnect banner —
+// recovery now lives in the AgentPanel ConnectionPill.
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
 import { THEME_ACCENT, THEME_ACCENT_SOFT_STRONG } from '@/components/desktop/workspace-terminal/constants';
 import { useWorkspaceTerminalController } from '@/components/desktop/workspace-terminal/useWorkspaceTerminalController';
@@ -259,109 +260,12 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           </div>
         ) : null}
 
-        {!controller.termWsConnected ? (
-          <motion.div
-            initial={{ opacity: 0, y: -4 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ type: 'spring', stiffness: 380, damping: 32, mass: 0.6 }}
-            style={{
-              display: 'grid',
-              gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-              alignItems: 'center',
-              gap: 10,
-              paddingTop: 6,
-              paddingBottom: 6,
-              paddingLeft: 12,
-              paddingRight: 12,
-              borderBottom: '0.5px solid rgba(249, 115, 22, 0.18)',
-              background: 'var(--t-panel)',
-              backdropFilter: 'saturate(180%) blur(20px)',
-              WebkitBackdropFilter: 'saturate(180%) blur(20px)',
-              color: 'var(--t-text)',
-              fontSize: 11,
-              lineHeight: 1.35,
-              letterSpacing: '-0.1px',
-              flexShrink: 0,
-              fontFamily: 'var(--font-sans-system)',
-            }}
-          >
-            <WorkspaceReconnectDot />
-            <span
-              style={{
-                minWidth: 0,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              }}
-            >
-              <span style={{ fontWeight: 400, color: 'var(--t-text)' }}>Reconnecting to workspace runtime</span>
-              <span style={{ color: 'var(--t-text-faint)', fontWeight: 300 }}> · saved tabs stay in place, sessions reattach when the bridge returns</span>
-            </span>
-            <div
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 8,
-                flexShrink: 0,
-              }}
-            >
-              {controller.activeTab?.kind === 'chat' && controller.activeCheckpoint ? (
-                <motion.button
-                  type="button"
-                  onClick={() => controller.handleRestoreLatestCheckpoint(controller.activeTab!.id)}
-                  transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
-                  style={{
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 5,
-                    border: '0.5px solid rgba(37, 99, 235, 0.24)',
-                    borderRadius: 8,
-                    background: 'rgba(37, 99, 235, 0.07)',
-                    color: '#2563eb',
-                    paddingTop: 3,
-                    paddingBottom: 3,
-                    paddingLeft: 9,
-                    paddingRight: 9,
-                    cursor: 'pointer',
-                    fontSize: 10.5,
-                    fontWeight: 400,
-                    letterSpacing: '-0.1px',
-                    fontFamily: 'var(--font-sans-system)',
-                    flexShrink: 0,
-                  }}
-                >
-                  <RotateCcw size={11} />
-                  Restore checkpoint
-                </motion.button>
-              ) : null}
-              <motion.button
-                type="button"
-                onClick={() => window.location.reload()}
-                transition={{ duration: 0.14, ease: [0.22, 1, 0.36, 1] }}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  border: '0.5px solid rgba(249, 115, 22, 0.24)',
-                  borderRadius: 8,
-                  background: 'rgba(249, 115, 22, 0.07)',
-                  color: '#f97316',
-                  paddingTop: 3,
-                  paddingBottom: 3,
-                  paddingLeft: 9,
-                  paddingRight: 9,
-                  cursor: 'pointer',
-                  fontSize: 10.5,
-                  fontWeight: 400,
-                  letterSpacing: '-0.1px',
-                  fontFamily: 'var(--font-sans-system)',
-                  flexShrink: 0,
-                }}
-              >
-                Reload workspace
-              </motion.button>
-            </div>
-          </motion.div>
-        ) : null}
+        {/* The full-width "Reconnecting to workspace runtime" banner used
+            to live here. It covered the workspace tab strip whenever
+            the WS dropped. The same state now surfaces as a compact
+            ConnectionPill inside AgentPanel (above UpdateCard) so the
+            workspace stays uncovered. The "Restore checkpoint" recovery
+            action still exists on each chat tab's header strip. */}
 
         <WorkspaceTerminalPanels
           visibleTabs={controller.visibleTabs}
@@ -397,29 +301,5 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
   },
 );
 
-function WorkspaceReconnectDot() {
-  return (
-    <span style={{ position: 'relative', width: 10, height: 10, flexShrink: 0 }}>
-      <motion.span
-        aria-hidden
-        animate={{ scale: [1, 1.9, 1], opacity: [0.45, 0, 0.45] }}
-        transition={{ duration: 1.6, ease: 'easeOut', repeat: Infinity }}
-        style={{
-          position: 'absolute',
-          inset: 0,
-          borderRadius: 999,
-          background: '#f97316',
-        }}
-      />
-      <span
-        style={{
-          position: 'absolute',
-          inset: 1,
-          borderRadius: 999,
-          background: '#f97316',
-          boxShadow: '0 0 0 0.5px rgba(249, 115, 22, 0.55) inset',
-        }}
-      />
-    </span>
-  );
-}
+// WorkspaceReconnectDot retired — see comment above where the
+// in-workspace reconnect banner used to render.

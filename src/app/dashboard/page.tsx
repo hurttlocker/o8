@@ -16,7 +16,7 @@ import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLef
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
-import { ConnectionBanner } from '@/components/desktop/ConnectionBanner';
+// ConnectionBanner retired — ConnectionPill in AgentPanel surfaces WS state.
 import { ThemeProvider, useTheme } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
 import type { BottomPanelSurfaceKind, ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
@@ -3663,8 +3663,10 @@ function DashboardInner() {
       {/* ── Connection Banner (#634) — surfaces dropped WebSocket so users
           know why agent statuses, transcripts, and approvals appear frozen.
           Reuses the existing reconnect/backoff machinery in
-          DesktopWebSocketContext; this only adds the chrome surface. ── */}
-      <ConnectionBanner connectionState={wsStatus} />
+          DesktopWebSocketContext; this only adds the chrome surface.
+          ConnectionBanner moved out of the workspace top — same state
+          now surfaces as ConnectionPill inside AgentPanel above the
+          UpdateCard slot (operator pass 2026-05-27). ── */}
 
       <ApprovalBanner />
 
