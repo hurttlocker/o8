@@ -1,10 +1,7 @@
 'use client';
 
-import { memo, useRef } from 'react';
+import { memo, useCallback, useRef } from 'react';
 import {
-  Cpu,
-  Folder,
-  GitBranch,
   MessageSquare,
   X,
 } from '../lucide-shims';
@@ -16,7 +13,7 @@ import {
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import type { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
 import { useThoughtsComposerAttachments } from '@/components/desktop/thoughts/chat-panel/useThoughtsComposerAttachments';
-import { ChipShell } from '@/components/desktop/OrchestratorEmptyState';
+import { InputButtons } from '@/components/desktop/thoughts/InputButtons';
 
 type ChatPaneState = ReturnType<typeof useWorkspaceChatPane>;
 
@@ -39,19 +36,26 @@ function WorkspaceChatComposerBase({
   tab,
   isLaneArchived,
 }: WorkspaceChatComposerProps) {
-  const working = chat.agentRunning;
-  const canSubmit = chat.canSend && !chat.sending;
-  const interactive = !working && canSubmit;
-  const iconColor = interactive ? '#ffffff' : 'var(--t-text-faint)';
-  const title = working ? 'Agent working…' : canSubmit ? 'Send (Enter)' : 'Type to send';
-
-  // Image attachment rendering (Pass 1 — Codex composer parity with the
-  // orchestrator). Drop an image onto the composer and a small thumbnail
-  // chip appears above the textarea instead of the raw absolute path being
-  // typed into the message body. Pass 2 will wire the chips into the send
-  // payload + add the runtime / repo / branch chips below.
+  // Image attachment rendering (Pass 1) + in-composer footer parity with
+  // the orchestrator (Pass 3). The footer is now the shared `InputButtons`
+  // component — same model chip + permission shield + action icons the
+  // orchestrator + llm-chat surfaces use, just fed by the Codex chat
+  // pane state. The previous standalone send button + below-card chip
+  // row (Pass 2) are gone.
   const hostRef = useRef<HTMLDivElement | null>(null);
   const attachments = useThoughtsComposerAttachments({ hostRef });
+
+  // Model chip label — runtime + model, e.g. "Codex GPT-5.5 xhigh".
+  // Falls back to just the runtime label when the chat hasn't picked a
+  // model yet (e.g., opencode awaiting providers).
+  const modelLabel = chat.selectedModel?.label
+    ? `${chat.runtimeLabel} ${chat.selectedModel.label}`
+    : chat.runtimeLabel;
+
+  // InputButtons leans on the orchestrator's enhance/undo flow. The
+  // Codex composer doesn't surface enhance today — stub the callbacks
+  // so the component renders without a no-op enhance button.
+  const noop = useCallback(() => undefined, []);
 
   return (
     <div
@@ -285,114 +289,19 @@ function WorkspaceChatComposerBase({
           />
         </div>
 
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'flex-end',
-            gap: 6,
-            paddingTop: 2,
-            paddingBottom: 8,
-            paddingLeft: 10,
-            paddingRight: 8,
-          }}
-        >
-          <button
-            type="button"
-            onClick={() => void chat.handleSend()}
-            disabled={!interactive}
-            title={title}
-            aria-label={title}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              width: 32,
-              height: 32,
-              paddingTop: 0,
-              paddingRight: 0,
-              paddingBottom: 0,
-              paddingLeft: 0,
-              borderRadius: 10,
-              borderWidth: interactive ? 0 : 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--t-border)',
-              background: interactive ? '#2563eb' : 'transparent',
-              color: iconColor,
-              cursor: interactive ? 'pointer' : 'default',
-              flexShrink: 0,
-              transition: 'background 180ms cubic-bezier(0.22, 1, 0.36, 1), opacity 180ms cubic-bezier(0.22, 1, 0.36, 1)',
-              opacity: working ? 0.7 : 1,
-              animation: working ? 'sendpill-pulse 1.6s ease-in-out infinite' : 'none',
-            }}
-          >
-            {working ? (
-              <svg width={13} height={13} viewBox="0 0 16 16" fill={iconColor} style={{ display: 'block' }} aria-hidden="true">
-                <rect x="4" y="3" width="3" height="10" rx="1" />
-                <rect x="9" y="3" width="3" height="10" rx="1" />
-              </svg>
-            ) : (
-              <svg width={13} height={13} viewBox="0 0 16 16" fill={iconColor} style={{ display: 'block' }} aria-hidden="true">
-                <path d="M5 3l8 5-8 5V3z" />
-              </svg>
-            )}
-            <style>{`@keyframes sendpill-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
-          </button>
-        </div>
-      </div>
-
-      {/* Codex/Gemini/opencode informational chip row — Repo · Branch ·
-          Runtime. Pass 2 of the composer-parity work. Read-only because
-          the runtime/worktree/branch are fixed at session-launch time;
-          the chips just surface what the agent is operating against so
-          the operator can scan it at a glance the way they scan the
-          orchestrator composer below-strip. */}
-      <CodexComposerBelow tab={tab} runtimeLabel={chat.runtimeLabel} />
-    </div>
-  );
-}
-
-function CodexComposerBelow({
-  tab,
-  runtimeLabel,
-}: {
-  tab: TerminalTab;
-  runtimeLabel: string;
-}) {
-  const repoLabel = tab.repo?.name || tab.repo?.localPath?.split('/').pop() || null;
-  const branchLabel = tab.repo?.branch || null;
-  // Nothing to show — keep the row out of the DOM entirely so a tab with
-  // no repo context doesn't render an empty chip strip.
-  if (!repoLabel && !branchLabel && !runtimeLabel) return null;
-  return (
-    <div
-      style={{
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 14,
-        paddingTop: 10,
-        paddingBottom: 4,
-        fontFamily: 'var(--font-sans-system)',
-      }}
-    >
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          gap: 8,
-        }}
-      >
-        {repoLabel ? (
-          <ChipShell icon={<Folder size={11} strokeWidth={1.6} />} label={repoLabel} />
-        ) : null}
-        {branchLabel ? (
-          <ChipShell icon={<GitBranch size={11} strokeWidth={1.6} />} label={branchLabel} />
-        ) : null}
-        {runtimeLabel ? (
-          <ChipShell icon={<Cpu size={11} strokeWidth={1.6} />} label={runtimeLabel} />
-        ) : null}
+        <InputButtons
+          input={chat.draft}
+          enhancing={false}
+          preEnhanceInput={null}
+          onEnhance={noop}
+          onUndoEnhance={noop}
+          onSubmit={() => void chat.handleSend()}
+          modelLabel={modelLabel}
+          repoLabel={tab.repo?.name || tab.repo?.localPath?.split('/').pop() || null}
+          repoPath={tab.repo?.localPath ?? null}
+          displayMessagesCount={chat.messages.length}
+          working={chat.agentRunning}
+        />
       </div>
     </div>
   );
