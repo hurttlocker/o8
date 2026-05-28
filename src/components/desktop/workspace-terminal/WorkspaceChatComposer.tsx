@@ -57,6 +57,69 @@ function WorkspaceChatComposerBase({
   // so the component renders without a no-op enhance button.
   const noop = useCallback(() => undefined, []);
 
+  // Sub-pass B — wire attached images into the actual send payload.
+  // Codex / Gemini / opencode CLIs accept a plain text prompt; the
+  // bridge is to upload each dropped image to <repoPath>/o8-assets/
+  // via the existing /api/repo-spec/asset writer (same path o8.md
+  // images take) and append `![name](o8-assets/...)` markdown refs to
+  // the prompt. The agent's filesystem tools can then read the file
+  // by path. When the chat has no repo bound, image attachments are
+  // dropped silently rather than crashing the send.
+  const handleSubmit = useCallback(() => {
+    const images = attachments.attachedImages;
+    const repoPath = tab.repo?.localPath;
+    void (async () => {
+      const imageRefs: string[] = [];
+      if (repoPath && images.length > 0) {
+        for (const image of images) {
+          try {
+            const blob = dataUriToBlob(image.dataUri, image.mimeType);
+            const res = await fetch(
+              `/api/repo-spec/asset?repoPath=${encodeURIComponent(repoPath)}`,
+              {
+                method: 'POST',
+                headers: {
+                  'Content-Type': image.mimeType,
+                  'x-filename': encodeURIComponent(image.name),
+                },
+                body: blob,
+              },
+            );
+            const data = (await res.json().catch(() => null)) as
+              | { ok?: boolean; relPath?: string }
+              | null;
+            if (res.ok && data?.ok && typeof data.relPath === 'string') {
+              imageRefs.push(`![${image.name}](${data.relPath})`);
+            }
+          } catch {
+            // Skip the image on upload failure; rest of the message still sends.
+          }
+        }
+      }
+
+      const baseDraft = chat.draft.trim();
+      const queuedTexts = chat.queuedContextCards
+        .map((card) => card.text.trim())
+        .filter(Boolean);
+      const text = [...queuedTexts, baseDraft, ...imageRefs]
+        .filter(Boolean)
+        .join('\n\n');
+      if (!text) return;
+
+      // Clear UI state up-front. handleRemoveQueuedContext is per-card
+      // since the pane doesn't expose a bulk clearer; iterate over a
+      // captured copy because the array mutates as we go.
+      chat.setDraft('');
+      const queuedCopy = [...chat.queuedContextCards];
+      for (const card of queuedCopy) {
+        chat.handleRemoveQueuedContext(card.id);
+      }
+      attachments.clearAttachments();
+
+      await chat.sendText(text);
+    })();
+  }, [attachments, chat, tab.repo?.localPath]);
+
   return (
     <div
       style={{
@@ -295,7 +358,7 @@ function WorkspaceChatComposerBase({
           preEnhanceInput={null}
           onEnhance={noop}
           onUndoEnhance={noop}
-          onSubmit={() => void chat.handleSend()}
+          onSubmit={handleSubmit}
           modelLabel={modelLabel}
           repoLabel={tab.repo?.name || tab.repo?.localPath?.split('/').pop() || null}
           repoPath={tab.repo?.localPath ?? null}
@@ -305,6 +368,23 @@ function WorkspaceChatComposerBase({
       </div>
     </div>
   );
+}
+
+/** Convert a `data:<mime>;base64,<...>` URI into a Blob suitable for a fetch
+ *  body. Used by the Codex composer's image-attachment send path so the
+ *  thumbnails dropped onto the composer (held in memory as data URIs by
+ *  useThoughtsComposerAttachments) can POST as raw bytes to
+ *  /api/repo-spec/asset. */
+function dataUriToBlob(dataUri: string, fallbackMime: string): Blob {
+  const commaIdx = dataUri.indexOf(',');
+  const head = commaIdx >= 0 ? dataUri.slice(0, commaIdx) : '';
+  const b64 = commaIdx >= 0 ? dataUri.slice(commaIdx + 1) : dataUri;
+  const mimeMatch = head.match(/data:([^;]+)/);
+  const mime = mimeMatch?.[1] ?? fallbackMime;
+  const decoded = typeof atob === 'function' ? atob(b64) : '';
+  const arr = new Uint8Array(decoded.length);
+  for (let i = 0; i < decoded.length; i++) arr[i] = decoded.charCodeAt(i);
+  return new Blob([arr], { type: mime });
 }
 
 export const WorkspaceChatComposer = memo(WorkspaceChatComposerBase);
