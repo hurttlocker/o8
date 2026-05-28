@@ -29,10 +29,12 @@ import { motion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle,
   ArrowRight,
+  BookOpen,
   ChevronRight,
   Clock,
   FileText,
   GitPullRequestDraft,
+  MessageSquare,
   Monitor,
   Search,
   X,
@@ -66,7 +68,7 @@ import {
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-export type CommandPaletteSearchKind = 'issue' | 'file' | 'agent';
+export type CommandPaletteSearchKind = 'issue' | 'file' | 'agent' | 'chat' | 'directive';
 
 export interface CommandPaletteSearchTarget {
   issueNumber?: number;
@@ -74,6 +76,12 @@ export interface CommandPaletteSearchTarget {
   filePath?: string;
   line?: number;
   sessionKey?: string;
+  /** chat-history tabId — parent reopens via the existing
+   *  `o8:open-history-chat` event when the row is activated. */
+  chatTabId?: string;
+  /** Cortex directive id — parent routes to Settings → Operator Defaults
+   *  (or a directive viewer) via `o8:open-directive`. */
+  directiveId?: string;
 }
 
 export interface CommandPaletteSearchResult {
@@ -125,6 +133,12 @@ export interface CommandPaletteProps {
   onSelectIssue: (issueNumber: number, repo?: string) => void;
   onSelectFile: (filePath: string, line?: number) => void;
   onSelectAgent: (sessionKey: string) => void;
+  /** #984 — chat-history row activation. Optional; when the host wires it,
+   *  reopens the saved thread. Falls back to a window event otherwise. */
+  onSelectChat?: (chatTabId: string, title?: string) => void;
+  /** #984 — directive row activation. Optional; when wired the host can
+   *  open a directive viewer. Falls back to a window event otherwise. */
+  onSelectDirective?: (directiveId: string) => void;
 }
 
 interface PaletteItem {
@@ -160,6 +174,8 @@ const KIND_ICON: Record<CommandPaletteSearchKind, LucideIcon> = {
   issue: GitPullRequestDraft,
   file: FileText,
   agent: Monitor,
+  chat: MessageSquare,
+  directive: BookOpen,
 };
 
 const GROUP_LABEL: Record<GroupKey, string> = {
@@ -167,6 +183,8 @@ const GROUP_LABEL: Record<GroupKey, string> = {
   issue: 'Issues',
   file: 'Files',
   agent: 'Agents',
+  chat: 'Chat history',
+  directive: 'Directives',
   action: 'Actions',
 };
 
@@ -227,10 +245,12 @@ export const CommandPalette = memo(function CommandPalette({
   onSelectIssue,
   onSelectFile,
   onSelectAgent,
+  onSelectChat,
+  onSelectDirective,
 }: CommandPaletteProps) {
   const [query, setQuery] = useState('');
   const [groups, setGroups] = useState<Record<CommandPaletteSearchKind, CommandPaletteSearchResult[]>>(
-    { issue: [], file: [], agent: [] },
+    { issue: [], file: [], agent: [], chat: [], directive: [] },
   );
   const [recents, setRecents] = useState<CommandPaletteRecent[]>([]);
   const [loading, setLoading] = useState(false);
@@ -247,7 +267,7 @@ export const CommandPalette = memo(function CommandPalette({
   useEffect(() => {
     if (!open) return;
     setQuery('');
-    setGroups({ issue: [], file: [], agent: [] });
+    setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
     setError(null);
     setLoading(false);
     setSelectedIndex(0);
@@ -272,7 +292,7 @@ export const CommandPalette = memo(function CommandPalette({
 
     const trimmed = query.trim();
     if (trimmed.length < 2) {
-      setGroups({ issue: [], file: [], agent: [] });
+      setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
       setError(null);
       setLoading(false);
       return;
@@ -291,21 +311,21 @@ export const CommandPalette = memo(function CommandPalette({
         });
         if (!response.ok) {
           setError('Search is unavailable.');
-          setGroups({ issue: [], file: [], agent: [] });
+          setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
           return;
         }
         const data = await response.json() as SearchResponse;
         if (data.error) {
           setError(data.error);
-          setGroups({ issue: [], file: [], agent: [] });
+          setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
           return;
         }
-        setGroups(data.groups ?? { issue: [], file: [], agent: [] });
+        setGroups(data.groups ?? { issue: [], file: [], agent: [], chat: [], directive: [] });
         setError(null);
       } catch (err) {
         if ((err as { name?: string })?.name === 'AbortError') return;
         setError('Search failed.');
-        setGroups({ issue: [], file: [], agent: [] });
+        setGroups({ issue: [], file: [], agent: [], chat: [], directive: [] });
       } finally {
         setLoading(false);
       }
@@ -385,6 +405,8 @@ export const CommandPalette = memo(function CommandPalette({
     pushGroup('agent');
     pushGroup('issue');
     pushGroup('file');
+    pushGroup('chat');
+    pushGroup('directive');
     return ordered;
   }, [filteredActionItems, groups, query, recents]);
 
@@ -439,9 +461,27 @@ export const CommandPalette = memo(function CommandPalette({
       onSelectFile(target.filePath, target.line);
     } else if (target.sessionKey) {
       onSelectAgent(target.sessionKey);
+    } else if (target.chatTabId) {
+      if (onSelectChat) {
+        onSelectChat(target.chatTabId, item.title);
+      } else if (typeof window !== 'undefined') {
+        // Fallback when the host hasn't wired onSelectChat — keeps the
+        // palette useful in any dashboard layout that mounts it.
+        window.dispatchEvent(new CustomEvent('o8:command-palette:open-chat', {
+          detail: { chatTabId: target.chatTabId, title: item.title },
+        }));
+      }
+    } else if (target.directiveId) {
+      if (onSelectDirective) {
+        onSelectDirective(target.directiveId);
+      } else if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('o8:command-palette:open-directive', {
+          detail: { directiveId: target.directiveId, title: item.title },
+        }));
+      }
     }
     onClose();
-  }, [onClose, onSelectAgent, onSelectFile, onSelectIssue]);
+  }, [onClose, onSelectAgent, onSelectChat, onSelectDirective, onSelectFile, onSelectIssue]);
 
   const handleKeyDown = useCallback((event: React.KeyboardEvent<HTMLDivElement>) => {
     if (event.key === 'Escape') {
