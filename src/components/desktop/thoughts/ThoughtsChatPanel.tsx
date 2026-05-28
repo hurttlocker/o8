@@ -1945,14 +1945,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // `containerType: 'size'` (set below) to make `cqh` resolve to
         // the local column, not the viewport.
         //
-        // 32cqh on a full ~960 px workspace ≈ 307 px (the original
-        // -28vh on a 1001 px viewport landed at ~280 px). On a 600 px
-        // workspace (bottom panel open) it drops to ~192 px and the
-        // composer no longer overshoots the empty-state heading.
+        // 38cqh on a full ~960 px workspace ≈ 365 px lift. With the
+        // title+quick-action block sitting around 28cqh from the top
+        // and ~80 px tall, the composer lands just under the question
+        // pills with a tight gap (operator pass 2026-05-27). On a
+        // shrunken 600 px workspace, the same 38cqh shrinks to ~228
+        // px so the relationship holds when the bottom panel opens.
         style={{
           flexShrink: 0,
           transform: displayMessages.length === 0
-            ? 'translateY(-32cqh)'
+            ? 'translateY(-38cqh)'
             : 'translateY(0)',
           transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)',
           willChange: 'transform',
