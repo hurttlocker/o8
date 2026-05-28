@@ -41,6 +41,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const [wrap, setWrap] = useState(false);
   const [wordDiff, setWordDiff] = useState(false);
   const [hideWhitespace, setHideWhitespace] = useState(false);
+  const [richPreview, setRichPreview] = useState(false);
   const [collapseSignal, setCollapseSignal] = useState<CollapseSignal>({ open: true, nonce: 0 });
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
@@ -92,6 +93,10 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   };
   const handleHideWhitespace = () => {
     setHideWhitespace((value) => !value);
+    setMenuOpen(false);
+  };
+  const handleRichPreview = () => {
+    setRichPreview((value) => !value);
     setMenuOpen(false);
   };
   const handleRefresh = () => {
@@ -305,6 +310,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
                 <MenuItem onClick={handleWordWrap} checked={wrap}>Word wrap</MenuItem>
                 <MenuItem onClick={handleWordDiff} checked={wordDiff}>Word diffs</MenuItem>
                 <MenuItem onClick={handleHideWhitespace} checked={hideWhitespace}>Hide whitespace</MenuItem>
+                <MenuItem onClick={handleRichPreview} checked={richPreview}>Rich preview</MenuItem>
                 <MenuItem onClick={handleRefresh}>Refresh</MenuItem>
               </div>
             ) : null}
@@ -341,6 +347,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
               wrap={wrap}
               wordDiff={wordDiff}
               hideWhitespace={hideWhitespace}
+              richPreview={richPreview}
               initialOpen={!denseChangeset}
               collapseSignal={collapseSignal}
               focusSignal={focusSignal}

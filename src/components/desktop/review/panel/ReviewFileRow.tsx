@@ -6,6 +6,30 @@ import type { DiffMode, CollapseSignal, LocalDiffComment, LocalCommentTarget } f
 import { UI_FONT, MONO_FONT, REVIEW_CONTROL_BG_ACTIVE } from './constants';
 import { DiffStatBadge, IconCheck } from './icons';
 import { DiffPatch, RowMessage } from './DiffView';
+import { MarkdownRender } from '../../o8-panel/markdown-render';
+
+/** Extensions that the "Rich preview" toggle (#1088) renders inline as
+ *  rendered content instead of as a raw unified diff. Anything not in this
+ *  set falls back to the normal diff path even when the toggle is on. */
+const MARKDOWN_PREVIEW_EXTENSIONS = new Set(['.md', '.mdx']);
+const IMAGE_PREVIEW_EXTENSIONS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.ico', '.bmp']);
+
+type PreviewKind = 'markdown' | 'image' | null;
+
+function previewKindFor(path: string): PreviewKind {
+  const dot = path.lastIndexOf('.');
+  if (dot < 0) return null;
+  const ext = path.slice(dot).toLowerCase();
+  if (MARKDOWN_PREVIEW_EXTENSIONS.has(ext)) return 'markdown';
+  if (IMAGE_PREVIEW_EXTENSIONS.has(ext)) return 'image';
+  return null;
+}
+
+type PreviewPayload =
+  | { kind: 'markdown'; content: string; truncated?: boolean }
+  | { kind: 'image'; dataUrl: string }
+  | { kind: 'svg'; markup: string }
+  | { kind: 'deleted' };
 
 /** One changed file: a collapsible header + an inline diff loaded on expand. */
 const ReviewFileRow = memo(function ReviewFileRow({
@@ -15,6 +39,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
   wrap,
   wordDiff,
   hideWhitespace,
+  richPreview,
   initialOpen,
   collapseSignal,
   focusSignal,
@@ -27,6 +52,10 @@ const ReviewFileRow = memo(function ReviewFileRow({
   wrap: boolean;
   wordDiff: boolean;
   hideWhitespace: boolean;
+  /** #1088: when true, applicable files (.md / .mdx / images) render as
+   *  rendered content instead of as the raw diff. Non-applicable files
+   *  continue to render as diffs. */
+  richPreview: boolean;
   initialOpen: boolean;
   collapseSignal: CollapseSignal;
   focusSignal: { path: string | null; nonce: number };
@@ -37,9 +66,17 @@ const ReviewFileRow = memo(function ReviewFileRow({
   const [diff, setDiff] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [preview, setPreview] = useState<PreviewPayload | null>(null);
+  const [previewLoading, setPreviewLoading] = useState(false);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [comments, setComments] = useState<LocalDiffComment[]>([]);
   const [activeComment, setActiveComment] = useState<LocalCommentTarget | null>(null);
   const [commentText, setCommentText] = useState('');
+
+  // #1088: applicable preview kind for this file (null = not previewable; the
+  // toggle has no effect on this row and the diff renders as usual).
+  const previewKind = previewKindFor(file.path);
+  const previewActive = richPreview && previewKind !== null && file.status !== 'deleted';
 
   // Apply the panel-level bulk collapse/expand signal only when it actually
   // changes — never on mount, so the #1084 `initialOpen` default holds.
@@ -58,7 +95,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
   }, [file.path, focusSignal]);
 
   useEffect(() => {
-    if (!open) return;
+    if (!open || previewActive) return;
     let cancelled = false;
     const controller = new AbortController();
     setLoading(true);
@@ -91,7 +128,58 @@ const ReviewFileRow = memo(function ReviewFileRow({
     };
     // file.additions/deletions are deps so the row re-fetches when
     // useWorkspaceChanges reports the file's diff stats changed (#1084).
-  }, [open, file.path, repoPath, hideWhitespace, file.additions, file.deletions]);
+  }, [open, previewActive, file.path, repoPath, hideWhitespace, file.additions, file.deletions]);
+
+  // #1088: rich-preview fetch. Renders the new version of the file as
+  // rendered content (markdown / image) instead of the unified diff.
+  // Triggered only when the toggle is on AND the file is applicable.
+  useEffect(() => {
+    if (!open || !previewActive) return;
+    let cancelled = false;
+    const controller = new AbortController();
+    setPreviewLoading(true);
+    setPreviewError(null);
+    setPreview(null);
+
+    const params = new URLSearchParams({ path: file.path, workspace: repoPath });
+    const endpoint = previewKind === 'image' ? '/api/panel/file-preview' : '/api/panel/file-content';
+
+    fetch(`${endpoint}?${params.toString()}`, { signal: controller.signal })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => ({}))) as Record<string, unknown>;
+        if (!response.ok) {
+          throw new Error((data.error as string) || `HTTP ${response.status}`);
+        }
+        return data;
+      })
+      .then((data) => {
+        if (cancelled) return;
+        if (previewKind === 'markdown') {
+          const content = typeof data.content === 'string' ? data.content : '';
+          setPreview({ kind: 'markdown', content, truncated: Boolean(data.truncated) });
+        } else if (previewKind === 'image') {
+          if (data.type === 'svg' && typeof data.content === 'string') {
+            setPreview({ kind: 'svg', markup: data.content });
+          } else if (typeof data.dataUrl === 'string') {
+            setPreview({ kind: 'image', dataUrl: data.dataUrl });
+          } else {
+            throw new Error('Unexpected image response shape.');
+          }
+        }
+      })
+      .catch((err) => {
+        if (!cancelled && (err as { name?: string })?.name !== 'AbortError') {
+          setPreviewError(err instanceof Error ? err.message : 'Unable to load preview.');
+        }
+      })
+      .finally(() => {
+        if (!cancelled) setPreviewLoading(false);
+      });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [open, previewActive, previewKind, file.path, repoPath, file.additions, file.deletions]);
 
   const openComment = useCallback((target: LocalCommentTarget) => {
     setActiveComment(target);
@@ -144,7 +232,17 @@ const ReviewFileRow = memo(function ReviewFileRow({
         <DiffStatBadge additions={file.additions ?? 0} deletions={file.deletions ?? 0} />
       </button>
       {open ? (
-        loading ? (
+        previewActive ? (
+          previewLoading ? (
+            <RowMessage text="Loading preview…" />
+          ) : previewError ? (
+            <RowMessage text={previewError} tone="error" />
+          ) : preview ? (
+            <RichPreviewBody payload={preview} />
+          ) : (
+            <RowMessage text="No preview available." />
+          )
+        ) : loading ? (
           <RowMessage text="Loading diff…" />
         ) : error ? (
           <RowMessage text={error} tone="error" />
@@ -169,6 +267,43 @@ const ReviewFileRow = memo(function ReviewFileRow({
     </div>
   );
 });
+
+// ── rich preview body (#1088) ──
+
+function RichPreviewBody({ payload }: { payload: PreviewPayload }) {
+  if (payload.kind === 'markdown') {
+    return (
+      <div style={{ paddingTop: 8, paddingBottom: 16, paddingLeft: 16, paddingRight: 16 }}>
+        <MarkdownRender content={payload.content} />
+        {payload.truncated ? (
+          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--t-text-faint)', fontFamily: UI_FONT }}>
+            … (truncated at 100KB)
+          </div>
+        ) : null}
+      </div>
+    );
+  }
+  if (payload.kind === 'image') {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'flex-start', paddingTop: 12, paddingBottom: 16, paddingLeft: 16, paddingRight: 16 }}>
+        {/* eslint-disable-next-line @next/next/no-img-element -- data URL, not a remote asset */}
+        <img src={payload.dataUrl} alt="" style={{ maxWidth: '100%', height: 'auto', borderRadius: 6, border: '1px solid var(--t-divider-subtle)' }} />
+      </div>
+    );
+  }
+  if (payload.kind === 'svg') {
+    return (
+      <div
+        style={{ display: 'flex', justifyContent: 'center', paddingTop: 12, paddingBottom: 16, paddingLeft: 16, paddingRight: 16 }}
+        // SVG markup comes from a loopback-gated read of a file inside the
+        // operator's repo, so it's trusted relative to the same threat model
+        // as the rest of the desktop shell.
+        dangerouslySetInnerHTML={{ __html: payload.markup }}
+      />
+    );
+  }
+  return <RowMessage text="File deleted — no preview." />;
+}
 
 // ── header toolbar ──
 
