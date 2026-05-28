@@ -1,6 +1,8 @@
 import 'server-only';
 
 import { readFileSync } from 'node:fs';
+import { connect, constants as http2Constants } from 'node:http2';
+import type { ClientHttp2Stream } from 'node:http2';
 import { basename } from 'node:path';
 import { importPKCS8, SignJWT } from 'jose';
 import type { AgentStatus } from '@/lib/fleet/types';
@@ -84,6 +86,11 @@ const DEFAULT_BUNDLE_ID = 'com.marquisehurtt.o8mobile';
 const MAX_FAILURE_COUNT = 5;
 const APNS_JWT_TTL_SECONDS = 20 * 60;
 const APNS_REQUEST_TIMEOUT_MS = 10_000;
+
+type ApnsHttp2Response = {
+  status: number;
+  body: { reason?: string } | null;
+};
 
 const STATUS_ORDER: MobileLiveActivityStatus[] = [
   'failed',
@@ -173,6 +180,84 @@ async function getApnsJwt() {
     expiresAt: Date.now() + APNS_JWT_TTL_SECONDS * 1000,
   };
   return { ok: true as const, token };
+}
+
+function sendApnsHttp2Request({
+  host,
+  deviceToken,
+  authorization,
+  topic,
+  payload,
+}: {
+  host: string;
+  deviceToken: string;
+  authorization: string;
+  topic: string;
+  payload: unknown;
+}): Promise<ApnsHttp2Response> {
+  return new Promise((resolve, reject) => {
+    const session = connect(`https://${host}`);
+    let request: ClientHttp2Stream | null = null;
+    let settled = false;
+    let status = 0;
+    let body = '';
+
+    const timeout = setTimeout(() => {
+      finish(() => reject(new Error('APNs request timed out')));
+    }, APNS_REQUEST_TIMEOUT_MS);
+
+    const finish = (complete: () => void) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeout);
+      request?.close();
+      session.close();
+      complete();
+    };
+
+    session.on('error', (error) => {
+      finish(() => reject(error));
+    });
+
+    request = session.request({
+      [http2Constants.HTTP2_HEADER_METHOD]: 'POST',
+      [http2Constants.HTTP2_HEADER_PATH]: `/3/device/${deviceToken}`,
+      authorization,
+      'apns-topic': topic,
+      'apns-push-type': 'liveactivity',
+      'apns-priority': '10',
+      'content-type': 'application/json',
+    });
+
+    request.setEncoding('utf8');
+    request.on('response', (headers) => {
+      const headerStatus = headers[http2Constants.HTTP2_HEADER_STATUS];
+      status = typeof headerStatus === 'number'
+        ? headerStatus
+        : Number(Array.isArray(headerStatus) ? headerStatus[0] : headerStatus ?? 0);
+    });
+    request.on('data', (chunk) => {
+      body += String(chunk);
+    });
+    request.on('end', () => {
+      finish(() => {
+        let parsed: { reason?: string } | null = null;
+        if (body.trim().length > 0) {
+          try {
+            parsed = JSON.parse(body) as { reason?: string };
+          } catch {
+            parsed = { reason: body.trim() };
+          }
+        }
+        resolve({ status, body: parsed });
+      });
+    });
+    request.on('error', (error) => {
+      finish(() => reject(error));
+    });
+
+    request.end(JSON.stringify(payload));
+  });
 }
 
 function tokenTableExists() {
@@ -580,24 +665,16 @@ async function sendActivityKitPayload(
     },
   };
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), APNS_REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(`https://${host}/3/device/${token.pushToken}`, {
-      method: 'POST',
-      headers: {
-        authorization: `bearer ${auth.token}`,
-        'apns-topic': `${token.bundleId}.push-type.liveactivity`,
-        'apns-push-type': 'liveactivity',
-        'apns-priority': '10',
-        'content-type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: controller.signal,
+    const response = await sendApnsHttp2Request({
+      host,
+      deviceToken: token.pushToken,
+      authorization: `bearer ${auth.token}`,
+      topic: `${token.bundleId}.push-type.liveactivity`,
+      payload,
     });
-    clearTimeout(timeoutId);
 
-    if (response.ok) {
+    if (response.status >= 200 && response.status < 300) {
       recordLiveActivityDeliverySuccess(token.pushToken, signature);
       if (event === 'end') deleteMobileLiveActivityToken(token.pushToken);
       return {
@@ -608,7 +685,6 @@ async function sendActivityKitPayload(
       };
     }
 
-    const body = await response.json().catch(() => null) as { reason?: string } | null;
     const permanent = response.status === 400 || response.status === 410;
     recordLiveActivityDeliveryFailure(token.pushToken, { permanent });
     return {
@@ -616,10 +692,9 @@ async function sendActivityKitPayload(
       ok: false,
       status: response.status,
       action: 'failed',
-      reason: body?.reason ?? `APNs HTTP ${response.status}`,
+      reason: response.body?.reason ?? `APNs HTTP ${response.status}`,
     };
   } catch (error) {
-    clearTimeout(timeoutId);
     recordLiveActivityDeliveryFailure(token.pushToken);
     return {
       token: token.pushToken,
