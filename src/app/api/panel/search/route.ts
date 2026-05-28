@@ -22,14 +22,19 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
 import os from 'node:os';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, basename } from 'node:path';
 import { ensureGitHubIssues, resolveRepoSlug } from '@/lib/github-broker';
 import { listRepos } from '@/lib/repos/registry';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
+import { getDataDir } from '@/lib/data-dir-migration';
+import { parseDirectiveFile } from '@/lib/cortex/directives/parse';
 
 const HOME = process.env.HOME || os.homedir();
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+const CHAT_HISTORY_DIR = join(HOME, '.o8', 'chat-history');
 
-type SearchKind = 'issue' | 'file' | 'agent';
+type SearchKind = 'issue' | 'file' | 'agent' | 'chat' | 'directive';
 
 interface SearchResult {
   kind: SearchKind;
@@ -43,6 +48,12 @@ interface SearchResult {
     filePath?: string;
     line?: number;
     sessionKey?: string;
+    /** For chat-history rows — the chat-history tabId so the parent can
+     *  reopen the thread via the existing `o8:open-history-chat` event. */
+    chatTabId?: string;
+    /** For directive rows — the directive id so the parent can route to
+     *  the Settings → Operator Defaults surface or to a directive viewer. */
+    directiveId?: string;
   };
   score: number;
 }
@@ -209,6 +220,134 @@ async function searchAgents(query: string): Promise<SearchResult[]> {
   }
 }
 
+// ── Chat history (#984) ────────────────────────────────────────────────────
+
+/** Scan the on-disk chat-history dir for threads whose title or
+ *  most-recent-message body contains the query. Keeps the read scope tight
+ *  (mtime-sorted, capped, only the first user message + last message). */
+function searchChatHistory(query: string): SearchResult[] {
+  let files: string[];
+  try {
+    files = readdirSync(CHAT_HISTORY_DIR).filter((f) => f.endsWith('.json'));
+  } catch {
+    return [];
+  }
+
+  const lowered = query.toLowerCase();
+  const out: SearchResult[] = [];
+
+  // Read mtime upfront so we can prefer recent threads when ranking.
+  const ranked = files
+    .map((file) => {
+      const filePath = join(CHAT_HISTORY_DIR, file);
+      try {
+        const stat = statSync(filePath);
+        return { file, filePath, mtimeMs: stat.mtimeMs };
+      } catch {
+        return null;
+      }
+    })
+    .filter((entry): entry is { file: string; filePath: string; mtimeMs: number } => entry !== null)
+    .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    .slice(0, 250);
+
+  for (const entry of ranked) {
+    try {
+      const raw = readFileSync(entry.filePath, 'utf-8');
+      const data = JSON.parse(raw) as {
+        title?: string;
+        messages?: Array<{ role?: string; content?: string }>;
+        repoName?: string | null;
+        archivedAt?: string | null;
+      };
+      const tabId = basename(entry.file, '.json');
+      // Skip placeholder / empty threads — those are typed-into-once-then-discarded.
+      if (!data.messages || data.messages.length === 0) continue;
+
+      const firstUser = data.messages.find((m) => m.role === 'user');
+      const lastMsg = data.messages[data.messages.length - 1];
+      const title = data.title
+        || (firstUser?.content ? firstUser.content.slice(0, 60).replace(/\n/g, ' ') : 'Untitled');
+      const preview = (lastMsg?.content ?? '').slice(0, 120).replace(/\n/g, ' ');
+
+      const haystack = `${title}\n${preview}\n${data.repoName ?? ''}`.toLowerCase();
+      if (!haystack.includes(lowered)) continue;
+
+      const titleMatch = title.toLowerCase().includes(lowered) ? 30 : 0;
+      const startsWith = title.toLowerCase().startsWith(lowered) ? 25 : 0;
+      const archivedPenalty = data.archivedAt ? -15 : 0;
+      const repoTag = data.repoName ? `${data.repoName} · ` : '';
+
+      out.push({
+        kind: 'chat',
+        id: `chat:${tabId}`,
+        title,
+        detail: `${repoTag}${preview}`.trim().slice(0, 140),
+        target: { chatTabId: tabId },
+        score: 45 + titleMatch + startsWith + archivedPenalty,
+      });
+      if (out.length >= 8) break;
+    } catch {
+      // skip unreadable JSON files
+    }
+  }
+  return out;
+}
+
+// ── Directives (#984) ──────────────────────────────────────────────────────
+
+/** Scan `<dataDir>/directives/*.md` for entries whose title, scope, or body
+ *  contains the query. Uses the same parser as the directive load pipeline. */
+function searchDirectives(query: string): SearchResult[] {
+  const directivesDir = join(getDataDir(), 'directives');
+  let files: string[];
+  try {
+    files = readdirSync(directivesDir).filter((f) => f.endsWith('.md'));
+  } catch {
+    return [];
+  }
+
+  const lowered = query.toLowerCase();
+  const out: SearchResult[] = [];
+
+  for (const file of files) {
+    const filePath = join(directivesDir, file);
+    try {
+      const raw = readFileSync(filePath, 'utf-8');
+      const fallbackId = basename(file, '.md');
+      const parsed = parseDirectiveFile(raw, fallbackId);
+      if (!parsed) continue;
+
+      const title = parsed.title || parsed.id || file;
+      const scope = parsed.scope || '';
+      const body = parsed.body || '';
+      const haystack = `${title}\n${scope}\n${parsed.repoName ?? ''}\n${body}`.toLowerCase();
+      if (!haystack.includes(lowered)) continue;
+
+      const titleMatch = title.toLowerCase().includes(lowered) ? 30 : 0;
+      const startsWith = title.toLowerCase().startsWith(lowered) ? 20 : 0;
+      const detailParts: string[] = [];
+      if (scope) detailParts.push(scope);
+      if (parsed.repoName) detailParts.push(parsed.repoName);
+      const bodyPreview = body.split('\n').find((line) => line.trim().length > 0)?.slice(0, 100) ?? '';
+      if (bodyPreview) detailParts.push(bodyPreview);
+
+      out.push({
+        kind: 'directive',
+        id: `directive:${parsed.id}`,
+        title,
+        detail: detailParts.join(' · ').slice(0, 140),
+        target: { directiveId: parsed.id },
+        score: 42 + titleMatch + startsWith,
+      });
+      if (out.length >= 8) break;
+    } catch {
+      // skip unparseable files
+    }
+  }
+  return out;
+}
+
 // ── Handler ────────────────────────────────────────────────────────────────
 
 export async function GET(request: Request): Promise<NextResponse<SearchResponse>> {
@@ -221,6 +360,8 @@ export async function GET(request: Request): Promise<NextResponse<SearchResponse
     issue: [],
     file: [],
     agent: [],
+    chat: [],
+    directive: [],
   };
 
   if (!query || query.length < 2) {
@@ -228,19 +369,23 @@ export async function GET(request: Request): Promise<NextResponse<SearchResponse
   }
 
   try {
-    const [issues, files, agents] = await Promise.all([
+    const [issues, files, agents, chats, directives] = await Promise.all([
       searchIssues(query, repoParam),
       Promise.resolve(searchFiles(query, workspace)),
       searchAgents(query),
+      Promise.resolve(searchChatHistory(query)),
+      Promise.resolve(searchDirectives(query)),
     ]);
 
     const groups: Record<SearchKind, SearchResult[]> = {
       issue: issues.sort((a, b) => b.score - a.score).slice(0, 8),
       file: files.sort((a, b) => b.score - a.score).slice(0, 10),
       agent: agents.sort((a, b) => b.score - a.score).slice(0, 8),
+      chat: chats.sort((a, b) => b.score - a.score).slice(0, 8),
+      directive: directives.sort((a, b) => b.score - a.score).slice(0, 8),
     };
 
-    const results = [...groups.agent, ...groups.issue, ...groups.file].sort(
+    const results = [...groups.agent, ...groups.issue, ...groups.file, ...groups.chat, ...groups.directive].sort(
       (a, b) => b.score - a.score,
     );
 
