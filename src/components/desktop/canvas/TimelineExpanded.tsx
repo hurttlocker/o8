@@ -84,7 +84,7 @@ function StatBlock({ value, label, isCompact, tone = 'default' }: { value: strin
     <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 56 }}>
       <div style={{
         fontSize: isCompact ? 18 : 22,
-        fontWeight: 600,
+        fontWeight: 300,
         letterSpacing: '-0.02em',
         color: tone === 'active' ? 'var(--t-accent, #2563eb)' : 'var(--t-text)',
         lineHeight: 1,
@@ -94,7 +94,7 @@ function StatBlock({ value, label, isCompact, tone = 'default' }: { value: strin
       </div>
       <div style={{
         fontSize: 9,
-        fontWeight: 600,
+        fontWeight: 300,
         letterSpacing: '0.1em',
         color: 'var(--t-text-muted)',
         textTransform: 'uppercase',
@@ -278,10 +278,10 @@ export function TimelineExpanded() {
       ref={containerRef}
     >
       <div style={{ marginBottom: isCompact ? 14 : 20, display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-        <h2 style={{ fontSize: titleSize, fontWeight: 600, letterSpacing: '-0.03em', color: 'var(--t-text)', marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 }}>
+        <h2 style={{ fontSize: titleSize, fontWeight: 300, letterSpacing: '-0.03em', color: 'var(--t-text)', marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 }}>
           Session Replay
         </h2>
-        <span style={{ fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-muted)', fontWeight: 500 }}>
+        <span style={{ fontSize: 11, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-muted)', fontWeight: 300 }}>
           What, where, which surface
         </span>
       </div>
@@ -360,10 +360,10 @@ export function TimelineExpanded() {
               }}
             >
               <div>
-                <div style={{ fontSize: 12, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-secondary)' }}>
+                <div style={{ fontSize: 12, fontWeight: 320, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-secondary)' }}>
                   Today
                 </div>
-                <div style={{ marginTop: 4, fontSize: isCompact ? 16 : 18, fontWeight: 800, letterSpacing: '-0.03em', color: 'var(--t-text)' }}>
+                <div style={{ marginTop: 4, fontSize: isCompact ? 16 : 18, fontWeight: 200, letterSpacing: '-0.03em', color: 'var(--t-text)' }}>
                   {timelineReplayTime(0)} → {timelineReplayTime(totalMin)}
                 </div>
               </div>
@@ -405,7 +405,7 @@ export function TimelineExpanded() {
                 return (
                   <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                     <div style={{ width: 10, height: 10, borderRadius: 999, background: colors[kind] }} />
-                    <span style={{ fontSize: isCompact ? 10 : 11, fontWeight: 700, color: 'var(--t-text)' }}>{labels[kind]}</span>
+                    <span style={{ fontSize: isCompact ? 10 : 11, fontWeight: 320, color: 'var(--t-text)' }}>{labels[kind]}</span>
                     <span style={{ fontSize: isCompact ? 10 : 11, color: 'var(--t-text-muted)' }}>{timelineReplayDuration(total)}</span>
                   </div>
                 );
@@ -443,10 +443,10 @@ export function TimelineExpanded() {
                   marginBottom: isCompact ? 12 : 16,
                 }}
               >
-                <h3 style={{ fontSize: isCompact ? 11 : 12, fontWeight: 700, color: 'var(--t-text)', letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 }}>
+                <h3 style={{ fontSize: isCompact ? 11 : 12, fontWeight: 320, color: 'var(--t-text)', letterSpacing: '0.05em', textTransform: 'uppercase', marginTop: 0, marginRight: 0, marginBottom: 0, marginLeft: 0 }}>
                   Replay Lanes
                 </h3>
-                <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 600 }}>
+                <span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontWeight: 300 }}>
                   Generated {generatedAt ? formatAge(generatedAt) : 'just now'}
                 </span>
               </div>
@@ -470,7 +470,7 @@ export function TimelineExpanded() {
                     >
                       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12 }}>
                         <div style={{ minWidth: 0 }}>
-                          <div style={{ fontSize: isCompact ? 14 : 15, fontWeight: 800, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
+                          <div style={{ fontSize: isCompact ? 14 : 15, fontWeight: 200, color: 'var(--t-text)', letterSpacing: '-0.02em' }}>
                             {entry.agent}
                           </div>
                           <div style={{ fontSize: isCompact ? 10 : 11, color: 'var(--t-text-muted)', marginTop: 3 }}>
@@ -480,7 +480,7 @@ export function TimelineExpanded() {
                         <div
                           style={{
                             fontSize: isCompact ? 11 : 12,
-                            fontWeight: 700,
+                            fontWeight: 320,
                             color: 'var(--t-text-secondary)',
                             fontFamily: '"SF Mono", ui-monospace, monospace',
                           }}
@@ -495,7 +495,7 @@ export function TimelineExpanded() {
                             <span
                               style={{
                                 fontSize: isCompact ? 9 : 10,
-                                fontWeight: 700,
+                                fontWeight: 320,
                                 color: runtimePalette.color,
                                 background: runtimePalette.background,
                                 border: `1px solid ${runtimePalette.border}`,
@@ -512,7 +512,7 @@ export function TimelineExpanded() {
                               <span
                                 style={{
                                   fontSize: isCompact ? 9 : 10,
-                                  fontWeight: 600,
+                                  fontWeight: 300,
                                   color: 'var(--t-text-secondary)',
                                   background: 'var(--t-divider-subtle)',
                                   border: '1px solid var(--t-panel-border)',
@@ -531,7 +531,7 @@ export function TimelineExpanded() {
                               <span
                                 style={{
                                   fontSize: isCompact ? 9 : 10,
-                                  fontWeight: 600,
+                                  fontWeight: 300,
                                   color: 'var(--t-text-muted)',
                                   background: 'var(--t-divider-subtle)',
                                   border: '1px solid var(--t-panel-border)',
@@ -584,7 +584,7 @@ export function TimelineExpanded() {
                           return (
                             <div key={kind} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
                               <div style={{ width: 6, height: 6, borderRadius: 999, background: colors[kind] }} />
-                              <span style={{ fontSize: isCompact ? 9 : 10, color: 'var(--t-text-muted)', fontWeight: 600 }}>
+                              <span style={{ fontSize: isCompact ? 9 : 10, color: 'var(--t-text-muted)', fontWeight: 300 }}>
                                 {labels[kind]} {timelineReplayDuration(minutes)}
                               </span>
                             </div>
@@ -613,7 +613,7 @@ export function TimelineExpanded() {
                 <h3
                   style={{
                     fontSize: isCompact ? 11 : 12,
-                    fontWeight: 700,
+                    fontWeight: 320,
                     color: 'var(--t-text)',
                     letterSpacing: '0.05em',
                     textTransform: 'uppercase',
@@ -654,7 +654,7 @@ export function TimelineExpanded() {
                             <div
                               style={{
                                 fontSize: isCompact ? 12 : 13,
-                                fontWeight: 700,
+                                fontWeight: 320,
                                 color: 'var(--t-text)',
                                 letterSpacing: '-0.01em',
                                 overflow: 'hidden',
@@ -671,7 +671,7 @@ export function TimelineExpanded() {
                           <span
                             style={{
                               fontSize: isCompact ? 9 : 10,
-                              fontWeight: 700,
+                              fontWeight: 320,
                               color: runtimePalette.color,
                               background: runtimePalette.background,
                               border: `1px solid ${runtimePalette.border}`,
@@ -713,7 +713,7 @@ export function TimelineExpanded() {
                 <h3
                   style={{
                     fontSize: isCompact ? 11 : 12,
-                    fontWeight: 700,
+                    fontWeight: 320,
                     color: 'var(--t-text)',
                     letterSpacing: '0.05em',
                     textTransform: 'uppercase',
@@ -739,7 +739,7 @@ export function TimelineExpanded() {
                     >
                       <div style={{ width: 8, height: 8, borderRadius: 999, background: colors[segment.kind] || '#e5e7eb', flexShrink: 0 }} />
                       <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: isCompact ? 11 : 12, fontWeight: 600, color: 'var(--t-text)' }}>
+                        <div style={{ fontSize: isCompact ? 11 : 12, fontWeight: 300, color: 'var(--t-text)' }}>
                           {(labels[segment.kind] || segment.kind)} · {segment.agent ?? 'Unscoped'}
                         </div>
                         <div style={{ fontSize: isCompact ? 9.5 : 10.5, color: 'var(--t-text-muted)', marginTop: 2 }}>
