@@ -298,7 +298,7 @@ export function timeOfDayGreeting(): string {
  * Chip primitives
  * ────────────────────────────────────────────────────────────────────── */
 
-function ChipShell({
+export function ChipShell({
   icon,
   label,
   onClick,

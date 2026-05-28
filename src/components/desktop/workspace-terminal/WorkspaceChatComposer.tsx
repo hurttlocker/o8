@@ -2,6 +2,9 @@
 
 import { memo, useRef } from 'react';
 import {
+  Cpu,
+  Folder,
+  GitBranch,
   MessageSquare,
   X,
 } from '../lucide-shims';
@@ -13,6 +16,7 @@ import {
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import type { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
 import { useThoughtsComposerAttachments } from '@/components/desktop/thoughts/chat-panel/useThoughtsComposerAttachments';
+import { ChipShell } from '@/components/desktop/OrchestratorEmptyState';
 
 type ChatPaneState = ReturnType<typeof useWorkspaceChatPane>;
 
@@ -32,6 +36,7 @@ interface WorkspaceChatComposerProps {
  */
 function WorkspaceChatComposerBase({
   chat,
+  tab,
   isLaneArchived,
 }: WorkspaceChatComposerProps) {
   const working = chat.agentRunning;
@@ -334,6 +339,60 @@ function WorkspaceChatComposerBase({
             <style>{`@keyframes sendpill-pulse { 0%,100% { opacity: 1 } 50% { opacity: 0.6 } }`}</style>
           </button>
         </div>
+      </div>
+
+      {/* Codex/Gemini/opencode informational chip row — Repo · Branch ·
+          Runtime. Pass 2 of the composer-parity work. Read-only because
+          the runtime/worktree/branch are fixed at session-launch time;
+          the chips just surface what the agent is operating against so
+          the operator can scan it at a glance the way they scan the
+          orchestrator composer below-strip. */}
+      <CodexComposerBelow tab={tab} runtimeLabel={chat.runtimeLabel} />
+    </div>
+  );
+}
+
+function CodexComposerBelow({
+  tab,
+  runtimeLabel,
+}: {
+  tab: TerminalTab;
+  runtimeLabel: string;
+}) {
+  const repoLabel = tab.repo?.name || tab.repo?.localPath?.split('/').pop() || null;
+  const branchLabel = tab.repo?.branch || null;
+  // Nothing to show — keep the row out of the DOM entirely so a tab with
+  // no repo context doesn't render an empty chip strip.
+  if (!repoLabel && !branchLabel && !runtimeLabel) return null;
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 14,
+        paddingTop: 10,
+        paddingBottom: 4,
+        fontFamily: 'var(--font-sans-system)',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          flexWrap: 'wrap',
+          justifyContent: 'center',
+          gap: 8,
+        }}
+      >
+        {repoLabel ? (
+          <ChipShell icon={<Folder size={11} strokeWidth={1.6} />} label={repoLabel} />
+        ) : null}
+        {branchLabel ? (
+          <ChipShell icon={<GitBranch size={11} strokeWidth={1.6} />} label={branchLabel} />
+        ) : null}
+        {runtimeLabel ? (
+          <ChipShell icon={<Cpu size={11} strokeWidth={1.6} />} label={runtimeLabel} />
+        ) : null}
       </div>
     </div>
   );
