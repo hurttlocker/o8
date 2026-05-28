@@ -125,7 +125,8 @@ markDashboardScriptStart();
    load. Keeping these out of the main dashboard chunk shaves real ms off
    first-render on cold launch. */
 const LazySettingsPage = lazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })));
-const LazyAnalyticsPage = lazy(() => import('@/components/desktop/AnalyticsPage').then(m => ({ default: m.AnalyticsPage })));
+// LazyAnalyticsPage full-page mount retired — Settings → Analytics tab is
+// the live entry point. AnalyticsPage is still consumed via that tab.
 const LazyAutomationsPage = lazy(() => import('@/components/desktop/AutomationsPage').then(m => ({ default: m.AutomationsPage })));
 const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
 const LazyCommandPalette = lazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })));
@@ -4065,13 +4066,12 @@ function DashboardInner() {
             },
           ] : []}
         />
-        {activeNavSection === 'analytics' && (
-          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-            <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading analytics...</div>}>
-            <LazyAnalyticsPage />
-            </Suspense>
-          </div>
-        )}
+        {/* The full-page Analytics branch was here when NavSection was
+            'analytics'. Audit found that section is never set by any
+            code path (NavRail retired, no other setter calls
+            setActiveNavSection('analytics')). Analytics still reaches
+            the operator through Settings → Analytics tab. Dropped
+            2026-05-27. */}
 
         {activeNavSection === 'automations' && (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
@@ -4081,7 +4081,7 @@ function DashboardInner() {
           </div>
         )}
 
-        {activeNavSection !== 'analytics' && activeNavSection !== 'automations' && (
+        {activeNavSection !== 'automations' && (
           <OrchestratorDataProvider
             agents={parsedAgents}
             missionState={thoughtsMissionState}
