@@ -4,15 +4,19 @@
  * UpdateCard — inline card for the AgentPanel bottom slot.
  *
  * Replaces the old center-top UpdateBanner. The banner covered the
- * workspace tab strip and reconnect status row whenever an update was
- * available; relocating it to the left rail (just above the chrome
- * icons) lets the operator dismiss + read changelog without losing
- * content area.
+ * workspace tab strip + reconnect row whenever an update was available;
+ * relocating it to the left rail (just above the chrome icons) lets the
+ * operator dismiss + read changelog without losing content area.
  *
- * Collapsed: orange dot · "Update available" · v0.1.X · Restart pill · dismiss
- * Expanded:  + release notes block (capped scroll). Tauri updater already
- * surfaces the GitHub release body, so no extra Brain round-trip is needed
- * for the common case.
+ * Collapsed shape:
+ *   [•] Update available                 [Restart] [×]
+ *       v0.1.172
+ *
+ * Click anywhere on the body to expand. The expanded section calls
+ * /api/panel/o8-update-summary (free OpenRouter pool) to render a
+ * 1-paragraph professional summary from the actual GitHub release body
+ * + recent commits. Result cached per version in localStorage so the
+ * second open is instant.
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -31,6 +35,7 @@ interface UpdateInfo {
 const UPDATE_CHECK_INTERVAL = 30 * 60 * 1000;
 const SESSION_DISMISS_KEY = 'o8:update-banner:dismissed';
 const EXPANDED_KEY = 'o8:update-card:expanded';
+const SUMMARY_CACHE_KEY = 'o8:update-card:summary'; // per-version map
 const UPDATE_AVAILABLE_EVENT = 'o8://update-available';
 const UPDATE_CLEAR_EVENT = 'o8://update-clear';
 const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
@@ -51,6 +56,28 @@ function readExpanded() {
   } catch {
     return false;
   }
+}
+
+function readCachedSummary(version: string): string | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
+    if (!raw) return null;
+    const map = JSON.parse(raw) as Record<string, string>;
+    return typeof map[version] === 'string' ? map[version] : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeCachedSummary(version: string, summary: string) {
+  if (typeof window === 'undefined') return;
+  try {
+    const raw = window.localStorage.getItem(SUMMARY_CACHE_KEY);
+    const map = raw ? JSON.parse(raw) as Record<string, string> : {};
+    map[version] = summary;
+    window.localStorage.setItem(SUMMARY_CACHE_KEY, JSON.stringify(map));
+  } catch { /* ignore */ }
 }
 
 function stringFromRecord(record: Record<string, unknown>, keys: string[]) {
@@ -80,6 +107,9 @@ export function UpdateCard() {
   const [installing, setInstalling] = useState(false);
   const [dismissed, setDismissed] = useState<string | null>(() => readDismissedVersion());
   const [expanded, setExpanded] = useState<boolean>(() => readExpanded());
+  const [summary, setSummary] = useState<string | null>(null);
+  const [summaryLoading, setSummaryLoading] = useState(false);
+  const [summaryError, setSummaryError] = useState<string | null>(null);
 
   const handleDismiss = useCallback(() => {
     const version = update?.version ?? '';
@@ -147,6 +177,42 @@ export function UpdateCard() {
     return () => window.clearInterval(interval);
   }, [checkForUpdate]);
 
+  // Fetch summary when the card is expanded and we have a version. Cache
+  // by version in localStorage so repeated opens are instant.
+  useEffect(() => {
+    if (!expanded || !update?.version) return;
+    const cached = readCachedSummary(update.version);
+    if (cached) {
+      setSummary(cached);
+      setSummaryError(null);
+      setSummaryLoading(false);
+      return;
+    }
+    setSummary(null);
+    setSummaryError(null);
+    setSummaryLoading(true);
+    const controller = new AbortController();
+    fetch(`/api/panel/o8-update-summary?version=${encodeURIComponent(update.version)}`, {
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({})) as { summary?: string; error?: string };
+        if (!response.ok || !payload.summary) {
+          throw new Error(payload.error || `Summary failed (${response.status}).`);
+        }
+        setSummary(payload.summary);
+        writeCachedSummary(update.version, payload.summary);
+      })
+      .catch((error) => {
+        if (controller.signal.aborted) return;
+        setSummaryError(error instanceof Error ? error.message : 'Unable to load summary.');
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setSummaryLoading(false);
+      });
+    return () => controller.abort();
+  }, [expanded, update?.version]);
+
   const handleInstall = useCallback(async () => {
     if (!isTauri()) {
       openExternalUrl(update?.releaseUrl ?? RELEASE_URL);
@@ -176,14 +242,14 @@ export function UpdateCard() {
     marginLeft: 8,
     marginRight: 8,
     marginBottom: 6,
-    paddingTop: 8,
+    paddingTop: 9,
     paddingRight: 10,
-    paddingBottom: 8,
-    paddingLeft: 10,
+    paddingBottom: 9,
+    paddingLeft: 11,
     borderRadius: 10,
     border: '1px solid var(--t-divider-subtle)',
     background: 'var(--t-bg-card, var(--t-panel-solid))',
-    boxShadow: '0 4px 14px rgba(15, 23, 42, 0.08)',
+    boxShadow: '0 4px 14px rgba(15, 23, 42, 0.06)',
     fontFamily: 'var(--font-sans-system)',
     color: 'var(--t-text)',
   };
@@ -191,8 +257,7 @@ export function UpdateCard() {
   const headerStyle: CSSProperties = {
     display: 'flex',
     alignItems: 'center',
-    gap: 8,
-    minHeight: 24,
+    gap: 9,
     cursor: 'pointer',
   };
 
@@ -256,14 +321,28 @@ export function UpdateCard() {
             flexShrink: 0,
           }}
         />
-        <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'baseline', gap: 6 }}>
-          <span style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
+        {/* Two-line label keeps the title on one row even at the 290px
+            AgentPanel width. Title 11.5/300/-0.1, meta 9.5/260/-0.4 —
+            the Hurttlocker row + meta-line pair. */}
+        <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
+          <span
+            style={{
+              fontSize: 11.5,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
+              color: 'var(--t-text)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
             Update available
           </span>
           <span
             style={{
-              fontSize: 10.5,
-              fontWeight: 360,
+              fontSize: 9.5,
+              fontWeight: 260,
+              letterSpacing: '-0.4px',
               color: 'var(--t-text-muted)',
               fontFamily: '"SF Mono", ui-monospace, monospace',
               whiteSpace: 'nowrap',
@@ -301,22 +380,62 @@ export function UpdateCard() {
       {expanded ? (
         <div
           style={{
-            marginTop: 8,
-            paddingTop: 8,
+            marginTop: 9,
+            paddingTop: 9,
             borderTop: '1px solid var(--t-divider-subtle)',
-            maxHeight: 220,
+            maxHeight: 200,
             overflowY: 'auto',
             fontSize: 11,
             fontWeight: 320,
-            lineHeight: 1.5,
+            lineHeight: 1.55,
             color: 'var(--t-text-secondary)',
-            whiteSpace: 'pre-wrap',
             wordBreak: 'break-word',
           }}
         >
-          {update.notes?.trim() ? update.notes : 'No release notes published for this version.'}
+          {summaryLoading ? (
+            <SummarySkeleton />
+          ) : summaryError ? (
+            <span style={{ color: 'var(--t-text-faint)', fontSize: 10.5 }}>
+              {summaryError}
+            </span>
+          ) : summary ? (
+            summary
+          ) : update.notes?.trim() ? (
+            update.notes
+          ) : (
+            <span style={{ color: 'var(--t-text-faint)', fontSize: 10.5 }}>
+              No summary available yet.
+            </span>
+          )}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+function SummarySkeleton() {
+  // Three short shimmer lines — keeps the card height stable while the
+  // free OpenRouter pool warms up + responds.
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+      {[100, 92, 64].map((widthPct) => (
+        <div
+          key={widthPct}
+          style={{
+            height: 9,
+            width: `${widthPct}%`,
+            borderRadius: 4,
+            background: 'var(--t-input-bg, rgba(15, 23, 42, 0.06))',
+            animation: 'o8-update-shimmer 1.6s ease-in-out infinite',
+          }}
+        />
+      ))}
+      <style>{`
+        @keyframes o8-update-shimmer {
+          0%, 100% { opacity: 0.45; }
+          50% { opacity: 0.8; }
+        }
+      `}</style>
     </div>
   );
 }
