@@ -14,7 +14,8 @@ import { AddRepoDialog } from './repo-registry/AddRepoDialog';
 import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
 import { useProjects, type ProjectRecord } from './repo-registry/useProjects';
-import { ChevronDown, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
+import { Menu, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
+import { MenuScale } from 'iconoir-react';
 import { AutoFlash, Delivery, InputSearch } from 'iconoir-react';
 import { repoSlugFromRemote } from './canvas-utils';
 
@@ -515,7 +516,7 @@ function MiniAgentPanelHeader({
           icon={Play}
           label="New session"
           active={sessionMenuOpen}
-          disclosure
+          disclosure="menu"
           onClick={() => {
             onProjectsOpenChange(false);
             setSessionMenuOpen((open) => !open);
@@ -553,7 +554,7 @@ function MiniAgentPanelHeader({
           icon={FolderIcon}
           label="Projects"
           active={projectsOpen}
-          disclosure
+          disclosure="filter"
           onClick={() => {
             setSessionMenuOpen(false);
             onProjectsOpenChange(!projectsOpen);
@@ -721,19 +722,33 @@ function MiniSessionMenuItem({
   );
 }
 
+/**
+ * LOCKED 2026-05-28 — DO NOT modify the icon column geometry, label x-position,
+ * or trailing-icon shift on this component without operator sign-off. These
+ * values are aligned by-eye against the Yesterday folder glyph (x=12) and
+ * chat-row text (x=37) below in the same column. See [[next-session-pickup-may28]].
+ *
+ *   Leading icon span: width 17, transform translateX(-2px) → visible icon
+ *     left edge ≈ x=10, matches Yesterday folder at x=12.
+ *   Button paddingLeft: 2 (was 10) → label text lands at x=37, matches
+ *     HistoryChatRow paddingLeft: 37.
+ *   Disclosure trailing icon: transform translateX(7px) → sits ~6px right of
+ *     the Yesterday FilterList glyph. New session uses lucide Menu (≡), Projects
+ *     uses iconoir MenuScale.
+ */
 function MiniAgentPanelAction({
   icon: Icon,
   label,
   active = false,
   disabled = false,
-  disclosure = false,
+  disclosure,
   onClick,
 }: {
   icon: LucideIcon;
   label: string;
   active?: boolean;
   disabled?: boolean;
-  disclosure?: boolean;
+  disclosure?: 'menu' | 'filter';
   onClick?: () => void;
 }) {
   return (
@@ -762,7 +777,7 @@ function MiniAgentPanelAction({
         paddingTop: 3,
         paddingRight: 10,
         paddingBottom: 3,
-        paddingLeft: 10,
+        paddingLeft: 2,
         textAlign: 'left',
         fontFamily: 'var(--font-sans-system)',
         // No transition — instant flat color swap, no soft fade. The
@@ -785,6 +800,7 @@ function MiniAgentPanelAction({
           justifyContent: 'center',
           color: disabled ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
           flexShrink: 0,
+          transform: 'translateX(-2px)',
         }}
       >
         <Icon size={14} strokeWidth={2} />
@@ -806,17 +822,23 @@ function MiniAgentPanelAction({
         </span>
       </span>
       {disclosure ? (
-        <ChevronDown
+        <span
           aria-hidden
-          size={13}
-          strokeWidth={2}
           style={{
             flexShrink: 0,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
             color: 'var(--t-text-faint)',
-            transform: active ? 'rotate(180deg)' : 'rotate(0deg)',
-            transition: 'transform 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+            transform: 'translateX(7px)',
           }}
-        />
+        >
+          {disclosure === 'menu' ? (
+            <Menu size={13} strokeWidth={2} />
+          ) : (
+            <MenuScale width={12} height={12} color="currentColor" strokeWidth={1.8} />
+          )}
+        </span>
       ) : null}
     </button>
   );

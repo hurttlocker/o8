@@ -11,6 +11,8 @@ export const KIND_COLOR = {
   issue: '#f97316',
   file: '#64748b',
   agent: '#16a34a',
+  chat: '#8b5cf6',
+  directive: '#0891b2',
 } as const;
 
 export const overlayStyle: CSSProperties = {
@@ -83,7 +85,7 @@ export const clearButtonStyle: CSSProperties = {
 
 export const kbdStyle: CSSProperties = {
   fontSize: 10,
-  fontWeight: 600,
+  fontWeight: 500,
   fontFamily: 'var(--font-sans-system)',
   color: 'var(--t-kbd-color, var(--t-text-muted))',
   background: 'var(--t-kbd-bg, var(--t-bg-card))',
@@ -112,10 +114,10 @@ export const sectionHeaderStyle: CSSProperties = {
   paddingBottom: 4,
   paddingLeft: 16,
   fontSize: 10,
-  fontWeight: 600,
+  fontWeight: 300,
   color: 'var(--t-text-faint)',
   textTransform: 'uppercase',
-  letterSpacing: '0.08em',
+  letterSpacing: '0.04em',
 };
 
 export const rowStyleBase: CSSProperties = {
@@ -172,7 +174,7 @@ export const detailTextStyle: CSSProperties = {
   fontWeight: 400,
 };
 
-export type GroupKey = 'recent' | 'issue' | 'file' | 'agent' | 'action';
+export type GroupKey = 'recent' | 'issue' | 'file' | 'agent' | 'chat' | 'directive' | 'action';
 
 export function groupBadgeStyle(group: GroupKey): CSSProperties {
   const tone = group === 'recent'
