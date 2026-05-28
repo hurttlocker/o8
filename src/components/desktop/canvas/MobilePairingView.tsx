@@ -157,8 +157,10 @@ export function MobilePairingView() {
         <h2
           style={{
             margin: 0,
+            // Hurttlocker display title — light 200 weight at 22 px reads
+            // as editorial, matches the orchestrator empty-state title.
             fontSize: 22,
-            fontWeight: 600,
+            fontWeight: 200,
             letterSpacing: '-0.02em',
             color: 'var(--t-text)',
           }}
@@ -169,8 +171,10 @@ export function MobilePairingView() {
         <p
           style={{
             margin: 0,
+            // Hurttlocker row body — 13.5/300/-0.1.
             fontSize: 13.5,
-            fontWeight: 400,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             lineHeight: 1.5,
             color: 'var(--t-text-secondary)',
             maxWidth: 340,
