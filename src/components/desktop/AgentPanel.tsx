@@ -4,6 +4,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { AgentPanelExtraAgents } from './AgentPanelExtraAgents';
+import { ConnectionPill } from './ConnectionPill';
 import { UpdateCard } from './UpdateCard';
 import { LeftPanelProjectFocus } from './repo-focus/LeftPanelProjectFocus';
 import { ChatsTab } from './repo-focus/tabs/ChatsTab';
@@ -262,6 +263,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
           onOpenHistoryChat={onOpenHistoryChat}
           onOpenSpecInWorkspace={onOpenSpecInWorkspace}
         />
+        <ConnectionPill />
         <UpdateCard />
         {addRepoDialog}
       </div>
@@ -452,6 +454,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             widens). Nothing else to render here. */}
 
       </div>
+      <ConnectionPill />
       <UpdateCard />
       {addRepoDialog}
     </div>
