@@ -127,7 +127,7 @@ export function KeyboardShortcutsOverlay({ open, onClose }: KeyboardShortcutsOve
             borderBottom: '1px solid var(--t-divider, var(--t-border))',
           }}
         >
-          <span style={{ fontSize: 13, fontWeight: 600, letterSpacing: '-0.01em' }}>
+          <span style={{ fontSize: 13, fontWeight: 500, letterSpacing: '-0.01em' }}>
             Keyboard shortcuts
           </span>
           <button
@@ -182,14 +182,14 @@ export function KeyboardShortcutsOverlay({ open, onClose }: KeyboardShortcutsOve
                     paddingLeft: 16,
                   }}
                 >
-                  <span style={{ fontSize: 12.5, color: 'var(--t-text)', fontWeight: 450 }}>
+                  <span style={{ fontSize: 12.5, color: 'var(--t-text)', fontWeight: 300, letterSpacing: '-0.1px' }}>
                     {row.label}
                   </span>
                   <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
                     {row.chords.map((chord, chordIndex) => (
                       <span key={chordIndex} style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
                         {chordIndex > 0 ? (
-                          <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontWeight: 500 }}>or</span>
+                          <span style={{ fontSize: 10, color: 'var(--t-text-faint)', fontWeight: 300 }}>or</span>
                         ) : null}
                         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 3 }}>
                           {chord.map((key, keyIndex) => (
