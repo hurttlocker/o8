@@ -10,7 +10,13 @@ import {
 } from 'react';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { DesktopWsCallbacks } from '@/components/desktop/hooks/useDesktopWebSocket';
-import type { TerminalHandle } from '@/components/desktop/LiveOutput';
+// TerminalHandle was the only thing live in LiveOutput.tsx — that file
+// was deleted, the shape lives here now.
+interface TerminalHandle {
+  writeToTerminal: (data: string) => void;
+  setTermError: (error: string) => void;
+  setTermExited: (exited: boolean) => void;
+}
 import type { ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import type { TerminalTabHandle } from '@/components/desktop/WorkspaceTerminal';
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
