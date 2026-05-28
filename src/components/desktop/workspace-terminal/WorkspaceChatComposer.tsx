@@ -1,6 +1,6 @@
 'use client';
 
-import { memo } from 'react';
+import { memo, useRef } from 'react';
 import {
   MessageSquare,
   X,
@@ -12,6 +12,7 @@ import {
 } from '@/components/desktop/workspace-terminal/constants';
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import type { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
+import { useThoughtsComposerAttachments } from '@/components/desktop/thoughts/chat-panel/useThoughtsComposerAttachments';
 
 type ChatPaneState = ReturnType<typeof useWorkspaceChatPane>;
 
@@ -39,6 +40,14 @@ function WorkspaceChatComposerBase({
   const iconColor = interactive ? '#ffffff' : 'var(--t-text-faint)';
   const title = working ? 'Agent working…' : canSubmit ? 'Send (Enter)' : 'Type to send';
 
+  // Image attachment rendering (Pass 1 — Codex composer parity with the
+  // orchestrator). Drop an image onto the composer and a small thumbnail
+  // chip appears above the textarea instead of the raw absolute path being
+  // typed into the message body. Pass 2 will wire the chips into the send
+  // payload + add the runtime / repo / branch chips below.
+  const hostRef = useRef<HTMLDivElement | null>(null);
+  const attachments = useThoughtsComposerAttachments({ hostRef });
+
   return (
     <div
       style={{
@@ -53,14 +62,19 @@ function WorkspaceChatComposerBase({
       }}
     >
       <div
+        ref={hostRef}
+        onDragOver={attachments.dragHandlers.onDragOver}
+        onDragLeave={attachments.dragHandlers.onDragLeave}
+        onDrop={attachments.dragHandlers.onDrop}
         style={{
           maxWidth: 720,
           marginLeft: 'auto',
           marginRight: 'auto',
-          border: '1px solid var(--t-input-border)',
+          border: `1px solid ${attachments.dragOver ? 'var(--t-accent, #2563eb)' : 'var(--t-input-border)'}`,
           borderRadius: 14,
           background: 'var(--t-input-bg)',
           overflow: 'hidden',
+          transition: 'border-color 140ms ease',
         }}
       >
         {chat.queuedContextCards.length > 0 ? (
@@ -154,7 +168,82 @@ function WorkspaceChatComposerBase({
           </div>
         ) : null}
 
-        <div style={{ paddingTop: 11, paddingBottom: 4, paddingLeft: 14, paddingRight: 14 }}>
+        {attachments.attachedImages.length > 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              gap: 10,
+              paddingTop: 12,
+              paddingRight: 14,
+              paddingBottom: 6,
+              paddingLeft: 14,
+              overflowX: 'auto',
+            }}
+          >
+            {attachments.attachedImages.map((image, index) => (
+              <div key={`${image.name}-${index}`} style={{ position: 'relative', width: 66, flexShrink: 0 }}>
+                {/* eslint-disable-next-line @next/next/no-img-element -- data URI, not a remote asset */}
+                <img
+                  src={image.dataUri}
+                  alt={image.name}
+                  style={{
+                    display: 'block',
+                    width: 56,
+                    height: 56,
+                    objectFit: 'cover',
+                    borderRadius: 10,
+                    border: '1px solid var(--t-input-border)',
+                    background: 'var(--t-bg-card)',
+                  }}
+                />
+                <div
+                  style={{
+                    width: 60,
+                    marginTop: 4,
+                    color: 'var(--t-text-faint)',
+                    fontSize: 10,
+                    lineHeight: 1.15,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                    fontFamily: 'var(--font-sans-system)',
+                  }}
+                >
+                  {image.name}
+                </div>
+                <button
+                  type="button"
+                  aria-label={`Remove ${image.name}`}
+                  onClick={() => attachments.removeAttachedImage(index)}
+                  style={{
+                    position: 'absolute',
+                    top: -5,
+                    right: 4,
+                    width: 18,
+                    height: 18,
+                    borderRadius: 999,
+                    border: '1px solid var(--t-input-border)',
+                    background: 'var(--t-input-bg)',
+                    color: 'var(--t-text-muted)',
+                    cursor: 'pointer',
+                    fontSize: 11,
+                    lineHeight: '16px',
+                    textAlign: 'center',
+                    paddingTop: 0,
+                    paddingRight: 0,
+                    paddingBottom: 0,
+                    paddingLeft: 0,
+                    boxShadow: 'var(--t-panel-shadow)',
+                  }}
+                >
+                  x
+                </button>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        <div style={{ paddingTop: attachments.attachedImages.length > 0 ? 2 : 11, paddingBottom: 4, paddingLeft: 14, paddingRight: 14 }}>
           <textarea
             ref={chat.composeRef}
             name="workspaceComposeMessage"
