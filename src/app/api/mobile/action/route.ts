@@ -380,7 +380,13 @@ export async function POST(request: NextRequest) {
         );
       }
 
-      const approval = resolveApproval(approvalId, action === 'approve' ? 'approve' : 'reject', 'mobile');
+      const approvalDecisionNote = payload.message?.trim();
+      const approval = resolveApproval(
+        approvalId,
+        action === 'approve' ? 'approve' : 'reject',
+        'mobile',
+        approvalDecisionNote,
+      );
       if (!approval) {
         return actionErrorResponse('Approval not found.', 404);
       }
