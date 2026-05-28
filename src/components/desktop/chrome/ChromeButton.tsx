@@ -20,6 +20,7 @@
  */
 
 import { type CSSProperties, type ReactNode } from 'react';
+import { motion } from 'framer-motion';
 
 // Flat button surface tokens — DESIGN.md §06.7. The legacy chrome-btn-* tokens
 // (boxy bg + inset shadow) were retired here on 2026-05-23 per operator lock-in.
@@ -107,12 +108,21 @@ export function ChromeButton({
   noDrag = false,
 }: ChromeButtonProps) {
   return (
-    <button
+    <motion.button
       type="button"
       onClick={onClick}
       aria-label={label}
       aria-current={active ? 'page' : undefined}
       title={title ?? label}
+      // whileHover="hover" propagates the variant down — the inner icon
+      // wrapper picks up { scale: 1.08 } so the icon gets a gentle micro
+      // motion on hover while the button itself stays put. Matches the
+      // title-bar IconPanelLeft / IconSearch language (operator pass
+      // 2026-05-27: "motion of the icon, not motion of the button").
+      initial="rest"
+      animate="rest"
+      whileHover="hover"
+      whileTap="tap"
       style={{
         display: 'flex',
         alignItems: 'center',
@@ -135,7 +145,17 @@ export function ChromeButton({
       }}
     >
       <div data-neo="" style={{ ...chromeNeoStyle(active, size, radius), color: TEXT_COLOR }}>
-        {icon}
+        <motion.div
+          variants={{
+            rest: { scale: 1, rotate: 0 },
+            hover: { scale: 1.1 },
+            tap: { scale: 0.92 },
+          }}
+          transition={{ type: 'spring', stiffness: 520, damping: 22, mass: 0.6 }}
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 0 }}
+        >
+          {icon}
+        </motion.div>
       </div>
       {badge !== undefined && badge > 0 ? (
         <div
@@ -162,6 +182,6 @@ export function ChromeButton({
           {badge > 9 ? '9+' : badge}
         </div>
       ) : null}
-    </button>
+    </motion.button>
   );
 }
