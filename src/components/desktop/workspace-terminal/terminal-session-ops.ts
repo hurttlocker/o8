@@ -264,6 +264,21 @@ export interface LlmChatSessionResult {
   activeTabId: string;
 }
 
+/**
+ * "Empty" llm-chat predicate — a tab the operator could keep typing into
+ * without losing anything. Used by `computeLlmChatSession` so that two clicks
+ * on "+ New session → Chat" don't pile up two empty Chat tabs side-by-side;
+ * the second click just focuses the first one. Mirrors the orchestrator-side
+ * `spawnOrchestratorTab` reuse-empty logic.
+ */
+function isEmptyLlmChatTab(tab: TerminalTab): boolean {
+  if (tab.kind !== 'llm-chat') return false;
+  if (tab.llmDraftInjection) return false;
+  if (tab.chatMessages && tab.chatMessages.length > 0) return false;
+  if (tab.orchestrationPacket) return false;
+  return true;
+}
+
 export function computeLlmChatSession(
   options: LlmChatSessionOptions,
   currentTabs: TerminalTab[],
@@ -284,14 +299,24 @@ export function computeLlmChatSession(
         && tab.id === targetTabId
         && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
       ));
-  const matchingExisting = options.createNew
-    ? null
-    : targetedExisting
-      ?? activeExisting
-      ?? currentTabs.find((tab) => (
-        tab.kind === 'llm-chat'
+  // "+ New session → Chat" comes through with `createNew: true`. Before we
+  // unconditionally mint a new tab, look for an empty Chat tab the operator
+  // already has open — focus it instead of growing a second one.
+  const emptyExisting = options.createNew
+    ? currentTabs.find((tab) => (
+        isEmptyLlmChatTab(tab)
         && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
-      ));
+      ))
+    : null;
+  const matchingExisting = emptyExisting
+    ?? (options.createNew
+      ? null
+      : targetedExisting
+        ?? activeExisting
+        ?? currentTabs.find((tab) => (
+          tab.kind === 'llm-chat'
+          && (options.repo ? tab.repo?.localPath === options.repo.localPath : true)
+        )));
   const injection = options.initialText ? {
     id: `workspace-llm-injection-${Date.now()}`,
     text: options.initialText,

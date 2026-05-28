@@ -378,6 +378,21 @@ export function useWorkspaceTerminalController(
   }, [createDefaultChatTab, setActiveTabIdFromUser]);
 
   const spawnOrchestratorTab = useCallback((): string => {
+    // "+ New session → Orchestrator" — before minting yet another empty
+    // Orchestrator tab, look for one the operator already has open with
+    // no attached thread, no packet, and no draft. Focus it instead.
+    // Mirrors the chat-side `isEmptyLlmChatTab` reuse in computeLlmChatSession.
+    const emptyExisting = tabsRef.current.find((tab) => (
+      tab.kind === 'orchestrator'
+      && tab.freshSpawn === true
+      && !tab.orchestrationPacket
+      && !tab.chatDraftInjection
+      && (!tab.chatMessages || tab.chatMessages.length === 0)
+    ));
+    if (emptyExisting) {
+      setActiveTabIdFromUser(emptyExisting.id);
+      return emptyExisting.id;
+    }
     // User-initiated spawn via + New session — pass fresh=true so the
     // tab gets a clean 'Orchestrator' label and skips the boot-time
     // last-thread restore (see createDefaultOrchestratorTab comments).

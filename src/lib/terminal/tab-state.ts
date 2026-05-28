@@ -135,7 +135,14 @@ export function sanitizePersistedTabState(state: PersistedTabState): PersistedTa
 
 /** Tabs that should never be dropped, even when over the cap. */
 function isPinnedKind(kind: PersistedTab['kind']): boolean {
-  return kind === 'orchestrator' || kind === 'llm-chat';
+  // Only orchestrator tabs are universally pinned. llm-chat tabs USED to be
+  // pinned here, but that turned historical chats into permanent zombie
+  // tabs that auto-restored on cold launch next to every fresh "+ New
+  // session" the operator created. llm-chats are now subject to the
+  // is-dead test below — alive chats (with checkpoints or an orchestration
+  // packet) still survive, dead historicals go to the chat-history sidebar
+  // where they actually belong.
+  return kind === 'orchestrator';
 }
 
 /**
@@ -154,6 +161,17 @@ function isClearlyDeadTab(tab: PersistedTab): boolean {
     const hasCheckpoints = Boolean(tab.chatCheckpoints?.length);
     const hasPacket = Boolean(tab.orchestrationPacket);
     return !hasSessionKey && !hasCheckpoints && !hasPacket;
+  }
+
+  // llm-chat (casual o8 Chat): dead when there's no live work signal. The
+  // chat-history sidebar still shows the saved thread; the tab itself
+  // doesn't need to auto-open on next launch. The active tab is preserved
+  // separately (phase 1 of pruneTabs); this rule only applies to background
+  // tabs the operator left behind.
+  if (kind === 'llm-chat') {
+    const hasCheckpoints = Boolean(tab.chatCheckpoints?.length);
+    const hasPacket = Boolean(tab.orchestrationPacket);
+    return !hasCheckpoints && !hasPacket;
   }
 
   // terminal: drop pure dead leaves — no tmux session AND no repo binding.
