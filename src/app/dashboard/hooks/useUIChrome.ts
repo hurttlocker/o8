@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, useSyncExternalStore } from 'react';
-import type { NavSection } from '@/components/desktop/NavRail';
+import type { NavSection } from '@/app/dashboard/types';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import {
   readTimelineVisible,
