@@ -188,19 +188,20 @@ button {
   padding: 0.75rem 0.95rem;
   font: inherit;
   cursor: pointer;
-  transition: transform 120ms ease, box-shadow 120ms ease, border-color 120ms ease;
+  /* Flat-button doctrine: no transform/box-shadow transitions on the
+     global button. Color/bg/border crossfade only. Operator locked
+     this language across the app on 2026-05-27 — the prior
+     translateY(-1px) jump was reading as "physical key press" which
+     felt heavy on every chrome control across the entire surface. */
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
 }
 
 button:hover {
-  transform: translateY(-1px);
-  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.08);
   border-color: rgba(37, 99, 235, 0.22);
 }
 
-[data-stationary-chrome="true"] button:hover {
-  transform: none;
-  box-shadow: none;
-}
+/* The [data-stationary-chrome="true"] opt-out is now redundant — kept
+   as a no-op for any consumer that still sets the attribute. */
 
 .button-primary {
   background: var(--blue);
@@ -1108,14 +1109,14 @@ button.workflow-file-item.workflow-file-item-active {
 
 .board-issue-card {
   cursor: pointer;
-  transition: border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease;
+  transition: border-color 180ms ease, box-shadow 180ms ease;
 }
 
 .board-issue-card:hover,
 .board-issue-card-active {
   border-color: rgba(59, 130, 246, 0.35);
   box-shadow: 0 10px 24px rgba(59, 130, 246, 0.08);
-  transform: translateY(-1px);
+  /* Flat-button doctrine — no translateY lift. */
 }
 
 .board-task-action-button {
