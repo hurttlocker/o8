@@ -63,7 +63,7 @@ export const inputStyle: CSSProperties = {
   background: 'transparent',
   outline: 'none',
   fontSize: 15,
-  fontWeight: 400,
+  fontWeight: 300,
   letterSpacing: '-0.01em',
   color: 'var(--t-text)',
   fontFamily: 'inherit',
@@ -157,8 +157,9 @@ export const titleColumnStyle: CSSProperties = {
 };
 
 export const titleTextStyle: CSSProperties = {
-  fontSize: 13,
-  fontWeight: 500,
+  fontSize: 13.5,
+  fontWeight: 300,
+  letterSpacing: '-0.1px',
   color: 'var(--t-text)',
   overflow: 'hidden',
   textOverflow: 'ellipsis',
@@ -171,7 +172,8 @@ export const detailTextStyle: CSSProperties = {
   overflow: 'hidden',
   textOverflow: 'ellipsis',
   whiteSpace: 'nowrap',
-  fontWeight: 400,
+  fontWeight: 300,
+  letterSpacing: '-0.1px',
 };
 
 export type GroupKey = 'recent' | 'issue' | 'file' | 'agent' | 'chat' | 'directive' | 'action';
@@ -184,7 +186,7 @@ export function groupBadgeStyle(group: GroupKey): CSSProperties {
       : KIND_COLOR[group];
   return {
     fontSize: 10,
-    fontWeight: 600,
+    fontWeight: 300,
     color: tone,
     paddingTop: 2,
     paddingRight: 6,
@@ -195,7 +197,7 @@ export function groupBadgeStyle(group: GroupKey): CSSProperties {
     border: '1px solid color-mix(in srgb, var(--t-border) 80%, transparent)',
     flexShrink: 0,
     textTransform: 'uppercase',
-    letterSpacing: '0.06em',
+    letterSpacing: '0.04em',
   };
 }
 
@@ -246,7 +248,8 @@ export const footerHintTextStyle: CSSProperties = {
   gap: 4,
   fontSize: 11,
   color: 'var(--t-text-muted)',
-  fontWeight: 500,
+  fontWeight: 300,
+  letterSpacing: '-0.1px',
 };
 
 export const footerSpacerStyle: CSSProperties = {
