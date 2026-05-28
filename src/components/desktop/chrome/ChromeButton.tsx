@@ -145,22 +145,17 @@ export function ChromeButton({
       }}
     >
       <div data-neo="" style={{ ...chromeNeoStyle(active, size, radius), color: TEXT_COLOR }}>
-        <motion.div
-          // Icon micro-motion — rotate + nudge, NOT a scale grow. Operator
-          // pass 2026-05-27: "motion of the icon, not just get bigger".
-          // ~7° tilt and 0.6 px horizontal nudge reads as "spring to
-          // attention" without resizing. Matches IconPanelLeft / IconSearch's
-          // tilt language in the title bar.
-          variants={{
-            rest: { rotate: 0, x: 0 },
-            hover: { rotate: -7, x: 0.6 },
-            tap: { rotate: -3, x: 0.2 },
-          }}
-          transition={{ type: 'spring', stiffness: 520, damping: 22, mass: 0.6 }}
-          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 0 }}
-        >
-          {icon}
-        </motion.div>
+        {/*
+          No generic wrapper motion — the icon prop carries its own
+          bespoke variants (gear spins, mobile wobbles, folder-plus
+          lifts, search rotates, etc.). The motion.button above
+          declares whileHover="hover" / whileTap="tap" so any motion
+          child with matching variant keys plays its signature gesture.
+          Icons that don't ship variants just sit flat — that's the
+          deliberate fallback per operator pass 2026-05-27 ("if it
+          just gets bigger I don't want it").
+        */}
+        {icon}
       </div>
       {badge !== undefined && badge > 0 ? (
         <div
