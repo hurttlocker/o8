@@ -323,8 +323,9 @@ function StatusRow({ icon, label, value, tone = 'neutral', title }: RowProps) {
       </div>
       <div
         style={{
+          // Hurttlocker section label: 10/300/uppercase (was 10/600).
           fontSize: 10,
-          fontWeight: 600,
+          fontWeight: 300,
           letterSpacing: '0.08em',
           textTransform: 'uppercase',
           color: 'var(--t-text-faint)',
@@ -339,10 +340,11 @@ function StatusRow({ icon, label, value, tone = 'neutral', title }: RowProps) {
         style={{
           flex: 1,
           minWidth: 0,
-          fontSize: 12.5,
-          fontWeight: 460,
+          // Hurttlocker chrome value: 12/300/-0.1px (was 12.5/460).
+          fontSize: 12,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
           color: valueColor,
-          letterSpacing: '-0.005em',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
@@ -520,9 +522,10 @@ function RepoStatusHoverBase({
       <div style={{ display: 'flex', flexDirection: 'column', gap: 3, marginBottom: 10 }}>
         <div
           style={{
-            fontSize: 14,
-            fontWeight: 600,
-            letterSpacing: '-0.012em',
+            // Hurttlocker row title: 13.5/300/-0.1px (was 14/600).
+            fontSize: 13.5,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             color: 'var(--t-text)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -533,12 +536,14 @@ function RepoStatusHoverBase({
         </div>
         <div
           style={{
-            fontSize: 11,
+            // Hurttlocker meta: 9.5/260/-0.4 (was 11/normal).
+            fontSize: 9.5,
+            fontWeight: 260,
+            letterSpacing: '-0.4px',
             color: 'var(--t-text-faint)',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
             whiteSpace: 'nowrap',
-            letterSpacing: '-0.002em',
           }}
         >
           {shortenPath(repo.localPath)}
@@ -547,6 +552,8 @@ function RepoStatusHoverBase({
           <div
             style={{
               fontSize: 11,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
               color: 'var(--t-text-muted)',
               fontFamily: '"SF Mono", ui-monospace, Menlo, monospace',
               overflow: 'hidden',
@@ -562,9 +569,10 @@ function RepoStatusHoverBase({
             style={{
               marginTop: 4,
               fontSize: 11.5,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
               lineHeight: 1.4,
               color: 'var(--t-text-secondary)',
-              letterSpacing: '-0.003em',
             }}
           >
             {repo.readiness.summary}
