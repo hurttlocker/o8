@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
-import type { NavSection } from '@/components/desktop/NavRail';
+import type { NavSection } from '@/app/dashboard/types';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
