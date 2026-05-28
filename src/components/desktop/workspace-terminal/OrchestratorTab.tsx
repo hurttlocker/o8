@@ -907,6 +907,11 @@ function OrchestratorTabInner({
           kindLocked={emptyKindLocked}
           onKindChange={handleEmptyKindChange}
           onActionClick={handleQuickAction}
+          repoLabel={projectLabel}
+          workspaceTargets={data?.workspaceTargets ?? []}
+          onSelectProject={handleEmptySelectProject}
+          onAddProject={handleEmptyAddProject}
+          onWorkWithoutProject={handleEmptyWorkWithoutProject}
         />
       )}
       showInlineExport={false}
