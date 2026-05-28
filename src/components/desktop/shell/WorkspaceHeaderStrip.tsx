@@ -11,6 +11,7 @@
  */
 
 import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { AnimatePresence, motion } from 'framer-motion';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
 import { HeaderIconPill } from './HeaderIconPill';
@@ -423,16 +424,33 @@ function HeaderPillStrip({
         paddingRight: 6,
       }}
     >
-      {tabs.map((tab) => (
-        <HeaderPill
-          key={tab.id}
-          tab={tab}
-          active={tab.id === activeTabId}
-          crowded={crowded}
-          onSelect={handleSelect}
-          onClose={handleClose}
-        />
-      ))}
+      {/* Continuity V1 — wrap each pill in a layout-aware motion.div so
+          mounts scale + fade in, exits scale + fade out, and the surviving
+          pills reflow smoothly. `mode="popLayout"` takes the exiting pill
+          out of the flex flow during its exit so the remaining pills slide
+          into place without leaving a gap. The full row→pill morph (V2)
+          will reuse this wrapper as the target host. */}
+      <AnimatePresence initial={false} mode="popLayout">
+        {tabs.map((tab) => (
+          <motion.div
+            key={tab.id}
+            layout
+            initial={{ opacity: 0, scale: 0.85 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.85 }}
+            transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+            style={{ display: 'inline-flex', flexShrink: 0 }}
+          >
+            <HeaderPill
+              tab={tab}
+              active={tab.id === activeTabId}
+              crowded={crowded}
+              onSelect={handleSelect}
+              onClose={handleClose}
+            />
+          </motion.div>
+        ))}
+      </AnimatePresence>
     </div>
   );
 }
