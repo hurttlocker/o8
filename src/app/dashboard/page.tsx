@@ -11,7 +11,7 @@ import { mergeTranscriptEntries } from '@/components/desktop/workspace-terminal/
 import { ReactiveQueryProvider } from '@/lib/query/provider';
 import { useReactiveQuery } from '@/lib/query/use-reactive-query';
 import { AgentPanel } from '@/components/desktop/AgentPanel';
-import { AgentPanelChat } from '@/components/desktop/AgentPanelChat';
+// AgentPanelChat retired — orchestrator/chat tabs handle chat surfaces now.
 import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLeftPanelProjectFocus';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
