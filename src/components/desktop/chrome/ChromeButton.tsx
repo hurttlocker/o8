@@ -146,10 +146,15 @@ export function ChromeButton({
     >
       <div data-neo="" style={{ ...chromeNeoStyle(active, size, radius), color: TEXT_COLOR }}>
         <motion.div
+          // Icon micro-motion — rotate + nudge, NOT a scale grow. Operator
+          // pass 2026-05-27: "motion of the icon, not just get bigger".
+          // ~7° tilt and 0.6 px horizontal nudge reads as "spring to
+          // attention" without resizing. Matches IconPanelLeft / IconSearch's
+          // tilt language in the title bar.
           variants={{
-            rest: { scale: 1, rotate: 0 },
-            hover: { scale: 1.1 },
-            tap: { scale: 0.92 },
+            rest: { rotate: 0, x: 0 },
+            hover: { rotate: -7, x: 0.6 },
+            tap: { rotate: -3, x: 0.2 },
           }}
           transition={{ type: 'spring', stiffness: 520, damping: 22, mass: 0.6 }}
           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 0 }}
