@@ -763,6 +763,7 @@ export function useWorkspaceChatPane({
     handleClaudePermissionDecision,
     handleScroll,
     handleSend,
+    sendText,
     isAgentTab,
     isRuntimeBound,
     issuePickerOpen,
