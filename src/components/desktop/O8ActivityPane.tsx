@@ -457,6 +457,12 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                 type="button"
                 onClick={() => setFilter(tab.key)}
                 title={tab.label}
+                onMouseEnter={(e) => {
+                  if (!active) e.currentTarget.style.background = 'var(--t-hover)';
+                }}
+                onMouseLeave={(e) => {
+                  if (!active) e.currentTarget.style.background = 'transparent';
+                }}
                 style={{
                   display: 'flex',
                   alignItems: 'center',
@@ -473,7 +479,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
                   fontWeight: 350,
                   cursor: 'pointer',
                   fontFamily: 'var(--font-sans-system)',
-                  transition: 'all 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+                  transition: 'background 120ms ease, color 120ms ease',
                   letterSpacing: '-0.1px',
                 }}
               >
