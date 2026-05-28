@@ -90,10 +90,12 @@ export function useTauriFileDrop({
     void (async () => {
       try {
         const { listen } = await import('@tauri-apps/api/event');
+        console.error('[tauri-drop] hook subscribed (acceptAll=%s)', acceptAll);
 
         const enterUn = await listen<DragEventPayload>(
           'o8:tauri-file-drop-enter',
           (event) => {
+            console.error('[tauri-drop] enter', JSON.stringify(event.payload));
             if (!mounted) return;
             const pos = event.payload.position;
             if (!pos) return;
@@ -114,6 +116,7 @@ export function useTauriFileDrop({
         );
 
         const leaveUn = await listen('o8:tauri-file-drop-leave', () => {
+          console.error('[tauri-drop] leave');
           if (!mounted) return;
           setDragOver(false);
         });
@@ -121,11 +124,13 @@ export function useTauriFileDrop({
         const dropUn = await listen<DragEventPayload>(
           'o8:tauri-file-drop',
           (event) => {
+            console.error('[tauri-drop] drop', JSON.stringify(event.payload));
             if (!mounted) return;
             setDragOver(false);
             const pos = event.payload.position;
             if (!pos) return;
             const { ok, clientX, clientY } = hit(pos.x, pos.y);
+            console.error('[tauri-drop] hit-test ok=%s clientX=%s clientY=%s paths=%s', ok, clientX, clientY, JSON.stringify(event.payload.paths));
             if (!ok) return;
             const paths = (event.payload.paths ?? []).filter(Boolean);
             if (paths.length === 0) return;
@@ -135,7 +140,7 @@ export function useTauriFileDrop({
 
         unlistens.push(enterUn, overUn, leaveUn, dropUn);
       } catch (err) {
-        console.warn('[use-tauri-file-drop] subscribe failed', err);
+        console.error('[tauri-drop] subscribe FAILED', err);
       }
     })();
 
