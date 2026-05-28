@@ -642,11 +642,13 @@ function MiniSessionMenuItem({
       type="button"
       onClick={onClick}
       style={{
-        width: '100%',
+        width: 'calc(100% - 16px)',
+        marginLeft: 8,
+        marginRight: 8,
         borderWidth: 0,
-        borderBottom: last ? 0 : MINI_ROW_DIVIDER,
-        borderRadius: 0,
-        background: MINI_FLAT_BUTTON_BG,
+        borderBottom: 0,
+        borderRadius: 8,
+        background: 'transparent',
         color: 'var(--t-text)',
         cursor: 'pointer',
         outline: 'none',
@@ -660,13 +662,14 @@ function MiniSessionMenuItem({
         paddingLeft: 10,
         textAlign: 'left',
         fontFamily: 'var(--font-sans-system)',
-        transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+        // Instant flat hover — matches the terminal toggle pattern.
+        // No row divider or fade transition (operator pass 2026-05-27).
       }}
       onMouseEnter={(event) => {
         event.currentTarget.style.background = MINI_FLAT_HOVER_BG;
       }}
       onMouseLeave={(event) => {
-        event.currentTarget.style.background = MINI_FLAT_BUTTON_BG;
+        event.currentTarget.style.background = 'transparent';
       }}
     >
       <span
@@ -739,12 +742,17 @@ function MiniAgentPanelAction({
       onClick={onClick}
       disabled={disabled}
       style={{
-        width: '100%',
+        width: 'calc(100% - 16px)',
+        marginLeft: 8,
+        marginRight: 8,
         minHeight: 27,
         borderWidth: 0,
         borderBottom: 0,
-        borderRadius: 0,
-        background: active ? MINI_FLAT_BUTTON_BG : 'transparent',
+        // Round + slight inset so the hover bg reads as a flat chip,
+        // not a full-bleed slab across the column. Matches the bottom
+        // terminal toggle's footprint feel — operator pass 2026-05-27.
+        borderRadius: 8,
+        background: active ? MINI_FLAT_HOVER_BG : 'transparent',
         color: disabled ? 'var(--t-text-faint)' : 'var(--t-text)',
         cursor: disabled ? 'default' : 'pointer',
         outline: 'none',
@@ -757,13 +765,14 @@ function MiniAgentPanelAction({
         paddingLeft: 10,
         textAlign: 'left',
         fontFamily: 'var(--font-sans-system)',
-        transition: 'background 140ms cubic-bezier(0.22, 1, 0.36, 1), color 140ms cubic-bezier(0.22, 1, 0.36, 1)',
+        // No transition — instant flat color swap, no soft fade. The
+        // terminal toggle button uses the same instant pattern.
       }}
       onMouseEnter={(event) => {
         if (!disabled) event.currentTarget.style.background = MINI_FLAT_HOVER_BG;
       }}
       onMouseLeave={(event) => {
-        if (!disabled) event.currentTarget.style.background = active ? MINI_FLAT_BUTTON_BG : 'transparent';
+        if (!disabled) event.currentTarget.style.background = active ? MINI_FLAT_HOVER_BG : 'transparent';
       }}
     >
       <span
