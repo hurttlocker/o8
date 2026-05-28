@@ -7,6 +7,13 @@
 
 import os from 'node:os';
 
+export type ReachableMobileHostKind = 'override' | 'tailscale' | 'lan';
+
+export interface ReachableMobileHost {
+  host: string | null;
+  kind: ReachableMobileHostKind | null;
+}
+
 /**
  * Pick the first non-loopback IPv4 in 10/8, 172.16/12, or 192.168/16.
  *
@@ -48,6 +55,45 @@ export function pickLanIp(): string | null {
   return candidates[0].address;
 }
 
+/**
+ * Pick the Tailscale IPv4 address from the 100.64.0.0/10 CGNAT range.
+ *
+ * Tailscale stays reachable when the phone leaves the local Wi-Fi, so mobile
+ * pairing prefers it over LAN when present. We only infer the local node's
+ * address from interfaces; MagicDNS names can still be forced through
+ * O8_MOBILE_PAIRING_HOST when needed.
+ */
+export function pickTailscaleIp(): string | null {
+  const ifaces = os.networkInterfaces();
+  const candidates: { iface: string; address: string }[] = [];
+
+  for (const [name, addrs] of Object.entries(ifaces)) {
+    if (!addrs) continue;
+    for (const addr of addrs) {
+      if (addr.family !== 'IPv4') continue;
+      if (addr.internal) continue;
+      if (!isTailscaleIp(addr.address)) continue;
+      candidates.push({ iface: name, address: addr.address });
+    }
+  }
+
+  if (candidates.length === 0) return null;
+  candidates.sort((a, b) => interfacePriority(a.iface) - interfacePriority(b.iface));
+  return candidates[0].address;
+}
+
+export function pickMobilePairingHost(): ReachableMobileHost {
+  const override = process.env.O8_MOBILE_PAIRING_HOST?.trim()
+    || process.env.O8_TAILSCALE_HOST?.trim()
+    || null;
+  if (override) return { host: stripHostDecorations(override), kind: 'override' };
+
+  const tailscale = pickTailscaleIp();
+  if (tailscale) return { host: tailscale, kind: 'tailscale' };
+
+  return { host: pickLanIp(), kind: 'lan' };
+}
+
 function privateRangeRank(ip: string): number {
   // 192.168.0.0/16 — home routers, return highest rank.
   if (ip.startsWith('192.168.')) return 3;
@@ -62,6 +108,23 @@ function privateRangeRank(ip: string): number {
     if (Number.isFinite(second) && second >= 16 && second <= 31) return 1;
   }
   return 0;
+}
+
+export function isTailscaleIp(ip: string): boolean {
+  const parts = ip.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) {
+    return false;
+  }
+  return parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127;
+}
+
+function stripHostDecorations(value: string): string {
+  try {
+    const url = new URL(value);
+    return url.hostname;
+  } catch {
+    return value.replace(/^https?:\/\//, '').replace(/\/.*$/, '').replace(/:\d+$/, '');
+  }
 }
 
 function interfacePriority(name: string): number {

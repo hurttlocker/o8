@@ -1,9 +1,10 @@
 import 'server-only';
 
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { connect, constants as http2Constants } from 'node:http2';
 import type { ClientHttp2Stream } from 'node:http2';
-import { basename } from 'node:path';
+import os from 'node:os';
+import { basename, join } from 'node:path';
 import { importPKCS8, SignJWT } from 'jose';
 import type { AgentStatus } from '@/lib/fleet/types';
 import { getSqlite } from '@/lib/db';
@@ -92,6 +93,15 @@ type ApnsHttp2Response = {
   body: { reason?: string } | null;
 };
 
+type ApnsConfigFile = {
+  keyId?: string;
+  teamId?: string;
+  privateKey?: string;
+  privateKeyPath?: string;
+  environment?: 'sandbox' | 'production' | 'development' | 'dev' | 'prod';
+  bundleId?: string;
+};
+
 const STATUS_ORDER: MobileLiveActivityStatus[] = [
   'failed',
   'awaiting_review',
@@ -115,6 +125,8 @@ let apnsJwtCache: {
   expiresAt: number;
 } | null = null;
 
+let apnsConfigCache: ApnsConfigFile | null | undefined;
+
 function normalizePrivateKey(value: string) {
   return value.includes('\\n') ? value.replace(/\\n/g, '\n') : value;
 }
@@ -124,11 +136,38 @@ function optionalString(value: string | undefined) {
   return trimmed ? trimmed : null;
 }
 
+function apnsConfigPath() {
+  return process.env.O8_APNS_CONFIG_PATH?.trim()
+    || join(process.env.O8_DATA_DIR || join(os.homedir(), '.o8'), 'apns.json');
+}
+
+function readApnsConfigFile(): ApnsConfigFile | null {
+  if (apnsConfigCache !== undefined) return apnsConfigCache;
+  const path = apnsConfigPath();
+  if (!existsSync(path)) {
+    apnsConfigCache = null;
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as ApnsConfigFile;
+    apnsConfigCache = parsed && typeof parsed === 'object' ? parsed : null;
+  } catch (error) {
+    console.warn('[mobile/live-activity] APNs config file could not be read', error);
+    apnsConfigCache = null;
+  }
+  return apnsConfigCache;
+}
+
 function getApnsCredentials() {
-  const keyId = optionalString(process.env.O8_APNS_KEY_ID ?? process.env.APPLE_KEY_ID);
-  const teamId = optionalString(process.env.O8_APNS_TEAM_ID ?? process.env.APPLE_TEAM_ID);
-  const privateKeyFromEnv = optionalString(process.env.O8_APNS_PRIVATE_KEY);
-  const privateKeyPath = optionalString(process.env.O8_APNS_PRIVATE_KEY_PATH ?? process.env.O8_APNS_P8_PATH);
+  const config = readApnsConfigFile();
+  const keyId = optionalString(process.env.O8_APNS_KEY_ID ?? process.env.APPLE_KEY_ID)
+    ?? optionalString(config?.keyId);
+  const teamId = optionalString(process.env.O8_APNS_TEAM_ID ?? process.env.APPLE_TEAM_ID)
+    ?? optionalString(config?.teamId);
+  const privateKeyFromEnv = optionalString(process.env.O8_APNS_PRIVATE_KEY)
+    ?? optionalString(config?.privateKey);
+  const privateKeyPath = optionalString(process.env.O8_APNS_PRIVATE_KEY_PATH ?? process.env.O8_APNS_P8_PATH)
+    ?? optionalString(config?.privateKeyPath);
   const privateKey = privateKeyFromEnv
     ? normalizePrivateKey(privateKeyFromEnv)
     : privateKeyPath
@@ -146,14 +185,16 @@ function getApnsCredentials() {
 }
 
 function configuredApnsEnvironment(): 'sandbox' | 'production' {
-  const raw = process.env.O8_APNS_ENV?.trim().toLowerCase();
+  const config = readApnsConfigFile();
+  const raw = (process.env.O8_APNS_ENV ?? config?.environment)?.trim().toLowerCase();
   if (raw === 'production' || raw === 'prod') return 'production';
   if (raw === 'sandbox' || raw === 'development' || raw === 'dev') return 'sandbox';
   return process.env.NODE_ENV === 'production' ? 'production' : 'sandbox';
 }
 
 function configuredBundleId() {
-  return optionalString(process.env.O8_APNS_BUNDLE_ID) ?? DEFAULT_BUNDLE_ID;
+  const config = readApnsConfigFile();
+  return optionalString(process.env.O8_APNS_BUNDLE_ID) ?? optionalString(config?.bundleId) ?? DEFAULT_BUNDLE_ID;
 }
 
 async function getApnsJwt() {

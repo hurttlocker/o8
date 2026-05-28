@@ -9,7 +9,9 @@
  *   - http(s)://10.x.x.x(:port)
  *   - http(s)://172.16.x.x – 172.31.x.x(:port)
  *   - http(s)://192.168.x.x(:port)
+ *   - http(s)://100.64.x.x – 100.127.x.x(:port) (Tailscale)
  *   - http(s)://*.local or *.localhost (mDNS / dev hostnames)
+ *   - http(s)://*.ts.net (Tailscale MagicDNS)
  *   - http(s)://[::1] (IPv6 loopback)
  *
  * Lives in `lib/` rather than the route file because Next.js App Router
@@ -33,7 +35,12 @@ export function isLanDevHost(rawUrl: string): boolean {
     ? rawHost.slice(1, -1)
     : rawHost;
 
-  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) {
+  if (
+    host === 'localhost' ||
+    host.endsWith('.localhost') ||
+    host.endsWith('.local') ||
+    host.endsWith('.ts.net')
+  ) {
     return true;
   }
 
@@ -41,6 +48,7 @@ export function isLanDevHost(rawUrl: string): boolean {
   if (host === '127.0.0.1' || host.startsWith('127.')) return true;
   if (host.startsWith('10.')) return true;
   if (host.startsWith('192.168.')) return true;
+  if (isTailscaleIp(host)) return true;
 
   if (host.startsWith('172.')) {
     const parts = host.split('.');
@@ -53,4 +61,12 @@ export function isLanDevHost(rawUrl: string): boolean {
   }
 
   return false;
+}
+
+function isTailscaleIp(host: string): boolean {
+  const parts = host.split('.').map((part) => Number.parseInt(part, 10));
+  if (parts.length !== 4 || parts.some((part) => !Number.isFinite(part))) {
+    return false;
+  }
+  return parts[0] === 100 && parts[1] >= 64 && parts[1] <= 127;
 }
