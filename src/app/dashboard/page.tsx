@@ -4315,6 +4315,15 @@ function DashboardInner() {
                 transition={{ type: 'spring', stiffness: 400, damping: 30 }}
                 onMouseEnter={openSidebarPreview}
                 onMouseLeave={scheduleSidebarPreviewClose}
+                // Clicking ANYWHERE on the overlay pins it → expands the
+                // real sidebar. Without this, the overlay looks like the
+                // sidebar but a click on its chrome bounces off (the
+                // operator's complaint 2026-05-28 "can't click agent
+                // panel to keep it up"). Child rows (New session,
+                // Search, chat rows) have their own onClick handlers
+                // that fire first; this bubble-phase handler pins the
+                // sidebar after so the user keeps their context.
+                onClick={() => setSidebarVisible(true)}
                 data-mcp-scope="agent-panel-hover-preview"
                 style={{
                   position: 'fixed',
