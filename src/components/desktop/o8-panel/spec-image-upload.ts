@@ -155,6 +155,71 @@ function handleImageFiles(view: EditorView, repoPath: string, pos: number, files
   }
 }
 
+/* ────────────────────────────────────────────────────────────────────── */
+/* Tauri drag-drop bridge                                                 */
+/* ────────────────────────────────────────────────────────────────────── */
+
+/**
+ * When `dragDropEnabled: true` is set in tauri.conf.json (it is — needed for
+ * the terminal / canvas / Monaco drop epics), the OS-level Finder→app file
+ * drop is INTERCEPTED by Tauri before it ever hits the HTML5 `drop` event.
+ * So the CodeMirror extension below stops seeing real file drops in the prod
+ * app. The Rust side bridges those drops into a `o8:tauri-file-drop` event
+ * (paths + position) via the `useTauriFileDrop` hook; this function is the
+ * upload counterpart that takes those absolute paths and inserts the same
+ * `![alt](o8-assets/...)` refs the body-bytes path produces.
+ */
+const TAURI_IMAGE_EXTS = new Set(['.png', '.jpg', '.jpeg', '.gif', '.webp', '.avif', '.svg']);
+
+async function uploadSpecImageByPath(repoPath: string, srcPath: string): Promise<string> {
+  const url = `/api/repo-spec/asset?repoPath=${encodeURIComponent(repoPath)}&srcPath=${encodeURIComponent(srcPath)}`;
+  const res = await fetch(url, { method: 'POST' });
+  const data = (await res.json().catch(() => null)) as { ok?: boolean; relPath?: unknown; error?: unknown } | null;
+  if (!res.ok || !data?.ok || typeof data.relPath !== 'string') {
+    throw new Error(typeof data?.error === 'string' ? data.error : `upload failed (${res.status})`);
+  }
+  return data.relPath;
+}
+
+export function handleImagePathsViaTauri(
+  view: EditorView,
+  repoPath: string,
+  pos: number,
+  paths: string[],
+): void {
+  const imagePaths = paths.filter((p) => {
+    const dot = p.lastIndexOf('.');
+    return dot >= 0 && TAURI_IMAGE_EXTS.has(p.slice(dot).toLowerCase());
+  });
+  if (imagePaths.length === 0) return;
+
+  const pending = imagePaths.map((srcPath) => {
+    const baseName = (srcPath.split('/').pop() || 'image').replace(/[\]\r\n]/g, '').slice(0, 60);
+    return { srcPath, baseName, placeholder: `![Uploading ${baseName}…](#o8-upload-${nextNonce()})` };
+  });
+
+  const docLen = view.state.doc.length;
+  const at = Math.max(0, Math.min(pos, docLen));
+  const before = at > 0 ? view.state.doc.sliceString(at - 1, at) : '\n';
+  const after = at < docLen ? view.state.doc.sliceString(at, at + 1) : '\n';
+  const lead = before === '\n' ? '' : '\n';
+  const trail = after === '\n' ? '' : '\n';
+  const block = lead + pending.map((p) => p.placeholder).join('\n') + trail;
+  view.dispatch({ changes: { from: at, insert: block }, selection: { anchor: at + block.length } });
+
+  for (const p of pending) {
+    void (async () => {
+      try {
+        const relPath = await uploadSpecImageByPath(repoPath, p.srcPath);
+        swapPlaceholder(view, p.placeholder, buildImageMarkdown(relPath, altFromName(p.baseName), null), false);
+      } catch (err) {
+        console.warn('[o8-spec-image] upload via path failed', err);
+        swapPlaceholder(view, p.placeholder, '', true);
+      }
+    })();
+  }
+}
+
 /**
  * Editor extension enabling image paste/drop → upload → inline ref. When
  * getRepoPath() returns null (e.g. the standalone editor lab) it stays inert and
