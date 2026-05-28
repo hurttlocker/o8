@@ -120,15 +120,16 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
         display: 'flex',
         flex: 1,
         minHeight: 0,
-        // Title + project chip pin to the upper portion of the empty
-        // area. The composer (rendered separately below) lifts up via
-        // translateY(-32cqh) so it lands in the middle of the workspace
-        // — the two read together as title-on-top + composer-mid. cqh
-        // makes the lift scale with the local column, so this adapts
-        // gracefully when the bottom panel halves the workspace.
+        // Sit the title right above the composer, not at the top of
+        // the column. 28cqh of paddingTop puts the title near the
+        // upper-middle of the workspace, so the lifted composer (which
+        // lands around 50% via translateY(-32cqh)) meets the title
+        // bottom with a tight gap. Scales with the column so a
+        // shrunken workspace (bottom panel open) keeps the same
+        // visual relationship.
         alignItems: 'flex-start',
         justifyContent: 'center',
-        paddingTop: '8cqh',
+        paddingTop: '28cqh',
         paddingRight: 24,
         paddingBottom: 24,
         paddingLeft: 24,
@@ -162,26 +163,10 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
           {title}
         </h1>
 
-        {/* Project chip ABOVE the composer — Antigravity / Cortex
-            pattern. The Worktree / Branch / Kind chips live BELOW the
-            composer input (rendered inside ThoughtsChatPanel's lift
-            wrapper) so the composer chrome doesn't duplicate them. */}
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'center',
-            width: '100%',
-          }}
-        >
-          <ProjectChip
-            label={repoLabel ?? 'No project'}
-            workspaceTargets={workspaceTargets}
-            selectedRepoPath={props.repoPath}
-            onSelectProject={onSelectProject}
-            onAddProject={onAddProject}
-            onWorkWithoutProject={onWorkWithoutProject}
-          />
-        </div>
+        {/* Project chip moved out of the heading — it now lives in
+            OrchestratorComposerBelow's chip row (next to Worktree),
+            so the heading reads as title-only and the composer's chip
+            cluster carries all the run-context selectors. */}
 
         {/* Inline quick action pills now render in OrchestratorComposerBelow
             (below the composer + chip row) so they sit in their natural
@@ -210,6 +195,13 @@ interface OrchestratorComposerBelowProps {
   kindLocked?: boolean;
   onKindChange?: (kind: OrchestratorEmptyKind) => void;
   onActionClick: (prompt: string) => void;
+  // Project chip (moved here from the heading row per operator
+  // request 2026-05-27 — sits to the right of Worktree).
+  repoLabel?: string | null;
+  workspaceTargets?: OrchestratorWorkspaceTarget[];
+  onSelectProject?: (target: OrchestratorWorkspaceTarget) => void;
+  onAddProject?: (mode?: 'scratch' | 'existing') => void;
+  onWorkWithoutProject?: () => void;
 }
 
 function OrchestratorComposerBelowBase(props: OrchestratorComposerBelowProps) {
@@ -233,6 +225,16 @@ function OrchestratorComposerBelowBase(props: OrchestratorComposerBelowProps) {
           gap: 8,
         }}
       >
+        {props.workspaceTargets ? (
+          <ProjectChip
+            label={props.repoLabel ?? 'No project'}
+            workspaceTargets={props.workspaceTargets}
+            selectedRepoPath={props.repoPath}
+            onSelectProject={props.onSelectProject}
+            onAddProject={props.onAddProject}
+            onWorkWithoutProject={props.onWorkWithoutProject}
+          />
+        ) : null}
         <WorktreeChip mode={props.worktreeMode} onChange={props.onWorktreeModeChange} />
         <BranchChip branch={props.branch} repoPath={props.repoPath} onChange={props.onBranchChange} />
         <KindChip kind={props.kind} locked={props.kindLocked} onChange={props.onKindChange} />
