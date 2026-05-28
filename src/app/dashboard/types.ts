@@ -1,11 +1,31 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import type { WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
-import type { WorkspaceSidePanelRepo } from '@/components/desktop/WorkspaceSidePanel';
 import type { RepoReadiness } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import type { WorkflowStageBadge } from '@/lib/workflows/status';
+
+// Lifted out of the retired workspace-side-panel module so callers can
+// keep importing from the same dashboard/types barrel.
+export interface WorkspaceSidePanelRepo {
+  name: string;
+  localPath: string;
+  branch?: string | null;
+  readiness?: RepoReadiness | null;
+  remoteUrl?: string;
+  isWorktree?: boolean;
+  worktreeStatus?: string | null;
+}
+
+export type WorkspaceSidePanelView = 'blank' | 'diff' | 'git-log';
+
+export interface FileNode {
+  name: string;
+  path: string;
+  type: 'file' | 'dir';
+  children?: FileNode[];
+}
 
 export interface WorkspaceChatTargetOption {
   sessionKey: string;

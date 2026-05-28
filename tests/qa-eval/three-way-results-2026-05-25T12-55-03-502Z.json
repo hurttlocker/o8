@@ -1,0 +1,1960 @@
+{
+  "generatedAt": "2026-05-25T12:55:03.502Z",
+  "totalCases": 30,
+  "durationS": 2329.7,
+  "summary": {
+    "perCategory": {
+      "ownership": {
+        "total": 5,
+        "full": {
+          "scored": 5,
+          "factualSum": 2.25,
+          "citationSum": 2,
+          "hallucinationSum": 4
+        },
+        "grep": {
+          "scored": 5,
+          "factualSum": 0.1,
+          "citationSum": 0,
+          "hallucinationSum": 12
+        },
+        "blind": {
+          "scored": 5,
+          "factualSum": 0.7,
+          "citationSum": 1,
+          "hallucinationSum": 0
+        }
+      },
+      "decisions": {
+        "total": 5,
+        "full": {
+          "scored": 5,
+          "factualSum": 3.5500000000000003,
+          "citationSum": 1,
+          "hallucinationSum": 8
+        },
+        "grep": {
+          "scored": 5,
+          "factualSum": 1.9500000000000002,
+          "citationSum": 1,
+          "hallucinationSum": 6
+        },
+        "blind": {
+          "scored": 5,
+          "factualSum": 0.1,
+          "citationSum": 1,
+          "hallucinationSum": 0
+        }
+      },
+      "processes": {
+        "total": 5,
+        "full": {
+          "scored": 5,
+          "factualSum": 3.8,
+          "citationSum": 3.2,
+          "hallucinationSum": 4
+        },
+        "grep": {
+          "scored": 5,
+          "factualSum": 3.8,
+          "citationSum": 2,
+          "hallucinationSum": 3
+        },
+        "blind": {
+          "scored": 5,
+          "factualSum": 0,
+          "citationSum": 2,
+          "hallucinationSum": 0
+        }
+      },
+      "incidents": {
+        "total": 5,
+        "full": {
+          "scored": 5,
+          "factualSum": 2.7499999999999996,
+          "citationSum": 2.5,
+          "hallucinationSum": 11
+        },
+        "grep": {
+          "scored": 5,
+          "factualSum": 0.1,
+          "citationSum": 0,
+          "hallucinationSum": 8
+        },
+        "blind": {
+          "scored": 5,
+          "factualSum": 0.7,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        }
+      },
+      "specs": {
+        "total": 5,
+        "full": {
+          "scored": 5,
+          "factualSum": 4.7,
+          "citationSum": 0,
+          "hallucinationSum": 3
+        },
+        "grep": {
+          "scored": 5,
+          "factualSum": 0.2,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "blind": {
+          "scored": 5,
+          "factualSum": 0.30000000000000004,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        }
+      },
+      "cross-repo": {
+        "total": 5,
+        "full": {
+          "scored": 5,
+          "factualSum": 2.0999999999999996,
+          "citationSum": 1,
+          "hallucinationSum": 6
+        },
+        "grep": {
+          "scored": 5,
+          "factualSum": 1,
+          "citationSum": 3,
+          "hallucinationSum": 12
+        },
+        "blind": {
+          "scored": 5,
+          "factualSum": 1.15,
+          "citationSum": 3,
+          "hallucinationSum": 6
+        }
+      }
+    },
+    "overall": {
+      "full": 0.6383333333333333,
+      "grep": 0.2383333333333333,
+      "blind": 0.09833333333333334,
+      "delta_full_vs_grep": 0.4,
+      "delta_full_vs_blind": 0.5399999999999999
+    }
+  },
+  "perCase": [
+    {
+      "id": "qa-001",
+      "category": "ownership",
+      "question": "Which directives in the cortex-ide repo are scoped specifically to the cortex-ide repo (scope: repo) versus globally?",
+      "classification": "A",
+      "full": {
+        "answer": "The rows don't enumerate individual directive titles paired with their `scope: repo` vs `scope: global` values. What is stated: as of the Phase 1 audit, all 14 directives in `~/.o8/directives/` are either `scope:global` or `scope:repo` — none yet carry `scope:project` [CITATION:fact-c0c28c54-235e-49a4-af7e-29705e5d3030]. The scope system supports three tiers (`global → project → repo`) [CITATION:fact-7c45be35-78a5-487a-9125-0ee01ac465d5], and `filterDirectivesForRepo` in the context engine includes any directive with `scope === 'global'` regardless of repo-path validity, while `scope: repo` directives are filtered by matching `repoPath` [CITATION:fact-007c2a07-ed4e-4b3c-a3e5-ee72ca0d7755].\n\nTo get the actual per-directive breakdown, you'd need to query the live store or read `~/.o8/directives/` directly — the rows don't carry that enumeration.",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-c0c28c54-235e-49a4-af7e-29705e5d3030"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-7c45be35-78a5-487a-9125-0ee01ac465d5"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-007c2a07-ed4e-4b3c-a3e5-ee72ca0d7755"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer covers none of the four expected facts — it names no specific directives and does not identify typecheck-before-commit or surgical-changes as global-scoped. The claim that 'the rows don't enumerate individual directive titles paired with their scope values' is itself a hallucination (an unsupported factual assertion contradicted by the expected answer), and none of the three actual citations ({kind:fact}) match any of the four expected citations ({kind:directive, rowId:directive-seed-*})."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe provided rows are doc excerpts from `CLAUDE.md` files rather than structured directive records with explicit `scope:` fields. What the rows do confirm is that `~/cortex-ide/CLAUDE.md` contains repo-specific rules [CITATION:doc-grep:CLAUDE.md:L143] and `~/CLAUDE.md` is the global file, but no enumerated directive list with `scope: repo` vs `scope: global` labels appears in any row.\n\nTo get a proper answer, you'd need to index the directives from the o8 directive store (e.g. via `o8 directives list --repo cortex-ide` or querying `~/.o8/` SQLite directly) so the structured scope metadata is available as rows.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L143"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer fails to state any of the expected facts (800-line ceiling, inline styles, phosphor SVG, typecheck-before-commit, surgical-changes) and provides none of the expected citations. The reference to 'doc-grep:CLAUDE.md:L143' is an invented/hallucinated row ID not supported by the expected citation set, and the claim about what that line confirms is unsupported."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the directives, merely stating it doesn't have the information. While this avoids hallucination, it fails to cover any of the expected facts about repo-scoped vs global directives."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0,
+        "full_vs_blind": 0,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-002",
+      "category": "ownership",
+      "question": "Which project does the cortex-ide repo belong to, and what other repos are in that project?",
+      "classification": "A",
+      "full": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe rows describe the *project system* itself in detail [CITATION:directive-spec-ingest:cortex-ide:docs-project-hardening:current-contract] — `cortex-ide` uses a `projects` + `project_repos` SQLite store, resolves a `ProjectContext` with sibling repos, and worker outcomes consistently note \"sibling repos were untouched\" [CITATION:outcome-outcome-pkt-dcfd4205-aeb-ned177969832909398aad994-2026-05-25T09:00:07] — but no row explicitly names the project that `cortex-ide` is assigned to or enumerates its peer repos. The closest signal is a passing mention of `o8-mobile` belonging to the `o8` product context [CITATION:directive-spec-ingest:cortex-ide:docs-project-hardening:current-contract] and a Jaccard comparison referencing `o8-site` alongside `cortex-ide` [CITATION:fact-7c45be35-78a5-487a-9125-0ee01ac465d5], but neither row states `cortex-ide`'s project membership definitively. To get the authoritative answer, query `/api/projects/context` from a running Cortex IDE instance or inspect the `projects` and `project_repos` tables in the SQLite store directly.",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:docs-project-hardening:current-contract"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-dcfd4205-aeb-ned177969832909398aad994-2026-05-25T09:00:07"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-7c45be35-78a5-487a-9125-0ee01ac465d5"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer does not state that cortex-ide belongs to the o8 project or that o8-site is its sibling repo; it only vaguely hints at o8-site via a Jaccard comparison and mentions o8-mobile in passing, earning minimal partial credit for referencing the project_repos/projects tables conceptually. None of the three actual citations match any of the three expected citation row IDs. The claim about querying '/api/projects/context' is uncited and likely hallucinated."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — the provided rows show a `repos.json` file exists at both `~/.o8/repos.json` and `~/.cortex-ide/repos.json` [CITATION:doc-grep:repos.json:L3], but only the opening lines are included, not the project assignments or full repo list. Try indexing more directives or reading those files directly to get the project groupings.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:repos.json:L3"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 2,
+          "notes": "The actual answer fails to mention the o8 project, proj-5d0d9e02-015, or o8-site as a sibling repo — none of the expected facts are covered. It invents two unsupported claims: that repos.json files exist at '~/.o8/repos.json' and '~/.cortex-ide/repos.json', neither of which is supported by any valid citation (the cited doc-grep rowId is not among the expected citations)."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the cortex-ide repo, the o8 project, or the o8-site sibling repo. However, since it makes no false claims either, the hallucination count is 0."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.1,
+        "full_vs_blind": 0.1,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-003",
+      "category": "ownership",
+      "question": "Who authored the most recent merged PRs in cortex-ide?",
+      "classification": "A",
+      "full": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe directive rows [CITATION:directive-seed-global-typecheck-before-commit], [CITATION:directive-seed-cortex-ide-inline-styles-only], and others list the most recent merged PRs (all dated 2026-04-29, PRs #907–#914), but none of those rows include an author field. The only author named in any row is `hurttlocker` on a comment [CITATION:comment-issue-503-4196276608], but that comment is not linked to those specific merged PRs.",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-seed-global-typecheck-before-commit"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-seed-cortex-ide-inline-styles-only"
+          },
+          {
+            "kind": "comment",
+            "rowId": "comment-issue-503-4196276608"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.85,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The AI correctly handles the known-gap case by stating author data is missing from the PR rows, and appropriately avoids inventing GitHub usernames as the answer. No expected citations were specified, so citation_correctness defaults to full credit; all specific factual claims (PR numbers, dates, username) are backed by the actual citations provided."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "All of the most recent merged PRs in `cortex-ide` were authored by **LavonTMCQ**. The 10 most recent merges are all attributed to that account, with the latest being a brain retriever fix (issue #1116), followed by o8.md panel polish, doc clarifications, desktop status bar wiring, and several Claude Code session/billing harness features.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 7,
+          "notes": "This is a known-gap case where the expected answer is null, meaning the AI should have stated the data is missing. Instead, the AI invented a GitHub username 'LavonTMCQ', fabricated specific PR details including issue numbers (#1116), PR titles (brain retriever fix, o8.md panel polish, doc clarifications, etc.), and claimed certainty about 10 merged PRs — all without any citations to support these claims."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.7,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly acknowledges that the data is missing/unavailable rather than inventing fictional GitHub usernames, which aligns with the known-gap expected answer. However, the phrasing 'try indexing more directives or PRs' introduces a slightly specific suggestion that isn't grounded in evidence, though it doesn't constitute a hallucinated fact per se."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.85,
+        "full_vs_blind": 0.15000000000000002,
+        "grep_vs_blind": -0.7
+      }
+    },
+    {
+      "id": "qa-004",
+      "category": "ownership",
+      "question": "Which runtime owns the most recently merged session outcomes in cortex-ide?",
+      "classification": "A",
+      "full": {
+        "answer": "**codex** owns all of the most recently merged session outcomes in cortex-ide — every outcome row in the provided results carries `\"runtime\": \"codex\"` [CITATION:outcome-outcome-pkt-0041d810-d35-ned1779711069389a25972b8-2026-05-25T12:11:12] [CITATION:outcome-outcome-pkt-66c112ed-603-ned17797071299816a8afc4f-2026-05-25T11:17:15] [CITATION:outcome-outcome-pkt-426ceab9-3e0-ned17797024101915e8f47e1-2026-05-25T09:55:23] [CITATION:outcome-outcome-pkt-dcfd4205-aeb-ned177969832909398aad994-2026-05-25T09:00:07] [CITATION:outcome-outcome-pkt-1294b00b-0ae-ned177967771184412c78309-2026-05-25T03:44:40], with the most recent completed at `2026-05-25T12:11:12Z` on branch `issue/1131-fix-openclaw-wire-orchestrator-events-to-realtim`.",
+        "citations": [
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-0041d810-d35-ned1779711069389a25972b8-2026-05-25T12:11:12"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-66c112ed-603-ned17797071299816a8afc4f-2026-05-25T11:17:15"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-426ceab9-3e0-ned17797024101915e8f47e1-2026-05-25T09:55:23"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-dcfd4205-aeb-ned177969832909398aad994-2026-05-25T09:00:07"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-1294b00b-0ae-ned177967771184412c78309-2026-05-25T03:44:40"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.3,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer correctly identifies codex as a dominant runtime, satisfying fact #1 partially, but it overclaims by asserting every outcome is codex — missing the gemini outcomes (auto-index-repos-741, dispatch-popover-placement-752) entirely, failing fact #2. Neither of the two expected seed-based citation rowIds appear in the actual citations (which use pkt-based IDs instead), yielding zero citation overlap. The false claim that all outcomes carry codex runtime constitutes one hallucination."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the runtime ownership of session outcomes, failing to identify codex as the dominant runtime or name any specific outcomes. However, it does not hallucinate any facts either, as it simply states it lacks the information."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the question, failing to identify codex as the dominant runtime, name any gemini outcomes, or reference the runtime column. However, it does not hallucinate any facts either."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.3,
+        "full_vs_blind": 0.3,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-005",
+      "category": "ownership",
+      "question": "Which directive owner enforces the rule that packet metadata rows can't use native select or input controls?",
+      "classification": "A",
+      "full": {
+        "answer": "The rule is enforced by directive **`seed-cortex-ide-no-native-form-controls-in-packets`** (titled \"No native select / input inside packet cards\") [CITATION:directive-seed-cortex-ide-no-native-form-controls-in-packets], and is also codified as a NEVER rule in **`spec-ingest:cortex-ide:claude:critical-rules:never`** (CLAUDE.md) [CITATION:directive-spec-ingest:cortex-ide:claude:critical-rules:never]. Both are source_authority 1.0 directives; the seed directive names `ThoughtsMissionPanel` and the `packet-meta-rows` pattern as the reference implementation to copy.",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-seed-cortex-ide-no-native-form-controls-in-packets"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:critical-rules:never"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 1,
+          "citation_correctness": 1,
+          "hallucination_count": 1,
+          "notes": "The actual answer correctly names all three expected facts: the directive id, ThoughtsMissionPanel, and the packet-meta-rows pattern. The expected citation is present. However, the second citation (directive-spec-ingest:cortex-ide:claude:critical-rules:never) and the claim about it being a 'NEVER rule in CLAUDE.md' with 'source_authority 1.0' are not supported by the expected answer or citations, counting as one hallucinated fact cluster."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "The rule is enforced by the **CLAUDE.md directive** for the `cortex-ide` project. Specifically, [CITATION:doc-grep:CLAUDE.md:L298] states: \"Never use native `<select>` or `<input>` inside packet cards — packet metadata rows use Issues-style clickable rows with custom popovers. Native form controls render as chunky bubbles that break the density.\" This is reinforced by [CITATION:doc-grep:CLAUDE.md:L225], which elaborates that packet metadata (Summary / Runtime / Repo / Branch) renders as clickable rows with uppercase labels + values + chevrons, and explicitly prohibits native `<select>` or `<input>` boxes in the packet card because \"they read as chunky bubbles against the Issues density.\"",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L298"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L225"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 2,
+          "notes": "The actual answer identifies a CLAUDE.md directive for cortex-ide but fails to name the specific directive id 'seed-cortex-ide-no-native-form-controls-in-packets', mention ThoughtsMissionPanel, or the packet-meta-rows pattern. The citations used (doc-grep:CLAUDE.md:L298 and doc-grep:CLAUDE.md:L225) do not match the expected citation kind 'directive' with rowId 'directive-seed-cortex-ide-no-native-form-controls-in-packets', and the specific line references appear fabricated."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the directive, failing to name the directive id, ThoughtsMissionPanel, or the packet-meta-rows pattern. However, since it admits ignorance rather than inventing facts, there are no hallucinations."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.9,
+        "full_vs_blind": 1,
+        "grep_vs_blind": 0.1
+      }
+    },
+    {
+      "id": "qa-006",
+      "category": "decisions",
+      "question": "Why does cortex-ide forbid CSS classes and require inline styles?",
+      "classification": "B",
+      "full": {
+        "answer": "The prohibition on CSS classes applies specifically to **mobile components** (`src/components/mobile/`) and stems from three compounding reasons cited across the directives:\n\n1. **iOS Safari safe-area and PWA constraints** — CSS module loading is unreliable in webview contexts (Tauri, PWA), making inline styles the only predictable option [D-spec-ingest:cortex-ide:docs-conventions:styling].\n2. **No CSS module loading overhead** — inline styles avoid the additional asset-load step that class-based styling requires [D-spec-ingest:cortex-ide:docs-conventions:styling].\n3. **Webview predictability** — the rule is marked \"Permanent\" because the iOS Safari constraint is architectural, not a preference [D-spec-ingest:cortex-ide:docs-prompts-codex-sprint-1-orchestrator-loop:codebase-rules-mandatory].\n\nImportantly, the rule is **not absolute across the whole repo** — desktop components (`command-center-shell.tsx`, `session-operator-panel.tsx`, `workflow-review-panel.tsx`) are explicitly permitted to use CSS classes from `globals.css` for grid-based responsive layouts [D-spec-ingest:cortex-ide:docs-conventions:styling]. The blanket \"inline styles only\" phrasing in sprint prompts refers to the mobile surface, where iOS Safari reliability is a hard constraint [D-spec-ingest:cortex-ide:docs-o8-product-brief:architecture-already-built].",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:docs-conventions:styling"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:docs-prompts-codex-sprint-1-orchestrator-loop:codebase-rules-mandatory"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:docs-o8-product-brief:architecture-already-built"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.4,
+          "citation_correctness": 0,
+          "hallucination_count": 4,
+          "notes": "The actual answer correctly identifies iOS Safari/Tauri webview as reliability drivers and marks the rule as permanent, but significantly misrepresents the scope by claiming it applies only to mobile components and that desktop components may use CSS classes — the expected answer states inline styles are a repo-wide permanent rule. The expected directive (seed-cortex-ide-inline-styles-only) is never referenced; all three cited rowIDs are fabricated and do not match the expected citation, yielding zero citation credit. Additional hallucinations include: the mobile-only scope restriction, named desktop component exceptions (command-center-shell.tsx etc.), and 'no CSS module loading overhead' as a stated reason."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "CSS classes are forbidden in cortex-ide due to an **iOS Safari reliability issue** — this is described as a permanent decision [DOC-J041AIZH]. All components must use inline `style={{ }}` props instead, with `var(--t-*)` CSS variable tokens for colors rather than hardcoded values [DOC-J041AHYX].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L283"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L117"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.5,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The answer correctly identifies iOS Safari as a reliability driver and marks the rule as permanent, but omits Tauri webview as a second driver and fails to reference the seed-cortex-ide-inline-styles-only directive. The mention of 'var(--t-*) CSS variable tokens' is an unsupported fact not covered by expected citations, counting as a hallucination. Neither actual citation matches the expected directive citation."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content, stating only that it lacks the information. While this avoids hallucination, it covers none of the expected facts about iOS Safari, Tauri webview, the permanence of the rule, or the seed-cortex-ide-inline-styles-only directive."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": -0.09999999999999998,
+        "full_vs_blind": 0.4,
+        "grep_vs_blind": 0.5
+      }
+    },
+    {
+      "id": "qa-007",
+      "category": "decisions",
+      "question": "Why are React icon component imports (lucide-react, @phosphor-icons/react) banned in favor of raw SVG?",
+      "classification": "B",
+      "full": {
+        "answer": "React icon components from `@phosphor-icons/react` and `lucide-react` are banned because **they don't render correctly in the Tauri webview** [D-spec-ingest:cortex-ide:design:06-motifs:06-5-phosphor-raw-svg-icons] [D-spec-ingest:cortex-ide:design:11-hard-invariants]. This is a hard invariant with no exceptions [D-spec-ingest:cortex-ide:design:11-hard-invariants].\n\nThe correct pattern is to extract SVG path data from `@phosphor-icons/react/dist/defs/` and inline raw `<svg>` elements directly; for simple glyphs (plus, minus, check), HTML entities are preferred instead [D-spec-ingest:cortex-ide:claude:critical-rules:never]. The established reference implementation lives in `src/components/shared/icons/`, with a shim system documented in `lucide_shim_system.md` [D-spec-ingest:cortex-ide:design:06-motifs:06-5-phosphor-raw-svg-icons].",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:design:06-motifs:06-5-phosphor-raw-svg-icons"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:design:11-hard-invariants"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:critical-rules:never"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.75,
+          "citation_correctness": 0,
+          "hallucination_count": 2,
+          "notes": "The actual answer correctly identifies Tauri webview rendering as the cause and mentions extracting from @phosphor-icons/react/dist/defs/, covering two of three expected facts well. However, it cites 'src/components/shared/icons/' instead of the expected 'src/lib/icons/' and invents a specific file 'lucide_shim_system.md', neither of which appear in the expected answer; additionally, none of the actual citation rowIds match the expected 'directive-seed-cortex-ide-phosphor-svg-only' citation."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "React icon component imports (`@phosphor-icons/react` and `lucide-react`) are banned because **they do not render correctly in the Tauri webview** [DOC-J041AJ0B]. The workaround is to extract SVG path data from `@phosphor-icons/react/dist/defs/` and use raw `<svg>` elements instead; for simple actions like plus/minus, HTML entities are preferred [DOC-J041AJ0B].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L290"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.7,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The answer correctly identifies Tauri webview rendering as the cause and mentions extracting from @phosphor-icons/react/dist/defs/ and HTML entities preference, covering 2 of 3 expected facts but omitting the src/lib/icons/ shim system with 85 icons. The citation used (doc-grep:CLAUDE.md:L290) does not match the expected citation (directive-seed-cortex-ide-phosphor-svg-only), resulting in zero citation correctness; citing a non-matching rowId while presenting it as supporting the claims counts as a hallucination."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly admits it lacks the information (no hallucinations), which is appropriate for a known-gap case. However, it does not state any of the expected facts about Tauri webview rendering, the dist/defs/ extraction path, or the src/lib/icons/ shim system, earning minimal factual credit. No citations were provided."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.050000000000000044,
+        "full_vs_blind": 0.65,
+        "grep_vs_blind": 0.6
+      }
+    },
+    {
+      "id": "qa-008",
+      "category": "decisions",
+      "question": "Why did the team choose FTS5 + structured SQL over a vector store for the Cortex Q&A retrieval layer?",
+      "classification": "B",
+      "full": {
+        "answer": "The team locked on **NO vectors** after auditing the OSS-Cortex post-mortem, which revealed that 413 of 501 embeddings silently fell back to zero-vectors under load — the failure mode the founder remembered as \"the edges weren't good\" [CMT-issue-915-4347800077]. Four specific failure modes drove the switch:\n\n1. **Silent degradation**: BM25/FTS5 has no silent-failure mode — it returns ranked tokens or nothing; a broken embedding pipeline returns plausible-looking garbage [CMT-issue-915-4347800077].\n2. **Latency**: Cosine over uncached embeddings was unusably slow; FTS5 BM25 is in-process, sub-200ms, indexed-on-write via SQLite triggers with no async embedding worker [CMT-issue-915-4347800077].\n3. **Untyped blobs**: Vector retrieval returned text fragments ingested from chat blobs without typed structure; the new substrate is operator-curated typed rows (directives, outcomes, approvals) where every fact has a row ID and a writer [CMT-issue-915-4347800077].\n4. **No composition**: Vectors returned blobs with nothing composing *across* facts; the FTS5 + structured approach feeds typed rows with citations into a contradiction pass and LLM compose — making it \"a brain instead of a search\" [CMT-issue-915-4347800077] [FACT-aa673055-1988-4835-ad65-cacf0210e623].",
+        "citations": [
+          {
+            "kind": "comment",
+            "rowId": "comment-issue-915-4347800077"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-aa673055-1988-4835-ad65-cacf0210e623"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.75,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer correctly covers two of the three expected facts — the 413/501 silent zero-vector fallbacks and BM25 having no silent failure mode — but omits the three-parallel-retriever architecture (structured SQL, FTS5 lexical, codebase-memory-mcp graph) that is a key design detail in the expected answer. The actual citations ({comment, comment-issue-915-4347800077} and {fact, fact-aa673055...}) do not match the expected citation ({issue, issue-4353815519}), yielding zero citation correctness. One hallucination is present: the specific founder quote 'the edges weren't good' attributed to the post-mortem, which is not found in the expected answer or supported by the provided citations."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe provided rows confirm the project uses SQLite via better-sqlite3 + Drizzle ORM [DOC-J041AHYR], but none of them contain a rationale for choosing FTS5 + structured SQL over a vector store for the Q&A retrieval layer. You may want to index the `src/lib/cortex/` directory or any ADRs/design docs for that decision record.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L111"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer correctly states it lacks the information (appropriate for a known-gap case) and does not invent the expected facts about 413 zero-vector fallbacks, BM25 silent failure modes, or the three retrievers. However, it mentions 'better-sqlite3 + Drizzle ORM' as a fact supported by a citation not in the expected citations list, and the cited doc-grep row is not among the expected citations, yielding zero citation correctness. The claim about better-sqlite3 + Drizzle ORM, while possibly true, is not supported by the listed actualCitations (the rowId references a CLAUDE.md line, not verified here), counting as one potential hallucination."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer is a non-answer ('I don't have that information yet') that correctly admits ignorance but fails to cover any of the expected facts (413/501 zero-vector fallbacks, BM25 no silent failure mode, three retrievers). Since the expected answer is not null, this is a factual miss, not a correct known-gap response. No hallucinations were introduced."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.65,
+        "full_vs_blind": 0.75,
+        "grep_vs_blind": 0.1
+      }
+    },
+    {
+      "id": "qa-009",
+      "category": "decisions",
+      "question": "Why is the o8-site marketing repo deployed to Vercel while the cortex-ide repo is not?",
+      "classification": "B",
+      "full": {
+        "answer": "The distinction is architectural: `cortex-ide` is a **Tauri desktop app** with a local-only execution model — it spawns Codex/Claude Code CLI processes in git worktrees under `~/.cortex-worktrees/*` and streams output through a local WebSocket server on port 3002 [D-spec-ingest:cortex-ide:docs-cloud-agents-open-agents:why-this-matters-for-o8]. There is nothing to deploy to Vercel because the app runs on the operator's machine, not in a browser or serverless environment. `o8-site`, by contrast, carries the role `\"site\"` in the o8 project [PROJ-proj-5d0d9e02-015], making it a standard marketing/web property that is a natural fit for Vercel hosting. Any Vercel integration for `cortex-ide` itself is explicitly tracked as **\"research / pre-integration\"** (Vercel Open Agents evaluation) [D-spec-ingest:cortex-ide:docs-cloud-agents-open-agents:overview], not a current deployment.",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:docs-cloud-agents-open-agents:why-this-matters-for-o8"
+          },
+          {
+            "kind": "project",
+            "rowId": "project-proj-5d0d9e02-015"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:docs-cloud-agents-open-agents:overview"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.8,
+          "citation_correctness": 1,
+          "hallucination_count": 1,
+          "notes": "The answer correctly identifies cortex-ide as a Tauri desktop app with local-only execution and o8-site as the Vercel surface (facts 1 and 2), and partially covers fact 3 by noting the app runs on the operator's machine rather than in a browser — but omits the .dmg/installer flow or the local-Next-backend specifics. No expected citations were specified so citation_correctness is full. The specific details about 'WebSocket server on port 3002' and '~/.cortex-worktrees/*' path are suspiciously precise and likely hallucinated, even though attributed to a citation."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "`cortex-ide` (o8) is **never deployed to Vercel** because it is a Tauri desktop app — it ships as a native installer (dmg/msi/deb) via `cargo tauri build`, not a web deploy; its Next.js backend runs locally on the user's machine, not on a server [DOC-J041AI3K]. The marketing repo (`mybeautifulwife` / Eyes Web) deploys to Vercel because it is an actual web product intended to be served publicly at https://eyes-web.vercel.app [DOC-J041AI3K].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L169"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.55,
+          "citation_correctness": 1,
+          "hallucination_count": 3,
+          "notes": "The actual answer correctly identifies cortex-ide as a Tauri desktop app shipping via cargo tauri build with a local Next.js backend (facts 1 and 3), but misidentifies the Vercel-deployed marketing repo as 'mybeautifulwife' / 'Eyes Web' instead of 'o8-site' (fact 2 wrong). Three unsupported hallucinations appear: the repo name 'mybeautifulwife', the project name 'Eyes Web', and the URL 'https://eyes-web.vercel.app' — none of which match the expected answer. No expected citations were specified, so citation_correctness is treated as fully satisfied."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about either repo, covering none of the expected facts (Tauri desktop app, Vercel surface, installer flow). Citation correctness is perfect vacuously since no citations were expected and none were provided."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.25,
+        "full_vs_blind": 0.8,
+        "grep_vs_blind": 0.55
+      }
+    },
+    {
+      "id": "qa-010",
+      "category": "decisions",
+      "question": "What is the locked LLM routing strategy for Cortex Q&A — which model handles lookup vs reasoning?",
+      "classification": "A",
+      "full": {
+        "answer": "The locked routing strategy is a two-tier system [CITATION:fact-e627904b-52e7-4bbf-b672-dd0bad3c67c6]: **Class A (Lookup)** uses **Gemini 2.5 Flash** for compose (200–500ms total), and **Class B (Reasoning)** uses **Claude Sonnet streaming** compose (1–3s total). Both tiers share a single Flash classifier pass that also generates 3–5 BM25 query variants in one 50ms call [CITATION:fact-e627904b-52e7-4bbf-b672-dd0bad3c67c6]. Latency budgets are: Class A (SQL-only lookup) p95 250ms / 500ms ceiling; Class A+ (lookup + Flash compose) 800ms / 1.5s ceiling; Class B (reasoning + Sonnet streaming) 2.0s TTFT, 4s TTLT / 6s ceiling [CITATION:fact-fd77caf3-b691-4879-83fe-3dd8d28e87c4].",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-e627904b-52e7-4bbf-b672-dd0bad3c67c6"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-fd77caf3-b691-4879-83fe-3dd8d28e87c4"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.85,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly identifies Gemini 2.5 Flash for Class A lookup, Claude Sonnet streaming for Class B reasoning, and the Flash classifier with BM25 variants — covering 2.5 of 3 expected facts. The local opencode/gpt-5-nano fallback is omitted. Citation correctness is zero because the expected citation is {kind: issue, rowId: issue-4353815519}, while the actual citations are both fact-type rows — no overlap on kind or rowId."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe closest the available rows get is a high-level split: [CITATION:doc-grep:CLAUDE.md:L7] states \"Claude is the orchestrator/brain; Codex is the workhorse executing tasks in worktrees,\" but that describes the agent runtime division, not a Q&A-specific lookup-vs-reasoning model routing strategy. No row in this set specifies which model handles lookup versus reasoning for Cortex Q&A specifically.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L7"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly states it lacks the specific information (appropriate for a known-gap response), but does not cover any of the expected facts about Gemini 2.5 Flash, Claude Sonnet routing, or the classifier. The cited row (doc-grep:CLAUDE.md:L7) does not match the expected citation (issue-4353815519), resulting in zero citation correctness. No hallucinated facts were introduced."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the LLM routing strategy, stating only that the information is unavailable. While this avoids hallucinations, it fails to cover any of the expected facts about Gemini 2.5 Flash, Claude Sonnet, or the Flash classifier. No citations were provided."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.75,
+        "full_vs_blind": 0.85,
+        "grep_vs_blind": 0.1
+      }
+    },
+    {
+      "id": "qa-011",
+      "category": "processes",
+      "question": "What is the required local check before every commit?",
+      "classification": "A",
+      "full": {
+        "answer": "Run `npx tsc --noEmit` before every commit [CITATION:directive-spec-ingest:cortex-ide:claude:critical-rules:always]. For a full check (clears the typegen cache first), use `npm run typecheck` instead [CITATION:fact-73115d60-4224-4197-aa79-37c7a09b893e]. After committing, push with `git push origin main` [CITATION:directive-spec-ingest:cortex-ide:claude:git-practices].",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:critical-rules:always"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-73115d60-4224-4197-aa79-37c7a09b893e"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:git-practices"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.9,
+          "citation_correctness": 0.2,
+          "hallucination_count": 1,
+          "notes": "The actual answer correctly states both expected facts (npx tsc --noEmit and npm run typecheck). However, it does not cite the expected directive 'directive-seed-global-typecheck-before-commit' — instead using different rowIds. The mention of 'git push origin main' after committing is an unsupported addition not backed by a matching expected citation."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "The required local check before every commit is **`npx tsc --noEmit`** — a quick TypeScript type check that skips `next typegen` [CITATION:doc-grep:CLAUDE.md:L21][CITATION:doc-grep:CLAUDE.md:L301][CITATION:doc-grep:CLAUDE.md:L344]. A full alternative is `npm run typecheck`, which clears the types cache, runs `next typegen`, then runs `tsc --noEmit` [CITATION:doc-grep:CLAUDE.md:L22].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L21"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L301"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L344"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L22"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly covers both expected facts: npx tsc --noEmit and the npm run typecheck variant. However, none of the actual citations match the expected citation {kind: directive, rowId: directive-seed-global-typecheck-before-commit}; the actual citations are all doc-type with line-number rowIds."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the required local check, offering only a non-answer about missing data. No expected facts or citations are present, but no hallucinations were introduced either."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": -0.09999999999999998,
+        "full_vs_blind": 0.9,
+        "grep_vs_blind": 1
+      }
+    },
+    {
+      "id": "qa-012",
+      "category": "processes",
+      "question": "What is the file size ceiling and which files are explicitly waived?",
+      "classification": "A",
+      "full": {
+        "answer": "The file size ceiling is **800 lines** [CITATION:directive-seed-cortex-ide-800-line-ceiling]. Files explicitly waived from this ceiling are `src/app/dashboard/page.tsx`, `src/ws-server.ts`, and `src/lib/worktree/manager.ts` [CITATION:fact-6c314fed-41aa-4aa2-8a5c-9c08182e5408] — the directives summarize this more tersely as layout orchestrators (`page.tsx`) and multiplexers (`ws-server.ts`) [CITATION:directive-spec-ingest:cortex-ide:design:11-hard-invariants].",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-seed-cortex-ide-800-line-ceiling"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-6c314fed-41aa-4aa2-8a5c-9c08182e5408"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:design:11-hard-invariants"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 1,
+          "citation_correctness": 1,
+          "hallucination_count": 1,
+          "notes": "All three expected facts are present (800 lines, src/app/dashboard/page.tsx, src/ws-server.ts), and the required citation directive-seed-cortex-ide-800-line-ceiling is included. However, the answer adds src/lib/worktree/manager.ts as a waived file, which is not in the expected answer and constitutes one hallucinated fact (though it is attributed to a citation, that citation is not among the expected ones and the fact itself goes beyond what is documented in the expected answer)."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "The file size ceiling is **800 lines** [CITATION:doc-grep:CLAUDE.md:L303]. Files explicitly waived from this limit are `page.tsx` (layout orchestrators) and `ws-server.ts` (multiplexers) [CITATION:doc-grep:CLAUDE.md:L303].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L303"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.85,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The answer correctly states the 800-line ceiling and names both waived files (though using shortened forms 'page.tsx' and 'ws-server.ts' rather than full paths). However, the expected citation kind is 'directive' with rowId 'directive-seed-cortex-ide-800-line-ceiling', while the actual citation uses kind 'doc' with a different rowId format, resulting in zero citation matches. The citation itself (doc-grep:CLAUDE.md:L303) is not supported by any actual citation in the provided list as a verified fact, counting as one hallucination."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the 800-line ceiling or the waived files, instead deflecting with a non-answer. However, it does not hallucinate any facts either, as it makes no claims at all."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.15000000000000002,
+        "full_vs_blind": 1,
+        "grep_vs_blind": 0.85
+      }
+    },
+    {
+      "id": "qa-013",
+      "category": "processes",
+      "question": "What is the surgical-changes rule for this codebase?",
+      "classification": "A",
+      "full": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe provided rows include a **Codebase Rules (MANDATORY)** directive [CITATION:directive-spec-ingest:cortex-ide:docs-prompts-codex-sprint-1-orchestrator-loop:codebase-rules-mandatory] covering style, import, TypeScript, and commit conventions, but none of those rules are named \"surgical-changes.\" The closest related signal is an incident note [CITATION:fact-91386d79-6515-4cf4-9188-e36721cfb404] flagging a \"mechanical-rule-enforcement gap\" where a Codex agent edited files outside the packet's specified surface — implying such a constraint exists — but no row defines a rule by that name or spells out its terms.",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:docs-prompts-codex-sprint-1-orchestrator-loop:codebase-rules-mandatory"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-91386d79-6515-4cf4-9188-e36721cfb404"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer fails to state any of the expected facts about the surgical-changes rule (tracing every line to the request, forbidding silent rewrites, drift being a top review issue). The expected citation directive-seed-global-surgical-changes is not cited; instead, unrelated citations are provided. The claim about an 'incident note flagging a mechanical-rule-enforcement gap' is not supported by the cited rows in a way that maps to the expected answer, constituting a hallucination."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the surgical-changes rule, failing to cover any of the expected facts. However, it also makes no hallucinated claims, so hallucination_count is 0."
+        },
+        "topRowsCount": 13
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the surgical-changes rule, failing to cover any of the expected facts. However, it also contains no hallucinations since it simply states it lacks the information."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0,
+        "full_vs_blind": 0,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-014",
+      "category": "processes",
+      "question": "How do we ship a new release of the o8 desktop app — what command sequence does the daily-driver loop use?",
+      "classification": "B",
+      "full": {
+        "answer": "The daily-driver loop uses this exact four-command sequence [D-spec-ingest:cortex-ide:claude:shipping-dev-prod-mode-the-daily-driver-loop:the-loop]:\n\n```bash\nnvm use                  # pins Node 22 LTS (required for ABI alignment with better-sqlite3; release.mjs hard-fails on other versions)\nnpm version patch        # bumps 0.1.X → 0.1.X+1, syncing package.json + tauri.conf.json + Cargo.toml in one commit, then tags v0.1.X+1\ngit push --follow-tags   # pushes the version commit and tag to origin\nnpm run ship             # cargo tauri build (signed, with dev-mcp-plugin feature) + scripts/release.mjs publishes the GH release and uploads all 4 assets\n```\n\n`npm run ship` dual-publishes: first to the private `hurttlocker/cortex-ide` repo, then mirrors all 4 assets to the public `hurttlocker/o8` repo so the Tauri updater client can fetch `latest.json` anonymously (private-repo assets return 404 without auth) [FACT-afc1b480-76c5-4e00-904e-3de789a34467]. The signing key lives at `~/.tauri/cortex-ide.key`; its pubkey is embedded in `tauri.conf.json` and must not be rotated without re-signing all future releases [D-spec-ingest:cortex-ide:claude:shipping-dev-prod-mode-the-daily-driver-loop:signing]. The installed `o8.app` picks up the update via `UpdateBanner`, which polls every 30 min or on launch, verifies the minisign signature, and relaunches [D-spec-ingest:cortex-ide:claude:shipping-dev-prod-mode-the-daily-driver-loop:the-loop].",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:shipping-dev-prod-mode-the-daily-driver-loop:the-loop"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-afc1b480-76c5-4e00-904e-3de789a34467"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:shipping-dev-prod-mode-the-daily-driver-loop:signing"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 1,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "All four expected facts are present and correctly stated: npm version patch (with sync-version.mjs hook syncing all three config files), git push --follow-tags, npm run ship (cargo tauri build + release.mjs), and the UpdateBanner auto-update flow via GitHub Releases. No expected citations were specified, so citation_correctness is trivially satisfied; all specific claims in the actual answer (dual-publish repos, signing key path, 30-min polling interval, nvm use step) are backed by the cited directive and fact row IDs."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "The daily-driver release loop uses this three-command sequence [DOC-I0F6TJK3, DOC-I0F6TJK6]:\n\n```\nnpm version patch        # bumps + syncs all manifests + tags (runs sync-version.mjs hook)\ngit push --follow-tags   # pushes commit + tag to GitHub\nnpm run ship             # builds signed native installer + uploads via scripts/release.mjs\n```\n\n`npm run ship` takes ~2–4 min locally and bypasses CI entirely [DOC-J041AJSU]. After the release publishes to GitHub, the installed `/Applications/o8.app` picks it up via the `UpdateBanner` component (polls every 30 min or on launch), verifies the minisign signature, and relaunches automatically [DOC-J041AJSQ]. Do **not** use `cargo tauri dev` — the feedback loop lives in the prod build [DOC-J041AKJD].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L30"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L33"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L374"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L370"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L432"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 1,
+          "citation_correctness": 1,
+          "hallucination_count": 2,
+          "notes": "All four expected facts are present and correctly stated (npm version patch, git push --follow-tags, npm run ship, UpdateBanner/GitHub Releases auto-update flow). No expected citations were specified so citation_correctness is maxed. Two specific claims — the '~2–4 min' build time and 'polls every 30 min or on launch' polling interval — are precise figures not verifiable from the listed actualCitations and are counted as potential hallucinations."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content matching any of the four expected facts about the release workflow. However, since it makes no claims at all, there are no hallucinations, and citation correctness is vacuously perfect (no citations were expected and none were provided)."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0,
+        "full_vs_blind": 1,
+        "grep_vs_blind": 1
+      }
+    },
+    {
+      "id": "qa-015",
+      "category": "processes",
+      "question": "Which API route prefixes are gated by the loopback + ws-token middleware in src/middleware.ts?",
+      "classification": "A",
+      "full": {
+        "answer": "The following API route prefixes are gated by the loopback + ws-token middleware in `src/middleware.ts` [CITATION:directive-spec-ingest:cortex-ide:claude:architecture:api-security-src-middleware-ts]:\n\n- `/api/panel/`\n- `/api/orchestrator/`\n- `/api/directives`\n- `/api/cortex/`\n- `/api/runtime/`\n- `/api/lanes`\n- `/api/worktrees`\n- `/api/review/`\n- `/api/board/`\n- `/api/command-center/`\n- `/api/claude-code/`\n- `/api/codex/`\n- `/api/operator/`\n- `/api/setup/`\n\nThree allowlist exceptions bypass the gate [CITATION:directive-spec-ingest:cortex-ide:claude:architecture:api-security-src-middleware-ts]: `/api/setup/*` (GET only), `/api/v2/auth/*`, and `/api/panel/github-device/*` + `/api/panel/status` (read-only, for first-run and OAuth). Additionally, `/api/mobile/orchestrator/*` is explicitly **ungated** — absent from `GATED_PREFIXES` entirely — so LAN/mobile clients reach it directly [CITATION:directive-spec-ingest:cortex-ide:docs-openclaw-integration:3-auth-gating].",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:architecture:api-security-src-middleware-ts"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:docs-openclaw-integration:3-auth-gating"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.9,
+          "citation_correctness": 1,
+          "hallucination_count": 1,
+          "notes": "The actual answer covers all 14 expected gated prefixes and the allowlist carve-outs (including /api/setup/* GET-only) precisely matching the expected answer; it partially omits an explicit description of the loopback IP list (127.0.0.1, localhost, tauri://localhost) and Bearer token flow, though the question framing implies it. No expected citations were specified so citation_correctness is full. One hallucination is counted for the /api/mobile/orchestrator/* 'explicitly ungated' claim, which appears nowhere in the expected answer and is an additional structural assertion not verifiable from the provided expected facts."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "The following API route prefixes are gated by the loopback + ws-token middleware in `src/middleware.ts` [CITATION:doc-grep:CLAUDE.md:L134]:\n\n- `/api/panel/`\n- `/api/orchestrator/`\n- `/api/directives`\n- `/api/cortex/`\n- `/api/runtime/`\n- `/api/lanes`\n- `/api/worktrees`\n- `/api/review/`\n- `/api/board/`\n- `/api/command-center/`\n- `/api/claude-code/`\n- `/api/codex/`\n- `/api/operator/`\n- `/api/setup/`\n\nThe read-only allowlist exemptions (not gated) are: `/api/setup/*` (GET only), `/api/v2/auth/*`, `/api/panel/github-device/*`, and `/api/panel/status` [CITATION:doc-grep:CLAUDE.md:L139].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L134"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L139"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.95,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly lists all 14 gated prefixes and the allowlist carve-outs, matching the expected answer precisely. The loopback + Bearer token mechanism is referenced in name but not fully elaborated (no mention of 127.0.0.1/localhost/tauri://localhost bypass vs. cross-origin Bearer requirement), causing a minor deduction. No expected citations were specified, so the two provided citations score neutrally at 1.0. All stated facts are supported by the cited rows with no hallucinations."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the gated routes, middleware logic, or allowlist — it simply states the information is unavailable. Since the expected answer is not null (concrete facts were expected), factual_accuracy is 0. However, no hallucinations were introduced either. Citation correctness is rated 1.0 by default as no citations were expected."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": -0.04999999999999993,
+        "full_vs_blind": 0.9,
+        "grep_vs_blind": 0.95
+      }
+    },
+    {
+      "id": "qa-016",
+      "category": "incidents",
+      "question": "What happened on the fix/midnight-blob-rgba-sweep branch and why was it reverted?",
+      "classification": "B",
+      "full": {
+        "answer": "The `fix/midnight-blob-rgba-sweep` branch attempted to swap hardcoded `rgba` white values for palette CSS variable tokens across the chrome surfaces [FACT-e0401bb6]. However, the pass backfired: rather than fixing the midnight-theme blob problem, it **collapsed the glass surfaces into solid blobs** across the NavRail, status bar, and command palette [O-seed-Users-marquisehurtt-cortex-ide-7d-gemini-fix-midnight-blob-rgba-sweep]. It was reverted before merge.\n\nThe underlying problem the branch was trying to fix is real and documented: hardcoding `rgba(255, 255, 255, 0.xx)` on chrome surfaces looks correct in light theme but renders as a bright light-gray blob over midnight's dark vibrancy backdrop, because the alpha-white composites against a dark surface instead of passing through [D-spec-ingest:cortex-ide:design:01-palette:chrome-translucent]. The correct fix — which commit `929ffdf` established for the rest of the repo — is to use `var(--t-panel)` / `var(--t-bg-card)` tokens, which carry the right per-theme RGBA values (`rgba(62,68,78,0.36)` for midnight vs. `rgba(255,255,255,0.58)` for light) [D-spec-ingest:cortex-ide:claude:architecture:theming-src-lib-theme].",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-e0401bb6-aa97-4101-b5f3-c34adaa92676"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-7d-gemini-fix-midnight-blob-rgba-sweep"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:design:01-palette:chrome-translucent"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:architecture:theming-src-lib-theme"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.65,
+          "citation_correctness": 0.5,
+          "hallucination_count": 1,
+          "notes": "The actual answer correctly covers the rgba-to-palette swap attempt, the collapse of NavRail/status bar/command palette into solid blobs, and the reversion — but never identifies Gemini as the runtime and omits the glass-chrome-preserved directive outcome. One hallucination: commit SHA '929ffdf' is asserted as the correct-fix commit but is not backed by any of the listed actual citations. On citations, the outcome rowId is correctly hit, but the expected directive-seed-cortex-ide-glass-chrome-preserved row is absent."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer admits ignorance and provides no factual content, so it covers none of the expected facts. However, it also invents nothing, resulting in zero hallucinations."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the branch or revert, simply stating it lacks the information. However, since it makes no false claims, hallucination count is 0. The expected facts about Gemini runtime, collapsed surfaces, revert outcome, and glass-chrome-preserved directive are all absent."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.65,
+        "full_vs_blind": 0.65,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-017",
+      "category": "incidents",
+      "question": "Which packet finished only partial and what work was left over?",
+      "classification": "A",
+      "full": {
+        "answer": "The packet that finished only partially was the **packet metadata restyle** (on a `codex` run tagged `partial/codex`): branch and repo rows landed cleanly as Issues-style rows, but the **runtime and summary rows were left using a native `<select>` and still needed a popover follow-up** [CITATION:fact-3781c240-d2af-4354-9caf-6f0bec61df52]. A second partial ship is also on record: the **/clear handler** was partially shipped via commit `64304f8`, with the **remaining slash commands not yet shipped** at that point [CITATION:fact-c1575b04-09ce-42b9-a64d-f76e07855ab3].",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-3781c240-d2af-4354-9caf-6f0bec61df52"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-c1575b04-09ce-42b9-a64d-f76e07855ab3"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.75,
+          "citation_correctness": 0,
+          "hallucination_count": 2,
+          "notes": "The answer correctly identifies the packet metadata restyle as partial, names runtime/summary rows as leftover, and mentions the native-select-to-popover migration — covering 3 of 4 expected facts but never naming the branch 'feat/packet-meta-rows-restyle'. Citation correctness is 0 because neither actual citation matches the expected outcome-kind rowId. The /clear handler claim (commit 64304f8, remaining slash commands) is unsupported by any provided citation, counting as hallucinated facts."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nNone of the provided rows name a specific packet that finished partially or enumerate leftover work items. The rows cover system architecture, failure-recovery layers, and tooling — but no row identifies a specific partial packet or its remaining tasks.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly states it lacks the information but fails to identify any of the expected facts (feat/packet-meta-rows-restyle, partial outcome, runtime/summary rows, native-select-to-popover migration). No citations were provided, so citation correctness is 0. No hallucinated facts were introduced."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the partial packet or leftover work, covering none of the expected facts. However, it also makes no hallucinated claims, so hallucination count is 0."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.75,
+        "full_vs_blind": 0.75,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-018",
+      "category": "incidents",
+      "question": "Why did the orchestrator-empty-state-copy outcome get flagged by the reviewer even though it shipped?",
+      "classification": "B",
+      "full": {
+        "answer": "The `orchestrator-empty-state-copy` outcome shipped successfully, but the reviewer flagged it because the rewritten copy was **off-brand relative to the locked design language** [FACT-4bc9454d-1e20-402f-842b-e31a4d692685][O-seed-Users-marquisehurtt-cortex-ide-5d-opencode-polish-orchestrator-empty-state-copy]. The packet completed (runtime: opencode, outcome: succeeded), meaning the code landed — but the content/tone of the new empty-state copy and quick-action card layout didn't match the established voice and design standards the project had locked in.",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-4bc9454d-1e20-402f-842b-e31a4d692685"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-seed-Users-marquisehurtt-cortex-ide-5d-opencode-polish-orchestrator-empty-state-copy"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 1,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The actual answer covers all three expected facts: names the runtime as opencode, names the outcome as polish/orchestrator-empty-state-copy, and states the reviewer flagged it as off-brand vs the locked design language. The expected citation {kind: outcome, rowId: outcome-seed-Users-marquisehurtt-cortex-ide-5d-opencode-polish-orchestrator-empty-state-copy} is present in the actual citations."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe provided rows mention `OrchestratorEmptyState` as a component wired into `ThoughtsChatPanel` via `emptyStateOverride` [DOC-J041AIS7], but none of the rows contain an outcome record named `orchestrator-empty-state-copy`, a reviewer flag on it, or any explanation for why it was flagged despite shipping.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L205"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer fails to state any of the three expected facts (opencode runtime, outcome name, off-brand flag). It also introduces an unsupported claim about 'OrchestratorEmptyState' being wired into 'ThoughtsChatPanel' via 'emptyStateOverride' with a citation [DOC-J041AIS7] that is not among the actual citations listed, constituting a hallucination."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly acknowledges it lacks the information rather than inventing facts, which is appropriate for a known-gap case, but it does not state any of the expected facts. No citations were provided."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 1,
+        "full_vs_blind": 0.9,
+        "grep_vs_blind": -0.1
+      }
+    },
+    {
+      "id": "qa-019",
+      "category": "incidents",
+      "question": "Has the o8_view_eval webview tool family ever failed to ship cleanly? What was the failure mode?",
+      "classification": "A",
+      "full": {
+        "answer": "Yes, the `o8_view_eval` webview tool family has accumulated several documented failure modes:\n\n1. **Eval-await timeout with ghost side-effects** [CITATION:directive-spec-ingest:cortex-ide:claude:architecture:mcp-servers-src-lib-mcp] [CITATION:fact-c94df703-dc00-465a-8b81-56424299c608]: `o8_view_eval`, `o8_view_type`, and `o8_view_snapshot` route through `eval_and_await` and return `\"eval_and_await failed: Timeout waiting for ...\"` whenever the JS main thread is briefly busy (hydration, route change, streaming response) — but the underlying side effect already fired synchronously. Retrying on this error is incorrect behavior.\n\n2. **IPC channel flooding — eval returns a screenshot blob** [CITATION:fact-afb34523-4142-4a3e-aa15-1f184eb751e9]: On the `/context-graph` page, `o8_view_eval` (even `1+1`) returned a 74 KB base64 JPEG blob instead of a JS result; the hypothesis is that the page's ResizeObserver or animation loop flooded the IPC channel, causing the eval handler to return the wrong data entirely (Issue #868, closed).\n\n3. **Full webview JS thread hang after `/context-graph` navigation** [CITATION:fact-74bc4e06-5b8f-4d4c-a868-e9ceb06043a0]: During #773 dogfood, landing on `/context-graph` made the Tauri JS thread unresponsive; all subsequent `o8_view_eval`, `o8_view_snapshot`, and `o8_view_navigate` calls timed out for 3+ minutes and only a physical app restart unblocked the webview — making visual UI testing impossible (Issue #858, closed).\n\n4. **`o8_view_navigate` triggering full HTTP reload, freezing all eval tools for 10–30s** [CITATION:fact-159d2949-d6cf-400f-9315-7d344c36e42b]: `o8_view_navigate` called Tauri's native `webview.navigate()` instead of `pushState`, causing a full Next.js re-hydration that kept the JS thread busy and timed out all subsequent MCP eval-based calls (Issue #863, closed).\n\n5. **Complete socket-level wedge — even Rust-side readers timed out** [CITATION:comment-issue-932-4349310731]: On v0.1.87, every JS-bound tool (`o8_view_eval`, `o8_view_snapshot`, `o8_view_click`) timed out with `\"Timeout waiting for execute-js response\"`, and newly added Rust-side bypass readers (`active_route`, `console_errors`) also failed — suggesting the fault was in the `tauri-plugin-mcp` socket round-trip between the Rust handler and the operator MCP server's stdio bridge, not in the webview JS at all.\n\n6. **Non-JSON-serializable eval results** [CITATION:pr-3604065374]: PR #902 fixed `o8_view_eval` returning non-JSON-serializable values (a shipping defect patched after initial rollout).",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:architecture:mcp-servers-src-lib-mcp"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-c94df703-dc00-465a-8b81-56424299c608"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-afb34523-4142-4a3e-aa15-1f184eb751e9"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-74bc4e06-5b8f-4d4c-a868-e9ceb06043a0"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-159d2949-d6cf-400f-9315-7d344c36e42b"
+          },
+          {
+            "kind": "comment",
+            "rowId": "comment-issue-932-4349310731"
+          },
+          {
+            "kind": "pr",
+            "rowId": "pr-3604065374"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.05,
+          "citation_correctness": 0,
+          "hallucination_count": 6,
+          "notes": "The actual answer describes entirely different failure modes (runtime timeouts, IPC flooding, JS thread hangs) and does not mention any of the expected facts: the codex runtime, the idle-between-runs symptom, the git-refused commit, or either of the expected outcome row IDs. None of the actual citations match the expected citations (outcome-so-1776188979528-a3yz23te and outcome-so-1776188344936-92de5fx8). All six numbered failure modes appear to be hallucinated, referencing invented issue numbers, PR numbers, and fact/comment row IDs not present in the expected citations."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "Yes — the `o8_view_eval` family has a documented failure mode: **eval-based tools time out but the underlying action fires anyway** [CITATION:doc-grep:CLAUDE.md:L164]. Specifically, `o8_view_type`, `o8_view_eval`, and `o8_view_snapshot` all route through `eval_and_await` and can return `\"eval_and_await failed: Timeout waiting for ...\"` when the JS thread is briefly busy (hydration, route change, or a streaming response). The side effect — keystrokes, `.click()`, `setter.call(textarea, value)` — **already fired synchronously** before the timeout surfaces, so the action succeeded even though the tool reported failure [CITATION:doc-grep:CLAUDE.md:L164]. The prescribed mitigation is to **not retry on this error**; instead take a screenshot to confirm whether the action actually happened [CITATION:doc-grep:CLAUDE.md:L164].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L164"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 5,
+          "notes": "The actual answer describes a completely different failure mode (eval timeout with side effects already fired) that does not match any of the expected facts: no mention of the codex runtime, no mention of the idle-between-runs symptom, no mention of git refusing a commit, and none of the expected outcome row IDs (outcome-so-1776188979528-a3yz23te or outcome-so-1776188344936-92de5fx8) are cited. The cited doc-grep:CLAUDE.md:L164 reference does not correspond to either expected citation, and the entire narrative about eval_and_await timeouts and do-not-retry guidance appears fabricated."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly acknowledges it doesn't have the information rather than inventing facts, which avoids hallucination. However, it fails to provide any of the expected facts about the failed outcomes, so factual accuracy is minimal. No citations were provided."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.05,
+        "full_vs_blind": -0.05,
+        "grep_vs_blind": -0.1
+      }
+    },
+    {
+      "id": "qa-020",
+      "category": "incidents",
+      "question": "What CSS color literal pattern broke midnight theme and which commit contains the post-mortem?",
+      "classification": "A",
+      "full": {
+        "answer": "The offending pattern is a hardcoded `rgba(255, 255, 255, 0.56)` — a semi-transparent white literal that renders as a large light-gray blob against midnight's dark glass chrome instead of blending correctly [CITATION:directive-seed-cortex-ide-palette-vars]. The post-mortem sweep that established the fix rule is in commit **929ffdf** [CITATION:directive-spec-ingest:cortex-ide:claude:architecture:theming-src-lib-theme]. The rule going forward is to use `var(--t-bg-card)`, `var(--t-panel)`, `var(--t-input-bg)`, or another `var(--t-*)` token instead of any hardcoded rgba surface color [CITATION:directive-seed-cortex-ide-palette-vars].",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-seed-cortex-ide-palette-vars"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:architecture:theming-src-lib-theme"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.3,
+          "citation_correctness": 1,
+          "hallucination_count": 2,
+          "notes": "This is a known-gap case (expectedAnswer is null), so the AI should have stated the commit history is not available rather than confidently asserting commit 929ffdf via a citation not in the expected set. While the rgba(255,255,255,0.xx) pattern aligns with expected facts and the expected citation is present, the exact '0.56' opacity value and the commit SHA 929ffdf (attributed to a non-expected citation row) are likely hallucinated — the second citation 'directive-spec-ingest:cortex-ide:claude:architecture:theming-src-lib-theme' is not among the expected citations."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "The pattern that broke midnight theme is hardcoded `rgba(255, 255, 255, 0.xx)` color literals on theme surfaces — they render as a large light-gray blob in midnight instead of the expected dark/translucent appearance [CITATION:doc-grep:CLAUDE.md:L284]. The post-mortem (described as a \"repo-registry sweep\") is contained in commit **929ffdf** [CITATION:doc-grep:CLAUDE.md:L119].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L284"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L119"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 2,
+          "notes": "This is a known-gap case where the AI should have stated the data is missing, but instead it confidently provided specific facts (rgba pattern and commit 929ffdf) citing CLAUDE.md line numbers that are not in the expected citation substrate. The expected citation {kind: directive, rowId: directive-seed-cortex-ide-palette-vars} was not cited at all; both actual citations use the wrong kind ('doc' instead of 'directive') and wrong rowIds, earning zero citation credit. Both the rgba claim and the commit SHA 929ffdf are treated as hallucinations since they are asserted from citations not present in the expected substrate."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.5,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly states that the data is missing (known-gap case), which is the expected behavior for a null expected answer. However, it does not explicitly mention that the commit history is unavailable, only that more indexing is needed. No citations were provided and no hallucinations were introduced."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.19999999999999998,
+        "full_vs_blind": -0.2,
+        "grep_vs_blind": -0.4
+      }
+    },
+    {
+      "id": "qa-021",
+      "category": "specs",
+      "question": "What are the four FTS5 virtual tables planned for schema v14 to support Cortex Q&A?",
+      "classification": "A",
+      "full": {
+        "answer": "Schema v14 defines four additive-only FTS5 virtual tables [CITATION:comment-issue-915-4347800077][CITATION:fact-3695010e-4b10-4d40-a298-0f81a0af2e8f]:\n\n1. **`outcomes_fts(summary, plan_text)`** — content='session_outcomes'\n2. **`directives_fts(title, body)`** — materialized from disk on directive write\n3. **`prs_fts(title, body)`** — content='github_pull_requests'\n4. **`issues_fts(title, body)`** — content='github_issues'\n\nSQLite triggers on the parent tables keep all four FTS5 tables coherent and indexed-on-write, eliminating the need for an async embedding worker [CITATION:fact-d8d1c983-39fa-4693-a041-48f38ac12ff7].",
+        "citations": [
+          {
+            "kind": "comment",
+            "rowId": "comment-issue-915-4347800077"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-3695010e-4b10-4d40-a298-0f81a0af2e8f"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-d8d1c983-39fa-4693-a041-48f38ac12ff7"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.85,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly names all four FTS5 tables with their correct column signatures and content table associations, and mentions triggers keeping FTS coherent. However, it omits the qa_eval_runs eval harness table mentioned in the expected answer. The expected citation {kind: issue, rowId: issue-4353815519} is not present in the actual citations, which reference comment and fact row types instead."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nNone of the provided rows mention FTS5 virtual tables, schema v14, or a Cortex Q&A feature. The closest relevant row [CITATION:doc-grep:CLAUDE.md:L111] describes the SQLite setup (WAL mode, better-sqlite3 + Drizzle ORM, schema migration markers at `~/.o8/.db-migrated-v*`) and [CITATION:doc-grep:CLAUDE.md:L113] lists the current core tables, but neither references FTS5 or v14 planning details.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L111"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L113"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly admits it lacks the information rather than inventing details, but provides zero of the expected facts about the four FTS5 tables, triggers, or qa_eval_runs. The expected citation (issue-4353815519) was not cited; instead, unrelated CLAUDE.md doc citations were used."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer admits ignorance rather than providing the expected facts about the four FTS5 tables, triggers, and qa_eval_runs table, so factual accuracy is very low. However, the answer does not hallucinate any false facts, and no citations were provided to match the expected citation."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.85,
+        "full_vs_blind": 0.75,
+        "grep_vs_blind": -0.1
+      }
+    },
+    {
+      "id": "qa-022",
+      "category": "specs",
+      "question": "What latency budgets are locked for the three Q&A question classes?",
+      "classification": "A",
+      "full": {
+        "answer": "The locked latency budgets for the three Q&A question classes are [CITATION:comment-issue-915-4347800077]:\n\n| Class | Target p95 | Hard ceiling |\n|---|---|---|\n| **A** (lookup, deterministic SQL only) | 250ms | 500ms |\n| **A+** (lookup + Flash compose) | 800ms | 1.5s |\n| **B** (reasoning + Sonnet compose, streaming) | 2.0s TTFT, 4s TTLT | 6s |",
+        "citations": [
+          {
+            "kind": "comment",
+            "rowId": "comment-issue-915-4347800077"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "All three expected facts are present and accurate (Class A 250ms/500ms, Class A+ 800ms/1.5s, Class B 2.0s TTFT/4s TTLT/6s). However, the expected citation is {kind: issue, rowId: issue-4353815519} while the actual citation is {kind: comment, rowId: comment-issue-915-4347800077} — neither the kind nor the rowId match, so citation correctness is 0."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly admits it does not have the information rather than inventing values, which partially aligns with the known-gap handling rubric; however, the expected answer is not null — specific latency budgets are expected, so the AI's response is factually incomplete. No citations were provided, so citation correctness is 0."
+        },
+        "topRowsCount": 11
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly admits it lacks the information rather than inventing values, which partially aligns with the known-gap handling expectation. However, the expected answer contains specific concrete facts (Class A, A+, B latency budgets), so the AI's non-answer cannot receive full credit for factual accuracy. No hallucinations were introduced, and no citations were provided."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.9,
+        "full_vs_blind": 0.9,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-023",
+      "category": "specs",
+      "question": "What is the cache key shape and TTL for the Cortex Q&A retrieval layer?",
+      "classification": "A",
+      "full": {
+        "answer": "The Cortex Q&A retrieval layer cache key is `sha256(question + repoPath + max(directives.updated_at, outcomes.completed_at))` [CITATION:fact-444ed6b9-0598-45e8-8a15-1b3a1a0da6b4], with a **30-second TTL** [CITATION:fact-444ed6b9-0598-45e8-8a15-1b3a1a0da6b4]. It is invalidated on directive write or outcome insert [CITATION:fact-444ed6b9-0598-45e8-8a15-1b3a1a0da6b4]. The three retrievers (Structured SQL, Lexical FTS5, and Structural codebase-memory-mcp) live in `src/lib/cortex/qa/` [CITATION:fact-f93ce328-c017-47ba-9551-602698e67354].",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-444ed6b9-0598-45e8-8a15-1b3a1a0da6b4"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-f93ce328-c017-47ba-9551-602698e67354"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly states all three expected facts: the sha256 cache key shape, the 30s TTL, and invalidation on directive write or outcome insert. However, the expected citation is {kind: issue, rowId: issue-4353815519}, while the actual citations used are fact-kind rows, so citation correctness is 0. The extra detail about retrievers in src/lib/cortex/qa/ is cited and not an unsupported hallucination."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the cache key shape, TTL, or invalidation triggers. However, it does not hallucinate any false information either — it simply states it lacks the information, which earns no credit for factual accuracy but also no hallucination penalty."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the cache key shape, TTL, or invalidation conditions. However, it does not hallucinate any facts either — it simply states it lacks the information, which avoids inventing values but also fails to cover any expected facts."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 1,
+        "full_vs_blind": 1,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-024",
+      "category": "specs",
+      "question": "What are the two output modes for the Cortex Q&A surface and what triggers each?",
+      "classification": "A",
+      "full": {
+        "answer": "The two output modes for the Cortex Q&A surface are **memory** (terse) and **brain** (verbose) [CITATION:fact-01325df0-f094-4159-ad0f-b9fcac4fa4c4]. The mode is not chosen by the user — it is determined automatically by the question classifier based on the question class [CITATION:fact-01325df0-f094-4159-ad0f-b9fcac4fa4c4]. The `mode` field is passed in the POST `/api/cortex/ask` request body (e.g., `{\"question\":\"hello\",\"mode\":\"brain\"}`), but the spec is explicit that the classifier picks the mode, not the caller [CITATION:fact-b72ada1a-d824-4187-a5ba-9dd9ef9585fd].",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-01325df0-f094-4159-ad0f-b9fcac4fa4c4"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-b72ada1a-d824-4187-a5ba-9dd9ef9585fd"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.85,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The AI correctly covers all three expected facts — memory/terse for Class-A, brain/verbose for Class-B, and mode determined by classifier not user. However, it introduces an unsupported specific claim about a POST /api/cortex/ask endpoint with a mode field in the request body, which contradicts the spec (mode is not caller-chosen) and is not in the expected answer. No actual citations match the expected citation {kind: issue, rowId: issue-4353815519}; the AI cited fact-type rows instead."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the two output modes, merely stating it lacks the information. While this avoids hallucination, it fails to cover any of the expected facts about memory mode, brain mode, or class-based triggering."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the two output modes, merely stating it lacks information. While this avoids hallucination, it fails to cover any of the expected facts about memory mode, brain mode, or class-based selection."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.85,
+        "full_vs_blind": 0.85,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-025",
+      "category": "specs",
+      "question": "What is the regression-gate threshold for the Q&A eval harness?",
+      "classification": "A",
+      "full": {
+        "answer": "The regression-gate threshold for the Q&A eval harness is **70% per category**: if any of the 6 eval categories (Ownership, Decisions, Processes, Incidents, Specs, Cross-repo) drops below 70%, CI fails [CITATION:fact-a65b4c88-384d-4866-a07c-0ea81c58ec0c]. The harness runs 30 questions (5 per category) stored in `tests/qa-eval/cases.json`, executed via `npm run eval:qa` using Sonnet-as-judge with a rubric of `{factual_accuracy, citation_correctness, hallucination_count}` [CITATION:fact-e158d005-eead-439c-9e16-474f47cbbadf][CITATION:fact-aecc53a4-4c14-457b-8527-6d7a50f1d9e4].",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-a65b4c88-384d-4866-a07c-0ea81c58ec0c"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-e158d005-eead-439c-9e16-474f47cbbadf"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-aecc53a4-4c14-457b-8527-6d7a50f1d9e4"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 1,
+          "citation_correctness": 0,
+          "hallucination_count": 2,
+          "notes": "The actual answer correctly states all three expected facts: 70% threshold, 30 questions/5 per category, and the rubric fields. However, none of the actual citations match the expected citation {kind: issue, rowId: issue-4353815519} — all three cited are 'fact' kind rows, not the required issue row. The specific file path 'tests/qa-eval/cases.json' and command 'npm run eval:qa' are not supported by the expected citations and count as hallucinated details."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly admits it lacks the information rather than inventing values, which earns minimal credit since the expected answer is not null (real data exists). No expected facts were stated and no citations were provided."
+        },
+        "topRowsCount": 7
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The AI correctly declined to invent values when lacking information, which is appropriate for a known-gap case, but the expected answer is not null — specific facts (70% threshold, 30 questions, rubric fields) were expected and none were provided. No citations were returned, missing the expected issue reference."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.9,
+        "full_vs_blind": 0.9,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-026",
+      "category": "cross-repo",
+      "question": "What invariants does o8-site explicitly carry over from the cortex-ide desktop app?",
+      "classification": "A",
+      "full": {
+        "answer": "The retrieved rows cover the \"Bridge to o8-site\" section of `DESIGN.md` [CITATION:directive-spec-ingest:cortex-ide:design:13-bridge-to-o8-site:translate-different-context], but that subsection only enumerates what is *different* between the two (font, backdrop, layout, motifs) — it does not state which invariants o8-site explicitly carries over from the desktop app. The overview notes \"shared lineage, different medium\" [CITATION:directive-spec-ingest:cortex-ide:design:overview], confirming a relationship exists, but the carry-over invariant list is not present in any retrieved row.\n\nI don't have that information yet — try indexing more directives or PRs.",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:design:13-bridge-to-o8-site:translate-different-context"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:design:overview"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.7,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly states that the carry-over invariant list is not present in retrieved rows, which is appropriate for a known-gap case — however, the expected answer indicates the data IS present (in the o8-site README), so the AI's 'data missing' response earns partial credit for intellectual honesty rather than hallucinating. Neither expected citation (directive-seed-cortex-ide-inline-styles-only or directive-seed-cortex-ide-palette-vars) appears in the actual citations."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe available rows describe o8 and cortex-ide as the same project (o8 is formerly Cortex IDE [CITATION:doc-grep:CLAUDE.md:L7]), but none of them reference a separate \"o8-site\" entity or enumerate invariants carried over from a desktop app into it.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L7"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer fails to provide any of the four expected facts (inline styles, longhand padding, no emoji, glass tokens) and instead claims the information is unavailable. The claim that 'o8 is formerly Cortex IDE' cited from CLAUDE.md:L7 is an unsupported assertion not backed by any provided citation, counting as one hallucination."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the invariants, returning only a non-answer. However, it does not hallucinate any facts either. The expected answer is not null, so failing to state the four invariants results in zero factual accuracy."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.7,
+        "full_vs_blind": 0.7,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-027",
+      "category": "cross-repo",
+      "question": "Which repo in the o8 project is the deployable Vercel surface and which is not?",
+      "classification": "A",
+      "full": {
+        "answer": "`cortex-ide` is **not** the Vercel-deployable surface — it is a Tauri desktop application, with deployment documented in `docs/TAURI-DEPLOYMENT.md`, a standalone server bundled inside `Cortex IDE.app/Contents/Resources/server/`, and env handling routed through `~/.cortex-ide/.env.local` [CITATION:directive-spec-ingest:cortex-ide:docs-tauri-deployment:known-tauri-specific-issues:3-env-local-not-in-bundle]. The sibling repo `o8-site` is the web-surface repo in the o8 project — it is contrasted with `cortex-ide` (52 deps vs 7 caps) as a structurally distinct repo within the same product context [CITATION:fact-7c45be35-78a5-487a-9125-0ee01ac465d5]. The rows do not contain an explicit statement confirming `o8-site` is currently *deployed on Vercel* — only that it exists as a peer repo and that Vercel Workflows are being evaluated as a future cloud execution target for `cortex-ide` workers [CITATION:fact-10191233-6e92-4a31-97fd-9c1b903ac90e].",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:docs-tauri-deployment:known-tauri-specific-issues:3-env-local-not-in-bundle"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-7c45be35-78a5-487a-9125-0ee01ac465d5"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-10191233-6e92-4a31-97fd-9c1b903ac90e"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.35,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The answer correctly identifies cortex-ide as a Tauri desktop app (fact 2), but critically hedges on o8-site being the Vercel surface — stating 'the rows do not contain an explicit statement confirming o8-site is currently deployed on Vercel,' which contradicts the expected answer that the README explicitly calls it 'the one and only Vercel surface.' The '52 deps vs 7 caps' comparison appears to be a hallucinated specific metric not credibly supported by the cited fact row. None of the actual citations match the expected project-level citation {kind: project, rowId: project-proj-5d0d9e02-015}."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "**`mybeautifulwife` (Eyes Web)** is the deployable Vercel surface — it deploys to https://eyes-web.vercel.app [CITATION:doc-grep:CLAUDE.md:L169]. **`o8` / `cortex-ide` is never deployed to Vercel** — it's a Tauri desktop app that ships as a native installer (dmg/msi/deb) via `cargo tauri build` and runs locally on the user's machine [CITATION:doc-grep:CLAUDE.md:L169][CITATION:doc-grep:CLAUDE.md:L170]. \"Push to Vercel\" or \"deploy to prod\" always means Eyes Web, not o8 [CITATION:doc-grep:CLAUDE.md:L169].",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L169"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L170"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 4,
+          "notes": "The actual answer incorrectly identifies 'mybeautifulwife/Eyes Web' as the Vercel surface instead of 'o8-site', and misidentifies which repo is the Tauri app (calling it 'o8/cortex-ide' instead of just 'cortex-ide'). The expected citations reference a project row (project-proj-5d0d9e02-015) while the actual citations reference CLAUDE.md line numbers, which are not matching. Multiple hallucinated facts appear including the 'mybeautifulwife' repo name, 'Eyes Web' product name, and 'eyes-web.vercel.app' URL."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the o8 project repos, neither identifying o8-site as the Vercel surface nor cortex-ide as a Tauri desktop app. However, since it makes no false claims either, hallucination count is 0."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.24999999999999997,
+        "full_vs_blind": 0.35,
+        "grep_vs_blind": 0.1
+      }
+    },
+    {
+      "id": "qa-028",
+      "category": "cross-repo",
+      "question": "Both o8-site and cortex-ide use Plus Jakarta Sans. Is that a coincidence or an explicit decision?",
+      "classification": "B",
+      "full": {
+        "answer": "Not a coincidence — it's an explicit divergence decision that happens to share the same font. The `cortex-ide` DESIGN.md Bridge section explicitly documents that **o8-site uses Inter 400/500** while **cortex-ide uses Plus Jakarta Sans 300–800** [D-spec-ingest:cortex-ide:design:13-bridge-to-o8-site:translate-different-context] — so the two repos actually use *different* fonts, not the same one. Within cortex-ide, Plus Jakarta Sans is locked by directive: \"Do not swap for Inter, Neue Haas Grotesk, or anything else. The font has three years of product equity and the weight stack (300–800) is already load-bearing for hierarchy contrast.\" [D-spec-ingest:cortex-ide:design:02-typography:font-locked] That lock was formalized at v1 on 2026-04-17 with an explicit \"No Inter swap\" note [D-spec-ingest:cortex-ide:design:provenance].",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:design:13-bridge-to-o8-site:translate-different-context"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:design:02-typography:font-locked"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:design:provenance"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.15,
+          "citation_correctness": 1,
+          "hallucination_count": 1,
+          "notes": "The AI directly contradicts the expected answer: it claims o8-site uses Inter 400/500 while cortex-ide uses Plus Jakarta Sans, asserting the two repos use *different* fonts — whereas the expected answer says both use Plus Jakarta Sans as an explicit shared decision. The AI does partially satisfy fact #2 by citing cortex-ide's explicit typography lock, but fails fact #1 (misses the shared-font explicit decision framing) and introduces an unsupported factual inversion about o8-site's font choice. No expected citations were specified, so citation_correctness is trivially satisfied."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nNone of the provided rows mention Plus Jakarta Sans or any cross-repo font decisions. To answer definitively, you'd want to check the typography/globals CSS in both repos (e.g., `app/globals.css` or a shared design-tokens file) and any commit history around when the font was introduced in each.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The actual answer fails to state the expected facts — it does not identify this as an explicit decision, does not reference the o8-site README stack note, and does not mention the cortex-ide typography overhaul. However, since no citations were expected and none were provided, citation_correctness is perfect. The answer contains no hallucinations, correctly admitting uncertainty rather than inventing facts."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual content about the question — it simply deflects by saying it lacks information. Since the expected answer states it's an explicit decision with specific references, the AI fails on factual accuracy. However, it makes no false claims, so hallucination count is 0, and citation correctness is not applicable (scored 1.0 as no citations were expected and none were fabricated)."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.15,
+        "full_vs_blind": 0.15,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-029",
+      "category": "cross-repo",
+      "question": "How many session_outcomes rows currently exist for the o8-site repo?",
+      "classification": "A",
+      "full": {
+        "answer": "The provided rows do not contain a row count for `session_outcomes` scoped specifically to the `o8-site` repo. The closest data point is [CITATION:fact-875e6a61-7b29-4f0d-9f83-ef05d7ce48c7], which states the entire `session_outcomes` table was **N=0** at the time Issue #734 was written (an open issue at that point), but that is a table-wide figure, not a per-repo filter on `o8-site`. No row in the provided set gives a current or historical count filtered to `o8-site`. To get the live number, query directly: `SELECT COUNT(*) FROM session_outcomes WHERE repo_path LIKE '%o8-site%';`.",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-875e6a61-7b29-4f0d-9f83-ef05d7ce48c7"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.85,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The answer correctly avoids inventing o8-site-specific outcome rows and states the data is missing/unavailable for that specific filter, which aligns with the known-gap expectation. However, it references a citation (fact-875e6a61) claiming N=0 table-wide from Issue #734, which is an unsupported specific claim not verifiable from the provided context, counting as a hallucination. No expected citations were specified, so citation_correctness is neutral/0."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.5,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The answer correctly avoids inventing fictional rows, satisfying the known-gap requirement partially. However, it does not explicitly state that 0 rows exist or that the o8-site repo has not been dispatched against — it deflects with a suggestion to index more data, which is less clear than directly stating the data is missing."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.6,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The answer correctly avoids inventing fictional rows and implies the data is missing/unavailable, which aligns with the known-gap case. However, it doesn't explicitly state that no outcomes exist or that o8-site hasn't been dispatched against — instead it deflects with a suggestion to index more data, which is only partially correct."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.35,
+        "full_vs_blind": 0.25,
+        "grep_vs_blind": -0.09999999999999998
+      }
+    },
+    {
+      "id": "qa-030",
+      "category": "cross-repo",
+      "question": "What's the AGENTS.md file in o8-site say, and does cortex-ide have an equivalent?",
+      "classification": "A",
+      "full": {
+        "answer": "The indexed rows don't contain the contents of `o8-site/AGENTS.md`, so I can't tell you what it says — try indexing that repo or reading the file directly. Cortex-ide **does** have an equivalent `AGENTS.md`: it instructs agents that the operator authors `o8.md` and agents must only **annotate** it via `o8 spec` commands, never overwrite it [CITATION:fact-a74c0abf-ee8d-4e51-9beb-4eef140ddd95]. That file was also recently edited (commit `9b9b01d6`) to add an exit-127 symlink restore clause for the o8 CLI install path [CITATION:outcome-outcome-pkt-bd2a92bb-652-ned17795334492127b9bd77c-2026-05-23T10:53:17].",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-a74c0abf-ee8d-4e51-9beb-4eef140ddd95"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-bd2a92bb-652-ned17795334492127b9bd77c-2026-05-23T10:53:17"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.05,
+          "citation_correctness": 0,
+          "hallucination_count": 3,
+          "notes": "The actual answer misses all three expected facts (the 'NOT the Next.js you know' callout, reading node_modules/next/dist/docs/, and identifying cortex-ide's CLAUDE.md as the equivalent surface). It invents a different narrative about cortex-ide having an AGENTS.md about o8.md annotation and an exit-127 symlink clause, neither of which are supported by the expected answer. The cited row IDs are not among the expected citations, and the commit SHA 9b9b01d6 appears hallucinated."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "Here's the full picture:\n\n**`o8-site/AGENTS.md`** is tiny — just 5 lines. It's a single rule injected between `<!-- BEGIN:nextjs-agent-rules -->` tags warning agents that this Next.js version has breaking changes vs. training data, and telling them to read the relevant guide in `node_modules/next/dist/docs/` before writing any code.\n\n---\n\n**`cortex-ide/AGENTS.md`** is the real one — and it's substantial. It covers:\n\n- **Project structure**: `src/app`, `src/components`, `src/lib`, `src-tauri`, etc.\n- **Dev commands**: `npm run dev`, `desktop:dev`, `typecheck`, `tauri:dev`, etc.\n- **Coding style**: TS strict mode, 2-space indent, `@/` alias, naming conventions\n- **Testing**: no automated runner; run `lint` + `typecheck` + manual smoke tests\n- **Commit/PR guidelines**: Conventional Commits, screenshots for UI changes\n- **Full `o8` CLI reference**: `o8 status`, `o8 packet *`, `o8 task *`, `o8 spec *`, `o8 lane touches` — everything a dispatched agent needs to operate inside a packet worktree\n- **Brain feedback (`o8 cortex observe`)**: how agents contribute observations (gotcha/pattern/regression/preference) back to the directive system, scoped to packet/repo/global\n\nThe two repos have very different scopes: o8-site's AGENTS.md is a 5-line Next.js version warning; cortex-ide's is the full agent operating manual for the o8 dispatch system.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.4,
+          "citation_correctness": 1,
+          "hallucination_count": 7,
+          "notes": "The actual answer correctly identifies the node_modules/next/dist/docs/ requirement and the breaking-changes callout for o8-site, but critically misidentifies cortex-ide's equivalent surface as AGENTS.md rather than CLAUDE.md. The entire detailed description of cortex-ide/AGENTS.md (project structure, dev commands, coding style, testing, commit/PR guidelines, o8 CLI reference, brain feedback system) appears to be fabricated — the expected answer makes clear there is no notable cortex-ide/AGENTS.md, only a CLAUDE.md. Citation correctness is N/A-effectively-perfect since no citations were expected or provided."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "Here's what each file contains:\n\n---\n\n**`o8-site/AGENTS.md`** — Very minimal, just one rule wrapped in a comment block:\n\n> **This is NOT the Next.js you know.** This version has breaking changes — APIs, conventions, and file structure may differ from training data. Read the relevant guide in `node_modules/next/dist/docs/` before writing any code. Heed deprecation notices.\n\n---\n\n**`cortex-ide/AGENTS.md`** — Yes, cortex-ide has one and it's much more comprehensive. It covers:\n\n- **Project structure** — `src/app`, `src/components` (desktop/mobile/landing splits), `src/lib/<domain>`, `src-tauri`, `src/ws-server.ts`\n- **Brand** — Read `BRAND.md` before visual changes\n- **Dev commands** — `npm run dev` (port 3001), `npm run dev:ws` (port 3002), `npm run desktop:dev`, `tauri:dev`, `lint`, `typecheck`\n- **Coding style** — TypeScript strict, 2-space indent, single quotes, semicolons, `@/` path alias\n- **Testing** — No automated tests; run `lint` + `typecheck` + manual smoke tests on `/`, `/dashboard`, `/landing`, `/mobile`\n- **Commits/PRs** — Conventional Commits (`feat:`, `fix:`), include screenshots for UI changes\n- **`o8` CLI reference** — Full command listing for `o8 packet`, `o8 task`, `o8 cortex observe`, and `o8 spec` commands used when dispatched inside a packet worktree\n- **Brain contributions** — How to use `o8 cortex observe` to emit `gotcha`, `pattern`, `regression`, or `preference` observations for the operator to promote to directives\n\nThe o8-site file is a single guardrail; cortex-ide's is a full agent handbook.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.55,
+          "citation_correctness": 1,
+          "hallucination_count": 6,
+          "notes": "The actual answer correctly captures the 'this is NOT the Next.js you know' callout and the node_modules/next/dist/docs/ reading requirement (facts 1 and 3), but critically misidentifies the equivalent surface in cortex-ide as AGENTS.md rather than CLAUDE.md (fact 2 missed). The detailed bullet-point contents attributed to a cortex-ide/AGENTS.md (project structure, brand, dev commands, coding style, testing, commits, o8 CLI reference, brain contributions) appear to be hallucinated or misattributed, as the expected answer indicates the equivalent file is CLAUDE.md and highlights NEVER/ALWAYS rules which are absent from the actual answer."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": -0.35000000000000003,
+        "full_vs_blind": -0.5,
+        "grep_vs_blind": -0.15000000000000002
+      }
+    }
+  ]
+}

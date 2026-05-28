@@ -2,7 +2,7 @@
 /* eslint-disable react-hooks/set-state-in-effect -- repo changes intentionally reset and refetch file tree state */
 
 import { useCallback, useEffect, useState } from 'react';
-import type { FileNode } from '../../workspace-side-panel/types';
+import type { FileNode } from '@/app/dashboard/types';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';

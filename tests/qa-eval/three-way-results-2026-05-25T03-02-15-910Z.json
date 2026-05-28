@@ -1,0 +1,461 @@
+{
+  "generatedAt": "2026-05-25T03:02:15.910Z",
+  "totalCases": 5,
+  "durationS": 290.2,
+  "summary": {
+    "perCategory": {
+      "ownership": {
+        "total": 5,
+        "full": {
+          "scored": 5,
+          "factualSum": 2.9499999999999997,
+          "citationSum": 1.25,
+          "hallucinationSum": 6
+        },
+        "grep": {
+          "scored": 5,
+          "factualSum": 0.1,
+          "citationSum": 0,
+          "hallucinationSum": 7
+        },
+        "blind": {
+          "scored": 5,
+          "factualSum": 0.7,
+          "citationSum": 1,
+          "hallucinationSum": 0
+        }
+      },
+      "decisions": {
+        "total": 0,
+        "full": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "grep": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "blind": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        }
+      },
+      "processes": {
+        "total": 0,
+        "full": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "grep": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "blind": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        }
+      },
+      "incidents": {
+        "total": 0,
+        "full": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "grep": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "blind": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        }
+      },
+      "specs": {
+        "total": 0,
+        "full": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "grep": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "blind": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        }
+      },
+      "cross-repo": {
+        "total": 0,
+        "full": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "grep": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        },
+        "blind": {
+          "scored": 0,
+          "factualSum": 0,
+          "citationSum": 0,
+          "hallucinationSum": 0
+        }
+      }
+    },
+    "overall": {
+      "full": 0.59,
+      "grep": 0.02,
+      "blind": 0.13999999999999999,
+      "delta_full_vs_grep": 0.57,
+      "delta_full_vs_blind": 0.44999999999999996
+    }
+  },
+  "perCase": [
+    {
+      "id": "qa-001",
+      "category": "ownership",
+      "question": "Which directives in the cortex-ide repo are scoped specifically to the cortex-ide repo (scope: repo) versus globally?",
+      "classification": "A",
+      "full": {
+        "answer": "The rows confirm that all 14 directives in `~/.o8/directives/` are either `scope:global` or `scope:repo` — no `scope:project` directives exist yet [CITATION:fact-c0c28c54-235e-49a4-af7e-29705e5d3030]. However, the rows do not enumerate which specific directive titles fall into each bucket; the only named example is \"Always typecheck before commit,\" which appears as a `global`-scoped directive in the bug reproduction trace [CITATION:fact-007c2a07-ed4e-4b3c-a3e5-ee72ca0d7755]. The scope semantics are: `repo` means every packet dispatched against the cortex-ide repo receives the directive, while `global` means every dispatch across every repo receives it [CITATION:directive-spec-ingest:cortex-ide:agents:contributing-to-the-brain-o8-cortex-observe]. To get the full split by name, you'd need to run `cat ~/.o8/directives/*.md | grep -E '^scope:'` or query the SQLite substrate directly — the indexed rows don't surface the per-directive title-to-scope mapping.",
+        "citations": [
+          {
+            "kind": "fact",
+            "rowId": "fact-c0c28c54-235e-49a4-af7e-29705e5d3030"
+          },
+          {
+            "kind": "fact",
+            "rowId": "fact-007c2a07-ed4e-4b3c-a3e5-ee72ca0d7755"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:agents:contributing-to-the-brain-o8-cortex-observe"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer fails to enumerate any of the six repo-scoped directives (800-line ceiling, inline-styles-only, phosphor-svg-only, etc.) and only partially identifies global scope (typecheck-before-commit but not surgical-changes); it incorrectly claims the indexed rows don't surface per-directive title-to-scope mapping, which is contradicted by the expected answer's specific enumeration. None of the four expected citations appear in the actual citations, and the central claim that the data is unavailable is itself an unsupported hallucination."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe provided rows are documentation excerpts from CLAUDE.md files, not structured directive records with explicit `scope:` fields. The only scoping signal present is [CITATION:doc-grep:CLAUDE.md:L143], which notes that `~/cortex-ide/CLAUDE.md` contains \"repo-specific rules\" (implying the global `~/CLAUDE.md` holds global ones), but no individual directives with `scope: repo` vs. global labels appear in these rows.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L143"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer claims the information is not available and no structured directive records exist, failing to identify any of the expected facts (800-line ceiling, inline styles, phosphor SVG, global typecheck-before-commit/surgical-changes). None of the expected citations were provided, though the answer makes no invented claims, resulting in zero hallucinations."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the directives, their scopes, or any of the expected facts. However, it also invents nothing, so hallucination count is 0."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.1,
+        "full_vs_blind": 0.1,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-002",
+      "category": "ownership",
+      "question": "Which project does the cortex-ide repo belong to, and what other repos are in that project?",
+      "classification": "A",
+      "full": {
+        "answer": "`cortex-ide` belongs to the **o8** project [CITATION:project-proj-5d0d9e02-015]. The other repos in that project are **o8-mobile** (`/Users/marquisehurtt/o8-mobile`, role: `mobile`) [CITATION:project_repo-8911d44e-2746-4ced-a08a-35c9e0543f90] and **o8-site** (`/Users/marquisehurtt/o8-site`, role: `site`) [CITATION:project_repo-a1c35bf5-ed73-44cf-a7d9-30c6ccb1eb84]. `cortex-ide` itself carries the `fullstack` role [CITATION:project_repo-70954348-8e56-41dd-ac10-5b4e91964fc2].",
+        "citations": [
+          {
+            "kind": "project",
+            "rowId": "project-proj-5d0d9e02-015"
+          },
+          {
+            "kind": "project_repo",
+            "rowId": "project_repo-8911d44e-2746-4ced-a08a-35c9e0543f90"
+          },
+          {
+            "kind": "project_repo",
+            "rowId": "project_repo-a1c35bf5-ed73-44cf-a7d9-30c6ccb1eb84"
+          },
+          {
+            "kind": "project_repo",
+            "rowId": "project_repo-70954348-8e56-41dd-ac10-5b4e91964fc2"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.85,
+          "citation_correctness": 0.75,
+          "hallucination_count": 1,
+          "notes": "The answer correctly identifies the o8 project and o8-site as a sibling repo, covering 2 of 3 expected facts. However, it introduces o8-mobile as an additional sibling repo, which is not mentioned in the expected answer and represents a potential hallucination or extra data not in scope. The expected citations project-proj-5d0d9e02-015 and both project_repo rows are present, but an extra citation for o8-mobile (project_repo-8911d44e) was added beyond what was expected."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe rows mention `cortex-ide` as a standalone repo at `/Users/marquisehurtt/cortex-ide` [CITATION:doc-grep:CLAUDE.md:L139] and reference one other repo called **Spear** (`spear-production`) under an \"Other Repos\" heading [CITATION:doc-grep:CLAUDE.md:L177], but no row names a parent project that `cortex-ide` belongs to or enumerates all sibling repos within such a project.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L139"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L177"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The actual answer correctly admits it lacks project membership information, which partially aligns with honesty, but it fails to identify any of the expected facts (o8 project, proj-5d0d9e02-015, o8-site sibling repo). The mention of 'Spear' as a related repo is not supported by expected citations and appears to be a hallucination relative to the expected answer."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the cortex-ide repo, the o8 project, or the o8-site sibling repo. However, it does not hallucinate any incorrect facts either — it simply states it lacks the information."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.85,
+        "full_vs_blind": 0.85,
+        "grep_vs_blind": 0
+      }
+    },
+    {
+      "id": "qa-003",
+      "category": "ownership",
+      "question": "Who authored the most recent merged PRs in cortex-ide?",
+      "classification": "A",
+      "full": {
+        "answer": "The available rows don't include author attribution for the most recent merged PRs. The directive rows list the most recent merges (all dated 2026-04-29) — PRs #907–#914 covering chip fetch resilience, composer fixes, and the projects epic waves 1–2 [CITATION:directive-seed-global-typecheck-before-commit] — but none of those rows carry an author field. The only named committer in the dataset is `hurttlocker`, seen in issue comments [CITATION:comment-issue-503-4196276608][CITATION:comment-issue-90-4072226096], but that's not confirmed as the PR author for those specific merges.\n\nI don't have that information yet — try indexing more directives or PRs.",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-seed-global-typecheck-before-commit"
+          },
+          {
+            "kind": "comment",
+            "rowId": "comment-issue-503-4196276608"
+          },
+          {
+            "kind": "comment",
+            "rowId": "comment-issue-90-4072226096"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.85,
+          "citation_correctness": 0,
+          "hallucination_count": 3,
+          "notes": "The AI correctly states the data is missing for author attribution, satisfying the known-gap requirement. However, it invents specific PR numbers (#907–#914), specific PR titles ('chip fetch resilience', 'composer fixes', 'projects epic waves 1–2'), and a specific date (2026-04-29) without these being verifiable from the cited rows — these constitute hallucinations. No expected citations were specified, so citation_correctness is neutral/0."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "All recent merged PRs in `cortex-ide` were authored by **LavonTMCQ**. The most recent merges are:\n\n1. `333a55fb` — fix brain retrievers not surfacing session outcomes\n2. `b2ff45eb` — o8.md panel polish (auto-widen, color persistence)\n3. `ab10c73f` — agent runtime contract doc\n4. `59a722cd` — AGENTS.md install-symlink clarification\n5. `64c48b85` — desktop status bar wiring + responsive layout",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 6,
+          "notes": "This is a known-gap case where the correct response is to state the data is missing. Instead, the AI invented a GitHub username ('LavonTMCQ'), five commit SHAs, and five PR titles with no citations to support any of them — all hallucinated."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0.7,
+          "citation_correctness": 1,
+          "hallucination_count": 0,
+          "notes": "The AI correctly states it does not have the data rather than inventing GitHub usernames, which matches the expected behavior for a known-gap case. However, the phrasing 'try indexing more directives or PRs' implies a specific technical action that may not be relevant, but no fictional facts were introduced."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.85,
+        "full_vs_blind": 0.15000000000000002,
+        "grep_vs_blind": -0.7
+      }
+    },
+    {
+      "id": "qa-004",
+      "category": "ownership",
+      "question": "Which runtime owns the most recently merged session outcomes in cortex-ide?",
+      "classification": "A",
+      "full": {
+        "answer": "**codex** owns all three of the most recently completed session outcomes in `cortex-ide`. Every outcome row retrieved carries `runtime: \"codex\"` — the most recent at `2026-05-23T13:32:53` [CITATION:outcome-outcome-pkt-ee5658e1-a13-ned1779542288145db5fabc7-2026-05-23T13:32:53], followed by `2026-05-23T10:53:17` [CITATION:outcome-outcome-pkt-bd2a92bb-652-ned17795334492127b9bd77c-2026-05-23T10:53:17], and `2026-05-23T10:40:07` [CITATION:outcome-outcome-pkt-f8351e28-dd1-ned17795326620738722b26e-2026-05-23T10:40:07].",
+        "citations": [
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-ee5658e1-a13-ned1779542288145db5fabc7-2026-05-23T13:32:53"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-bd2a92bb-652-ned17795334492127b9bd77c-2026-05-23T10:53:17"
+          },
+          {
+            "kind": "outcome",
+            "rowId": "outcome-outcome-pkt-f8351e28-dd1-ned17795326620738722b26e-2026-05-23T10:40:07"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.3,
+          "citation_correctness": 0,
+          "hallucination_count": 1,
+          "notes": "The AI correctly identifies codex as a dominant runtime but incorrectly states 'every outcome row retrieved carries runtime: codex,' omitting Gemini entirely despite it owning auto-index-repos-741 and dispatch-popover-placement-752. None of the three actual citation rowIds match either expected citation rowId, yielding zero citation credit."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.\n\nThe provided rows describe the `session_outcomes` table as the \"Cortex v2 ledger\" [CITATION:doc-grep:CLAUDE.md:L113] and list the four adapters (`codex`, `claude-code`, `gemini`, `opencode`) [CITATION:doc-grep:CLAUDE.md:L79], but none of them contain merged-PR data or ledger query results that would identify which runtime's outcomes were most recently merged.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L113"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L79"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.1,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly admits it lacks the data to identify which runtime owns the most recent merged outcomes, which earns minimal credit for not fabricating facts. However, it fails to identify codex as dominant, name any specific gemini outcome, or reference the runtime column — none of the expected facts are covered. Neither expected citation was included; the citations provided (CLAUDE.md lines) are unrelated to the expected outcome-row references."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer provides no factual information about the expected content, simply stating it lacks the information. No expected facts were covered, no citations were provided, but no hallucinations were introduced either."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.19999999999999998,
+        "full_vs_blind": 0.3,
+        "grep_vs_blind": 0.1
+      }
+    },
+    {
+      "id": "qa-005",
+      "category": "ownership",
+      "question": "Which directive owner enforces the rule that packet metadata rows can't use native select or input controls?",
+      "classification": "A",
+      "full": {
+        "answer": "The directive enforcing this rule is owned by `CLAUDE.md` (the repo's critical-rules spec), not an individual human owner. [CITATION:directive-spec-ingest:cortex-ide:claude:critical-rules:never] states \"Never use native `<select>` or `<input>` inside packet cards — packet metadata rows use Issues-style clickable rows with custom popovers.\" The seed directive [CITATION:directive-seed-cortex-ide-no-native-form-controls-in-packets] reinforces this under the title \"No native select / input inside packet cards,\" pointing to `ThoughtsMissionPanel` and the `packet-meta-rows` pattern as the reference implementation.",
+        "citations": [
+          {
+            "kind": "directive",
+            "rowId": "directive-spec-ingest:cortex-ide:claude:critical-rules:never"
+          },
+          {
+            "kind": "directive",
+            "rowId": "directive-seed-cortex-ide-no-native-form-controls-in-packets"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0.85,
+          "citation_correctness": 0.5,
+          "hallucination_count": 0,
+          "notes": "The actual answer correctly names the seed directive id, mentions ThoughtsMissionPanel and packet-meta-rows pattern, covering all three expected facts. However, it includes an extra citation (directive-spec-ingest:cortex-ide:claude:critical-rules:never) not in the expected citations, and only one of the two citations matches the expected one (directive-seed-cortex-ide-no-native-form-controls-in-packets), giving partial citation credit."
+        },
+        "topRowsCount": -1
+      },
+      "grep": {
+        "answer": "The rule is documented in `CLAUDE.md` [CITATION:doc-grep:CLAUDE.md:L298] [CITATION:doc-grep:CLAUDE.md:L225], but none of the available rows identify a named directive owner for it — only the rule itself is present in the source. I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L298"
+          },
+          {
+            "kind": "doc",
+            "rowId": "doc-grep:CLAUDE.md:L225"
+          }
+        ],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer fails to identify the directive, its id, ThoughtsMissionPanel, or the packet-meta-rows pattern — none of the expected facts are present. The citations provided are doc-grep rows for CLAUDE.md lines, not the expected directive row, so citation_correctness is 0. No hallucinated facts were introduced; the answer simply admitted lack of information."
+        },
+        "topRowsCount": 15
+      },
+      "blind": {
+        "answer": "I don't have that information yet — try indexing more directives or PRs.",
+        "citations": [],
+        "score": {
+          "factual_accuracy": 0,
+          "citation_correctness": 0,
+          "hallucination_count": 0,
+          "notes": "The actual answer admits ignorance and provides no factual content, so it neither covers any expected facts nor hallucinates any. It correctly declines to invent information, but fails to provide the expected directive details."
+        },
+        "topRowsCount": 0
+      },
+      "deltas": {
+        "full_vs_grep": 0.85,
+        "full_vs_blind": 0.85,
+        "grep_vs_blind": 0
+      }
+    }
+  ]
+}

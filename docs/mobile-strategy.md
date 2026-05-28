@@ -1,5 +1,11 @@
 # Mobile Strategy — Cortex IDE
 
+> Superseded framing, 2026-05-24: active mobile product planning now lives in
+> the native o8-mobile repo at
+> `/Users/marquisehurtt/o8-mobile/docs/mobile-ui-pattern-notes.md`. Use that
+> file for implementation targeting. This document is useful as older strategy
+> context, but new mobile UX work should not be scoped as a dashboard/web app.
+
 ## Conclusion first
 
 **Yes: mobile support should exist from day one.**
@@ -152,6 +158,91 @@ Expand into:
 - mobile-first incident response
 - background watch modes
 - wearable / notification-only quick actions
+
+## Locked research-informed plan — May 24, 2026
+
+Recent product references sharpen the plan:
+
+- Notion mobile refresh: borrow softness, floating input, calm cards, and selective density.
+- Paulius / Komand demos: mobile must close the AFK agent loop with live preview, review, approval, and commit.
+- `AI-experiments`: borrow prompt navigation, answer-depth controls, and tactile AI steering patterns.
+- `ShipSwift`: borrow the idea of a reusable, tuneable motion/theme layer, especially for subtle paper/ink movement behind chat.
+
+### P0 build targets
+- persistent floating orchestrator composer
+- persistent agent state pill synced from desktop/runtime state
+- switchable mobile surfaces for Chat / Files / Review / Terminal / Browser / Preview
+- full-screen preview surface for tunneled localhost URLs
+- preview lifecycle states: loading, ready, stale, crashed, disconnected
+
+### P1 build targets
+- mobile review sheet with changed-file list and compact diff
+- AI-generated commit message from the review sheet
+- draggable dual-surface split layout for Chat + Preview / Terminal / Review
+- prompt/history navigator for long orchestrator chats
+- answer-depth control for summaries, diffs, and explanations
+- subtle paper-motion background behind chat
+
+### P2 build targets
+- Expo / React Native preview bridge
+- remote simulator streaming investigation
+- out-of-app agent status via Web Push first, native Live Activities / Dynamic Island later
+- camera/context capture for bug reports and visual AI context
+- memory/topic map inspired by node/globe interaction experiments
+
+### Motion theming rule
+Mobile chat may have motion, but it must stay quiet.
+
+The target is paper grain, slow ink, or soft texture behind the conversation.
+It should be token-driven, low contrast, and easy to disable.
+
+Do not use loud plasma/chrome effects, decorative orbs, or heavy gradients as the primary chat background.
+Terminal, review, diff, and code surfaces should either disable the motion layer or reduce it to near-invisible texture.
+
+Implementation should start in the current web mobile surface:
+- CSS or Canvas grain first
+- `framer-motion` for theme/intensity transitions
+- `prefers-reduced-motion` support
+- one `MobileMotionTheme` registry instead of scattered background code
+
+Native SwiftUI references from `AI-experiments` and `ShipSwift` can be reused later in `o8-mobile` with MIT attribution if the native path becomes the active target.
+
+### Draggable split-surface rule
+Mobile should support a controlled split layout for work that needs two simultaneous surfaces.
+
+Start with these pairings:
+- Chat + Preview
+- Chat + Terminal tail
+- Review summary + Diff
+- Agent status + Browser preview
+
+The split layout should have three rest states only:
+- compact top
+- balanced
+- compact bottom
+
+During drag, low-priority controls should fade or compress before clipping.
+When a pane is too small, it should switch to a compact summary rather than showing broken full UI.
+The user's last split ratio should persist per surface pair.
+
+For the current web mobile app, implement this with pointer events, CSS variables, and `framer-motion`.
+For a future native app, React Native Reanimated plus Gesture Handler is the right model.
+
+### Background status rule
+Out-of-app agent visibility is useful, but the phone should never own the run.
+
+Desktop/server execution remains authoritative.
+Mobile receives progress, status, and approval requests.
+If the app is suspended, the agent must continue safely.
+
+Current web path:
+- push notifications
+- service worker status updates where available
+- resume-to-current-state when the user reopens the app
+
+Native future:
+- Live Activities / Dynamic Island first
+- Picture-in-Picture video only as a research path, not the default implementation
 
 ## Strategic payoff
 
