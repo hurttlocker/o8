@@ -83,6 +83,12 @@ export function O8RepoSelector({
         title="Switch repository"
         aria-haspopup="menu"
         aria-expanded={open}
+        onMouseEnter={(e) => {
+          if (!open) e.currentTarget.style.background = 'var(--t-hover)';
+        }}
+        onMouseLeave={(e) => {
+          if (!open) e.currentTarget.style.background = 'var(--t-panel)';
+        }}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -95,7 +101,7 @@ export function O8RepoSelector({
           paddingLeft: 8,
           borderRadius: 8,
           border: '0.5px solid var(--t-divider-subtle)',
-          background: 'var(--t-panel)',
+          background: open ? 'var(--t-hover)' : 'var(--t-panel)',
           cursor: 'pointer',
           fontFamily: 'var(--font-sans-system)',
           fontSize: 13.5,
@@ -103,6 +109,7 @@ export function O8RepoSelector({
           color: 'var(--t-text)',
           letterSpacing: '-0.1px',
           lineHeight: 1.25,
+          transition: 'background 120ms ease',
         }}
       >
         <span style={{
