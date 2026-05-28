@@ -3029,6 +3029,19 @@ function DashboardInner() {
       const overlay = sidebarPreviewOverlayRef.current;
       if (!overlay) return;
       if (event.target instanceof Node && overlay.contains(event.target)) return;
+      // Don't pre-empt clicks on the sidebar-toggle pill — its own onClick
+      // toggles `sidebarVisible` and the collapse-on-open effect at line
+      // 3047 dismisses the preview right after. If we close the preview
+      // here first, AnimatePresence starts an exit animation while React
+      // is still processing the click, which on real cursors lands the
+      // click target on the (still-animating) overlay subtree and the
+      // pill's onClick never fires. Symptom: "i have to double click"
+      // (operator 2026-05-28). Skipping the pill click lets the toggle
+      // own the dismiss path.
+      if (event.target instanceof Element) {
+        const togglePill = event.target.closest('[aria-label="Toggle sidebar"]');
+        if (togglePill) return;
+      }
       setSidebarPreviewOpen(false);
     };
     // mousedown so the dismiss fires before any focus changes from the
