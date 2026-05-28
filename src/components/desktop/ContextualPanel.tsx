@@ -1101,30 +1101,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
             )}
           </div>
 
-          {onSplitVertical && (
-            <button
-              type="button"
-              onClick={onSplitVertical}
-              aria-label="Split vertically"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                width: 28,
-                height: 28,
-                borderRadius: 8,
-                border: 'none',
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                cursor: 'pointer',
-                flexShrink: 0,
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-panel-hover)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
-            >
-              <SplitVerticalIcon />
-            </button>
-          )}
+          {/* Split-vertical button removed 2026-05-27 — bottom panel
+              leans on tabs for multiple surfaces. */}
 
           <button
             type="button"
