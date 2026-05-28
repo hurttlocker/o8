@@ -565,35 +565,6 @@ function DashboardInner() {
   // to produce the [perf] bootstrap log.
   markDashboardFirstRender();
 
-  // DIAG (v0.1.179) — always-on Tauri drag-drop event tap. Independent of
-  // any specific surface so we can prove the OS-level bridge fires. Logs
-  // go through console.error which the Rust ring buffer captures; readable
-  // via the o8_view_console_errors MCP tool. Remove once the drag-drop
-  // regression is root-caused.
-  useEffect(() => {
-    if (typeof window === 'undefined') return undefined;
-    let mounted = true;
-    const unlistens: Array<() => void> = [];
-    void (async () => {
-      try {
-        const { listen } = await import('@tauri-apps/api/event');
-        console.error('[tauri-drop-diag] dashboard tap installed');
-        for (const name of ['o8:tauri-file-drop-enter', 'o8:tauri-file-drop-over', 'o8:tauri-file-drop', 'o8:tauri-file-drop-leave']) {
-          const un = await listen(name, (event) => {
-            if (!mounted) return;
-            console.error('[tauri-drop-diag]', name, JSON.stringify((event as { payload?: unknown }).payload ?? null));
-          });
-          unlistens.push(un);
-        }
-      } catch (err) {
-        console.error('[tauri-drop-diag] install FAILED', err);
-      }
-    })();
-    return () => {
-      mounted = false;
-      for (const u of unlistens) { try { u(); } catch {} }
-    };
-  }, []);
 
   // Glass vs solid axis: in glass mode the AgentPanel card paints nothing
   // and shadows its descendants with midnight-palette ink so dark vibrancy
