@@ -96,20 +96,7 @@ interface OrchestratorEmptyStateProps {
 }
 
 function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
-  const {
-    onActionClick,
-    repoLabel,
-    workspaceTargets,
-    onSelectProject,
-    onAddProject,
-    onWorkWithoutProject,
-    worktreeMode,
-    onWorktreeModeChange,
-    branch,
-    kind,
-    kindLocked,
-    onKindChange,
-  } = props;
+  const { onActionClick, repoLabel } = props;
 
   const titleProject = repoLabel ?? 'your workspace';
   const title = `What should we build in ${titleProject}?`;
@@ -147,11 +134,11 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
       >
         <h1
           style={{
-            // Match the sidebar's lighter-weight hierarchy (Hurttlocker
-            // spec: title weight 300, tight tracking). The sidebar
-            // family already lives at `var(--font-sans-system)`.
+            // Lighter weight per operator pass — 200 reads as airy
+            // editorial instead of the 300 sidebar weight. Tracking
+            // pulled tighter to keep the 30 px display copy crisp.
             fontSize: 30,
-            fontWeight: 300,
+            fontWeight: 200,
             color: 'var(--t-text)',
             letterSpacing: '-0.02em',
             lineHeight: 1.2,
@@ -163,15 +150,67 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
           {title}
         </h1>
 
-        {/* Project chip moved out of the heading — it now lives in
-            OrchestratorComposerBelow's chip row (next to Worktree),
-            so the heading reads as title-only and the composer's chip
-            cluster carries all the run-context selectors. */}
-
-        {/* Inline quick action pills now render in OrchestratorComposerBelow
-            (below the composer + chip row) so they sit in their natural
-            visible position once the composer slides up. */}
+        {/* Quick action pills sit RIGHT under the title, ABOVE the
+            composer (per operator pass 2026-05-27). The composer
+            lifts up via -32cqh and lands just below this block, so
+            the visual stack reads: title → suggestions → composer. */}
+        <QuickActionPills onActionClick={onActionClick} />
       </div>
+    </div>
+  );
+}
+
+function QuickActionPills({ onActionClick }: { onActionClick: (prompt: string) => void }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexWrap: 'wrap',
+        justifyContent: 'center',
+        columnGap: 11,
+        rowGap: 5,
+        maxWidth: 640,
+        marginTop: 6,
+      }}
+    >
+      {QUICK_ACTIONS.map((action, index) => (
+        <span
+          key={action.id}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            // Hurttlocker meta weight — quieter than the chip row so
+            // the eye flows title → suggestions → composer cleanly.
+            fontSize: 10,
+            fontWeight: 320,
+            letterSpacing: '-0.005em',
+            color: 'var(--t-text-muted)',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => onActionClick(action.prompt)}
+            style={{
+              background: 'transparent',
+              borderWidth: 0,
+              padding: 0,
+              fontFamily: 'inherit',
+              fontSize: 'inherit',
+              color: 'var(--t-text-secondary)',
+              cursor: 'pointer',
+              letterSpacing: '-0.005em',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
+          >
+            {action.label}
+          </button>
+          {index < QUICK_ACTIONS.length - 1 ? (
+            <span aria-hidden style={{ color: 'var(--t-text-faint)' }}>·</span>
+          ) : null}
+        </span>
+      ))}
     </div>
   );
 }
@@ -239,57 +278,9 @@ function OrchestratorComposerBelowBase(props: OrchestratorComposerBelowProps) {
         <BranchChip branch={props.branch} repoPath={props.repoPath} onChange={props.onBranchChange} />
         <KindChip kind={props.kind} locked={props.kindLocked} onChange={props.onKindChange} />
       </div>
-      <div
-        style={{
-          display: 'flex',
-          flexWrap: 'wrap',
-          justifyContent: 'center',
-          columnGap: 11,
-          rowGap: 5,
-          maxWidth: 640,
-        }}
-      >
-        {QUICK_ACTIONS.map((action, index) => (
-          <span
-            key={action.id}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 6,
-              // Match the sidebar's meta-text weight (Hurttlocker spec:
-              // 9.5px / 260 / -0.4) — these are quiet suggestion text,
-              // smaller than the chip row above so the eye flows
-              // composer → chips → pills as a clear hierarchy.
-              fontSize: 10,
-              fontWeight: 320,
-              letterSpacing: '-0.005em',
-              color: 'var(--t-text-muted)',
-            }}
-          >
-            <button
-              type="button"
-              onClick={() => props.onActionClick(action.prompt)}
-              style={{
-                background: 'transparent',
-                borderWidth: 0,
-                padding: 0,
-                fontFamily: 'inherit',
-                fontSize: 'inherit',
-                color: 'var(--t-text-secondary)',
-                cursor: 'pointer',
-                letterSpacing: '-0.005em',
-              }}
-              onMouseEnter={(e) => { e.currentTarget.style.color = 'var(--t-text)'; }}
-              onMouseLeave={(e) => { e.currentTarget.style.color = 'var(--t-text-secondary)'; }}
-            >
-              {action.label}
-            </button>
-            {index < QUICK_ACTIONS.length - 1 ? (
-              <span aria-hidden style={{ color: 'var(--t-text-faint)' }}>·</span>
-            ) : null}
-          </span>
-        ))}
-      </div>
+      {/* QUICK_ACTIONS pills moved into OrchestratorEmptyState (above the
+          composer) per operator pass 2026-05-27. Composer chip row only
+          carries run-context selectors now. */}
     </div>
   );
 }
