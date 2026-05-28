@@ -349,7 +349,9 @@ export function SessionTimeline({
       style={chromeStyle}
     >
       <div style={leftClusterStyle}>
-        <TimelineButton icon={<PlayIcon />} label="Play session replay" />
+        {/* Play button removed per operator pass 2026-05-27 — the
+            replay is opened via the Expand affordance + full Session
+            Replay page; inline play was unused. */}
         {onExpand ? <TimelineButton icon={<ExpandIcon />} label="Expand timeline" onClick={onExpand} /> : null}
         <span style={kickerStyle}>Last 24h</span>
         {errorSegmentCount > 0 ? (
@@ -366,7 +368,7 @@ export function SessionTimeline({
               background: 'var(--red-soft)',
               color: 'var(--red)',
               fontSize: 10,
-              fontWeight: 700,
+              fontWeight: 320,
               letterSpacing: '0.04em',
               textTransform: 'uppercase',
               fontFamily: 'var(--font-sans-system)',
@@ -433,7 +435,7 @@ const chromeStyle = {
   background: 'var(--t-chrome, transparent)',
   borderBottom: '0.5px solid var(--t-divider-subtle)',
   fontSize: 11,
-  fontWeight: 500,
+  fontWeight: 300,
   color: 'var(--t-text-secondary)',
   letterSpacing: '-0.01em',
   position: 'relative',
@@ -449,7 +451,7 @@ const leftClusterStyle = {
 } as const;
 
 const kickerStyle = {
-  fontWeight: 600,
+  fontWeight: 300,
   color: 'var(--t-text)',
   textTransform: 'uppercase',
   fontSize: 10,
@@ -514,7 +516,7 @@ function HoverStatusRow({ label, children, tone = 'neutral' }: {
     <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, paddingTop: 4, paddingBottom: 4 }}>
       <div style={{
         fontSize: 10,
-        fontWeight: 600,
+        fontWeight: 300,
         letterSpacing: '0.08em',
         textTransform: 'uppercase',
         color: 'var(--t-text-faint)',
@@ -591,7 +593,7 @@ function TimelineHoverCard({ info, card }: { info: TrackerHoverInfo; card: Hover
         <div style={{ flex: 1, minWidth: 0 }}>
           <div style={{
             fontSize: 13.5,
-            fontWeight: 600,
+            fontWeight: 300,
             letterSpacing: '-0.012em',
             color: 'var(--t-text)',
             overflow: 'hidden',
@@ -615,7 +617,7 @@ function TimelineHoverCard({ info, card }: { info: TrackerHoverInfo; card: Hover
         {card.durationLabel ? (
           <div style={{
             fontSize: 11,
-            fontWeight: 700,
+            fontWeight: 320,
             whiteSpace: 'nowrap',
             paddingTop: 4,
             paddingRight: 8,
