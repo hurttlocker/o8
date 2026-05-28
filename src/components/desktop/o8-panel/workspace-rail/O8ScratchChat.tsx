@@ -293,6 +293,12 @@ function HeaderButton({
       aria-label="Ask o8"
       aria-disabled={disabled}
       onMouseDown={(event) => event.preventDefault()}
+      onMouseEnter={(e) => {
+        if (!active && !disabled) e.currentTarget.style.background = 'var(--t-hover)';
+      }}
+      onMouseLeave={(e) => {
+        if (!active && !disabled) e.currentTarget.style.background = 'transparent';
+      }}
       onClick={onOpen}
       style={{
         width: 26,
