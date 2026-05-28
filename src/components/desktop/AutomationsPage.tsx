@@ -134,7 +134,8 @@ const ghostButton: React.CSSProperties = {
   background: 'transparent',
   color: 'var(--t-text-muted)',
   fontSize: 12,
-  fontWeight: 500,
+  fontWeight: 300,
+  letterSpacing: '-0.1px',
   cursor: 'pointer',
 };
 
@@ -149,7 +150,8 @@ const primaryButton: React.CSSProperties = {
   background: 'var(--t-accent, #2563eb)',
   color: '#ffffff',
   fontSize: 12,
-  fontWeight: 600,
+  fontWeight: 500,
+  letterSpacing: '-0.1px',
   cursor: 'pointer',
 };
 
@@ -157,11 +159,11 @@ function Field({ label, children }: { label: string; children: React.ReactNode }
   return (
     <label style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
       <span style={{
-        fontSize: 10.5,
-        fontWeight: 600,
+        fontSize: 10,
+        fontWeight: 300,
         letterSpacing: '0.04em',
         textTransform: 'uppercase',
-        color: 'var(--t-text-muted)',
+        color: 'var(--t-text-faint)',
       }}>
         {label}
       </span>
@@ -314,8 +316,9 @@ function AutomationModal({
           paddingBottom: 12,
           paddingLeft: 20,
           borderBottom: '1px solid var(--t-divider)',
-          fontSize: 15,
-          fontWeight: 600,
+          fontSize: 13.5,
+          fontWeight: 400,
+          letterSpacing: '-0.1px',
         }}>
           {editing ? 'Edit automation' : 'New automation'}
         </div>
@@ -421,7 +424,8 @@ function AutomationModal({
                     background: form.triggerKind === t ? 'var(--t-accent-soft, rgba(37,99,235,0.08))' : 'transparent',
                     color: form.triggerKind === t ? 'var(--t-accent, #2563eb)' : 'var(--t-text-muted)',
                     fontSize: 12,
-                    fontWeight: 500,
+                    fontWeight: 300,
+                    letterSpacing: '-0.1px',
                     cursor: 'pointer',
                   }}
                 >
@@ -445,7 +449,7 @@ function AutomationModal({
             </Field>
           ) : null}
           {error ? (
-            <div style={{ fontSize: 12, color: 'var(--t-brand-red, #ef4444)', fontWeight: 500 }}>
+            <div style={{ fontSize: 12, color: 'var(--t-brand-red, #ef4444)', fontWeight: 400 }}>
               {error}
             </div>
           ) : null}
@@ -509,15 +513,16 @@ function Tabs({ scope, mineCount, teamCount, onChange }: {
               borderRadius: 8,
               background: active ? 'var(--t-input-bg)' : 'transparent',
               color: active ? 'var(--t-text)' : 'var(--t-text-muted)',
-              fontSize: 13,
-              fontWeight: active ? 600 : 500,
+              fontSize: 12,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
               cursor: 'pointer',
             }}
           >
             {item.label}
             <span style={{
               fontSize: 11,
-              fontWeight: 500,
+              fontWeight: 300,
               color: 'var(--t-text-muted)',
             }}>
               {item.count}
@@ -623,7 +628,8 @@ function RowActions({
           background: 'transparent',
           color: 'var(--t-text-muted)',
           fontSize: 11,
-          fontWeight: 500,
+          fontWeight: 300,
+          letterSpacing: '-0.1px',
           cursor: running ? 'default' : 'pointer',
           opacity: running ? 0.5 : 1,
           display: 'inline-flex',
@@ -812,7 +818,7 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
       }}>
         <div style={{
           fontSize: 22,
-          fontWeight: 600,
+          fontWeight: 300,
           letterSpacing: '-0.02em',
           color: 'var(--t-text)',
         }}>
@@ -842,7 +848,8 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
             background: 'var(--t-input-bg)',
             color: 'var(--t-text)',
             fontSize: 12,
-            fontWeight: 500,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
             cursor: 'pointer',
             display: 'inline-flex',
             alignItems: 'center',
@@ -881,11 +888,11 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
           paddingLeft: 14,
           borderBottom: '1px solid var(--t-divider)',
           background: 'var(--t-input-bg)',
-          fontSize: 10.5,
-          fontWeight: 600,
+          fontSize: 10,
+          fontWeight: 300,
           letterSpacing: '0.04em',
           textTransform: 'uppercase',
-          color: 'var(--t-text-muted)',
+          color: 'var(--t-text-faint)',
         }}>
           <span />
           <span>Name</span>
@@ -940,7 +947,7 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
                 }}
               >
                 <StatusDot status={row.lastRunStatus} title={dotTooltip} />
-                <span title={row.prompt} style={{ fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                <span title={row.prompt} style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                   {row.name}
                 </span>
                 <span style={{ color: 'var(--t-text-muted)', fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
