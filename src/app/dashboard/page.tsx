@@ -4327,10 +4327,15 @@ function DashboardInner() {
                 data-mcp-scope="agent-panel-hover-preview"
                 style={{
                   position: 'fixed',
-                  // Below the traffic lights (drawn at y ~13–30) so the
-                  // overlay reads as professional drop chrome, not as a
-                  // layer that fights the OS controls. 2026-05-27.
-                  top: 44,
+                  // Sits just under the toggle pill (pill height 26, sits
+                  // at y=7 → bottom=33) with a 2 px breathing gap. The
+                  // old top:44 left an 11 px dead zone between pill and
+                  // overlay — clicking in that gap fired the window
+                  // mousedown listener (closing the preview) but no
+                  // onClick handler caught the press, so the operator
+                  // had to double-click to pin (2026-05-28). Traffic
+                  // lights end around y=30 — y=35 still clears them.
+                  top: 35,
                   left: 8,
                   // Match the actual AgentPanel column width so the
                   // overlay is a 1:1 stand-in for the real panel — no
@@ -4339,9 +4344,11 @@ function DashboardInner() {
                   // Explicit height — without it the overlay sizes to the
                   // AgentPanel's intrinsic content height (which collapses
                   // to ~48 px because AgentPanel's children use flex: 1).
-                  // Pin the rail to (viewport − traffic-light gap − bottom
-                  // gutter) so it matches the open AgentPanel column.
-                  height: 'calc(100vh - 90px)',
+                  // Pin the rail to (viewport − top inset − bottom gutter)
+                  // so it matches the open AgentPanel column. top went
+                  // 44 → 35 to close the click-gap, so the height grew
+                  // proportionally (was 100vh - 90 from the old top).
+                  height: 'calc(100vh - 81px)',
                   display: 'flex',
                   flexDirection: 'column',
                   overflow: 'hidden',
