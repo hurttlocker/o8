@@ -14,6 +14,7 @@ import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
 import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
+import { OrchestratorStatusCard, detectOrchestratorStatusEvent } from '@/components/desktop/thoughts/chat-panel/OrchestratorStatusCard';
 import { useOrchestratorEntryEvicted } from '@/components/desktop/orchestrator/context-residency';
 import {
   hydrateOrchestratorTurnPinEntry,
@@ -335,6 +336,23 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
         {renderMetaRow('flex-end')}
       </div>
     );
+  }
+
+  // Orchestrator lifecycle events (e.g. mission complete) arrive as system
+  // entries. Upgrade them from a plain gray bubble into a themed, animated
+  // status card — and suppress the legacy "(NEW THREAD · READY)" marker. This
+  // also tidies old threads in place (detection is by text, no migration).
+  if (entry.role === 'system') {
+    const statusEvent = detectOrchestratorStatusEvent(displayText);
+    if (statusEvent) {
+      return (
+        <OrchestratorStatusCard
+          event={statusEvent}
+          timestampLabel={entry.timestampLabel}
+          isLast={isLast}
+        />
+      );
+    }
   }
 
   const hasThinking = Boolean(entry.thinking?.trim());
