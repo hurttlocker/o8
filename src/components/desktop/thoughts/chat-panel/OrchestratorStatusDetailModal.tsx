@@ -155,7 +155,7 @@ export function OrchestratorStatusDetailModal({
             <StatusGlyph event={event} stroke={palette.stroke} size={19} animate={false} />
           </span>
           <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-            <span style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text-strong, var(--t-text))', letterSpacing: '-0.01em' }}>
+            <span style={{ fontSize: 15, fontWeight: 400, color: 'var(--t-text-strong, var(--t-text))', letterSpacing: '-0.1px' }}>
               {title}
             </span>
             {timestampLabel ? (
@@ -169,7 +169,7 @@ export function OrchestratorStatusDetailModal({
 
         {/* Body */}
         <div style={{ paddingTop: 16, paddingBottom: 16, paddingLeft: 18, paddingRight: 18, display: 'flex', flexDirection: 'column', gap: 16 }}>
-          <p style={{ margin: 0, fontSize: 12.5, fontWeight: 360, lineHeight: 1.55, color: 'var(--t-text-secondary)', letterSpacing: '-0.005em' }}>
+          <p style={{ margin: 0, fontSize: 12.5, fontWeight: 300, lineHeight: 1.55, color: 'var(--t-text-secondary)', letterSpacing: '-0.1px' }}>
             {explain}
           </p>
           {rows.length > 0 ? (
@@ -191,7 +191,7 @@ export function OrchestratorStatusDetailModal({
                     background: idx % 2 === 1 ? 'var(--t-input-bg)' : 'transparent',
                   }}
                 >
-                  <span style={{ flexShrink: 0, width: 96, fontSize: 9.5, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}>
+                  <span style={{ flexShrink: 0, width: 96, fontSize: 9.5, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}>
                     {row.label}
                   </span>
                   <span style={{ flex: 1, minWidth: 0, fontSize: 12, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.005em', lineHeight: 1.45, wordBreak: 'break-word' }}>
@@ -277,8 +277,8 @@ function FooterButton({ onClose }: { onClose: () => void }) {
         color: 'var(--t-text)',
         cursor: 'pointer',
         fontSize: 12,
-        fontWeight: 500,
-        letterSpacing: '-0.005em',
+        fontWeight: 400,
+        letterSpacing: '-0.1px',
         fontFamily: 'var(--font-sans-system)',
         transition: 'background 120ms ease',
       }}

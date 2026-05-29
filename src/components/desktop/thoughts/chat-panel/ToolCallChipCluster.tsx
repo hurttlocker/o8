@@ -193,7 +193,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
               color: 'var(--t-text-muted)',
               fontFamily: 'var(--font-sans-system)',
               fontSize: 11,
-              fontWeight: 540,
+              fontWeight: 300,
               letterSpacing: '0.01em',
               paddingTop: 3,
               paddingRight: 9,
@@ -238,7 +238,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
                 color: 'var(--t-text-muted)',
                 fontFamily: 'var(--font-sans-system)',
                 fontSize: 11,
-                fontWeight: 540,
+                fontWeight: 300,
                 letterSpacing: '0.01em',
                 paddingTop: 3,
                 paddingRight: 9,
@@ -292,9 +292,9 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
             <div style={{ minWidth: 0 }}>
               <div style={{
                 fontSize: 10,
-                fontWeight: 640,
+                fontWeight: 300,
                 color: 'var(--t-text-muted)',
-                letterSpacing: '0.06em',
+                letterSpacing: '0.04em',
                 textTransform: 'uppercase',
               }}>
                 Tool call
@@ -302,7 +302,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
               <div style={{
                 marginTop: 3,
                 fontSize: 13,
-                fontWeight: 620,
+                fontWeight: 400,
                 color: 'var(--t-text)',
                 overflow: 'hidden',
                 textOverflow: 'ellipsis',
@@ -325,7 +325,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
                 background: 'var(--t-bg-card)',
                 color: 'var(--t-text-secondary)',
                 fontSize: 11,
-                fontWeight: 600,
+                fontWeight: 400,
                 paddingTop: 4,
                 paddingRight: 8,
                 paddingBottom: 4,
@@ -354,10 +354,10 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
               >
                 <div style={{
                   fontSize: 10,
-                  fontWeight: 700,
+                  fontWeight: 300,
                   color: 'var(--t-text-muted)',
                   textTransform: 'uppercase',
-                  letterSpacing: '0.05em',
+                  letterSpacing: '0.04em',
                   paddingTop: 2,
                 }}>
                   {row.label}

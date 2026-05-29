@@ -8,8 +8,8 @@ function PacketMetaChip({ label, value, mono }: { label: string; value: string; 
       <span
         style={{
           fontSize: 9,
-          fontWeight: 700,
-          letterSpacing: '0.08em',
+          fontWeight: 300,
+          letterSpacing: '0.04em',
           textTransform: 'uppercase',
           color: 'var(--t-text-faint)',
         }}
@@ -92,8 +92,8 @@ export function PacketHeaderCard({
           <span
             style={{
               fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.12em',
+              fontWeight: 300,
+              letterSpacing: '0.04em',
               textTransform: 'uppercase',
               color: 'var(--t-text-faint)',
             }}
@@ -103,9 +103,9 @@ export function PacketHeaderCard({
           <span
             style={{
               fontSize: 13,
-              fontWeight: 600,
+              fontWeight: 400,
               color: 'var(--t-text)',
-              letterSpacing: '-0.01em',
+              letterSpacing: '-0.1px',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',

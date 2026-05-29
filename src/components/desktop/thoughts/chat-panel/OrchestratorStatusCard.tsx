@@ -88,7 +88,7 @@ export function OrchestratorStatusCard({
         </span>
 
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-          <span style={{ fontSize: 13, fontWeight: 500, color: 'var(--t-text)', letterSpacing: '-0.01em', lineHeight: 1.3 }}>
+          <span style={{ fontSize: 13, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.1px', lineHeight: 1.3 }}>
             {title}
           </span>
           {detail ? (
