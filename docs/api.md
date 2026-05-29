@@ -19,6 +19,7 @@ The middleware at `src/middleware.ts` gates state-mutating routes on this auth t
 - Errors return structured JSON: `{ ok: false, error: '<message>' }` with appropriate HTTP status. Never throw — always return a response.
 - Pagination is opt-in per-route via `?limit=<n>&offset=<n>` query params (not standardized across the surface).
 - Realtime updates ship over WebSocket (`/ws` → port 3002), not Server-Sent Events. See `src/ws-server.ts`.
+Note: the realtime `lane-lifecycle` payload carries lane status in the `status` field, not `laneStatus`; client readers should coalesce via `laneStatusOf()` in `src/lib/orchestrator/status-events.ts`.
 
 ## Route reference
 
