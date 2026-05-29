@@ -407,7 +407,7 @@ The user's installed `o8.app` sees the new version via the `UpdateCard` componen
 
 ### Why local instead of CI
 
-GitHub Actions macOS runners failed because of billing. Local `npm run ship` takes ~2–4 min vs ~6 min CI and costs nothing. The CI release workflow (`.github/workflows/release.yml`) still exists as a fallback — it triggers on `v*` tags and uses the same `TAURI_SIGNING_PRIVATE_KEY` secret. If CI billing gets fixed, the workflow will auto-publish parallel to the local script (harmless — `gh release create` in the script errors cleanly when the release already exists, use `--clobber` inside the script to replace assets).
+GitHub Actions macOS runners failed because of billing. Local `npm run ship` takes ~2–4 min vs ~6 min CI and costs nothing. The CI release workflow (`.github/workflows/release.yml`) still exists as a **manual-only** fallback (`workflow_dispatch`) — the `v*` tag trigger was **removed** so every `git push --follow-tags` no longer spins billed macOS runners (`matrix.platform = macos-latest` ×2) that only failed on billing. Run it on-demand from the Actions tab if the local ship path is ever unavailable (e.g. CI macOS billing gets fixed). It uses the same `TAURI_SIGNING_PRIVATE_KEY` secret; `gh release create` in the local script errors cleanly when the release already exists (use `--clobber` to replace assets).
 
 ### Signing
 
