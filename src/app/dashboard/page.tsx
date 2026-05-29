@@ -40,6 +40,7 @@ import {
 import type { WorkspaceSidePanelRepo } from './types';
 import type { O8Tab } from '@/components/desktop/o8-panel/types';
 import {
+  logDashboardBootTiming,
   markDashboardScriptStart,
   markDashboardFirstRender,
   markDashboardInteractive,
@@ -576,6 +577,7 @@ function DashboardInner() {
 
   const [inTauri, setInTauri] = useState(false);
   useEffect(() => {
+    logDashboardBootTiming();
     setInTauri(isTauri());
     // tauri-plugin-mcp no longer needs JS-side init — the eval_and_await
     // protocol shipped in #932 phase 2 invokes JS from Rust per call.
