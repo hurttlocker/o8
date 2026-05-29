@@ -336,15 +336,15 @@ export function useOrchestratorStream(
     const activeRepoPath = repoPathRef.current;
     if (!activeRepoPath) return;
     await archiveCompletedMissionThread(detail, {
-      appendLocalEntries,
       planText: planTextRef.current,
       replaceTranscript,
+      getTranscript: () => messagesRef.current,
       repoPath: activeRepoPath,
       reset,
       transcript: messagesRef.current,
       transitionStripTimerRef,
     });
-  }, [appendLocalEntries, replaceTranscript, reset]);
+  }, [replaceTranscript, reset]);
 
   const rotateMissionThread = useCallback(async (detail: OrchestratorMissionCompletedDetail) => {
     const activeRepoPath = normalizeRepoPath(repoPathRef.current);
