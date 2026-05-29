@@ -1,9 +1,11 @@
 name: Release
 
 on:
-  push:
-    tags:
-      - 'v*'
+  # Manual-only. Local `npm run ship` publishes releases (see CLAUDE.md), so the
+  # tag-push trigger is removed — every `git push --follow-tags` was spinning
+  # billed macOS runners (matrix.platform = macos-latest ×2) that only failed on
+  # billing anyway. Run on-demand from the Actions tab if the local ship path is
+  # ever unavailable (e.g. CI macOS billing gets fixed).
   workflow_dispatch:
 
 permissions:
