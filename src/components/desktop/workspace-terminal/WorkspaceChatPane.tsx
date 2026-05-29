@@ -71,9 +71,10 @@ function looksLikePacketPrompt(text: string): boolean {
 
 function WorkspaceChatPaneBase({
   tab,
-  // `active` is retained on the prop surface for Packet C (visibility/display
-  // wiring) but the hook no longer consumes it — Packet B killed the active-
-  // gated polling that was the only reader.
+  // `active` (tab focused/visible) gates the transcript re-fetch + live poll in
+  // useWorkspaceChatPane, so a dispatched packet's transcript loads on view and
+  // streams while the agent is working.
+  active,
   onUpdateMessages,
   onUpdateSessionKey,
   onRunInTerminal,
@@ -85,6 +86,7 @@ function WorkspaceChatPaneBase({
 }: WorkspaceChatPaneProps) {
   const chat = useWorkspaceChatPane({
     tab,
+    active,
     onUpdateMessages,
     onUpdateSessionKey,
     onSelectModel,

@@ -45,6 +45,7 @@ import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-jso
 
 interface UseWorkspaceChatPaneOptions {
   tab: TerminalTab;
+  active?: boolean;
   onUpdateMessages: (tabId: string, messages: MobileTranscriptEntry[]) => void;
   onUpdateSessionKey: (tabId: string, sessionKey: string) => void;
   onSelectModel: (tabId: string, modelId: string) => void;
@@ -53,6 +54,7 @@ interface UseWorkspaceChatPaneOptions {
 
 export function useWorkspaceChatPane({
   tab,
+  active = false,
   onUpdateMessages,
   onUpdateSessionKey,
   onSelectModel,
@@ -204,16 +206,32 @@ export function useWorkspaceChatPane({
     return status === 'running' || status === 'launched' || status === 'waiting';
   })();
 
+  // Load the transcript on mount, RE-load whenever the tab becomes active, and
+  // poll while an agent is actively working. The one-shot-on-mount bootstrap
+  // wasn't enough for DISPATCHED packets: the pane often mounts at dispatch time
+  // (transcript still empty) and the WS history push doesn't reliably cover
+  // MCP-dispatched owned-Codex sessions — so the transcript never filled in and
+  // the operator couldn't watch the agent work. A bounded pull (re-fetch on
+  // activate + 3s poll only while active AND the supervisor is running) makes
+  // the transcript load on view and stream live, then goes quiet once idle.
   useEffect(() => {
     if (!normalizedSessionKey) return undefined;
     const controller = new AbortController();
-    void bootstrapTranscripts([normalizedSessionKey], {
+    const run = () => bootstrapTranscripts([normalizedSessionKey], {
       merge: mergeTranscriptEntries,
       signal: controller.signal,
       refetchFresh: true,
     });
-    return () => controller.abort();
-  }, [normalizedSessionKey]);
+    void run();
+    let interval: number | undefined;
+    if (active && supervisorActive) {
+      interval = window.setInterval(() => { void run(); }, 3000);
+    }
+    return () => {
+      controller.abort();
+      if (interval !== undefined) window.clearInterval(interval);
+    };
+  }, [normalizedSessionKey, active, supervisorActive]);
 
   const sendText = useCallback(async (inputText: string, options?: {
     baseMessages?: MobileTranscriptEntry[];
