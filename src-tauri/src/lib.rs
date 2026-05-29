@@ -698,6 +698,30 @@ fn child_stdio(file: Option<&std::fs::File>) -> std::process::Stdio {
     }
 }
 
+fn prewarm_bundled_next_server(api_port: u16) {
+    std::thread::spawn(move || {
+        let url = format!("http://127.0.0.1:{}/dashboard", api_port);
+        std::thread::sleep(std::time::Duration::from_millis(150));
+
+        let client = match reqwest::blocking::Client::builder()
+            .timeout(std::time::Duration::from_millis(1500))
+            .build()
+        {
+            Ok(client) => client,
+            Err(_) => return,
+        };
+
+        for attempt in 0..4 {
+            if client.get(&url).header("Connection", "close").send().is_ok() {
+                return;
+            }
+            if attempt < 3 {
+                std::thread::sleep(std::time::Duration::from_millis(250));
+            }
+        }
+    });
+}
+
 fn spawn_bundled_ws_server(
     node_bin: &str,
     server_dir: &std::path::Path,
@@ -2834,6 +2858,7 @@ pub fn run() {
                         let pid = child.id();
                         log::info!("Next.js server started (pid: {})", pid);
                         sidecar_lifecycle::register_child(pid);
+                        prewarm_bundled_next_server(api_port);
                     }
                     Err(e) => {
                         log::error!("Failed to start server: {}", e);
