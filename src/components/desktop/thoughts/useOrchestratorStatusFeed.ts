@@ -6,6 +6,7 @@ import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { hasMissionBeenCarded, markMissionCarded } from '@/lib/orchestrator/store';
 import {
   deriveLaneStatusEvent,
+  laneStatusOf,
   statusEventDedupeKey,
   statusEventToText,
   type LaneLifecyclePayload,
@@ -184,7 +185,7 @@ export function useOrchestratorStatusFeed({
 
       // Advance the mission-complete tracker when a packet's lane completes —
       // the durable per-packet signal that survives the mission-state clear.
-      if (data.laneStatus === 'completed') {
+      if (laneStatusOf(data) === 'completed') {
         for (const [missionKey, tracker] of missionTrackers) {
           let packetId = data.packetId && tracker.packetIds.has(data.packetId) ? data.packetId : null;
           if (!packetId) {
