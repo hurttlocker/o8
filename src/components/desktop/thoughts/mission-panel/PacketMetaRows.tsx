@@ -173,9 +173,9 @@ export function PacketMetaRows({
   };
   const rowLabelStyle: React.CSSProperties = {
     fontSize: 9,
-    fontWeight: 700,
+    fontWeight: 300,
     textTransform: 'uppercase',
-    letterSpacing: '0.06em',
+    letterSpacing: '0.04em',
     color: 'var(--t-text-muted)',
     width: 58,
     flexShrink: 0,
@@ -271,7 +271,7 @@ export function PacketMetaRows({
           onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
         >
           <span style={rowLabelStyle}>runtime</span>
-          <span style={{ ...rowValueStyle, color: orchestratorRuntimeTone(packet.runtime).color, fontWeight: 600, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' as const }}>
+          <span style={{ ...rowValueStyle, color: orchestratorRuntimeTone(packet.runtime).color, fontWeight: 400, display: 'flex', alignItems: 'center', gap: 6, whiteSpace: 'nowrap' as const }}>
             {/* min-width:0 lets the runtime label shrink so the recommendation
                 chip never gets clipped by the row's overflow:hidden, even when
                 running packets carry longer lane metadata or denser layout. */}

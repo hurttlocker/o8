@@ -252,8 +252,8 @@ function SessionPillBase({
           <span
             style={{
               fontSize: 9,
-              fontWeight: 700,
-              letterSpacing: '0.06em',
+              fontWeight: 300,
+              letterSpacing: '0.04em',
               textTransform: 'uppercase',
               color: tint,
               flexShrink: 0,
@@ -264,7 +264,7 @@ function SessionPillBase({
           <span
             style={{
               fontSize: 10.5,
-              fontWeight: 500,
+              fontWeight: 400,
               color: 'var(--t-text-muted)',
               overflow: 'hidden',
               textOverflow: 'ellipsis',
@@ -279,7 +279,7 @@ function SessionPillBase({
         <div
           style={{
             fontSize: 10.5,
-            fontWeight: 500,
+            fontWeight: 400,
             color: 'var(--t-text-muted)',
             lineHeight: 1.3,
             overflow: 'hidden',
@@ -414,8 +414,8 @@ function SessionVisualizerBase({
           <div
             style={{
               fontSize: 10,
-              fontWeight: 700,
-              letterSpacing: '0.08em',
+              fontWeight: 300,
+              letterSpacing: '0.04em',
               textTransform: 'uppercase',
               color: 'var(--t-text-muted)',
             }}
@@ -425,7 +425,7 @@ function SessionVisualizerBase({
           <div
             style={{
               fontSize: 10,
-              fontWeight: 600,
+              fontWeight: 300,
               color: 'var(--t-text-faint)',
             }}
           >
@@ -446,7 +446,7 @@ function SessionVisualizerBase({
             <div
               style={{
                 fontSize: 10,
-                fontWeight: 700,
+                fontWeight: 300,
                 color: 'var(--t-text-faint)',
                 letterSpacing: '0.04em',
                 textTransform: 'uppercase',
@@ -473,7 +473,7 @@ function SessionVisualizerBase({
                 background: 'var(--t-bg-card)',
                 color: 'var(--t-text-secondary)',
                 fontSize: 12,
-                fontWeight: 700,
+                fontWeight: 400,
                 cursor: 'pointer',
               }}
               onMouseEnter={(event) => {
@@ -510,7 +510,7 @@ function SessionVisualizerBase({
             borderColor: 'var(--t-divider-subtle)',
             background: 'transparent',
             fontSize: 11,
-            fontWeight: 500,
+            fontWeight: 400,
             color: 'var(--t-text-muted)',
           }}
         >

@@ -200,14 +200,14 @@ export function PacketCard({
         >
           <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusMeta.color, boxShadow: `0 0 6px ${statusMeta.border}`, flexShrink: 0 }} />
           <span style={{ flex: 1, minWidth: 0 }}>
-            <span style={{ display: 'block', fontSize: 11, fontWeight: 600, lineHeight: 1.35, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.01em' }}>
+            <span style={{ display: 'block', fontSize: 11, fontWeight: 400, lineHeight: 1.35, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.1px' }}>
               {packet.title}
             </span>
             <span style={{ display: 'block', marginTop: 1, fontSize: 9, lineHeight: 1.3, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {orchestratorRuntimeTone(packet.runtime).label}
             </span>
           </span>
-          <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 600, color: statusMeta.color, letterSpacing: '-0.01em' }}>
+          <span style={{ flexShrink: 0, fontSize: 9, fontWeight: 300, color: statusMeta.color, letterSpacing: '-0.1px' }}>
             {statusMeta.label}
           </span>
           <svg width={10} height={10} viewBox="0 0 10 10" fill="none" stroke="var(--t-text-muted)" strokeWidth="1.5" strokeLinecap="round" style={{ flexShrink: 0, transform: isExpanded ? 'rotate(0deg)' : 'rotate(-90deg)', transition: 'transform 150ms cubic-bezier(0.22, 1, 0.36, 1)' }}>
@@ -231,10 +231,10 @@ export function PacketCard({
               paddingLeft: 10,
               borderRadius: 12,
               fontSize: 10,
-              fontWeight: 700,
+              fontWeight: 400,
               cursor: canLaunch ? 'pointer' : 'not-allowed',
               opacity: canLaunch ? 1 : 0.5,
-              letterSpacing: '-0.01em',
+              letterSpacing: '-0.1px',
             }}
           >
             Launch
@@ -320,9 +320,9 @@ export function PacketCard({
               <span
                 style={{
                   fontSize: 9,
-                  fontWeight: 700,
+                  fontWeight: 300,
                   textTransform: 'uppercase',
-                  letterSpacing: '0.06em',
+                  letterSpacing: '0.04em',
                   color: 'var(--t-text-muted)',
                   width: 58,
                   flexShrink: 0,
@@ -376,10 +376,10 @@ export function PacketCard({
             <span
               style={{
                 fontSize: 9,
-                fontWeight: 700,
+                fontWeight: 300,
                 color: 'var(--t-text-muted)',
                 textTransform: 'uppercase',
-                letterSpacing: '0.06em',
+                letterSpacing: '0.04em',
                 paddingTop: 5,
                 flexShrink: 0,
                 width: 56,
@@ -406,7 +406,7 @@ export function PacketCard({
                 paddingBottom: 6,
                 paddingLeft: 10,
                 fontSize: 10.5,
-                fontWeight: 600,
+                fontWeight: 400,
                 color: '#b91c1c',
                 background: 'rgba(239, 68, 68, 0.06)',
                 borderTopWidth: 1,
@@ -446,7 +446,7 @@ export function PacketCard({
                   paddingLeft: 8,
                   borderRadius: 5,
                   fontSize: 10.5,
-                  fontWeight: 600,
+                  fontWeight: 400,
                   cursor: 'pointer',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; e.currentTarget.style.color = 'var(--t-text)'; }}
@@ -468,7 +468,7 @@ export function PacketCard({
                   paddingLeft: 8,
                   borderRadius: 5,
                   fontSize: 10.5,
-                  fontWeight: 600,
+                  fontWeight: 400,
                   cursor: 'pointer',
                 }}
                 onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'; }}
@@ -490,7 +490,7 @@ export function PacketCard({
                 paddingLeft: 8,
                 borderRadius: 5,
                 fontSize: 10.5,
-                fontWeight: 600,
+                fontWeight: 400,
                 cursor: 'pointer',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-divider-subtle)'; e.currentTarget.style.color = 'var(--t-text)'; }}
@@ -511,7 +511,7 @@ export function PacketCard({
                 paddingLeft: 8,
                 borderRadius: 5,
                 fontSize: 10.5,
-                fontWeight: 600,
+                fontWeight: 400,
                 cursor: 'pointer',
               }}
               onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'; e.currentTarget.style.color = '#ef4444'; }}
@@ -535,10 +535,10 @@ export function PacketCard({
                 paddingLeft: 10,
                 borderRadius: 12,
                 fontSize: 10.5,
-                fontWeight: 700,
+                fontWeight: 400,
                 cursor: canLaunch ? 'pointer' : 'not-allowed',
                 opacity: canLaunch ? 1 : 0.5,
-                letterSpacing: '-0.01em',
+                letterSpacing: '-0.1px',
               }}
             >
               Launch
@@ -559,7 +559,7 @@ export function PacketCard({
                       paddingLeft: 8,
                       borderRadius: 5,
                       fontSize: 10.5,
-                      fontWeight: 700,
+                      fontWeight: 400,
                       cursor: 'pointer',
                     }}
                     onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(37, 99, 235, 0.08)'; }}
@@ -582,7 +582,7 @@ export function PacketCard({
                       paddingLeft: 10,
                       borderRadius: 5,
                       fontSize: 10.5,
-                      fontWeight: 700,
+                      fontWeight: 400,
                       cursor: 'pointer',
                       letterSpacing: '-0.01em',
                     }}
@@ -628,7 +628,7 @@ export function PacketCard({
         <div style={{ padding: '0 14px 8px', display: 'flex', alignItems: 'center', gap: 6 }}>
           <span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{runtimeMeta.label}</span>
           {targetLabel ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>{targetLabel}</span></> : null}
-          {packet.lane ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: '#22c55e', fontWeight: 600 }}>Live</span></> : null}
+          {packet.lane ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: '#22c55e', fontWeight: 400 }}>Live</span></> : null}
           {packet.lane?.laneId ? <><span style={{ fontSize: 10, color: 'var(--t-text-muted)' }}>·</span><span style={{ fontSize: 10, color: 'var(--t-text-muted)', fontFamily: 'var(--font-mono, "SF Mono", Menlo, monospace)' }}>{packet.lane.laneId.slice(0, 12)}</span></> : null}
         </div>
       )}
