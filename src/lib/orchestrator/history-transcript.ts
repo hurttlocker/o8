@@ -1,91 +1,15 @@
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-
-type StoredTranscriptMessage = {
-  id?: string;
-  role?: MobileTranscriptEntry['role'];
-  content?: string;
-  text?: string;
-  type?: MobileTranscriptEntry['type'];
-  media?: MobileTranscriptEntry['media'];
-  toolCalls?: MobileTranscriptEntry['toolCalls'];
-  timestamp?: number;
-  timestampLabel?: string;
-  model?: string;
-  tokens?: MobileTranscriptEntry['tokens'];
-  costUsd?: number;
-  sources?: MobileTranscriptEntry['sources'];
-  thinking?: string;
-  thinkingSteps?: MobileTranscriptEntry['thinkingSteps'];
-  thinkingDurationMs?: MobileTranscriptEntry['thinkingDurationMs'];
-  recalledFacts?: MobileTranscriptEntry['recalledFacts'];
-  command?: MobileTranscriptEntry['command'];
-  compaction?: MobileTranscriptEntry['compaction'];
-  statusEvent?: MobileTranscriptEntry['statusEvent'];
-  isPartial?: boolean;
-  isCompaction?: boolean;
-};
-
-function normalizeStoredMessage(value: unknown): MobileTranscriptEntry | null {
-  const message = (value && typeof value === 'object' ? value : null) as StoredTranscriptMessage | null;
-  const role = message?.role;
-  if (
-    !message
-    || typeof message.id !== 'string'
-    || (role !== 'user' && role !== 'assistant' && role !== 'system' && role !== 'tool')
-    || message.isPartial
-  ) {
-    return null;
-  }
-
-  return {
-    id: message.id,
-    role,
-    text: typeof message.text === 'string' ? message.text : typeof message.content === 'string' ? message.content : '',
-    type: message.type ?? (message.compaction || message.isCompaction ? 'compaction' : 'message'),
-    media: message.media,
-    toolCalls: message.toolCalls,
-    timestamp: typeof message.timestamp === 'number' ? message.timestamp : undefined,
-    timestampLabel: typeof message.timestampLabel === 'string' ? message.timestampLabel : undefined,
-    model: typeof message.model === 'string' ? message.model : undefined,
-    tokens: message.tokens,
-    costUsd: typeof message.costUsd === 'number' ? message.costUsd : undefined,
-    sources: message.sources,
-    thinking: typeof message.thinking === 'string' ? message.thinking : undefined,
-    thinkingSteps: message.thinkingSteps,
-    thinkingDurationMs: typeof message.thinkingDurationMs === 'number' ? message.thinkingDurationMs : undefined,
-    recalledFacts: typeof message.recalledFacts === 'number' ? message.recalledFacts : undefined,
-    command: message.command,
-    compaction: message.compaction,
-    statusEvent: message.statusEvent,
-  };
-}
+import {
+  deserializeStoredTranscript,
+  serializeTranscriptForStorage,
+  type SerializeTranscriptForStorageOptions,
+} from '@/lib/transcripts/history-serde';
 
 export function serializeThoughtsHistoryMessages(
   messages: MobileTranscriptEntry[],
-  options?: { timestampFallback?: 'now' | 'zero' },
+  options?: SerializeTranscriptForStorageOptions,
 ) {
-  const timestampFallback = options?.timestampFallback ?? 'now';
-  return messages.map((message) => ({
-    id: message.id,
-    role: message.role,
-    content: message.text,
-    type: message.type,
-    media: message.media,
-    toolCalls: message.toolCalls,
-    timestamp: message.timestamp ?? (timestampFallback === 'zero' ? 0 : Date.now()),
-    timestampLabel: message.timestampLabel,
-    model: message.model,
-    tokens: message.tokens,
-    costUsd: message.costUsd,
-    sources: message.sources,
-    thinking: message.thinking,
-    thinkingSteps: message.thinkingSteps,
-    thinkingDurationMs: message.thinkingDurationMs,
-    recalledFacts: message.recalledFacts,
-    command: message.command,
-    compaction: message.compaction,
-    statusEvent: message.statusEvent,
-  }));
+  return serializeTranscriptForStorage(messages, options);
 }
 
 export function transcriptMatchesStoredHistory(
@@ -96,11 +20,13 @@ export function transcriptMatchesStoredHistory(
     return false;
   }
 
-  const normalizedCandidate = candidateMessages
-    .map((message) => normalizeStoredMessage(message))
-    .filter((message): message is MobileTranscriptEntry => message !== null);
+  const normalizedCurrent = deserializeStoredTranscript(
+    serializeThoughtsHistoryMessages(current, { timestampFallback: 'zero' }),
+    { dropInvalid: true },
+  );
+  const normalizedCandidate = deserializeStoredTranscript(candidateMessages, { dropInvalid: true });
 
-  return JSON.stringify(serializeThoughtsHistoryMessages(current, { timestampFallback: 'zero' }))
+  return JSON.stringify(serializeThoughtsHistoryMessages(normalizedCurrent, { timestampFallback: 'zero' }))
     === JSON.stringify(serializeThoughtsHistoryMessages(normalizedCandidate, { timestampFallback: 'zero' }));
 }
 
