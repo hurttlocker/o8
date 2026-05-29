@@ -8,7 +8,7 @@
  * Esc / backdrop to close.
  */
 
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import {
   humanizeLaneStatus,
@@ -26,13 +26,12 @@ function detailContent(event: OrchestratorStatusEventData): { explain: string; r
   switch (event.kind) {
     case 'mission-complete':
       return {
-        explain: 'Every packet in this mission was reviewed, merged into the base branch, and its lane archived. The thread is ready for your next mission.',
+        explain: 'Every packet in this mission was reviewed, merged into the base branch, and its lane archived. Here is what shipped.',
         rows: [
           { label: 'Merged', value: `${event.mergedCount} ${event.mergedCount === 1 ? 'packet' : 'packets'}` },
           ...(typeof event.archivedCount === 'number'
             ? [{ label: 'Archived', value: `${event.archivedCount} ${event.archivedCount === 1 ? 'lane' : 'lanes'}` }]
             : []),
-          ...(event.summary ? [{ label: 'Summary', value: event.summary }] : []),
         ],
       };
     case 'merge':
@@ -201,6 +200,7 @@ export function OrchestratorStatusDetailModal({
               ))}
             </div>
           ) : null}
+          {event.kind === 'mission-complete' ? <MissionPacketSummary event={event} /> : null}
         </div>
 
         {/* Footer */}
@@ -291,5 +291,128 @@ function FooterButton({ onClose }: { onClose: () => void }) {
     >
       Got it
     </button>
+  );
+}
+
+type MissionCompleteEvent = Extract<OrchestratorStatusEventData, { kind: 'mission-complete' }>;
+
+interface MissionPacketLine {
+  referenceLabel?: string;
+  title: string;
+  outcome?: string | null;
+  summary?: string | null;
+  fileCount?: number;
+}
+
+/**
+ * The "What shipped" section of the mission-complete detail modal. Lazily
+ * fetches a free-AI prose summary of the merged packets (server hydrates each
+ * from the session_outcomes ledger) and renders it above an Issues-style list
+ * of the packets themselves. Degrades to the packet titles carried on the event
+ * if the summary request fails or no OpenRouter key is configured.
+ */
+function MissionPacketSummary({ event }: { event: MissionCompleteEvent }) {
+  const packetsFromEvent = event.packets ?? [];
+  const [state, setState] = useState<{
+    status: 'idle' | 'loading' | 'done';
+    prose: string | null;
+    lines: MissionPacketLine[];
+  }>({ status: packetsFromEvent.length > 0 ? 'loading' : 'idle', prose: null, lines: [] });
+
+  useEffect(() => {
+    const packets = event.packets ?? [];
+    if (packets.length === 0) {
+      setState({ status: 'idle', prose: null, lines: [] });
+      return;
+    }
+    const controller = new AbortController();
+    const fallbackLines: MissionPacketLine[] = packets.map((packet) => ({
+      title: packet.title,
+      referenceLabel: packet.referenceLabel,
+    }));
+    setState({ status: 'loading', prose: null, lines: [] });
+
+    void (async () => {
+      try {
+        const response = await fetch('/api/panel/o8-mission-summary', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ repoPath: event.repoPath ?? null, summary: event.summary ?? null, packets }),
+          signal: controller.signal,
+        });
+        if (!response.ok) throw new Error('mission summary request failed');
+        const data = await response.json() as { prose?: string | null; packets?: MissionPacketLine[] };
+        const lines = Array.isArray(data.packets) && data.packets.length > 0 ? data.packets : fallbackLines;
+        setState({ status: 'done', prose: data.prose ?? null, lines });
+      } catch {
+        if (controller.signal.aborted) return;
+        setState({ status: 'done', prose: event.summary ?? null, lines: fallbackLines });
+      }
+    })();
+
+    return () => controller.abort();
+  }, [event]);
+
+  if (packetsFromEvent.length === 0) return null;
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: 'var(--t-text-faint)' }}>
+        What shipped
+      </span>
+      {state.status === 'loading' ? (
+        <span style={{ fontSize: 12, fontWeight: 300, color: 'var(--t-text-faint)', letterSpacing: '-0.1px', animation: 'o8StatusModalFade 900ms ease-in-out infinite alternate' }}>
+          Summarizing the work…
+        </span>
+      ) : null}
+      {state.prose ? (
+        <p style={{ margin: 0, fontSize: 12.5, fontWeight: 300, lineHeight: 1.55, color: 'var(--t-text-secondary)', letterSpacing: '-0.1px' }}>
+          {state.prose}
+        </p>
+      ) : null}
+      {state.lines.length > 0 ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 0, borderRadius: 10, borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider)', overflow: 'hidden' }}>
+          {state.lines.map((line, idx) => (
+            <div
+              key={`${line.referenceLabel ?? 'pkt'}-${idx}`}
+              style={{
+                display: 'flex',
+                alignItems: 'baseline',
+                gap: 10,
+                paddingTop: 9,
+                paddingBottom: 9,
+                paddingLeft: 12,
+                paddingRight: 12,
+                borderTopWidth: idx === 0 ? 0 : 1,
+                borderTopStyle: 'solid',
+                borderTopColor: 'var(--t-divider-subtle, var(--t-divider))',
+                background: idx % 2 === 1 ? 'var(--t-input-bg)' : 'transparent',
+              }}
+            >
+              {line.referenceLabel ? (
+                <span style={{ flexShrink: 0, fontSize: 10, fontWeight: 400, color: 'var(--t-text-faint)', letterSpacing: '0.02em', fontVariantNumeric: 'tabular-nums' }}>
+                  {line.referenceLabel}
+                </span>
+              ) : null}
+              <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.005em', lineHeight: 1.4, wordBreak: 'break-word' }}>
+                  {line.title}
+                </span>
+                {line.summary ? (
+                  <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)', letterSpacing: '-0.05px', lineHeight: 1.45, wordBreak: 'break-word' }}>
+                    {line.summary}
+                  </span>
+                ) : null}
+                {typeof line.fileCount === 'number' && line.fileCount > 0 ? (
+                  <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--t-text-faint)', letterSpacing: '0.02em' }}>
+                    {line.fileCount} {line.fileCount === 1 ? 'file' : 'files'} changed
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
   );
 }

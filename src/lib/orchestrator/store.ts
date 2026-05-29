@@ -65,6 +65,8 @@ export interface OrchestratorMissionCompletedDetail {
   missionId: string; repoPath: string | null; summary: string;
   mergedCount: number; archivedCount: number;
   completedAt: string;
+  /** Merged packets (id + title) so the detail modal can explain what shipped. */
+  packets: Array<{ id: string; title: string; referenceLabel: string }>;
 }
 
 function nowIso() {
@@ -85,14 +87,20 @@ function buildMissionCompletedDetail(
     return null;
   }
 
-  const mergedCount = next.packets.filter((packet) => packet.releaseState === 'released').length;
+  const releasedPackets = next.packets.filter((packet) => packet.releaseState === 'released');
+  const mergedCount = releasedPackets.length;
   const archivedCount = next.packets.filter((packet) => Boolean(packet.archivedAt)).length;
   const completedAt = next.packets.reduce((latest, packet) => {
     const candidate = packet.archivedAt ?? packet.lastEventAt ?? packet.review?.recordedAt ?? next.updatedAt;
     return candidate > latest ? candidate : latest;
   }, next.updatedAt);
+  const packets = releasedPackets.map((packet) => ({
+    id: packet.id,
+    title: packet.title,
+    referenceLabel: packet.referenceLabel,
+  }));
 
-  return { missionId, repoPath: next.repoPath ?? null, summary: next.summary, mergedCount, archivedCount, completedAt };
+  return { missionId, repoPath: next.repoPath ?? null, summary: next.summary, mergedCount, archivedCount, completedAt, packets };
 }
 
 function packetReferenceIndex(label?: string | null) {
