@@ -85,6 +85,8 @@ function showMissionThreadTransition(
     mergedCount: mergeCount,
     archivedCount: detail.archivedCount,
     summary: detail.summary || undefined,
+    repoPath: detail.repoPath,
+    packets: detail.packets,
   };
   options.replaceTranscript([{ ...buildMissionTransitionEntry(confirmationId, summary, startedAt), statusEvent }]);
 
