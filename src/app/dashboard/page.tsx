@@ -136,6 +136,7 @@ const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignMode
 const LazyO8Panel = lazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })));
 // #888/#895 — packet-mode right panel (Spec / Agent Overview / Changes).
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
+import { useMissionCompleteDetector } from '@/components/desktop/thoughts/mission-complete-detector';
 import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
 import { TileContainer } from '@/components/desktop/TileContainer';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
@@ -901,6 +902,11 @@ function DashboardInner() {
     setThoughtsMissionState,
     thoughtsMissionState,
   } = useOrchestratorMission();
+  // Always-mounted Mission-complete detector — records the card from durable
+  // lane-lifecycle signals regardless of which tab is focused, so a dispatched
+  // mission's completion card survives the orchestrator tab's active/mode
+  // flapping. The orchestrator feed drains the recorded card on view.
+  useMissionCompleteDetector(thoughtsMissionState);
   // ── Right panel + workspace side panel state (tightly coupled to callbacks, kept inline) ──
   // SSR-safe defaults; hydrate from localStorage in an effect so the
   // visibility/kind survives a reload but server and first client render
