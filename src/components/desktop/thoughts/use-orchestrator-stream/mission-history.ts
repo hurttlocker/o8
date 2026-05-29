@@ -5,7 +5,7 @@ import {
   serializeThoughtsHistoryMessages,
   transcriptMatchesStoredHistory,
 } from '@/lib/orchestrator/history-transcript';
-import type { OrchestratorMissionCompletedDetail } from '@/lib/orchestrator/store';
+import { markMissionCarded, type OrchestratorMissionCompletedDetail } from '@/lib/orchestrator/store';
 import type { OrchestratorStatusEventData } from '@/lib/orchestrator/status-events';
 import { normalizeRepoPath } from './shared';
 
@@ -73,6 +73,10 @@ function showMissionThreadTransition(
     clearTimeout(options.transitionStripTimerRef.current);
     options.transitionStripTimerRef.current = null;
   }
+
+  // Claim this mission so the lifecycle-driven status feed (the fallback for
+  // MCP-dispatched missions) doesn't also card it.
+  markMissionCarded(detail.missionId);
 
   const startedAt = Date.now();
   const confirmationId = `orch-mission-complete-${startedAt}`;
