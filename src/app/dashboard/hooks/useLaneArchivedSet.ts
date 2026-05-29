@@ -22,9 +22,19 @@ export interface ArchivedLaneView {
   packetIds: Set<string>;
 }
 
+// Terminal lane statuses that mean "retired" — the session is done and the
+// tab should be read-only. `archived` is the normal post-merge state, but the
+// governance-override merge path (o8_approve → merge) leaves a lane at
+// `completed`: it merged yet never transitioned to `archived`. Both are
+// inactive (the Codex process has exited), so we treat them the same —
+// otherwise an override-merged packet's tab stays stuck on "Agent working…"
+// with a live steer composer while its sibling (normal merge) reads as merged.
+const RETIRED_LANE_STATUSES = new Set(['archived', 'completed']);
+
 // Fetches all lanes and exposes the sessionKeys + packetIds that belong to
-// lanes in `archived` status. Subscribes to the realtime lane lifecycle
-// window event so a refetch fires whenever a lane transitions.
+// lanes in a retired (`archived` / `completed`) status. Subscribes to the
+// realtime lane lifecycle window event so a refetch fires whenever a lane
+// transitions.
 //
 // #542 — A supervisor retry loop binds multiple sessionKeys to the same
 // lane over its lifetime. By the time the lane archives, `lane.sessionKey`
@@ -60,7 +70,7 @@ export function useLaneArchivedView(): ArchivedLaneView {
       const nextSessions = new Set<string>();
       const nextPackets = new Set<string>();
       for (const lane of data.lanes ?? []) {
-        if (lane.status !== 'archived') continue;
+        if (!RETIRED_LANE_STATUSES.has(lane.status)) continue;
         if (lane.sessionKey) nextSessions.add(lane.sessionKey);
         if (lane.packetId) nextPackets.add(lane.packetId);
         const accumulated = laneSessionKeysRef.current.get(lane.id);
@@ -101,7 +111,7 @@ export function useLaneArchivedView(): ArchivedLaneView {
         }
         keys.add(data.sessionKey);
       }
-      if (data?.laneStatus === 'archived') {
+      if (data?.laneStatus && RETIRED_LANE_STATUSES.has(data.laneStatus)) {
         const keys = data.laneId ? laneSessionKeysRef.current.get(data.laneId) : null;
         const packetId = data.packetId ?? null;
         setState((current) => {
