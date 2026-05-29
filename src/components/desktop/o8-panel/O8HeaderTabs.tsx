@@ -150,11 +150,16 @@ export function O8HeaderTabs({
       role="tablist"
       aria-label="O8 panel tabs"
       style={{
-        display: 'inline-flex',
+        display: 'flex',
         alignItems: 'center',
         gap: 3,
         height: 32,
-        flexShrink: 0,
+        minWidth: 0,
+        maxWidth: '100%',
+        flexShrink: 1,
+        overflowX: 'auto',
+        overflowY: 'hidden',
+        scrollbarWidth: 'none',
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
     >
