@@ -14,8 +14,24 @@
  *    into a merge / heal status event, client-side (see useOrchestratorStatusFeed).
  */
 
+/** Lightweight per-packet identity carried on a mission-complete event, so the
+ *  detail modal can lazily fetch each packet's ledger summary (kept small —
+ *  the heavy session_outcomes lookup + AI prose happen server-side on click). */
+export interface MissionStatusPacket {
+  id: string;
+  title: string;
+  referenceLabel?: string;
+}
+
 export type OrchestratorStatusEventData =
-  | { kind: 'mission-complete'; mergedCount: number; archivedCount?: number; summary?: string }
+  | {
+      kind: 'mission-complete';
+      mergedCount: number;
+      archivedCount?: number;
+      summary?: string;
+      repoPath?: string | null;
+      packets?: MissionStatusPacket[];
+    }
   | { kind: 'merge'; packetTitle: string; branch?: string | null; runtime?: string | null }
   | { kind: 'heal'; outcome: 'recovered' | 'needs-human'; packetTitle?: string | null; previousStatus?: string | null };
 
