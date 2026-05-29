@@ -71,17 +71,19 @@ export function ColumnHeaderStrip({
         color: 'var(--t-text)',
         position: 'relative',
         boxSizing: 'border-box',
+        minWidth: 0,
+        overflow: 'hidden',
         ['WebkitAppRegion' as string]: drag ? 'drag' : 'no-drag',
         ...style,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 1, minWidth: 0, overflow: 'hidden' }}>
         {left}
       </div>
-      <div style={{ flex: 1, display: 'flex', alignItems: 'center', minWidth: 0 }}>
+      <div style={{ flex: 1, display: 'flex', alignItems: 'center', minWidth: 0, overflow: 'hidden' }}>
         {center}
       </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0, minWidth: 0, overflow: 'hidden' }}>
         {right}
       </div>
     </div>

@@ -170,7 +170,9 @@ const MAX_RIGHT_PANEL_WIDTH = 720;
 const MIN_O8_PANEL_WIDTH = 400;
 const MAX_O8_PANEL_WIDTH = 1200;
 const O8_SPEC_PANEL_TARGET_WIDTH = 600;
-const COMPACT_SHELL_MEDIA_QUERY = '(max-width: 980px)';
+const RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH = 1180;
+const RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH = 900;
+const RESPONSIVE_COMPACT_SHELL_WIDTH = 420;
 const O8_ACTIVE_TAB_STORAGE_KEY = 'o8ActiveTab';
 const DEFAULT_O8_ACTIVE_TAB: O8Tab = 'activity';
 
@@ -905,6 +907,10 @@ function DashboardInner() {
   // match (no hydration mismatch).
   const [chatVisible, setChatVisible] = useState(false);
   const [rightPanelKind, setRightPanelKind] = useState<'review' | 'o8'>('o8');
+  const [viewportWidth, setViewportWidth] = useState<number | null>(null);
+  const viewportWidthRef = useRef<number | null>(null);
+  const [responsiveAutoCollapsed, setResponsiveAutoCollapsed] = useState({ left: false, right: false });
+  const responsiveManualOpenRef = useRef({ left: false, right: false });
   useEffect(() => {
     try {
       const visRaw = window.localStorage.getItem('o8:right-panel:visible');
@@ -914,20 +920,102 @@ function DashboardInner() {
     } catch { /* ignore */ }
   }, []);
   useEffect(() => {
+    if (responsiveAutoCollapsed.right) return;
     try { window.localStorage.setItem('o8:right-panel:visible', chatVisible ? '1' : '0'); } catch { /* ignore */ }
-  }, [chatVisible]);
+  }, [chatVisible, responsiveAutoCollapsed.right]);
   useEffect(() => {
     try { window.localStorage.setItem('o8:right-panel:kind', rightPanelKind); } catch { /* ignore */ }
   }, [rightPanelKind]);
-  const [compactShell, setCompactShell] = useState(false);
   useEffect(() => {
     if (typeof window === 'undefined') return undefined;
-    const media = window.matchMedia(COMPACT_SHELL_MEDIA_QUERY);
-    const update = () => setCompactShell(media.matches);
+    const update = () => {
+      const next = window.innerWidth;
+      viewportWidthRef.current = next;
+      setViewportWidth(next);
+    };
     update();
-    media.addEventListener('change', update);
-    return () => media.removeEventListener('change', update);
+    window.addEventListener('resize', update);
+    return () => window.removeEventListener('resize', update);
   }, []);
+  const compactShell = viewportWidth !== null && viewportWidth < RESPONSIVE_COMPACT_SHELL_WIDTH;
+  const getResponsiveViewportWidth = useCallback(() => (
+    viewportWidthRef.current ?? (typeof window !== 'undefined' ? window.innerWidth : Number.POSITIVE_INFINITY)
+  ), []);
+  const noteSidebarManualIntent = useCallback((nextVisible: boolean) => {
+    responsiveManualOpenRef.current.left = nextVisible
+      && getResponsiveViewportWidth() < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH;
+    setResponsiveAutoCollapsed((current) => (
+      current.left ? { ...current, left: false } : current
+    ));
+  }, [getResponsiveViewportWidth]);
+  const toggleSidebarFromChrome = useCallback(() => {
+    const nextVisible = !sidebarVisible;
+    noteSidebarManualIntent(nextVisible);
+    setSidebarVisible(nextVisible);
+  }, [noteSidebarManualIntent, setSidebarVisible, sidebarVisible]);
+  const openSidebarFromChrome = useCallback(() => {
+    noteSidebarManualIntent(true);
+    setSidebarVisible(true);
+  }, [noteSidebarManualIntent, setSidebarVisible]);
+  const noteRightPanelManualIntent = useCallback((nextVisible: boolean) => {
+    responsiveManualOpenRef.current.right = nextVisible
+      && getResponsiveViewportWidth() < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH;
+    setResponsiveAutoCollapsed((current) => (
+      current.right ? { ...current, right: false } : current
+    ));
+  }, [getResponsiveViewportWidth]);
+  const openRightPanelFromUser = useCallback(() => {
+    noteRightPanelManualIntent(true);
+    setChatVisible(true);
+  }, [noteRightPanelManualIntent]);
+  const closeRightPanelFromUser = useCallback(() => {
+    noteRightPanelManualIntent(false);
+    setChatVisible(false);
+  }, [noteRightPanelManualIntent]);
+  useEffect(() => {
+    if (viewportWidth === null) return;
+
+    if (viewportWidth < RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH) {
+      if (chatVisible && !responsiveManualOpenRef.current.right) {
+        setResponsiveAutoCollapsed((current) => (
+          current.right ? current : { ...current, right: true }
+        ));
+        setChatVisible(false);
+      }
+    } else {
+      responsiveManualOpenRef.current.right = false;
+      if (responsiveAutoCollapsed.right) {
+        setChatVisible(true);
+        setResponsiveAutoCollapsed((current) => (
+          current.right ? { ...current, right: false } : current
+        ));
+      }
+    }
+
+    if (viewportWidth < RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH) {
+      if (sidebarVisible && !responsiveManualOpenRef.current.left) {
+        setResponsiveAutoCollapsed((current) => (
+          current.left ? current : { ...current, left: true }
+        ));
+        setSidebarVisible(false);
+      }
+    } else {
+      responsiveManualOpenRef.current.left = false;
+      if (responsiveAutoCollapsed.left) {
+        setSidebarVisible(true);
+        setResponsiveAutoCollapsed((current) => (
+          current.left ? { ...current, left: false } : current
+        ));
+      }
+    }
+  }, [
+    chatVisible,
+    responsiveAutoCollapsed.left,
+    responsiveAutoCollapsed.right,
+    setSidebarVisible,
+    sidebarVisible,
+    viewportWidth,
+  ]);
   const [rightWidth, setRightWidth] = useState(() => {
     if (typeof window === 'undefined') return 280;
     try {
@@ -1717,12 +1805,12 @@ function DashboardInner() {
   useEffect(() => {
     const handleOpenInbox = () => {
       setRightPanelKind('o8');
-      setChatVisible(true);
+      openRightPanelFromUser();
       setO8ActiveTab('inbox');
     };
     window.addEventListener('o8:open-inbox-tab', handleOpenInbox);
     return () => window.removeEventListener('o8:open-inbox-tab', handleOpenInbox);
-  }, []);
+  }, [openRightPanelFromUser]);
 
   // Automations nav entry (lives in AgentPanel's MiniAgentPanelHeader) dispatches
   // o8:open-automations when clicked. Flip the activeNavSection so the
@@ -2137,8 +2225,8 @@ function DashboardInner() {
     if (options.repoPath) setO8RepoPathOverride(options.repoPath);
     setO8ActiveTab(normalizeO8ActiveTab(options.tab) ?? DEFAULT_O8_ACTIVE_TAB);
     setRightPanelKind('o8');
-    setChatVisible(true);
-  }, []);
+    openRightPanelFromUser();
+  }, [openRightPanelFromUser]);
 
   const handleSelectSession = useCallback((sessionKey: string) => {
     // Open the session transcript in a canvas chat tab
@@ -2254,7 +2342,7 @@ function DashboardInner() {
 
   const handleSelectIssue = useCallback((issueNumber: number, repo?: string) => {
     setRightPanelKind('review');
-    setChatVisible(true);
+    openRightPanelFromUser();
     openCanvasTab({
       id: `issue:${issueNumber}${repo ? `:${repo}` : ''}`,
       kind: 'issue',
@@ -2262,7 +2350,7 @@ function DashboardInner() {
       resourceId: String(issueNumber),
       meta: repo ? { repo } : undefined,
     });
-  }, [openCanvasTab]);
+  }, [openCanvasTab, openRightPanelFromUser]);
 
   // Stable callbacks passed to CommandPalette — extracted to avoid defeating
   // memo boundaries with fresh inline arrows on every render (#809).
@@ -2297,7 +2385,7 @@ function DashboardInner() {
 
   const handleSelectPR = useCallback((prNumber: number, repo?: string) => {
     setRightPanelKind('review');
-    setChatVisible(true);
+    openRightPanelFromUser();
     openCanvasTab({
       id: `pr:${prNumber}${repo ? `:${repo}` : ''}`,
       kind: 'pr',
@@ -2305,7 +2393,7 @@ function DashboardInner() {
       resourceId: String(prNumber),
       meta: repo ? { repo } : undefined,
     });
-  }, [openCanvasTab]);
+  }, [openCanvasTab, openRightPanelFromUser]);
 
   const handleReviewPR = useCallback((prNumber: number, repo?: string) => {
     // PRs now live under Activity — prNumber 0 means show the Activity feed.
@@ -2316,8 +2404,8 @@ function DashboardInner() {
     setO8PrNumber(prNumber || null);
     setO8PrRepo(repo ?? null);
     setRightPanelKind('o8');
-    setChatVisible(true);
-  }, []);
+    openRightPanelFromUser();
+  }, [openRightPanelFromUser]);
 
   const handleDeepReviewPR = useCallback((prNumber: number, repo?: string) => {
     handleSelectPR(prNumber, repo);
@@ -2456,26 +2544,26 @@ function DashboardInner() {
   const handleToggleChatPanel = useCallback(() => {
     // v1: chat panel removed — toggle workspace instead
     if (chatVisible) {
-      setChatVisible(false);
+      closeRightPanelFromUser();
       return;
     }
-    setChatVisible(true);
-  }, [chatVisible]);
+    openRightPanelFromUser();
+  }, [chatVisible, closeRightPanelFromUser, openRightPanelFromUser]);
 
   const handleToggleO8Panel = useCallback(() => {
     if (chatVisible && rightPanelKind === 'o8') {
       // o8 → collapsed. Keep kind=o8 so next click re-opens straight to O8
       // (not the workspace side panel). Clear commit context so reopening
       // doesn't re-expand a stale commit detail.
-      setChatVisible(false);
+      closeRightPanelFromUser();
       setO8CommitSha(null);
       setO8CommitRepoPath(null);
       setO8CommitRepoSlug(null);
       return;
     }
     setRightPanelKind('o8');
-    setChatVisible(true);
-  }, [chatVisible, rightPanelKind]);
+    openRightPanelFromUser();
+  }, [chatVisible, closeRightPanelFromUser, openRightPanelFromUser, rightPanelKind]);
 
   // Browser button on the TitleBar — opens (or focuses) the wide O8 panel
   // and selects its Browser tab. The Browser tab itself is no longer in the
@@ -2483,9 +2571,9 @@ function DashboardInner() {
   // it with a quick port menu.
   const handleOpenBrowser = useCallback(() => {
     setRightPanelKind('o8');
-    setChatVisible(true);
+    openRightPanelFromUser();
     setO8ActiveTab('browser');
-  }, []);
+  }, [openRightPanelFromUser]);
 
   const handleSelectWorkspaceChatTarget = useCallback((sessionKey: string) => {
     setWorkspaceChatTargetKeyByRepoPath((current) => {
@@ -2504,13 +2592,13 @@ function DashboardInner() {
       reason: 'preview',
       text: formatPreviewSelectionContext(selection),
     };
-    setChatVisible(true);
+    openRightPanelFromUser();
     setRightPanelMode('chat');
     setDesktopDraftInjection({
       id: `${payload.reason}-${Date.now()}`,
       text: payload.text,
     });
-  }, [setDesktopDraftInjection]);
+  }, [openRightPanelFromUser, setDesktopDraftInjection]);
 
   const handleDesignModeCapture = useCallback((contextText: string) => {
     setThoughtsDraftInjection({
@@ -2565,11 +2653,11 @@ function DashboardInner() {
         });
         return;
       }
-      setChatVisible(true);
+      openRightPanelFromUser();
       setRightPanelMode('chat');
       setDesktopDraftInjection(nextInjection);
     })();
-  }, [activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, setActiveWorkspace, setDesktopDraftInjection, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets]);
+  }, [activeWorkspaceChatSessionKey, globalRepoBranch, globalRepoEntry, openRightPanelFromUser, setActiveWorkspace, setDesktopDraftInjection, waitForWorkspaceTerminalTarget, workspaceChatTargetKeyByRepoPath, workspaceChatTargets]);
 
   const handleAgentPanelChatInjection = useCallback((payload: AgentPanelChatInjectionPayload) => {
     injectPayloadIntoRepoChat(payload, null);
@@ -2645,8 +2733,8 @@ function DashboardInner() {
     setO8ActiveTab('activity');
     setO8PrRepo(repo ?? null);
     setRightPanelKind('o8');
-    setChatVisible(true);
-  }, []);
+    openRightPanelFromUser();
+  }, [openRightPanelFromUser]);
 
   const handleCreateIssue = useCallback((repo?: string) => {
     openCanvasTab({
@@ -2909,7 +2997,7 @@ function DashboardInner() {
     }
     setO8ActiveTab('workspace');
     setRightPanelKind('o8');
-    setChatVisible(true);
+    openRightPanelFromUser();
 
     openCanvasTab({
       id: `${isImage ? 'image' : 'file'}:${filePath}${workspace ? `:${workspace}` : ''}`,
@@ -2918,7 +3006,7 @@ function DashboardInner() {
       resourceId: filePath,
       meta: workspace ? { workspace } : undefined,
     });
-  }, [activeWorkspace, globalRepoEntry?.localPath, openCanvasTab]);
+  }, [activeWorkspace, globalRepoEntry?.localPath, openCanvasTab, openRightPanelFromUser]);
 
   const handleOpenSpecInWorkspace = useCallback((repoPath: string) => {
     setO8CommitSha(null);
@@ -2927,8 +3015,8 @@ function DashboardInner() {
     setO8RepoPathOverride(repoPath);
     setO8ActiveTab('spec');
     setRightPanelKind('o8');
-    setChatVisible(true);
-  }, []);
+    openRightPanelFromUser();
+  }, [openRightPanelFromUser]);
 
   const handleSelectCommit = useCallback((hash: string, meta?: Record<string, string>) => {
     const nextMeta: Record<string, string> = { ...(meta ?? {}) };
@@ -2965,8 +3053,8 @@ function DashboardInner() {
     setO8CommitRepoPath(repoPath);
     setO8CommitRepoSlug(repoSlug);
     setRightPanelKind('o8');
-    setChatVisible(true);
-  }, [globalRepoEntries, globalRepoEntry]);
+    openRightPanelFromUser();
+  }, [globalRepoEntries, globalRepoEntry, openRightPanelFromUser]);
 
   const handleClearCommit = useCallback(() => {
     setO8CommitSha(null);
@@ -3560,7 +3648,7 @@ function DashboardInner() {
           break;
         case 'b':
           event.preventDefault();
-          setSidebarVisible((v) => !v);
+          toggleSidebarFromChrome();
           break;
         case 'j':
           event.preventDefault();
@@ -3576,7 +3664,7 @@ function DashboardInner() {
     };
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
-  }, [dispatchSpawn, setSidebarVisible, handleToggleO8Panel, toggleContextualPanelTile, toggleSettingsOverlay]);
+  }, [dispatchSpawn, handleToggleO8Panel, toggleContextualPanelTile, toggleSettingsOverlay, toggleSidebarFromChrome]);
 
   const showSidebarColumn = sidebarVisible && !compactShell;
   const showRightPanelColumn = chatVisible && !compactShell;
@@ -3985,7 +4073,7 @@ function DashboardInner() {
           >
           <LeftHeaderStrip
             sidebarVisible={sidebarVisible}
-            onToggleSidebar={() => setSidebarVisible(v => !v)}
+            onToggleSidebar={toggleSidebarFromChrome}
           />
           <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           <GuidedDiscoveryHalo active={showAgentPanelFtux} borderRadius={20} />
@@ -4048,7 +4136,7 @@ function DashboardInner() {
         <WorkspaceHeaderStrip
           leadingInset={!showSidebarColumn}
           sidebarVisible={sidebarVisible}
-          onToggleSidebar={!showSidebarColumn && !compactShell ? () => setSidebarVisible(v => !v) : undefined}
+          onToggleSidebar={!showSidebarColumn && !compactShell ? toggleSidebarFromChrome : undefined}
           onSidebarHoverEnter={!showSidebarColumn && !compactShell ? openSidebarPreview : undefined}
           onSidebarHoverLeave={!showSidebarColumn && !compactShell ? scheduleSidebarPreviewClose : undefined}
           rightPanelOpen={showRightPanelColumn}
@@ -4336,7 +4424,7 @@ function DashboardInner() {
                 // Search, chat rows) have their own onClick handlers
                 // that fire first; this bubble-phase handler pins the
                 // sidebar after so the user keeps their context.
-                onClick={() => setSidebarVisible(true)}
+                onClick={openSidebarFromChrome}
                 data-mcp-scope="agent-panel-hover-preview"
                 style={{
                   position: 'fixed',
@@ -4441,7 +4529,7 @@ function DashboardInner() {
           setO8BrowserUrl(url);
           setO8ActiveTab('browser');
           setRightPanelKind('o8');
-          setChatVisible(true);
+          openRightPanelFromUser();
         }}
       />
 
