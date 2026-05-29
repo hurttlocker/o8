@@ -20,6 +20,7 @@ export type ThoughtsHistoryMessage = {
   recalledFacts?: MobileTranscriptEntry['recalledFacts'];
   command?: MobileTranscriptEntry['command'];
   compaction?: MobileTranscriptEntry['compaction'];
+  statusEvent?: MobileTranscriptEntry['statusEvent'];
   isPartial?: boolean;
   isCompaction?: boolean;
 };
@@ -48,5 +49,6 @@ export function mapHistoryMessagesToTranscript(messages: ThoughtsHistoryMessage[
       recalledFacts: message.recalledFacts,
       command: message.command,
       compaction: message.compaction,
+      statusEvent: message.statusEvent,
     }));
 }

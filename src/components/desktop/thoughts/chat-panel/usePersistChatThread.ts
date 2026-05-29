@@ -23,6 +23,7 @@ function serializeMessages(msgs: MobileTranscriptEntry[]) {
     recalledFacts: m.recalledFacts,
     command: m.command,
     compaction: m.compaction,
+    statusEvent: m.statusEvent,
   }));
 }
 
