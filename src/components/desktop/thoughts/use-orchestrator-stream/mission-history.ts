@@ -6,6 +6,7 @@ import {
   transcriptMatchesStoredHistory,
 } from '@/lib/orchestrator/history-transcript';
 import type { OrchestratorMissionCompletedDetail } from '@/lib/orchestrator/store';
+import type { OrchestratorStatusEventData } from '@/lib/orchestrator/status-events';
 import { normalizeRepoPath } from './shared';
 
 interface ThoughtsHistoryListEntry {
@@ -79,7 +80,13 @@ function showMissionThreadTransition(
   const summary = mergeCount > 0
     ? `Mission complete — ${mergeCount} ${mergeCount === 1 ? 'packet' : 'packets'} merged and archived. Ready for the next one.`
     : 'Mission archived. Ready for the next one.';
-  options.replaceTranscript([buildMissionTransitionEntry(confirmationId, summary, startedAt)]);
+  const statusEvent: OrchestratorStatusEventData = {
+    kind: 'mission-complete',
+    mergedCount: mergeCount,
+    archivedCount: detail.archivedCount,
+    summary: detail.summary || undefined,
+  };
+  options.replaceTranscript([{ ...buildMissionTransitionEntry(confirmationId, summary, startedAt), statusEvent }]);
 
   // After a beat, clear the confirmation so the thread returns to its empty
   // state (greeting + quick-action cards) — the completed mission is preserved
