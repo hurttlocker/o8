@@ -397,8 +397,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   useOrchestratorStatusFeed({
     active: isOrchestratorMode && !isChatMode,
     repoPath: resolvedRepoPath,
-    missionId: missionState?.missionId ?? null,
-    missionSummary: missionState?.summary ?? '',
     missionPackets: missionState?.packets ?? [],
     appendLocalEntries: orchStream.appendLocalEntries,
   });
