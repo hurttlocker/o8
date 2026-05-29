@@ -266,6 +266,9 @@ function FooterButton({ onClose }: { onClose: () => void }) {
       type="button"
       onClick={onClose}
       style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
         height: 30,
         paddingLeft: 16,
         paddingRight: 16,
@@ -278,6 +281,7 @@ function FooterButton({ onClose }: { onClose: () => void }) {
         cursor: 'pointer',
         fontSize: 12,
         fontWeight: 400,
+        lineHeight: 1,
         letterSpacing: '-0.1px',
         fontFamily: 'var(--font-sans-system)',
         transition: 'background 120ms ease',
