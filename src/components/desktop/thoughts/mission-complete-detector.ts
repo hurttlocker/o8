@@ -41,6 +41,16 @@ interface MissionTracker {
 const trackers = new Map<string, MissionTracker>();
 const pendingCards: MobileTranscriptEntry[] = [];
 
+// TEMP diagnostic — inspect via window.__o8mc in the webview. Remove after.
+const diag = { trackers, pendingCards, log: [] as string[] };
+function dlog(msg: string) {
+  diag.log.push(`${new Date().toISOString().slice(11, 23)} ${msg}`);
+  if (diag.log.length > 100) diag.log.shift();
+}
+if (typeof window !== 'undefined') {
+  (window as unknown as { __o8mc?: typeof diag }).__o8mc = diag;
+}
+
 function packetIsTerminal(packet: OrchestratorPacket): boolean {
   return packet.releaseState === 'released' || Boolean(packet.archivedAt);
 }
@@ -72,6 +82,7 @@ function recordPendingMissionCard(tracker: MissionTracker) {
     statusEvent,
   });
   trackers.delete(tracker.missionId);
+  dlog(`RECORD card ${tracker.missionId} packets=${packets.length}`);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(MISSION_CARD_READY_EVENT));
   }
@@ -91,6 +102,7 @@ function checkTrackerComplete(missionId: string) {
 export function drainPendingMissionCards(repoPath: string | null): MobileTranscriptEntry[] {
   if (pendingCards.length === 0) return [];
   const target = normalizeRepoPath(repoPath);
+  dlog(`drain req repo=${repoPath ?? 'null'} pending=${pendingCards.length}`);
   const drained: MobileTranscriptEntry[] = [];
   for (let i = pendingCards.length - 1; i >= 0; i -= 1) {
     const card = pendingCards[i];
@@ -143,6 +155,7 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
       if (packetIsTerminal(packet)) tracker.done.add(packet.id);
     }
     trackers.set(id, tracker);
+    dlog(`capture ${id} packets=${tracker.packetIds.size} done=${tracker.done.size}`);
     checkTrackerComplete(id);
   }, [missionState]);
 
@@ -152,7 +165,9 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
   useEffect(() => {
     const handler = (event: Event) => {
       const data = (event as CustomEvent<{ data?: LaneLifecycleDetailData }>).detail?.data;
-      if (!data || laneStatusOf(data) !== 'completed') return;
+      if (!data) return;
+      dlog(`evt status=${laneStatusOf(data)} pkt=${data.packetId ?? '?'} trackers=${trackers.size}`);
+      if (laneStatusOf(data) !== 'completed') return;
       for (const [missionId, tracker] of trackers) {
         let packetId = data.packetId && tracker.packetIds.has(data.packetId) ? data.packetId : null;
         if (!packetId) {
