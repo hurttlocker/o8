@@ -91,6 +91,7 @@ type ThoughtsHistoryMessage = ExportThreadMessage & {
   thinkingDurationMs?: MobileTranscriptEntry['thinkingDurationMs'];
   recalledFacts?: MobileTranscriptEntry['recalledFacts'];
   command?: MobileTranscriptEntry['command'];
+  statusEvent?: MobileTranscriptEntry['statusEvent'];
   isPartial?: boolean;
   isCompaction?: boolean;
 };
@@ -119,6 +120,7 @@ function mapHistoryMessagesToTranscript(messages: ThoughtsHistoryMessage[]): Mob
       recalledFacts: message.recalledFacts,
       command: message.command,
       compaction: message.compaction,
+      statusEvent: message.statusEvent,
     }));
 }
 
