@@ -56,6 +56,19 @@ function PromptGlyph({ icon }: { icon: string }) {
   return <FileText size={16} />;
 }
 
+// A dispatched-packet prompt is a large, structured brief. We collapse it into a
+// PacketHeaderCard so the transcript doesn't open with a wall of text — but the
+// gate used to require `tab.orchestrationPacket`, which is dropped when a tab is
+// reconstructed from session discovery (the packet metadata doesn't survive).
+// Detect the prompt by the markers the dispatcher always emits so the card shows
+// regardless of whether the badge metadata is present.
+function looksLikePacketPrompt(text: string): boolean {
+  if (!text || text.length < 400) return false;
+  return /##\s*Project\s+(Brief|Scope|Directives)\b/i.test(text)
+    || /(^|\n)\s*Packet:\s/i.test(text)
+    || /(^|\n)\s*STRICT SCOPE:/i.test(text);
+}
+
 function WorkspaceChatPaneBase({
   tab,
   // `active` is retained on the prop surface for Packet C (visibility/display
@@ -463,15 +476,18 @@ function WorkspaceChatPaneBase({
                 // giant packet prompt) with a collapsible PacketHeaderCard so
                 // the transcript doesn't open with a wall of text.
                 const isFirstUser = index === 0 && message.role === 'user';
-                if (isFirstUser && tab.orchestrationPacket) {
+                const firstUserPrompt = isFirstUser
+                  ? (typeof message.content === 'string' ? message.content : String(message.content ?? ''))
+                  : '';
+                if (isFirstUser && (tab.orchestrationPacket || looksLikePacketPrompt(firstUserPrompt))) {
                   return (
                     <PacketHeaderCard
                       key={message.id}
-                      title={tab.orchestrationPacket.title ?? tab.label ?? 'Dispatched packet'}
-                      branch={tab.orchestrationPacket.branchTarget ?? null}
-                      runtime={tab.orchestrationPacket.runtime ?? tab.chatRuntime ?? null}
+                      title={tab.orchestrationPacket?.title ?? tab.label ?? 'Dispatched packet'}
+                      branch={tab.orchestrationPacket?.branchTarget ?? null}
+                      runtime={tab.orchestrationPacket?.runtime ?? tab.chatRuntime ?? null}
                       status={liveStatus}
-                      prompt={typeof message.content === 'string' ? message.content : String(message.content ?? '')}
+                      prompt={firstUserPrompt}
                     />
                   );
                 }
