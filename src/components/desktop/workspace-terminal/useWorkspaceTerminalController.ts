@@ -29,6 +29,7 @@ import {
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { buildTerminalTabHandle } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
 import { readLastOrchestratorThreadTitle } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
+import { clearSessionTileStorage, scrubOrphanSessionTileKeys } from '@/components/desktop/workspace-terminal/use-session-tiles';
 import { canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, resetControllerRefs, shouldSkipRestoreKeyChange } from '@/components/desktop/workspace-terminal/terminal-restore';
 import {
   buildChatSessionSnapshots,
@@ -305,6 +306,62 @@ export function useWorkspaceTerminalController(
       persistTabs(tabs, effectiveActiveTabId);
     }
   }, [effectiveActiveTabId, persistTabs, tabs]);
+
+  // Capture each orchestrator tab's chat-history thread id so the exact
+  // conversation survives reload. OrchestratorTab broadcasts
+  // 'o8:workspace-thread-id' whenever its loaded thread settles; stamping it
+  // onto the tab (orchestratorThreadId) lets serializeTabsForPersistence
+  // persist it and the restore path reopen THIS thread per-tab — instead of
+  // every orchestrator tab collapsing onto the global last-active thread.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: string; threadId?: string | null }>).detail;
+      const tabId = detail?.tabId;
+      const threadId = detail?.threadId;
+      if (!tabId || !threadId) return;
+      // One orchestrator tab per thread. If another orchestrator tab already
+      // owns this thread, `tabId` is a duplicate that landed on it — e.g. a
+      // fresh/default tab that global-restored a conversation an existing tab
+      // already shows. Close the duplicate (keeps the original + its transcript)
+      // rather than leaving two copies of the same thread open.
+      const owner = tabsRef.current.find(
+        (t) => t.id !== tabId && t.kind === 'orchestrator' && t.orchestratorThreadId === threadId,
+      );
+      if (owner) {
+        handleCloseTabRef.current(tabId);
+        return;
+      }
+      setTabs((previous) => {
+        const idx = previous.findIndex((t) => t.id === tabId && t.kind === 'orchestrator');
+        if (idx < 0) return previous;
+        if (previous[idx]!.orchestratorThreadId === threadId) return previous;
+        const next = [...previous];
+        next[idx] = { ...next[idx]!, orchestratorThreadId: threadId };
+        tabsRef.current = next;
+        return next;
+      });
+    };
+    window.addEventListener('o8:workspace-thread-id', handler as EventListener);
+    return () => window.removeEventListener('o8:workspace-thread-id', handler as EventListener);
+  }, []);
+
+  // One-time scrub of orphaned `…:session-tiles:tab:*` localStorage keys left
+  // behind by closed tabs (they were never cleaned on close pre-fix). Runs once
+  // after restore populates `tabs`, keying off the live tab ids so legit
+  // layouts are preserved. Going forward, handleCloseTab clears keys on close.
+  const orphanScrubDoneRef = useRef(false);
+  // Keyed on restoreCompletedKey (not just tabs): that state flips exactly once
+  // when restore finishes, in the same render that populates `tabs`. Gating on
+  // `tabs` alone was racy — if restoreSettledRef flipped true AFTER the last
+  // tabs change, the effect never re-ran and orphans survived that load.
+  useEffect(() => {
+    if (orphanScrubDoneRef.current) return;
+    if (!restoreSettledRef.current) return;
+    if (tabs.length === 0) return;
+    orphanScrubDoneRef.current = true;
+    const removed = scrubOrphanSessionTileKeys(new Set(tabs.map((t) => t.id)));
+    if (removed > 0) console.log(`[session-tiles] scrubbed ${removed} orphaned tab layout key(s)`);
+  }, [tabs, restoreCompletedKey]);
 
   const createDefaultShellTab = useCallback((): TerminalTab => ({
     id: createWorkspaceTabId('terminal'), label: 'Shell', kind: 'terminal',
@@ -903,6 +960,9 @@ export function useWorkspaceTerminalController(
       pendingSessionsRef.current.delete(tabId);
     }
     pendingCliCommands.current.delete(tabId);
+    // Drop this tab's persisted session-tile layout so closed orchestrator
+    // tabs don't leave orphaned `…:session-tiles:tab:*` localStorage keys.
+    clearSessionTileStorage(tabId);
     for (const [requestId, pendingTabId] of pendingRequestRef.current) {
       if (pendingTabId === tabId) pendingRequestRef.current.delete(requestId);
     }

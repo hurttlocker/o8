@@ -91,6 +91,7 @@ export async function computeRestoredTabs(
   const sessionsToAttach: string[] = [];
   const seenRuntimeChats = new Set<string>();
   const seenTerminalSessions = new Set<string>();
+  const seenOrchestratorThreads = new Set<string>();
   const seenTabIds = new Set<string>();
   let restoredActiveTabId: string | null = null;
 
@@ -99,23 +100,44 @@ export async function computeRestoredTabs(
     const now = Date.now();
     const tabKind = savedTab.kind ?? 'terminal';
 
-    // Issue #708 — orchestrator tabs are never restored from persistence.
-    // The pinned Orchestrator is injected fresh by the migration effect in
-    // useWorkspaceTerminalController, so any persisted `kind: 'orchestrator'`
-    // entries are stale duplicates. Skipping them avoids two failure modes:
-    //   (a) duplicate Orchestrator tabs after restore;
-    //   (b) silent fallthrough to the default `terminal` branch below, which
-    //       would carry the "Orchestrator" label onto a real terminal tab.
+    // Orchestrator tabs restore ONLY when they carry a recoverable chat-history
+    // thread — either the thread id IS the tab id (history-opened tabs use a
+    // `thoughts-…` id) or a separate `orchestratorThreadId` was persisted for a
+    // spawned tab. This reopens each orchestrator conversation on its own tab
+    // instead of collapsing every tab onto the global last-active thread.
     //
-    // Issue #714 — also skip any tab whose ID begins with `orchestrator-`,
-    // regardless of its persisted `kind`. The `orchestrator-` prefix is only
-    // ever produced by `createWorkspaceTabId('orchestrator')`, so a saved tab
-    // with that prefix was originally an orchestrator. If a downstream code
-    // path mutated its `kind` to `terminal` (the disk artifact that triggered
-    // #714), it is still a zombie that the migration effect will replace —
-    // resurrecting it as a real terminal would produce the duplicate-tab
-    // symptom on every controller remount.
+    // Tabs with NO recoverable thread are dropped here (the migration effect in
+    // useWorkspaceTerminalController injects a single fresh Orchestrator). That
+    // preserves the original #708 / #714 guarantees: a stale/empty orchestrator
+    // entry — or a #714 zombie whose `kind` was mutated to `terminal` but whose
+    // `orchestrator-` id remains — has no thread id, so it can never resurrect
+    // as a duplicate tab or leak the "Orchestrator" label onto a terminal.
     if (tabKind === 'orchestrator' || (savedTab.id ?? '').startsWith('orchestrator-')) {
+      const recoveredThreadId = (savedTab.id ?? '').startsWith('thoughts-')
+        ? savedTab.id
+        : (savedTab.orchestratorThreadId ?? null);
+      if (!recoveredThreadId) continue;
+      // One orchestrator tab per thread — a second persisted tab pointing at the
+      // same conversation is a duplicate; drop it so reload can't resurrect the
+      // two-copies-of-one-thread bug.
+      if (seenOrchestratorThreads.has(recoveredThreadId)) continue;
+      seenOrchestratorThreads.add(recoveredThreadId);
+      const tabId = claimWorkspaceTabId('orchestrator', seenTabIds, savedTab.id);
+      restoredTabs.push({
+        id: tabId,
+        label: savedTab.label,
+        kind: 'orchestrator',
+        tmuxSession: null,
+        repo: savedTab.repoPath ? { name: savedTab.repoName ?? 'repo', localPath: savedTab.repoPath } : (currentPreferredRepo ?? undefined),
+        mode: savedTab.mode ?? 'fleet',
+        singleRuntime: savedTab.singleRuntime,
+        chatModelId: savedTab.chatModelId,
+        chatOpenrouterModel: savedTab.chatOpenrouterModel,
+        orchestratorThreadId: recoveredThreadId,
+        createdAt: now,
+        lastActivity: now,
+      });
+      if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
       continue;
     }
 

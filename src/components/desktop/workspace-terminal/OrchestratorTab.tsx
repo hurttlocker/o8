@@ -91,6 +91,21 @@ function permissionStorageKey(tabId: string): string {
   return `cortex-ide:orchestrator-permission:tab:${tabId}`;
 }
 
+// One-shot claim on the global "last-active orchestrator thread" pointer.
+//
+// Plain orchestrator tabs carry an `orchestrator-…` id (no explicit
+// initialThreadId), so their ONLY signal for "should I adopt the global
+// last-active thread?" is the per-tab `freshSpawn` flag. That flag is
+// in-memory only and gets dropped whenever a tab object is reconstructed
+// (rename, mode switch, title-sync) — at which point EVERY such tab reads the
+// same `o8:last-orchestrator-thread-id` and they all collapse onto one
+// conversation (the duplicate-orchestrator-tab bug). The robust guard lives
+// here, not on the tab: only the FIRST orchestrator tab to mount + activate
+// per app load may adopt the global thread; every later tab stays fresh.
+// Resets on a full reload (module re-eval), so the default tab still restores
+// your last conversation on boot.
+let globalLastThreadRestoreClaimed = false;
+
 // Persistence helpers for the cross-reload thread restore live in a
 // shared module so the workspace controller can read the same values
 // at tab-creation time (pre-set tab.label) without re-implementing.
@@ -394,6 +409,9 @@ function OrchestratorTabInner({
     // Only orchestrator tabs in default mode (no explicit initialThreadId)
     // participate in the restore path.
     if (initialThreadId) return false;
+    // Another orchestrator tab already adopted the global last-thread this
+    // session — this one stays fresh, so don't flash the restore shimmer.
+    if (globalLastThreadRestoreClaimed) return false;
     return Boolean(readLastOrchestratorThreadId());
   });
   useEffect(() => {
@@ -403,15 +421,22 @@ function OrchestratorTabInner({
     const restored = readLastOrchestratorThreadId();
     if (!restored) return;
     if (restoredThreadRef.current === restored) return; // already loaded
+    // At most ONE orchestrator tab per app load adopts the global last-active
+    // thread; later tabs stay fresh instead of duplicating it. (A tab that
+    // already claimed it is short-circuited by the restoredThreadRef guard
+    // above, so this only blocks *other* tabs.)
+    if (globalLastThreadRestoreClaimed) return;
     let cancelled = false;
     let attempts = 0;
     const tryLoad = () => {
       if (cancelled) return;
       if (restoredThreadRef.current === restored) return;
+      if (globalLastThreadRestoreClaimed) return; // claimed by another tab mid-wait
       const handle = chatPanelRef.current;
       if (handle) {
         handle.loadThread(restored);
         restoredThreadRef.current = restored;
+        globalLastThreadRestoreClaimed = true;
         return;
       }
       attempts += 1;

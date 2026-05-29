@@ -4058,9 +4058,6 @@ function DashboardInner() {
           onTitleRenameSubmit={titleMenuActive ? handleTitleRenameSubmit : undefined}
           onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}
           onTitleShare={titleMenuActive ? handleTitleShare : undefined}
-          onSpawnOrchestrator={isSingleWorkspace ? handleSpawnOrchestrator : undefined}
-          onSpawnChat={isSingleWorkspace ? handleSpawnChat : undefined}
-          onSpawnTerminal={isSingleWorkspace ? handleSpawnTerminal : undefined}
         />
         <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
