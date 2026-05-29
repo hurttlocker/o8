@@ -42,6 +42,7 @@ import {
   mergeTranscriptEntries,
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
+import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
@@ -422,6 +423,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       threadIdRef.current = id;
       setThreadId(id);
     }, []),
+  });
+
+  // Surface per-packet lifecycle moments (merge, self-heal / needs-human) as
+  // status cards in the orchestrator transcript. Mission-complete is handled
+  // separately inside the stream hook.
+  useOrchestratorStatusFeed({
+    active: isOrchestratorMode && !isChatMode,
+    repoPath: resolvedRepoPath,
+    missionPackets: missionState?.packets ?? [],
+    appendLocalEntries: orchStream.appendLocalEntries,
   });
 
   useEffect(() => {

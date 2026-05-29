@@ -211,6 +211,8 @@ export interface MobileTranscriptEntry {
     source?: 'explicit' | 'summary' | 'inferred';
     summary?: string;
   };
+  /** Structured orchestrator status event (mission complete / merge / heal) — rendered as OrchestratorStatusCard. */
+  statusEvent?: import('@/lib/orchestrator/status-events').OrchestratorStatusEventData;
 }
 
 export interface MobileRuntimeTailGroup {
