@@ -13,6 +13,9 @@ interface LaneLifecycleEventData {
   laneId?: string;
   sessionKey?: string | null;
   packetId?: string | null;
+  // The live WS payload carries the lane status as `status`; `laneStatus` is the
+  // legacy/realtime-envelope name. Read both (see laneStatusOf in status-events).
+  status?: string;
   laneStatus?: string;
   previousStatus?: string | null;
 }
@@ -111,7 +114,8 @@ export function useLaneArchivedView(): ArchivedLaneView {
         }
         keys.add(data.sessionKey);
       }
-      if (data?.laneStatus && RETIRED_LANE_STATUSES.has(data.laneStatus)) {
+      const eventLaneStatus = data?.laneStatus ?? data?.status;
+      if (data && eventLaneStatus && RETIRED_LANE_STATUSES.has(eventLaneStatus)) {
         const keys = data.laneId ? laneSessionKeysRef.current.get(data.laneId) : null;
         const packetId = data.packetId ?? null;
         setState((current) => {
