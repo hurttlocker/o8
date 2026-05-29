@@ -20,6 +20,7 @@ type StoredTranscriptMessage = {
   recalledFacts?: MobileTranscriptEntry['recalledFacts'];
   command?: MobileTranscriptEntry['command'];
   compaction?: MobileTranscriptEntry['compaction'];
+  statusEvent?: MobileTranscriptEntry['statusEvent'];
   isPartial?: boolean;
   isCompaction?: boolean;
 };
@@ -55,6 +56,7 @@ function normalizeStoredMessage(value: unknown): MobileTranscriptEntry | null {
     recalledFacts: typeof message.recalledFacts === 'number' ? message.recalledFacts : undefined,
     command: message.command,
     compaction: message.compaction,
+    statusEvent: message.statusEvent,
   };
 }
 
@@ -82,6 +84,7 @@ export function serializeThoughtsHistoryMessages(
     recalledFacts: message.recalledFacts,
     command: message.command,
     compaction: message.compaction,
+    statusEvent: message.statusEvent,
   }));
 }
 
