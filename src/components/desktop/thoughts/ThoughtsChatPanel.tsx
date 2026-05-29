@@ -391,11 +391,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   });
 
   // Surface per-packet lifecycle moments (merge, self-heal / needs-human) as
-  // status cards in the orchestrator transcript. Mission-complete is handled
-  // separately inside the stream hook.
+  // status cards in the orchestrator transcript. Also delivers the
+  // Mission-complete card for MCP-dispatched missions (the chat-stream rotation
+  // path only sees chat-driven ones); a shared carded set prevents double-cards.
   useOrchestratorStatusFeed({
     active: isOrchestratorMode && !isChatMode,
     repoPath: resolvedRepoPath,
+    missionId: missionState?.missionId ?? null,
+    missionSummary: missionState?.summary ?? '',
     missionPackets: missionState?.packets ?? [],
     appendLocalEntries: orchStream.appendLocalEntries,
   });

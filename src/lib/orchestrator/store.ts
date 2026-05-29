@@ -46,6 +46,28 @@ const MAX_RECOVERY_ATTEMPTS = 2;
 const RECOVERY_COOLDOWN_MS = 60_000;
 let orchestratorMissionCache = createEmptyOrchestratorMissionState();
 
+/**
+ * Mission IDs that have already had a "Mission complete" card delivered this
+ * session. Shared so the two delivery paths never double-card the same mission:
+ *  - the chat-driven rotation path (showMissionThreadTransition) claims it
+ *    immediately when it shows its card, and
+ *  - the lifecycle-driven status feed (useOrchestratorStatusFeed) is the
+ *    fallback for MCP-dispatched missions, which the chat path never sees.
+ * In-memory + per-session by design: a mission completed in a prior session
+ * shouldn't re-card on launch.
+ */
+const cardedMissionIds = new Set<string>();
+
+export function hasMissionBeenCarded(missionId: string | null | undefined): boolean {
+  const id = missionId?.trim();
+  return Boolean(id) && cardedMissionIds.has(id as string);
+}
+
+export function markMissionCarded(missionId: string | null | undefined): void {
+  const id = missionId?.trim();
+  if (id) cardedMissionIds.add(id);
+}
+
 interface StoredOrchestratorPrelude {
   id: string;
   text: string;
