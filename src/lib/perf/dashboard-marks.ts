@@ -21,6 +21,7 @@ const INTERACTIVE_MARK = 'o8:dashboard:interactive';
 let scriptStartMarked = false;
 let firstRenderMarked = false;
 let interactiveMarked = false;
+let bootTimingLogged = false;
 
 function hasPerf(): boolean {
   return typeof performance !== 'undefined' && typeof performance.mark === 'function';
@@ -83,5 +84,28 @@ export function markDashboardInteractive(): void {
       `[perf] dashboard bootstrap: script-start→first-render=${scriptToFirst}ms, `
         + `first-render→interactive=${firstToInteractive}ms, total=${total}ms`,
     );
+  } catch { /* noop */ }
+}
+
+export function logDashboardBootTiming(): void {
+  if (bootTimingLogged || typeof window === 'undefined') return;
+  try {
+    const perf = window.performance;
+    if (!perf || typeof perf.getEntriesByType !== 'function') return;
+    const navigationEntry = perf.getEntriesByType('navigation')[0] as PerformanceNavigationTiming | undefined;
+    if (!navigationEntry) return;
+    bootTimingLogged = true;
+    const ttfbMs = navigationEntry.responseStart - navigationEntry.requestStart;
+    const domInteractiveMs = navigationEntry.domInteractive;
+    const domContentLoadedMs = navigationEntry.domContentLoadedEventEnd;
+    const loadCompleteMs = navigationEntry.loadEventEnd;
+    const dashInteractiveMs = Math.round(perf.now());
+    console.log('[boot-timing]', {
+      ttfbMs,
+      domInteractiveMs,
+      domContentLoadedMs,
+      loadCompleteMs,
+      dashInteractiveMs,
+    });
   } catch { /* noop */ }
 }
