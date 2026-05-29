@@ -138,7 +138,7 @@ export function ChatPacketStatusBanner({
             background: tone.color,
             color: '#fff',
             fontSize: 9,
-            fontWeight: 700,
+            fontWeight: 400,
             textTransform: 'uppercase',
             letterSpacing: '0.04em',
             flexShrink: 0,
@@ -148,10 +148,10 @@ export function ChatPacketStatusBanner({
           {tone.label}
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: 12, fontWeight: 600, color: tone.color, letterSpacing: '-0.01em' }}>
+          <div style={{ fontSize: 12, fontWeight: 400, color: tone.color, letterSpacing: '-0.1px' }}>
             {packetTitle ?? 'Dispatched packet'}
           </div>
-          <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', marginTop: 2, lineHeight: 1.45 }}>
+          <div style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)', marginTop: 2, lineHeight: 1.45 }}>
             {tone.detail}
           </div>
         </div>
@@ -173,10 +173,10 @@ export function ChatPacketStatusBanner({
               background: pending === 'merge' ? 'rgba(22, 163, 74, 0.6)' : '#16a34a',
               color: '#fff',
               fontSize: 11,
-              fontWeight: 700,
+              fontWeight: 400,
               cursor: pending !== null ? 'wait' : 'pointer',
               fontFamily: 'var(--font-sans-system)',
-              letterSpacing: '-0.005em',
+              letterSpacing: '-0.1px',
             }}
           >
             {pending === 'merge' ? 'Merging…' : 'Approve & merge'}
@@ -197,7 +197,7 @@ export function ChatPacketStatusBanner({
               background: 'transparent',
               color: tone.color,
               fontSize: 11,
-              fontWeight: 600,
+              fontWeight: 400,
               cursor: pending !== null ? 'wait' : 'pointer',
               fontFamily: 'var(--font-sans-system)',
             }}
@@ -218,7 +218,7 @@ export function ChatPacketStatusBanner({
                 background: 'transparent',
                 color: 'var(--t-text-muted)',
                 fontSize: 11,
-                fontWeight: 500,
+                fontWeight: 400,
                 cursor: 'pointer',
                 fontFamily: 'var(--font-sans-system)',
               }}

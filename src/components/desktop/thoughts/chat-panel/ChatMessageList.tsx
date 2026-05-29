@@ -174,7 +174,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
             gap: 7,
             boxShadow: '0 12px 30px rgba(245, 158, 11, 0.08)',
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 800, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, fontWeight: 400, color: '#b45309', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
               <div style={{ width: 14, height: 14, borderRadius: '50%', border: '2px solid rgba(245, 158, 11, 0.3)', borderTopColor: '#f59e0b', animation: 'spin 1s linear infinite' }} />
               Compaction in progress
             </div>
@@ -200,7 +200,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
             {[0, 1, 2].map((index) => (
               <div key={index} style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--t-text-secondary)', animation: `llmDot 1.2s ease-in-out ${index * 0.18}s infinite` }} />
             ))}
-            <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--t-text-secondary)', letterSpacing: '-0.01em' }}>
+            <span style={{ fontSize: 11, fontWeight: 400, color: 'var(--t-text-secondary)', letterSpacing: '-0.1px' }}>
               {activeTargetLabel} is thinking…
             </span>
           </div>
