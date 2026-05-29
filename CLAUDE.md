@@ -41,7 +41,7 @@ npm run lint             # ESLint (flat config, next core-web-vitals + TS)
 npm run measure:render   # Bootstrap render speed measurement
 ```
 
-**No test runner is configured.** There are no jest/vitest/playwright configs and no `test` script. The single test file (`src/lib/cortex/fact-backed.test.ts`) exists but has no harness.
+**No test runner is configured.** There are no jest/vitest/playwright configs, no `test` script, and no test files in the tree.
 
 ## CI Pipeline (`.github/workflows/ci.yml`)
 
@@ -124,7 +124,7 @@ Core tables (current schema): `users`, `api_keys` (AES-256-GCM encrypted), `usag
 
 ### Theming (`src/lib/theme/`)
 
-CSS variable system with 60+ tokens per theme. **Two shipping themes: `light` and `midnight`** (legacy `dark` was removed; users on `dark` auto-remap via `LEGACY_THEME_IDS`). Architecture is **two-axis: palette × surface** — `palette` ∈ {light, midnight, ...} controls the color tokens; `surface` ∈ {glass, solid} controls whether the chrome bleeds the macOS vibrancy backdrop or paints opaque (accessibility / vestibular path). `ThemeProvider` applies vars to `<html>` root, persists to localStorage. Components reference `var(--t-*)` tokens inside inline styles.
+CSS variable system, **two-axis: palette × surface** — `palette` ∈ {light, midnight, ...} controls the color tokens; `surface` ∈ {glass, solid} controls whether the chrome bleeds the macOS vibrancy backdrop or paints opaque (accessibility / vestibular path). Two shipping palettes (`light`, `midnight`); legacy `dark` auto-remaps via `LEGACY_THEME_IDS`. `ThemeProvider` applies vars to `<html>` root, persists to localStorage; components reference `var(--t-*)` tokens inside inline styles. **Full detail + vibrancy material notes in "Theme System (current state)" below.**
 
 **Never hardcode rgba colors for theme surfaces.** Use `var(--t-bg-card)`, `var(--t-panel)`, `var(--t-input-bg)`, etc. A hardcoded `rgba(255, 255, 255, 0.56)` renders as a huge light-gray blob in midnight — see commit 929ffdf for the repo-registry sweep.
 
@@ -403,7 +403,7 @@ npm run ship                    # cargo tauri build with signing key +
                                # and uploads all 4 assets
 ```
 
-The user's installed `o8.app` sees the new version via the `UpdateBanner` component (polls every 30 min or on launch), downloads the signed `.app.tar.gz`, verifies the minisign signature against the pubkey in `tauri.conf.json`, extracts, replaces `/Applications/o8.app`, and relaunches.
+The user's installed `o8.app` sees the new version via the `UpdateCard` component (polls every 30 min or on launch), downloads the signed `.app.tar.gz`, verifies the minisign signature against the pubkey in `tauri.conf.json`, extracts, replaces `/Applications/o8.app`, and relaunches.
 
 ### Why local instead of CI
 
@@ -415,7 +415,7 @@ GitHub Actions macOS runners failed because of billing. Local `npm run ship` tak
 
 ### o8_view_* webview tools (lets Claude drive the installed app)
 
-The production build includes the `tauri-plugin-mcp` Rust crate via the `dev-mcp-plugin` Cargo feature (always-on now in `tauri:build:signed`). On launch it opens a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock`. The **operator MCP server** connects to that socket and exposes 7 tools with `o8_view_*` verbs (screenshot, snapshot, click, type, read, eval, navigate).
+The production build includes the `tauri-plugin-mcp` Rust crate via the `dev-mcp-plugin` Cargo feature (always-on now in `tauri:build:signed`). On launch it opens a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock`. The **operator MCP server** connects to that socket and exposes the 12 `o8_view_*` webview tools (full list under "Webview control tools" in MCP servers above).
 
 `.mcp.json` at the repo root registers only the `o8` operator MCP server. Any new Claude Code session that opens this directory picks it up automatically and the webview tools appear under `mcp__o8__o8_view_*`.
 
@@ -548,4 +548,5 @@ Using subagents saves main context and runs cheaper models on tasks that don't n
 - `docs/openclaw-integration.md` — openclaw orchestrator backend integration details + v1 streaming limitations
 - `docs/vocabulary.md` — Canonical glossary (`runtime` / `agent` / `session` / `packet` / `lane` / `mission` / `review` / `approval`). MCP tool names + DB columns frozen; UI label divergences documented inline.
 
+<!-- Last reviewed: 2026-05-28 (staleness fix after the 97-file cleanup wave — corrected: no test files (was fact-backed.test.ts), UpdateBanner→UpdateCard, de-duped the webview-tools section (stale "7 tools" → 12) + added Theming cross-ref. Verified still-accurate against source: 26 API families, 74 lib domains, TILE_LAYOUT_VERSION 4, all 20 Key Files, Opus 4.7 orchestrator model, tab kinds, /api/v2/chat, spec-ingest.ts.) -->
 <!-- Last reviewed: 2026-05-26 (full staleness pass + closed-issues sweep — runtime model, layout diagram, theme system, design constants → hurttlocker.md, Cortex v2 rewrite + Engineering Brain + spec-ingest feedback loop, WS channels, port resolution, middleware GATED_PREFIXES, webview tools 7→12, OrchestratorHistorySidebar removal, DB tables, API families 10→26, lib domains 13→74, three orchestrator backends incl. openclaw, ReviewPanel + TurnSummaryCard + ChatActionCard, cortex_ask MCP tool, recovering lane state, docs/api.md + docs/openclaw-integration.md) -->

@@ -87,13 +87,6 @@ interface WorkspaceHeaderStripProps {
   onTitleRenameSubmit?: (newTitle: string) => Promise<void>;
   onTitleArchive?: () => void;
   onTitleShare?: () => void;
-  /** Single-workspace spawn shortcut — when in single mode the global
-   *  header carries the ▶ play button (the per-pane lower TabBar that
-   *  used to host it is hidden). Each spawn callback gates its menu
-   *  item. May come off — operator wants to feel it out first. */
-  onSpawnOrchestrator?: () => void;
-  onSpawnChat?: () => void;
-  onSpawnTerminal?: () => void;
 }
 
 export function WorkspaceHeaderStrip({
@@ -111,9 +104,6 @@ export function WorkspaceHeaderStrip({
   onTitleRenameSubmit,
   onTitleArchive,
   onTitleShare,
-  onSpawnOrchestrator,
-  onSpawnChat,
-  onSpawnTerminal,
   headerTabs,
   headerActiveTabId,
   projectContextRailAvailable = false,
@@ -130,7 +120,6 @@ export function WorkspaceHeaderStrip({
   const usePillStrip = !isSplit && tabs.length > 1;
   const hasTitleMenu = !isSplit && !usePillStrip && headerLabel && (onTitleRenameSubmit || onTitleArchive || onTitleShare);
   const [renameMode, setRenameMode] = useState(false);
-  const hasPlayButton = Boolean(onSpawnOrchestrator || onSpawnChat || onSpawnTerminal);
   return (
     <ColumnHeaderStrip
       drag
@@ -186,7 +175,7 @@ export function WorkspaceHeaderStrip({
         </div>
       ) : null}
       right={
-        showProjectContextToggle || hasPlayButton || onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
+        showProjectContextToggle || onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
           <>
             {showProjectContextToggle ? (
               <HeaderIconPill
@@ -195,13 +184,6 @@ export function WorkspaceHeaderStrip({
                 title={projectContextRailVisible ? 'Hide project context' : 'Show project context'}
                 onClick={onToggleProjectContextRail}
                 yNudge={-3}
-              />
-            ) : null}
-            {hasPlayButton ? (
-              <HeaderPlayButton
-                onSpawnOrchestrator={onSpawnOrchestrator}
-                onSpawnChat={onSpawnChat}
-                onSpawnTerminal={onSpawnTerminal}
               />
             ) : null}
             {onToggleBottomPanel ? (
