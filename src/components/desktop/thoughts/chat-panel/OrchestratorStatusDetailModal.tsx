@@ -26,7 +26,9 @@ function detailContent(event: OrchestratorStatusEventData): { explain: string; r
   switch (event.kind) {
     case 'mission-complete':
       return {
-        explain: 'Every packet in this mission was reviewed, merged into the base branch, and its lane archived. Here is what shipped.',
+        explain: event.packets && event.packets.length > 0
+          ? 'Every packet in this mission was reviewed, merged into the base branch, and its lane archived. Here is what shipped.'
+          : 'Every packet in this mission was reviewed, merged into the base branch, and its lane archived. The thread is ready for your next mission.',
         rows: [
           { label: 'Merged', value: `${event.mergedCount} ${event.mergedCount === 1 ? 'packet' : 'packets'}` },
           ...(typeof event.archivedCount === 'number'
