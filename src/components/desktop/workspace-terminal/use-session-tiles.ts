@@ -52,6 +52,44 @@ function persistSessionTileLayout(tabId: string, layout: SessionTileLayout): voi
   }
 }
 
+const SESSION_TILE_KEY_PREFIX = 'o8:orchestrator:session-tiles:tab:';
+
+/** Remove the persisted session-tile layout for a single tab. Call on tab
+ *  close so a closed orchestrator tab never leaves an orphaned localStorage
+ *  key behind (the leak that piled up 80+ dead `…:session-tiles:tab:*` keys). */
+export function clearSessionTileStorage(tabId: string): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.removeItem(sessionTileStorageKey(tabId));
+  } catch {
+    // ignore
+  }
+}
+
+/** One-time scrub: drop every session-tile key whose tab id is not in
+ *  `validTabIds`. Pre-fix these keys were never cleaned on close, so they
+ *  accumulated forever. Returns the number of orphans removed. */
+export function scrubOrphanSessionTileKeys(validTabIds: Set<string>): number {
+  if (typeof window === 'undefined') return 0;
+  let removed = 0;
+  try {
+    const orphans: string[] = [];
+    for (let i = 0; i < window.localStorage.length; i += 1) {
+      const key = window.localStorage.key(i);
+      if (!key || !key.startsWith(SESSION_TILE_KEY_PREFIX)) continue;
+      const tabId = key.slice(SESSION_TILE_KEY_PREFIX.length);
+      if (!validTabIds.has(tabId)) orphans.push(key);
+    }
+    for (const key of orphans) {
+      window.localStorage.removeItem(key);
+      removed += 1;
+    }
+  } catch {
+    // ignore
+  }
+  return removed;
+}
+
 interface UseSessionTilesArgs {
   tabId: string;
   /** sessionKeys of every active fleet agent — used to prune stale leaves. */

@@ -91,7 +91,7 @@ function WorkspaceTerminalPanelsBase({
               initialMode={tab.mode}
               initialSingleRuntime={tab.singleRuntime}
               initialChatModelId={tab.chatModelId}
-              initialThreadId={tab.id.startsWith('thoughts-') ? tab.id : undefined}
+              initialThreadId={tab.orchestratorThreadId ?? (tab.id.startsWith('thoughts-') ? tab.id : undefined)}
               projectContextRailVisible={projectContextRailVisible}
               onChatSummary={(text) => onUpdateLlmSummary(tab.id, text)}
               restoreLastThread={!tab.freshSpawn}

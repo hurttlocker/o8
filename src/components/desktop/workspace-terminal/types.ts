@@ -82,6 +82,12 @@ export interface TerminalTab {
   // or model-tier preference. Empty/undefined = use the env-configured
   // chain.
   chatOpenrouterModel?: string;
+  // The chat-history thread id (`thoughts-…`) this orchestrator tab is
+  // showing. Captured from the tab's `o8:workspace-thread-id` broadcast and
+  // persisted so the EXACT conversation reopens on reload — instead of every
+  // orchestrator tab collapsing onto the global last-active thread. Distinct
+  // from `id`, which is `orchestrator-<uuid>` for spawned tabs.
+  orchestratorThreadId?: string;
   // True for tabs spawned via "+ New session" (a deliberate user action).
   // The boot-restore path leaves this undefined so the saved last-thread
   // gets re-loaded; fresh user-spawned tabs skip the restore and start

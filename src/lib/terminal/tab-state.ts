@@ -44,6 +44,12 @@ export interface PersistedTab {
   chatModelId?: ChatModelId;
   /** Per-tab pinned OpenRouter model slug overriding the chain. */
   chatOpenrouterModel?: string;
+  /**
+   * The chat-history thread id (`thoughts-…`) an orchestrator tab is showing.
+   * Persisted so reload reopens the exact conversation per-tab instead of
+   * collapsing every orchestrator tab onto the global last-active thread.
+   */
+  orchestratorThreadId?: string;
   linkedIssue?: {
     repo: string;
     number: number;
