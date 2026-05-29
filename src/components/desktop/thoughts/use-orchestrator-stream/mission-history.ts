@@ -16,17 +16,13 @@ interface ThoughtsHistoryListEntry {
 }
 
 interface ArchiveMissionThreadOptions {
-  appendLocalEntries: (entries: MobileTranscriptEntry[]) => void;
   planText: string | null;
   replaceTranscript: (entries: MobileTranscriptEntry[]) => void;
+  getTranscript: () => MobileTranscriptEntry[];
   repoPath: string;
   reset: () => void;
   transcript: MobileTranscriptEntry[];
   transitionStripTimerRef: { current: number | null };
-}
-
-function missionMergeLabel(count: number) {
-  return `${count} MERGE${count === 1 ? '' : 'S'}`;
 }
 
 function buildMissionTransitionEntry(id: string, text: string, timestamp: number): MobileTranscriptEntry {
@@ -70,7 +66,7 @@ async function findStoredThoughtsThreadTabId(
 
 function showMissionThreadTransition(
   detail: OrchestratorMissionCompletedDetail,
-  options: Pick<ArchiveMissionThreadOptions, 'appendLocalEntries' | 'replaceTranscript' | 'transitionStripTimerRef'>,
+  options: Pick<ArchiveMissionThreadOptions, 'replaceTranscript' | 'getTranscript' | 'transitionStripTimerRef'>,
 ) {
   if (options.transitionStripTimerRef.current) {
     clearTimeout(options.transitionStripTimerRef.current);
@@ -78,19 +74,25 @@ function showMissionThreadTransition(
   }
 
   const startedAt = Date.now();
-  options.replaceTranscript([
-    buildMissionTransitionEntry(
-      `orch-mission-complete-${startedAt}`,
-      `(MISSION COMPLETE · ${missionMergeLabel(detail.mergedCount)} · ARCHIVED)`,
-      startedAt,
-    ),
-  ]);
+  const confirmationId = `orch-mission-complete-${startedAt}`;
+  const mergeCount = detail.mergedCount;
+  const summary = mergeCount > 0
+    ? `Mission complete — ${mergeCount} ${mergeCount === 1 ? 'packet' : 'packets'} merged and archived. Ready for the next one.`
+    : 'Mission archived. Ready for the next one.';
+  options.replaceTranscript([buildMissionTransitionEntry(confirmationId, summary, startedAt)]);
+
+  // After a beat, clear the confirmation so the thread returns to its empty
+  // state (greeting + quick-action cards) — the completed mission is preserved
+  // in the history list, so the live thread doesn't need to keep a marker.
+  // Guard against wiping a turn the operator started in the meantime: only
+  // clear when the confirmation is still the sole entry.
   options.transitionStripTimerRef.current = window.setTimeout(() => {
     options.transitionStripTimerRef.current = null;
-    options.appendLocalEntries([
-      buildMissionTransitionEntry(`orch-mission-ready-${startedAt}`, '(NEW THREAD · READY)', startedAt + 220),
-    ]);
-  }, 220);
+    const current = options.getTranscript();
+    if (current.length === 1 && current[0]?.id === confirmationId) {
+      options.replaceTranscript([]);
+    }
+  }, 4600);
 }
 
 export async function archiveMissionThread(
