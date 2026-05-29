@@ -276,6 +276,8 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | POST | `/api/panel/mcp-test` | "Test connection" probe for a registered MCP server (stdio or HTTP). |
 | GET | `/api/panel/mobile-pairing` | Mobile pairing payload (Tailscale URL, ws-token, fingerprints) for QR. |
 | POST | `/api/panel/o8-github-summary` | Summarize a repo's recent GitHub activity via OpenRouter free models. |
+| GET | `/api/panel/o8-update-summary` | Summarize an o8 GitHub release (release notes + recent commits) via OpenRouter free models for the UpdateCard. |
+| POST | `/api/panel/o8-mission-summary` | Summarize a completed mission's merged packets (hydrated from the session_outcomes ledger) into plain-language prose via OpenRouter free models, for the Mission-complete detail modal. |
 | POST | `/api/panel/o8-scratch-chat` | One-shot scratch chat with tool calls (file context, OpenRouter free models). |
 | GET | `/api/panel/open-in` | List available editors (CLIs that exist on PATH). |
 | POST | `/api/panel/open-in` | Open a file in the requested editor. |
