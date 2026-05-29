@@ -80,17 +80,28 @@ export interface LaneLifecyclePayload {
   laneId?: string;
   packetId?: string | null;
   sessionKey?: string | null;
+  // The WS `lane-lifecycle` payload (buildLaneLifecyclePayload) carries the
+  // lane status as `status`; some legacy/realtime envelopes use `laneStatus`.
+  // Read both — `laneStatusOf()` coalesces them. A bare `laneStatus`-only read
+  // is always undefined against the live WS event (the bug that suppressed
+  // every lane-lifecycle card).
+  status?: string;
   laneStatus?: string;
   previousStatus?: string | null;
   branch?: string | null;
   runtime?: string | null;
 }
 
+/** The lane status off a lifecycle payload, tolerant of both field names. */
+export function laneStatusOf(data: LaneLifecyclePayload): string {
+  return data.laneStatus ?? data.status ?? '';
+}
+
 export function deriveLaneStatusEvent(
   data: LaneLifecyclePayload,
   resolvePacketTitle: (data: LaneLifecyclePayload) => string | null,
 ): OrchestratorStatusEventData | null {
-  const status = data.laneStatus ?? '';
+  const status = laneStatusOf(data);
   const previous = data.previousStatus ?? '';
 
   // A packet merged: its lane settled to `completed`.
@@ -126,7 +137,7 @@ export function deriveLaneStatusEvent(
 // A stable dedupe key so a given transition cards exactly once per session.
 export function statusEventDedupeKey(data: LaneLifecyclePayload, event: OrchestratorStatusEventData): string {
   const anchor = data.packetId ?? data.laneId ?? data.sessionKey ?? 'lane';
-  return `${anchor}:${event.kind}:${data.laneStatus ?? ''}`;
+  return `${anchor}:${event.kind}:${laneStatusOf(data)}`;
 }
 
 // ---- Human-readable formatting (shared by card + modal + fallback text) ----
