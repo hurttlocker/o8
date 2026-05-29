@@ -1,30 +1,11 @@
 import { useCallback, useRef } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { serializeTranscriptForStorage } from '@/lib/transcripts/history-serde';
 
 const DEBOUNCE_MS = 800;
 
 function serializeMessages(msgs: MobileTranscriptEntry[]) {
-  return msgs.map((m) => ({
-    id: m.id,
-    role: m.role,
-    content: m.text,
-    type: m.type,
-    media: m.media,
-    toolCalls: m.toolCalls,
-    timestamp: m.timestamp ?? Date.now(),
-    timestampLabel: m.timestampLabel,
-    model: m.model,
-    tokens: m.tokens,
-    costUsd: m.costUsd,
-    sources: m.sources,
-    thinking: m.thinking,
-    thinkingSteps: m.thinkingSteps,
-    thinkingDurationMs: m.thinkingDurationMs,
-    recalledFacts: m.recalledFacts,
-    command: m.command,
-    compaction: m.compaction,
-    statusEvent: m.statusEvent,
-  }));
+  return serializeTranscriptForStorage(msgs);
 }
 
 export function usePersistChatThread(resolvedRepoPath: string | null) {

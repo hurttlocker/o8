@@ -27,7 +27,7 @@ import type {
 } from '@/lib/orchestrator/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { PendingSteer } from './chat-panel/PendingSteerCard';
-import { serializeThreadToMarkdown, type ExportThreadMessage } from '@/lib/llm/export-thread';
+import { serializeThreadToMarkdown } from '@/lib/llm/export-thread';
 import {
   executeOrchestratorSlashCommand,
   parseOrchestratorSlashCommand,
@@ -80,49 +80,12 @@ import {
   fetchThoughtsOperatorDefaults,
   THOUGHTS_OPERATOR_DEFAULTS_FALLBACK,
 } from './operator-defaults';
+import {
+  mapHistoryMessagesToTranscript,
+  type ThoughtsHistoryMessage,
+} from './history-transcript';
 
 export type { ThoughtsChatPanelHandle, ThoughtsChatPanelChromeState, ThoughtsChatPermissionMode };
-
-type ThoughtsHistoryMessage = ExportThreadMessage & {
-  id: string;
-  role: MobileTranscriptEntry['role'];
-  media?: MobileTranscriptEntry['media'];
-  thinkingSteps?: MobileTranscriptEntry['thinkingSteps'];
-  thinkingDurationMs?: MobileTranscriptEntry['thinkingDurationMs'];
-  recalledFacts?: MobileTranscriptEntry['recalledFacts'];
-  command?: MobileTranscriptEntry['command'];
-  statusEvent?: MobileTranscriptEntry['statusEvent'];
-  isPartial?: boolean;
-  isCompaction?: boolean;
-};
-
-function mapHistoryMessagesToTranscript(messages: ThoughtsHistoryMessage[]): MobileTranscriptEntry[] {
-  return messages
-    .filter((message) => !message.isPartial)
-    .map((message) => ({
-      id: message.id,
-      role: message.role,
-      text: message.text ?? message.content ?? '',
-      type: message.type ?? (message.compaction || message.isCompaction ? 'compaction' : 'message'),
-      media: message.media,
-      toolCalls: message.toolCalls,
-      timestamp: message.timestamp ?? Date.now(),
-      timestampLabel: message.timestampLabel ?? (message.timestamp
-        ? new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
-        : ''),
-      model: message.model,
-      tokens: message.tokens,
-      costUsd: message.costUsd,
-      sources: message.sources,
-      thinking: message.thinking,
-      thinkingSteps: message.thinkingSteps,
-      thinkingDurationMs: message.thinkingDurationMs,
-      recalledFacts: message.recalledFacts,
-      command: message.command,
-      compaction: message.compaction,
-      statusEvent: message.statusEvent,
-    }));
-}
 
 function isRuntimeSessionKey(sessionKey: string): boolean {
   return sessionKey.startsWith('claude-code:')
