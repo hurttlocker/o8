@@ -28,8 +28,8 @@ export const LONG_RUNNING_MS = 1 * 60 * 1000; // 1 min — pulse → orbit (was 
  * its (freeform or enum) status string through this ONE function so the motion
  * vocabulary reads identically everywhere — no per-surface drift. Covers the
  * union of every surface's vocabulary (lane status, AgentStatus, VisualStatus,
- * packetVisualState). active/working/reviewing → working; anything awaiting the
- * human → review; blocked/failed/error → failed; completed/merged/released →
+ * packetVisualState). active/working → working; reviewing (= awaiting review)
+ * + anything awaiting the human → review; blocked/failed/error → failed; completed/merged/released →
  * the merged glyph; everything else (queued/draft/idle/archived) → idle.
  */
 export function agentStatusToDotState(status?: string | null): AgentDotState {
@@ -38,9 +38,9 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
     case 'active':
     case 'working':
     case 'launching':
-    case 'reviewing':
     case 'recovering':
       return 'running';
+    case 'reviewing':
     case 'waiting':
     case 'awaiting_input':
     case 'awaiting_orchestrator':
