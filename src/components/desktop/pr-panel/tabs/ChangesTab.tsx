@@ -85,7 +85,20 @@ function DiffPatch({ patch }: { patch: string }) {
             >
               {line.newNumber ?? ''}
             </span>
-            <span style={{ flex: 1, minWidth: 0 }}>{line.text}</span>
+            <span
+              style={{
+                flex: 1,
+                minWidth: 0,
+                // Wrap long diff lines by default — matches ReviewPanel's
+                // wrap-on default + the operator's o8.md note. pre-wrap keeps
+                // leading indentation; overflowWrap breaks unbreakable tokens
+                // (URLs, minified blobs) so nothing clips off the right edge.
+                whiteSpace: 'pre-wrap',
+                overflowWrap: 'anywhere',
+              }}
+            >
+              {line.text}
+            </span>
           </div>
         );
       })}
