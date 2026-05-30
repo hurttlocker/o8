@@ -338,6 +338,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const thinkingPreferenceTouchedRef = useRef(false);
   const pollRef = useRef<number | null>(null);
   const pollDelayRef = useRef<number | null>(null);
+  // Aborts the in-flight transcript fetch. The 2s poll reads a JSONL transcript
+  // that grows large in long sessions; without aborting, a stalled read leaves
+  // the request open while the next tick fires another, stacking ESTABLISHED
+  // sockets until the webview's ~6-per-origin budget is exhausted (which then
+  // wedges every on-demand fetch). Abort per-tick + on teardown so at most one
+  // transcript request is ever in flight.
+  const pollAbortRef = useRef<AbortController | null>(null);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const seenServerEntriesRef = useRef<Map<string, string>>(new Map());
   const responseSeenRef = useRef(false);
@@ -718,6 +725,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return () => {
       if (pollRef.current !== null) window.clearInterval(pollRef.current);
       if (pollDelayRef.current !== null) window.clearTimeout(pollDelayRef.current);
+      if (pollAbortRef.current !== null) pollAbortRef.current.abort();
       if (exportFeedbackTimerRef.current !== null) window.clearTimeout(exportFeedbackTimerRef.current);
     };
   }, []);
@@ -730,6 +738,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     if (pollDelayRef.current !== null) {
       window.clearTimeout(pollDelayRef.current);
       pollDelayRef.current = null;
+    }
+    // Drop the in-flight transcript request too — clearing the timer alone
+    // leaves a stalled fetch holding its socket open.
+    if (pollAbortRef.current !== null) {
+      pollAbortRef.current.abort();
+      pollAbortRef.current = null;
     }
   }, []);
 
@@ -819,8 +833,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         return;
       }
 
+      // Cancel any still-in-flight tick before starting a new one so a stalled
+      // transcript read can't pile up open sockets.
+      pollAbortRef.current?.abort();
+      const controller = new AbortController();
+      pollAbortRef.current = controller;
+
       try {
-        const res = await fetch(transcriptUrl(sessionKey));
+        const res = await fetch(transcriptUrl(sessionKey), { signal: controller.signal });
         if (!res.ok) return;
 
         const data = await res.json();
