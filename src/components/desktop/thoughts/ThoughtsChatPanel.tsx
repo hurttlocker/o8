@@ -43,6 +43,7 @@ import {
 } from './utils';
 import { useOrchestratorStream } from './useOrchestratorStream';
 import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
+import { getPendingMissionCards } from './mission-complete-detector';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
@@ -1075,6 +1076,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       clearPolling();
       orchStream.reset();
       orchStream.replaceTranscript(msgs);
+      // A thread reload replaces the transcript wholesale, which would drop a
+      // live-appended Mission-complete card. Re-assert any recorded card for
+      // this repo so the reload can't clobber it (idempotent by id).
+      if (isOrchestratorMode) {
+        const missionCards = getPendingMissionCards(resolvedRepoPath);
+        if (missionCards.length > 0) orchStream.appendLocalEntries(missionCards);
+      }
       seenServerEntriesRef.current.clear();
       orchestratorSessionRef.current = null;
       singleRuntimeSessionRef.current = null;
@@ -1090,7 +1098,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         inFlightLoadKeyRef.current = null;
       }
     }
-  }, [clearPolling, orchStream]);
+  }, [clearPolling, orchStream, isOrchestratorMode, resolvedRepoPath]);
 
   const suggestions = useMemo(
     () => generateSuggestions(agents.filter(isRunnableCliSession), sessionTargets),

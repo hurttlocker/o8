@@ -9,7 +9,7 @@ import {
   statusEventToText,
   type LaneLifecyclePayload,
 } from '@/lib/orchestrator/status-events';
-import { drainPendingMissionCards, MISSION_CARD_READY_EVENT } from './mission-complete-detector';
+import { getPendingMissionCards, MISSION_CARD_READY_EVENT } from './mission-complete-detector';
 import { normalizeRepoPath } from './use-orchestrator-stream/shared';
 
 interface LaneLifecycleDetailData extends LaneLifecyclePayload {
@@ -57,18 +57,19 @@ export function useOrchestratorStatusFeed({
     repoRef.current = repoPath;
   });
 
-  // Drain Mission-complete cards recorded by the detector. Runs on becoming
-  // active and whenever a new card is recorded — resilient to active flapping
-  // because the detector holds the card until it's drained.
+  // Surface Mission-complete cards recorded by the detector. The detector keeps
+  // them (non-consuming), so we re-assert on becoming active and whenever a new
+  // card is recorded; appendLocalEntries dedups by id, so this is a no-op once
+  // the card is present and survives a thread reload (which re-asserts again).
   useEffect(() => {
     if (!active) return undefined;
-    const drain = () => {
-      const cards = drainPendingMissionCards(repoRef.current);
+    const assert = () => {
+      const cards = getPendingMissionCards(repoRef.current);
       if (cards.length > 0) appendRef.current(cards);
     };
-    drain();
-    window.addEventListener(MISSION_CARD_READY_EVENT, drain);
-    return () => window.removeEventListener(MISSION_CARD_READY_EVENT, drain);
+    assert();
+    window.addEventListener(MISSION_CARD_READY_EVENT, assert);
+    return () => window.removeEventListener(MISSION_CARD_READY_EVENT, assert);
   }, [active]);
 
   // Per-packet merge / self-heal cards.

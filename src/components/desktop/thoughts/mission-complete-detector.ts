@@ -39,17 +39,14 @@ interface MissionTracker {
 // mode/active flapping AND the server clearing the current-mission pointer
 // after archival. Pending cards wait here until a live transcript drains them.
 const trackers = new Map<string, MissionTracker>();
+// Recorded Mission-complete cards. NOT consumed on read — kept here so the feed
+// can RE-ASSERT them (idempotent append-by-id) after a thread reload clobbers
+// the live transcript. Capped; superseded per repo by newer missions.
 const pendingCards: MobileTranscriptEntry[] = [];
-
-// TEMP diagnostic — inspect via window.__o8mc in the webview. Remove after.
-const diag = { trackers, pendingCards, log: [] as string[] };
-function dlog(msg: string) {
-  diag.log.push(`${new Date().toISOString().slice(11, 23)} ${msg}`);
-  if (diag.log.length > 100) diag.log.shift();
-}
-if (typeof window !== 'undefined') {
-  (window as unknown as { __o8mc?: typeof diag }).__o8mc = diag;
-}
+const MAX_PENDING_CARDS = 12;
+// Skip redundant capture work when the mission snapshot is unchanged (the
+// capture effect re-runs on every render because missionState is a fresh ref).
+const lastCaptureSig = new Map<string, string>();
 
 function packetIsTerminal(packet: OrchestratorPacket): boolean {
   return packet.releaseState === 'released' || Boolean(packet.archivedAt);
@@ -73,16 +70,19 @@ function recordPendingMissionCard(tracker: MissionTracker) {
     repoPath: tracker.repoPath,
     packets,
   };
-  pendingCards.push({
-    id: `orch-mission-complete-${tracker.missionId}`,
-    role: 'system',
-    text: statusEventToText(statusEvent),
-    timestamp: Date.now(),
-    timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-    statusEvent,
-  });
+  const cardId = `orch-mission-complete-${tracker.missionId}`;
+  if (!pendingCards.some((card) => card.id === cardId)) {
+    pendingCards.push({
+      id: cardId,
+      role: 'system',
+      text: statusEventToText(statusEvent),
+      timestamp: Date.now(),
+      timestampLabel: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      statusEvent,
+    });
+    while (pendingCards.length > MAX_PENDING_CARDS) pendingCards.shift();
+  }
   trackers.delete(tracker.missionId);
-  dlog(`RECORD card ${tracker.missionId} packets=${packets.length}`);
   if (typeof window !== 'undefined') {
     window.dispatchEvent(new CustomEvent(MISSION_CARD_READY_EVENT));
   }
@@ -96,24 +96,19 @@ function checkTrackerComplete(missionId: string) {
 }
 
 /**
- * Drain the Mission-complete cards recorded for `repoPath` (returns + removes
- * them). Cards with no repoPath, or a matching one, are returned.
+ * Return (WITHOUT removing) the Mission-complete cards recorded for `repoPath`.
+ * Non-consuming so the feed can re-assert them after a thread reload clobbers
+ * the live transcript — appendLocalEntries dedups by id, so re-asserting is a
+ * no-op once the card is present.
  */
-export function drainPendingMissionCards(repoPath: string | null): MobileTranscriptEntry[] {
+export function getPendingMissionCards(repoPath: string | null): MobileTranscriptEntry[] {
   if (pendingCards.length === 0) return [];
   const target = normalizeRepoPath(repoPath);
-  dlog(`drain req repo=${repoPath ?? 'null'} pending=${pendingCards.length}`);
-  const drained: MobileTranscriptEntry[] = [];
-  for (let i = pendingCards.length - 1; i >= 0; i -= 1) {
-    const card = pendingCards[i];
+  return pendingCards.filter((card) => {
     const event = card.statusEvent;
     const cardRepo = normalizeRepoPath(event && event.kind === 'mission-complete' ? event.repoPath ?? null : null);
-    if (!target || !cardRepo || cardRepo === target) {
-      drained.unshift(card);
-      pendingCards.splice(i, 1);
-    }
-  }
-  return drained;
+    return !target || !cardRepo || cardRepo === target;
+  });
 }
 
 /**
@@ -133,6 +128,11 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
     const id = missionState?.missionId?.trim();
     if (!id || !missionState || missionState.packets.length === 0) return;
     if (hasMissionBeenCarded(id)) return;
+    // Skip when this mission's packet/release snapshot is unchanged — the effect
+    // re-runs on every render (missionState is a fresh ref each time).
+    const sig = missionState.packets.map((p) => `${p.id}:${p.releaseState}:${p.archivedAt ? 1 : 0}`).join('|');
+    if (lastCaptureSig.get(id) === sig) return;
+    lastCaptureSig.set(id, sig);
     const existing = trackers.get(id);
     const tracker: MissionTracker = existing ?? {
       missionId: id,
@@ -155,7 +155,6 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
       if (packetIsTerminal(packet)) tracker.done.add(packet.id);
     }
     trackers.set(id, tracker);
-    dlog(`capture ${id} packets=${tracker.packetIds.size} done=${tracker.done.size}`);
     checkTrackerComplete(id);
   }, [missionState]);
 
@@ -165,9 +164,7 @@ export function useMissionCompleteDetector(missionState: OrchestratorMissionStat
   useEffect(() => {
     const handler = (event: Event) => {
       const data = (event as CustomEvent<{ data?: LaneLifecycleDetailData }>).detail?.data;
-      if (!data) return;
-      dlog(`evt status=${laneStatusOf(data)} pkt=${data.packetId ?? '?'} trackers=${trackers.size}`);
-      if (laneStatusOf(data) !== 'completed') return;
+      if (!data || laneStatusOf(data) !== 'completed') return;
       for (const [missionId, tracker] of trackers) {
         let packetId = data.packetId && tracker.packetIds.has(data.packetId) ? data.packetId : null;
         if (!packetId) {
