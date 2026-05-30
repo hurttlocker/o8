@@ -8,6 +8,7 @@ function generateLaneLifecycleMutationId(laneId: string) {
   return `lane-lifecycle-${laneId}-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
 }
 
+// NOTE: lane status is exposed as `status` here; clients coalesce laneStatus ?? status (see laneStatusOf).
 function buildLaneLifecyclePayload(
   lane: Pick<Lane, 'id' | 'packetId' | 'status' | 'sessionKey' | 'branch' | 'repoPath'>,
   previousStatus: LaneStatus | null,
