@@ -48,6 +48,7 @@ import { useOrchestratorContextResidency } from '@/components/desktop/orchestrat
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
 import { SwarmStatusCard } from './chat-panel/SwarmStatusCard';
+import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import type { TurnSummary } from './chat-panel/TurnSummaryCard';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
@@ -511,7 +512,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     let cancelled = false;
     (async () => {
       try {
-        const res = await fetch('/api/panel/repos');
+        const res = await ipcFetch('/api/panel/repos');
         if (res.ok && !cancelled) {
           const data = await res.json() as { repos?: Array<{ localPath: string }> };
           const path = data.repos?.[0]?.localPath ?? null;
@@ -595,7 +596,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       let repoPath = resolvedRepoPath;
       if (!repoPath) {
         try {
-          const res = await fetch('/api/panel/repos');
+          const res = await ipcFetch('/api/panel/repos');
           if (res.ok) {
             const data = await res.json() as { repos?: Array<{ localPath: string }> };
             repoPath = data.repos?.[0]?.localPath ?? null;

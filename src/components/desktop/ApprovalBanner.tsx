@@ -1,8 +1,9 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import type { ApprovalRecord } from '@/lib/approvals/types';
+import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 
 // First-class approval surface. Lives directly under TitleBar so merge-gate
 // cards can't get buried in an alerts popover. Rendered only when there are
@@ -212,14 +213,23 @@ export function ApprovalBanner() {
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
 
+  // Skip a tick if the previous one is still running so a slow read can't
+  // stack overlapping requests. The GET routes through ipcFetch → in the
+  // desktop app it's a Rust invoke that never touches the webview's HTTP
+  // socket budget (this banner is always mounted and polls every 5s).
+  const loadInFlightRef = useRef(false);
   const load = useCallback(async () => {
+    if (loadInFlightRef.current) return;
+    loadInFlightRef.current = true;
     try {
-      const res = await fetch('/api/panel/approvals?status=pending', { cache: 'no-store' });
+      const res = await ipcFetch('/api/panel/approvals?status=pending', { cache: 'no-store' });
       if (!res.ok) return;
       const data = (await res.json()) as { approvals?: ApprovalRecord[] };
       setApprovals(data.approvals ?? []);
     } catch {
       // silent — poll ticks again on next interval
+    } finally {
+      loadInFlightRef.current = false;
     }
   }, []);
 
