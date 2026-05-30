@@ -18,6 +18,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ActivityItem } from './agent-panel/types';
 import { shortRepoLabel, normalizeRepoSlug } from './agent-panel/shared';
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import {
   ACTIVITY_COLORS,
   EMPTY_DATA,
@@ -229,7 +230,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   useEffect(() => {
     if (registeredRepos.length > 0) return;
     let cancelled = false;
-    fetch('/api/panel/repos')
+    ipcFetch('/api/panel/repos')
       .then((res) => res.json())
       .then((d) => {
         const slugs = (d.repos ?? [])

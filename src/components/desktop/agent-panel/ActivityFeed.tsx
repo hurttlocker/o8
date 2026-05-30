@@ -23,6 +23,7 @@ import type {
   PRHoverDetail,
   RepoTaskLaunchRequest,
 } from './types';
+import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 
 const ALL_REPOS_KEY = '__github__';
 
@@ -77,7 +78,7 @@ export const ActivityFeed = memo(function ActivityFeed({
   const [ciHoverDetails, setCiHoverDetails] = useState<Record<string, CIHoverDetail>>({});
 
   useEffect(() => {
-    fetch('/api/panel/repos')
+    ipcFetch('/api/panel/repos')
       .then((response) => response.json())
       .then((data) => {
         const ghRepos = (data.repos ?? [])
@@ -165,7 +166,7 @@ export const ActivityFeed = memo(function ActivityFeed({
         fetch(`/api/panel/issues?repo=${encodeURIComponent(repoSlug)}`).catch(() => null),
         fetch(`/api/panel/prs?repo=${encodeURIComponent(repoSlug)}`).catch(() => null),
         fetch(`/api/panel/ci?repo=${encodeURIComponent(repoSlug)}`).catch(() => null),
-        fetch(`/api/panel/commits?repo=${encodeURIComponent(repoSlug)}`).catch(() => null),
+        ipcFetch(`/api/panel/commits?repo=${encodeURIComponent(repoSlug)}`).catch(() => null),
       ]);
 
       for (const response of [issuesRes, prsRes, ciRes, commitsRes]) {
