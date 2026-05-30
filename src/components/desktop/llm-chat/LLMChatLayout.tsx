@@ -56,6 +56,7 @@ function LLMChatLayoutBase(props: React.ComponentProps<typeof HistorySidebar> & 
     inputRef: rest.inputRef,
     isEmpty: rest.isEmpty,
     isStreaming: rest.isStreaming,
+    turnStartedAt: rest.turnStartedAt,
     isUserScrolledUp: rest.isUserScrolledUp,
     messages: rest.messages,
     missionCard: rest.missionCard,

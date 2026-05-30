@@ -18,9 +18,10 @@ function ArrowDownIcon({ size = 13 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></svg>;
 }
 
+import { AgentStatusDot } from '../AgentStatusDot';
 import { CompactionNode } from '../CompactionNode';
 import { renderLLMMarkdown } from '../LLMMarkdown';
-import { ChainOfThought, LiveToolCalls, StreamingIndicator } from './ChainOfThought';
+import { ChainOfThought, LiveToolCalls } from './ChainOfThought';
 import { MessageBubble } from './MessageBubble';
 import { PROMPT_ICONS, SUGGESTED_PROMPTS, THEME_ACCENT, THEME_ACCENT_SOFT, THEME_ACCENT_SOFT_STRONG, THEME_BG_CARD, THEME_GLASS_BORDER_STRONG, THEME_GLASS_ELEVATED, THEME_GLASS_MUTED, THEME_GLASS_SHADOW, THEME_PANEL_BORDER, THEME_TEXT, THEME_TEXT_FAINT, THEME_TEXT_MUTED, THEME_TEXT_SECONDARY, type ActiveThinkingState, type LLMMessage, type MissionAction, type MissionCardData, type ModelOption, type ToolCallInfo } from './shared';
 
@@ -36,6 +37,7 @@ function ChatSurfaceBase({
   inputRef,
   isEmpty,
   isStreaming,
+  turnStartedAt,
   isUserScrolledUp,
   messages,
   missionCard,
@@ -72,6 +74,8 @@ function ChatSurfaceBase({
   inputRef: React.RefObject<HTMLTextAreaElement | null>;
   isEmpty: boolean;
   isStreaming: boolean;
+  /** Real turn-start (epoch ms) — drives the working dot's pulse→orbit switch at 7 min. */
+  turnStartedAt?: number | null;
   isUserScrolledUp: boolean;
   messages: LLMMessage[];
   missionCard: MissionCardData | null;
@@ -298,7 +302,11 @@ function ChatSurfaceBase({
                   })}
                   <span style={{ display: 'inline-block', width: 2, height: 16, background: '#3b82f6', marginLeft: 2, verticalAlign: 'text-bottom', animation: 'llmDot 1s ease-in-out infinite' }} />
                 </div>
-              ) : !activeThinking ? <StreamingIndicator /> : null}
+              ) : !activeThinking ? (
+                <div style={{ display: 'flex', alignItems: 'center', paddingTop: 16, paddingBottom: 8 }}>
+                  <AgentStatusDot state="running" startedAt={turnStartedAt} />
+                </div>
+              ) : null}
             </div>
           ) : null}
           {permissionMode === 'plan' && model.provider === 'operator' && messages.length === 0 && !isStreaming ? (

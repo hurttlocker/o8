@@ -1,6 +1,7 @@
 'use client';
 
 import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
+import { AgentStatusDot } from '@/components/desktop/AgentStatusDot';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { PendingSteerCard, type PendingSteer } from './PendingSteerCard';
@@ -31,6 +32,10 @@ function ComposerStatusBar({
 }) {
   const startedAtRef = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
+  // Render-visible mirror of startedAtRef for AgentStatusDot's pulse→orbit
+  // switch (refs can't be read during render). Synced from the same tick that
+  // drives `elapsed`, so it tracks the real turn-start without extra timers.
+  const [turnStart, setTurnStart] = useState<number | null>(null);
   const prevDisplayWaitingRef = useRef(displayWaiting);
   const prevLatestUserMessageIdRef = useRef<string | null>(latestUserMessageId);
   const hasRunningTools = runningTools.length > 0;
@@ -60,7 +65,7 @@ function ComposerStatusBar({
   useEffect(() => {
     if (!active) {
       startedAtRef.current = null;
-      const frame = window.requestAnimationFrame(() => setElapsed(0));
+      const frame = window.requestAnimationFrame(() => { setTurnStart(null); setElapsed(0); });
       return () => window.cancelAnimationFrame(frame);
     }
     if (startedAtRef.current === null) {
@@ -68,6 +73,7 @@ function ComposerStatusBar({
     }
     const tick = () => {
       const anchor = startedAtRef.current;
+      setTurnStart(anchor);
       setElapsed(anchor === null ? 0 : Date.now() - anchor);
     };
     const frame = window.requestAnimationFrame(tick);
@@ -102,19 +108,11 @@ function ComposerStatusBar({
         color: 'var(--t-text-muted)',
       }}
     >
-      <svg
-        width="10"
-        height="10"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="3.2"
-        strokeLinecap="round"
-        style={{ animation: 'spin 0.9s linear infinite', flexShrink: 0 }}
-        aria-hidden="true"
-      >
-        <path d="M21 12a9 9 0 1 1-6.22-8.56" />
-      </svg>
+      {/* Shared status vocabulary — accent pulse while working, flips to the
+          binary orbit once this turn crosses the long-running threshold (7 min).
+          startedAtRef holds the real turn-start (Date.now ms), so a genuinely
+          long orchestrator turn surfaces the orbit. */}
+      <AgentStatusDot state="running" startedAt={turnStart} />
       <span style={{
         fontSize: 11,
         fontWeight: 500,
