@@ -167,6 +167,24 @@ function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; acti
   );
 }
 
+// UltraCode tier accent — shares the climax orange with `max` so the top of
+// the thinking ladder reads as one premium family. UltraCode = our Claude-on-Max
+// orchestrating a Codex + Gemini swarm via workflows.
+const SWARM_ACCENT = '#FF5A1F';
+
+/** Three-node constellation — reads as "multiple agents working in parallel". */
+function SwarmGlyph({ size = 12, color = SWARM_ACCENT }: { size?: number; color?: string }) {
+  return (
+    <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+        <circle cx="8" cy="3.4" r="2" fill={color} />
+        <circle cx="3.4" cy="11.6" r="2" fill={color} />
+        <circle cx="12.6" cy="11.6" r="2" fill={color} />
+      </svg>
+    </span>
+  );
+}
+
 const MODEL_THINKING_MENU_WIDTH = 162;
 
 function ModelThinkingChip({
@@ -174,11 +192,15 @@ function ModelThinkingChip({
   effort,
   adaptiveEnabled,
   onEffortChange,
+  swarmEnabled = false,
+  onSetSwarm,
 }: {
   modelLabel: string;
   effort: ThinkingEffort;
   adaptiveEnabled: boolean;
   onEffortChange?: (effort: ThinkingEffort) => void;
+  swarmEnabled?: boolean;
+  onSetSwarm?: (enabled: boolean) => void;
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -188,7 +210,8 @@ function ModelThinkingChip({
   const menuRef = useRef<HTMLDivElement>(null);
   const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
   const selectedLabel = EFFORT_LABELS[effort];
-  const canOpen = Boolean(onEffortChange);
+  const ultraActive = Boolean(swarmEnabled);
+  const canOpen = Boolean(onEffortChange || onSetSwarm);
   const showingAffordance = canOpen && (hovered || focused || open);
 
   useEffect(() => {
@@ -237,7 +260,7 @@ function ModelThinkingChip({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         disabled={!canOpen}
-        title={`${modelLabel} · thinking ${selectedLabel}`}
+        title={ultraActive ? `${modelLabel} · UltraCode (swarm) · thinking ${selectedLabel}` : `${modelLabel} · thinking ${selectedLabel}`}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{
@@ -252,10 +275,10 @@ function ModelThinkingChip({
           paddingLeft: canOpen ? 5 : 0,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: showingAffordance ? 'rgba(37, 99, 235, 0.14)' : 'transparent',
+          borderColor: ultraActive ? 'rgba(255, 90, 31, 0.32)' : showingAffordance ? 'rgba(37, 99, 235, 0.14)' : 'transparent',
           borderRadius: 7,
-          background: showingAffordance ? 'rgba(37, 99, 235, 0.052)' : 'transparent',
-          color: showingAffordance ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+          background: ultraActive ? 'rgba(255, 90, 31, 0.08)' : showingAffordance ? 'rgba(37, 99, 235, 0.052)' : 'transparent',
+          color: ultraActive ? 'var(--t-text)' : showingAffordance ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
           cursor: canOpen ? 'pointer' : 'default',
           outline: focused && canOpen ? '2px solid rgba(37, 99, 235, 0.12)' : 'none',
           outlineOffset: 1,
@@ -266,6 +289,7 @@ function ModelThinkingChip({
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.1px' }}>
           {modelLabel}
         </span>
+        {ultraActive ? <SwarmGlyph size={11} /> : null}
         <ThinkingBars effort={effort} active={open || effort === 'max'} />
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: canOpen ? 0.72 : 0 }}>
           <path d="m6 9 6 6 6-6" />
@@ -356,6 +380,53 @@ function ModelThinkingChip({
               );
             })}
           </div>
+
+          {/* UltraCode — the top of the ladder. Selecting it flips on the
+              swarm (Claude-on-Max fans work out to a parallel Codex + Gemini
+              crew via workflows) and bumps thinking to xhigh. Toggle off to
+              return to a single-thread turn at the current effort. */}
+          {onSetSwarm ? (
+            <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--t-divider-subtle)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <button
+                type="button"
+                role="menuitemradio"
+                aria-checked={ultraActive}
+                onClick={() => {
+                  const next = !ultraActive;
+                  onSetSwarm(next);
+                  if (next) onEffortChange?.('xhigh');
+                  setOpen(false);
+                }}
+                style={{
+                  display: 'grid',
+                  gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+                  alignItems: 'center',
+                  gap: 8,
+                  minHeight: 30,
+                  paddingTop: 4,
+                  paddingRight: 6,
+                  paddingBottom: 4,
+                  paddingLeft: 7,
+                  borderWidth: 0,
+                  borderRadius: 8,
+                  background: ultraActive ? 'rgba(255, 90, 31, 0.10)' : 'transparent',
+                  color: 'var(--t-text)',
+                  cursor: 'pointer',
+                  textAlign: 'left',
+                  fontFamily: 'var(--font-sans-system)',
+                }}
+                onMouseEnter={(event) => { if (!ultraActive) event.currentTarget.style.background = 'var(--t-hover)'; }}
+                onMouseLeave={(event) => { if (!ultraActive) event.currentTarget.style.background = 'transparent'; }}
+              >
+                <SwarmGlyph size={13} color={ultraActive ? SWARM_ACCENT : 'var(--t-text-muted)'} />
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>UltraCode</span>
+                  <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '-0.2px', lineHeight: 1.2, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Codex + Gemini swarm</span>
+                </span>
+                <span style={{ width: 6, height: 6, borderRadius: 999, background: ultraActive ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
+              </button>
+            </div>
+          ) : null}
         </div>,
         document.body,
       ) : null}
@@ -681,6 +752,8 @@ export function InputButtons({
   effort = 'adaptive',
   onEffortChange,
   adaptiveEnabled = true,
+  swarmEnabled = false,
+  onSetSwarm,
   permissionMode,
   onTogglePermission,
   repoLabel,
@@ -708,6 +781,9 @@ export function InputButtons({
   effort?: ThinkingEffort;
   onEffortChange?: (effort: ThinkingEffort) => void;
   adaptiveEnabled?: boolean;
+  /** UltraCode / swarm tier — Claude-on-Max fans work out to Codex + Gemini. */
+  swarmEnabled?: boolean;
+  onSetSwarm?: (enabled: boolean) => void;
   permissionMode?: 'full' | 'plan';
   onTogglePermission?: () => void;
   repoLabel?: string | null;
@@ -747,6 +823,8 @@ export function InputButtons({
           effort={effort}
           adaptiveEnabled={adaptiveEnabled}
           onEffortChange={onEffortChange}
+          swarmEnabled={swarmEnabled}
+          onSetSwarm={onSetSwarm}
         />
       ) : null}
 

@@ -19,6 +19,9 @@ interface ChatMessageListProps {
   emptyStateOverride?: React.ReactNode;
   emptyStateFallback: React.ReactNode;
   topContent?: React.ReactNode;
+  /** Rendered at the live edge of the transcript — after the last message,
+   *  before the thinking indicator. Used for the inline swarm crew card. */
+  bottomContent?: React.ReactNode;
   // Orchestrator has its own sticky ComposerStatusBar above the textarea
   // that already surfaces "working" state + elapsed time + running tools.
   // Duplicating the inline "is thinking…" bubble here makes the chat feel
@@ -56,6 +59,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
   emptyStateOverride,
   emptyStateFallback,
   topContent,
+  bottomContent,
   isOrchestratorMode = false,
   suggestedReplyMessageId,
   suggestedReplies,
@@ -162,6 +166,8 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
             </Fragment>
           );
         })}
+
+        {bottomContent}
 
         {isCompacting ? (
           <div style={{
