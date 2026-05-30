@@ -3,9 +3,9 @@
 /**
  * OrchestratorStatusCard — themed, animated card for orchestrator lifecycle
  * events (mission complete, packet merged, lane self-healed / needs-human).
- * Replaces the plain gray system bubble. The whole card is a click-through into
- * OrchestratorStatusDetailModal so the operator can always see exactly what
- * happened.
+ * Replaces the plain gray system bubble. Clicking the card expands an inline
+ * detail drawer right below it (a drop-down, NOT a modal) so the operator can
+ * see exactly what happened without a flow-breaking overlay.
  *
  * House rules: inline styles only, raw SVG icons, CSS-keyframe motion. hurttlocker
  * restraint — neutral card surface; the accent rides only on a small icon badge.
@@ -17,7 +17,7 @@ import {
   type OrchestratorStatusEventData,
   type StatusEventTone,
 } from '@/lib/orchestrator/status-events';
-import { OrchestratorStatusDetailModal } from './OrchestratorStatusDetailModal';
+import { OrchestratorStatusDetailBody } from './OrchestratorStatusDetail';
 import { StatusGlyph } from './status-glyphs';
 
 const TONE: Record<StatusEventTone, { stroke: string; badge: string }> = {
@@ -40,13 +40,14 @@ export function OrchestratorStatusCard({
   const palette = TONE[tone];
 
   return (
-    <>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
       <button
         type="button"
-        onClick={() => setDetailOpen(true)}
+        onClick={() => setDetailOpen((open) => !open)}
         onMouseEnter={() => setHover(true)}
         onMouseLeave={() => setHover(false)}
-        aria-label={`${title} — view details`}
+        aria-expanded={detailOpen}
+        aria-label={`${title} — ${detailOpen ? 'hide' : 'view'} details`}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -125,7 +126,7 @@ export function OrchestratorStatusCard({
           strokeLinecap="round"
           strokeLinejoin="round"
           aria-hidden="true"
-          style={{ flexShrink: 0, opacity: hover ? 0.9 : 0.5, transition: 'opacity 140ms ease' }}
+          style={{ flexShrink: 0, opacity: hover ? 0.9 : 0.5, transform: detailOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'opacity 140ms ease, transform 200ms cubic-bezier(0.22, 1, 0.36, 1)' }}
         >
           <path d="M4.5 2.5 L8 6 L4.5 9.5" />
         </svg>
@@ -134,16 +135,30 @@ export function OrchestratorStatusCard({
           @keyframes o8StatusCardIn { 0% { opacity: 0; transform: translateY(6px) scale(0.985); } 100% { opacity: 1; transform: translateY(0) scale(1); } }
           @keyframes o8StatusBadgePop { 0% { opacity: 0; transform: scale(0.62); } 60% { transform: scale(1.06); } 100% { opacity: 1; transform: scale(1); } }
           @keyframes o8StatusGlyphDraw { to { stroke-dashoffset: 0; } }
+          @keyframes o8StatusDrawerIn { 0% { opacity: 0; transform: translateY(-5px); } 100% { opacity: 1; transform: translateY(0); } }
+          @keyframes o8StatusDrawerFade { from { opacity: 0.45; } to { opacity: 1; } }
         `}</style>
       </button>
 
       {detailOpen ? (
-        <OrchestratorStatusDetailModal
-          event={event}
-          timestampLabel={timestampLabel}
-          onClose={() => setDetailOpen(false)}
-        />
+        <div
+          style={{
+            width: '100%',
+            maxWidth: 'min(440px, 92%)',
+            marginTop: 6,
+            borderRadius: 12,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider)',
+            background: 'var(--t-bg-card)',
+            boxShadow: 'var(--t-panel-shadow)',
+            overflow: 'hidden',
+            animation: 'o8StatusDrawerIn 220ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        >
+          <OrchestratorStatusDetailBody event={event} />
+        </div>
       ) : null}
-    </>
+    </div>
   );
 }
