@@ -2,6 +2,7 @@
 
 import { memo, useCallback, useMemo } from 'react';
 import type { FleetAgent } from './thoughts/types';
+import { AgentStatusDot, agentStatusToDotState } from './AgentStatusDot';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 
 export interface SessionPillContextMenuRequest {
@@ -130,7 +131,6 @@ function SessionPillBase({
   onToggleTileSession,
   onRequestContextMenu,
 }: SessionPillProps) {
-  const statusColor = STATUS_COLORS[session.status];
   const tint = runtimeTint(session.runtime);
 
   const handleContextMenu = useCallback((event: React.MouseEvent<HTMLDivElement>) => {
@@ -226,29 +226,7 @@ function SessionPillBase({
             minWidth: 0,
           }}
         >
-          {session.status === 'idle' ? (
-            // Motion vocab A — static outline ring. Says "alive, quiet".
-            <span
-              className="o8-static-ring"
-              style={{ width: 6, height: 6, borderColor: statusColor, opacity: 1 }}
-            />
-          ) : session.status === 'running' ? (
-            // Motion vocab B — single pulsing circle. Says "working now".
-            <span
-              className="o8-pulse-circle"
-              style={{ width: 6, height: 6, background: statusColor }}
-            />
-          ) : (
-            <span
-              style={{
-                width: 5,
-                height: 5,
-                borderRadius: '50%',
-                background: statusColor,
-                flexShrink: 0,
-              }}
-            />
-          )}
+          <AgentStatusDot state={agentStatusToDotState(session.status)} />
           <span
             style={{
               fontSize: 9,

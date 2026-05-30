@@ -1,6 +1,7 @@
 'use client';
 
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
+import { AgentStatusDot, agentStatusToDotState } from '@/components/desktop/AgentStatusDot';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../types';
 import {
@@ -8,6 +9,7 @@ import {
   packetStatusColor,
   packetStatusLabel,
   packetTimeLabel,
+  packetVisualState,
   REPO_FOCUS_FONT,
   runtimeFromValue,
 } from '../utils';
@@ -87,6 +89,7 @@ export function PacketRow({
         paddingLeft: 14,
       }}
     >
+      <AgentStatusDot state={agentStatusToDotState(packetVisualState(packet))} />
       <RuntimeIcon runtime={packet.runtime} />
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -130,6 +133,7 @@ export function SessionRow({
         paddingLeft: 24,
       }}
     >
+      <AgentStatusDot state={agentStatusToDotState(session.status)} />
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {session.name || session.runtime || 'Agent'}

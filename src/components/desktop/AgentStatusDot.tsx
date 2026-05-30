@@ -23,6 +23,45 @@ export type AgentDotState = 'idle' | 'running' | 'review' | 'merged' | 'failed';
 
 export const LONG_RUNNING_MS = 7 * 60 * 1000; // 7 min — pulse → orbit
 
+/**
+ * Canonical status → dot-state map. Every agent/session/packet surface routes
+ * its (freeform or enum) status string through this ONE function so the motion
+ * vocabulary reads identically everywhere — no per-surface drift. Covers the
+ * union of every surface's vocabulary (lane status, AgentStatus, VisualStatus,
+ * packetVisualState). active/working/reviewing → working; anything awaiting the
+ * human → review; blocked/failed/error → failed; completed/merged/released →
+ * the merged glyph; everything else (queued/draft/idle/archived) → idle.
+ */
+export function agentStatusToDotState(status?: string | null): AgentDotState {
+  switch (status) {
+    case 'running':
+    case 'active':
+    case 'working':
+    case 'launching':
+    case 'reviewing':
+    case 'recovering':
+      return 'running';
+    case 'waiting':
+    case 'awaiting_input':
+    case 'awaiting_orchestrator':
+    case 'awaiting_review':
+    case 'review':
+    case 'approval':
+    case 'pending':
+      return 'review';
+    case 'blocked':
+    case 'failed':
+    case 'error':
+      return 'failed';
+    case 'completed':
+    case 'merged':
+    case 'released':
+      return 'merged';
+    default:
+      return 'idle';
+  }
+}
+
 const ACCENT: Record<'running' | 'review' | 'failed', string> = {
   running: 'var(--t-accent)',
   review: '#FF5A1F',
