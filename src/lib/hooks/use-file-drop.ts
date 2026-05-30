@@ -6,6 +6,13 @@ import { useTauriFileDrop } from './use-tauri-file-drop';
 
 const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5 MB
 
+/**
+ * Max images a single composer message may carry. Shared so the orchestrator
+ * composer and the LLM-chat composer enforce one cap from one source instead
+ * of repeating the magic number at each `attachedImages` push site.
+ */
+export const MAX_COMPOSER_IMAGES = 4;
+
 export interface DroppedFile {
   name: string;
   mimeType: string;
@@ -97,8 +104,15 @@ export function useFileDrop(options?: UseFileDropOptions): UseFileDropResult {
 
   // #1136 Tauri drag-drop bridge. When hostRef is provided AND running in
   // Tauri, subscribe to the Rust bridge and route drops through
-  // `read_dropped_file`. Skipped entirely otherwise — HTML5 path handles
-  // browser-only use (mobile PWA) and internal-only drags.
+  // `read_dropped_file`, populating DroppedFile.absolutePath. Skipped
+  // otherwise — the HTML5 path below handles every shipping surface.
+  //
+  // NOTE (2026-05-30): this bridge is currently INERT at runtime. lib.rs emits
+  // `o8:tauri-file-drop-*` from `WindowEvent::DragDrop`, which never fires while
+  // `dragDropEnabled: false` in tauri.conf.json (the macOS transparency+vibrancy
+  // trap — flipping it true kills DragDrop on our window). So all working image
+  // drops go through the HTML5 path; this is scaffolding kept for the (greenlit
+  // but trap-blocked) #636 native-path epic, not a live code path today.
   const tauriEnabled = Boolean(hostRef) && isTauri();
   const handleTauriDrop = useCallback(
     (paths: string[]) => {
