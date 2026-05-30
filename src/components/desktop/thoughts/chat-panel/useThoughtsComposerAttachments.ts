@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useState, type DragEvent, type RefObject } from 'react';
-import { useFileDrop } from '@/lib/hooks/use-file-drop';
+import { useFileDrop, MAX_COMPOSER_IMAGES } from '@/lib/hooks/use-file-drop';
 
 export interface ThoughtsAttachedImage {
   name: string;
@@ -38,7 +38,7 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
       for (const file of pendingFiles) {
         if (file.mimeType.startsWith('image/')) {
           setAttachedImages((current) => {
-            if (current.length >= 4) return current;
+            if (current.length >= MAX_COMPOSER_IMAGES) return current;
             return [
               ...current,
               {
@@ -65,9 +65,9 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
   }, []);
 
   // Programmatic add (e.g. "Add to chat" from an o8.md inline image). Respects
-  // the same 4-image cap as the drop/paste bridge above.
+  // the same image cap as the drop/paste bridge above.
   const addAttachedImage = useCallback((image: ThoughtsAttachedImage) => {
-    setAttachedImages((current) => (current.length >= 4 ? current : [...current, image]));
+    setAttachedImages((current) => (current.length >= MAX_COMPOSER_IMAGES ? current : [...current, image]));
   }, []);
 
   const removeAttachedFile = useCallback((fileName: string) => {
