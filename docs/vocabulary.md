@@ -1,3 +1,5 @@
+This glossary covers o8's core product terms across runtime, session, packet, lane, mission, review, and approval surfaces. It is for operators, orchestrator agents, and MCP integrators who need shared vocabulary without breaking UI labels, prompts, persisted state, or public API contracts.
+
 # o8 Vocabulary
 
 The canonical glossary for o8's primitives across audiences. **Read this before renaming anything that appears in more than one surface.**
