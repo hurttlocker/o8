@@ -513,7 +513,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   // now a runtime selector, not an on/off gate.
   //   - toggle OFF (default) → Codex GPT-5.5 xhigh runs the review. Free for
   //     ChatGPT Plus / Codex sub users; no Anthropic Agent SDK draw.
-  //   - toggle ON              → Claude Opus 4.7 runs the review (existing
+  //   - toggle ON              → Claude Opus 4.8 runs the review (existing
   //     behavior, bills against the user's Agent SDK credit pool).
   // Codex path lacks MCP wiring in this ship — codex writes its review verdict
   // to the log but cannot call `lane_command` to create the approval card.

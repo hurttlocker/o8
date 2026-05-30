@@ -84,12 +84,12 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   overlapGate: 'advisory',
   healBotEnabled: true,
   supervisorAutoEscalate: false,
-  // Operator-pinned: Opus 4.7 with max thinking is the default orchestrator
+  // Operator-pinned: Opus 4.8 with max thinking is the default orchestrator
   // brain. Subscription-billed via the REPL migration, so cost is the user's
   // existing Claude Code MAX plan — not a per-token API charge.
   thinkingEffort: 'max',
   promptCachingEnabled: true,
-  orchestratorModel: 'claude-opus-4-7',
+  orchestratorModel: 'claude-opus-4-8',
   defaultDispatchRuntime: 'codex',
   experimentalOpencode: false,
   classAComposer: 'auto',
@@ -117,6 +117,7 @@ export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'p
 ];
 
 export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
   { value: 'claude-opus-4-7', label: 'Opus 4.7' },
   { value: 'claude-opus-4-6', label: 'Opus 4.6' },
   { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },

@@ -39,6 +39,7 @@ export const GEMINI_FALLBACK_CASCADE: ReadonlyArray<string> = [
 ];
 
 export const CLAUDE_CLI_MODELS: WorkspaceCliModelOption[] = [
+  { id: 'claude-opus-4-8', label: 'Opus 4.8 (1M)', color: '#8b5cf6' },
   { id: 'claude-opus-4-7', label: 'Opus 4.7 (1M)', color: '#8b5cf6' },
   { id: 'claude-sonnet-4-6', label: 'Sonnet 4.6', color: '#8b5cf6' },
   { id: 'claude-haiku-4-5', label: 'Haiku 4.5', color: '#8b5cf6' },

@@ -180,6 +180,6 @@ You DO NOT need to read these files for the agent. If you find yourself reading 
 
 ## Runtime/backend awareness
 
-- **Codex GPT-5.5 xhigh is the default orchestrator backend** since v0.1.135. The Claude path (Opus 4.7) is opt-in via the `inAppOrchestratorEnabled` operator-defaults toggle and bills against the user's Anthropic Agent SDK pool. Same dual-path applies to auto-review, GitHub intake, Q&A cascade, heal-bot, auto-compact, and the post-commit distill hook.
+- **Codex GPT-5.5 xhigh is the default orchestrator backend** since v0.1.135. The Claude path (Opus 4.8) is opt-in via the `inAppOrchestratorEnabled` operator-defaults toggle and bills against the user's Anthropic Agent SDK pool. Same dual-path applies to auto-review, GitHub intake, Q&A cascade, heal-bot, auto-compact, and the post-commit distill hook.
 - **o8 dispatch is available via `mcp__o8__*` tools** (create_mission, dispatch_mission, get_mission_status, submit_review, approve_and_merge). Use them to hand work to Codex/Gemini agents in worktrees — that's the whole point of you being the orchestrator.
 - **`#1045` outstanding**: Codex auto-review writes verdicts to the log but can't yet create approval cards (MCP wiring follow-up). Until that ships, you should manually merge from the worktree OR use `approve_and_merge` after reviewing the diff.

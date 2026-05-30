@@ -73,6 +73,22 @@ function detectPricingModel(rawModel: string | null | undefined, usage: ClaudeUs
     || normalizedSpeed === 'fast'
     || normalizedModel.includes('fast');
 
+  if (normalizedModel.includes('opus-4-8')) {
+    return {
+      canonicalModel: isFastTier ? 'claude-opus-4-8-fast' : 'claude-opus-4-8',
+      inputUsdPerMillion: isFastTier ? 30 : 5,
+      outputUsdPerMillion: isFastTier ? 150 : 25,
+    };
+  }
+
+  if (normalizedModel.includes('opus-4-7')) {
+    return {
+      canonicalModel: isFastTier ? 'claude-opus-4-7-fast' : 'claude-opus-4-7',
+      inputUsdPerMillion: isFastTier ? 30 : 5,
+      outputUsdPerMillion: isFastTier ? 150 : 25,
+    };
+  }
+
   if (normalizedModel.includes('opus-4-6')) {
     return {
       canonicalModel: isFastTier ? 'claude-opus-4-6-fast' : 'claude-opus-4-6',
