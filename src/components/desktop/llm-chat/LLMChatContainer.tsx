@@ -58,6 +58,10 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
   const { pendingFiles: droppedFiles, dragOver, clearPendingFiles: clearDroppedFiles, dragHandlers } = useFileDrop({ enablePaste: false, hostRef: dragHostRef });
 
   const applySearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), handledDraftInjectionRef = useRef<string | null>(null), scrollRef = useRef<HTMLDivElement>(null), inputRef = useRef<HTMLTextAreaElement>(null), abortRef = useRef<AbortController | null>(null), fileSearchTimeout = useRef<ReturnType<typeof setTimeout> | null>(null), saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Real turn-start (epoch ms) for the streaming working indicator. Stamped on
+  // every isStreaming false→true edge so a long LLM turn flips to the orbit at
+  // the 7-min mark via AgentStatusDot — survives the dot remounting mid-turn.
+  const turnStartRef = useRef<number | null>(null);
 
   // Detect installed CLI runtimes + configured API keys, then build the visible model list.
   // Only models whose CLI is installed OR whose API key is configured will appear in the picker.
@@ -373,6 +377,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
     const imageMarkdown = attachedImages.map((image, index) => `![Image ${index + 1}](${image.dataUri})`).join('\n');
     const messageForModel = [text, fileContext, imageMarkdown].filter(Boolean).join('\n\n');
 
+    turnStartRef.current = Date.now();
     setIsStreaming(true);
     setShowTypingIndicator(true);
     setStreamContent('');
@@ -635,6 +640,9 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
     const edited = pendingApproval.name === 'run_terminal_command' ? editedCommand.trim() : '';
     setPendingApproval(null);
     setApprovedToolsSet((current) => new Set([...current, toolName]));
+    // Re-anchor the turn clock at the resume point so the human approval-wait
+    // (isStreaming was false) doesn't count toward the long-running threshold.
+    turnStartRef.current = Date.now();
     setIsStreaming(true);
     setShowTypingIndicator(true);
     setStreamContent('');
@@ -822,6 +830,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
       inputRef={inputRef}
       isEmpty={messages.length === 0 && !isStreaming}
       isStreaming={isStreaming}
+      turnStartedAt={turnStartRef.current}
       isUserScrolledUp={isUserScrolledUp}
       issuePickerOpen={issuePickerOpen}
       linkedIssue={linkedIssue}
