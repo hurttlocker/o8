@@ -283,7 +283,10 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
         gap: 12,
         minHeight: 58,
         paddingLeft: 18,
-        paddingRight: 18,
+        // Right padding matches the panel header strip above (ColumnHeaderStrip
+        // = 8) so the Workspace Notes toolbar icons (review / settings) line up
+        // vertically with the panel header icons instead of sitting 10px left.
+        paddingRight: 8,
         borderBottom: '1px solid var(--t-divider-subtle)',
         fontFamily: UI_FONT,
       }}>
