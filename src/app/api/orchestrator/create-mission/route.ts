@@ -26,11 +26,13 @@ function normalizeIssues(value: unknown): LoadedIssue[] | null {
 
   return value.map((issue) => {
     const record = asRecord(issue);
+    const perIssueRuntime = normalizeRuntime(record?.runtime);
     return {
       number: typeof record?.number === 'number' ? record.number : Number.NaN,
       title: typeof record?.title === 'string' ? record.title : '',
       body: typeof record?.body === 'string' ? record.body : '',
       url: typeof record?.url === 'string' ? record.url : '',
+      ...(perIssueRuntime ? { runtime: perIssueRuntime } : {}),
     };
   });
 }

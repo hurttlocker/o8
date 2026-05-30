@@ -18,11 +18,18 @@ export interface RepoEntry {
   lastOpenedAt: string;
 }
 
+/** One agent in the swarm: a task + the runtime that should run it. */
+export interface SwarmRow {
+  id: string;
+  text: string;
+  runtime: OrchestratorRuntime;
+}
+
 // Phosphor "X" path (regular weight, 256 viewBox).
 const PHOSPHOR_X_PATH =
   'M205.66,194.34a8,8,0,0,1-11.32,11.32L128,139.31,61.66,205.66a8,8,0,0,1-11.32-11.32L116.69,128,50.34,61.66A8,8,0,0,1,61.66,50.34L128,116.69l66.34-66.35a8,8,0,0,1,11.32,11.32L139.31,128Z';
 
-export function DispatchHeader({ busy, onClose }: { busy: boolean; onClose: () => void }) {
+export function DispatchHeader({ busy, agentCount, onClose }: { busy: boolean; agentCount: number; onClose: () => void }) {
   return (
     <div
       data-tauri-drag-region=""
@@ -62,7 +69,7 @@ export function DispatchHeader({ busy, onClose }: { busy: boolean; onClose: () =
           color: 'var(--t-text)',
         }}
       >
-        Dispatch a task
+        {agentCount > 1 ? 'Dispatch a swarm' : 'Dispatch a task'}
       </span>
       <span
         style={{
@@ -72,7 +79,11 @@ export function DispatchHeader({ busy, onClose }: { busy: boolean; onClose: () =
           marginLeft: 4,
         }}
       >
-        {busy ? 'Dispatching…' : 'one-shot packet'}
+        {busy
+          ? 'Dispatching…'
+          : agentCount > 1
+            ? `${agentCount} agents`
+            : 'one-shot packet'}
       </span>
       <div style={{ flex: 1 }} />
       <button
@@ -153,41 +164,189 @@ export function ContextEnginePill() {
   );
 }
 
-interface DispatchBodyProps {
-  textareaRef: React.MutableRefObject<HTMLTextAreaElement | null>;
-  value: string;
+interface SwarmBodyProps {
+  rows: SwarmRow[];
+  runtimes: OrchestratorRuntime[];
   busy: boolean;
-  onChange: (next: string) => void;
+  firstTextareaRef: React.MutableRefObject<HTMLTextAreaElement | null>;
+  onChangeText: (id: string, text: string) => void;
+  onChangeRuntime: (id: string, runtime: OrchestratorRuntime) => void;
+  onAddRow: () => void;
+  onRemoveRow: (id: string) => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 }
 
-export function DispatchBody({ textareaRef, value, busy, onChange, onKeyDown }: DispatchBodyProps) {
+export function SwarmBody({
+  rows,
+  runtimes,
+  busy,
+  firstTextareaRef,
+  onChangeText,
+  onChangeRuntime,
+  onAddRow,
+  onRemoveRow,
+  onKeyDown,
+}: SwarmBodyProps) {
   return (
     <div
       style={{
         flex: 1,
         display: 'flex',
         flexDirection: 'column',
+        gap: 10,
         paddingTop: 12,
         paddingRight: 14,
         paddingBottom: 8,
         paddingLeft: 14,
         minHeight: 0,
+        overflowY: 'auto',
       }}
     >
+      {rows.map((row, index) => (
+        <SwarmRowCard
+          key={row.id}
+          row={row}
+          index={index}
+          runtimes={runtimes}
+          busy={busy}
+          canRemove={rows.length > 1}
+          textareaRef={index === 0 ? firstTextareaRef : undefined}
+          onChangeText={onChangeText}
+          onChangeRuntime={onChangeRuntime}
+          onRemove={onRemoveRow}
+          onKeyDown={onKeyDown}
+        />
+      ))}
+      <button
+        type="button"
+        onClick={onAddRow}
+        disabled={busy}
+        style={{
+          alignSelf: 'flex-start',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 6,
+          paddingTop: 6,
+          paddingRight: 10,
+          paddingBottom: 6,
+          paddingLeft: 8,
+          borderRadius: 8,
+          borderWidth: 1,
+          borderStyle: 'dashed',
+          borderColor: 'var(--t-divider-subtle)',
+          background: 'transparent',
+          color: 'var(--t-text-muted)',
+          fontFamily: 'inherit',
+          fontSize: 11.5,
+          fontWeight: 500,
+          letterSpacing: '-0.005em',
+          cursor: busy ? 'default' : 'pointer',
+          opacity: busy ? 0.5 : 1,
+          transition: 'color 120ms cubic-bezier(0.22, 1, 0.36, 1), border-color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+        }}
+        onMouseEnter={(e) => {
+          if (busy) return;
+          e.currentTarget.style.color = 'var(--t-text)';
+          e.currentTarget.style.borderColor = 'var(--t-accent-border, var(--t-text-muted))';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = 'var(--t-text-muted)';
+          e.currentTarget.style.borderColor = 'var(--t-divider-subtle)';
+        }}
+      >
+        <span aria-hidden style={{ fontSize: 14, lineHeight: 1, fontWeight: 400 }}>+</span>
+        Add agent
+      </button>
+    </div>
+  );
+}
+
+interface SwarmRowCardProps {
+  row: SwarmRow;
+  index: number;
+  runtimes: OrchestratorRuntime[];
+  busy: boolean;
+  canRemove: boolean;
+  textareaRef?: React.MutableRefObject<HTMLTextAreaElement | null>;
+  onChangeText: (id: string, text: string) => void;
+  onChangeRuntime: (id: string, runtime: OrchestratorRuntime) => void;
+  onRemove: (id: string) => void;
+  onKeyDown: (event: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+}
+
+function SwarmRowCard({
+  row,
+  index,
+  runtimes,
+  busy,
+  canRemove,
+  textareaRef,
+  onChangeText,
+  onChangeRuntime,
+  onRemove,
+  onKeyDown,
+}: SwarmRowCardProps) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span
+          style={{
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: '0.04em',
+            textTransform: 'uppercase',
+            color: 'var(--t-text-muted)',
+          }}
+        >
+          {`Agent ${index + 1}`}
+        </span>
+        <div style={{ flex: 1 }} />
+        <RuntimeChips runtime={row.runtime} runtimes={runtimes} onChange={(next) => onChangeRuntime(row.id, next)} />
+        {canRemove ? (
+          <button
+            type="button"
+            aria-label={`Remove agent ${index + 1}`}
+            onClick={() => onRemove(row.id)}
+            disabled={busy}
+            style={{
+              width: 24,
+              height: 24,
+              borderRadius: 7,
+              borderWidth: 0,
+              background: 'transparent',
+              color: 'var(--t-text-muted)',
+              cursor: busy ? 'default' : 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+            onMouseEnter={(e) => {
+              if (busy) return;
+              e.currentTarget.style.background = 'var(--t-divider-subtle)';
+            }}
+            onMouseLeave={(e) => {
+              e.currentTarget.style.background = 'transparent';
+            }}
+          >
+            <svg width={12} height={12} viewBox="0 0 256 256" fill="currentColor" aria-hidden>
+              <path d={PHOSPHOR_X_PATH} />
+            </svg>
+          </button>
+        ) : null}
+      </div>
       <textarea
         ref={textareaRef}
-        value={value}
+        value={row.text}
         disabled={busy}
-        onChange={(event) => onChange(event.target.value)}
+        onChange={(event) => onChangeText(row.id, event.target.value)}
         onKeyDown={onKeyDown}
-        placeholder="What do you want done?"
+        placeholder={index === 0 ? 'What do you want done?' : 'Another task for this agent…'}
         spellCheck={false}
-        autoFocus
         style={{
-          flex: 1,
           width: '100%',
-          minHeight: 0,
+          minHeight: 56,
           resize: 'none',
           background: 'var(--t-input-bg)',
           borderWidth: 1,
@@ -231,10 +390,7 @@ export function ErrorRow({ message }: { message: string }) {
 }
 
 interface DispatchFooterProps {
-  runtime: OrchestratorRuntime;
-  runtimes: OrchestratorRuntime[];
-  runtimeButtonsRef: React.MutableRefObject<Array<HTMLButtonElement | null>>;
-  onRuntimeChange: (next: OrchestratorRuntime) => void;
+  rows: SwarmRow[];
   repoButtonRef: React.MutableRefObject<HTMLButtonElement | null>;
   repoPickerOpen: boolean;
   onRepoPickerToggle: () => void;
@@ -249,10 +405,7 @@ interface DispatchFooterProps {
 }
 
 export function DispatchFooter({
-  runtime,
-  runtimes,
-  runtimeButtonsRef,
-  onRuntimeChange,
+  rows,
   repoButtonRef,
   repoPickerOpen,
   onRepoPickerToggle,
@@ -281,12 +434,7 @@ export function DispatchFooter({
         position: 'relative',
       }}
     >
-      <RuntimeChips
-        runtime={runtime}
-        runtimes={runtimes}
-        runtimeButtonsRef={runtimeButtonsRef}
-        onChange={onRuntimeChange}
-      />
+      <SwarmSummary rows={rows} />
       <RepoPicker
         repoButtonRef={repoButtonRef}
         open={repoPickerOpen}
@@ -302,10 +450,35 @@ export function DispatchFooter({
   );
 }
 
+/** Compact "Codex ×2 · Gemini ×1" breakdown of the swarm's runtimes. */
+function SwarmSummary({ rows }: { rows: SwarmRow[] }) {
+  const counts = new Map<OrchestratorRuntime, number>();
+  for (const row of rows) counts.set(row.runtime, (counts.get(row.runtime) ?? 0) + 1);
+  const parts = [...counts.entries()].map(([rt, n]) => `${ORCHESTRATOR_RUNTIMES[rt].shortLabel} ×${n}`);
+  return (
+    <span
+      title="Agents in this dispatch, by runtime"
+      style={{
+        fontSize: 11,
+        fontWeight: 500,
+        color: 'var(--t-text-muted)',
+        letterSpacing: '-0.005em',
+        whiteSpace: 'nowrap',
+        overflow: 'hidden',
+        textOverflow: 'ellipsis',
+        maxWidth: 200,
+        flexShrink: 0,
+      }}
+    >
+      {parts.join(' · ')}
+    </span>
+  );
+}
+
 interface RuntimeChipsProps {
   runtime: OrchestratorRuntime;
   runtimes: OrchestratorRuntime[];
-  runtimeButtonsRef: React.MutableRefObject<Array<HTMLButtonElement | null>>;
+  runtimeButtonsRef?: React.MutableRefObject<Array<HTMLButtonElement | null>>;
   onChange: (next: OrchestratorRuntime) => void;
 }
 
@@ -333,7 +506,7 @@ function RuntimeChips({ runtime, runtimes, runtimeButtonsRef, onChange }: Runtim
           <button
             key={id}
             ref={(el) => {
-              runtimeButtonsRef.current[index] = el;
+              if (runtimeButtonsRef) runtimeButtonsRef.current[index] = el;
             }}
             type="button"
             role="radio"
