@@ -2,7 +2,7 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "o8 default capabilities",
-  "windows": ["main", "dispatch-popover"],
+  "windows": ["main"],
   "remote": {
     "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
   },
@@ -26,10 +26,6 @@
     "notification:default",
     "store:default",
     "log:default",
-    "updater:default",
-    "global-shortcut:default",
-    "global-shortcut:allow-register",
-    "global-shortcut:allow-unregister",
-    "global-shortcut:allow-is-registered"
+    "updater:default"
   ]
 }

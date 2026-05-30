@@ -47,6 +47,7 @@ import { getPendingMissionCards } from './mission-complete-detector';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { ChatMessageList } from './chat-panel/ChatMessageList';
+import { SwarmStatusCard } from './chat-panel/SwarmStatusCard';
 import type { TurnSummary } from './chat-panel/TurnSummaryCard';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
@@ -121,6 +122,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsMutedGlass: string;
   permissionMode?: ThoughtsChatPermissionMode;
   onTogglePermission?: () => void;
+  /**
+   * UltraCode / swarm tier (per-tab). When on, the orchestrator turn carries a
+   * hint to fan work out to a parallel Codex + Gemini swarm, and live agent
+   * cards surface inline in the transcript.
+   */
+  swarmEnabled?: boolean;
+  onSetSwarm?: (enabled: boolean) => void;
   repoLabel?: string | null;
   emptyStateOverride?: React.ReactNode;
   // Slot rendered BELOW the composer input when no messages have
@@ -185,6 +193,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   thoughtsMutedGlass,
   permissionMode = 'full',
   onTogglePermission,
+  swarmEnabled = false,
+  onSetSwarm,
   repoLabel,
   emptyStateOverride,
   composerBelowSlot,
@@ -1328,8 +1338,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       model: orchestratorModel,
       displayMessage: request.displayMessage,
       localEntriesAfterUser,
+      swarm: swarmEnabled,
     });
-  }, [orchStream, orchestratorModel, permissionMode, thinkingEffort]);
+  }, [orchStream, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled]);
 
   const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
     if (!isOrchestratorMode || isChatMode) return false;
@@ -1423,6 +1434,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             permissionMode,
             thinkingEffort,
             model: orchestratorModel,
+            swarm: swarmEnabled,
             ...(attachments ? { attachments } : {}),
           });
           clearAttachments();
@@ -1559,6 +1571,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         permissionMode,
         thinkingEffort,
         model: orchestratorModel,
+        swarm: swarmEnabled,
         ...(attachments ? { attachments } : {}),
       });
       clearAttachments();
@@ -1610,7 +1623,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, waitingForReply]);
+  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -1641,6 +1654,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           permissionMode,
           thinkingEffort,
           model: orchestratorModel,
+          swarm: swarmEnabled,
           ...(attachments ? { attachments } : {}),
         });
         clearAttachments();
@@ -1651,7 +1665,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
-  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, waitingForReply]);
+  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, waitingForReply]);
 
   // ⌘⏎ steer handlers. enqueueSteer routes the typed input through the queue:
   // idle → fire immediately via sendNow; busy → push onto pendingSteers and let
@@ -1896,6 +1910,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           emptyStateOverride={emptyStateOverride}
           emptyStateFallback={fallbackEmptyState}
           topContent={transcriptTopContent}
+          bottomContent={isOrchestratorMode ? <SwarmStatusCard packets={missionState?.packets ?? []} /> : null}
           isOrchestratorMode={isOrchestratorMode}
           suggestedReplyMessageId={suggestedReplyMessageId}
           suggestedReplies={chipsForLastAssistant}
@@ -1974,6 +1989,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         effort={thinkingEffort}
         onEffortChange={handleEffortChange}
         adaptiveEnabled={adaptiveThinkingEnabled}
+        swarmEnabled={swarmEnabled}
+        onSetSwarm={onSetSwarm}
         permissionMode={permissionMode}
         onTogglePermission={onTogglePermission}
         repoLabel={composerRepoLabel}

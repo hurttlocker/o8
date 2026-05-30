@@ -148,6 +148,9 @@ interface ComposerAreaProps {
   effort: ThinkingEffort;
   onEffortChange: (next: ThinkingEffort) => void;
   adaptiveEnabled: boolean;
+  /** UltraCode / swarm tier — surfaced in the thinking dropdown. */
+  swarmEnabled?: boolean;
+  onSetSwarm?: (enabled: boolean) => void;
   permissionMode: ThoughtsChatPermissionMode;
   onTogglePermission?: () => void;
   repoLabel?: string | null;
@@ -202,6 +205,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   effort,
   onEffortChange,
   adaptiveEnabled,
+  swarmEnabled,
+  onSetSwarm,
   permissionMode,
   onTogglePermission,
   repoLabel,
@@ -666,6 +671,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             effort={effort}
             onEffortChange={onEffortChange}
             adaptiveEnabled={adaptiveEnabled}
+            swarmEnabled={swarmEnabled}
+            onSetSwarm={showReasoningControls ? onSetSwarm : undefined}
             permissionMode={permissionMode}
             onTogglePermission={onTogglePermission}
             repoLabel={showReasoningControls ? repoLabel : null}
