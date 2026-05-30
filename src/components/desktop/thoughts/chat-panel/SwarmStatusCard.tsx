@@ -16,12 +16,13 @@ import type { OrchestratorPacket, OrchestratorPacketStatus, OrchestratorRuntime 
 
 const SWARM_ACCENT = '#FF5A1F';
 
-// Statuses that mean a packet is part of the live crew. Archived / released /
-// draft are settled or not-yet-real, so they drop out of the inline card.
+// Statuses that mean a packet is genuinely in-flight as part of the live crew.
+// `idle` is excluded on purpose — a launched-then-idle or errored packet sits
+// idle and would otherwise masquerade as a working agent (the launch_error
+// leftovers bug). Archived / released / draft are settled or not-yet-real.
 const ACTIVE_STATUSES = new Set<OrchestratorPacketStatus>([
   'queued',
   'launching',
-  'idle',
   'running',
   'recovering',
   'awaiting_review',
