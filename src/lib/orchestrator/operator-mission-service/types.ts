@@ -7,6 +7,12 @@ export interface LoadedIssue {
   title: string;
   body: string;
   url: string;
+  /**
+   * Optional per-issue worker runtime — lets one mission mix Codex + Gemini
+   * packets (the swarm "split coding/thinking" path). Falls back to the
+   * mission-level `runtime` when unset; routing still validates dispatchability.
+   */
+  runtime?: OrchestratorRuntime;
 }
 
 export type ExistingBranchPolicy = 'auto' | 'reset' | 'continue' | 'error';

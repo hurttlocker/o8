@@ -98,6 +98,19 @@ export async function createMission(input: CreateMissionInput) {
         ? [loadedIssues[index - 1]!.number]
         : [];
 
+    // Per-issue runtime — a mission can mix Codex + Gemini packets (the swarm
+    // "split coding/thinking" path). When the issue pins its own runtime, route
+    // that packet through it; otherwise inherit the mission-level routing.
+    const packetRouting = issue.runtime
+      ? resolveWorkerRouting({
+          workerIntent: input.workerIntent,
+          requestedProvider: input.requestedProvider,
+          requestedRuntime: issue.runtime,
+          requestedModel: input.requestedModel,
+          source: 'mission-create-packet',
+        })
+      : workerRouting;
+
     // #453 — Inline tasks get "inline/{slug}" branches, not "issue/{number}-{slug}"
     const branchTarget = branchTargets[index]!;
     const inlineLabel = hasInlineIssues ? referenceLabels[index] : undefined;
@@ -137,7 +150,7 @@ export async function createMission(input: CreateMissionInput) {
       summary: packetSummary,
       workspaceTargetPath: repoPath,
       branchTarget,
-      runtime: workerRouting.selectedRuntime,
+      runtime: packetRouting.selectedRuntime,
       dependencyLabels: dependencyNumbers.map((dependency) => referenceLabelByIssueNumber.get(dependency) ?? `#${dependency}`),
       dependencyPacketIds: dependencyNumbers.map((dependency) => packetIdByIssueNumber.get(dependency) ?? '').filter(Boolean),
       queueState: 'queued',
@@ -149,8 +162,8 @@ export async function createMission(input: CreateMissionInput) {
       archivedAt: null,
       review: null,
       lane: null,
-      workerIntent: workerRouting.workerIntent,
-      workerRouting,
+      workerIntent: packetRouting.workerIntent,
+      workerRouting: packetRouting,
       prompt: [issue.title, packetSummary].map((part) => part.trim()).filter(Boolean).join('\n\n'),
       ...(learnedRules.length > 0 ? { learnedRules } : {}),
       ...(issueMeta ? { issue: issueMeta } : {}),
