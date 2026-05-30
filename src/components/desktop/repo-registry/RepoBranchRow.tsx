@@ -42,6 +42,7 @@ import {
   OpenCodeIcon,
 } from './shared';
 import { AgentStatusHover } from './AgentStatusHover';
+import { AgentStatusDot, agentStatusToDotState } from '../AgentStatusDot';
 import { threeWordTaskSummary } from './task-label';
 
 interface RepoBranchRowProps {
@@ -998,7 +999,7 @@ function RepoBranchRowBase({
                         }}
                       >
                         <span style={{ width: 12, flexShrink: 0, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', marginTop: 2 }}>
-                          <AgentSpinner status={agent.status} size={6} />
+                          <AgentStatusDot state={agentStatusToDotState(agent.status)} />
                         </span>
                         {agent.runtime === 'claude-code' ? <ClaudeIcon size={12} />
                           : agent.runtime === 'gemini' ? <GeminiIcon size={12} />
