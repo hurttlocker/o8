@@ -1,8 +1,8 @@
 import type { CSSProperties } from 'react';
 import type { ReviewScope } from './types';
 
-const SCOPE_LABELS: Record<ReviewScope, string> = { all: 'All changes', staged: 'Staged', unstaged: 'Unstaged' };
-const SCOPE_ORDER: ReviewScope[] = ['all', 'staged', 'unstaged'];
+const SCOPE_LABELS: Record<ReviewScope, string> = { all: 'All changes', 'last-turn': 'Last turn', staged: 'Staged', unstaged: 'Unstaged' };
+const SCOPE_ORDER: ReviewScope[] = ['all', 'last-turn', 'staged', 'unstaged'];
 // Above this many visible rows, files default to collapsed so the panel
 // doesn't fire N concurrent /api/panel/file-diff requests on mount (#1084).
 const BIG_CHANGESET = 25;

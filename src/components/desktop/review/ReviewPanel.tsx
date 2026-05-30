@@ -34,6 +34,21 @@ import { FilesDrawer } from './panel/FilesDrawer';
  * tracked as its own follow-up, not part of this header.)
  */
 
+interface LastTurnScopeResponse {
+  filePaths?: string[];
+}
+
+function reviewPathCandidates(reviewPath: string) {
+  const parts = reviewPath.includes(' → ') ? reviewPath.split(' → ') : [reviewPath];
+  return [reviewPath, ...parts].filter(Boolean);
+}
+
+function lastTurnPathMatches(reviewPath: string, lastTurnPaths: Set<string>) {
+  return reviewPathCandidates(reviewPath).some((candidate) => (
+    lastTurnPaths.has(candidate) || (candidate.endsWith('.tsx') && lastTurnPaths.has(candidate.slice(0, -1)))
+  ));
+}
+
 export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos = [], onRepoPathChange, selectedFile = null }: { repoPath?: string | null; registeredRepos?: RepoRegistryEntry[]; onRepoPathChange?: (repoPath: string) => void; selectedFile?: string | null }) {
   const changes = useWorkspaceChanges(repoPath);
   const [fileQuery, setFileQuery] = useState('');
@@ -52,6 +67,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   const repoMenuRef = useRef<HTMLDivElement | null>(null);
   const [filesDrawerOpen, setFilesDrawerOpen] = useState(false);
   const [focusSignal, setFocusSignal] = useState<{ path: string | null; nonce: number }>({ path: null, nonce: 0 });
+  const [lastTurnPaths, setLastTurnPaths] = useState<Set<string>>(new Set());
   const rowRefs = useRef(new Map<string, HTMLDivElement>());
 
   // Close the header menus on outside-click or Escape.
@@ -123,13 +139,40 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
   }, []);
   const currentRepo = registeredRepos.find((repo) => repo.localPath === repoPath);
   const repoLabel = currentRepo?.name ?? (repoPath ? (repoPath.split('/').filter(Boolean).pop() ?? 'Repo') : 'Repo');
+  const changedFilesKey = useMemo(() => changes.files.map((file) => file.path).join('\n'), [changes.files]);
+
+  useEffect(() => {
+    if (!repoPath) {
+      setLastTurnPaths(new Set());
+      return;
+    }
+
+    let cancelled = false;
+    const loadLastTurn = async () => {
+      try {
+        const response = await fetch(`/api/review/last-turn?workspace=${encodeURIComponent(repoPath)}`);
+        if (!response.ok) throw new Error('Failed to load last-turn scope');
+        const data = await response.json() as LastTurnScopeResponse;
+        const paths = Array.isArray(data.filePaths)
+          ? data.filePaths.filter((item): item is string => typeof item === 'string' && item.length > 0)
+          : [];
+        if (!cancelled) setLastTurnPaths(new Set(paths));
+      } catch {
+        if (!cancelled) setLastTurnPaths(new Set());
+      }
+    };
+
+    void loadLastTurn();
+    return () => { cancelled = true; };
+  }, [changedFilesKey, repoPath]);
 
   const visible = useMemo(() => {
     let list = changes.files;
     if (scope === 'staged') list = list.filter((file) => file.staged);
     else if (scope === 'unstaged') list = list.filter((file) => file.unstaged);
+    else if (scope === 'last-turn') list = list.filter((file) => lastTurnPathMatches(file.path, lastTurnPaths));
     return list;
-  }, [changes.files, scope]);
+  }, [changes.files, lastTurnPaths, scope]);
   const drawerQuery = fileQuery.trim().toLowerCase();
   const drawerFiles = useMemo(() => (
     drawerQuery ? visible.filter((file) => file.path.toLowerCase().includes(drawerQuery)) : visible
@@ -334,7 +377,9 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
                 ? 'No staged changes.'
                 : scope === 'unstaged'
                   ? 'No unstaged changes.'
-                  : 'No files match.'
+                  : scope === 'last-turn'
+                    ? 'No files from the last agent turn.'
+                    : 'No files match.'
             }
           />
         ) : (
