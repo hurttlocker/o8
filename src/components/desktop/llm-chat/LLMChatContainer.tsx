@@ -1,7 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { useFileDrop } from '@/lib/hooks/use-file-drop';
+import { useFileDrop, MAX_COMPOSER_IMAGES } from '@/lib/hooks/use-file-drop';
 
 import { LLMChatLayout } from './LLMChatLayout';
 import {
@@ -213,7 +213,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
     for (const f of droppedFiles) {
       if (f.mimeType.startsWith('image/')) {
         setAttachedImages((prev) => {
-          if (prev.length >= 4) return prev;
+          if (prev.length >= MAX_COMPOSER_IMAGES) return prev;
           return [...prev, { name: f.name, dataUri: `data:${f.mimeType};base64,${f.content}`, mimeType: f.mimeType }];
         });
       } else {
@@ -225,7 +225,7 @@ export default function LLMChatContainer({ tabId, preferredRepo, linkedIssue, dr
 
   const handleImageFile = useCallback((file: File) => {
     if (!file.type.startsWith('image/')) return;
-    if (attachedImages.length >= 4) return;
+    if (attachedImages.length >= MAX_COMPOSER_IMAGES) return;
     const reader = new FileReader();
     reader.onload = () => {
       setAttachedImages((current) => [...current, { name: file.name, dataUri: reader.result as string, mimeType: file.type }]);
