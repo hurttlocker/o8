@@ -1071,8 +1071,26 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     lastLoadKeyRef.current = tabId;
     lastLoadAtRef.current = now;
     try {
-      const res = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`);
-      if (!res.ok) return;
+      // In long sessions the webview's per-origin socket budget (~6) can be
+      // saturated by the dashboard poll fan-out, leaving this fetch with no
+      // free socket — a bare `await fetch` then hangs forever and the thread
+      // silently never loads (the empty state sticks). Bound it with a timeout
+      // and retry once so a transient starvation can't permanently wedge the
+      // load. (The durable fix is relieving the poll concurrency.)
+      const fetchHistoryOnce = async (): Promise<Response | null> => {
+        const controller = new AbortController();
+        const timer = window.setTimeout(() => controller.abort(), 6000);
+        try {
+          return await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(tabId)}`, { signal: controller.signal });
+        } catch {
+          return null;
+        } finally {
+          window.clearTimeout(timer);
+        }
+      };
+      let res = await fetchHistoryOnce();
+      if (!res || !res.ok) res = await fetchHistoryOnce();
+      if (!res || !res.ok) return;
       const data = await res.json() as {
         messages?: ThoughtsHistoryMessage[];
         planText?: string | null;
