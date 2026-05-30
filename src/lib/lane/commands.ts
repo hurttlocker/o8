@@ -34,7 +34,8 @@ import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
-import { PRODUCTION_AGENT_RUNTIME, resolveWorkerRouting } from '@/lib/agents/routing';
+import { resolveWorkerRouting } from '@/lib/agents/routing';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { fetchWorkerRun } from '@/lib/worker/runs';
@@ -255,11 +256,11 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         command.branch,
       );
       if (existing) {
-        if (existing.runtime !== PRODUCTION_AGENT_RUNTIME) {
+        if (!listDispatchableRuntimes({ includeExperimental: true }).includes(existing.runtime)) {
           return {
             ok: false,
             laneId: existing.id,
-            note: `Production agent spawning is restricted to Codex. Existing lane ${existing.id} is ${existing.runtime}; archive or migrate it before launching new work.`,
+            note: `Runtime "${existing.runtime}" is not dispatchable (existing lane ${existing.id}). Dispatchable: ${listDispatchableRuntimes({ includeExperimental: true }).join(', ')}. Archive or migrate the lane before launching new work.`,
             lane: existing,
           };
         }
@@ -299,11 +300,11 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
     case 'launch_session': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
-      if (lane.runtime !== PRODUCTION_AGENT_RUNTIME) {
+      if (!listDispatchableRuntimes({ includeExperimental: true }).includes(lane.runtime)) {
         return {
           ok: false,
           laneId: command.laneId,
-          note: `Production agent spawning is restricted to Codex. ${lane.runtime} is scaffolded for later but cannot launch yet.`,
+          note: `Runtime "${lane.runtime}" is not dispatchable. Dispatchable: ${listDispatchableRuntimes({ includeExperimental: true }).join(', ')}.`,
           lane,
         };
       }

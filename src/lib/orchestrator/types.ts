@@ -16,7 +16,7 @@ export interface WorkerRouting {
   selectedProvider: WorkerProvider;
   selectedRuntime: OrchestratorRuntime;
   selectedModel: string | null;
-  enforcement: 'codex_only_production';
+  enforcement: 'codex_only_production' | 'dispatchable_runtimes';
   confidence: WorkerRoutingConfidence;
   reason: string;
   decidedAt: string;
