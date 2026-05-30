@@ -15,14 +15,22 @@ import type {
   Lane,
 } from '@/lib/lane/types';
 import type { ApprovalRisk } from '@/lib/approvals/types';
+import { existsSync } from 'node:fs';
 import {
   createLane,
   getLane,
+  getLaneEvents,
   updateLane,
   setLaneStatus,
   attachSession,
   archiveLane,
 } from '@/lib/lane/registry';
+
+// A lane whose worker can never spawn (e.g. its worktree/cwd was cleaned up)
+// otherwise loops launching→idle forever — the scheduler re-dispatches on every
+// launch_error/launch_failed with no ceiling. Cap the attempts so it fails
+// terminally and surfaces for operator attention instead of churning the DB.
+const LAUNCH_ATTEMPT_CAP = 5;
 import { getLanePolicy, isProtectedBranch } from '@/lib/lane/policy';
 import { getSqlite } from '@/lib/db';
 import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
@@ -312,6 +320,34 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       const policy = getLanePolicy(lane.branch);
       if (!policy.branchWritable && !policy.requiresApproval) {
         return { ok: false, laneId: command.laneId, note: `Branch ${lane.branch} is not writable.` };
+      }
+
+      // Bound launch attempts. Count prior `launching` transitions for this lane;
+      // past the cap, fail terminally so the scheduler stops re-dispatching
+      // (getDispatchBlocker treats 'failed' as a hard stop and the
+      // 'launch_attempts_exhausted' label is outside its launch_error retry set).
+      const priorLaunchAttempts = getLaneEvents(command.laneId, 200).filter(
+        (event) => event.verb === 'status_change' && event.payload?.status === 'launching',
+      ).length;
+      if (priorLaunchAttempts >= LAUNCH_ATTEMPT_CAP) {
+        setLaneStatus(command.laneId, 'failed', 'system', 'launch_attempts_exhausted');
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `Launch failed ${priorLaunchAttempts}× — giving up. Reset the packet to retry.`,
+        };
+      }
+
+      // Fail fast if the working directory is gone (deleted temp dir / pruned
+      // worktree). Spawning into a nonexistent cwd just errors and loops.
+      const launchCwd = lane.worktreePath ?? lane.repoPath;
+      if (launchCwd && !existsSync(launchCwd)) {
+        setLaneStatus(command.laneId, 'failed', 'system', 'launch_aborted_missing_cwd');
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `Working directory no longer exists: ${launchCwd}. Reset the packet to re-provision.`,
+        };
       }
 
       setLaneStatus(command.laneId, 'launching', actor, 'launching_session');
