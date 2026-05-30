@@ -17,6 +17,8 @@ import { PacketSpecEditor } from './PacketSpecEditor';
 import { RejectedFeedbackPanel } from './RejectedFeedbackPanel';
 import { PacketTabStrip, type PacketTabId } from '@/components/desktop/orchestrator/PacketTabStrip';
 import { LivingAgentPanel } from '@/components/desktop/orchestrator/LivingAgentPanel';
+import { AgentStatusDot, agentStatusToDotState } from '@/components/desktop/AgentStatusDot';
+import { packetVisualState } from '@/components/desktop/repo-focus/utils';
 
 interface PacketCardProps {
   packet: OrchestratorPacket;
@@ -198,7 +200,9 @@ export function PacketCard({
             padding: 0,
           }}
         >
-          <span style={{ width: 6, height: 6, borderRadius: '50%', background: statusMeta.color, boxShadow: `0 0 6px ${statusMeta.border}`, flexShrink: 0 }} />
+          <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 6, height: 6, flexShrink: 0 }}>
+            <AgentStatusDot state={agentStatusToDotState(packetVisualState(packet))} />
+          </span>
           <span style={{ flex: 1, minWidth: 0 }}>
             <span style={{ display: 'block', fontSize: 11, fontWeight: 400, lineHeight: 1.35, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', letterSpacing: '-0.1px' }}>
               {packet.title}

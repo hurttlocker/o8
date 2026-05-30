@@ -6,6 +6,7 @@
 
 import { memo, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { AgentStatusDot, agentStatusToDotState } from '@/components/desktop/AgentStatusDot';
 import {
   resolveFloatingPanelPosition,
   sessionStatusTone,
@@ -442,15 +443,7 @@ function AgentStatusHoverBase({
           }}
         >
           <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-            <span
-              style={{
-                width: 6,
-                height: 6,
-                borderRadius: '50%',
-                background: statusTone.color,
-                flexShrink: 0,
-              }}
-            />
+            <AgentStatusDot state={agentStatusToDotState(agent.status)} />
             <span>{statusTone.label}</span>
           </span>
           <span style={{ color: 'var(--t-text-faint)' }}>·</span>
