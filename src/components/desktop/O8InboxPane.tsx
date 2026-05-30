@@ -122,7 +122,11 @@ export function O8InboxPane() {
     const handleEvent = () => refresh();
     window.addEventListener(REFRESH_EVENT, handleEvent);
     window.addEventListener('o8:supervisor-inbox', handleEvent);
-    const interval = window.setInterval(refresh, 15000);
+    // Push-not-poll: the `o8:supervisor-inbox` WS event (and the local
+    // REFRESH_EVENT) drive live updates, so this timer is only a safety net for
+    // a dropped event — stretch it from 15s to 5min to keep it off the webview's
+    // socket budget instead of hammering an unmapped route every 15s.
+    const interval = window.setInterval(refresh, 300000);
     return () => {
       window.removeEventListener(REFRESH_EVENT, handleEvent);
       window.removeEventListener('o8:supervisor-inbox', handleEvent);
