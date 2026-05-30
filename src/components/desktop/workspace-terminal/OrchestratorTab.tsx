@@ -91,6 +91,10 @@ function permissionStorageKey(tabId: string): string {
   return `cortex-ide:orchestrator-permission:tab:${tabId}`;
 }
 
+function swarmStorageKey(tabId: string): string {
+  return `cortex-ide:orchestrator-swarm:tab:${tabId}`;
+}
+
 // One-shot claim on the global "last-active orchestrator thread" pointer.
 //
 // Plain orchestrator tabs carry an `orchestrator-…` id (no explicit
@@ -124,6 +128,24 @@ function persistPermissionMode(tabId: string, mode: ThoughtsChatPermissionMode):
   if (typeof window === 'undefined') return;
   try {
     window.localStorage.setItem(permissionStorageKey(tabId), mode);
+  } catch {
+    // ignore
+  }
+}
+
+function readStoredSwarm(tabId: string): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(swarmStorageKey(tabId)) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function persistSwarm(tabId: string, enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(swarmStorageKey(tabId), enabled ? '1' : '0');
   } catch {
     // ignore
   }
@@ -269,6 +291,12 @@ function OrchestratorTabInner({
 
   const [permissionMode, setPermissionMode] = useState<ThoughtsChatPermissionMode>(
     () => readStoredPermissionMode(tabId),
+  );
+  // UltraCode / swarm tier (per-tab). Picking "UltraCode" in the composer's
+  // thinking dropdown flips this on; the orchestrator then fans work out to a
+  // parallel Codex + Gemini crew.
+  const [swarmEnabled, setSwarmEnabled] = useState<boolean>(
+    () => readStoredSwarm(tabId),
   );
   const [preferredRuntime, setPreferredRuntime] = useState<OrchestratorRuntime>(
     () => readOrchestratorRuntimePreference(),
@@ -550,6 +578,11 @@ function OrchestratorTabInner({
       persistPermissionMode(tabId, next);
       return next;
     });
+  }, [tabId]);
+
+  const handleSetSwarm = useCallback((enabled: boolean) => {
+    setSwarmEnabled(enabled);
+    persistSwarm(tabId, enabled);
   }, [tabId]);
 
   useEffect(() => {
@@ -919,6 +952,8 @@ function OrchestratorTabInner({
       thoughtsMutedGlass={thoughtsMutedGlass}
       permissionMode={permissionMode}
       onTogglePermission={handleTogglePermission}
+      swarmEnabled={swarmEnabled}
+      onSetSwarm={handleSetSwarm}
       repoLabel={repoLabel}
       emptyStateOverride={emptyOrShimmerNode}
       composerBelowSlot={(

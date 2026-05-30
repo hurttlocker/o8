@@ -88,7 +88,22 @@ interface OrchestratorSendOptions {
   displayMessage?: string;
   /** Local system/command entries inserted immediately after the user bubble. */
   localEntriesAfterUser?: MobileTranscriptEntry[];
+  /**
+   * UltraCode / swarm mode. When true, a swarm hint is prepended to the
+   * OUTBOUND message (the visible transcript bubble stays the user's raw
+   * text) nudging the orchestrator to fan work out to a parallel Codex +
+   * Gemini crew via the mission tools instead of doing everything itself.
+   */
+  swarm?: boolean;
 }
+
+// Prepended to the outbound orchestrator turn when swarm/UltraCode is on. Kept
+// out of the transcript via `displayMessage`. References the real o8 mission
+// tools the orchestrator already holds so it dispatches a mixed crew.
+const SWARM_TURN_HINT = [
+  '[UltraCode / swarm mode active]',
+  'Prefer parallelism for this turn. When the work splits into independent pieces, spin up a swarm of worker agents instead of doing everything yourself: dispatch a mixed mission via the o8 mission tools (create_mission with a per-issue `runtime`, then dispatch_mission) — route coding/implementation packets to Codex and analysis/research/review packets to Gemini — and run them in parallel. Review each agent\'s diff before merging. If the task is genuinely single-threaded, say so briefly and proceed normally.',
+].join('\n');
 
 interface ActiveTurnState {
   startedAt: number;
@@ -699,6 +714,7 @@ export function useOrchestratorStream(
     const model = options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
     const displayMessage = options?.displayMessage?.trim() || message;
     const localEntriesAfterUser = options?.localEntriesAfterUser ?? [];
+    const swarm = options?.swarm === true;
 
     void (async () => {
       const activeRepoPath = repoPathRef.current;
@@ -791,6 +807,11 @@ export function useOrchestratorStream(
       const resumePrelude = consumeOrchestratorSessionPrelude(activeRepoPath, threadIdRef.current);
       if (resumePrelude) {
         outboundMessage = `${resumePrelude}\n\nOperator message:\n${message}`;
+      }
+      // Swarm/UltraCode: prepend the crew hint to the outbound turn only — the
+      // user's transcript bubble already rendered with the raw `displayMessage`.
+      if (swarm) {
+        outboundMessage = `${SWARM_TURN_HINT}\n\n${outboundMessage}`;
       }
       const payload = JSON.stringify({
         type: 'orchestrator-send',

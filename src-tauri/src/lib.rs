@@ -12,9 +12,8 @@ use std::sync::{Mutex, OnceLock};
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{MouseButton, MouseButtonState, TrayIcon, TrayIconBuilder, TrayIconEvent},
-    AppHandle, Emitter, Manager, RunEvent, WebviewUrl, WebviewWindowBuilder,
+    AppHandle, Emitter, Manager, RunEvent,
 };
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use webview_latch::WebviewLatch;
 #[cfg(target_os = "macos")]
@@ -1760,21 +1759,18 @@ fn read_workspaces() -> Result<serde_json::Value, String> {
     Ok(serde_json::json!({ "workspaces": workspaces }))
 }
 
-// ── Tray badge + native weapons (issues #730, #731) ──
+// ── Tray badge + native weapons (issue #731) ──
 //
-// Three native macOS features that differentiate o8 from web/Electron rivals:
+// Two native macOS features that differentiate o8 from web/Electron rivals:
 //
-//   1. Cmd+Shift+O global shortcut → spawns a 600x80 always-on-top dispatch
-//      popover. Wired via tauri-plugin-global-shortcut.
-//
-//   2. Native notifications when a packet flips to `awaiting_review`. Fired
+//   1. Native notifications when a packet flips to `awaiting_review`. Fired
 //      from the frontend (which already holds the WS lane stream) via the
 //      `notify_review_ready` Tauri command. The macOS notification plugin
 //      doesn't expose action buttons natively (notify-rust limitation), so
 //      clicking the notification raises the app focused on the review card —
 //      "Approve / Reject" stay as in-app affordances for v1.
 //
-//   3. Menu bar tray with live "[N]" badge for pending reviews. The tray
+//   2. Menu bar tray with live "[N]" badge for pending reviews. The tray
 //      already exists; we now keep its title in sync by polling the lanes
 //      API every 5s. `set_tray_badge` is also exposed as a Tauri command so
 //      the frontend can push exact counts when WS lane events arrive (faster
@@ -1897,7 +1893,7 @@ struct AwaitingLane {
 
 /// Fetch lanes whose status is `reviewing`, projected for the tray dropdown.
 /// Falls back to an empty list on any parse / network error so the menu
-/// degrades to the static `Show / Quick Dispatch / Quit` entries.
+/// degrades to the static `Show / Quit` entries.
 fn fetch_awaiting_lanes() -> Vec<AwaitingLane> {
     let Some(body) = http_get_local("/api/lanes?active=true") else { return Vec::new() };
     let Ok(json) = serde_json::from_str::<serde_json::Value>(&body) else { return Vec::new() };
@@ -1927,17 +1923,16 @@ fn truncate_label(label: &str) -> String {
 }
 
 /// Build the tray dropdown menu given the current awaiting-review set.
-/// Layout: `<packet> · <repo>` rows, separator, `Show o8`, `Quick Dispatch`,
-/// separator, `Quit`. When the set is empty the per-packet rows are skipped
-/// and the menu collapses to the static three.
+/// Layout: `<packet> · <repo>` rows, separator, `Show o8`, separator, `Quit`.
+/// When the set is empty the per-packet rows are skipped and the menu collapses
+/// to the static two.
 fn build_tray_menu(app: &AppHandle, lanes: &[AwaitingLane]) -> tauri::Result<Menu<tauri::Wry>> {
     let show = MenuItem::with_id(app, "show", "Show o8", true, None::<&str>)?;
-    let dispatch = MenuItem::with_id(app, "dispatch", "Quick Dispatch", true, Some("CmdOrCtrl+Shift+O"))?;
     let separator = PredefinedMenuItem::separator(app)?;
     let quit = MenuItem::with_id(app, "quit", "Quit o8", true, None::<&str>)?;
 
     if lanes.is_empty() {
-        return Menu::with_items(app, &[&show, &dispatch, &separator, &quit]);
+        return Menu::with_items(app, &[&show, &separator, &quit]);
     }
 
     let menu = Menu::new(app)?;
@@ -1952,7 +1947,6 @@ fn build_tray_menu(app: &AppHandle, lanes: &[AwaitingLane]) -> tauri::Result<Men
     }
     menu.append(&PredefinedMenuItem::separator(app)?)?;
     menu.append(&show)?;
-    menu.append(&dispatch)?;
     menu.append(&separator)?;
     menu.append(&quit)?;
     Ok(menu)
@@ -1999,160 +1993,6 @@ fn spawn_tray_badge_poller(app: AppHandle) {
             std::thread::sleep(std::time::Duration::from_secs(5));
         }
     });
-}
-
-// ── Cmd+Shift+O dispatch popover ──
-//
-// The popover is a secondary window labelled "dispatch-popover" loaded from
-// /dispatch-popover (a Next.js route that renders DispatchPopover.tsx). We
-// destroy it on Esc / submit so each invocation is a fresh window — simpler
-// than juggling visibility state across the global-shortcut callback and the
-// frontend.
-
-const POPOVER_LABEL: &str = "dispatch-popover";
-const POPOVER_WIDTH: f64 = 600.0;
-const POPOVER_HEIGHT: f64 = 280.0;
-const POPOVER_STATE_FILE: &str = "popover-state.json";
-
-/// Read the saved popover position from `~/.o8/popover-state.json`.
-/// Returns None when the file is missing, malformed, or contains values that
-/// don't fit on any plausible screen — in which case the open path falls back
-/// to the Spotlight-style top-center anchor.
-fn read_saved_popover_position() -> Option<(f64, f64)> {
-    let path = std::path::PathBuf::from(o8_data_dir()).join(POPOVER_STATE_FILE);
-    let raw = std::fs::read_to_string(&path).ok()?;
-    let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
-    let x = json.get("x")?.as_f64()?;
-    let y = json.get("y")?.as_f64()?;
-    // Reject obviously broken values — multi-monitor reconfigs sometimes save
-    // off-screen coordinates we can't recover from. Same defensive bounds as
-    // sanitize_window_state(), just looser.
-    if !x.is_finite() || !y.is_finite() { return None; }
-    if x < -10000.0 || x > 20000.0 || y < -10000.0 || y > 10000.0 { return None; }
-    Some((x, y))
-}
-
-/// Persist the popover position to `~/.o8/popover-state.json`. Called from
-/// the frontend after a drag finishes (via `save_dispatch_popover_position`).
-/// Best-effort: any IO error is logged and swallowed so the popover never
-/// becomes unusable just because a write failed.
-fn write_saved_popover_position(x: f64, y: f64) {
-    let dir = o8_data_dir();
-    if let Err(e) = std::fs::create_dir_all(&dir) {
-        log::warn!("[popover] mkdir {} failed: {}", dir, e);
-        return;
-    }
-    let path = std::path::PathBuf::from(&dir).join(POPOVER_STATE_FILE);
-    let payload = serde_json::json!({ "x": x, "y": y });
-    if let Err(e) = std::fs::write(&path, payload.to_string()) {
-        log::warn!("[popover] write {:?} failed: {}", path, e);
-    }
-}
-
-/// Open (or focus, if already open) the dispatch popover. Spotlight-style on
-/// first launch: horizontally centered, anchored at 25% from the top of the
-/// active monitor. Subsequent opens honor a position the user dragged the
-/// popover to (persisted to `~/.o8/popover-state.json`). Always-on-top, no
-/// decorations, frameless. Built on the dev URL when running `cargo tauri
-/// dev`, otherwise the bundled `tauri://localhost` scheme. Returns Ok(()) on
-/// success.
-fn open_dispatch_popover_impl(app: &AppHandle) -> Result<(), String> {
-    // Compute Spotlight-style position on the primary monitor: horizontally
-    // centered, 25% from the top. Falls back to .center() if monitor info is
-    // unavailable (rare — headless / detached display races).
-    //
-    // Tauri v2: monitor.size() is physical pixels, popover dims are logical.
-    // .position(x, y) takes physical pixels, so we scale logical → physical.
-    let spotlight_position: Option<(f64, f64)> = match app.primary_monitor() {
-        Ok(Some(monitor)) => {
-            let scale = monitor.scale_factor();
-            let monitor_w = monitor.size().width as f64;
-            let monitor_h = monitor.size().height as f64;
-            let popover_w_phys = POPOVER_WIDTH * scale;
-            let x = (monitor_w - popover_w_phys) / 2.0;
-            let y = monitor_h * 0.25;
-            Some((x.max(0.0), y.max(0.0)))
-        }
-        _ => None,
-    };
-
-    // Saved drag position wins over the Spotlight default — this is what
-    // makes the popover "remember where I put it" across summons.
-    let preferred_position = read_saved_popover_position().or(spotlight_position);
-
-    if let Some(existing) = app.get_webview_window(POPOVER_LABEL) {
-        let _ = existing.show();
-        let _ = existing.set_focus();
-        if let Some((x, y)) = preferred_position {
-            let _ = existing.set_position(tauri::PhysicalPosition::new(x, y));
-        } else {
-            let _ = existing.center();
-        }
-        return Ok(());
-    }
-
-    // /dispatch-popover route. In dev (cargo tauri dev) we hit the Next dev
-    // server directly; in prod we use tauri://localhost which serves the
-    // static build out of out/frontend/.
-    let url = if cfg!(debug_assertions) {
-        let port = resolve_api_port();
-        let raw = format!("http://localhost:{}/dispatch-popover", port);
-        let parsed: tauri::Url = raw.parse().map_err(|e| format!("popover url parse: {}", e))?;
-        WebviewUrl::External(parsed)
-    } else {
-        WebviewUrl::App("dispatch-popover".into())
-    };
-
-    let mut builder = WebviewWindowBuilder::new(app, POPOVER_LABEL, url)
-        .title("Dispatch")
-        .inner_size(POPOVER_WIDTH, POPOVER_HEIGHT)
-        .resizable(false)
-        .always_on_top(true)
-        .decorations(false)
-        .transparent(true)
-        .focused(true)
-        .visible(true)
-        .skip_taskbar(true);
-
-    builder = if let Some((x, y)) = preferred_position {
-        builder.position(x, y)
-    } else {
-        builder.center()
-    };
-
-    // visible_on_all_workspaces is critical for a global shortcut —
-    // otherwise the popover only shows on the workspace that owns the main
-    // window, defeating the "from anywhere" promise.
-    builder = builder.visible_on_all_workspaces(true);
-
-    builder.build().map_err(|e| e.to_string())?;
-    Ok(())
-}
-
-/// Tauri command: open the popover. Called from frontend (e.g. a NavRail
-/// button) as well as from the global shortcut callback.
-#[tauri::command]
-fn open_dispatch_popover(app: AppHandle) -> Result<(), String> {
-    open_dispatch_popover_impl(&app)
-}
-
-/// Tauri command: close the popover. Called from the popover frontend on
-/// Esc / submit / blur.
-#[tauri::command]
-fn close_dispatch_popover(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(POPOVER_LABEL) {
-        let _ = window.close();
-    }
-    Ok(())
-}
-
-/// Tauri command: persist the dispatch popover's last-known physical
-/// position. The popover frontend calls this after a drag finishes (mouseup
-/// on the header) so the next Cmd+Shift+O opens at the same spot. Coordinates
-/// are physical pixels relative to the primary monitor.
-#[tauri::command]
-fn save_dispatch_popover_position(x: f64, y: f64) {
-    write_saved_popover_position(x, y);
 }
 
 /// Tauri command: push an exact awaiting-review count to the tray badge.
@@ -2342,12 +2182,6 @@ pub fn run() {
     // not just 3001/3002.
     sidecar_lifecycle::reap_o8_orphans();
 
-    // Cmd+Shift+O on macOS, Ctrl+Shift+O elsewhere. The global-shortcut
-    // plugin uses the same `Modifiers::SUPER` token for both Cmd (mac) and
-    // the Windows key — close enough for v1; we expose this constant so the
-    // handler and the registration match.
-    let dispatch_shortcut = Shortcut::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyO);
-
     let dev_frontend = match dev_frontend::from_env() {
         Ok(dev_frontend) => dev_frontend,
         Err(err) => {
@@ -2374,32 +2208,8 @@ pub fn run() {
         .plugin(tauri_plugin_store::Builder::default().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Auto-saves window size + position to the OS data dir on close and
-        // restores them on next launch. The dispatch-popover is excluded —
-        // it's transient (Cmd+Shift+O summons + closes per use) and we don't
-        // want its 600x80 dimensions or position bleeding into anything.
-        .plugin(
-            tauri_plugin_window_state::Builder::default()
-                .with_filter(|label| label != POPOVER_LABEL)
-                .skip_initial_state(POPOVER_LABEL)
-                .build(),
-        )
-        // Cmd+Shift+O global shortcut (issue #730). Registered on `setup()`
-        // below so the AppHandle is available; the handler routes back into
-        // `open_dispatch_popover_impl()`.
-        .plugin(
-            tauri_plugin_global_shortcut::Builder::new()
-                .with_handler(move |app, shortcut, event| {
-                    if event.state() != ShortcutState::Pressed {
-                        return;
-                    }
-                    if shortcut == &dispatch_shortcut {
-                        if let Err(err) = open_dispatch_popover_impl(app) {
-                            log::warn!("[global-shortcut] open dispatch popover failed: {}", err);
-                        }
-                    }
-                })
-                .build(),
-        );
+        // restores them on next launch.
+        .plugin(tauri_plugin_window_state::Builder::default().build());
 
     // MCP plugin: exposes app to AI agents (screenshots, DOM, input simulation).
     // Optional dev-only feature. Requires a sibling checkout of tauri-plugin-mcp.
@@ -2426,8 +2236,8 @@ pub fn run() {
 
     builder
         // Inject the console-error capture hook on every main-window page
-        // load (issue #793). Other windows (dispatch popover, etc.) skip
-        // injection — we only care about errors in the main app shell.
+        // load (issue #793). Non-main windows skip injection — we only care
+        // about errors in the main app shell.
         // PageLoadEvent fires twice per navigation (Started + Finished); we
         // inject on Started so the hook is in place before any user JS runs.
         .on_page_load(|webview, payload| {
@@ -2455,9 +2265,6 @@ pub fn run() {
             read_git_status,
             read_approvals,
             read_workspaces,
-            open_dispatch_popover,
-            close_dispatch_popover,
-            save_dispatch_popover_position,
             set_tray_badge,
             notify_review_ready,
             record_console_error,
@@ -2472,14 +2279,11 @@ pub fn run() {
         ])
         .setup(move |app| {
             // ── System Tray (issue #731) ──
-            // Menu items: Show / Open Dispatch (Cmd+Shift+O) / Quit. The
-            // separator + "Open Dispatch" entry surfaces the global-shortcut
-            // feature so users discover it without reading docs.
+            // Menu items: Show / Quit.
             let show = MenuItem::with_id(app, "show", "Show o8", true, None::<&str>)?;
-            let dispatch = MenuItem::with_id(app, "dispatch", "Quick Dispatch", true, Some("CmdOrCtrl+Shift+O"))?;
             let separator = PredefinedMenuItem::separator(app)?;
             let quit = MenuItem::with_id(app, "quit", "Quit o8", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &dispatch, &separator, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &separator, &quit])?;
 
             let tray = TrayIconBuilder::new()
                 .menu(&menu)
@@ -2494,11 +2298,6 @@ pub fn run() {
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
-                            }
-                        }
-                        "dispatch" => {
-                            if let Err(err) = open_dispatch_popover_impl(app) {
-                                log::warn!("[tray] dispatch menu failed: {}", err);
                             }
                         }
                         "quit" => {
@@ -2537,21 +2336,6 @@ pub fn run() {
             // Store the handle so background tasks (badge poller) and
             // frontend commands can mutate the tray's title / tooltip.
             store_tray(tray);
-
-            // ── Cmd+Shift+O global shortcut registration (issue #730) ──
-            // The handler is wired in the plugin Builder above; we just need
-            // to register the binding. macOS shows the accessibility prompt
-            // automatically on first registration; if the user denies, we
-            // log + carry on rather than blocking startup.
-            if let Err(err) = app.global_shortcut().register(dispatch_shortcut) {
-                log::warn!(
-                    "[global-shortcut] could not register Cmd+Shift+O: {} \
-                     (user may need to grant Accessibility permission)",
-                    err
-                );
-            } else {
-                log::info!("[global-shortcut] Cmd+Shift+O registered");
-            }
 
             // ── Badge poller (issue #731) ──
             // 5s tick keeps the tray title in sync with awaiting_review
