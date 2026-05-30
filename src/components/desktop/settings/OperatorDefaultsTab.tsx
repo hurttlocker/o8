@@ -63,6 +63,7 @@ const THINKING_EFFORT_OPTIONS: Array<{ value: ThinkingEffort; label: string; det
 ];
 
 const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
   { value: 'claude-opus-4-7', label: 'Opus 4.7' },
   { value: 'claude-opus-4-6', label: 'Opus 4.6' },
   { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
@@ -757,13 +758,13 @@ export function OperatorDefaultsTab() {
           margin: 0,
           marginBottom: 4,
         }}>
-          In-app chat uses Codex GPT-5.5 xhigh by default — free for ChatGPT Plus / Codex subscribers, no Anthropic draw. Toggle ON to use Claude Opus 4.7 instead, routed through the <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>claude</span> CLI&apos;s interactive REPL — same subscription pool <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>claude</span> in Terminal uses. <strong>No Anthropic API key needed.</strong> Requires the <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>claude</span> CLI installed and signed in. Background features (auto-review, intake, distill) follow the same default — Codex when off, Claude when on. Env{' '}
+          In-app chat uses Codex GPT-5.5 xhigh by default — free for ChatGPT Plus / Codex subscribers, no Anthropic draw. Toggle ON to use Claude Opus 4.8 instead, routed through the <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>claude</span> CLI&apos;s interactive REPL — same subscription pool <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>claude</span> in Terminal uses. <strong>No Anthropic API key needed.</strong> Requires the <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>claude</span> CLI installed and signed in. Background features (auto-review, intake, distill) follow the same default — Codex when off, Claude when on. Env{' '}
           <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>O8_IN_APP_ORCHESTRATOR_ENABLED</span>{' '}
           overrides.
         </p>
         <Row
           label="In-app orchestrator runtime"
-          description={values.inAppOrchestratorEnabled ? 'On — chat + background features use Claude Opus 4.7 via the claude CLI interactive REPL. Bills your Claude Code MAX subscription pool (same as running claude in Terminal). No API key, no per-token charge.' : 'Off (default) — chat + background features use Codex GPT-5.5 xhigh (free with Codex sub). Auto-review writes verdicts to log but does not create approval cards yet (#1045).'}
+          description={values.inAppOrchestratorEnabled ? 'On — chat + background features use Claude Opus 4.8 via the claude CLI interactive REPL. Bills your Claude Code MAX subscription pool (same as running claude in Terminal). No API key, no per-token charge.' : 'Off (default) — chat + background features use Codex GPT-5.5 xhigh (free with Codex sub). Auto-review writes verdicts to log but does not create approval cards yet (#1045).'}
           source={sources.inAppOrchestratorEnabled}
           disabledReason={sources?.inAppOrchestratorEnabled === 'env' ? envDisabledReason : undefined}
           right={

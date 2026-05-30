@@ -5,7 +5,7 @@ import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thought
 export type OrchestratorStreamStatus = 'connecting' | 'ready' | 'busy' | 'error' | 'dead';
 
 export type OrchestratorPermissionMode = 'full' | 'plan';
-export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-7';
+export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-8';
 
 export const ORCHESTRATOR_CONTEXT_LIMIT = 1_000_000;
 export const ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR = 250_000;

@@ -449,7 +449,7 @@ For exact token values and row/typography geometry, **always** read [`hurttlocke
 
 | Backend | When | Billing | Implementation |
 |---|---|---|---|
-| **Claude Code REPL** | Toggle ON (Opus 4.7) | Agent SDK pool | `lane/codex-orchestrator-session.ts` peer + Claude REPL spawn (interactive `--input-format stream-json`, *not* `claude -p` — that was retired in #1066) |
+| **Claude Code REPL** | Toggle ON (Opus 4.8) | Agent SDK pool | `lane/codex-orchestrator-session.ts` peer + Claude REPL spawn (interactive `--input-format stream-json`, *not* `claude -p` — that was retired in #1066) |
 | **Codex GPT-5.5 xhigh** | Toggle OFF (default) | ChatGPT Plus / Codex sub (no Anthropic draw) | `lane/codex-orchestrator-session.ts` — `codex exec --json -c model=gpt-5.5 -c model_reasoning_effort=xhigh`, maps `thread.started` / `item.completed` / `turn.completed` JSON stream into `OrchestratorEvent` contract |
 | **openclaw** | Mobile-first / governed copies | Sub-billed via openclaw | `lane/orchestrator-backends/openclaw.ts` — spawns `openclaw --profile o8 agent --json` once per turn. Critical: dispatches Codex workers **through the o8 operator MCP** (`o8__dispatch_mission`), not openclaw's native `sessions_spawn` — that tool is `tools.deny`-stripped on the governed `o8` profile, per the structural fix for #1075 (orchestrator-runtime ≠ worker-runtime). Streaming limitation: openclaw `agent --json` returns one final JSON blob, so no live tool/thinking deltas. See `docs/openclaw-integration.md`. |
 

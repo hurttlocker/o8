@@ -12,6 +12,7 @@ function normalizeModelLookup(model: string) {
 export function anthropicPricingForModel(model: string): ModelPricingPerMillionUsd | null {
   const normalizedModel = normalizeModelLookup(model);
   if (!normalizedModel) return null;
+  if (normalizedModel.includes('claude-opus-4-8') || normalizedModel.includes('opus 4.8')) return { input: 5, output: 25 };
   if (normalizedModel.includes('claude-opus-4-7') || normalizedModel.includes('opus 4.7')) return { input: 5, output: 25 };
   if (normalizedModel.includes('claude-opus-4-6') || normalizedModel.includes('opus 4.6')) return { input: 15, output: 75 };
   if (normalizedModel.includes('claude-sonnet-4-6') || normalizedModel.includes('sonnet 4.6')) return { input: 3, output: 15 };
