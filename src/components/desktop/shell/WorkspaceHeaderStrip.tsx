@@ -382,12 +382,86 @@ function HeaderPillStrip({
   // tabs each pill compacts to just its first significant word.
   const crowded = tabs.length >= 5;
 
+  // Overflow affordances. The strip hides its scrollbar (scrollbarWidth:none)
+  // to stay chrome-clean, so when many tabs are open the off-screen ones are
+  // invisible *and* unreachable with a normal mouse — only a horizontal
+  // trackpad swipe scrolls them. Two fixes: map vertical wheel → horizontal
+  // scroll (non-passive native listener so preventDefault sticks), and fade
+  // the overflowing edge(s) via a mask so you can SEE there's more. 2026-05-30.
+  const [edges, setEdges] = useState({ left: false, right: false });
+
+  const recomputeEdges = useCallback(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const maxScroll = el.scrollWidth - el.clientWidth;
+    setEdges({
+      left: el.scrollLeft > 1,
+      right: el.scrollLeft < maxScroll - 1,
+    });
+  }, []);
+
   const handleSelect = useCallback((tabId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-select-tab', { detail: { tabId, workspaceId: workspaceId ?? null } }));
   }, [workspaceId]);
   const handleClose = useCallback((tabId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-close-tab', { detail: { tabId, workspaceId: workspaceId ?? null } }));
   }, [workspaceId]);
+
+  // Native non-passive wheel listener: React's onWheel attaches passive in
+  // some builds, which silently no-ops preventDefault. Attach our own so the
+  // vertical wheel reliably becomes horizontal scroll without scrolling the
+  // page. Only consume the event when there's actually overflow to move.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      if (el.scrollWidth <= el.clientWidth) return; // nothing to scroll
+      const dominant = Math.abs(e.deltaX) > Math.abs(e.deltaY) ? e.deltaX : e.deltaY;
+      if (dominant === 0) return;
+      e.preventDefault();
+      el.scrollLeft += dominant * (e.deltaMode === 1 ? 16 : 1);
+      recomputeEdges();
+    };
+    el.addEventListener('wheel', onWheel, { passive: false });
+    el.addEventListener('scroll', recomputeEdges, { passive: true });
+    const ro = new ResizeObserver(recomputeEdges);
+    ro.observe(el);
+    recomputeEdges();
+    return () => {
+      el.removeEventListener('wheel', onWheel);
+      el.removeEventListener('scroll', recomputeEdges);
+      ro.disconnect();
+    };
+  }, [recomputeEdges]);
+
+  // Recompute when the tab set changes (pills added/removed shift overflow).
+  useEffect(() => { recomputeEdges(); }, [tabs.length, recomputeEdges]);
+
+  // Selecting a tab that's scrolled off-screen should bring it into view —
+  // otherwise clicking a pill in the (separate) AgentPanel can activate a tab
+  // you can't see in the strip.
+  useEffect(() => {
+    const el = scrollRef.current;
+    if (!el) return;
+    const active = el.querySelector('[data-pill-active="true"]');
+    if (active && typeof active.scrollIntoView === 'function') {
+      active.scrollIntoView({ inline: 'nearest', block: 'nearest', behavior: 'smooth' });
+    }
+    const id = window.setTimeout(recomputeEdges, 220);
+    return () => window.clearTimeout(id);
+  }, [activeTabId, tabs.length, recomputeEdges]);
+
+  // Fade only the edge(s) that have more content behind them. Transparent-safe
+  // (masks the pills themselves) so it works over the vibrancy chrome where a
+  // solid gradient overlay would read as a grey smear.
+  const FADE = 18;
+  const maskImage = edges.left && edges.right
+    ? `linear-gradient(to right, transparent 0, #000 ${FADE}px, #000 calc(100% - ${FADE}px), transparent 100%)`
+    : edges.left
+      ? `linear-gradient(to right, transparent 0, #000 ${FADE}px, #000 100%)`
+      : edges.right
+        ? `linear-gradient(to right, #000 0, #000 calc(100% - ${FADE}px), transparent 100%)`
+        : 'none';
 
   return (
     <div
@@ -404,7 +478,9 @@ function HeaderPillStrip({
         scrollbarWidth: 'none',
         paddingLeft: 6,
         paddingRight: 6,
-      }}
+        maskImage,
+        WebkitMaskImage: maskImage,
+      } as React.CSSProperties}
     >
       {/* Continuity V1 — wrap each pill in a layout-aware motion.div so
           mounts scale + fade in, exits scale + fade out, and the surviving
@@ -417,6 +493,7 @@ function HeaderPillStrip({
           <motion.div
             key={tab.id}
             layout
+            data-pill-active={tab.id === activeTabId ? 'true' : undefined}
             initial={{ opacity: 0, scale: 0.85 }}
             animate={{ opacity: 1, scale: 1 }}
             exit={{ opacity: 0, scale: 0.85 }}
