@@ -5,7 +5,7 @@
  * every surface (the /preview/motion lab):
  *   - idle    → A3 static ring (quiet, no motion)
  *   - running → B pulse (accent) — or C binary orbit once the run has been
- *               active past LONG_RUNNING_MS (7 min). Dynamic: flips live.
+ *               active past LONG_RUNNING_MS (1 min). Dynamic: flips live.
  *   - review  → pulse in the review accent (awaiting you)
  *   - merged  → purple branch-merge glyph
  *   - failed  → solid red dot
@@ -21,7 +21,7 @@ import { useEffect, useRef, useState } from 'react';
 
 export type AgentDotState = 'idle' | 'running' | 'review' | 'merged' | 'failed';
 
-export const LONG_RUNNING_MS = 7 * 60 * 1000; // 7 min — pulse → orbit
+export const LONG_RUNNING_MS = 1 * 60 * 1000; // 1 min — pulse → orbit (was 7 min; lowered so the long-run orbit is observable)
 
 /**
  * Canonical status → dot-state map. Every agent/session/packet surface routes
