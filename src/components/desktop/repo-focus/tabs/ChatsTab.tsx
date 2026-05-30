@@ -376,6 +376,15 @@ export function ChatsTab({
     return map;
   }, [archivedLanes, targetRepos, variant]);
 
+  // Flat archived-lane list for the non-repo grouping modes (flat / date),
+  // which have no per-repo bucket to hang archived lanes under. Lets those
+  // views show the same Archived section the repo view renders per-repo, so
+  // no grouping filter silently hides threads. 2026-05-30.
+  const flatArchivedLanes = useMemo(
+    () => [...archivedLanesByRepoKey.values()].flat(),
+    [archivedLanesByRepoKey],
+  );
+
   const toggleArchivedLanes = useCallback((repoKey: string) => {
     setArchivedLanesExpanded((current) => {
       const next = new Set(current);
@@ -546,6 +555,32 @@ export function ChatsTab({
                   );
                 })
               )}
+              {/* Parity trailer (2026-05-30): flat + date modes surface the
+                  same Spawned agents + Archived sections the repo mode renders
+                  inline above, so every grouping filter exposes the complete
+                  thread set — no chats hidden by the grouping choice. */}
+              {chatGroupBy !== 'repo' ? (
+                <>
+                  {slotBeforeArchived}
+                  {flatArchivedLanes.length > 0 ? (
+                    <>
+                      <SectionLabel
+                        label="Archived"
+                        compact={compact}
+                        collapsed={collapsedGroups.archived}
+                        onToggle={() => toggleGroup('archived')}
+                      />
+                      {collapsedGroups.archived ? null : flatArchivedLanes.map((lane) => (
+                        <ArchivedLaneCompactRow
+                          key={lane.id}
+                          lane={lane}
+                          onSelectSession={onSelectSession}
+                        />
+                      ))}
+                    </>
+                  ) : null}
+                </>
+              ) : null}
             </>
           ) : (
             <>
@@ -615,13 +650,10 @@ export function ChatsTab({
         </div>
       )) : null}
 
-      {/* Spawned agents (workers / packets) live ONLY under the repo-grouped
-          view — the operator keeps them separate from chat history. In repo
-          mode the flat-compact-repos branch already injects them inline at
-          the end of each repo group (so per-repo Archived sits below). In
-          date/flat modes we deliberately drop them: the time-grouped view
-          is for chats, not work units. Packets remain reachable via
-          AgentPanel groups + LeftPanelProjectFocus AgentsTab. */}
+      {/* Non-compact repo view appends Spawned agents after the chat sections.
+          Compact modes render it inline instead: repo mode in the last repo
+          group, flat/date modes in the parity trailer above — so every grouping
+          filter surfaces the same complete thread set. */}
       {chatGroupBy === 'repo'
         && !(compact && flatHistoryRepoGroups.length > 0)
         ? slotBeforeArchived
