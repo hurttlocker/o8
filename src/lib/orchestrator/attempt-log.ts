@@ -11,7 +11,7 @@ const MAX_SUMMARY_CHARS = 500;
 const MAX_FILES_CHANGED = 12;
 const MAX_ERROR_LINES = 3;
 const MAX_ERROR_LINE_CHARS = 240;
-const FILE_REFERENCE_PATTERN = /([A-Za-z0-9_./-]+\.(?:ts|tsx|js|jsx|mjs|cjs|mts|cts|json|css|scss|md))(?:\(\d+,\d+\)|:\d+(?::\d+)?)?/g;
+const FILE_REFERENCE_PATTERN = /([A-Za-z0-9_./-]+\.(?:tsx|ts|jsx|js|mjs|cjs|mts|cts|json|css|scss|md))(?:\(\d+,\d+\)|:\d+(?::\d+)?)?/g;
 
 export interface AttemptLearning {
   attempt: number;
