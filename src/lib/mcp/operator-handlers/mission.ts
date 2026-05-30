@@ -73,8 +73,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         runtime: {
           type: 'string',
-          enum: ['codex'],
-          description: 'Worker runtime for all mission packets. Codex is the only supported worker — Claude runs as the orchestrator (REPL via stream-json) and never as a packet worker. Gemini and opencode are not currently dispatchable.',
+          enum: ['codex', 'gemini'],
+          description: 'Worker runtime for all mission packets. Codex (default) and Gemini are both dispatchable — mix them across packets for a coding + thinking swarm. Claude runs only as the orchestrator (REPL via stream-json), never as a packet worker; opencode is not dispatchable.',
         },
         workerIntent: {
           type: 'string',
@@ -257,8 +257,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: ['codex'],
-          description: 'Worker runtime hint. Codex is the only supported worker today.',
+          enum: ['codex', 'gemini'],
+          description: 'Worker runtime for this task. Codex (default) or Gemini — both are dispatchable.',
         },
         model: {
           type: 'string',
@@ -354,8 +354,8 @@ export const MISSION_TOOLS: McpTool[] = [
         },
         requestedRuntime: {
           type: 'string',
-          enum: ['codex'],
-          description: 'Worker runtime hint. Codex is the only supported worker today.',
+          enum: ['codex', 'gemini'],
+          description: 'Worker runtime for this task. Codex (default) or Gemini — both are dispatchable.',
         },
         projectId: {
           type: 'string',

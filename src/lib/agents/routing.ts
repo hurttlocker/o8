@@ -5,10 +5,25 @@ import type {
   WorkerRouting,
   WorkerRoutingConfidence,
 } from '@/lib/orchestrator/types';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 
+// Codex stays the always-on fallback workhorse when no dispatchable runtime is
+// requested. Other runtimes (Gemini today) are honored when the capability map
+// marks them dispatchable — that's what makes a mixed Codex+Gemini swarm work.
 export const PRODUCTION_AGENT_RUNTIME: OrchestratorRuntime = 'codex';
 export const PRODUCTION_AGENT_PROVIDER: WorkerProvider = 'codex';
-export const PRODUCTION_AGENT_ENFORCEMENT = 'codex_only_production';
+export const PRODUCTION_AGENT_ENFORCEMENT = 'dispatchable_runtimes' as const;
+
+/** Map a dispatchable runtime to its worker provider for routing metadata. */
+function providerForRuntime(runtime: OrchestratorRuntime): WorkerProvider {
+  switch (runtime) {
+    case 'gemini': return 'gemini';
+    case 'claude-code': return 'claude';
+    case 'opencode': return 'opencode';
+    case 'codex':
+    default: return 'codex';
+  }
+}
 
 const WORKER_INTENTS: readonly WorkerIntent[] = [
   'light_worker',
@@ -73,17 +88,16 @@ function routingConfidence(intent: WorkerIntent): WorkerRoutingConfidence {
 }
 
 function routingReason(input: {
-  requestedProvider: WorkerProvider | null;
   requestedRuntime: OrchestratorRuntime | null;
+  selectedRuntime: OrchestratorRuntime;
   workerIntent: WorkerIntent;
   source?: string;
 }) {
-  const requested = input.requestedProvider ?? input.requestedRuntime;
   const source = input.source ? ` from ${input.source}` : '';
-  if (requested && requested !== PRODUCTION_AGENT_PROVIDER && requested !== PRODUCTION_AGENT_RUNTIME) {
-    return `Requested ${requested}${source}, but production agent spawning is currently restricted to Codex. Intent scaffold preserved for later provider routing.`;
+  if (input.requestedRuntime && input.requestedRuntime !== input.selectedRuntime) {
+    return `Requested ${input.requestedRuntime}${source} is not currently dispatchable; routed ${input.workerIntent} to ${input.selectedRuntime}.`;
   }
-  return `Production routing selected Codex for ${input.workerIntent}${source}.`;
+  return `Routed ${input.workerIntent}${source} to ${input.selectedRuntime}.`;
 }
 
 export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): WorkerRouting {
@@ -91,23 +105,35 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
   const requestedProvider = normalizeWorkerProvider(input.requestedProvider);
   const requestedRuntime = normalizeRequestedRuntime(input.requestedRuntime);
   const requestedModel = normalizeModel(input.requestedModel);
-  const requestedCodexModel = requestedModel
-    && (requestedProvider === null || requestedProvider === PRODUCTION_AGENT_PROVIDER)
-    && (requestedRuntime === null || requestedRuntime === PRODUCTION_AGENT_RUNTIME);
+
+  // Honor a requested runtime when the capability map marks it dispatchable
+  // (Codex + Gemini today). Anything else — including a request for a
+  // non-dispatchable runtime like claude-code — falls back to Codex.
+  const dispatchable = listDispatchableRuntimes({ includeExperimental: true });
+  const selectedRuntime = requestedRuntime && dispatchable.includes(requestedRuntime)
+    ? requestedRuntime
+    : PRODUCTION_AGENT_RUNTIME;
+  const selectedProvider = providerForRuntime(selectedRuntime);
+
+  // A requested model is honored only when it targets the runtime we actually
+  // selected — so a Codex model hint can't leak onto a Gemini packet.
+  const modelTargetsSelected = requestedModel
+    && (requestedRuntime === null || requestedRuntime === selectedRuntime)
+    && (requestedProvider === null || requestedProvider === selectedProvider);
 
   return {
     workerIntent,
     requestedProvider,
     requestedRuntime,
     requestedModel,
-    selectedProvider: PRODUCTION_AGENT_PROVIDER,
-    selectedRuntime: PRODUCTION_AGENT_RUNTIME,
-    selectedModel: requestedCodexModel ? requestedModel : null,
+    selectedProvider,
+    selectedRuntime,
+    selectedModel: modelTargetsSelected ? requestedModel : null,
     enforcement: PRODUCTION_AGENT_ENFORCEMENT,
     confidence: input.confidence ?? routingConfidence(workerIntent),
     reason: input.reason ?? routingReason({
-      requestedProvider,
       requestedRuntime,
+      selectedRuntime,
       workerIntent,
       source: input.source,
     }),
