@@ -35,6 +35,7 @@ import { Folder as IconoirFolder } from 'iconoir-react';
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 import { ChevronDown, ChevronRight } from '@/components/desktop/lucide-shims';
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { AgentIdenticon } from '@/components/desktop/AgentIdenticon';
 
 // ── Types ──
 
@@ -408,6 +409,7 @@ function ExtraAgentRowView({
         ) : null}
       </span>
       <OriginChip origin={row.origin} />
+      <AgentIdenticon seed={row.sessionKey ?? row.key} title={row.name} />
       <AgentStatusDot state={dotState} />
     </button>
   );
