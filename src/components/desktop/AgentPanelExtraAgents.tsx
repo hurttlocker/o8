@@ -34,6 +34,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEven
 import { Folder as IconoirFolder } from 'iconoir-react';
 import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 import { ChevronDown, ChevronRight } from '@/components/desktop/lucide-shims';
+import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 
 // ── Types ──
 
@@ -325,10 +326,14 @@ function ExtraAgentRowView({
   onSelectSession?: (sessionKey: string) => void;
   onOpenMenu?: (event: ReactMouseEvent, row: ExtraAgentRow) => void;
 }) {
-  // Status colors retired — Spawned agents rows now use the same motion
-  // vocabulary as the chat rows above (gray pulse for active, gray ring
-  // for idle). Keeps the panel visually unified.
-  const isActive = row.status === 'running' || row.status === 'waiting';
+  // Same status vocabulary as the chat rows (AgentStatusDot): accent pulse
+  // while running — flips to the binary orbit once long-running — review
+  // orange, failed red, idle ring. Keeps the panel unified with the history list.
+  const dotState: AgentDotState =
+    row.status === 'running' ? 'running'
+      : row.status === 'waiting' ? 'review'
+        : row.status === 'error' ? 'failed'
+          : 'idle';
   const canFocus = Boolean(row.sessionKey && onSelectSession);
   const handleClick = useCallback(() => {
     if (row.sessionKey) onSelectSession?.(row.sessionKey);
@@ -403,11 +408,7 @@ function ExtraAgentRowView({
         ) : null}
       </span>
       <OriginChip origin={row.origin} />
-      {isActive ? (
-        <span className="o8-pulse-circle" aria-label="Working" title="Working" style={{ width: 5, height: 5, flexShrink: 0 }} />
-      ) : (
-        <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5, flexShrink: 0 }} />
-      )}
+      <AgentStatusDot state={dotState} />
     </button>
   );
 }
