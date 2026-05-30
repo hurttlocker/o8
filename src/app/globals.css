@@ -1881,6 +1881,34 @@ button.workflow-file-item.workflow-file-item-active {
   opacity: 0.65;
 }
 
+/* Motion vocabulary C — binary orbit. Two dots 180° apart circling a center.
+   Says "long-running op underway" — shown when a run's elapsed crosses the
+   long-running threshold (7 min). Color via currentColor so callers set the
+   state accent inline. */
+@keyframes o8-orbit-spin { to { transform: rotate(360deg); } }
+.o8-orbit {
+  position: relative;
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+  color: var(--t-text-faint, #9ca3af);
+  animation: o8-orbit-spin 1.6s linear infinite;
+}
+.o8-orbit::before,
+.o8-orbit::after {
+  content: '';
+  position: absolute;
+  left: 50%;
+  width: 3px;
+  height: 3px;
+  margin-left: -1.5px;
+  border-radius: 50%;
+  background: currentColor;
+}
+.o8-orbit::before { top: 0; }
+.o8-orbit::after { bottom: 0; opacity: 0.55; }
+
 @media (prefers-reduced-motion: reduce) {
   .o8-text-shimmer,
   .o8-dot-shimmer > span,
@@ -1889,4 +1917,5 @@ button.workflow-file-item.workflow-file-item-active {
   }
   .o8-dot-shimmer > span { opacity: 0.6 !important; }
   .o8-pulse-circle { opacity: 0.7 !important; }
+  .o8-orbit { animation: none !important; }
 }

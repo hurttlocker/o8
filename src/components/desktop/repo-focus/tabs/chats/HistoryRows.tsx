@@ -12,40 +12,10 @@ import {
   packetTimestamp,
   shimmerTextStyle,
 } from './helpers';
-import { RuntimeHistoryIcon } from './shared';
+import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
 import type { ArchivedLaneRow, ChatHistoryItem, HistoryRowTone } from './types';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { IdeWorkspaceSession } from '../../types';
-
-// Merged-state glyph — Claude-style purple branch-merge mark. Static (no
-// animation) so it sits quietly alongside the gray rings, but the color
-// breaks the gray rhythm enough to catch the eye on a long list. Sized
-// to match the 5px ring footprint so the row alignment stays clean.
-function MergedGlyph() {
-  return (
-    <span
-      aria-label="Merged"
-      title="Merged"
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 9,
-        height: 9,
-        flexShrink: 0,
-        color: '#8b5cf6',
-      }}
-    >
-      <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <circle cx="3" cy="3" r="1.5" />
-        <circle cx="3" cy="9" r="1.5" />
-        <circle cx="9" cy="6" r="1.5" />
-        <path d="M3 4.5v3" />
-        <path d="M4.5 3c0 1.5 1.5 3 3 3" />
-      </svg>
-    </span>
-  );
-}
 
 export function ArchivedLaneCompactRow({
   lane,
@@ -237,8 +207,12 @@ export function HistoryChatRow({
     rowTone.label ? { text: rowTone.label, status: true } : null,
     { text: formatElapsedAgo(item.modifiedAt), status: false },
   ].filter((part): part is { text: string; status: boolean } => Boolean(part?.text));
-  const shimmerStatus = rowTone.key === 'running' || rowTone.key === 'review';
-  const mergedStatus = rowTone.key === 'merged';
+  const dotState: AgentDotState =
+    rowTone.key === 'running' ? 'running'
+      : rowTone.key === 'review' ? 'review'
+        : rowTone.key === 'merged' ? 'merged'
+          : rowTone.key === 'failed' ? 'failed'
+            : 'idle';
 
   return (
     <div
@@ -345,13 +319,7 @@ export function HistoryChatRow({
         {compact ? (
           <span>{formatElapsedAgo(item.modifiedAt)}</span>
         ) : null}
-        {shimmerStatus ? (
-          <span className="o8-pulse-circle" aria-label="Agent working" title="Agent working" />
-        ) : mergedStatus ? (
-          <MergedGlyph />
-        ) : (
-          <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5 }} />
-        )}
+        <AgentStatusDot state={dotState} />
       </span>
     </div>
   );
@@ -402,11 +370,7 @@ export function CompactSessionRow({
           {metaLabel}
         </span>
       </span>
-      {isRunning ? (
-        <span className="o8-pulse-circle" aria-label="Working" title="Working" style={{ width: 5, height: 5, flexShrink: 0 }} />
-      ) : (
-        <span className="o8-static-ring" aria-label="Idle session" title="Idle session" style={{ width: 5, height: 5, flexShrink: 0 }} />
-      )}
+      <AgentStatusDot state={isRunning ? 'running' : 'idle'} />
     </button>
   );
 }
