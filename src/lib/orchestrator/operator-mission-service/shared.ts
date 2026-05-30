@@ -71,6 +71,7 @@ export function normalizeLoadedIssue(issue: LoadedIssue, index: number): LoadedI
     title,
     body: typeof issue.body === 'string' ? issue.body : '',
     url: typeof issue.url === 'string' ? issue.url : '',
+    ...(issue.runtime ? { runtime: issue.runtime } : {}),
   };
 }
 

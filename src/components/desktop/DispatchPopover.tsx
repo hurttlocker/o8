@@ -3,15 +3,21 @@
 /**
  * DispatchPopover — the glass card summoned by Cmd+Shift+O (issues #730, #753, #763).
  *
- * Layout (600x280):
+ * Swarm composer: one or more agent rows, each with its own task + runtime
+ * (Codex / Gemini). All rows dispatch as a SINGLE mission with per-issue
+ * runtime, so a user can split coding + thinking across a mixed swarm — add
+ * 1, 2, or 5 agents and pick who codes with what.
+ *
  *   ┌─────────────────────────────────────────────┐
- *   │ Dispatch a task          [drag handle]  [×] │  44px header
+ *   │ Dispatch a swarm         [drag handle]  [×] │  44px header
  *   ├─────────────────────────────────────────────┤
- *   │                                             │
- *   │  What do you want done?                     │  textarea body
- *   │                                             │
+ *   │ Agent 1            [Codex] [Gemini]      ×  │
+ *   │  What do you want done?                     │  row
+ *   │ Agent 2            [Codex] [Gemini]      ×  │
+ *   │  …                                          │
+ *   │ + Add agent                                 │
  *   ├─────────────────────────────────────────────┤
- *   │ [Codex] [Gemini] [openc.] · repo▾   Send ⌘↵│  48px footer
+ *   │ 2 agents · 1 Codex · 1 Gemini   repo▾  Send │  48px footer
  *   └─────────────────────────────────────────────┘
  *
  * Header is the entire drag region (`data-tauri-drag-region`). After a drag
@@ -20,24 +26,31 @@
  * the saved spot. Esc closes without dispatching; ⌘+Enter dispatches.
  *
  * Dispatch is fire-and-forget: POST /api/orchestrator/create-mission with
- * { repoPath, runtime, issues: [{title, body}] } then close the window. The
- * orchestrator's WS lane events drive the awaiting-review notification on the
- * main window, not this popover. Subcomponents live in `DispatchPopoverParts.tsx`
- * to keep this file under the 800-line ceiling.
+ * { repoPath, runtime, issues: [{title, body, runtime}, …] } then close the
+ * window. The orchestrator's WS lane events drive the awaiting-review
+ * notification on the main window, not this popover. Subcomponents live in
+ * `DispatchPopoverParts.tsx` to keep this file under the 800-line ceiling.
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { V1_DISPATCH_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import {
   ContextEnginePill,
-  DispatchBody,
   DispatchFooter,
   DispatchHeader,
   ErrorRow,
+  SwarmBody,
   type RepoEntry,
+  type SwarmRow,
 } from './DispatchPopoverParts';
 
 type CodebaseMemoryStatus = 'unknown' | 'downloading' | 'ready' | 'error';
+
+// Window grows with the swarm: 280px base (one row) + 116px per extra row,
+// capped at 620 (taller missions scroll inside the rows container).
+const POPOVER_BASE_HEIGHT = 280;
+const POPOVER_ROW_DELTA = 116;
+const POPOVER_MAX_HEIGHT = 620;
 
 function readWsToken(): string {
   if (typeof document === 'undefined') return '';
@@ -87,15 +100,16 @@ async function closePopover(): Promise<void> {
 }
 
 export default function DispatchPopover() {
-  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const firstTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const sendButtonRef = useRef<HTMLButtonElement | null>(null);
-  const runtimeButtonsRef = useRef<Array<HTMLButtonElement | null>>([]);
   const repoButtonRef = useRef<HTMLButtonElement | null>(null);
+  // Monotonic row-id source. Lives in a ref so render stays pure (no Date.now()
+  // / Math.random() in the render path — React Compiler purity rule).
+  const nextRowIdRef = useRef(1);
 
-  const [value, setValue] = useState('');
+  const [rows, setRows] = useState<SwarmRow[]>([{ id: 'agent-0', text: '', runtime: 'codex' }]);
   const [repos, setRepos] = useState<RepoEntry[]>([]);
   const [repoPath, setRepoPath] = useState<string | null>(null);
-  const [runtime, setRuntime] = useState<OrchestratorRuntime>('codex');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [repoPickerOpen, setRepoPickerOpen] = useState(false);
@@ -103,7 +117,7 @@ export default function DispatchPopover() {
 
   const dispatchableRuntimes = useMemo<OrchestratorRuntime[]>(() => V1_DISPATCH_RUNTIMES, []);
 
-  // Mount: load repos, focus textarea.
+  // Mount: load repos, focus the first row.
   useEffect(() => {
     let cancelled = false;
     void loadRepos().then((list) => {
@@ -112,12 +126,38 @@ export default function DispatchPopover() {
       // Default to most-recently-opened repo (lastOpenedAt-sorted from loadRepos).
       if (list.length > 0) setRepoPath(list[0].localPath);
     });
-    const focusId = window.setTimeout(() => textareaRef.current?.focus(), 30);
+    const focusId = window.setTimeout(() => firstTextareaRef.current?.focus(), 30);
     return () => {
       cancelled = true;
       window.clearTimeout(focusId);
     };
   }, []);
+
+  // Grow / shrink the popover window to fit the swarm. Pure JS Tauri API —
+  // works even though the window is created non-resizable.
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      if (typeof window === 'undefined' || !('__TAURI_INTERNALS__' in window)) return;
+      try {
+        const [{ getCurrentWindow }, { LogicalSize }] = await Promise.all([
+          import('@tauri-apps/api/window'),
+          import('@tauri-apps/api/dpi'),
+        ]);
+        if (cancelled) return;
+        const height = Math.min(
+          POPOVER_MAX_HEIGHT,
+          POPOVER_BASE_HEIGHT + (rows.length - 1) * POPOVER_ROW_DELTA,
+        );
+        await getCurrentWindow().setSize(new LogicalSize(600, height));
+      } catch {
+        // Non-Tauri / API unavailable — body scrolls instead.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [rows.length]);
 
   // Listen for the codebase-memory-mcp download status emitted by the Tauri
   // sidecar on launch. Don't block dispatch — show an inline pill so the user
@@ -197,9 +237,36 @@ export default function DispatchPopover() {
     return () => window.removeEventListener('keydown', handler);
   }, []);
 
+  const updateRowText = useCallback((id: string, text: string) => {
+    setRows((prev) => prev.map((row) => (row.id === id ? { ...row, text } : row)));
+  }, []);
+
+  const updateRowRuntime = useCallback((id: string, nextRuntime: OrchestratorRuntime) => {
+    setRows((prev) => prev.map((row) => (row.id === id ? { ...row, runtime: nextRuntime } : row)));
+  }, []);
+
+  const addRow = useCallback(() => {
+    setRows((prev) => {
+      const last = prev[prev.length - 1];
+      const id = `agent-${nextRowIdRef.current}`;
+      nextRowIdRef.current += 1;
+      // New agents inherit the previous row's runtime — adding a second Codex
+      // is one click; switching one row to Gemini is the mix.
+      return [...prev, { id, text: '', runtime: last?.runtime ?? 'codex' }];
+    });
+  }, []);
+
+  const removeRow = useCallback((id: string) => {
+    setRows((prev) => (prev.length <= 1 ? prev : prev.filter((row) => row.id !== id)));
+  }, []);
+
+  const filledRows = useMemo(() => rows.filter((row) => row.text.trim()), [rows]);
+  const canSend = filledRows.length > 0 && Boolean(repoPath) && !busy;
+
   const submit = useCallback(async () => {
-    const trimmed = value.trim();
-    if (!trimmed || busy) return;
+    if (busy) return;
+    const ready = rows.filter((row) => row.text.trim());
+    if (ready.length === 0) return;
     if (!repoPath) {
       setError('No repo registered. Open one in the dashboard first.');
       return;
@@ -207,20 +274,28 @@ export default function DispatchPopover() {
     setBusy(true);
     setError(null);
     try {
+      // Inline issues: number ≥ 90001 + empty url marks them ad-hoc (see
+      // isInlineIssue). A timestamp base keeps them unique within the mission.
+      const base = Date.now();
+      const issues = ready.map((row, index) => {
+        const trimmed = row.text.trim();
+        return {
+          number: base + index,
+          title: trimmed.slice(0, 120),
+          body: trimmed,
+          url: '',
+          runtime: row.runtime,
+        };
+      });
       const res = await fetch('/api/orchestrator/create-mission', {
         method: 'POST',
         headers: bearerHeaders(),
         body: JSON.stringify({
           repoPath,
-          runtime,
-          issues: [
-            {
-              number: Date.now(),
-              title: trimmed.slice(0, 120),
-              body: trimmed,
-              url: '',
-            },
-          ],
+          // Mission-level runtime = the first agent's; each issue carries its
+          // own runtime so the swarm can mix Codex + Gemini per packet.
+          runtime: issues[0]?.runtime ?? 'codex',
+          issues,
         }),
       });
       if (!res.ok) {
@@ -236,16 +311,16 @@ export default function DispatchPopover() {
       setError(err instanceof Error ? err.message : 'Network error');
       setBusy(false);
     }
-  }, [busy, repoPath, runtime, value]);
+  }, [busy, repoPath, rows]);
 
-  const onTextareaKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // ⌘+Enter / Ctrl+Enter dispatches. Plain Enter inserts a newline (this is
-    // a textarea, not a single-line input, so the user can write multi-line tasks).
+  const onRowKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // ⌘+Enter / Ctrl+Enter dispatches the whole swarm. Plain Enter inserts a
+    // newline so tasks can be multi-line.
     if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
       event.preventDefault();
       void submit();
     }
-  };
+  }, [submit]);
 
   const selectedRepo = repos.find((r) => r.localPath === repoPath) ?? null;
   const memoryDownloading = memoryStatus === 'downloading';
@@ -270,21 +345,22 @@ export default function DispatchPopover() {
         overflow: 'hidden',
       }}
     >
-      <DispatchHeader busy={busy} onClose={() => void closePopover()} />
+      <DispatchHeader busy={busy} agentCount={rows.length} onClose={() => void closePopover()} />
       {memoryDownloading ? <ContextEnginePill /> : null}
-      <DispatchBody
-        textareaRef={textareaRef}
-        value={value}
+      <SwarmBody
+        rows={rows}
+        runtimes={dispatchableRuntimes}
         busy={busy}
-        onChange={setValue}
-        onKeyDown={onTextareaKeyDown}
+        firstTextareaRef={firstTextareaRef}
+        onChangeText={updateRowText}
+        onChangeRuntime={updateRowRuntime}
+        onAddRow={addRow}
+        onRemoveRow={removeRow}
+        onKeyDown={onRowKeyDown}
       />
       {error ? <ErrorRow message={error} /> : null}
       <DispatchFooter
-        runtime={runtime}
-        runtimes={dispatchableRuntimes}
-        runtimeButtonsRef={runtimeButtonsRef}
-        onRuntimeChange={setRuntime}
+        rows={rows}
         repoButtonRef={repoButtonRef}
         repoPickerOpen={repoPickerOpen}
         onRepoPickerToggle={() => setRepoPickerOpen((o) => !o)}
@@ -296,7 +372,7 @@ export default function DispatchPopover() {
           setRepoPickerOpen(false);
         }}
         sendButtonRef={sendButtonRef}
-        canSend={Boolean(value.trim()) && Boolean(repoPath) && !busy}
+        canSend={canSend}
         busy={busy}
         onSend={() => void submit()}
       />
