@@ -23,6 +23,7 @@ Note: the realtime `lane-lifecycle` payload carries lane status in the `status` 
 
 ## Route reference
 
+All routes are defined under src/app/api/ and run on the Node.js runtime with force-dynamic.
 Routes are grouped by their first path segment.
 
 ### `/api/automations/*` — Superset-style scheduled runs (gated)
