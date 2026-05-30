@@ -1910,7 +1910,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           emptyStateOverride={emptyStateOverride}
           emptyStateFallback={fallbackEmptyState}
           topContent={transcriptTopContent}
-          bottomContent={isOrchestratorMode ? <SwarmStatusCard packets={missionState?.packets ?? []} /> : null}
+          bottomContent={isOrchestratorMode && displayMessages.length > 0 ? <SwarmStatusCard packets={missionState?.packets ?? []} /> : null}
           isOrchestratorMode={isOrchestratorMode}
           suggestedReplyMessageId={suggestedReplyMessageId}
           suggestedReplies={chipsForLastAssistant}
