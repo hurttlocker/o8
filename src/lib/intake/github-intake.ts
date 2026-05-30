@@ -99,7 +99,7 @@ export async function processAssignedIssue(
   // selects which CLI does the planning.
   //   - toggle OFF (default) → Codex GPT-5.5 xhigh plans (no SDK draw, free
   //     for ChatGPT Plus / Codex sub users).
-  //   - toggle ON              → Claude Opus 4.7 plans (existing behavior;
+  //   - toggle ON              → Claude Opus 4.8 plans (existing behavior;
   //     bills against the user's Agent SDK credit pool).
   // Intake only needs a text response that contains a JSON code block — no
   // MCP tools are called by the orchestrator in this flow, so Codex has full

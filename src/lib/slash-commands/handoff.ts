@@ -12,7 +12,7 @@ export async function handleHandoffSlashCommand(
       buildSlashCommandEntry({
         name: 'handoff',
         summary: 'Handoff needs a model id.',
-        details: ['Example: /handoff claude-sonnet-4-6', 'Example: /handoff claude-opus-4-7'],
+        details: ['Example: /handoff claude-sonnet-4-6', 'Example: /handoff claude-opus-4-8'],
         chips: [{ label: 'argument required', tone: 'amber' }],
       }),
     ]);

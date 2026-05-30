@@ -454,7 +454,7 @@ export function ensureOrchestratorSession(repoPath: string, threadId?: string | 
  *   chip is toggled to "Read-only" — the safe-mode orchestrator.
  */
 export type OrchestratorPermissionMode = 'full' | 'plan';
-export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-7';
+export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-8';
 
 export interface SendToOrchestratorOptions {
   permissionMode?: OrchestratorPermissionMode;

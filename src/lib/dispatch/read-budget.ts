@@ -76,7 +76,7 @@ export function resolveModelTier(input: {
   const model = (input.assignedModel ?? '').trim().toLowerCase();
 
   if (model) {
-    if (model.includes('xhigh') || model.includes('gpt-5') || model.includes('o1') || model.includes('opus-4-7') || model.includes('opus-4-6[1m]')) {
+    if (model.includes('xhigh') || model.includes('gpt-5') || model.includes('o1') || model.includes('opus-4-8') || model.includes('opus-4-7') || model.includes('opus-4-6[1m]')) {
       return 'codex-strong';
     }
     if (model.includes('opus') || model.includes('sonnet')) {

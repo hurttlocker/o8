@@ -6,7 +6,7 @@
  * Two side-by-side mode cards (#888/#892):
  *   - LEFT  — "Fleet orchestration" — Claude orchestrates Codex +
  *             Gemini + opencode in parallel waves. Tagged "using Claude
- *             Opus 4.7".
+ *             Opus 4.8".
  *   - RIGHT — "Single runtime" — collapsible runtime sub-picker
  *             (Codex / Gemini / opencode / Claude Code). Dispatches one
  *             agent without orchestration overhead.
@@ -114,7 +114,7 @@ function ModePickerBase({
         active={selectedMode === 'fleet'}
         title="Fleet orchestration"
         copy="Claude orchestrates Codex + Gemini + opencode in parallel waves."
-        tag="using Claude Opus 4.7"
+        tag="using Claude Opus 4.8"
         onClick={handleClickFleet}
         glyph={<FleetGlyph />}
       />

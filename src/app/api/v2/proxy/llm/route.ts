@@ -113,7 +113,8 @@ function parseRequestedThinkingEffort(value: unknown): ThinkingEffort | null {
 
 function supportsAnthropicAdaptiveThinking(model: string): boolean {
   const normalizedModel = model.trim().toLowerCase();
-  return normalizedModel.includes('claude-opus-4-7')
+  return normalizedModel.includes('claude-opus-4-8')
+    || normalizedModel.includes('claude-opus-4-7')
     || normalizedModel.includes('claude-opus-4-6')
     || normalizedModel.includes('claude-sonnet-4-6')
     || normalizedModel.includes('claude-mythos-preview');
