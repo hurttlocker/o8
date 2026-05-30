@@ -407,6 +407,16 @@ function HeaderPillStrip({
     window.dispatchEvent(new CustomEvent('o8:request-close-tab', { detail: { tabId, workspaceId: workspaceId ?? null } }));
   }, [workspaceId]);
 
+  // Click-to-scroll for mouse users. The wheel-map + edge fade aren't a
+  // discoverable, clickable affordance with a regular mouse — the edge arrows
+  // (rendered when there's overflow that way) call this. One ~70%-viewport
+  // nudge per click, smooth. 2026-05-30.
+  const scrollByStep = useCallback((dir: 1 | -1) => {
+    const el = scrollRef.current;
+    if (!el) return;
+    el.scrollBy({ left: dir * Math.max(140, el.clientWidth * 0.7), behavior: 'smooth' });
+  }, []);
+
   // Native non-passive wheel listener: React's onWheel attaches passive in
   // some builds, which silently no-ops preventDefault. Attach our own so the
   // vertical wheel reliably becomes horizontal scroll without scrolling the
@@ -465,23 +475,27 @@ function HeaderPillStrip({
 
   return (
     <div
-      ref={scrollRef}
       data-no-drag
-      style={{
-        flex: 1,
-        minWidth: 0,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 2,
-        overflowX: 'auto',
-        overflowY: 'hidden',
-        scrollbarWidth: 'none',
-        paddingLeft: 6,
-        paddingRight: 6,
-        maskImage,
-        WebkitMaskImage: maskImage,
-      } as React.CSSProperties}
+      style={{ position: 'relative', flex: 1, minWidth: 0, display: 'flex', alignItems: 'center' }}
     >
+      <div
+        ref={scrollRef}
+        data-no-drag
+        style={{
+          flex: 1,
+          minWidth: 0,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          overflowX: 'auto',
+          overflowY: 'hidden',
+          scrollbarWidth: 'none',
+          paddingLeft: 6,
+          paddingRight: 6,
+          maskImage,
+          WebkitMaskImage: maskImage,
+        } as React.CSSProperties}
+      >
       {/* Continuity V1 — wrap each pill in a layout-aware motion.div so
           mounts scale + fade in, exits scale + fade out, and the surviving
           pills reflow smoothly. `mode="popLayout"` takes the exiting pill
@@ -510,7 +524,54 @@ function HeaderPillStrip({
           </motion.div>
         ))}
       </AnimatePresence>
+      </div>
+      {/* Mouse-friendly scroll affordance — clickable chevrons appear at an
+          overflowing edge so a regular mouse (no trackpad swipe) can still
+          reach off-screen tabs. Siblings of the scroll container (not children)
+          so they stay pinned while the pills scroll under them. 2026-05-30. */}
+      {edges.left ? <HeaderScrollArrow side="left" onClick={() => scrollByStep(-1)} /> : null}
+      {edges.right ? <HeaderScrollArrow side="right" onClick={() => scrollByStep(1)} /> : null}
     </div>
+  );
+}
+
+function HeaderScrollArrow({ side, onClick }: { side: 'left' | 'right'; onClick: () => void }) {
+  const [hovered, setHovered] = useState(false);
+  return (
+    <button
+      type="button"
+      data-no-drag
+      onClick={onClick}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      aria-label={side === 'left' ? 'Scroll tabs left' : 'Scroll tabs right'}
+      title={side === 'left' ? 'Scroll left' : 'Scroll right'}
+      style={{
+        position: 'absolute',
+        top: '50%',
+        left: side === 'left' ? 1 : undefined,
+        right: side === 'right' ? 1 : undefined,
+        transform: 'translateY(-50%)',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 20,
+        height: 20,
+        borderRadius: 6,
+        borderWidth: 0,
+        background: hovered ? 'var(--t-hover)' : 'var(--t-input-bg)',
+        color: hovered ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        cursor: 'pointer',
+        padding: 0,
+        boxShadow: '0 0 0 0.5px var(--t-divider), 0 1px 3px rgba(0, 0, 0, 0.12)',
+        transition: 'background 120ms ease, color 120ms ease',
+        zIndex: 2,
+      }}
+    >
+      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+        {side === 'left' ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 18l6-6-6-6" />}
+      </svg>
+    </button>
   );
 }
 
