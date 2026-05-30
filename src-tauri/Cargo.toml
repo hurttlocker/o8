@@ -1,6 +1,6 @@
 [package]
 name = "o8"
-version = "0.1.212"
+version = "0.1.213"
 description = "o8 — governance layer for autonomous engineering teams"
 authors = ["hurttlocker"]
 license = "MIT"
