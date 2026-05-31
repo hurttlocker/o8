@@ -2,17 +2,8 @@ import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobi
 import type {
   ChatErrorResponse,
   ChatHistoryMessage,
-  ChatRequestBody,
-  ChatStreamEvent,
 } from '@/lib/chat/types';
 import type { ChatModelOption } from './chat-models';
-
-interface SendChatMessageInput {
-  history: MobileTranscriptEntry[];
-  message: string;
-  modelChoice: ChatModelOption;
-  onDelta: (text: string) => void;
-}
 
 export class ChatSendError extends Error {
   status: number;
@@ -93,70 +84,6 @@ function friendlyErrorMessage(status: number, payload: ChatErrorResponse | null)
     return 'Paid chat models are not active yet. Use o8 Default or Bring your own key for now.';
   }
   return payload?.message || `Chat request failed (${status}).`;
-}
-
-function parseSseBlock(block: string): ChatStreamEvent | null {
-  const data = block
-    .split('\n')
-    .filter((line) => line.startsWith('data: '))
-    .map((line) => line.slice(6))
-    .join('\n')
-    .trim();
-  if (!data) return null;
-  try {
-    return JSON.parse(data) as ChatStreamEvent;
-  } catch {
-    return null;
-  }
-}
-
-export async function sendChatMessage({
-  history,
-  message,
-  modelChoice,
-  onDelta,
-}: SendChatMessageInput): Promise<void> {
-  const body: ChatRequestBody = {
-    message,
-    model: modelChoice.id,
-    history: toChatHistory(history),
-  };
-
-  const response = await fetch('/api/v2/chat', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!response.ok) {
-    const payload = await parseErrorResponse(response);
-    throw new ChatSendError(response.status, friendlyErrorMessage(response.status, payload));
-  }
-  if (!response.body) {
-    throw new ChatSendError(502, 'Chat stream did not return a response body.');
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
-
-  while (true) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    buffer += decoder.decode(value, { stream: true });
-    const blocks = buffer.split('\n\n');
-    buffer = blocks.pop() ?? '';
-
-    for (const block of blocks) {
-      const event = parseSseBlock(block);
-      if (!event) continue;
-      if (event.type === 'content') {
-        onDelta(event.text);
-      } else if (event.type === 'error') {
-        throw new ChatSendError(502, event.message);
-      }
-    }
-  }
 }
 
 // ── Scratch chat (OpenRouter free + tools) ──
