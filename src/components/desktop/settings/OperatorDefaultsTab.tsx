@@ -38,6 +38,7 @@ interface OperatorDefaults {
   orchestratorModel: string;
   defaultDispatchRuntime: DispatchRuntime;
   experimentalOpencode: boolean;
+  experimentalGemini: boolean;
   classAComposer: ClassAComposer;
   inAppOrchestratorEnabled: boolean;
 }
@@ -694,7 +695,10 @@ export function OperatorDefaultsTab() {
           right={
             <PickerMenu<DispatchRuntime>
               value={values.defaultDispatchRuntime}
-              options={DISPATCH_RUNTIME_OPTIONS.filter((opt) => opt.value !== 'opencode' || values.experimentalOpencode)}
+              options={DISPATCH_RUNTIME_OPTIONS.filter((opt) =>
+                (opt.value !== 'opencode' || values.experimentalOpencode)
+                && (opt.value !== 'gemini' || values.experimentalGemini),
+              )}
               onChange={(next) => { void updateField('defaultDispatchRuntime', next); }}
               disabled={runtimeEnv || busyField === 'defaultDispatchRuntime'}
               minWidth={180}
@@ -714,6 +718,25 @@ export function OperatorDefaultsTab() {
                 void updateField('experimentalOpencode', next);
                 // If turning off while opencode is the selected default, snap to codex
                 if (!next && values.defaultDispatchRuntime === 'opencode') {
+                  void updateField('defaultDispatchRuntime', 'codex');
+                }
+              }}
+            />
+          }
+        />
+        <Row
+          label="Experimental: Gemini"
+          description="Show Gemini in dispatch + CLI pickers. Off by default for v1 — we ship Claude + Codex. The adapter stays wired so existing Gemini lanes keep working."
+          source={sources.experimentalGemini}
+          disabledReason={sources?.experimentalGemini === 'env' ? envDisabledReason : undefined}
+          right={
+            <SettingsToggleButton
+              checked={values.experimentalGemini}
+              disabled={sources?.experimentalGemini === 'env' || busyField === 'experimentalGemini'}
+              onChange={(next) => {
+                void updateField('experimentalGemini', next);
+                // If turning off while Gemini is the selected default, snap to codex
+                if (!next && values.defaultDispatchRuntime === 'gemini') {
                   void updateField('defaultDispatchRuntime', 'codex');
                 }
               }}
