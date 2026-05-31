@@ -22,6 +22,7 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
+import { useExperimentalGeminiFlag } from '@/lib/operator/use-experimental-gemini';
 import type { ChatModelId } from './chat-models';
 
 export type { ChatModelId, OrchestrationMode };
@@ -61,9 +62,12 @@ function ModePickerBase({
   onSpawnChatTab,
 }: ModePickerProps) {
   const opencodeEnabled = useExperimentalOpencodeFlag();
+  const geminiEnabled = useExperimentalGeminiFlag();
   const visibleRuntimes = useMemo(
-    () => (opencodeEnabled ? SINGLE_RUNTIMES : SINGLE_RUNTIMES.filter((r) => r.id !== 'opencode')),
-    [opencodeEnabled],
+    () => SINGLE_RUNTIMES.filter((r) =>
+      (r.id !== 'opencode' || opencodeEnabled) && (r.id !== 'gemini' || geminiEnabled),
+    ),
+    [opencodeEnabled, geminiEnabled],
   );
   // Single still has a sub-drawer (operator picks the runtime). Chat
   // spawns immediately — the spawned tab carries its own model picker.

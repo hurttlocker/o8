@@ -17,6 +17,7 @@ import type { EditingField } from './types';
 // endpoint revalidates on its own). Avoids prop-drilling the flag through
 // every mission-panel layer for a single opt-in toggle.
 let cachedExperimentalOpencode: boolean | null = null;
+let cachedExperimentalGemini: boolean | null = null;
 
 // #747 — Routing recommendation cache. One entry per repoPath; refreshed
 // lazily so the chip stays consistent across packet cards on the same repo.
@@ -113,6 +114,25 @@ function useExperimentalOpencodeFlag(override?: boolean): boolean {
   return flag;
 }
 
+function useExperimentalGeminiFlag(override?: boolean): boolean {
+  const [flag, setFlag] = useState<boolean>(
+    override !== undefined ? override : (cachedExperimentalGemini ?? false),
+  );
+  useEffect(() => {
+    if (override !== undefined) { setFlag(override); return; }
+    if (cachedExperimentalGemini !== null) { setFlag(cachedExperimentalGemini); return; }
+    let cancelled = false;
+    const controller = new AbortController();
+    void fetchThoughtsOperatorDefaults(controller.signal).then((defaults) => {
+      if (cancelled) return;
+      cachedExperimentalGemini = defaults.experimentalGemini;
+      setFlag(defaults.experimentalGemini);
+    });
+    return () => { cancelled = true; controller.abort(); };
+  }, [override]);
+  return flag;
+}
+
 interface PacketMetaRowsProps {
   packet: OrchestratorPacket;
   workspaceTargets: OrchestratorWorkspaceTarget[];
@@ -121,6 +141,8 @@ interface PacketMetaRowsProps {
   onPatch: (updater: (packet: OrchestratorPacket) => OrchestratorPacket) => void;
   /** When false (v1 default), opencode is hidden from the runtime picker. */
   experimentalOpencode?: boolean;
+  /** When false (v1 default), Gemini is hidden from the runtime picker. */
+  experimentalGemini?: boolean;
 }
 
 export function PacketMetaRows({
@@ -130,8 +152,10 @@ export function PacketMetaRows({
   onEditingFieldChange,
   onPatch,
   experimentalOpencode,
+  experimentalGemini,
 }: PacketMetaRowsProps) {
   const opencodeEnabled = useExperimentalOpencodeFlag(experimentalOpencode);
+  const geminiEnabled = useExperimentalGeminiFlag(experimentalGemini);
   const isEditingSummary = editingField?.packetId === packet.id && editingField.field === 'summary';
   const isEditingRuntime = editingField?.packetId === packet.id && editingField.field === 'runtime';
   const isEditingRepo = editingField?.packetId === packet.id && editingField.field === 'repo';
@@ -321,16 +345,21 @@ export function PacketMetaRows({
             }}
           >
             {(() => {
-              // #860 — When opencode is hidden by the experimentalOpencode flag
-              // we still render its evidence row (disabled) so operators can see
-              // historical data and understand WHY the runtime was excluded.
-              const dispatchable = listDispatchableRuntimes({ includeExperimental: opencodeEnabled || packet.runtime === 'opencode' });
-              const opencodeHidden = !dispatchable.includes('opencode');
-              const opencodeHasEvidence = (recommendation?.evidence?.opencode?.total ?? 0) > 0;
-              const showDisabledOpencodeRow = opencodeHidden && opencodeHasEvidence;
+              // #860 — When a hidden runtime (opencode / gemini) is excluded by
+              // its experimental flag we still render its evidence row (disabled)
+              // so operators can see historical data and understand WHY the
+              // runtime was excluded.
+              const experimental: OrchestratorRuntime[] = [];
+              if (opencodeEnabled) experimental.push('opencode');
+              if (geminiEnabled) experimental.push('gemini');
+              if (packet.runtime === 'opencode' || packet.runtime === 'gemini') experimental.push(packet.runtime);
+              const dispatchable = listDispatchableRuntimes({ experimental });
+              const disabledRows = (['opencode', 'gemini'] as OrchestratorRuntime[])
+                .filter((rt) => !dispatchable.includes(rt) && (recommendation?.evidence?.[rt]?.total ?? 0) > 0)
+                .map((rt) => ({ runtime: rt, disabled: true }));
               const visibleRuntimes: Array<{ runtime: OrchestratorRuntime; disabled: boolean }> = [
                 ...dispatchable.map((runtime) => ({ runtime, disabled: false })),
-                ...(showDisabledOpencodeRow ? [{ runtime: 'opencode' as OrchestratorRuntime, disabled: true }] : []),
+                ...disabledRows,
               ];
               return visibleRuntimes.map(({ runtime, disabled }) => {
                 const evidence = recommendation?.evidence?.[runtime] ?? null;
@@ -343,7 +372,7 @@ export function PacketMetaRows({
                     key={runtime}
                     type="button"
                     disabled={disabled}
-                    title={disabled ? 'opencode is disabled. Enable the experimentalOpencode flag in Settings → Operator Defaults to dispatch.' : undefined}
+                    title={disabled ? `${orchestratorRuntimeTone(runtime).label} is hidden in v1. Enable it in Settings → Operator Defaults to dispatch.` : undefined}
                     onClick={disabled ? undefined : () => {
                       onPatch((current) => ({ ...current, runtime }));
                       onEditingFieldChange(null);

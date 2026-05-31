@@ -8,6 +8,7 @@ interface OperatorDefaultsPayload {
     orchestratorModel?: unknown;
     thinkingEffort?: unknown;
     experimentalOpencode?: unknown;
+    experimentalGemini?: unknown;
   };
 }
 
@@ -15,12 +16,14 @@ export interface ThoughtsOperatorDefaults {
   orchestratorModel: string;
   thinkingEffort: ThinkingEffort;
   experimentalOpencode: boolean;
+  experimentalGemini: boolean;
 }
 
 export const THOUGHTS_OPERATOR_DEFAULTS_FALLBACK: ThoughtsOperatorDefaults = {
   orchestratorModel: DEFAULT_ORCHESTRATOR_MODEL,
   thinkingEffort: 'adaptive',
   experimentalOpencode: false,
+  experimentalGemini: false,
 };
 
 export async function fetchThoughtsOperatorDefaults(signal?: AbortSignal): Promise<ThoughtsOperatorDefaults> {
@@ -49,10 +52,14 @@ function normalizeThoughtsOperatorDefaults(payload: OperatorDefaultsPayload | nu
   const experimentalOpencode = typeof payload?.values?.experimentalOpencode === 'boolean'
     ? payload.values.experimentalOpencode
     : THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode;
+  const experimentalGemini = typeof payload?.values?.experimentalGemini === 'boolean'
+    ? payload.values.experimentalGemini
+    : THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.experimentalGemini;
 
   return {
     orchestratorModel,
     thinkingEffort,
     experimentalOpencode,
+    experimentalGemini,
   };
 }

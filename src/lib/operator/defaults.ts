@@ -55,6 +55,13 @@ export interface OperatorDefaults {
    */
   experimentalOpencode: boolean;
   /**
+   * Off by default — Gemini is hidden from the dispatch + CLI pickers for v1
+   * (we ship Claude + Codex). Mirrors `experimentalOpencode`: flip on to
+   * surface Gemini again. The adapter stays wired either way so existing
+   * Gemini lanes keep working even with the flag off.
+   */
+  experimentalGemini: boolean;
+  /**
    * Q&A Class A composer model (#971). Production-only knob — eval mode keeps
    * its OpenRouter Sonnet 4.6 path either way.
    */
@@ -92,6 +99,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   orchestratorModel: 'claude-opus-4-8',
   defaultDispatchRuntime: 'codex',
   experimentalOpencode: false,
+  experimentalGemini: false,
   classAComposer: 'auto',
   // ON by default post-#1097. Subscription pool, not Agent SDK pool. See the
   // docstring above on the field for the rationale.
@@ -196,6 +204,13 @@ function envExperimentalOpencode(): boolean | null {
   return null;
 }
 
+function envExperimentalGemini(): boolean | null {
+  const raw = process.env.O8_EXPERIMENTAL_GEMINI;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 function envClassAComposer(): ClassAComposer | null {
   const raw = process.env.O8_CLASS_A_COMPOSER?.trim();
   if (raw && isClassAComposer(raw)) return raw;
@@ -221,6 +236,7 @@ interface StoredOperatorDefaults {
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
   experimentalOpencode?: boolean;
+  experimentalGemini?: boolean;
   classAComposer?: ClassAComposer;
   inAppOrchestratorEnabled?: boolean;
 }
@@ -270,6 +286,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (typeof stored.experimentalOpencode === 'boolean') {
     result.experimentalOpencode = stored.experimentalOpencode;
   }
+  if (typeof stored.experimentalGemini === 'boolean') {
+    result.experimentalGemini = stored.experimentalGemini;
+  }
   if (isClassAComposer(stored.classAComposer)) {
     result.classAComposer = stored.classAComposer;
   }
@@ -291,6 +310,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envModel = envOrchestratorModel();
   const envRuntime = envDefaultDispatchRuntime();
   const envOpencode = envExperimentalOpencode();
+  const envGemini = envExperimentalGemini();
   const envComposer = envClassAComposer();
   const envInApp = envInAppOrchestratorEnabled();
 
@@ -306,6 +326,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
     defaultDispatchRuntime: envRuntime ?? fileValues.defaultDispatchRuntime ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchRuntime,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
+    experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled:
       envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled,
@@ -323,6 +344,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntime !== undefined ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
+    experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
       envInApp !== null ? 'env' : fileValues.inAppOrchestratorEnabled !== undefined ? 'file' : 'default',
@@ -412,6 +434,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.experimentalOpencode !== undefined) {
     stored.experimentalOpencode = Boolean(update.experimentalOpencode);
+  }
+  if (update.experimentalGemini !== undefined) {
+    stored.experimentalGemini = Boolean(update.experimentalGemini);
   }
   if (update.classAComposer !== undefined) {
     if (!isClassAComposer(update.classAComposer)) {
