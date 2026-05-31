@@ -2,7 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
-import { listManagedRuns, findRunByCwd } from '@/lib/runtimes/managed-runs/registry';
+import { listManagedRuns, listRunningRuns } from '@/lib/runtimes/managed-runs/registry';
 
 /** agent = o8-owned run (→ live terminal) · browser = dev server (→ preview) · noise = db/infra (collapsed) */
 type PortCategory = 'agent' | 'browser' | 'noise';
@@ -138,20 +138,52 @@ export async function GET() {
     const DEV_PROCESSES = new Set(['node', 'next-server', 'tsx', 'bun', 'deno', 'python', 'Python', 'go', 'cargo', 'ruby', 'java', 'uvicorn', 'gunicorn', 'flask']);
     const filtered = entries.filter(e => e.repo !== null || DEV_PROCESSES.has(e.process));
 
-    // Tag each port: agent-owned (cwd matches a live `o8 run`) → live terminal,
-    // noise (db/cache/infra) → collapsed, else browser (dev server) → preview.
+    // Tag each port: agent-owned (the listening process descends from a live
+    // `o8 run` tmux pane) → live terminal, noise (db/cache/infra) → collapsed,
+    // else browser (dev server) → preview. Attribution is by pane-pid ancestry,
+    // not cwd — o8 owns the session, so we confirm the port's process is inside
+    // the run's process tree rather than guessing from a shared directory.
     const NOISE_PROCESSES = ['postgres', 'postmaster', 'redis', 'mysqld', 'mariadbd', 'mongod', 'memcached', 'elasticsearch', 'rabbitmq', 'etcd', 'clickhouse'];
+    const classifyNonAgent = (entry: PortEntry) => {
+      entry.category = NOISE_PROCESSES.some(p => entry.process.toLowerCase().includes(p)) ? 'noise' : 'browser';
+    };
     try {
-      await listManagedRuns(); // reconcile against live tmux before cwd cross-ref
-      for (const entry of filtered) {
-        const run = findRunByCwd(entry.cwd);
-        if (run) {
-          entry.category = 'agent';
-          entry.agentSession = run.session;
-        } else if (NOISE_PROCESSES.some(p => entry.process.toLowerCase().includes(p))) {
-          entry.category = 'noise';
-        } else {
-          entry.category = 'browser';
+      await listManagedRuns(); // reconcile against live tmux (flips dead runs → gone)
+      const panePidToRun = new Map<number, { session: string }>();
+      for (const run of listRunningRuns()) {
+        if (typeof run.panePid === 'number') panePidToRun.set(run.panePid, { session: run.session });
+      }
+      if (panePidToRun.size === 0) {
+        for (const entry of filtered) classifyNonAgent(entry);
+      } else {
+        // One ps snapshot → pid→ppid map; walk each port's process up to its run pane.
+        const ppidByPid = new Map<number, number>();
+        try {
+          const psRaw = execSync('ps -axo pid=,ppid= 2>/dev/null', { encoding: 'utf-8', timeout: 3000 }).trim();
+          for (const line of psRaw.split('\n')) {
+            const m = line.trim().match(/^(\d+)\s+(\d+)$/);
+            if (m) ppidByPid.set(parseInt(m[1], 10), parseInt(m[2], 10));
+          }
+        } catch { /* ps failed — every port falls through to non-agent */ }
+        const ownerSession = (pid: number): string | null => {
+          let cur = pid;
+          for (let hops = 0; cur > 1 && hops < 32; hops += 1) {
+            const owner = panePidToRun.get(cur);
+            if (owner) return owner.session;
+            const parent = ppidByPid.get(cur);
+            if (parent === undefined || parent === cur) break;
+            cur = parent;
+          }
+          return null;
+        };
+        for (const entry of filtered) {
+          const session = ownerSession(entry.pid);
+          if (session) {
+            entry.category = 'agent';
+            entry.agentSession = session;
+          } else {
+            classifyNonAgent(entry);
+          }
         }
       }
     } catch { /* registry/tmux unavailable — leave default 'browser' category */ }

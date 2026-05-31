@@ -141,7 +141,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
     fetchAll();
     const handler = () => fetchAll();
     window.addEventListener('o8:agent-lifecycle', handler);
-    const fallback = setInterval(fetchAll, 15_000);
+    const fallback = setInterval(fetchAll, 20_000);
     return () => {
       cancelled = true;
       clearInterval(fallback);

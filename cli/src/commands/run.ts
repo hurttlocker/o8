@@ -151,14 +151,8 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     );
   }
 
-  // Tee the pane's raw output to a log file, then release the gate.
-  try {
-    execFileSync('tmux', ['pipe-pane', '-o', '-t', session, `cat >> ${sq(logFile)}`], {
-      timeout: 5_000,
-      stdio: 'ignore',
-    });
-  } catch { /* without pipe-pane the operator can still attach live; agent just won't see stream */ }
-
+  // Capture the pane pid (the server attributes ports to runs via pane-pid
+  // ancestry — needed in BOTH modes).
   let panePid: number | null = null;
   try {
     const out = execFileSync('tmux', ['list-panes', '-t', session, '-F', '#{pane_pid}'], {
@@ -167,6 +161,18 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     }).trim();
     panePid = Number.parseInt(out, 10) || null;
   } catch { /* informational only */ }
+
+  // Only stream mode needs the pane teed to a log file (we tail it to stdout).
+  // Detached runs are watched by attaching the tmux session directly, so piping
+  // would just grow an unbounded /tmp log nobody reads.
+  if (!detach) {
+    try {
+      execFileSync('tmux', ['pipe-pane', '-o', '-t', session, `cat >> ${sq(logFile)}`], {
+        timeout: 5_000,
+        stdio: 'ignore',
+      });
+    } catch { /* without pipe-pane the operator can still attach live; agent just won't see stream */ }
+  }
 
   writeFileSync(goFile, ''); // release — command starts now
 
