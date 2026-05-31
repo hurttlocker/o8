@@ -2,6 +2,10 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { execSync } from 'child_process';
+import { listManagedRuns, findRunByCwd } from '@/lib/runtimes/managed-runs/registry';
+
+/** agent = o8-owned run (→ live terminal) · browser = dev server (→ preview) · noise = db/infra (collapsed) */
+type PortCategory = 'agent' | 'browser' | 'noise';
 
 interface PortEntry {
   port: number;
@@ -9,6 +13,8 @@ interface PortEntry {
   process: string;
   cwd: string;
   repo: string | null;
+  category: PortCategory;
+  agentSession: string | null;
 }
 
 // ── Response cache (ports don't change fast enough to scan every request) ──
@@ -74,6 +80,8 @@ export async function GET() {
             process: currentProcess,
             cwd,
             repo: null,
+            category: 'browser',
+            agentSession: null,
           });
         }
       }
@@ -129,6 +137,24 @@ export async function GET() {
     // Filter to only dev-relevant: must be in a registered repo OR be a known dev tool
     const DEV_PROCESSES = new Set(['node', 'next-server', 'tsx', 'bun', 'deno', 'python', 'Python', 'go', 'cargo', 'ruby', 'java', 'uvicorn', 'gunicorn', 'flask']);
     const filtered = entries.filter(e => e.repo !== null || DEV_PROCESSES.has(e.process));
+
+    // Tag each port: agent-owned (cwd matches a live `o8 run`) → live terminal,
+    // noise (db/cache/infra) → collapsed, else browser (dev server) → preview.
+    const NOISE_PROCESSES = ['postgres', 'postmaster', 'redis', 'mysqld', 'mariadbd', 'mongod', 'memcached', 'elasticsearch', 'rabbitmq', 'etcd', 'clickhouse'];
+    try {
+      await listManagedRuns(); // reconcile against live tmux before cwd cross-ref
+      for (const entry of filtered) {
+        const run = findRunByCwd(entry.cwd);
+        if (run) {
+          entry.category = 'agent';
+          entry.agentSession = run.session;
+        } else if (NOISE_PROCESSES.some(p => entry.process.toLowerCase().includes(p))) {
+          entry.category = 'noise';
+        } else {
+          entry.category = 'browser';
+        }
+      }
+    } catch { /* registry/tmux unavailable — leave default 'browser' category */ }
 
     // Group by repo
     const groups: PortGroup[] = [];
