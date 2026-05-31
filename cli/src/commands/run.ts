@@ -151,17 +151,22 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
     envLines.push(`export ${k}=${sq(v)}`);
   }
-  try { writeFileSync(envFile, envLines.join('\n')); } catch { /* best effort */ }
+  // Mode 0600 — the env-file mirrors the agent's full environment (incl.
+  // O8_API_TOKEN + provider keys) into shared /tmp; never world-readable.
+  try { writeFileSync(envFile, envLines.join('\n'), { mode: 0o600 }); } catch { /* best effort */ }
 
   // A go-gate guarantees pipe-pane is attached before the command emits output,
   // so nothing is missed (matters for short commands). The command runs via
   // `"$@"` (tokens passed as positional args) so quoting survives intact — a
   // joined-and-reshelled string would mangle anything with shell metachars.
+  // A `trap ... EXIT` removes the secret-bearing env-file + go-file
+  // unconditionally — even if `cd` fails or the command is killed mid-run.
   const wrapper = [
+    `trap 'rm -f ${sq(goFile)} ${sq(envFile)}' EXIT`,
     `cd ${sq(cwd)} || exit 1`,
     `[ -e ${sq(envFile)} ] && . ${sq(envFile)}`,
+    `rm -f ${sq(envFile)}`,
     `while [ ! -e ${sq(goFile)} ]; do sleep 0.02; done`,
-    `rm -f ${sq(goFile)} ${sq(envFile)}`,
     `"$@"`,
     `__o8_ec=$?`,
     `printf '%s' "$__o8_ec" > ${sq(exitFile)}`,
@@ -297,8 +302,15 @@ export async function runRun(mode: OutputMode, _rest: string[]): Promise<number>
     if (tick % 13 === 0 && !sessionAlive()) break;
     await sleep(150);
   }
-  // Final drain — pipe-pane's `cat` flushes async.
-  for (let i = 0; i < 6; i += 1) { await sleep(50); pump(); }
+  // Final drain — pipe-pane's `cat` flushes async; keep pumping until the log
+  // stops growing (no new bytes across two reads) or a ~1.5s cap, so an agent
+  // parsing this captured stdout isn't truncated vs the live tmux view.
+  for (let i = 0, stable = 0; i < 30 && stable < 2; i += 1) {
+    const before = pos;
+    await sleep(50);
+    pump();
+    stable = pos === before ? stable + 1 : 0;
+  }
 
   let exitCode = 0;
   if (exitFound) {

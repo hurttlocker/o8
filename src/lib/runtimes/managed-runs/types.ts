@@ -12,7 +12,8 @@
  * deliberate later step.
  */
 
-export type ManagedRunStatus = 'running' | 'finished' | 'gone';
+/** running · finished (exited, code may be known) · killed (operator stopped it) · gone (vanished, no code) */
+export type ManagedRunStatus = 'running' | 'finished' | 'killed' | 'gone';
 
 /** stream = CLI blocks + mirrors output to its own stdout; detach = fire-and-register. */
 export type ManagedRunMode = 'stream' | 'detach';
@@ -32,7 +33,8 @@ export interface ManagedRunRecord {
   packetId?: string | null;
   /** lane id when launched from inside a packet worktree */
   laneId?: string | null;
-  /** tmux pane pid (informational; cross-ref is by cwd, not ppid-walk) */
+  /** tmux pane pid — the ports route attributes a port by walking the listening
+   *  process's ppid chain up to this pid (o8 owns the session). */
   panePid?: number | null;
   mode: ManagedRunMode;
   startedAt: string;
