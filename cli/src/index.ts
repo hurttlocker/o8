@@ -140,7 +140,10 @@ exit codes:
 
 async function dispatch(args: ParsedArgs): Promise<number> {
   const [primary, secondary] = args.command;
-  if (args.help) {
+  // `run` owns all flag parsing for its wrapped command (extractRunCommand reads
+  // raw argv), so a `--help`/`-h` meant for the wrapped tool must NOT trigger o8's
+  // global help here — otherwise `o8 run node --help` prints o8 USAGE + exit 0.
+  if (args.help && primary !== 'run') {
     process.stdout.write(USAGE);
     return 0;
   }
