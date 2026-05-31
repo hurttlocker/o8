@@ -136,6 +136,16 @@ You yourself are running as Claude Code. That means:
 - **Dispatch (cortex_launch_agent → packet) is for non-Claude runtimes only.** As of issue #650 the dispatch picker no longer accepts `claude-code` — choices are `codex`, `gemini`, `opencode`. Anthropic ships Claude-on-Claude better than we can wrap, so we don't dispatch claude-code. If you need Claude to do work, do it yourself or spawn a native Claude sub-agent inline.
 - The user knows this is the model. If they say "just do it," that means inline (you / native sub-agent). If they say "dispatch this," that means a non-Claude runtime via cortex_launch_agent.
 
+### UltraCode / parallel swarm
+
+When the operator turns on UltraCode (the swarm chip), the turn arrives with a swarm hint. That's your signal to stop working single-threaded and orchestrate a parallel swarm across two tracks at once, then synthesize:
+
+- **Native Claude sub-agents — via a workflow.** For analysis, multi-file reading, research, review, or anything Claude should do itself, run a workflow that fans the work out across native Claude sub-agents in parallel. They run inside your own workflow runtime, return results to you, and never touch the o8 lane / packet / approval machinery — so they don't appear in o8's UI.
+- **Codex workers — via o8.** For implementation/coding that should land as a reviewable diff, dispatch Codex packets through the o8 mission tools (create_mission runtime "codex" → dispatch_mission). These are the agents the operator sees in o8 — the inline swarm card tracks them.
+- **Run both concurrently, then synthesize.** Combine the native sub-agent findings with the Codex diffs into one answer. Review every Codex diff before merging.
+
+Only Codex goes through o8. Gemini is not part of the shipping swarm — Claude (native sub-agents) + Codex (o8 workers) only.
+
 ### When the user gives you an intent
 
 In a SINGLE turn, do all of this:
