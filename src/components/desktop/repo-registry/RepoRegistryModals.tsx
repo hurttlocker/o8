@@ -46,6 +46,29 @@ function useExperimentalOpencodeFlag(): boolean {
   return flag;
 }
 
+// Sibling of the opencode flag — Gemini is hidden from the launch picker in v1.
+let cachedExperimentalGemini: boolean | null = null;
+function useExperimentalGeminiFlag(): boolean {
+  const [flag, setFlag] = useState<boolean>(cachedExperimentalGemini ?? false);
+  useEffect(() => {
+    if (cachedExperimentalGemini !== null) {
+      return;
+    }
+    let cancelled = false;
+    const controller = new AbortController();
+    void fetchThoughtsOperatorDefaults(controller.signal).then((defaults) => {
+      if (cancelled) return;
+      cachedExperimentalGemini = defaults.experimentalGemini;
+      setFlag(defaults.experimentalGemini);
+    });
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, []);
+  return flag;
+}
+
 // Normalise a remote URL to a friendly "owner/repo" label.
 // https://github.com/hurttlocker/cortex-ide.git → hurttlocker/cortex-ide
 // git@github.com:hurttlocker/cortex-ide.git     → hurttlocker/cortex-ide
@@ -187,12 +210,15 @@ function RepoRegistryModalsBase({
   handleRemoveRepo,
 }: RepoRegistryModalsProps) {
   const opencodeEnabled = useExperimentalOpencodeFlag();
-  // When the user already has opencode selected (e.g. via a saved localStorage
-  // preference), keep it visible even if the experimental flag is off so the
-  // picker doesn't silently drop their choice.
-  const launchRuntimeOptions = listDispatchableRuntimes({
-    includeExperimental: opencodeEnabled || launchRuntime === 'opencode',
-  });
+  const geminiEnabled = useExperimentalGeminiFlag();
+  // When the user already has a hidden runtime selected (e.g. via a saved
+  // localStorage preference), keep it visible even if its experimental flag is
+  // off so the picker doesn't silently drop their choice.
+  const launchExperimental: OrchestratorRuntime[] = [];
+  if (opencodeEnabled) launchExperimental.push('opencode');
+  if (geminiEnabled) launchExperimental.push('gemini');
+  if (launchRuntime === 'opencode' || launchRuntime === 'gemini') launchExperimental.push(launchRuntime);
+  const launchRuntimeOptions = listDispatchableRuntimes({ experimental: launchExperimental });
   const workspaceIsolationPreference = workspaceRepo?.setup.workspaceIsolationPreference ?? 'auto';
   const launchIsolationPreference = launchRepo?.setup.workspaceIsolationPreference ?? 'auto';
 

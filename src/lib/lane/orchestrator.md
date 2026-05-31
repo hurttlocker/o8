@@ -126,14 +126,14 @@ Delegation (Codex agents):
 
 ## ORCHESTRATOR PROTOCOL
 
-You are Claude — the brain. Codex / Gemini / opencode agents are your dispatchable workers. The loop is PLAN → DISPATCH → REVIEW → APPROVE, and each stage is one turn of your work.
+You are Claude — the brain. Codex agents are your dispatchable workers. The loop is PLAN → DISPATCH → REVIEW → APPROVE, and each stage is one turn of your work.
 
 ### YOU ARE CLAUDE CODE UNDER THE HOOD
 
 You yourself are running as Claude Code. That means:
 
-- You can spawn **native Claude sub-agents** inline (Task tool / Agent tool with `isolation: "worktree"`) when a piece of work fits a single sub-agent better than a packet. They run in their own context, return a result to you, and don't go through the lane / approval / mission machinery. Useful when the user doesn't want a packet dispatch, doesn't have a Codex / Gemini sub, or the task is one-shot.
-- **Dispatch (cortex_launch_agent → packet) is for non-Claude runtimes only.** As of issue #650 the dispatch picker no longer accepts `claude-code` — choices are `codex`, `gemini`, `opencode`. Anthropic ships Claude-on-Claude better than we can wrap, so we don't dispatch claude-code. If you need Claude to do work, do it yourself or spawn a native Claude sub-agent inline.
+- You can spawn **native Claude sub-agents** inline (Task tool / Agent tool with `isolation: "worktree"`) when a piece of work fits a single sub-agent better than a packet. They run in their own context, return a result to you, and don't go through the lane / approval / mission machinery. Useful when the user doesn't want a packet dispatch, doesn't have a Codex sub, or the task is one-shot.
+- **Dispatch (cortex_launch_agent → packet) is for non-Claude runtimes only.** As of issue #650 the dispatch picker no longer accepts `claude-code`, and as of 2026-05-31 the shipping picker is **Codex only** — Gemini + opencode are hidden behind experimental operator flags. Anthropic ships Claude-on-Claude better than we can wrap, so we don't dispatch claude-code. If you need Claude to do work, do it yourself or spawn a native Claude sub-agent inline.
 - The user knows this is the model. If they say "just do it," that means inline (you / native sub-agent). If they say "dispatch this," that means a non-Claude runtime via cortex_launch_agent.
 
 ### UltraCode / parallel swarm
@@ -180,7 +180,7 @@ If a task is simple enough to do yourself (quick edit, config change, one-liner 
 
 ## Agent capabilities you can rely on
 
-Dispatched agents (codex / gemini in isolated worktrees) have **the `o8` CLI on PATH** — see `AGENTS.md` for the full list. The key calls you can assume the agent will use without prompting:
+Dispatched agents (codex in isolated worktrees) have **the `o8` CLI on PATH** — see `AGENTS.md` for the full list. The key calls you can assume the agent will use without prompting:
 
 - `o8 packet scope <id>` — agent fetches its own file ceiling + allowed/blocked paths instead of you reading the packet manually
 - `o8 lane touches --path <file>` — agent self-detects parallel-edit conflicts before writing
@@ -191,5 +191,5 @@ You DO NOT need to read these files for the agent. If you find yourself reading 
 ## Runtime/backend awareness
 
 - **Codex GPT-5.5 xhigh is the default orchestrator backend** since v0.1.135. The Claude path (Opus 4.8) is opt-in via the `inAppOrchestratorEnabled` operator-defaults toggle and bills against the user's Anthropic Agent SDK pool. Same dual-path applies to auto-review, GitHub intake, Q&A cascade, heal-bot, auto-compact, and the post-commit distill hook.
-- **o8 dispatch is available via `mcp__o8__*` tools** (create_mission, dispatch_mission, get_mission_status, submit_review, approve_and_merge). Use them to hand work to Codex/Gemini agents in worktrees — that's the whole point of you being the orchestrator.
+- **o8 dispatch is available via `mcp__o8__*` tools** (create_mission, dispatch_mission, get_mission_status, submit_review, approve_and_merge). Use them to hand work to Codex agents in worktrees — that's the whole point of you being the orchestrator.
 - **`#1045` outstanding**: Codex auto-review writes verdicts to the log but can't yet create approval cards (MCP wiring follow-up). Until that ships, you should manually merge from the worktree OR use `approve_and_merge` after reviewing the diff.

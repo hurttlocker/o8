@@ -17,6 +17,7 @@ import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
+import { useExperimentalGeminiFlag } from '@/lib/operator/use-experimental-gemini';
 import { O8BrowserPane } from '@/components/desktop/O8BrowserPane';
 import { AllFilesTree } from '@/components/desktop/o8-panel/workspace-rail/AllFilesTree';
 import { FileViewer } from '@/components/desktop/o8-panel/workspace-rail/FileViewer';
@@ -601,7 +602,10 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
     const [addMenuOpen, setAddMenuOpen] = useState(false);
     const [selectedFile, setSelectedFile] = useState<string | null>(null);
     const opencodeEnabled = useExperimentalOpencodeFlag();
-    const visibleAgents = opencodeEnabled ? CLI_AGENTS : CLI_AGENTS.filter((a) => a.id !== 'opencode');
+    const geminiEnabled = useExperimentalGeminiFlag();
+    const visibleAgents = CLI_AGENTS.filter((a) =>
+      (a.id !== 'opencode' || opencodeEnabled) && (a.id !== 'gemini' || geminiEnabled),
+    );
     const pendingTabIdsRef = useRef<string[]>([]);
     const pendingAgentsRef = useRef<Map<string, CliAgent['id']>>(new Map());
     const pendingRequestRef = useRef<Map<string, string>>(new Map());

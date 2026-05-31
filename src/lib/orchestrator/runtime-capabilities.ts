@@ -52,7 +52,12 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
   gemini: {
     label: 'Gemini',
     shortLabel: 'Gemini',
-    dispatchable: true,
+    // dispatchable=false: Gemini is hidden from the v1 picker (decision
+    // 2026-05-31). We ship Claude + Codex only; Gemini lives behind the
+    // `experimentalGemini` operator-defaults flag, mirroring opencode. The
+    // adapter still ships so existing Gemini lanes stay readable + dispatch
+    // validation (includeExperimental) keeps accepting them.
+    dispatchable: false,
     requiresModel: false,
     // 2026-04-28: reverted from gemini-3.1-pro to gemini-3-pro-preview after
     // the 3.1-pro fan-out test (mission-958a824e-b0a) showed 5/5 hallucinated
@@ -87,18 +92,24 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
   },
 };
 
-export function listDispatchableRuntimes(options?: { includeExperimental?: boolean }): OrchestratorRuntime[] {
-  const includeExperimental = options?.includeExperimental ?? false;
+// `opencode` + `gemini` ship hidden behind their own experimental operator
+// flags. Server-side validation passes `includeExperimental: true` to accept
+// every hidden runtime (existing lanes must still validate); client pickers
+// pass `experimental: [...]` to ungate only the runtimes whose flag is on.
+const HIDDEN_DISPATCH_RUNTIMES = new Set<OrchestratorRuntime>(['opencode', 'gemini']);
+
+export function listDispatchableRuntimes(options?: {
+  includeExperimental?: boolean;
+  experimental?: OrchestratorRuntime[];
+}): OrchestratorRuntime[] {
+  const includeAll = options?.includeExperimental ?? false;
+  const allow = new Set<OrchestratorRuntime>(options?.experimental ?? []);
   return (Object.keys(ORCHESTRATOR_RUNTIMES) as OrchestratorRuntime[])
     .filter((id) => {
       const cap = ORCHESTRATOR_RUNTIMES[id];
-      if (!cap.dispatchable) {
-        // opencode lives behind `experimentalOpencode` for the rare operator
-        // who explicitly flips it on. Big-3 picker stays clean by default.
-        if (id === 'opencode' && includeExperimental) return true;
-        return false;
-      }
-      return true;
+      if (cap.dispatchable) return true;
+      if (HIDDEN_DISPATCH_RUNTIMES.has(id)) return includeAll || allow.has(id);
+      return false;
     });
 }
 
@@ -107,4 +118,4 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): Orchestrator
 }
 
 /** Runtimes that ship in the v1 dispatch picker. Keep this narrow. */
-export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'gemini'];
+export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex'];
