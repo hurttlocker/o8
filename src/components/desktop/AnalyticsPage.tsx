@@ -818,9 +818,12 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
         ) : data ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: 0 }}>
 
-            {/* ── 01 — TOTALS ── */}
+            {/* ── 01 / 02 — AUTONOMY + GOVERNANCE lead the page (moat-forward); cost below ── */}
+            <AnalyticsMoatSections autonomy={data.autonomy ?? null} governance={data.governance ?? null} />
+
+            {/* ── 03 — TOTALS (cost) ── */}
             <section style={{ marginBottom: 36 }}>
-              <SectionLabel number="01">TOTALS</SectionLabel>
+              <SectionLabel number="03">TOTALS</SectionLabel>
               {/* Row 1: spend / messages / cost-per-hour */}
               <div style={{
                 display: 'flex',
@@ -874,10 +877,10 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
               <HairlineRule />
             </section>
 
-            {/* ── 02 — SPEND OVER TIME ── */}
+            {/* ── 04 — SPEND OVER TIME ── */}
             {data.hourly.length > 0 && (
               <section style={{ marginBottom: 36 }}>
-                <SectionLabel number="02">SPEND OVER TIME</SectionLabel>
+                <SectionLabel number="04">SPEND OVER TIME</SectionLabel>
                 <SpendChart data={data.hourly} />
                 <div style={{ marginTop: 20 }}>
                   <HairlineRule />
@@ -885,10 +888,10 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
               </section>
             )}
 
-            {/* ── 03 — BY SURFACE ── */}
+            {/* ── 05 — BY SURFACE ── */}
             {surfaceEntries.length > 0 && (
               <section style={{ marginBottom: 36 }}>
-                <SectionLabel number="03">BY SURFACE</SectionLabel>
+                <SectionLabel number="05">BY SURFACE</SectionLabel>
                 <BreakdownRows
                   entries={surfaceEntries}
                   totalCost={data.totals.cost}
@@ -899,7 +902,7 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
               </section>
             )}
 
-            {/* ── 04 — BY AGENT + BY MODEL (two columns) ── */}
+            {/* ── 06 — BY AGENT + BY MODEL (two columns) ── */}
             <section style={{ marginBottom: 36 }}>
               <div style={{
                 display: 'flex',
@@ -909,7 +912,7 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
               }}>
                 {agentEntries.length > 0 && (
                   <div style={{ flex: 1, minWidth: 240 }}>
-                    <SectionLabel number="04">BY AGENT</SectionLabel>
+                    <SectionLabel number="06">BY AGENT</SectionLabel>
                     <BreakdownRows
                       entries={agentEntries}
                       totalCost={data.totals.cost}
@@ -918,7 +921,7 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
                 )}
                 {data.byModel.length > 0 && (
                   <div style={{ flex: 1, minWidth: 240 }}>
-                    <SectionLabel number={agentEntries.length > 0 ? '05' : '04'}>BY MODEL</SectionLabel>
+                    <SectionLabel number={agentEntries.length > 0 ? '07' : '06'}>BY MODEL</SectionLabel>
                     <ModelRows byModel={data.byModel} />
                   </div>
                 )}
@@ -928,10 +931,10 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
               </div>
             </section>
 
-            {/* ── 05 / 06 — TOP SESSIONS ── */}
+            {/* ── 07 / 08 — TOP SESSIONS ── */}
             {data.topSessions.length > 0 && (
               <section style={{ marginBottom: 36 }}>
-                <SectionLabel number={agentEntries.length > 0 && data.byModel.length > 0 ? '06' : '05'}>
+                <SectionLabel number={agentEntries.length > 0 && data.byModel.length > 0 ? '08' : '07'}>
                   TOP SESSIONS BY SPEND
                 </SectionLabel>
                 <TopSessionsRows sessions={data.topSessions} />
@@ -940,9 +943,6 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
                 </div>
               </section>
             )}
-
-            {/* ── 07 / 08 — AUTONOMY + GOVERNANCE (the moat; cost stays king above) ── */}
-            <AnalyticsMoatSections autonomy={data.autonomy ?? null} governance={data.governance ?? null} />
 
           </div>
         ) : null}

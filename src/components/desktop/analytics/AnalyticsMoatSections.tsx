@@ -134,7 +134,7 @@ export const AnalyticsMoatSections = memo(function AnalyticsMoatSections({
     <>
       {/* ── AUTONOMY — how much shipped without a human in the loop ── */}
       <section style={{ marginBottom: 36 }}>
-        <SectionLabel number="07">AUTONOMY</SectionLabel>
+        <SectionLabel number="01">AUTONOMY</SectionLabel>
         {autonomy && autonomy.total > 0 ? (
           <div style={cellRowStyle}>
             <Cell
@@ -167,7 +167,7 @@ export const AnalyticsMoatSections = memo(function AnalyticsMoatSections({
 
       {/* ── GOVERNANCE — the operator approval surface as a measurable funnel ── */}
       <section style={{ marginBottom: 36 }}>
-        <SectionLabel number="08">GOVERNANCE</SectionLabel>
+        <SectionLabel number="02">GOVERNANCE</SectionLabel>
         {governance && governance.total > 0 ? (
           <div style={cellRowStyle}>
             <Cell
