@@ -761,7 +761,8 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
       },
       getSession: () => tabsRef.current.find((entry) => entry.id === activeTabId && entry.kind === 'terminal')?.tmuxSession ?? null,
       runCommand: (command: string) => {
-        const activeTab = tabsRef.current.find((entry) => entry.id === activeTabId && entry.kind === 'terminal');
+        // Skip read-only watch tabs (`o8 run` views) — never inject into an agent's PTY.
+        const activeTab = tabsRef.current.find((entry) => entry.id === activeTabId && entry.kind === 'terminal' && !entry.readOnly);
         if (activeTab?.tmuxSession) {
           sendTerminalInput(activeTab.tmuxSession, command + '\n');
           return;
