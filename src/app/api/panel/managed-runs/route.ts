@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import {
   registerManagedRun,
   finishManagedRun,
+  killManagedRun,
   listManagedRuns,
 } from '@/lib/runtimes/managed-runs/registry';
 import { killTmuxSession } from '@/lib/terminal/tmux';
@@ -9,6 +10,10 @@ import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+/** Managed-run sessions are always `cortex-run-<id>`; never let a caller act on any other session. */
+const RUN_SESSION_RE = /^cortex-run-[A-Za-z0-9]+$/;
+const MAX_FIELD = 4096; // cap persisted/echoed strings — no unbounded command/cwd
 
 /** GET — list managed runs (reconciled against live tmux). */
 export async function GET() {
@@ -57,19 +62,33 @@ export async function POST(req: Request) {
 
   if (body.action === 'kill') {
     const session = body.session;
-    if (!session) {
-      return NextResponse.json({ ok: false, error: 'missing_session' }, { status: 400 });
+    // Only ever kill o8-owned managed-run sessions — never an orchestrator,
+    // agent-runtime, dashboard, or unrelated tmux session passed by name.
+    if (!session || !RUN_SESSION_RE.test(session)) {
+      return NextResponse.json({ ok: false, error: 'invalid_session' }, { status: 400 });
     }
     await killTmuxSession(session); // best-effort; no-op if already gone
-    const rec = finishManagedRun(session, null);
-    return NextResponse.json({ ok: true, run: rec });
+    const rec = killManagedRun(session);
+    return NextResponse.json({ ok: Boolean(rec), run: rec });
   }
 
+  // ── register (default) ──
+  if (body.action && body.action !== 'register') {
+    return NextResponse.json({ ok: false, error: 'unknown_action' }, { status: 400 });
+  }
   if (!body.id || !body.session || !body.command || !body.cwd) {
     return NextResponse.json(
       { ok: false, error: 'missing_fields', need: ['id', 'session', 'command', 'cwd'] },
       { status: 400 },
     );
+  }
+  // Session must be the canonical cortex-run-<id> and match the id, so a caller
+  // can't register a record that later legitimizes killing a foreign session.
+  if (!RUN_SESSION_RE.test(body.session) || body.session !== `cortex-run-${body.id}`) {
+    return NextResponse.json({ ok: false, error: 'invalid_session' }, { status: 400 });
+  }
+  if (body.command.length > MAX_FIELD || body.cwd.length > MAX_FIELD) {
+    return NextResponse.json({ ok: false, error: 'field_too_long' }, { status: 400 });
   }
 
   const rec: ManagedRunRecord = {

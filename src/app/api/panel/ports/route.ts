@@ -72,8 +72,10 @@ export async function GET() {
         // CWD resolution deferred to batch below
         const cwd = '';
 
-        // Deduplicate (same port can appear for IPv4 and IPv6)
-        if (!entries.some(e => e.port === port)) {
+        // Deduplicate the SAME process double-binding (IPv4 + IPv6) by (pid,port);
+        // two DIFFERENT processes on one port number are both kept so the
+        // agent-owned one can still be attributed (collapsed for render later).
+        if (!entries.some(e => e.pid === currentPid && e.port === port)) {
           entries.push({
             port,
             pid: currentPid,
@@ -134,29 +136,26 @@ export async function GET() {
       }
     }
 
-    // Filter to only dev-relevant: must be in a registered repo OR be a known dev tool
-    const DEV_PROCESSES = new Set(['node', 'next-server', 'tsx', 'bun', 'deno', 'python', 'Python', 'go', 'cargo', 'ruby', 'java', 'uvicorn', 'gunicorn', 'flask']);
-    const filtered = entries.filter(e => e.repo !== null || DEV_PROCESSES.has(e.process));
-
-    // Tag each port: agent-owned (the listening process descends from a live
-    // `o8 run` tmux pane) → live terminal, noise (db/cache/infra) → collapsed,
-    // else browser (dev server) → preview. Attribution is by pane-pid ancestry,
-    // not cwd — o8 owns the session, so we confirm the port's process is inside
-    // the run's process tree rather than guessing from a shared directory.
+    // Tag EVERY listening port BEFORE the dev-relevance filter — agent ownership
+    // is the strongest signal and must not be gated behind the weakest heuristic
+    // (an o8-owned port of an arbitrary binary outside a registered repo would
+    // otherwise be dropped before it could be tagged 'agent'):
+    //  - agent: the process descends from a live `o8 run` tmux pane (pane-pid
+    //    ancestry — o8 owns the session, so the port's process is in its tree).
+    //  - noise: db/cache/infra → collapsed.  - browser: dev server → preview.
     const NOISE_PROCESSES = ['postgres', 'postmaster', 'redis', 'mysqld', 'mariadbd', 'mongod', 'memcached', 'elasticsearch', 'rabbitmq', 'etcd', 'clickhouse'];
     const classifyNonAgent = (entry: PortEntry) => {
       entry.category = NOISE_PROCESSES.some(p => entry.process.toLowerCase().includes(p)) ? 'noise' : 'browser';
     };
     try {
-      await listManagedRuns(); // reconcile against live tmux (flips dead runs → gone)
-      const panePidToRun = new Map<number, { session: string }>();
+      await listManagedRuns(); // reconcile against live tmux (flips dead runs away)
+      const panePidToRun = new Map<number, string>();
       for (const run of listRunningRuns()) {
-        if (typeof run.panePid === 'number') panePidToRun.set(run.panePid, { session: run.session });
+        if (typeof run.panePid === 'number') panePidToRun.set(run.panePid, run.session);
       }
-      if (panePidToRun.size === 0) {
-        for (const entry of filtered) classifyNonAgent(entry);
-      } else {
-        // One ps snapshot → pid→ppid map; walk each port's process up to its run pane.
+      let ownerSession: (pid: number) => string | null = () => null;
+      if (panePidToRun.size > 0) {
+        // One ps snapshot → pid→ppid map; walk each port's process up to a run pane.
         const ppidByPid = new Map<number, number>();
         try {
           const psRaw = execSync('ps -axo pid=,ppid= 2>/dev/null', { encoding: 'utf-8', timeout: 3000 }).trim();
@@ -164,29 +163,39 @@ export async function GET() {
             const m = line.trim().match(/^(\d+)\s+(\d+)$/);
             if (m) ppidByPid.set(parseInt(m[1], 10), parseInt(m[2], 10));
           }
-        } catch { /* ps failed — every port falls through to non-agent */ }
-        const ownerSession = (pid: number): string | null => {
+        } catch { /* ps failed — no agent tags this pass */ }
+        ownerSession = (pid: number): string | null => {
           let cur = pid;
           for (let hops = 0; cur > 1 && hops < 32; hops += 1) {
-            const owner = panePidToRun.get(cur);
-            if (owner) return owner.session;
+            const session = panePidToRun.get(cur);
+            if (session) return session;
             const parent = ppidByPid.get(cur);
             if (parent === undefined || parent === cur) break;
             cur = parent;
           }
           return null;
         };
-        for (const entry of filtered) {
-          const session = ownerSession(entry.pid);
-          if (session) {
-            entry.category = 'agent';
-            entry.agentSession = session;
-          } else {
-            classifyNonAgent(entry);
-          }
-        }
       }
-    } catch { /* registry/tmux unavailable — leave default 'browser' category */ }
+      for (const entry of entries) {
+        const session = ownerSession(entry.pid);
+        if (session) { entry.category = 'agent'; entry.agentSession = session; }
+        else classifyNonAgent(entry);
+      }
+    } catch { /* registry/tmux unavailable — entries keep default 'browser' */ }
+
+    // Keep agent-owned ports regardless of repo/process; otherwise require a
+    // registered repo or a known dev tool.
+    const DEV_PROCESSES = new Set(['node', 'next-server', 'tsx', 'bun', 'deno', 'python', 'Python', 'go', 'cargo', 'ruby', 'java', 'uvicorn', 'gunicorn', 'flask']);
+    const relevant = entries.filter(e => e.category === 'agent' || e.repo !== null || DEV_PROCESSES.has(e.process));
+
+    // One row per port number for the UI — prefer the agent-owned entry when two
+    // distinct processes hold the same port.
+    const byPort = new Map<number, PortEntry>();
+    for (const entry of relevant) {
+      const existing = byPort.get(entry.port);
+      if (!existing || (entry.category === 'agent' && existing.category !== 'agent')) byPort.set(entry.port, entry);
+    }
+    const filtered = [...byPort.values()];
 
     // Group by repo
     const groups: PortGroup[] = [];
