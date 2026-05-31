@@ -3,6 +3,9 @@ import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
 import { hydrateUsageLogAnalytics } from './usage-log-analytics';
+import { getDb } from '@/lib/db';
+import { sessionOutcomes, approvals } from '@/lib/db/schema';
+import { gte, sql } from 'drizzle-orm';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -210,6 +213,86 @@ function discoverIdeChatSessions(sinceTs: number): Array<{ id: string; model: st
   }
 
   return sessions;
+}
+
+interface AutonomyMetrics {
+  total: number;
+  succeeded: number;
+  partial: number;
+  failed: number;
+  mergedClean: number;
+  successRate: number;
+  mergedCleanRate: number;
+}
+
+interface GovernanceMetrics {
+  total: number;
+  approved: number;
+  rejected: number;
+  pending: number;
+  approvalRate: number;
+  avgLatencyMs: number;
+}
+
+/**
+ * Autonomy (from session_outcomes) + Governance (from approvals), windowed to
+ * `sinceTs`. Both null on DB-unavailable / query failure so the page degrades
+ * to an honest empty state — never mocks.
+ */
+function computeMoatMetrics(sinceTs: number): {
+  autonomy: AutonomyMetrics | null;
+  governance: GovernanceMetrics | null;
+} {
+  let autonomy: AutonomyMetrics | null = null;
+  let governance: GovernanceMetrics | null = null;
+  try {
+    const db = getDb();
+    if (!db) return { autonomy, governance };
+
+    // session_outcomes.completedAt is ISO text → convert to unix ms for the window.
+    const outcomes = db
+      .select({ outcome: sessionOutcomes.outcome, mergedClean: sessionOutcomes.mergedClean })
+      .from(sessionOutcomes)
+      .where(gte(sql`strftime('%s', ${sessionOutcomes.completedAt}) * 1000`, sinceTs))
+      .all();
+    const total = outcomes.length;
+    const succeeded = outcomes.filter((o) => o.outcome === 'succeeded').length;
+    const partial = outcomes.filter((o) => o.outcome === 'partial').length;
+    const failed = outcomes.filter((o) => o.outcome === 'failed' || o.outcome === 'interrupted').length;
+    const mergedClean = outcomes.filter((o) => o.mergedClean === true).length;
+    autonomy = {
+      total, succeeded, partial, failed, mergedClean,
+      successRate: total > 0 ? (succeeded / total) * 100 : 0,
+      mergedCleanRate: total > 0 ? (mergedClean / total) * 100 : 0,
+    };
+
+    // approvals.createdAt / resolvedAt are unix ms already.
+    const apprs = db
+      .select({ status: approvals.status, createdAt: approvals.createdAt, resolvedAt: approvals.resolvedAt })
+      .from(approvals)
+      .where(gte(approvals.createdAt, sinceTs))
+      .all();
+    const approved = apprs.filter((a) => a.status === 'approved');
+    const rejected = apprs.filter((a) => a.status === 'rejected').length;
+    const pending = apprs.filter((a) => a.status === 'pending').length;
+    const latencies = approved
+      .map((a) => (typeof a.resolvedAt === 'number' ? a.resolvedAt - a.createdAt : 0))
+      .filter((d) => d > 0);
+    const avgLatencyMs = latencies.length > 0
+      ? latencies.reduce((s, d) => s + d, 0) / latencies.length
+      : 0;
+    governance = {
+      total: apprs.length,
+      approved: approved.length,
+      rejected,
+      pending,
+      approvalRate: apprs.length > 0 ? (approved.length / apprs.length) * 100 : 0,
+      avgLatencyMs,
+    };
+  } catch {
+    // graceful — omit on any DB/query error
+  }
+  return { autonomy, governance };
 }
 
 export async function GET(request: NextRequest) {
@@ -521,6 +604,12 @@ export async function GET(request: NextRequest) {
       ? (totalCache / (totalInput + totalCache)) * 100
       : 0;
 
+    // ── Autonomy (session_outcomes) + Governance (approvals) ──
+    // DB-backed, windowed to the same `hours`. Graceful: if the DB is
+    // unavailable or empty these come back null and the page shows an honest
+    // empty state. Cost stays the primary surface; these ride on top.
+    const moat = computeMoatMetrics(sinceTs);
+
     return NextResponse.json({
       totals: {
         cost: totalCost,
@@ -539,6 +628,8 @@ export async function GET(request: NextRequest) {
       byModel,
       hourly,
       topSessions: topSessions.slice(0, 10),
+      autonomy: moat.autonomy,
+      governance: moat.governance,
     });
   } catch (err) {
     return NextResponse.json(
