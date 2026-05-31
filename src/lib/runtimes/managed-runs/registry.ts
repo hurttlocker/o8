@@ -6,7 +6,6 @@
  * ws-server does not read this; it attaches tmux sessions by name, registry-free.
  */
 
-import { sep } from 'node:path';
 import { listCortexTmuxSessions } from '@/lib/terminal/tmux';
 import type { ManagedRunRecord } from './types';
 
@@ -44,7 +43,7 @@ export function finishManagedRun(
 export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
   let alive: Set<string>;
   try {
-    alive = new Set(await listCortexTmuxSessions());
+    alive = new Set((await listCortexTmuxSessions()).filter((n) => n.startsWith('cortex-run-')));
   } catch {
     alive = new Set<string>();
   }
@@ -61,23 +60,11 @@ export async function listManagedRuns(): Promise<ManagedRunRecord[]> {
   return [...runs.values()].sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
-/**
- * Most-recent still-running run whose working directory matches the given
- * process cwd (cwd cross-ref, NOT ppid-walk). Returns null on no match.
- */
-export function findRunByCwd(cwd: string | null | undefined): ManagedRunRecord | null {
-  if (!cwd) return null;
-  let best: ManagedRunRecord | null = null;
-  for (const rec of runs.values()) {
-    if (rec.status !== 'running') continue;
-    const match =
-      cwd === rec.cwd ||
-      cwd.startsWith(rec.cwd + sep) ||
-      rec.cwd.startsWith(cwd + sep);
-    if (!match) continue;
-    if (!best || rec.startedAt > best.startedAt) best = rec;
-  }
-  return best;
+/** All still-running runs, newest-first (used by the ports route for pane-pid attribution). */
+export function listRunningRuns(): ManagedRunRecord[] {
+  return [...runs.values()]
+    .filter((r) => r.status === 'running')
+    .sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
 function prune() {
