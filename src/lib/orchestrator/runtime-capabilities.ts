@@ -96,6 +96,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
 // flags. Server-side validation passes `includeExperimental: true` to accept
 // every hidden runtime (existing lanes must still validate); client pickers
 // pass `experimental: [...]` to ungate only the runtimes whose flag is on.
+// Hide opencode and gemini from the shipping v1 picker while they remain experimental/non-primary dispatch paths.
 const HIDDEN_DISPATCH_RUNTIMES = new Set<OrchestratorRuntime>(['opencode', 'gemini']);
 
 export function listDispatchableRuntimes(options?: {
