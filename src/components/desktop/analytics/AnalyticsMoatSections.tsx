@@ -46,14 +46,15 @@ function formatLatency(ms: number): string {
   return `${(m / 60).toFixed(1)}h`;
 }
 
-const Cell = memo(function Cell({ label, value, sub, accent = false }: {
+const Cell = memo(function Cell({ label, value, title, sub, accent = false }: {
   label: string;
   value: string;
+  title: string;
   sub?: string;
   accent?: boolean;
 }) {
   return (
-    <div style={{
+    <div title={title} style={{
       flex: 1,
       minWidth: 130,
       display: 'flex',
@@ -140,22 +141,26 @@ export const AnalyticsMoatSections = memo(function AnalyticsMoatSections({
             <Cell
               label="merged clean"
               value={`${autonomy.mergedCleanRate.toFixed(0)}%`}
+              title="Packets merged without operator edits"
               sub={`${autonomy.mergedClean} of ${autonomy.total} shipped untouched`}
               accent
             />
             <Cell
               label="success rate"
               value={`${autonomy.successRate.toFixed(0)}%`}
+              title="Percentage of packet outcomes that succeeded"
               sub={`${autonomy.succeeded} succeeded`}
             />
             <Cell
               label="needed a human"
               value={(autonomy.partial + autonomy.failed).toString()}
+              title="Packets that ended partial or failed and needed operator intervention"
               sub={`${autonomy.partial} partial · ${autonomy.failed} failed`}
             />
             <Cell
               label="outcomes"
               value={autonomy.total.toLocaleString()}
+              title="Completed packet outcomes in the selected window"
               sub="in window"
             />
           </div>
@@ -173,22 +178,26 @@ export const AnalyticsMoatSections = memo(function AnalyticsMoatSections({
             <Cell
               label="approval rate"
               value={`${governance.approvalRate.toFixed(0)}%`}
+              title="Percentage of approval requests approved"
               sub={`${governance.approved} approved`}
               accent
             />
             <Cell
               label="pending"
               value={governance.pending.toString()}
+              title="Approval requests still awaiting review"
               sub="awaiting review"
             />
             <Cell
               label="rejected"
               value={governance.rejected.toString()}
+              title="Approval requests rejected by the operator"
               sub={`${governance.total} total`}
             />
             <Cell
               label="review latency"
               value={formatLatency(governance.avgLatencyMs)}
+              title="Average time from approval request to resolution"
               sub="avg time to resolve"
             />
           </div>
