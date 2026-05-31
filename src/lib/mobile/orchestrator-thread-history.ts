@@ -349,8 +349,15 @@ export function upsertMobileOrchestratorAssistantMessage(input: {
 
   const now = new Date();
   const nowIso = now.toISOString();
-  const timestamp = typeof input.timestampMs === 'number' ? input.timestampMs : now.getTime();
   const messages = Array.isArray(existing.messages) ? existing.messages : [];
+  // The caller (ws-server) freezes the assistant timestamp at turn START, which
+  // can be a millisecond BEFORE the user message is persisted — that inverts the
+  // pair so the timestamp-sorted transcript renders the reply above the question
+  // (#transcript-flip). Clamp the assistant strictly after the most recent
+  // existing message (the user it's answering) so the turn always reads in order.
+  const baseTimestamp = typeof input.timestampMs === 'number' ? input.timestampMs : now.getTime();
+  const lastTimestamp = messages.length > 0 ? (messages[messages.length - 1]?.timestamp ?? 0) : 0;
+  const timestamp = Math.max(baseTimestamp, lastTimestamp + 1);
 
   const existingIndex = messages.findIndex((m) => m?.id === input.messageId);
   let nextMessages: ChatHistoryMessage[];
