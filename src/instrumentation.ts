@@ -23,4 +23,18 @@ export async function register(): Promise<void> {
   // probe completes in the background (~200ms typical in prod, ~900ms in dev
   // because Turbopack compiles the module on first registration).
   void warmupOpenRouter();
+
+  // One-time, marker-gated repair of transcripts flipped by the pre-v0.1.229
+  // assistant-timestamp bug — so every install self-heals its old threads on
+  // update (the persistence clamp already prevents new flips). Deferred to a
+  // microtask + never awaited so it can't block boot; idempotent after the
+  // marker lands.
+  void (async () => {
+    try {
+      const { repairFlippedOrchestratorTranscripts } = await import('@/lib/mobile/orchestrator-thread-history');
+      repairFlippedOrchestratorTranscripts();
+    } catch {
+      // never blocks boot
+    }
+  })();
 }
