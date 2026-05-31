@@ -63,6 +63,94 @@ function writeHistoryRecord(tabId: string, record: OrchestratorHistoryRecord) {
   writeFileSync(safeOrchestratorHistoryPath(tabId), JSON.stringify(record));
 }
 
+// Marker so the one-time transcript-order repair runs once per install.
+const TRANSCRIPT_REPAIR_MARKER = join(homedir(), '.o8', '.transcript-order-repaired-v1');
+// Pre-v0.1.229, ws-server froze the assistant timestamp at turn START — a
+// millisecond BEFORE the user message was persisted — so timestamp-sorted
+// transcripts rendered the reply above the question. The inverted pair sits
+// 0-1ms apart, while a genuine reply→next-question boundary is minutes apart,
+// so an adjacent [assistant→user] pair inside this window is unambiguously a
+// flipped turn (the live scan found the nearest real boundary ~40min away).
+const TRANSCRIPT_FLIP_GAP_MS = 5000;
+
+/**
+ * One-time, marker-gated repair of transcripts flipped by the pre-v0.1.229
+ * assistant-timestamp bug. Swaps the inverted [assistant, user] pair's
+ * timestamps so the question precedes the reply, then rewrites the file in
+ * corrected order. Idempotent and never throws — safe to call on every boot;
+ * after the marker lands it returns immediately. The persistence-layer clamp
+ * in upsertMobileOrchestratorAssistantMessage prevents new flips, so this only
+ * heals history written before the fix shipped.
+ */
+export function repairFlippedOrchestratorTranscripts(): void {
+  try {
+    if (existsSync(TRANSCRIPT_REPAIR_MARKER)) return;
+    let files: string[] = [];
+    try {
+      files = readdirSync(ORCHESTRATOR_HISTORY_DIR).filter((file) => file.endsWith('.json'));
+    } catch {
+      files = [];
+    }
+    let fixedThreads = 0;
+    let fixedPairs = 0;
+    for (const file of files) {
+      const fullPath = join(ORCHESTRATOR_HISTORY_DIR, file);
+      let record: OrchestratorHistoryRecord | null;
+      try {
+        record = JSON.parse(readFileSync(fullPath, 'utf-8')) as OrchestratorHistoryRecord;
+      } catch {
+        continue;
+      }
+      if (!record || !Array.isArray(record.messages)) continue;
+      // Walk in render order (timestamp-sorted); the message objects are shared
+      // with record.messages (shallow slice), so swapping their timestamps here
+      // lands on the stored record.
+      const sorted = record.messages.slice().sort((a, b) => (a.timestamp ?? 0) - (b.timestamp ?? 0));
+      let changed = false;
+      for (let i = 0; i < sorted.length - 1; i += 1) {
+        const reply = sorted[i];
+        const prompt = sorted[i + 1];
+        if (
+          reply.role === 'assistant'
+          && prompt.role === 'user'
+          && typeof reply.timestamp === 'number'
+          && typeof prompt.timestamp === 'number'
+        ) {
+          const gap = prompt.timestamp - reply.timestamp;
+          if (gap >= 0 && gap < TRANSCRIPT_FLIP_GAP_MS) {
+            const tmp = reply.timestamp;
+            reply.timestamp = prompt.timestamp;
+            prompt.timestamp = tmp;
+            changed = true;
+            fixedPairs += 1;
+          }
+        }
+      }
+      if (changed) {
+        record.messages = record.messages
+          .slice()
+          .sort((x, y) => (x.timestamp ?? 0) - (y.timestamp ?? 0));
+        try {
+          writeFileSync(fullPath, JSON.stringify(record));
+          fixedThreads += 1;
+        } catch {
+          // best-effort per file
+        }
+      }
+    }
+    try {
+      writeFileSync(TRANSCRIPT_REPAIR_MARKER, new Date().toISOString());
+    } catch {
+      // best-effort marker; a failed write just means we retry next boot (idempotent)
+    }
+    if (fixedPairs > 0) {
+      console.log(`[transcript-repair] fixed ${fixedPairs} flipped turn(s) across ${fixedThreads} thread(s)`);
+    }
+  } catch (err) {
+    console.warn('[transcript-repair] skipped:', err);
+  }
+}
+
 function normalizeSessionIds(value: unknown): Record<string, string | null> {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return {};
   const normalized: Record<string, string | null> = {};
