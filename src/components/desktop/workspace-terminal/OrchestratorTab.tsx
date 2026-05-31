@@ -36,6 +36,7 @@ import {
   type OrchestratorEmptyKind,
 } from '@/components/desktop/OrchestratorEmptyState';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
+import { OrchestratorRunStrip } from '@/components/desktop/orchestrator/OrchestratorRunStrip';
 import { QuickActionPalette } from '@/components/desktop/orchestrator/QuickActionPalette';
 import type { QuickAction } from '@/lib/orchestrator/quick-actions';
 import { OrchestratorContextResidencyProvider } from '@/components/desktop/orchestrator/context-residency';
@@ -1072,6 +1073,10 @@ function OrchestratorTabInner({
           ))}
         </div>
       ) : null}
+
+      {/* Live `o8 run` sessions — click a chip to watch the raw stdout in the
+          bottom panel without leaving the chat. Self-hides when none run. */}
+      <OrchestratorRunStrip active={active} />
 
       {/* Body: chat (flex) | branch details (self-hides). Threads/Archive
           moved into LeftPanelProjectFocus → Chats + Agents tabs. */}
