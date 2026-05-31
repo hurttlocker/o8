@@ -168,8 +168,9 @@ function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; acti
 }
 
 // UltraCode tier accent — shares the climax orange with `max` so the top of
-// the thinking ladder reads as one premium family. UltraCode = our Claude-on-Max
-// orchestrating a Codex + Gemini swarm via workflows.
+// the thinking ladder reads as one premium family. UltraCode = Claude
+// orchestrating a parallel swarm — native sub-agents via workflow + Codex
+// workers via o8 — and synthesizing both.
 const SWARM_ACCENT = '#FF5A1F';
 
 /** Three-node constellation — reads as "multiple agents working in parallel". */
@@ -382,9 +383,10 @@ function ModelThinkingChip({
           </div>
 
           {/* UltraCode — the top of the ladder. Selecting it flips on the
-              swarm (Claude-on-Max fans work out to a parallel Codex + Gemini
-              crew via workflows) and bumps thinking to xhigh. Toggle off to
-              return to a single-thread turn at the current effort. */}
+              swarm (Claude fans work out to a parallel crew — native sub-agents
+              via workflow + Codex workers via o8 — and synthesizes both) and
+              bumps thinking to xhigh. Toggle off to return to a single-thread
+              turn at the current effort. */}
           {onSetSwarm ? (
             <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--t-divider-subtle)', display: 'flex', flexDirection: 'column', gap: 2 }}>
               <button
@@ -421,7 +423,7 @@ function ModelThinkingChip({
                 <SwarmGlyph size={13} color={ultraActive ? SWARM_ACCENT : 'var(--t-text-muted)'} />
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
                   <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>UltraCode</span>
-                  <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '-0.2px', lineHeight: 1.2, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Codex + Gemini swarm</span>
+                  <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '-0.2px', lineHeight: 1.2, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Claude + Codex swarm</span>
                 </span>
                 <span style={{ width: 6, height: 6, borderRadius: 999, background: ultraActive ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
               </button>
@@ -781,7 +783,7 @@ export function InputButtons({
   effort?: ThinkingEffort;
   onEffortChange?: (effort: ThinkingEffort) => void;
   adaptiveEnabled?: boolean;
-  /** UltraCode / swarm tier — Claude-on-Max fans work out to Codex + Gemini. */
+  /** UltraCode / swarm tier — Claude fans work out to native sub-agents + Codex. */
   swarmEnabled?: boolean;
   onSetSwarm?: (enabled: boolean) => void;
   permissionMode?: 'full' | 'plan';
