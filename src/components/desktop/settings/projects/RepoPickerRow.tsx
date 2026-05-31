@@ -54,7 +54,7 @@ export function RepoPickerRow({
         paddingLeft: 8,
         borderRadius: 4,
         position: 'relative',
-        background: checked ? 'rgba(255, 90, 31, 0.04)' : 'transparent',
+        background: checked ? 'rgba(29, 78, 216, 0.04)' : 'transparent',
       }}
     >
       <button
