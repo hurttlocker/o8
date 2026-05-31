@@ -229,7 +229,7 @@ export function popoverItemStyle(active: boolean): CSSProperties {
     paddingBottom: 7,
     paddingLeft: 12,
     borderWidth: 0,
-    background: active ? 'rgba(255, 90, 31, 0.08)' : 'transparent',
+    background: active ? 'rgba(29, 78, 216, 0.08)' : 'transparent',
     color: 'var(--t-text)',
     fontFamily: APP_FONT_STACK,
     fontSize: 12,

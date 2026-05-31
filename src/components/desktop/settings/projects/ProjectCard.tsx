@@ -346,7 +346,7 @@ export function ProjectCard({
       <ProjectContextSection label="Files">
         <div style={{
           minHeight: 48,
-          borderRadius: 8,
+          borderRadius: 12,
           borderWidth: 1,
           borderStyle: 'dashed',
           borderColor: RAMS_HAIRLINE_SOFT,
@@ -453,7 +453,7 @@ function ProjectContextSection({
               letterSpacing: '0.1em',
               textTransform: 'uppercase',
             }}
-            onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255, 90, 31, 0.06)'; }}
+            onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(29, 78, 216, 0.06)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
           >
             {action}
