@@ -303,7 +303,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
 
       <div style={{
         display: 'grid',
-        gridTemplateColumns: 'repeat(3, minmax(0, 1fr))',
+        gridTemplateColumns: `repeat(${V1_DISPATCH_RUNTIMES.length}, minmax(0, 1fr))`,
         gap: 10,
       }}>
         {V1_DISPATCH_RUNTIMES.map((runtime) => {

@@ -13,6 +13,8 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useExperimentalGeminiFlag } from '@/lib/operator/use-experimental-gemini';
+import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
 
 type TriggerKind = 'manual' | 'cron';
 type RunStatus = 'idle' | 'running' | 'ok' | 'error';
@@ -229,6 +231,10 @@ function AutomationModal({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // v1 ships Codex only; Gemini / opencode stay hidden behind their
+  // experimental operator flags (parity with the dispatch + settings pickers).
+  const geminiEnabled = useExperimentalGeminiFlag();
+  const opencodeEnabled = useExperimentalOpencodeFlag();
 
   // When `initial` flips (Create → Edit on a different row), reset the form.
   // Guarded behind `open` so closing the modal doesn't clobber the form mid-fade.
@@ -359,8 +365,8 @@ function AutomationModal({
                 style={inputStyle}
               >
                 <option value="codex">codex</option>
-                <option value="gemini">gemini</option>
-                <option value="opencode">opencode</option>
+                {(geminiEnabled || form.runtime === 'gemini') ? <option value="gemini">gemini</option> : null}
+                {(opencodeEnabled || form.runtime === 'opencode') ? <option value="opencode">opencode</option> : null}
               </select>
             </Field>
             <Field label="Branch">

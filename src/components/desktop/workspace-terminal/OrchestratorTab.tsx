@@ -294,7 +294,7 @@ function OrchestratorTabInner({
   );
   // UltraCode / swarm tier (per-tab). Picking "UltraCode" in the composer's
   // thinking dropdown flips this on; the orchestrator then fans work out to a
-  // parallel Codex + Gemini crew.
+  // parallel crew — native Claude sub-agents + Codex workers via o8.
   const [swarmEnabled, setSwarmEnabled] = useState<boolean>(
     () => readStoredSwarm(tabId),
   );
