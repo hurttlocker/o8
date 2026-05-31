@@ -99,11 +99,12 @@ interface OrchestratorSendOptions {
 }
 
 // Prepended to the outbound orchestrator turn when swarm/UltraCode is on. Kept
-// out of the transcript via `displayMessage`. The word "workflow" is load-
-// bearing — it triggers Claude Code's native Workflow machinery so the
-// orchestrator fans native sub-agents out in parallel alongside the o8 Codex
-// dispatch, then synthesizes both. (On a Codex orchestrator backend the
-// workflow sentence is a no-op and only the Codex-dispatch track runs.)
+// out of the transcript via `displayMessage`. The hint names "workflow" to
+// invoke Claude Code's Workflow orchestration when the spawned orchestrator
+// has it (Opus 4.8 + UltraCode), but it ALSO explicitly says "native Claude
+// sub-agents in parallel" — so the orchestrator fans out via its Task/Agent
+// tool regardless, then synthesizes alongside the o8 Codex dispatch. (On a
+// Codex orchestrator backend only the Codex-dispatch track runs.)
 const SWARM_TURN_HINT = [
   '[UltraCode / parallel swarm mode active]',
   'Don\'t run this turn single-threaded — orchestrate a parallel swarm across two tracks at the same time, then synthesize. (1) For implementation/coding that should land as a reviewable diff, dispatch Codex workers through the o8 mission tools (create_mission with runtime "codex", then dispatch_mission) — fire them in parallel, one per scoped task, and review each diff before merging. (2) For analysis, multi-file reading, research, or cross-checking, run a workflow that fans the work out across native Claude sub-agents in parallel and returns a synthesized result. Run both tracks concurrently, then combine the native sub-agent findings with the Codex diffs into one answer for me. If the task is genuinely single-threaded, say so briefly and just do it.',

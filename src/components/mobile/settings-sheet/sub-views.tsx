@@ -12,6 +12,7 @@ import {
 } from '@/app/mobile/mobile-approvals-shared';
 import { mobileSafeBottom } from '@/app/mobile/mobile-shell-primitives';
 import { isHapticEnabled, setHapticEnabled, triggerHaptic } from '@/lib/mobile/haptic';
+import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import {
   ICON_GITHUB,
   ICON_INFO,
@@ -250,7 +251,14 @@ export function CapabilitiesSubView({ palette }: { palette: MobilePalette }) {
 
       <SectionLabel palette={palette}>Default dispatch runtime</SectionLabel>
       <SectionCard palette={palette}>
-        {(Object.keys(DISPATCH_RUNTIME_LABELS) as Array<OperatorDefaultsState['defaultDispatchRuntime']>).map((runtime, index, arr) => {
+        {(Object.keys(DISPATCH_RUNTIME_LABELS) as Array<OperatorDefaultsState['defaultDispatchRuntime']>)
+          // v1 ships Codex only; Gemini / opencode / claude-code stay hidden
+          // here (parity with desktop). Keep whatever the operator already
+          // selected visible so we never strip an active choice.
+          .filter((runtime) =>
+            listDispatchableRuntimes().includes(runtime) || defaults.defaultDispatchRuntime === runtime,
+          )
+          .map((runtime, index, arr) => {
           const active = defaults.defaultDispatchRuntime === runtime;
           return (
             <Row
