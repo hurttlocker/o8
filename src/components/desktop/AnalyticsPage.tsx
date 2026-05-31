@@ -30,6 +30,7 @@ import {
   TabBreadcrumb,
   TabHeading,
 } from './settings/shared';
+import { AnalyticsMoatSections, type AutonomyMetrics, type GovernanceMetrics } from './analytics/AnalyticsMoatSections';
 
 // ── Types ──
 
@@ -83,6 +84,8 @@ interface AnalyticsData {
   byModel: ModelBreakdown[];
   hourly: HourBucket[];
   topSessions: TopSession[];
+  autonomy: AutonomyMetrics | null;
+  governance: GovernanceMetrics | null;
 }
 
 // ── Formatting helpers ──
@@ -740,7 +743,7 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
         }}>
           <TabHeading
             title="analytics"
-            subtitle="Spend, token usage, and agent efficiency across Codex, Claude Code, Gemini, and IDE chat."
+            subtitle="Spend stays king. Autonomy + governance on top — how much shipped clean, and the approval funnel."
           />
           {/* Time range picker */}
           <div style={{
@@ -937,6 +940,9 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
                 </div>
               </section>
             )}
+
+            {/* ── 07 / 08 — AUTONOMY + GOVERNANCE (the moat; cost stays king above) ── */}
+            <AnalyticsMoatSections autonomy={data.autonomy ?? null} governance={data.governance ?? null} />
 
           </div>
         ) : null}
