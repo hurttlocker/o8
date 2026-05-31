@@ -1,0 +1,288 @@
+/**
+ * `o8 run [--detach] [--] <cmd...>` — run a process inside an o8-owned tmux
+ * session so the operator can attach a LIVE raw-stdout terminal and watch it.
+ *
+ * Why tmux: a bare-exec'd child's stdout flows into the agent's own pipe with
+ * no retroactive tap (no /proc on macOS, SIP blocks dtrace). o8 must OWN the
+ * PTY at spawn. The command runs in `cortex-run-<id>`; the bottom panel attaches
+ * to that session = raw stdout. The same session ties listening ports to the
+ * run (cwd cross-ref), so the footer can offer a "watch live" chip.
+ *
+ * Default (stream): the CLI mirrors the pane to its OWN stdout and blocks until
+ * the command exits, so the agent sees output exactly as if it ran the command
+ * directly. `--detach` fire-and-registers and returns immediately (servers).
+ */
+
+import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import {
+  existsSync,
+  openSync,
+  readSync,
+  closeSync,
+  readFileSync,
+  writeFileSync,
+  rmSync,
+  fstatSync,
+} from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { apiFetch, CliError, EXIT } from '../api.js';
+import { resolveConfig } from '../config.js';
+import { resolveLaneFromCwd } from './packet/worktree-resolve.js';
+import { printJson, printHumanHeading, printHumanKv, type OutputMode } from '../output.js';
+
+/** Flags consumed by `o8 run` itself (everything else is the command). */
+const RUN_LEADING_FLAGS = new Set([
+  '--detach',
+  '--human',
+  '--json',
+  '--verbose',
+  '-v',
+  '--help',
+  '-h',
+]);
+
+/** env vars that must NOT leak into the pane (confuse tmux / cwd). */
+const ENV_DENYLIST = new Set(['_', 'PWD', 'OLDPWD', 'SHLVL', 'TMUX', 'TMUX_PANE']);
+
+const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
+
+/** single-quote a value for safe interpolation into an `sh -c` string. */
+function sq(value: string): string {
+  return `'${value.replace(/'/g, "'\\''")}'`;
+}
+
+/**
+ * Pull the command out of the RAW argv. The shared dispatcher greedily eats the
+ * first two bare tokens as command words, so it can't be trusted to carry an
+ * arbitrary command — re-parse from process.argv. Supports both
+ * `o8 run <cmd...>` and `o8 run [--detach] -- <cmd...>`.
+ */
+function extractRunCommand(): { detach: boolean; command: string[] } {
+  const argv = process.argv.slice(2);
+  const runIdx = argv.indexOf('run');
+  const after = runIdx >= 0 ? argv.slice(runIdx + 1) : [];
+
+  const dashIdx = after.indexOf('--');
+  let flags: string[];
+  let command: string[];
+  if (dashIdx >= 0) {
+    flags = after.slice(0, dashIdx);
+    command = after.slice(dashIdx + 1);
+  } else {
+    flags = [];
+    let i = 0;
+    while (i < after.length && after[i].startsWith('-') && RUN_LEADING_FLAGS.has(after[i])) {
+      flags.push(after[i]);
+      i += 1;
+    }
+    command = after.slice(i);
+  }
+  return { detach: flags.includes('--detach'), command };
+}
+
+export async function runRun(mode: OutputMode, _rest: string[]): Promise<number> {
+  void _rest; // the command comes from raw argv, not the dispatcher's parse
+  const { detach, command } = extractRunCommand();
+
+  if (command.length === 0) {
+    throw new CliError(
+      'no_command',
+      'o8 run needs a command to execute.',
+      EXIT.INVALID_ARGS,
+      'usage: o8 run [--detach] [--] <command...>   e.g. o8 run python backtest.py',
+    );
+  }
+
+  const id = randomUUID().replace(/-/g, '').slice(0, 8);
+  const session = `cortex-run-${id}`;
+  const cwd = process.cwd();
+  const cmd = command.join(' ');
+
+  const base = join(tmpdir(), `o8-run-${id}`);
+  const logFile = `${base}.log`;
+  const exitFile = `${base}.exit`;
+  const goFile = `${base}.go`;
+  const envFile = `${base}.env`;
+  for (const f of [logFile, exitFile, goFile, envFile]) {
+    try { rmSync(f, { force: true }); } catch { /* fresh paths */ }
+  }
+
+  // Mirror the agent's full env into the pane (the tmux server may have stale
+  // env — at minimum PATH would be wrong → "command not found").
+  const envLines: string[] = [];
+  for (const [k, v] of Object.entries(process.env)) {
+    if (v == null) continue;
+    if (ENV_DENYLIST.has(k)) continue;
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(k)) continue;
+    envLines.push(`export ${k}=${sq(v)}`);
+  }
+  try { writeFileSync(envFile, envLines.join('\n')); } catch { /* best effort */ }
+
+  // A go-gate guarantees pipe-pane is attached before the command emits output,
+  // so nothing is missed (matters for short commands). The command runs via
+  // `"$@"` (tokens passed as positional args) so quoting survives intact — a
+  // joined-and-reshelled string would mangle anything with shell metachars.
+  const wrapper = [
+    `cd ${sq(cwd)} || exit 1`,
+    `[ -e ${sq(envFile)} ] && . ${sq(envFile)}`,
+    `while [ ! -e ${sq(goFile)} ]; do sleep 0.02; done`,
+    `rm -f ${sq(goFile)} ${sq(envFile)}`,
+    `"$@"`,
+    `__o8_ec=$?`,
+    `printf '%s' "$__o8_ec" > ${sq(exitFile)}`,
+    `exit $__o8_ec`,
+  ].join('; ');
+
+  try {
+    execFileSync(
+      'tmux',
+      ['new-session', '-d', '-s', session, '-x', '220', '-y', '50', 'sh', '-c', wrapper, 'o8run', ...command],
+      { timeout: 10_000, stdio: 'ignore' },
+    );
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    throw new CliError(
+      'tmux_spawn_failed',
+      `Could not start tmux session: ${msg}`,
+      EXIT.INVALID_ARGS,
+      'o8 run needs tmux on PATH to own the process PTY. Install tmux (brew install tmux).',
+    );
+  }
+
+  // Tee the pane's raw output to a log file, then release the gate.
+  try {
+    execFileSync('tmux', ['pipe-pane', '-o', '-t', session, `cat >> ${sq(logFile)}`], {
+      timeout: 5_000,
+      stdio: 'ignore',
+    });
+  } catch { /* without pipe-pane the operator can still attach live; agent just won't see stream */ }
+
+  let panePid: number | null = null;
+  try {
+    const out = execFileSync('tmux', ['list-panes', '-t', session, '-F', '#{pane_pid}'], {
+      encoding: 'utf-8',
+      timeout: 3_000,
+    }).trim();
+    panePid = Number.parseInt(out, 10) || null;
+  } catch { /* informational only */ }
+
+  writeFileSync(goFile, ''); // release — command starts now
+
+  // Resolve packet context (best effort) and register the run (soft — a down
+  // server must not block the agent's work; the command still runs in tmux).
+  const cfg = resolveConfig();
+  let packetId: string | null = null;
+  let laneId: string | null = null;
+  try {
+    const lane = await resolveLaneFromCwd();
+    if (lane) {
+      packetId = lane.packetId;
+      laneId = lane.laneId;
+    }
+  } catch { /* not in a packet worktree, or lanes API hiccup */ }
+
+  let registered = false;
+  try {
+    const res = await apiFetch<{ ok?: boolean }>(cfg, '/api/panel/managed-runs', {
+      method: 'POST',
+      body: { action: 'register', id, session, command: cmd, cwd, packetId, laneId, panePid, mode: detach ? 'detach' : 'stream' },
+    });
+    registered = Boolean(res.data?.ok);
+  } catch { /* server unreachable — degrade to run-without-visibility */ }
+
+  if (detach) {
+    if (mode.human) {
+      printHumanHeading(`o8 run (detached) — ${session}`);
+      printHumanKv([
+        ['command', cmd],
+        ['cwd', cwd],
+        ['session', session],
+        ['watchable', registered ? 'yes (o8 ports menu → Agent)' : 'no (o8 server unreachable)'],
+      ]);
+    } else {
+      printJson({
+        schema: 'o8/cli/run/v1',
+        mode: 'detach',
+        id,
+        session,
+        command: cmd,
+        cwd,
+        packetId,
+        laneId,
+        registered,
+      });
+    }
+    return 0;
+  }
+
+  // Stream mode: this CLI's stdout IS the command's output. o8 metadata → stderr.
+  process.stderr.write(`[o8 run] ${session} — watch live in o8 (ports menu → Agent)\n`);
+
+  let fd: number | null = null;
+  let pos = 0;
+  const pump = () => {
+    if (fd === null) {
+      if (!existsSync(logFile)) return;
+      try { fd = openSync(logFile, 'r'); } catch { fd = null; return; }
+    }
+    try {
+      const size = fstatSync(fd).size;
+      if (size <= pos) return;
+      const len = size - pos;
+      const buf = Buffer.allocUnsafe(len);
+      const n = readSync(fd, buf, 0, len, pos);
+      if (n > 0) {
+        process.stdout.write(buf.subarray(0, n));
+        pos += n;
+      }
+    } catch { /* transient read race — retry next tick */ }
+  };
+  const sessionAlive = (): boolean => {
+    try {
+      execFileSync('tmux', ['has-session', '-t', session], { timeout: 3_000, stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  let tick = 0;
+  let exitFound = false;
+  for (;;) {
+    pump();
+    if (existsSync(exitFile)) { exitFound = true; break; }
+    tick += 1;
+    // Fallback (~2s): session vanished without writing exit = killed externally.
+    if (tick % 13 === 0 && !sessionAlive()) break;
+    await sleep(150);
+  }
+  // Final drain — pipe-pane's `cat` flushes async.
+  for (let i = 0; i < 6; i += 1) { await sleep(50); pump(); }
+
+  let exitCode = 0;
+  if (exitFound) {
+    try {
+      const parsed = Number.parseInt(readFileSync(exitFile, 'utf-8').trim(), 10);
+      exitCode = Number.isNaN(parsed) ? 0 : parsed;
+    } catch { exitCode = 0; }
+  } else {
+    exitCode = 130; // session killed out from under us
+  }
+
+  if (fd !== null) { try { closeSync(fd); } catch { /* noop */ } }
+  for (const f of [logFile, exitFile, goFile, envFile]) {
+    try { rmSync(f, { force: true }); } catch { /* noop */ }
+  }
+
+  try {
+    await apiFetch(cfg, '/api/panel/managed-runs', {
+      method: 'POST',
+      body: { action: 'finish', session, exitCode },
+    });
+  } catch { /* best effort */ }
+
+  process.stderr.write(`[o8 run] ${session} exited ${exitCode}\n`);
+  return exitCode;
+}

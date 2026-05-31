@@ -20,6 +20,7 @@ import { runDoctor } from './commands/doctor.js';
 import { runCortexObserve } from './commands/cortex.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runStatus } from './commands/status.js';
+import { runRun } from './commands/run.js';
 import { runVersion } from './commands/version.js';
 import { runPacketInfo } from './commands/packet/info.js';
 import { runPacketHeartbeat } from './commands/packet/heartbeat.js';
@@ -72,6 +73,12 @@ function parseArgs(argv: string[]): ParsedArgs {
   let i = 0;
   while (i < argv.length) {
     const tok = argv[i];
+    if (tok === '--') {
+      // End-of-options: everything after `--` is positional (used by `o8 run`
+      // to pass a command containing its own flags). Stop interpreting flags.
+      rest.push(...argv.slice(i + 1));
+      break;
+    }
     if (tok === '--human') human = true;
     else if (tok === '--json') jsonExplicit = true;
     else if (tok === '--verbose' || tok === '-v') verbose = true;
@@ -92,6 +99,7 @@ commands:
   version              CLI version + connected server version
   doctor               verify port + token resolution, ping server
   status               snapshot: running packets, lanes, merges, approvals
+  run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   task list            current task pool grouped by ready/running/review/etc.
@@ -146,6 +154,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       return runDoctor(args.mode, args.rest);
     case 'status':
       return runStatus(args.mode);
+    case 'run':
+      return runRun(args.mode, args.rest);
     case 'cortex': {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
       throw unknownSubcommandError('cortex', secondary);
