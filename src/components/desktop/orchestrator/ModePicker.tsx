@@ -23,6 +23,7 @@ import { memo, useCallback, useMemo, useState } from 'react';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
 import { useExperimentalGeminiFlag } from '@/lib/operator/use-experimental-gemini';
+import { useExperimentalChatFlag } from '@/lib/operator/use-experimental-chat';
 import type { ChatModelId } from './chat-models';
 
 export type { ChatModelId, OrchestrationMode };
@@ -63,6 +64,7 @@ function ModePickerBase({
 }: ModePickerProps) {
   const opencodeEnabled = useExperimentalOpencodeFlag();
   const geminiEnabled = useExperimentalGeminiFlag();
+  const chatEnabled = useExperimentalChatFlag();
   const visibleRuntimes = useMemo(
     () => SINGLE_RUNTIMES.filter((r) =>
       (r.id !== 'opencode' || opencodeEnabled) && (r.id !== 'gemini' || geminiEnabled),
@@ -180,18 +182,20 @@ function ModePickerBase({
           </div>
         ) : null}
       </div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <ModeCard
-          active={selectedMode === 'chat'}
-          title="Chat"
-          copy={onSpawnChatTab
-            ? 'Spawn a new chat tab — talk to o8, switch models from inside the tab.'
-            : 'Talk to o8 about anything. No dispatch.'}
-          tag="model picker in tab"
-          onClick={handleClickChat}
-          glyph={<ChatGlyph />}
-        />
-      </div>
+      {chatEnabled ? (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          <ModeCard
+            active={selectedMode === 'chat'}
+            title="Chat"
+            copy={onSpawnChatTab
+              ? 'Spawn a new chat tab — talk to o8, switch models from inside the tab.'
+              : 'Talk to o8 about anything. No dispatch.'}
+            tag="model picker in tab"
+            onClick={handleClickChat}
+            glyph={<ChatGlyph />}
+          />
+        </div>
+      ) : null}
     </div>
   );
 }

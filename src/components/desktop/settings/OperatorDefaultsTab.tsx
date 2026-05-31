@@ -39,6 +39,7 @@ interface OperatorDefaults {
   defaultDispatchRuntime: DispatchRuntime;
   experimentalOpencode: boolean;
   experimentalGemini: boolean;
+  experimentalChat: boolean;
   classAComposer: ClassAComposer;
   inAppOrchestratorEnabled: boolean;
 }
@@ -739,6 +740,21 @@ export function OperatorDefaultsTab() {
                 if (!next && values.defaultDispatchRuntime === 'gemini') {
                   void updateField('defaultDispatchRuntime', 'codex');
                 }
+              }}
+            />
+          }
+        />
+        <Row
+          label="Experimental: Chat tab"
+          description="Show the casual o8 Default Chat tab in the new-tab drawer + mode picker. Off by default for alpha — the orchestrator is the only conversational surface. Fully wired; flip on for free-compute chat when people need it."
+          source={sources.experimentalChat}
+          disabledReason={sources?.experimentalChat === 'env' ? envDisabledReason : undefined}
+          right={
+            <SettingsToggleButton
+              checked={values.experimentalChat}
+              disabled={sources?.experimentalChat === 'env' || busyField === 'experimentalChat'}
+              onChange={(next) => {
+                void updateField('experimentalChat', next);
               }}
             />
           }
