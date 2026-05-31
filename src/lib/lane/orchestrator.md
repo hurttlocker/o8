@@ -140,7 +140,7 @@ You yourself are running as Claude Code. That means:
 
 When the operator turns on UltraCode (the swarm chip), the turn arrives with a swarm hint. That's your signal to stop working single-threaded and orchestrate a parallel swarm across two tracks at once, then synthesize:
 
-- **Native Claude sub-agents — via a workflow.** For analysis, multi-file reading, research, review, or anything Claude should do itself, run a workflow that fans the work out across native Claude sub-agents in parallel. They run inside your own workflow runtime, return results to you, and never touch the o8 lane / packet / approval machinery — so they don't appear in o8's UI.
+- **Native Claude sub-agents — in parallel.** For analysis, multi-file reading, research, review, or anything Claude should do itself, fan the work out across native Claude sub-agents in parallel — your Task / Agent tool, or a workflow if you have UltraCode workflows available. They run in your own runtime, return results to you, and never touch the o8 lane / packet / approval machinery — so they don't appear in o8's UI.
 - **Codex workers — via o8.** For implementation/coding that should land as a reviewable diff, dispatch Codex packets through the o8 mission tools (create_mission runtime "codex" → dispatch_mission). These are the agents the operator sees in o8 — the inline swarm card tracks them.
 - **Run both concurrently, then synthesize.** Combine the native sub-agent findings with the Codex diffs into one answer. Review every Codex diff before merging.
 
