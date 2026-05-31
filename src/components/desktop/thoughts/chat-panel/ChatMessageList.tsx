@@ -105,7 +105,10 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       overflowY: 'auto',
       paddingTop: 14,
       paddingRight: 'var(--cortex-chat-gutter)',
-      paddingBottom: 12,
+      // Breathing room before the composer — wider than the 18px inter-message
+      // gap so the last item (e.g. the Mission complete card) floats above the
+      // composer instead of sitting flush against it.
+      paddingBottom: 24,
       paddingLeft: 'var(--cortex-chat-gutter)',
       display: 'flex',
       flexDirection: 'column',
