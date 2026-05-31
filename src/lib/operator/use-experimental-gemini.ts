@@ -1,3 +1,9 @@
+/**
+ * Experimental Gemini operator flag.
+ *
+ * When off, Gemini stays hidden from the dispatch picker and CLI runtime pickers.
+ * Off by default for v1, mirroring the sibling flag in `use-experimental-opencode.ts`.
+ */
 'use client';
 
 import { useEffect, useState } from 'react';
