@@ -4,6 +4,7 @@ import {
   finishManagedRun,
   listManagedRuns,
 } from '@/lib/runtimes/managed-runs/registry';
+import { killTmuxSession } from '@/lib/terminal/tmux';
 import type { ManagedRunRecord } from '@/lib/runtimes/managed-runs/types';
 
 export const runtime = 'nodejs';
@@ -23,7 +24,7 @@ export async function GET() {
 }
 
 type RegisterBody = {
-  action?: 'register' | 'finish';
+  action?: 'register' | 'finish' | 'kill';
   id?: string;
   session?: string;
   command?: string;
@@ -36,7 +37,7 @@ type RegisterBody = {
   exitCode?: number;
 };
 
-/** POST — register a new run (default) or finish an existing one (action:'finish'). */
+/** POST — register a run (default), finish one (action:'finish'), or kill one (action:'kill'). */
 export async function POST(req: Request) {
   let body: RegisterBody;
   try {
@@ -52,6 +53,16 @@ export async function POST(req: Request) {
     }
     const rec = finishManagedRun(key, typeof body.exitCode === 'number' ? body.exitCode : null);
     return NextResponse.json({ ok: Boolean(rec), run: rec });
+  }
+
+  if (body.action === 'kill') {
+    const session = body.session;
+    if (!session) {
+      return NextResponse.json({ ok: false, error: 'missing_session' }, { status: 400 });
+    }
+    await killTmuxSession(session); // best-effort; no-op if already gone
+    const rec = finishManagedRun(session, null);
+    return NextResponse.json({ ok: true, run: rec });
   }
 
   if (!body.id || !body.session || !body.command || !body.cwd) {

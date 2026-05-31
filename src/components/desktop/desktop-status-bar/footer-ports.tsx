@@ -220,6 +220,20 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
     }
   };
 
+  // Stop a running o8 run (kills its tmux session). Optimistically drop it
+  // from local state, then fire the lifecycle event so every surface refetches.
+  const killRun = (session: string) => {
+    setRuns((prev) => prev.filter((r) => r.session !== session));
+    setPorts((prev) => prev.filter((p) => p.agentSession !== session));
+    fetch('/api/panel/managed-runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'kill', session }),
+    })
+      .catch(() => {})
+      .finally(() => window.dispatchEvent(new Event('o8:agent-lifecycle')));
+  };
+
   // ── Buckets ──
   const agentPorts = ports.filter((p) => p.category === 'agent');
   const browserPorts = ports.filter((p) => p.category === 'browser');
@@ -334,6 +348,38 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
     );
   };
 
+  // Wrap an agent watch-row with a trailing stop button (kills the run).
+  const withStop = (watchNode: ReactNode, session: string, rowKey: string) => (
+    <div key={rowKey} style={{ display: 'flex', alignItems: 'center', gap: 2 }}>
+      <div style={{ flex: 1, minWidth: 0 }}>{watchNode}</div>
+      <button
+        type="button"
+        title="Stop run"
+        aria-label="Stop run"
+        onClick={(event) => { event.stopPropagation(); killRun(session); }}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          flexShrink: 0,
+          borderWidth: 0,
+          borderRadius: 6,
+          background: 'transparent',
+          color: 'var(--t-text-faint)',
+          cursor: 'pointer',
+        }}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-danger-soft, var(--t-panel-hover))'; event.currentTarget.style.color = 'var(--t-danger)'; }}
+        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; event.currentTarget.style.color = 'var(--t-text-faint)'; }}
+      >
+        <svg width={9} height={9} viewBox="0 0 24 24" style={{ display: 'block' }} aria-hidden="true">
+          <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
+        </svg>
+      </button>
+    </div>
+  );
+
   return (
     <div
       ref={anchorRef}
@@ -418,8 +464,8 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
               {agentCount > 0 ? (
                 <>
                   {showLabels ? <SectionLabel>Agent</SectionLabel> : null}
-                  {agentPorts.map(renderPortButton)}
-                  {portlessRuns.map(renderRunButton)}
+                  {agentPorts.map((p) => withStop(renderPortButton(p), p.agentSession ?? '', `ap-${p.port}`))}
+                  {portlessRuns.map((r) => withStop(renderRunButton(r), r.session, `ar-${r.session}`))}
                 </>
               ) : null}
               {browserPorts.length > 0 ? (

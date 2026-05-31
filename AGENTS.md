@@ -39,6 +39,7 @@ o8 doctor [--reap]                     # verify port/token resolution + ping; --
 # Run a long process the operator can WATCH LIVE (servers, backtests, scripts)
 o8 run <cmd...>                        # run inside an o8-owned terminal; streams output to you AND lets the operator attach a live view
 o8 run --detach <cmd...>               # fire-and-register (servers): returns immediately, leaves it running
+o8 run --list                          # list managed runs (running + recent, with exit codes)
 o8 run -- <cmd...>                     # put -- before the command when it has its own flags (e.g. o8 run -- pytest -q)
 
 # Packet (your dispatched work) — most auto-resolve the lane from cwd
