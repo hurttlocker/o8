@@ -131,7 +131,7 @@ export function ProjectForm({
     paddingRight: 12,
     paddingBottom: 8,
     paddingLeft: 12,
-    borderRadius: 8,
+    borderRadius: 12,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: RAMS_HAIRLINE,

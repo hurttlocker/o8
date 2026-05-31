@@ -76,14 +76,14 @@ export const MONO_FONT_STACK = '"iA Writer Mono", "JetBrains Mono", ui-monospace
 export const SETTINGS_CONTENT_MAX_WIDTH = 1400;
 
 // Rams × o8-site editorial tokens — paper, ink, one orange. See o8_design_language.md.
-export const RAMS_ACCENT = '#FF5A1F';
+export const RAMS_ACCENT = '#1D4ED8';
 export const RAMS_HAIRLINE_SOFT = 'rgba(17, 17, 17, 0.08)';
 export const RAMS_HAIRLINE = 'rgba(17, 17, 17, 0.18)';
 export const RAMS_INK_QUIET = 'var(--t-text-muted, #9A968E)';
 export const RAMS_CONTROL_BG = 'var(--t-bg-card, rgba(17, 17, 17, 0.035))';
 export const RAMS_CONTROL_BORDER = 'var(--t-panel-border, rgba(17, 17, 17, 0.14))';
-export const RAMS_CONTROL_ACTIVE_BG = 'rgba(255, 90, 31, 0.1)';
-export const RAMS_CONTROL_ACTIVE_BORDER = 'rgba(255, 90, 31, 0.32)';
+export const RAMS_CONTROL_ACTIVE_BG = 'rgba(29, 78, 216, 0.1)';
+export const RAMS_CONTROL_ACTIVE_BORDER = 'rgba(29, 78, 216, 0.32)';
 
 // ── Helpers ──
 
@@ -302,7 +302,7 @@ export function TabButton({ label, icon, active, onClick, comingSoon = false }: 
         paddingRight: 12,
         paddingBottom: 9,
         paddingLeft: 14,
-        borderRadius: 8,
+        borderRadius: 12,
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: active ? RAMS_CONTROL_ACTIVE_BORDER : 'transparent',
@@ -459,7 +459,7 @@ export function SettingsToggleButton({
         minWidth: 78,
         paddingLeft: 14,
         paddingRight: 14,
-        borderRadius: 8,
+        borderRadius: 12,
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: checked ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
@@ -482,9 +482,9 @@ export function SettingsToggleButton({
         style={{
           width: 7,
           height: 7,
-          borderRadius: 2,
+          borderRadius: 3.5,
           background: checked ? RAMS_ACCENT : 'var(--t-text-faint)',
-          boxShadow: checked ? '0 0 0 3px rgba(255, 90, 31, 0.12)' : 'none',
+          boxShadow: checked ? '0 0 0 3px rgba(29, 78, 216, 0.12)' : 'none',
           flexShrink: 0,
         }}
       />
@@ -535,7 +535,7 @@ export function RamsButton({
         minHeight: 44,
         paddingLeft: 14,
         paddingRight: 14,
-        borderRadius: 8,
+        borderRadius: 12,
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: disabled ? RAMS_HAIRLINE_SOFT : border,
@@ -772,7 +772,7 @@ export function QuickLink({
         paddingBottom: 7,
         paddingLeft: 14,
         paddingRight: 14,
-        borderRadius: 8,
+        borderRadius: 12,
         border: '1px solid var(--t-panel-border)',
         background: 'var(--t-panel)',
         color: 'var(--t-text-secondary)',
