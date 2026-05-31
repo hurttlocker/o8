@@ -8,6 +8,7 @@ import {
 import { THEME_ACCENT, THEME_ACCENT_SOFT } from '@/components/desktop/workspace-terminal/constants';
 import { PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
 import { useWorkspaceSpawn } from '@/components/desktop/workspace-terminal/spawn-context';
+import { useExperimentalChatFlag } from '@/lib/operator/use-experimental-chat';
 import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/types';
 
 interface WorkspaceLaunchPickerProps {
@@ -26,6 +27,8 @@ function WorkspaceLaunchPickerBase({
   const [pickerOpen, setPickerOpen] = useState(false);
   const pickerRef = useRef<HTMLDivElement>(null);
   const spawnHandlers = useWorkspaceSpawn();
+  // Alpha: the casual "Chat" (llm-chat) option is hidden unless experimentalChat.
+  const experimentalChat = useExperimentalChatFlag();
 
   useEffect(() => {
     if (!pickerOpen) return undefined;
@@ -129,23 +132,26 @@ function WorkspaceLaunchPickerBase({
             </div>
           </button>
 
-          <div style={dividerStyle} />
-
-          <button
-            type="button"
-            onClick={handleNewChat}
-            style={menuButtonStyle}
-            onMouseEnter={highlightOn}
-            onMouseLeave={resetOn}
-          >
-            <span style={iconSlotStyle}>
-              <MessageSquare size={14} style={{ color: THEME_ACCENT }} />
-            </span>
-            <div>
-              <div style={{ fontWeight: 500 }}>Chat</div>
-              <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Direct LLM conversation</div>
-            </div>
-          </button>
+          {experimentalChat ? (
+            <>
+              <div style={dividerStyle} />
+              <button
+                type="button"
+                onClick={handleNewChat}
+                style={menuButtonStyle}
+                onMouseEnter={highlightOn}
+                onMouseLeave={resetOn}
+              >
+                <span style={iconSlotStyle}>
+                  <MessageSquare size={14} style={{ color: THEME_ACCENT }} />
+                </span>
+                <div>
+                  <div style={{ fontWeight: 500 }}>Chat</div>
+                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Direct LLM conversation</div>
+                </div>
+              </button>
+            </>
+          ) : null}
 
           <div style={dividerStyle} />
 

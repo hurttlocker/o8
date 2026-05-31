@@ -62,6 +62,13 @@ export interface OperatorDefaults {
    */
   experimentalGemini: boolean;
   /**
+   * Off by default for alpha. The casual `llm-chat` ("o8 Default" assistant)
+   * tab is fully wired but hidden from the UI — the orchestrator is the only
+   * conversational surface until this flips on. Mirrors `experimentalGemini`:
+   * existing llm-chat tabs + the model picker stay wired, just unsurfaced.
+   */
+  experimentalChat: boolean;
+  /**
    * Q&A Class A composer model (#971). Production-only knob — eval mode keeps
    * its OpenRouter Sonnet 4.6 path either way.
    */
@@ -100,6 +107,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   defaultDispatchRuntime: 'codex',
   experimentalOpencode: false,
   experimentalGemini: false,
+  experimentalChat: false,
   classAComposer: 'auto',
   // ON by default post-#1097. Subscription pool, not Agent SDK pool. See the
   // docstring above on the field for the rationale.
@@ -211,6 +219,13 @@ function envExperimentalGemini(): boolean | null {
   return null;
 }
 
+function envExperimentalChat(): boolean | null {
+  const raw = process.env.O8_EXPERIMENTAL_CHAT;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 function envClassAComposer(): ClassAComposer | null {
   const raw = process.env.O8_CLASS_A_COMPOSER?.trim();
   if (raw && isClassAComposer(raw)) return raw;
@@ -237,6 +252,7 @@ interface StoredOperatorDefaults {
   defaultDispatchRuntime?: OrchestratorRuntime;
   experimentalOpencode?: boolean;
   experimentalGemini?: boolean;
+  experimentalChat?: boolean;
   classAComposer?: ClassAComposer;
   inAppOrchestratorEnabled?: boolean;
 }
@@ -289,6 +305,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (typeof stored.experimentalGemini === 'boolean') {
     result.experimentalGemini = stored.experimentalGemini;
   }
+  if (typeof stored.experimentalChat === 'boolean') {
+    result.experimentalChat = stored.experimentalChat;
+  }
   if (isClassAComposer(stored.classAComposer)) {
     result.classAComposer = stored.classAComposer;
   }
@@ -311,6 +330,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envRuntime = envDefaultDispatchRuntime();
   const envOpencode = envExperimentalOpencode();
   const envGemini = envExperimentalGemini();
+  const envChat = envExperimentalChat();
   const envComposer = envClassAComposer();
   const envInApp = envInAppOrchestratorEnabled();
 
@@ -327,6 +347,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     defaultDispatchRuntime: envRuntime ?? fileValues.defaultDispatchRuntime ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchRuntime,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
+    experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled:
       envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled,
@@ -345,6 +366,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntime !== undefined ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
+    experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
       envInApp !== null ? 'env' : fileValues.inAppOrchestratorEnabled !== undefined ? 'file' : 'default',
@@ -437,6 +459,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.experimentalGemini !== undefined) {
     stored.experimentalGemini = Boolean(update.experimentalGemini);
+  }
+  if (update.experimentalChat !== undefined) {
+    stored.experimentalChat = Boolean(update.experimentalChat);
   }
   if (update.classAComposer !== undefined) {
     if (!isClassAComposer(update.classAComposer)) {
