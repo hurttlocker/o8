@@ -36,6 +36,11 @@ o8 status                              # global fleet snapshot (running packets,
 o8 version                             # CLI + connected server version
 o8 doctor [--reap]                     # verify port/token resolution + ping; --reap clears zombie lanes
 
+# Run a long process the operator can WATCH LIVE (servers, backtests, scripts)
+o8 run <cmd...>                        # run inside an o8-owned terminal; streams output to you AND lets the operator attach a live view
+o8 run --detach <cmd...>               # fire-and-register (servers): returns immediately, leaves it running
+o8 run -- <cmd...>                     # put -- before the command when it has its own flags (e.g. o8 run -- pytest -q)
+
 # Packet (your dispatched work) — most auto-resolve the lane from cwd
 o8 packet info                         # current packet metadata (id, branch, base, runtime, recent events)
 o8 packet scope [packet-id]            # one-call worker context: file ceiling, allowed/blocked paths, directives, related-packet overlap (auto-resolves from cwd)
@@ -78,6 +83,14 @@ o8 spec suggest  --repo <path> --kind add|del|sub --anchor "<text>" [--text "<ad
 Output is JSON by default (pass `--human` for pretty ANSI). Errors come back as JSON with a stable schema + an exit code (1 invalid args, 2 connection refused, 3 unauthorized, 4 not found, 5 conflict). Calls are gated by the loopback + ws-token guard that protects the o8 API — they only work locally, no auth needed.
 
 If a command exits 127 (`command not found`), o8.app probably hasn't run yet on this machine, or the symlink was removed; fall back to typecheck + commit and the heal-bot will pick up signals from there.
+
+## Running things the operator can see (`o8 run`)
+
+When you start a process the operator might want to watch — a dev server, a backtest, a long test suite, a build — run it through `o8 run` instead of bare-exec'ing it. `o8 run` owns the process's terminal (a real PTY in an o8 session), so its raw stdout streams back to you exactly as if you'd run it directly **and** the operator can pop open a live, read-only view of it from the o8 ports menu (Agent bucket). A bare-exec'd child's output can't be tapped after the fact, so this is the only way the operator gets to see it.
+
+- Finite jobs (backtests, test runs): `o8 run -- pytest -q` — it streams output and blocks until the command exits, propagating the exit code.
+- Servers / daemons you want to leave running: `o8 run --detach -- npm run dev` — returns immediately; the operator attaches whenever.
+- It's opt-in: only reach for it when live visibility helps. Quick one-shots don't need it.
 
 ## Contributing to the brain (`o8 cortex observe`)
 
