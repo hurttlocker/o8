@@ -35,6 +35,7 @@ import { printJson, printHumanHeading, printHumanKv, type OutputMode } from '../
 /** Flags consumed by `o8 run` itself (everything else is the command). */
 const RUN_LEADING_FLAGS = new Set([
   '--detach',
+  '--list',
   '--human',
   '--json',
   '--verbose',
@@ -59,7 +60,7 @@ function sq(value: string): string {
  * arbitrary command — re-parse from process.argv. Supports both
  * `o8 run <cmd...>` and `o8 run [--detach] -- <cmd...>`.
  */
-function extractRunCommand(): { detach: boolean; command: string[] } {
+function extractRunCommand(): { detach: boolean; list: boolean; command: string[] } {
   const argv = process.argv.slice(2);
   const runIdx = argv.indexOf('run');
   const after = runIdx >= 0 ? argv.slice(runIdx + 1) : [];
@@ -79,12 +80,44 @@ function extractRunCommand(): { detach: boolean; command: string[] } {
     }
     command = after.slice(i);
   }
-  return { detach: flags.includes('--detach'), command };
+  return { detach: flags.includes('--detach'), list: flags.includes('--list'), command };
+}
+
+interface ManagedRunRow {
+  id: string;
+  session: string;
+  command: string;
+  status: 'running' | 'finished' | 'gone';
+  exitCode?: number | null;
+  mode?: string;
+}
+
+/** `o8 run --list` — show managed runs (running + recent finished w/ exit codes). */
+async function runRunList(mode: OutputMode): Promise<number> {
+  const cfg = resolveConfig();
+  const res = await apiFetch<{ runs?: ManagedRunRow[] }>(cfg, '/api/panel/managed-runs');
+  const runs = res.data?.runs ?? [];
+  if (mode.human) {
+    printHumanHeading(`o8 runs (${cfg.apiBase})`);
+    if (runs.length === 0) {
+      process.stdout.write('  (no managed runs)\n');
+    } else {
+      printHumanKv(runs.map((r) => [
+        r.session,
+        `${r.status}${typeof r.exitCode === 'number' ? ` (exit ${r.exitCode})` : ''} · ${r.command}`,
+      ]));
+    }
+  } else {
+    printJson({ schema: 'o8/cli/run-list/v1', runs });
+  }
+  return 0;
 }
 
 export async function runRun(mode: OutputMode, _rest: string[]): Promise<number> {
   void _rest; // the command comes from raw argv, not the dispatcher's parse
-  const { detach, command } = extractRunCommand();
+  const { detach, list, command } = extractRunCommand();
+
+  if (list) return runRunList(mode);
 
   if (command.length === 0) {
     throw new CliError(

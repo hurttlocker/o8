@@ -100,6 +100,7 @@ commands:
   doctor               verify port + token resolution, ping server
   status               snapshot: running packets, lanes, merges, approvals
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
+  run --list           list managed runs (running + recent, with exit codes)
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   task list            current task pool grouped by ready/running/review/etc.

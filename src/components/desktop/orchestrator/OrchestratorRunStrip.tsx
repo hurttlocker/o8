@@ -58,6 +58,17 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
     window.dispatchEvent(new CustomEvent('o8:open-agent-terminal', { detail: { session } }));
   };
 
+  const stop = (session: string) => {
+    setRuns((prev) => prev.filter((r) => r.session !== session));
+    fetch('/api/panel/managed-runs', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'kill', session }),
+    })
+      .catch(() => {})
+      .finally(() => window.dispatchEvent(new Event('o8:agent-lifecycle')));
+  };
+
   return (
     <div
       style={{
@@ -89,43 +100,79 @@ export function OrchestratorRunStrip({ active }: { active: boolean }) {
         Running
       </span>
       {runs.map((run) => (
-        <button
+        <span
           key={run.session}
-          type="button"
-          onClick={() => watch(run.session)}
-          title={`Watch the live terminal: ${run.command}`}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 6,
             height: 24,
-            paddingTop: 0,
-            paddingRight: 9,
-            paddingBottom: 0,
-            paddingLeft: 8,
             borderRadius: 7,
             borderWidth: 1,
             borderStyle: 'solid',
             borderColor: 'var(--t-accent-border)',
             background: 'var(--t-accent-soft)',
-            color: 'var(--t-accent)',
-            cursor: 'pointer',
-            fontSize: 11.5,
-            fontWeight: 500,
-            letterSpacing: '-0.005em',
-            fontFamily: 'var(--font-sans-system)',
-            maxWidth: 320,
+            maxWidth: 340,
             flexShrink: 0,
-            transition: 'background 160ms cubic-bezier(0.22, 1, 0.36, 1)',
+            overflow: 'hidden',
           }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-accent-soft-strong, var(--t-accent-soft))'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'var(--t-accent-soft)'; }}
         >
-          <TerminalIcon width={12} height={12} color="var(--t-accent)" strokeWidth={2} style={{ flexShrink: 0 }} />
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {shortLabel(run.command)}
-          </span>
-        </button>
+          <button
+            type="button"
+            onClick={() => watch(run.session)}
+            title={`Watch the live terminal: ${run.command}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              height: '100%',
+              paddingTop: 0,
+              paddingRight: 8,
+              paddingBottom: 0,
+              paddingLeft: 8,
+              borderWidth: 0,
+              background: 'transparent',
+              color: 'var(--t-accent)',
+              cursor: 'pointer',
+              fontSize: 11.5,
+              fontWeight: 500,
+              letterSpacing: '-0.005em',
+              fontFamily: 'var(--font-sans-system)',
+              minWidth: 0,
+            }}
+          >
+            <TerminalIcon width={12} height={12} color="var(--t-accent)" strokeWidth={2} style={{ flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {shortLabel(run.command)}
+            </span>
+          </button>
+          <button
+            type="button"
+            onClick={() => stop(run.session)}
+            title={`Stop run: ${run.command}`}
+            aria-label="Stop run"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              width: 22,
+              height: '100%',
+              flexShrink: 0,
+              borderWidth: 0,
+              borderLeftWidth: 1,
+              borderLeftStyle: 'solid',
+              borderLeftColor: 'var(--t-accent-border)',
+              background: 'transparent',
+              color: 'var(--t-accent)',
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-danger-soft, var(--t-accent-soft-strong))'; e.currentTarget.style.color = 'var(--t-danger)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; e.currentTarget.style.color = 'var(--t-accent)'; }}
+          >
+            <svg width={8} height={8} viewBox="0 0 24 24" style={{ display: 'block' }} aria-hidden="true">
+              <rect x="5" y="5" width="14" height="14" rx="2" fill="currentColor" />
+            </svg>
+          </button>
+        </span>
       ))}
     </div>
   );
