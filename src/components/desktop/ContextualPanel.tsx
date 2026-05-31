@@ -62,6 +62,8 @@ export interface ContextualPanelHandle {
   runCommand: (command: string) => void;
   /** Open or focus one of the bottom panel's non-terminal utility surfaces. */
   openSurface: (surface: BottomPanelSurfaceKind) => void;
+  /** Attach a live, read-only view of an o8-owned run session (`o8 run`). */
+  attachLiveAgentTerminal: (session: string) => void;
 }
 
 export type BottomPanelSurfaceKind = 'files' | 'side-chat' | 'browser' | 'review' | 'terminal';
@@ -199,8 +201,10 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalDetach: (sessionName: string) => void;
   visible: boolean;
+  /** Watch-only: render live output but never forward keystrokes to the PTY. */
+  readOnly?: boolean;
 }>(function BottomXtermPanel(
-  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible },
+  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, readOnly = false },
   ref,
 ) {
   const { themeId } = useTheme();
@@ -280,6 +284,8 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
           allowTransparency: false,
           allowProposedApi: true,
           scrollback: 10000,
+          // Watch posture: a read-only agent-run view never captures input.
+          disableStdin: readOnly,
           theme: buildXtermTheme(),
         });
 
@@ -311,7 +317,10 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
         fitAddonRef.current = fitAddon;
 
         sendTerminalAttach(tmuxSession, term.cols, term.rows);
-        term.onData((data) => { sendTerminalInput(tmuxSession, data); });
+        // Read-only (agent-run) views watch without typing into the agent's PTY.
+        if (!readOnly) {
+          term.onData((data) => { sendTerminalInput(tmuxSession, data); });
+        }
 
         const observer = new ResizeObserver(() => {
           if (disposed || !fitAddonRef.current) return;
@@ -337,7 +346,7 @@ const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       if (termRef.current) { termRef.current.dispose(); termRef.current = null; }
       fitAddonRef.current = null;
     };
-  }, [tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach]);
+  }, [tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, readOnly]);
 
   // Live-update xterm theme when the app theme switches — no dispose/recreate.
   useEffect(() => {
@@ -428,6 +437,8 @@ interface ContextualPanelTab {
   kind: BottomPanelSurfaceKind;
   agentId?: CliAgent['id'];
   tmuxSession: string | null;
+  /** true for `o8 run` agent-run views — live output, input guarded. */
+  readOnly?: boolean;
   createdAt: number;
   lastActivity: number;
 }
@@ -773,6 +784,29 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
         createBottomTab(CLI_AGENTS[0], command);
       },
       openSurface,
+      attachLiveAgentTerminal: (session: string) => {
+        setAddMenuOpen(false);
+        // Already showing this run? Just focus it.
+        const existing = tabsRef.current.find((entry) => entry.kind === 'terminal' && entry.tmuxSession === session);
+        if (existing) { setActiveTabId(existing.id); return; }
+        tabCountRef.current += 1;
+        const now = Date.now();
+        const shortId = session.startsWith('cortex-run-')
+          ? session.slice('cortex-run-'.length, 'cortex-run-'.length + 6)
+          : session.slice(0, 6);
+        // Preset tmuxSession (non-null) → BottomXtermPanel auto-attaches on mount.
+        const nextTab: ContextualPanelTab = {
+          id: `bottom-agent-${tabCountRef.current}`,
+          label: `run·${shortId}`,
+          kind: 'terminal',
+          tmuxSession: session,
+          readOnly: true,
+          createdAt: now,
+          lastActivity: now,
+        };
+        setTabs((prev) => [...prev, nextTab]);
+        setActiveTabId(nextTab.id);
+      },
     }), [activeTabId, createBottomTab, openSurface, sendTerminalInput]);
 
     const handleCreateTab = useCallback((agent: CliAgent) => {
@@ -1151,6 +1185,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                   sendTerminalResize={sendTerminalResize}
                   sendTerminalDetach={sendTerminalDetach}
                   visible={tab.id === activeTabId}
+                  readOnly={tab.readOnly}
                 />
               ) : tab.kind === 'terminal' ? (
                 <div
