@@ -185,6 +185,7 @@ Dispatched agents (codex in isolated worktrees) have **the `o8` CLI on PATH** �
 - `o8 packet scope <id>` — agent fetches its own file ceiling + allowed/blocked paths instead of you reading the packet manually
 - `o8 lane touches --path <file>` — agent self-detects parallel-edit conflicts before writing
 - `o8 cortex observe --kind gotcha --text "..."` — agent writes lessons learned back to Cortex memory mid-run
+- `o8 run <cmd>` — agent runs servers / backtests / long jobs in an o8-owned terminal the operator can watch live. If you want the operator to be able to see a long-running process, tell the agent to launch it via `o8 run` (or `o8 run --detach` for servers) rather than a bare shell exec.
 
 You DO NOT need to read these files for the agent. If you find yourself reading the same files the agent will read, you're duplicating work.
 
