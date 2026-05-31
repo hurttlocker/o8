@@ -125,8 +125,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onTogglePermission?: () => void;
   /**
    * UltraCode / swarm tier (per-tab). When on, the orchestrator turn carries a
-   * hint to fan work out to a parallel Codex + Gemini swarm, and live agent
-   * cards surface inline in the transcript.
+   * hint to fan work out in parallel — native Claude sub-agents via a workflow
+   * plus Codex workers via o8 — and live agent cards surface inline in the
+   * transcript.
    */
   swarmEnabled?: boolean;
   onSetSwarm?: (enabled: boolean) => void;

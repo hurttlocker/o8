@@ -3,11 +3,13 @@
 /**
  * SwarmStatusCard — live, inline crew monitor.
  *
- * When the orchestrator fans a turn out to a parallel Codex + Gemini swarm
- * (UltraCode), this card surfaces directly in the chat transcript at the live
- * edge and updates as packets move through their lifecycle. It reads
- * `missionState.packets` (handed down through ThoughtsChatPanel) so it tracks
- * status in real time without its own fetch. No modal — the crew lives in the
+ * When the orchestrator fans a turn out to a parallel Claude + Codex swarm
+ * (UltraCode), this card surfaces the o8-visible crew directly in the chat
+ * transcript at the live edge and updates as packets move through their
+ * lifecycle. It reads `missionState.packets` (handed down through
+ * ThoughtsChatPanel) so it tracks status in real time without its own fetch.
+ * Native Claude sub-agents run inside the workflow runtime and aren't packets,
+ * so only the o8 Codex workers surface here. No modal — the crew lives in the
  * conversation, matching the operator's "beautiful cards, inline" direction.
  */
 
@@ -74,7 +76,7 @@ export function SwarmStatusCard({ packets }: { packets: OrchestratorPacket[] }) 
   const active = packets.filter((packet) => ACTIVE_STATUSES.has(packet.status));
   if (active.length === 0) return null;
 
-  // Runtime breakdown for the header ("Codex 2 · Gemini 1").
+  // Runtime breakdown for the header ("Codex 3").
   const byRuntime = new Map<OrchestratorRuntime, number>();
   for (const packet of active) {
     const runtime = resolveDisplayRuntime(packet);

@@ -91,18 +91,22 @@ interface OrchestratorSendOptions {
   /**
    * UltraCode / swarm mode. When true, a swarm hint is prepended to the
    * OUTBOUND message (the visible transcript bubble stays the user's raw
-   * text) nudging the orchestrator to fan work out to a parallel Codex +
-   * Gemini crew via the mission tools instead of doing everything itself.
+   * text) nudging the orchestrator to fan work out in parallel — native
+   * Claude sub-agents via a workflow, plus Codex workers via the o8 mission
+   * tools — and synthesize both, instead of doing everything single-threaded.
    */
   swarm?: boolean;
 }
 
 // Prepended to the outbound orchestrator turn when swarm/UltraCode is on. Kept
-// out of the transcript via `displayMessage`. References the real o8 mission
-// tools the orchestrator already holds so it dispatches a mixed crew.
+// out of the transcript via `displayMessage`. The word "workflow" is load-
+// bearing — it triggers Claude Code's native Workflow machinery so the
+// orchestrator fans native sub-agents out in parallel alongside the o8 Codex
+// dispatch, then synthesizes both. (On a Codex orchestrator backend the
+// workflow sentence is a no-op and only the Codex-dispatch track runs.)
 const SWARM_TURN_HINT = [
-  '[UltraCode / swarm mode active]',
-  'Prefer parallelism for this turn. When the work splits into independent pieces, spin up a swarm of worker agents instead of doing everything yourself: dispatch a mixed mission via the o8 mission tools (create_mission with a per-issue `runtime`, then dispatch_mission) — route coding/implementation packets to Codex and analysis/research/review packets to Gemini — and run them in parallel. Review each agent\'s diff before merging. If the task is genuinely single-threaded, say so briefly and proceed normally.',
+  '[UltraCode / parallel swarm mode active]',
+  'Don\'t run this turn single-threaded — orchestrate a parallel swarm across two tracks at the same time, then synthesize. (1) For implementation/coding that should land as a reviewable diff, dispatch Codex workers through the o8 mission tools (create_mission with runtime "codex", then dispatch_mission) — fire them in parallel, one per scoped task, and review each diff before merging. (2) For analysis, multi-file reading, research, or cross-checking, run a workflow that fans the work out across native Claude sub-agents in parallel and returns a synthesized result. Run both tracks concurrently, then combine the native sub-agent findings with the Codex diffs into one answer for me. If the task is genuinely single-threaded, say so briefly and just do it.',
 ].join('\n');
 
 interface ActiveTurnState {
