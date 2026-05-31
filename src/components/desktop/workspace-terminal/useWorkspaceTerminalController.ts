@@ -10,6 +10,7 @@ import {
 } from '@/lib/terminal/tab-state';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
+import { useExperimentalChatFlag } from '@/lib/operator/use-experimental-chat';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { ORCHESTRATED_TAB_AUTO_ARCHIVE_MS } from '@/components/desktop/workspace-terminal/constants';
@@ -158,9 +159,19 @@ export function useWorkspaceTerminalController(
     [defaultTab, preferredRepo?.localPath, splitCreated, stateScope],
   );
   const primaryRestoreSettled = restoreCompletedKey === restoreKey;
+  // Alpha: the casual llm-chat ("o8 Default") tab is hidden behind
+  // experimentalChat. Filter it out of the rendered set when off — existing
+  // tabs disappear from the bar (effectiveActiveTabId falls back to another
+  // visible tab) and the composer unmounts, so the orchestrator is the only
+  // conversational surface. The tab data stays persisted for when it flips on.
+  const experimentalChat = useExperimentalChatFlag();
   const visibleTabs = useMemo(
-    () => tabs.filter((tab) => !(tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci')),
-    [tabs],
+    () => tabs.filter((tab) => {
+      if (tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci') return false;
+      if (!experimentalChat && tab.kind === 'llm-chat') return false;
+      return true;
+    }),
+    [tabs, experimentalChat],
   );
   const effectiveActiveTabId = useMemo(
     () => visibleTabs.some((tab) => tab.id === activeTabId)
@@ -403,8 +414,12 @@ export function useWorkspaceTerminalController(
   // orchestrator stays the command center while the left rail's Chat row has
   // a real tab to focus on first load.
   const createDefaultChatTabSet = useCallback((): TerminalTab[] => {
+    // Alpha: don't spawn the casual llm-chat tab by default — orchestrator only,
+    // unless experimentalChat is on. (visibleTabs also hides any pre-existing
+    // llm-chat tab, so this is belt-and-suspenders + avoids a wasted spawn.)
+    if (!experimentalChat) return [createDefaultOrchestratorTab()];
     return [createDefaultOrchestratorTab(), createDefaultChatTab()];
-  }, [createDefaultChatTab, createDefaultOrchestratorTab]);
+  }, [createDefaultChatTab, createDefaultOrchestratorTab, experimentalChat]);
 
   const spawnSingleRuntimeTab = useCallback((runtime: OrchestratorRuntime): string => {
     const newTab: TerminalTab = {

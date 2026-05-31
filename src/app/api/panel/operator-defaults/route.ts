@@ -104,6 +104,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.experimentalGemini = body.experimentalGemini;
   }
 
+  if (body.experimentalChat !== undefined) {
+    if (typeof body.experimentalChat !== 'boolean') {
+      throw new Error('experimentalChat must be boolean.');
+    }
+    update.experimentalChat = body.experimentalChat;
+  }
+
   if (body.classAComposer !== undefined) {
     const raw = body.classAComposer;
     if (raw !== 'auto' && raw !== 'haiku-cli' && raw !== 'sonnet-cli') {
