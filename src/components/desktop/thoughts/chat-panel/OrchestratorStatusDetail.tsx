@@ -16,6 +16,45 @@ import {
   humanizeLaneStatus,
   type OrchestratorStatusEventData,
 } from '@/lib/orchestrator/status-events';
+import { ArtifactStrip } from '@/components/desktop/artifacts/ArtifactStrip';
+import type { ArtifactRef } from '@/components/desktop/artifacts/types';
+
+/**
+ * #1147 — visual proof in the chat. Fetches captured before/after artifacts for
+ * every packet in the completed mission and renders the Bug/Fixed strip right
+ * inside the mission-complete card, so the operator SEES what shipped, not just
+ * reads it. Self-hides when no packet captured proof.
+ */
+function MissionProofStrip({ packetIds }: { packetIds: string[] }) {
+  const [artifacts, setArtifacts] = useState<ArtifactRef[]>([]);
+  const key = packetIds.join(',');
+
+  useEffect(() => {
+    if (packetIds.length === 0) { setArtifacts([]); return; }
+    let cancelled = false;
+    void (async () => {
+      const collected: ArtifactRef[] = [];
+      for (const pid of packetIds) {
+        try {
+          const res = await fetch(`/api/panel/artifacts?packetId=${encodeURIComponent(pid)}`);
+          if (!res.ok) continue;
+          const json = (await res.json()) as { artifacts?: ArtifactRef[] };
+          if (Array.isArray(json.artifacts)) collected.push(...json.artifacts);
+        } catch { /* skip */ }
+      }
+      if (!cancelled) setArtifacts(collected);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key]);
+
+  if (artifacts.length === 0) return null;
+  return (
+    <div style={{ marginTop: 2 }}>
+      <ArtifactStrip artifacts={artifacts} />
+    </div>
+  );
+}
 
 function detailContent(event: OrchestratorStatusEventData): { explain: string; rows: { label: string; value: string }[] } {
   switch (event.kind) {
@@ -221,6 +260,7 @@ function MissionPacketSummary({ event }: { event: MissionCompleteEvent }) {
           ))}
         </div>
       ) : null}
+      <MissionProofStrip packetIds={packetsFromEvent.map((packet) => packet.id)} />
     </div>
   );
 }

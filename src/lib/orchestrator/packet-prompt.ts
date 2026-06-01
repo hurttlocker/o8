@@ -299,6 +299,12 @@ export async function buildPacketPrompt(
   // block so weaker models see adjacent risk surfaces up-front.
   const edgeCaseSections = renderEdgeCaseSections(packet.edgeCaseSites);
   const sandboxVerificationSections = buildSandboxVerificationSections(packet);
+  // #1147 — visual proof. Only nudge UI-shaped packets, and only when they
+  // legitimately run their own app (NOT o8's dev servers — the sandbox block
+  // above forbids that). Pure-logic packets get nothing (no visual to show).
+  const captureProofSection = packetLooksUiShaped(packet)
+    ? 'Visual proof (UI changes): if you run this app\'s UI to verify a visual fix — only when the task legitimately serves its own app, e.g. you started it via `o8 run --detach`, and NEVER by spinning up o8\'s own dev servers per the sandbox note above — capture the broken state first then the fixed state: `o8 packet capture --url <localhost-url> --before --label "<what>" --wait-for "<selector>"`, make the fix, then the same command with `--after` and the SAME --label. They pair into a Bug/Fixed strip the operator sees on the packet, in review, and in chat. Skip entirely for pure-logic/backend changes.'
+    : null;
   // #743 — Cortex context block. Pull directives + recent outcomes +
   // symbol-graph for this repo and prepend a `<context>` envelope so the
   // runtime sees the same recall data the operator sees on the packet
@@ -367,6 +373,7 @@ export async function buildPacketPrompt(
     ...sandboxVerificationSections,
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     'If a task step needs a long-running or long-output process — a test suite, build, backtest, data job, or a server the task itself requires — start it with `o8 run -- <cmd>` (e.g. `o8 run -- pytest -q`) rather than a bare shell exec, so the operator can watch its live output. This is about genuinely long jobs; still follow any sandbox UI-verification guidance above (do not start dev servers just to smoke-test).',
+    captureProofSection,
     learnedRuleSection,
     ...buildPacketSelfReviewInstructions(baseBranch),
     'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',

@@ -13,6 +13,8 @@ import type { EditingField, ReviewPanelState } from './types';
 import { PacketMetaRows } from './PacketMetaRows';
 import { PacketReviewCard } from './PacketReviewCard';
 import { PacketReviewPanel } from './PacketReviewPanel';
+import { ArtifactStrip } from '@/components/desktop/artifacts/ArtifactStrip';
+import { useArtifacts } from '@/components/desktop/artifacts/useArtifacts';
 import { PacketSpecEditor } from './PacketSpecEditor';
 import { RejectedFeedbackPanel } from './RejectedFeedbackPanel';
 import { PacketTabStrip, type PacketTabId } from '@/components/desktop/orchestrator/PacketTabStrip';
@@ -101,6 +103,11 @@ export function PacketCard({
       : null;
     return deriveGithubIssueUrl(packet.referenceLabel, remoteUrl);
   }, [packet.issue?.url, packet.referenceLabel, packet.workspaceTargetPath, repoRemoteUrlByPath]);
+
+  // #1147 — visual proof captured for this packet. Fetched only while expanded
+  // (the strip lives in the expanded body). When empty it self-hides unless
+  // we're on a review surface, where "no visual proof" is the honest signal.
+  const { artifacts: packetArtifacts } = useArtifacts({ packetId: packet.id, enabled: isExpanded });
 
   // #615 — Details popover state. Anchored to the DETAILS row via DOMRect snapshot.
   const detailsRowRef = useRef<HTMLButtonElement | null>(null);
@@ -597,6 +604,12 @@ export function PacketCard({
               </>
             )}
           </div>
+
+          {(packetArtifacts.length > 0 || showHeroReviewCard || showReviewSection) ? (
+            <div style={{ paddingTop: 4, paddingRight: 10, paddingBottom: 10, paddingLeft: 10 }}>
+              <ArtifactStrip artifacts={packetArtifacts} showEmpty={showHeroReviewCard || showReviewSection} />
+            </div>
+          ) : null}
 
           {showHeroReviewCard ? (
             <PacketReviewCard
