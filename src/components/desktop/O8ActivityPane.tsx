@@ -267,8 +267,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   useEffect(() => {
     let cancelled = false;
 
-    async function load() {
-      setLoading(true);
+    async function load(showSpinner: boolean) {
+      if (showSpinner) setLoading(true);
       try {
         if (isAllRepos) {
           const results = await Promise.all(
@@ -297,10 +297,13 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       }
     }
 
-    void load();
+    // Initial load / scope change shows the skeleton; background refreshes
+    // below update the feed in place so the pane doesn't flash to the
+    // "Loading activity…" skeleton on every realtime tick (#1150).
+    void load(true);
 
-    // WS-driven invalidation + 5min fallback
-    const handler = () => { void load(); };
+    // WS-driven invalidation + 5min fallback — silent refresh (no skeleton).
+    const handler = () => { void load(false); };
     window.addEventListener('o8:realtime', handler);
     window.addEventListener('o8:agent-lifecycle', handler);
     window.addEventListener('o8:lane-lifecycle', handler);
