@@ -23,7 +23,14 @@ import { renderJudgePrompt } from '../../../../../tests/qa-eval/judge';
 
 // ── Types ──────────────────────────────────────────────────────────────────────
 
-export type Category = 'ownership' | 'decisions' | 'processes' | 'incidents' | 'specs' | 'cross-repo';
+export type Category =
+  | 'ownership'
+  | 'decisions'
+  | 'processes'
+  | 'incidents'
+  | 'specs'
+  | 'cross-repo'
+  | 'literal-lookup';
 
 interface Rubric {
   factual_accuracy_threshold: number;
@@ -197,6 +204,7 @@ const CATEGORIES: Category[] = [
   'incidents',
   'specs',
   'cross-repo',
+  'literal-lookup',
 ];
 
 const CATEGORY_THRESHOLD = 0.7;
@@ -227,6 +235,7 @@ export async function runEval(): Promise<RunSummary> {
     incidents: emptyAgg(),
     specs: emptyAgg(),
     'cross-repo': emptyAgg(),
+    'literal-lookup': emptyAgg(),
   };
 
   let totalKnownGaps = 0;
@@ -320,6 +329,9 @@ export async function runEval(): Promise<RunSummary> {
   let passed = true;
   for (const cat of CATEGORIES) {
     const agg = perCategory[cat];
+    if (agg.total === 0 && cat === 'literal-lookup') {
+      continue;
+    }
     if (agg.scored === 0) {
       passed = false;
       continue;
@@ -352,6 +364,7 @@ function printSummary(summary: RunSummary): void {
   console.log('[qa-eval] per-category factual_accuracy (threshold = 70%)');
   for (const cat of CATEGORIES) {
     const agg = summary.perCategory[cat];
+    if (agg.total === 0 && cat === 'literal-lookup') continue;
     const mean = agg.scored > 0 ? agg.factualAccuracySum / agg.scored : 0;
     const flag = mean >= CATEGORY_THRESHOLD ? 'PASS' : 'FAIL';
     console.log(
