@@ -12,6 +12,10 @@ import { promises as fs } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import type { TypedRow } from '@/lib/cortex/qa/types';
+import {
+  buildStrongGrepTopRowsImpl,
+  type StrongGrepOptions,
+} from './strong-grep-baseline';
 
 const STOP_WORDS = new Set([
   'a', 'an', 'and', 'are', 'as', 'at', 'be', 'by', 'for', 'from', 'has',
@@ -97,6 +101,18 @@ export async function buildGrepTopRows(
     },
     score: m.score,
   }));
+}
+
+export async function buildStrongGrepTopRows(
+  question: string,
+  repoPath: string | undefined,
+  opts: StrongGrepOptions = {},
+): Promise<TypedRow[]> {
+  return buildStrongGrepTopRowsImpl(question, repoPath, {
+    ...opts,
+    tokenize,
+    fallback: buildGrepTopRows,
+  });
 }
 
 /**

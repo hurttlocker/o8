@@ -5,8 +5,8 @@
  * Checks:
  *   1. File parses as JSON
  *   2. Has version + cases[]
- *   3. Exactly 30 cases
- *   4. Exactly 5 cases per category across the 6 expected categories
+ *   3. At least 30 cases
+ *   4. Exactly 5 cases per seeded category across the 6 original categories
  *   5. Every case has the required fields with the right types
  *   6. (warning, not failure) every expectedCitations[].rowId resolves against
  *      the live ~/.o8/cortex-ide.db. Fresh clones don't have rows yet, so we
@@ -20,7 +20,14 @@ import path from 'node:path';
 import os from 'node:os';
 import process from 'node:process';
 
-type Category = 'ownership' | 'decisions' | 'processes' | 'incidents' | 'specs' | 'cross-repo';
+type Category =
+  | 'ownership'
+  | 'decisions'
+  | 'processes'
+  | 'incidents'
+  | 'specs'
+  | 'cross-repo'
+  | 'literal-lookup';
 
 interface ExpectedCitation {
   kind: 'outcome' | 'directive' | 'pr' | 'issue' | 'project' | 'project_repo';
@@ -43,13 +50,17 @@ interface QaCase {
   knownGap?: string;
 }
 
-const EXPECTED_CATEGORIES: Category[] = [
+const SEEDED_CATEGORIES: Category[] = [
   'ownership',
   'decisions',
   'processes',
   'incidents',
   'specs',
   'cross-repo',
+];
+const EXPECTED_CATEGORIES: Category[] = [
+  ...SEEDED_CATEGORIES,
+  'literal-lookup',
 ];
 const EXPECTED_CITATION_KINDS: ExpectedCitation['kind'][] = [
   'outcome',
@@ -59,7 +70,7 @@ const EXPECTED_CITATION_KINDS: ExpectedCitation['kind'][] = [
   'project',
   'project_repo',
 ];
-const EXPECTED_TOTAL = 30;
+const MIN_EXPECTED_TOTAL = 30;
 const EXPECTED_PER_CATEGORY = 5;
 
 interface ValidationResult {
@@ -292,8 +303,8 @@ async function validate(): Promise<ValidationResult> {
   }
 
   const cases = file.cases as unknown[];
-  if (cases.length !== EXPECTED_TOTAL) {
-    result.errors.push(`expected ${EXPECTED_TOTAL} cases, got ${cases.length}`);
+  if (cases.length < MIN_EXPECTED_TOTAL) {
+    result.errors.push(`expected at least ${MIN_EXPECTED_TOTAL} cases, got ${cases.length}`);
   }
 
   const seenIds = new Set<string>();
@@ -318,7 +329,7 @@ async function validate(): Promise<ValidationResult> {
     }
   }
 
-  for (const cat of EXPECTED_CATEGORIES) {
+  for (const cat of SEEDED_CATEGORIES) {
     const n = perCategoryCount[cat] ?? 0;
     if (n !== EXPECTED_PER_CATEGORY) {
       result.errors.push(`category '${cat}' has ${n} cases, expected ${EXPECTED_PER_CATEGORY}`);
@@ -347,7 +358,7 @@ async function main(): Promise<void> {
   }
   if (result.errors.length === 0) {
     console.log(
-      `[validate-qa-cases] OK — ${EXPECTED_TOTAL} cases, ${EXPECTED_PER_CATEGORY}/category across ${EXPECTED_CATEGORIES.length} categories`,
+      `[validate-qa-cases] OK — at least ${MIN_EXPECTED_TOTAL} cases, ${EXPECTED_PER_CATEGORY}/seeded category across ${EXPECTED_CATEGORIES.length} allowed categories`,
     );
     process.exitCode = 0;
     return;

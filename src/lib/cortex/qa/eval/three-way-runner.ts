@@ -1,7 +1,7 @@
 /**
  * #938 three-way memory-substrate runner.
  *
- * For each test case in tests/qa-eval/cases.json, runs THREE conditions and
+ * For each test case in tests/qa-eval/cases.json, runs FOUR conditions and
  * compares them with the same Sonnet-via-OpenRouter judge held constant.
  *
  *   full  — production askCortex() pipeline: classify → retrieveAll →
@@ -10,17 +10,19 @@
  *   grep  — naive grep over CLAUDE.md (project + global) + repos.json,
  *           top-15 lines by keyword hits → same composer. The hostile-read
  *           dismissal of the memory layer as "just markdown."
+ *   strongGrep — realistic repo-wide ripgrep over top matching files,
+ *           bounded matched-line context windows → same composer.
  *   blind — empty row set → same composer. The floor: what does the LLM
  *           know from training data alone?
  *
- * Classifier runs ONCE per case so all three conditions hit the same
+ * Classifier runs ONCE per case so all four conditions hit the same
  * composer (composeClassA vs composeClassB). The only varied input is the
  * TypedRow set the composer sees.
  *
  * Output:
  *   - tests/qa-eval/three-way-results-<timestamp>.json (raw)
  *   - Per-condition × per-category factual_accuracy table on stdout
- *   - Per-case delta(full - grep) and delta(full - blind)
+ *   - Per-case deltas between full, grep, strongGrep, and blind
  *
  * Run: O8_EVAL_MODE=1 OPENROUTER_API_KEY=... npx tsx \
  *      src/lib/cortex/qa/eval/three-way-runner.ts
@@ -37,12 +39,19 @@ import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { retrieveAll, unionMerge } from '@/lib/cortex/qa/retrieve';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
 
-import { buildBlindTopRows, buildGrepTopRows } from './baselines';
+import { buildBlindTopRows, buildGrepTopRows, buildStrongGrepTopRows } from './baselines';
 import { renderJudgePrompt } from '../../../../../tests/qa-eval/judge';
 
 // ── Case types (mirror runner.ts) ─────────────────────────────────────────────
 
-type Category = 'ownership' | 'decisions' | 'processes' | 'incidents' | 'specs' | 'cross-repo';
+type Category =
+  | 'ownership'
+  | 'decisions'
+  | 'processes'
+  | 'incidents'
+  | 'specs'
+  | 'cross-repo'
+  | 'literal-lookup';
 
 interface ExpectedCitation { kind: string; rowId: string }
 
@@ -129,7 +138,7 @@ async function realJudge(input: {
 
 // ── Condition runners ─────────────────────────────────────────────────────────
 
-type Condition = 'full' | 'grep' | 'blind';
+type Condition = 'full' | 'grep' | 'strongGrep' | 'blind';
 
 interface ComposeOutput {
   answer: string;
@@ -198,10 +207,19 @@ interface CategoryAgg {
   total: number;
   full: ConditionAgg;
   grep: ConditionAgg;
+  strongGrep: ConditionAgg;
   blind: ConditionAgg;
 }
 
-const CATEGORIES: Category[] = ['ownership', 'decisions', 'processes', 'incidents', 'specs', 'cross-repo'];
+const CATEGORIES: Category[] = [
+  'ownership',
+  'decisions',
+  'processes',
+  'incidents',
+  'specs',
+  'cross-repo',
+  'literal-lookup',
+];
 
 function emptyConditionAgg(): ConditionAgg {
   return { scored: 0, factualSum: 0, citationSum: 0, hallucinationSum: 0 };
@@ -212,6 +230,7 @@ function emptyCategoryAgg(): CategoryAgg {
     total: 0,
     full: emptyConditionAgg(),
     grep: emptyConditionAgg(),
+    strongGrep: emptyConditionAgg(),
     blind: emptyConditionAgg(),
   };
 }
@@ -234,9 +253,12 @@ interface PerCaseResult {
   classification: 'A' | 'B';
   full: { answer: string; citations: ExpectedCitation[]; score: JudgeResult; topRowsCount: number };
   grep: { answer: string; citations: ExpectedCitation[]; score: JudgeResult; topRowsCount: number };
+  strongGrep: { answer: string; citations: ExpectedCitation[]; score: JudgeResult; topRowsCount: number };
   blind: { answer: string; citations: ExpectedCitation[]; score: JudgeResult; topRowsCount: number };
   deltas: {
     full_vs_grep: number;
+    full_vs_strongGrep: number;
+    strongGrep_vs_grep: number;
     full_vs_blind: number;
     grep_vs_blind: number;
   };
@@ -251,7 +273,7 @@ async function main(): Promise<void> {
   const limit = process.env.THREE_WAY_LIMIT ? Number(process.env.THREE_WAY_LIMIT) : fileRaw.cases.length;
   const file: CasesFile = { ...fileRaw, cases: fileRaw.cases.slice(0, limit) };
 
-  console.log(`[938] running ${file.cases.length} cases × 3 conditions = ${file.cases.length * 3} generations`);
+  console.log(`[938] running ${file.cases.length} cases × 4 conditions = ${file.cases.length * 4} generations`);
   console.log(`[938] eval mode: ${process.env.O8_EVAL_MODE} (Sonnet-via-OpenRouter for compose + judge)`);
 
   const perCategory: Record<Category, CategoryAgg> = {
@@ -261,6 +283,7 @@ async function main(): Promise<void> {
     incidents: emptyCategoryAgg(),
     specs: emptyCategoryAgg(),
     'cross-repo': emptyCategoryAgg(),
+    'literal-lookup': emptyCategoryAgg(),
   };
 
   const perCase: PerCaseResult[] = [];
@@ -274,7 +297,7 @@ async function main(): Promise<void> {
 
     perCategory[qc.category].total += 1;
 
-    // Classify once so all 3 conditions use the same composer.
+    // Classify once so all 4 conditions use the same composer.
     let classification: 'A' | 'B';
     try {
       const c = await classifyQuestion(qc.question);
@@ -305,6 +328,17 @@ async function main(): Promise<void> {
       grepOut = { answer: '(error)', citations: [] };
     }
 
+    // ── Condition: strongGrep ──
+    let strongGrepRows: TypedRow[] = [];
+    let strongGrepOut: ComposeOutput;
+    try {
+      strongGrepRows = await buildStrongGrepTopRows(qc.question, qc.repoPath);
+      strongGrepOut = await runConditionAlt(qc, classification, strongGrepRows);
+    } catch (err) {
+      console.warn(`        strongGrep threw: ${err instanceof Error ? err.message : err}`);
+      strongGrepOut = { answer: '(error)', citations: [] };
+    }
+
     // ── Condition: blind ──
     let blindOut: ComposeOutput;
     try {
@@ -314,7 +348,7 @@ async function main(): Promise<void> {
       blindOut = { answer: '(error)', citations: [] };
     }
 
-    // ── Judge all three ──
+    // ── Judge all four ──
     const judgeInput = (out: ComposeOutput) => ({
       question: qc.question,
       expectedAnswer: qc.expectedAnswer,
@@ -323,18 +357,22 @@ async function main(): Promise<void> {
       actualAnswer: out.answer,
       actualCitations: out.citations,
     });
-    const [fullScore, grepScore, blindScore] = await Promise.all([
+    const [fullScore, grepScore, strongGrepScore, blindScore] = await Promise.all([
       realJudge(judgeInput(fullOut)),
       realJudge(judgeInput(grepOut)),
+      realJudge(judgeInput(strongGrepOut)),
       realJudge(judgeInput(blindOut)),
     ]);
 
     addToAgg(perCategory[qc.category].full, fullScore);
     addToAgg(perCategory[qc.category].grep, grepScore);
+    addToAgg(perCategory[qc.category].strongGrep, strongGrepScore);
     addToAgg(perCategory[qc.category].blind, blindScore);
 
     const deltas = {
       full_vs_grep: fullScore.factual_accuracy - grepScore.factual_accuracy,
+      full_vs_strongGrep: fullScore.factual_accuracy - strongGrepScore.factual_accuracy,
+      strongGrep_vs_grep: strongGrepScore.factual_accuracy - grepScore.factual_accuracy,
       full_vs_blind: fullScore.factual_accuracy - blindScore.factual_accuracy,
       grep_vs_blind: grepScore.factual_accuracy - blindScore.factual_accuracy,
     };
@@ -346,12 +384,13 @@ async function main(): Promise<void> {
       classification,
       full: { answer: fullOut.answer, citations: fullOut.citations, score: fullScore, topRowsCount: -1 },
       grep: { answer: grepOut.answer, citations: grepOut.citations, score: grepScore, topRowsCount: grepRows.length },
+      strongGrep: { answer: strongGrepOut.answer, citations: strongGrepOut.citations, score: strongGrepScore, topRowsCount: strongGrepRows.length },
       blind: { answer: blindOut.answer, citations: blindOut.citations, score: blindScore, topRowsCount: 0 },
       deltas,
     });
 
     const dt = Date.now() - tCase0;
-    console.log(`        full: ${formatPct(fullScore.factual_accuracy)} | grep: ${formatPct(grepScore.factual_accuracy)} | blind: ${formatPct(blindScore.factual_accuracy)}  (Δfull-grep=${deltas.full_vs_grep >= 0 ? '+' : ''}${(deltas.full_vs_grep * 100).toFixed(0)}pp, ${(dt / 1000).toFixed(1)}s)`);
+    console.log(`        full: ${formatPct(fullScore.factual_accuracy)} | grep: ${formatPct(grepScore.factual_accuracy)} | strongGrep: ${formatPct(strongGrepScore.factual_accuracy)} | blind: ${formatPct(blindScore.factual_accuracy)}  (Δfull-strongGrep=${deltas.full_vs_strongGrep >= 0 ? '+' : ''}${(deltas.full_vs_strongGrep * 100).toFixed(0)}pp, ${(dt / 1000).toFixed(1)}s)`);
   }
 
   const totalDt = ((Date.now() - t0) / 1000).toFixed(1);
@@ -359,32 +398,36 @@ async function main(): Promise<void> {
 
   // ── Print summary tables ──
   console.log('\n[938] PER-CATEGORY × PER-CONDITION factual_accuracy:');
-  console.log('  category      total  | full         grep        blind       | Δfull-grep  Δfull-blind');
-  console.log('  ' + '─'.repeat(95));
-  let overallFull = { sum: 0, n: 0 };
-  let overallGrep = { sum: 0, n: 0 };
-  let overallBlind = { sum: 0, n: 0 };
+  console.log('  category      total  | full         grep        strongGrep  blind       | Δfull-strong  Δfull-grep');
+  console.log('  ' + '─'.repeat(112));
+  const overallFull = { sum: 0, n: 0 };
+  const overallGrep = { sum: 0, n: 0 };
+  const overallStrongGrep = { sum: 0, n: 0 };
+  const overallBlind = { sum: 0, n: 0 };
   for (const cat of CATEGORIES) {
     const agg = perCategory[cat];
     if (agg.total === 0) continue;
     const fullMean = agg.full.scored > 0 ? agg.full.factualSum / agg.full.scored : 0;
     const grepMean = agg.grep.scored > 0 ? agg.grep.factualSum / agg.grep.scored : 0;
+    const strongGrepMean = agg.strongGrep.scored > 0 ? agg.strongGrep.factualSum / agg.strongGrep.scored : 0;
     const blindMean = agg.blind.scored > 0 ? agg.blind.factualSum / agg.blind.scored : 0;
     overallFull.sum += agg.full.factualSum; overallFull.n += agg.full.scored;
     overallGrep.sum += agg.grep.factualSum; overallGrep.n += agg.grep.scored;
+    overallStrongGrep.sum += agg.strongGrep.factualSum; overallStrongGrep.n += agg.strongGrep.scored;
     overallBlind.sum += agg.blind.factualSum; overallBlind.n += agg.blind.scored;
+    const dfsg = fullMean - strongGrepMean;
     const dfg = fullMean - grepMean;
-    const dfb = fullMean - blindMean;
     console.log(
-      `  ${cat.padEnd(13)} ${String(agg.total).padStart(3)}    | ${formatPct(fullMean).padEnd(11)} ${formatPct(grepMean).padEnd(11)} ${formatPct(blindMean).padEnd(11)} | ${(dfg >= 0 ? '+' : '') + (dfg * 100).toFixed(1).padStart(4)}pp     ${(dfb >= 0 ? '+' : '') + (dfb * 100).toFixed(1).padStart(4)}pp`
+      `  ${cat.padEnd(13)} ${String(agg.total).padStart(3)}    | ${formatPct(fullMean).padEnd(11)} ${formatPct(grepMean).padEnd(11)} ${formatPct(strongGrepMean).padEnd(11)} ${formatPct(blindMean).padEnd(11)} | ${(dfsg >= 0 ? '+' : '') + (dfsg * 100).toFixed(1).padStart(4)}pp       ${(dfg >= 0 ? '+' : '') + (dfg * 100).toFixed(1).padStart(4)}pp`
     );
   }
   const ofMean = overallFull.n > 0 ? overallFull.sum / overallFull.n : 0;
   const ogMean = overallGrep.n > 0 ? overallGrep.sum / overallGrep.n : 0;
+  const osgMean = overallStrongGrep.n > 0 ? overallStrongGrep.sum / overallStrongGrep.n : 0;
   const obMean = overallBlind.n > 0 ? overallBlind.sum / overallBlind.n : 0;
-  console.log('  ' + '─'.repeat(95));
+  console.log('  ' + '─'.repeat(112));
   console.log(
-    `  OVERALL       ${String(file.cases.length).padStart(3)}    | ${formatPct(ofMean).padEnd(11)} ${formatPct(ogMean).padEnd(11)} ${formatPct(obMean).padEnd(11)} | ${((ofMean - ogMean) >= 0 ? '+' : '') + ((ofMean - ogMean) * 100).toFixed(1).padStart(4)}pp     ${((ofMean - obMean) >= 0 ? '+' : '') + ((ofMean - obMean) * 100).toFixed(1).padStart(4)}pp`
+    `  OVERALL       ${String(file.cases.length).padStart(3)}    | ${formatPct(ofMean).padEnd(11)} ${formatPct(ogMean).padEnd(11)} ${formatPct(osgMean).padEnd(11)} ${formatPct(obMean).padEnd(11)} | ${((ofMean - osgMean) >= 0 ? '+' : '') + ((ofMean - osgMean) * 100).toFixed(1).padStart(4)}pp       ${((ofMean - ogMean) >= 0 ? '+' : '') + ((ofMean - ogMean) * 100).toFixed(1).padStart(4)}pp`
   );
 
   // ── Persist raw ──
@@ -399,8 +442,10 @@ async function main(): Promise<void> {
       overall: {
         full: ofMean,
         grep: ogMean,
+        strongGrep: osgMean,
         blind: obMean,
         delta_full_vs_grep: ofMean - ogMean,
+        delta_full_vs_strongGrep: ofMean - osgMean,
         delta_full_vs_blind: ofMean - obMean,
       },
     },
