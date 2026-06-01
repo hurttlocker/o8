@@ -12,10 +12,20 @@ import { getPacketTailBatch, resolvePacketTailPacketId } from '@/lib/lane/packet
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
+const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 function requireLoopbackBearer(req: NextRequest): NextResponse | null {
-  if (!LOOPBACK_HOSTS.has(req.nextUrl.hostname)) {
+  // Mirror the global middleware's loopback detection (isTrustedLocalRequest):
+  // accept the Host header hostname too, not just req.nextUrl.hostname. A
+  // dispatched agent's CLI request reaches the bundled server with a loopback
+  // Host header but, depending on how the server is bound/proxied, nextUrl can
+  // resolve to a non-loopback hostname — which previously 403'd valid agent
+  // `o8 packet report` calls even though the middleware (which gates /api/lanes)
+  // already accepted them. (#1147 dogfood finding.)
+  const hostHeader = req.headers.get('host')?.split(':')[0]?.trim();
+  const isLoopback = LOOPBACK_HOSTS.has(req.nextUrl.hostname)
+    || (!!hostHeader && LOOPBACK_HOSTS.has(hostHeader));
+  if (!isLoopback) {
     return NextResponse.json({ ok: false, note: 'Lane event reports must come from loopback.' }, { status: 403 });
   }
 
