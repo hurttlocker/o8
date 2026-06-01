@@ -703,10 +703,22 @@ export function O8Panel({
         <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'activity' || activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8ActivityPane repoPath={repoPath} repoSlug={prRepo ?? repoSlug} registeredRepos={registeredRepos} allRepos={allRepos} onSelectAllRepos={onSelectAllRepos} onSelectRepoPath={onRepoPathChange} onSelectCommit={onSelectCommit} onSelectIssue={onSelectIssue} selectedPrNumber={prNumber ?? null} selectedPrRepo={prRepo ?? null} />
+        <O8ActivityPane
+          active={activeTab === 'activity' || activeTab === 'prs'}
+          repoPath={repoPath}
+          repoSlug={prRepo ?? repoSlug}
+          registeredRepos={registeredRepos}
+          allRepos={allRepos}
+          onSelectAllRepos={onSelectAllRepos}
+          onSelectRepoPath={onRepoPathChange}
+          onSelectCommit={onSelectCommit}
+          onSelectIssue={onSelectIssue}
+          selectedPrNumber={prNumber ?? null}
+          selectedPrRepo={prRepo ?? null}
+        />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'inbox' ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8InboxPane />
+        <O8InboxPane active={activeTab === 'inbox'} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'spec' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8SpecPane
