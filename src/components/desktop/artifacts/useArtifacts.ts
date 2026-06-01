@@ -50,10 +50,34 @@ export function useArtifacts({ packetId, prNumber, laneId, pollMs, enabled = tru
       return;
     }
     void fetchOnce();
-    if (!pollMs || pollMs <= 0) return;
+
+    // Live update (#1147 Phase 2): the ws-server fans out an `artifacts`
+    // channel event when an agent records a still, which the desktop WS bridge
+    // turns into an `o8:artifacts` window event. Refetch only when the event's
+    // identifiers match THIS surface's filter, so the proof strip appears
+    // without waiting for a poll/remount and we avoid redundant fetches.
+    const onRecorded = (e: Event) => {
+      const d = (e as CustomEvent).detail?.data as
+        | { packetId?: string | null; prNumber?: number | null; laneId?: string | null }
+        | undefined;
+      if (!d) return;
+      const matches =
+        (!!packetId && d.packetId === packetId) ||
+        (typeof prNumber === 'number' && d.prNumber === prNumber) ||
+        (!!laneId && d.laneId === laneId);
+      if (matches) void fetchOnce();
+    };
+    window.addEventListener('o8:artifacts', onRecorded as EventListener);
+
+    if (!pollMs || pollMs <= 0) {
+      return () => window.removeEventListener('o8:artifacts', onRecorded as EventListener);
+    }
     const id = window.setInterval(() => { void fetchOnce(); }, pollMs);
-    return () => window.clearInterval(id);
-  }, [key, enabled, hasFilter, pollMs, fetchOnce]);
+    return () => {
+      window.removeEventListener('o8:artifacts', onRecorded as EventListener);
+      window.clearInterval(id);
+    };
+  }, [key, enabled, hasFilter, pollMs, fetchOnce, packetId, prNumber, laneId]);
 
   return { artifacts, loading, refetch: fetchOnce };
 }

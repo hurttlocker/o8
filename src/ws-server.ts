@@ -37,6 +37,8 @@
  *   lane-lifecycle    — DURABLE: queued under backpressure.
  *   review            — DURABLE: queued under backpressure.
  *   conflicts         — DURABLE: queued under backpressure.
+ *   artifacts         — DURABLE: queued under backpressure. Fires when an
+ *                       agent records a before/after proof still (#1147).
  *   pong              — LOSSY: keepalive response, loss is harmless.
  */
 
@@ -3712,6 +3714,54 @@ const httpServer = createServer((req, res) => {
           },
         });
         console.log(`[cortex-changes] Broadcast scope=${scope}${body.reason ? ` reason=${body.reason}` : ''}`);
+        res.writeHead(202);
+        res.end('accepted');
+      } catch (err) {
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({
+          ok: false,
+          error: err instanceof Error ? err.message : 'invalid json',
+        }));
+      }
+    });
+    return;
+  }
+
+  // ── #1147 Phase 2 — live visual-proof broadcast ──
+  // Invoked by `publishArtifactRecorded()` after an agent records a
+  // before/after still. Fans out an `artifacts` channel event; the desktop WS
+  // bridge converts it to an `o8:artifacts` window event so the mounted proof
+  // strips (PacketCard / PrPanel / mission-complete) refetch live. DURABLE —
+  // missing a proof event would leave a stale strip until the next fetch.
+  if (req.url === '/internal/artifacts' && req.method === 'POST') {
+    if (!isAuthorizedInternalRequest(req)) {
+      res.writeHead(401);
+      res.end('unauthorized');
+      return;
+    }
+
+    const chunks: Buffer[] = [];
+    req.on('data', (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+    req.on('end', () => {
+      try {
+        const body = JSON.parse(Buffer.concat(chunks).toString('utf-8')) as {
+          artifactId?: string;
+          packetId?: string | null;
+          prNumber?: number | null;
+          laneId?: string | null;
+        };
+        broadcast({
+          channel: 'artifacts',
+          event: 'recorded',
+          data: {
+            artifactId: typeof body.artifactId === 'string' ? body.artifactId : null,
+            packetId: body.packetId ?? null,
+            prNumber: typeof body.prNumber === 'number' ? body.prNumber : null,
+            laneId: body.laneId ?? null,
+            ts: currentIsoTime(),
+          },
+        });
+        console.log(`[artifacts] Broadcast recorded packet=${body.packetId ?? '-'} pr=${body.prNumber ?? '-'}`);
         res.writeHead(202);
         res.end('accepted');
       } catch (err) {
