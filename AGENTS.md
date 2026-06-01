@@ -49,6 +49,7 @@ o8 packet diff [id]                    # this packet's code diff vs base (commit
 o8 packet commit -m "<message>"        # stage + commit the worktree with an explicit pathspec (use instead of raw git add/commit)
 o8 packet heartbeat                    # lifecycle ping; safe no-op outside a packet
 o8 packet report --event progress [--reason "..." --message "..."]   # surface a structured progress/blocker event
+o8 packet capture --url <url> --before|--after [--wait-for <sel>] [--settle <ms>] [--label "..."]   # screenshot the running app as VISUAL PROOF of a bug/fix
 o8 packet log [id] [--follow] [--since <cursor>]                     # read or tail this packet's lane events
 o8 packet runtime-drift                # detect + warn when the lane's bound runtime drifted (exit 5 on drift)
 o8 packet review --approve [--commit-message "..."]                  # approve + merge a reviewed packet
@@ -92,6 +93,20 @@ When you start a process the operator might want to watch — a dev server, a ba
 - Finite jobs (backtests, test runs): `o8 run -- pytest -q` — it streams output and blocks until the command exits, propagating the exit code.
 - Servers / daemons you want to leave running: `o8 run --detach -- npm run dev` — returns immediately; the operator attaches whenever.
 - It's opt-in: only reach for it when live visibility helps. Quick one-shots don't need it.
+
+## Visual proof for UI changes (`o8 packet capture`)
+
+If your change is **visual** (a UI bug or fix the operator could *see*), capture before/after screenshots so they can recognize the fix at a glance instead of reading your description. The operator sees them as a Bug → Fixed strip on the packet, in review, and in chat.
+
+- **When it applies:** only when you actually have the app's UI running — e.g. the task is a standalone web app you can serve, or you started its server via `o8 run --detach -- <start cmd>`. **Respect the sandbox UI-verification guidance above** — do NOT spin up o8's own Next/Tauri dev servers just to capture; for o8-self UI packets the operator verifies visually and the orchestrator captures during review.
+- **The pattern:** capture the broken state first, fix it, capture the fixed state:
+  ```
+  o8 packet capture --url http://localhost:3000/login --before --label "login button overlaps form" --wait-for "[data-testid=login-form]"
+  # ...make the fix...
+  o8 packet capture --url http://localhost:3000/login --after  --label "login button overlaps form" --wait-for "[data-testid=login-form]"
+  ```
+  Use the SAME `--label` on both so they pair into one Bug/Fixed card. `--wait-for <selector>` polls until the real UI is on screen (no blank-loading captures); `--settle <ms>` adds a pause for animations.
+- **Skip it** for pure-logic/backend changes — there's nothing to show, and that's fine (a "no visual proof — backend change" note is the honest default).
 
 ## Contributing to the brain (`o8 cortex observe`)
 
