@@ -37,6 +37,12 @@ interface CaptureArgs {
   waitFor: string | null;
   settleMs: number;
   pairId: string | null;
+  /** Capture the whole scrollable page, not just the viewport (#1147 D1). */
+  fullPage: boolean;
+  /** Hover this selector before the shot — surfaces :hover states (#1147 D2). */
+  hover: string | null;
+  /** Click this selector before the shot — surfaces post-interaction states. */
+  click: string | null;
 }
 
 interface WorktreeMatch { worktreePath: string; packetSlug: string }
@@ -65,6 +71,9 @@ export function parseCaptureArgs(rest: string[]): CaptureArgs {
   let waitFor: string | null = null;
   let settleMs = 0;
   let pairId: string | null = null;
+  let fullPage = false;
+  let hover: string | null = null;
+  let click: string | null = null;
 
   const take = (tok: string, flag: string, i: { v: number }): string | null =>
     tok === flag ? (rest[++i.v] ?? null) : tok.startsWith(`${flag}=`) ? tok.slice(flag.length + 1) : null;
@@ -79,6 +88,9 @@ export function parseCaptureArgs(rest: string[]): CaptureArgs {
     else if ((val = take(tok, '--wait-for', i)) !== null) waitFor = val;
     else if ((val = take(tok, '--settle', i)) !== null) settleMs = Math.max(0, Math.min(10_000, Number(val) || 0));
     else if ((val = take(tok, '--pair', i)) !== null) pairId = val;
+    else if ((val = take(tok, '--hover', i)) !== null) hover = val;
+    else if ((val = take(tok, '--click', i)) !== null) click = val;
+    else if (tok === '--full-page' || tok === '--fullpage') fullPage = true;
     else if (tok === '--before') phase = 'before';
     else if (tok === '--after') phase = 'after';
     else if (!tok.startsWith('--') && !url) url = tok;
@@ -93,6 +105,9 @@ export function parseCaptureArgs(rest: string[]): CaptureArgs {
     waitFor: waitFor?.trim() || null,
     settleMs,
     pairId: pairId?.trim() || null,
+    fullPage,
+    hover: hover?.trim() || null,
+    click: click?.trim() || null,
   };
 }
 
@@ -106,9 +121,12 @@ async function captureViaDevBrowser(args: CaptureArgs): Promise<DevBrowserCaptur
   const script = `
     const page = await browser.getPage("o8-capture");
     await page.goto(${JSON.stringify(args.url)}, { waitUntil: "domcontentloaded", timeout: 30000 });
-    ${args.waitFor ? `await page.waitForSelector(${JSON.stringify(args.waitFor)}, { state: "visible", timeout: ${waitMs} });` : ''}
+    ${args.waitFor ? `await page.waitForSelector(${JSON.stringify(args.waitFor)}, { state: "visible", timeout: ${waitMs} });
+    try { await page.locator(${JSON.stringify(args.waitFor)}).first().scrollIntoViewIfNeeded({ timeout: 3000 }); } catch {}` : ''}
+    ${args.hover ? `try { await page.hover(${JSON.stringify(args.hover)}, { timeout: ${waitMs} }); } catch {}` : ''}
+    ${args.click ? `try { await page.click(${JSON.stringify(args.click)}, { timeout: ${waitMs} }); } catch {}` : ''}
     ${args.settleMs > 0 ? `await page.waitForTimeout(${args.settleMs});` : ''}
-    const buf = await page.screenshot({ fullPage: false });
+    const buf = await page.screenshot({ fullPage: ${args.fullPage ? 'true' : 'false'} });
     const p = await saveScreenshot(buf, ${JSON.stringify(name + '.png')});
     let vp = null; try { vp = page.viewportSize(); } catch {}
     console.log("O8CAP:" + JSON.stringify({ path: p, width: vp && vp.width, height: vp && vp.height }));
