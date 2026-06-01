@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { performance } from 'node:perf_hooks';
 import {
   addRepo,
   listRepos,
@@ -118,13 +119,14 @@ async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl
 }
 
 export async function GET() {
+  const startedAt = performance.now();
   try {
     const repos = await enrichRepoReadinessList(await listRepos());
-    return NextResponse.json({ repos });
+    return NextResponse.json({ repos }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Unable to load repository registry.' },
-      { status: 500 },
+      { status: 500, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },
     );
   }
 }

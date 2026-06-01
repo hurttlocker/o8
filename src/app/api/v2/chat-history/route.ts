@@ -10,6 +10,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, mkdirSync, unlinkSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
@@ -102,13 +103,14 @@ function defaultModelForBackend(
 }
 
 export async function GET(request: NextRequest) {
+  const startedAt = performance.now();
   const tabId = request.nextUrl.searchParams.get('tabId');
-  if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400 });
+  if (!tabId) return NextResponse.json({ error: 'tabId required' }, { status: 400, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
 
   const filePath = safePath(tabId);
   try {
     const data = readFileSync(filePath, 'utf-8');
-    return NextResponse.json(JSON.parse(data));
+    return NextResponse.json(JSON.parse(data), { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch {
     return NextResponse.json({
       messages: [],
@@ -127,7 +129,7 @@ export async function GET(request: NextRequest) {
       orchestratorSessionIds: null,
       orchestratorSessionUpdatedAt: null,
       exists: false,
-    });
+    }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   }
 }
 

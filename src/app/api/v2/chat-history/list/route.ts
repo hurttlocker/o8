@@ -11,6 +11,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { readdirSync, readFileSync, statSync, unlinkSync } from 'node:fs';
 import { join, basename } from 'node:path';
 import { homedir } from 'node:os';
+import { performance } from 'node:perf_hooks';
 
 // Empty placeholder files (#597 mint-on-open pattern) get garbage-collected
 // after this window — gives the operator time to come back to a fresh tab
@@ -69,6 +70,7 @@ function inferOrchestratorModel(tabId: string, data: Record<string, unknown>): s
 }
 
 export async function GET(request: NextRequest) {
+  const startedAt = performance.now();
   const searchQuery = request.nextUrl.searchParams.get('q')?.toLowerCase();
   const includeOrchestrator = request.nextUrl.searchParams.get('include') === 'orchestrator';
   const archivedParam = request.nextUrl.searchParams.get('archived');
@@ -204,8 +206,8 @@ export async function GET(request: NextRequest) {
       try { unlinkSync(path); } catch { /* ignore */ }
     }
 
-    return NextResponse.json({ conversations });
+    return NextResponse.json({ conversations }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch {
-    return NextResponse.json({ conversations: [] });
+    return NextResponse.json({ conversations: [] }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   }
 }
