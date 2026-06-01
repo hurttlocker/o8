@@ -120,7 +120,7 @@ commands:
   packet heartbeat     update the current packet lane heartbeat
   packet review        approve + merge a reviewed packet
   packet report        append an agent_report event for this packet
-  packet capture       screenshot the agent's app as visual proof (--url --label --before/--after --wait-for --full-page --hover/--click)
+  packet capture       screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
   packet log [id]      read or follow packet lane events (--follow, --since)
   packet runtime-drift detect and warn when a lane's bound runtime drifted
 
