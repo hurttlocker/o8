@@ -49,7 +49,7 @@ o8 packet diff [id]                    # this packet's code diff vs base (commit
 o8 packet commit -m "<message>"        # stage + commit the worktree with an explicit pathspec (use instead of raw git add/commit)
 o8 packet heartbeat                    # lifecycle ping; safe no-op outside a packet
 o8 packet report --event progress [--reason "..." --message "..."]   # surface a structured progress/blocker event
-o8 packet capture --url <url> --before|--after [--wait-for <sel>] [--full-page] [--hover <sel>] [--click <sel>] [--settle <ms>] [--label "..."]   # screenshot the running app as VISUAL PROOF of a bug/fix
+o8 packet capture --url <url> --before|--after [--clip <sel>] [--full-page] [--wait-for <sel>] [--hover <sel>] [--click <sel>] [--settle <ms>] [--label "..."]   # screenshot the running app as VISUAL PROOF of a bug/fix
 o8 packet log [id] [--follow] [--since <cursor>]                     # read or tail this packet's lane events
 o8 packet runtime-drift                # detect + warn when the lane's bound runtime drifted (exit 5 on drift)
 o8 packet review --approve [--commit-message "..."]                  # approve + merge a reviewed packet
@@ -106,9 +106,10 @@ If your change is **visual** (a UI bug or fix the operator could *see*), capture
   o8 packet capture --url http://localhost:3000/login --after  --label "login button overlaps form" --wait-for "[data-testid=login-form]"
   ```
   Use the SAME `--label` on both so they pair into one Bug/Fixed card. `--wait-for <selector>` polls until the real UI is on screen (no blank-loading captures); `--settle <ms>` adds a pause for animations.
-- **Capture what actually changed:**
-  - If the change is **below the fold** (a footer, a long page), pass `--full-page` — a viewport-only shot lands on the hero and misses your change. `--wait-for "<selector>"` also scrolls that element into view.
-  - If the change is an **interaction state** (`:hover`, `:focus`, an open menu, a clicked tab), a static shot shows nothing — pass `--hover "<selector>"` or `--click "<selector>"` to trigger the state before the shot.
+- **Frame the actual change — the preview should BE the change:**
+  - For a **localized change** (a footer, a button, a card), pass `--clip "<selector>"` — it screenshots just that element's box, so the before/after shows the change tight, not a full page where it's a thin strip. This is the preferred default for most UI fixes.
+  - For a **whole-page / layout** change, pass `--full-page` instead (a viewport-only shot lands on the hero and misses below-the-fold changes). `--wait-for "<selector>"` also scrolls that element into view.
+  - If the change is an **interaction state** (`:hover`, `:focus`, an open menu, a clicked tab), a static shot shows nothing — pass `--hover "<selector>"` or `--click "<selector>"` to trigger the state before the shot (combine with `--clip` to frame it).
 - **Skip it** for pure-logic/backend changes — there's nothing to show, and that's fine (a "no visual proof — backend change" note is the honest default).
 
 ## Contributing to the brain (`o8 cortex observe`)

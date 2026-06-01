@@ -43,6 +43,9 @@ interface CaptureArgs {
   hover: string | null;
   /** Click this selector before the shot — surfaces post-interaction states. */
   click: string | null;
+  /** Screenshot ONLY this element's box — frames the actual change so the
+   *  preview IS the change, not a full page where it's a thin strip (#1149). */
+  clip: string | null;
 }
 
 interface WorktreeMatch { worktreePath: string; packetSlug: string }
@@ -74,6 +77,7 @@ export function parseCaptureArgs(rest: string[]): CaptureArgs {
   let fullPage = false;
   let hover: string | null = null;
   let click: string | null = null;
+  let clip: string | null = null;
 
   const take = (tok: string, flag: string, i: { v: number }): string | null =>
     tok === flag ? (rest[++i.v] ?? null) : tok.startsWith(`${flag}=`) ? tok.slice(flag.length + 1) : null;
@@ -90,6 +94,7 @@ export function parseCaptureArgs(rest: string[]): CaptureArgs {
     else if ((val = take(tok, '--pair', i)) !== null) pairId = val;
     else if ((val = take(tok, '--hover', i)) !== null) hover = val;
     else if ((val = take(tok, '--click', i)) !== null) click = val;
+    else if ((val = take(tok, '--clip', i)) !== null) clip = val;
     else if (tok === '--full-page' || tok === '--fullpage') fullPage = true;
     else if (tok === '--before') phase = 'before';
     else if (tok === '--after') phase = 'after';
@@ -108,6 +113,7 @@ export function parseCaptureArgs(rest: string[]): CaptureArgs {
     fullPage,
     hover: hover?.trim() || null,
     click: click?.trim() || null,
+    clip: clip?.trim() || null,
   };
 }
 
@@ -126,7 +132,11 @@ async function captureViaDevBrowser(args: CaptureArgs): Promise<DevBrowserCaptur
     ${args.hover ? `try { await page.hover(${JSON.stringify(args.hover)}, { timeout: ${waitMs} }); } catch {}` : ''}
     ${args.click ? `try { await page.click(${JSON.stringify(args.click)}, { timeout: ${waitMs} }); } catch {}` : ''}
     ${args.settleMs > 0 ? `await page.waitForTimeout(${args.settleMs});` : ''}
-    const buf = await page.screenshot({ fullPage: ${args.fullPage ? 'true' : 'false'} });
+    ${args.clip
+      ? `const __clip = page.locator(${JSON.stringify(args.clip)}).first();
+    try { await __clip.scrollIntoViewIfNeeded({ timeout: 3000 }); } catch {}
+    const buf = await __clip.screenshot();`
+      : `const buf = await page.screenshot({ fullPage: ${args.fullPage ? 'true' : 'false'} });`}
     const p = await saveScreenshot(buf, ${JSON.stringify(name + '.png')});
     let vp = null; try { vp = page.viewportSize(); } catch {}
     console.log("O8CAP:" + JSON.stringify({ path: p, width: vp && vp.width, height: vp && vp.height }));
