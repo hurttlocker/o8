@@ -45,6 +45,7 @@ import {
   markDashboardFirstRender,
   markDashboardInteractive,
 } from '@/lib/perf/dashboard-marks';
+import { startWebVitalsObserver } from '@/lib/perf/web-vitals';
 import {
   subscribeO8PanelFocus,
 } from '@/lib/events/o8-panel-focus';
@@ -581,6 +582,7 @@ function DashboardInner() {
   const [inTauri, setInTauri] = useState(false);
   useEffect(() => {
     logDashboardBootTiming();
+    startWebVitalsObserver();
     setInTauri(isTauri());
     // tauri-plugin-mcp no longer needs JS-side init — the eval_and_await
     // protocol shipped in #932 phase 2 invokes JS from Rust per call.

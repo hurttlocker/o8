@@ -46,7 +46,7 @@ import { useOrchestratorStatusFeed } from './useOrchestratorStatusFeed';
 import { getPendingMissionCards } from './mission-complete-detector';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
-import { ChatMessageList } from './chat-panel/ChatMessageList';
+import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
 import { SwarmStatusCard } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import type { TurnSummary } from './chat-panel/TurnSummaryCard';
