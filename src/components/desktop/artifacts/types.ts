@@ -40,11 +40,18 @@ export function groupArtifacts(artifacts: ArtifactRef[]): ArtifactGroup[] {
   const groups: ArtifactGroup[] = [];
 
   for (const a of artifacts) {
-    if (a.pairId && a.phase) {
-      let g = byPair.get(a.pairId);
+    // Pair a before/after by explicit pairId, or fall back to a shared label —
+    // agents naturally pass the SAME --label on both shots (no --pair), which
+    // is what AGENTS.md documents. Without the label fallback they'd render as
+    // two singles instead of one Bug/Fixed card (#1147 dogfood finding B).
+    const pairKey = a.phase
+      ? (a.pairId ? `pair:${a.pairId}` : (a.label ? `label:${a.label.trim().toLowerCase()}` : null))
+      : null;
+    if (pairKey) {
+      let g = byPair.get(pairKey);
       if (!g) {
-        g = { key: `pair:${a.pairId}`, before: null, after: null, single: null };
-        byPair.set(a.pairId, g);
+        g = { key: pairKey, before: null, after: null, single: null };
+        byPair.set(pairKey, g);
         groups.push(g);
       }
       if (a.phase === 'before') g.before = a;
