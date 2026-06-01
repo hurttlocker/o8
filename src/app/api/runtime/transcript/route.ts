@@ -1,13 +1,15 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { performance } from 'node:perf_hooks';
 import { readRuntimeTranscript } from '@/lib/runtime/transcript';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(request: NextRequest) {
+  const startedAt = performance.now();
   const sessionKey = request.nextUrl.searchParams.get('sessionKey');
   if (!sessionKey) {
-    return NextResponse.json({ error: 'sessionKey is required' }, { status: 400 });
+    return NextResponse.json({ error: 'sessionKey is required' }, { status: 400, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   }
 
   const limit = parseInt(request.nextUrl.searchParams.get('limit') ?? '20', 10);
@@ -34,7 +36,7 @@ export async function GET(request: NextRequest) {
       } : undefined,
     }));
     return NextResponse.json({ transcript }, {
-      headers: { 'Cache-Control': 'no-store, max-age=0' },
+      headers: { 'Cache-Control': 'no-store, max-age=0', 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` },
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to read transcript';
@@ -43,7 +45,7 @@ export async function GET(request: NextRequest) {
       : 500;
     return NextResponse.json(
       { error: message },
-      { status },
+      { status, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },
     );
   }
 }
