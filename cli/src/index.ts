@@ -26,6 +26,7 @@ import { runPacketInfo } from './commands/packet/info.js';
 import { runPacketHeartbeat } from './commands/packet/heartbeat.js';
 import { runPacketLog } from './commands/packet/log.js';
 import { runPacketReport } from './commands/packet/report.js';
+import { runPacketCapture } from './commands/packet/capture.js';
 import { runPacketReview } from './commands/packet/review.js';
 import { runPacketScope } from './commands/packet/scope.js';
 import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
@@ -119,6 +120,7 @@ commands:
   packet heartbeat     update the current packet lane heartbeat
   packet review        approve + merge a reviewed packet
   packet report        append an agent_report event for this packet
+  packet capture       screenshot the agent's app as visual proof (--url --label --before/--after --wait-for)
   packet log [id]      read or follow packet lane events (--follow, --since)
   packet runtime-drift detect and warn when a lane's bound runtime drifted
 
@@ -188,6 +190,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'heartbeat') return runPacketHeartbeat(args.mode, args.rest);
       if (secondary === 'review') return runPacketReview(args.mode, args.rest);
       if (secondary === 'report') return runPacketReport(args.mode, args.rest);
+      if (secondary === 'capture') return runPacketCapture(args.mode, args.rest);
       if (secondary === 'log') return runPacketLog(args.mode, args.rest);
       if (secondary === 'runtime-drift') return runPacketRuntimeDrift(args.mode);
       throw unknownSubcommandError('packet', secondary);
