@@ -15,6 +15,7 @@ import {
   type ArtifactSource,
   type ArtifactPhase,
 } from '@/lib/artifacts/store';
+import { publishArtifactRecorded } from '@/lib/realtime/publisher';
 
 const MAX_BYTES = 25 * 1024 * 1024; // 25MB — generous for PNG; videos gate later.
 const VALID_SOURCES: ReadonlySet<string> = new Set<ArtifactSource>(['agent-capture', 'review-boundary', 'manual']);
@@ -152,6 +153,14 @@ export async function POST(request: Request) {
     if (!rec) {
       return NextResponse.json({ error: 'Artifact stored on disk but DB unavailable.' }, { status: 500 });
     }
+    // #1147 Phase 2 — notify mounted proof strips to refetch live. Fire-and-
+    // forget; never blocks the ingest response or throws on a downed bridge.
+    void publishArtifactRecorded({
+      artifactId: rec.id,
+      packetId: rec.packetId,
+      prNumber: rec.prNumber,
+      laneId: rec.laneId,
+    });
     const view = toArtifactView(rec);
     return NextResponse.json({ artifactId: rec.id, url: view.url, relPath: rec.relPath });
   } catch (err) {

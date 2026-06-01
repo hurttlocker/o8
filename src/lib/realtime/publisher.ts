@@ -70,3 +70,33 @@ export async function publishCortexChange(payload: {
     // Best-effort — UI still has poll fallback.
   }
 }
+
+/**
+ * #1147 Phase 2 — live visual-proof. After an agent records a before/after
+ * still (POST /api/panel/artifacts), fan out an `artifacts` channel event so
+ * the mounted proof strips (PacketCard, PrPanel, mission-complete) refetch
+ * live instead of waiting for the next mount/poll. Carries only identifiers —
+ * clients refetch the authoritative list via GET /api/panel/artifacts.
+ *
+ * Best-effort — never throws, never blocks the ingest path.
+ */
+export async function publishArtifactRecorded(payload: {
+  artifactId: string;
+  packetId?: string | null;
+  prNumber?: number | null;
+  laneId?: string | null;
+}) {
+  try {
+    await fetch(`${REALTIME_INTERNAL_ORIGIN}/internal/artifacts`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${getOrCreateWsToken()}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: AbortSignal.timeout(REALTIME_INTERNAL_TIMEOUT_MS),
+    });
+  } catch {
+    // Best-effort — UI still has its mount/poll fetch.
+  }
+}
