@@ -83,6 +83,25 @@ const LOG_PREFIX = '[orchestrator-rehydrate]';
 // re-prompt with a tighter brief that pre-supplies the file pointers.
 const PROCESS_TIMEOUT_MS = 1_800_000;
 
+/**
+ * Steer-Now / preempt settle window. A follow-up send fired while a turn is
+ * still in flight (Steer-Now, or the steer-queue auto-fire) arrives ~immediately
+ * after the interrupt SIGTERMs the prior subprocess — but `session.status` only
+ * leaves 'busy' when `proc.on('close')` fires (~1-2s later, SIGKILL fallback at
+ * 2s). Waiting that window out lets the dying turn settle so the new message is
+ * accepted instead of being dropped with a hard "busy" rejection.
+ */
+const PREEMPT_SETTLE_MS = 4_000;
+
+/** Poll until the session leaves 'busy' (a turn closed) or the window elapses. */
+async function waitForOrchestratorIdle(session: OrchestratorSession, timeoutMs: number): Promise<void> {
+  if (session.status !== 'busy') return;
+  const deadline = Date.now() + timeoutMs;
+  while (session.status === 'busy' && Date.now() < deadline) {
+    await new Promise((resolveTick) => setTimeout(resolveTick, 50));
+  }
+}
+
 let startupRehydrationPromise: Promise<void> | null = null;
 let startupRehydrationComplete = false;
 
@@ -484,13 +503,26 @@ export async function sendToOrchestrator(
   const thinkingEffort = options.thinkingEffort;
   const model = options.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
 
-  // #457 — Auto-recover dead sessions by creating a fresh one
+  // Steer-Now / queue preempt: the ws-server aborts the prior turn's
+  // controller before calling sendTurn, so a still-'busy' session here means a
+  // just-interrupted subprocess that's mid-teardown. Wait for it to close
+  // rather than rejecting the steered message outright.
+  if (session.status === 'busy') {
+    await waitForOrchestratorIdle(session, PREEMPT_SETTLE_MS);
+  }
+
+  // #457 — Auto-recover dead sessions by creating a fresh one. A SIGTERM'd turn
+  // exits non-zero → 'dead', so the settle wait above commonly lands here.
   if (session.status === 'dead') {
     console.log(`[orchestrator-session] Auto-recovering dead session ${session.sessionName}`);
     session.status = 'ready';
     session.claudeSessionId = null;
     session.proc = null;
   }
+  // Still busy after the settle window — a genuinely concurrent turn that was
+  // never interrupted, or a hung proc. Reject as before. The `session.status =
+  // 'busy'` claim below is synchronous (no await before the spawn), so a second
+  // waiter that lost the race re-enters here and rejects instead of double-spawning.
   if (session.status === 'busy') {
     throw new Error('Orchestrator session is busy');
   }
