@@ -676,3 +676,46 @@ export const automations = sqliteTable('automations', {
   ownerCreatedIdx: index('idx_automations_owner_created').on(table.owner, table.createdAt),
   enabledNextRunIdx: index('idx_automations_enabled_next_run').on(table.enabled, table.nextRunAt),
 }));
+
+/**
+ * Schema v27 — visual verification artifacts. An agent (or the review-boundary
+ * hook) captures a screenshot/video proving a bug reproduces or a fix works;
+ * the row points at bytes on disk under `<dataDir>/artifacts/<packetId>/`. The
+ * artifact rides back to the orchestrator in the packet status payload and
+ * surfaces as a before/after strip in the review / PR / packet-card surfaces.
+ * Path is stored RELATIVE to the data dir (clone-safe — never an absolute
+ * /Users/... path).
+ */
+export const artifacts = sqliteTable('artifacts', {
+  id: text('id').primaryKey(),
+  /** 'screenshot' | 'video' — v1 ships screenshot only. */
+  kind: text('kind').notNull().default('screenshot'),
+  /** Origin: 'agent-capture' (o8 packet capture) | 'review-boundary' | 'manual'. */
+  source: text('source').notNull(),
+  laneId: text('lane_id'),
+  packetId: text('packet_id'),
+  repoPath: text('repo_path'),
+  prNumber: integer('pr_number'),
+  threadId: text('thread_id'),
+  /** Human label ("login screen — bug", "after fix"). */
+  label: text('label'),
+  /** 'before' | 'after' | null — drives the before/after strip pairing. */
+  phase: text('phase', { enum: ['before', 'after'] }),
+  /** Groups a before/after pair captured for the same check. */
+  pairId: text('pair_id'),
+  /** Path RELATIVE to the o8 data dir, e.g. `artifacts/<packetId>/<id>.png`. */
+  relPath: text('rel_path').notNull(),
+  mimeType: text('mime_type').notNull().default('image/png'),
+  width: integer('width'),
+  height: integer('height'),
+  bytes: integer('bytes'),
+  /** Set once mirrored into a GitHub PR comment (best-effort). */
+  ghCommentUrl: text('gh_comment_url'),
+  capturedAt: text('captured_at').notNull().default(sql`(datetime('now'))`),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  packetIdx: index('idx_artifacts_packet').on(table.packetId, table.capturedAt),
+  prIdx: index('idx_artifacts_pr').on(table.prNumber, table.capturedAt),
+  laneIdx: index('idx_artifacts_lane').on(table.laneId, table.capturedAt),
+  threadIdx: index('idx_artifacts_thread').on(table.threadId, table.capturedAt),
+}));
