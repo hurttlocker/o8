@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
 
 const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
@@ -99,12 +99,13 @@ function ArchiveGlyph() {
   );
 }
 
-export function O8InboxPane() {
+export function O8InboxPane({ active = true }: { active?: boolean }) {
   const [items, setItems] = useState<SupervisorInboxItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<'active' | 'self_healed' | 'all'>('active');
   const [expandedTranscriptById, setExpandedTranscriptById] = useState<Record<string, RuntimeTranscriptEntry[]>>({});
   const [actionNoteById, setActionNoteById] = useState<Record<string, string>>({});
+  const inboxHydratedRef = useRef(false);
 
   const refresh = useCallback(async () => {
     try {
@@ -118,6 +119,8 @@ export function O8InboxPane() {
   }, []);
 
   useEffect(() => {
+    if (!active && !inboxHydratedRef.current) return;
+    inboxHydratedRef.current = true;
     refresh();
     const handleEvent = () => refresh();
     window.addEventListener(REFRESH_EVENT, handleEvent);
@@ -132,7 +135,7 @@ export function O8InboxPane() {
       window.removeEventListener('o8:supervisor-inbox', handleEvent);
       window.clearInterval(interval);
     };
-  }, [refresh]);
+  }, [active, refresh]);
 
   const setActionNote = useCallback((id: string, note: string) => {
     setActionNoteById((current) => ({ ...current, [id]: note }));

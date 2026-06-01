@@ -93,6 +93,7 @@ function parseTs(value?: string | null): number | null {
 // ── Component ──
 
 interface O8ActivityPaneProps {
+  active?: boolean;
   repoPath?: string | null;
   repoSlug?: string | null;
   registeredRepos?: RepoRegistryEntry[];
@@ -106,6 +107,7 @@ interface O8ActivityPaneProps {
 }
 
 export const O8ActivityPane = memo(function O8ActivityPane({
+  active = true,
   repoPath,
   repoSlug,
   registeredRepos: registeredRepoEntries = [],
@@ -156,6 +158,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   }, []);
   const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
   const mountedRef = useRef(true);
+  const activityHydratedRef = useRef(false);
   const orchestratorData = useOrchestratorData();
   const missionPackets = orchestratorData?.missionState?.packets;
 
@@ -183,7 +186,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     handleDismiss: handleDismissProposal,
   } = useDirectiveProposals({
     open: true,
-    visible: true,
+    visible: active || !loading,
     retryNonce: 0,
     onAccept: handleAcceptDirectiveProposal,
   });
@@ -265,6 +268,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
 
   // Fetch activity data
   useEffect(() => {
+    if (!active && !activityHydratedRef.current) return;
+    activityHydratedRef.current = true;
     let cancelled = false;
 
     async function load(showSpinner: boolean) {
@@ -300,7 +305,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     // Initial load / scope change shows the skeleton; background refreshes
     // below update the feed in place so the pane doesn't flash to the
     // "Loading activity…" skeleton on every realtime tick (#1150).
-    void load(true);
+    void load(active);
 
     // WS-driven invalidation + 5min fallback — silent refresh (no skeleton).
     const handler = () => { void load(false); };
@@ -316,7 +321,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       window.removeEventListener('o8:lane-lifecycle', handler);
       clearInterval(fallbackId);
     };
-  }, [effectiveRepo, isAllRepos, repoOptions]);
+  }, [active, effectiveRepo, isAllRepos, repoOptions]);
 
   // Packet items are derived from orchestrator missionState (not the
   // /api/panel feed). Always-on as of commit 2 — Mission rail is gone, so
