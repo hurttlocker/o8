@@ -52,6 +52,17 @@ export interface SendToCodexOrchestratorOptions {
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';
 /** Mirror of orchestrator-session.ts PROCESS_TIMEOUT_MS (30 min). */
 const PROCESS_TIMEOUT_MS = 1_800_000;
+/** Mirror of orchestrator-session.ts PREEMPT_SETTLE_MS — see that file for why. */
+const PREEMPT_SETTLE_MS = 4_000;
+
+/** Poll until the session leaves 'busy' (a turn closed) or the window elapses. */
+async function waitForCodexOrchestratorIdle(session: CodexOrchestratorSession, timeoutMs: number): Promise<void> {
+  if (session.status !== 'busy') return;
+  const deadline = Date.now() + timeoutMs;
+  while (session.status === 'busy' && Date.now() < deadline) {
+    await new Promise((resolveTick) => setTimeout(resolveTick, 50));
+  }
+}
 const USER_CODEX_HOME = join(homedir(), '.codex');
 const USER_CODEX_CONFIG_PATH = join(USER_CODEX_HOME, 'config.toml');
 const CODEX_ORCHESTRATOR_HOME_DIR = join(
@@ -318,12 +329,25 @@ export async function sendToCodexOrchestrator(
   const model = options.model?.trim() || DEFAULT_CODEX_MODEL;
   const reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort);
 
+  // Steer-Now / queue preempt: the ws-server aborts the prior turn's
+  // controller before calling sendTurn, so a still-'busy' session here is a
+  // just-interrupted subprocess mid-teardown. Wait for it to close rather than
+  // dropping the steered message. See orchestrator-session.ts for the full why.
+  if (session.status === 'busy') {
+    await waitForCodexOrchestratorIdle(session, PREEMPT_SETTLE_MS);
+  }
+
+  // A SIGTERM'd turn exits non-zero → 'dead', so the settle wait above commonly
+  // lands here; auto-recover into a fresh turn.
   if (session.status === 'dead') {
     console.log(`[codex-orchestrator-session] Auto-recovering dead session ${session.sessionName}`);
     session.status = 'ready';
     session.threadId = null;
     session.proc = null;
   }
+  // Still busy after the settle window — genuinely concurrent / hung. Reject.
+  // The synchronous `session.status = 'busy'` claim below means a second waiter
+  // that lost the race re-enters here and rejects instead of double-spawning.
   if (session.status === 'busy') {
     throw new Error('Codex orchestrator session is busy');
   }

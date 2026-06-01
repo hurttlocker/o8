@@ -79,6 +79,11 @@ export async function POST(request: Request) {
         language: 'en',
         temperature: 0,
       }),
+      // Bound the upstream call so a hung provider request can't freeze the
+      // dictation pill indefinitely (it has no client-side abort). Matches the
+      // QA openrouter-adapter pattern. AbortSignal.timeout throws a TimeoutError
+      // into the catch below → structured 502.
+      signal: AbortSignal.timeout(60_000),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Network error';
@@ -87,6 +92,15 @@ export async function POST(request: Request) {
 
   const raw = await response.text();
   if (!response.ok) {
+    // 402 = the OpenRouter account is out of credits. Surface an actionable
+    // operator message instead of the raw provider text (which can also carry
+    // an account user_id).
+    if (response.status === 402) {
+      return NextResponse.json(
+        { error: 'Dictation provider is out of credits — top up OpenRouter in Settings → Keys.' },
+        { status: 502 },
+      );
+    }
     return NextResponse.json(
       { error: `Transcribe upstream error (${response.status}): ${raw.slice(0, 240)}` },
       { status: 502 },
@@ -98,7 +112,7 @@ export async function POST(request: Request) {
     const parsed = JSON.parse(raw) as { text?: string; error?: { message?: string } };
     text = parsed.text?.trim() ?? '';
     if (!text && parsed.error?.message) {
-      return NextResponse.json({ error: parsed.error.message }, { status: 502 });
+      return NextResponse.json({ error: parsed.error.message.slice(0, 240) }, { status: 502 });
     }
   } catch {
     return NextResponse.json({ error: 'Transcribe response was not JSON.' }, { status: 502 });

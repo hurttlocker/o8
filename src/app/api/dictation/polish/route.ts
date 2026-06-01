@@ -86,6 +86,10 @@ export async function POST(request: Request) {
           max_tokens: 16_384,
           temperature: 0.2,
         }),
+        // Bound each upstream call (polish loops over 2 models → 60s worst
+        // case). Polish is best-effort and falls back to the raw transcript,
+        // so a per-model timeout just skips cleanup rather than hanging.
+        signal: AbortSignal.timeout(30_000),
       });
       const text = await response.text();
       if (!response.ok) {
@@ -98,7 +102,7 @@ export async function POST(request: Request) {
       };
       const polished = parsed.choices?.[0]?.message?.content?.trim() ?? '';
       if (!polished && parsed.error?.message) {
-        failures.push(`${model}: ${parsed.error.message}`);
+        failures.push(`${model}: ${parsed.error.message.slice(0, 160)}`);
         continue;
       }
       return NextResponse.json({ text: polished || preCleaned, polished: Boolean(polished) });
