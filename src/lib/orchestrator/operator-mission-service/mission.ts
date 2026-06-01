@@ -4,6 +4,7 @@ import { withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orche
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket } from '@/lib/lane/registry';
+import { listArtifacts, toArtifactRef } from '@/lib/artifacts/store';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { archiveMissionsExcept, getMissionRecord, recordMission } from '@/lib/db/missions-store';
 import {
@@ -612,6 +613,10 @@ export async function getMissionStatus(input: MissionStatusInput) {
           reviewedHeadSha: packet.review.reviewedHeadSha ?? null,
           auditApprovalId: packet.review.auditApprovalId ?? null,
         } : null,
+        // Visual verification proof (#1147) — slim refs (url + phase/pair/label),
+        // never raw disk paths. Rides back to the orchestrator so a "done/merged"
+        // packet surfaces its before/after screenshots alongside the verdict.
+        artifacts: listArtifacts({ packetId: packet.id }).map(toArtifactRef),
       };
     }),
     agents,

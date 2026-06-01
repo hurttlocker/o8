@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 26;
+const DB_SCHEMA_VERSION = 27;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -167,6 +167,9 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // color, and ordering. Migration reads existing JSON into SQLite once.
   ensureAppStateTable(sqlite);
   ensureProjectsLedgerColumns(sqlite);
+  // Schema v27 — `artifacts` table (visual verification screenshots/video).
+  // CREATE TABLE IF NOT EXISTS + indexes, safe on every boot.
+  ensureArtifactsTable(sqlite);
   migrateProjectsLedgerJsonIfNeeded(sqlite);
 }
 
@@ -202,6 +205,40 @@ function ensureAutomationsErrorColumn(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'automations', 'last_error_message')) {
     sqlite.exec('ALTER TABLE automations ADD COLUMN last_error_message TEXT');
   }
+}
+
+/**
+ * Schema v27 — visual verification artifacts. See schema.ts `artifacts` for the
+ * field semantics. `rel_path` is relative to the data dir (clone-safe).
+ */
+function ensureArtifactsTable(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS artifacts (
+      id TEXT PRIMARY KEY,
+      kind TEXT NOT NULL DEFAULT 'screenshot',
+      source TEXT NOT NULL,
+      lane_id TEXT,
+      packet_id TEXT,
+      repo_path TEXT,
+      pr_number INTEGER,
+      thread_id TEXT,
+      label TEXT,
+      phase TEXT,
+      pair_id TEXT,
+      rel_path TEXT NOT NULL,
+      mime_type TEXT NOT NULL DEFAULT 'image/png',
+      width INTEGER,
+      height INTEGER,
+      bytes INTEGER,
+      gh_comment_url TEXT,
+      captured_at TEXT NOT NULL DEFAULT (datetime('now')),
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_artifacts_packet ON artifacts(packet_id, captured_at);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_pr ON artifacts(pr_number, captured_at);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_lane ON artifacts(lane_id, captured_at);
+    CREATE INDEX IF NOT EXISTS idx_artifacts_thread ON artifacts(thread_id, captured_at);
+  `);
 }
 
 // ── #1099 — projects ledger migration to SQLite ──
