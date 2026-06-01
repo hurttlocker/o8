@@ -50,6 +50,7 @@ o8 packet commit -m "<message>"        # stage + commit the worktree with an exp
 o8 packet heartbeat                    # lifecycle ping; safe no-op outside a packet
 o8 packet report --event progress [--reason "..." --message "..."]   # surface a structured progress/blocker event
 o8 packet capture --url <url> --before|--after [--clip <sel>] [--full-page] [--wait-for <sel>] [--hover <sel>] [--click <sel>] [--settle <ms>] [--label "..."]   # screenshot the running app as VISUAL PROOF of a bug/fix
+o8 packet mirror-proof --pr <n> [--repo owner/repo] [--packet <id>]  # mirror the packet's before/after proof onto a GitHub PR (release-asset hosted, zero git bloat)
 o8 packet log [id] [--follow] [--since <cursor>]                     # read or tail this packet's lane events
 o8 packet runtime-drift                # detect + warn when the lane's bound runtime drifted (exit 5 on drift)
 o8 packet review --approve [--commit-message "..."]                  # approve + merge a reviewed packet
@@ -111,6 +112,7 @@ If your change is **visual** (a UI bug or fix the operator could *see*), capture
   - For a **whole-page / layout** change, pass `--full-page` instead (a viewport-only shot lands on the hero and misses below-the-fold changes). `--wait-for "<selector>"` also scrolls that element into view.
   - If the change is an **interaction state** (`:hover`, `:focus`, an open menu, a clicked tab), a static shot shows nothing — pass `--hover "<selector>"` or `--click "<selector>"` to trigger the state before the shot (combine with `--clip` to frame it).
 - **Skip it** for pure-logic/backend changes — there's nothing to show, and that's fine (a "no visual proof — backend change" note is the honest default).
+- **Mirror it onto the PR (`o8 packet mirror-proof`):** if the packet's work lands as a GitHub PR, run `o8 packet mirror-proof --pr <n>` to surface the same before/after stills as an inline-image comment on the PR, where human reviewers see them. The bytes are hosted on a hidden per-PR prerelease so nothing bloats git history; re-running edits the comment in place. Invoke it once a PR exists (o8 packets usually side-merge, so there's no automatic PR moment).
 
 ## Contributing to the brain (`o8 cortex observe`)
 

@@ -1,0 +1,34 @@
+export const dynamic = 'force-dynamic';
+
+import { NextResponse } from 'next/server';
+import { mirrorProofToPr } from '@/lib/artifacts/pr-mirror';
+
+/**
+ * POST /api/panel/artifacts/mirror — mirror a packet/lane's before/after proof
+ * stills onto a GitHub PR (#1147 Phase 2). Body: { repoSlug, prNumber, packetId? | laneId? }.
+ * Loopback-gated by the /api/panel/ middleware prefix. Best-effort: returns a
+ * structured result; mirrorProofToPr never throws.
+ */
+export async function POST(request: Request) {
+  let body: Record<string, unknown>;
+  try {
+    body = (await request.json()) as Record<string, unknown>;
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON body.' }, { status: 400 });
+  }
+
+  const repoSlug = typeof body.repoSlug === 'string' ? body.repoSlug.trim() : '';
+  const prNumber = Number(body.prNumber);
+  const packetId = typeof body.packetId === 'string' && body.packetId.trim() ? body.packetId.trim() : null;
+  const laneId = typeof body.laneId === 'string' && body.laneId.trim() ? body.laneId.trim() : null;
+
+  if (!repoSlug || !Number.isInteger(prNumber) || prNumber <= 0) {
+    return NextResponse.json({ error: 'Provide repoSlug ("owner/repo") and a positive integer prNumber.' }, { status: 400 });
+  }
+  if (!packetId && !laneId) {
+    return NextResponse.json({ error: 'Provide packetId or laneId.' }, { status: 400 });
+  }
+
+  const result = await mirrorProofToPr({ repoSlug, prNumber, packetId, laneId });
+  return NextResponse.json(result, { status: result.mirrored ? 200 : 422 });
+}
