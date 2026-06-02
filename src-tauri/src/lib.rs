@@ -2560,25 +2560,45 @@ pub fn run() {
                 // Persist for child processes (MCP server, ws-server, etc.)
                 std::env::set_var("O8_NODE_BIN", &node_bin);
 
-                // ── Reap o8 orphans on default ports (issue #719) ──
-                // If a previous install crashed or was killed in a way that
-                // left its Node children reparented to launchd, they're
-                // still serving on 3001/3002 right now. The naive
-                // find_free_port() below would step around them and pick
-                // 3003+ — but the webview keeps loading from 3001 and gets
-                // the stale orphan. Force-clear only o8-owned launchd orphans
-                // first so the new sidecar binds cleanly without killing
-                // unrelated local services.
-                sidecar_lifecycle::kill_o8_orphans_on_port(3001);
-                sidecar_lifecycle::kill_o8_orphans_on_port(3002);
+                if preship_gate {
+                    // ── Pre-ship boot gate isolation ──
+                    // This is a disposable 2nd instance launched alongside the
+                    // operator's live app. It must NEVER reap or bind the
+                    // operator's ports. find_free_port() can wrongly return the
+                    // operator's :3001 via an IPv4/IPv6 dual-stack bind quirk
+                    // (the probe's 127.0.0.1 bind doesn't conflict with an
+                    // operator listener on ::1/0.0.0.0), so do NOT probe — bind
+                    // exactly the free ports the gate driver provisioned.
+                    api_port = std::env::var("O8_API_PORT")
+                        .ok()
+                        .and_then(|p| p.parse().ok())
+                        .unwrap_or(3060);
+                    ws_port = std::env::var("O8_WS_PORT")
+                        .ok()
+                        .and_then(|p| p.parse().ok())
+                        .unwrap_or(3061);
+                    log::info!("[preship-gate] forced isolated ports: api={} ws={}", api_port, ws_port);
+                } else {
+                    // ── Reap o8 orphans on default ports (issue #719) ──
+                    // If a previous install crashed or was killed in a way that
+                    // left its Node children reparented to launchd, they're
+                    // still serving on 3001/3002 right now. The naive
+                    // find_free_port() below would step around them and pick
+                    // 3003+ — but the webview keeps loading from 3001 and gets
+                    // the stale orphan. Force-clear only o8-owned launchd orphans
+                    // first so the new sidecar binds cleanly without killing
+                    // unrelated local services.
+                    sidecar_lifecycle::kill_o8_orphans_on_port(3001);
+                    sidecar_lifecycle::kill_o8_orphans_on_port(3002);
 
-                // ── Port allocation ──
-                // Probe for free ports starting at the legacy defaults. If the
-                // user has something else on 3001/3002 (another o8 instance, a
-                // Next dev server, a random service), fall through to 3003+.
-                api_port = find_free_port(API_PORT_RANGE, None).unwrap_or(3001);
-                ws_port = find_free_port(WS_PORT_RANGE, Some(api_port)).unwrap_or(3002);
-                log::info!("Allocated ports: api={} ws={}", api_port, ws_port);
+                    // ── Port allocation ──
+                    // Probe for free ports starting at the legacy defaults. If the
+                    // user has something else on 3001/3002 (another o8 instance, a
+                    // Next dev server, a random service), fall through to 3003+.
+                    api_port = find_free_port(API_PORT_RANGE, None).unwrap_or(3001);
+                    ws_port = find_free_port(WS_PORT_RANGE, Some(api_port)).unwrap_or(3002);
+                    log::info!("Allocated ports: api={} ws={}", api_port, ws_port);
+                }
                 let _ = write_port_file("api-port", api_port);
                 let _ = write_port_file("ws-port", ws_port);
                 std::env::set_var("O8_API_PORT", api_port.to_string());
