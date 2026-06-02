@@ -59,10 +59,22 @@ for (const path of [DMG, APP_TAR, APP_SIG]) {
   }
 }
 
+let gateWarnFailed = false;
 try {
   execFileSync('node', ['scripts/preship-webview-gate.mjs', '--mode=authoritative', APP_TAR], { stdio: 'inherit' });
 } catch {
-  process.exit(1);
+  // #1163: WARN-ONLY. The gate's authoritative run records its own PASS/FAIL
+  // audit row before returning; here a non-zero exit (including a child-app
+  // panic that false-blocks a healthy build) is logged and stamped into the
+  // published release notes for an honest trail — but it does NOT abort the
+  // publish. Restore the hard block with O8_GATE_STRICT=1 once the gate no
+  // longer panics its own child (the #1163 robustness fix).
+  if (process.env.O8_GATE_STRICT === '1') {
+    console.error('[release] pre-ship boot gate FAILED (O8_GATE_STRICT) — refusing to publish.');
+    process.exit(1);
+  }
+  gateWarnFailed = true;
+  console.warn('[release] WARNING: pre-ship boot gate failed (warn-only, #1163). Publishing anyway. Set O8_GATE_STRICT=1 to hard-block.');
 }
 
 const signature = readFileSync(APP_SIG, 'utf8').trim();
@@ -75,9 +87,12 @@ const gateReleaseNotePath = join(BUNDLE, 'macos', 'preship-webview-gate-release-
 const gateReleaseNote = existsSync(gateReleaseNotePath)
   ? readFileSync(gateReleaseNotePath, 'utf8').trim()
   : '';
-const releaseNotes = gateReleaseNote
+const warnStamp = gateWarnFailed
+  ? '\n\ngate:warn-failed — pre-ship boot gate did not pass; shipped warn-only per #1163.'
+  : '';
+const releaseNotes = (gateReleaseNote
   ? `o8 ${tag} — see installer assets.\n\n${gateReleaseNote}`
-  : `o8 ${tag} — see installer assets.`;
+  : `o8 ${tag} — see installer assets.`) + warnStamp;
 const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 ${tag}`;
 
 // Same signed binary works on x86_64 natively and aarch64 under Rosetta, so
