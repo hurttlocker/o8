@@ -138,12 +138,29 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
         })
         .catch(() => {});
     }
-    fetchAll();
+    let rICHandle: number | undefined;
+    let timeoutHandle: number | undefined;
+    rICHandle = window.requestIdleCallback(() => {
+      rICHandle = undefined;
+      if (timeoutHandle !== undefined) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
+      fetchAll();
+    }, { timeout: 3000 });
+    timeoutHandle = window.setTimeout(() => {
+      timeoutHandle = undefined;
+      if (rICHandle !== undefined) window.cancelIdleCallback(rICHandle);
+      rICHandle = undefined;
+      fetchAll();
+    }, 1500);
     const handler = () => fetchAll();
     window.addEventListener('o8:agent-lifecycle', handler);
     const fallback = setInterval(fetchAll, 20_000);
     return () => {
       cancelled = true;
+      if (rICHandle !== undefined) window.cancelIdleCallback(rICHandle);
+      if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
       clearInterval(fallback);
       window.removeEventListener('o8:agent-lifecycle', handler);
     };
