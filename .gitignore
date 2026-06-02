@@ -25,6 +25,7 @@ artifacts/research/
 
 # Smoke test artifacts
 test-results/
+tests/bench/latest/
 tmp/
 smoke-*.txt
 mobile-*.txt
