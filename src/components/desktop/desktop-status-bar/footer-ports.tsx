@@ -140,14 +140,16 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
     }
     let rICHandle: number | undefined;
     let timeoutHandle: number | undefined;
-    rICHandle = window.requestIdleCallback(() => {
-      rICHandle = undefined;
-      if (timeoutHandle !== undefined) {
-        clearTimeout(timeoutHandle);
-        timeoutHandle = undefined;
-      }
-      fetchAll();
-    }, { timeout: 3000 });
+    if (typeof window.requestIdleCallback === 'function') {
+      rICHandle = window.requestIdleCallback(() => {
+        rICHandle = undefined;
+        if (timeoutHandle !== undefined) {
+          clearTimeout(timeoutHandle);
+          timeoutHandle = undefined;
+        }
+        fetchAll();
+      }, { timeout: 3000 });
+    }
     timeoutHandle = window.setTimeout(() => {
       timeoutHandle = undefined;
       if (rICHandle !== undefined) window.cancelIdleCallback(rICHandle);

@@ -43,14 +43,16 @@ export function SupervisorInboxBadge() {
     window.addEventListener('focus', handleFocus);
     let rICHandle: number | undefined;
     let timeoutHandle: number | undefined;
-    rICHandle = window.requestIdleCallback(() => {
-      rICHandle = undefined;
-      if (timeoutHandle !== undefined) {
-        window.clearTimeout(timeoutHandle);
-        timeoutHandle = undefined;
-      }
-      void refresh();
-    }, { timeout: 2500 });
+    if (typeof window.requestIdleCallback === 'function') {
+      rICHandle = window.requestIdleCallback(() => {
+        rICHandle = undefined;
+        if (timeoutHandle !== undefined) {
+          window.clearTimeout(timeoutHandle);
+          timeoutHandle = undefined;
+        }
+        void refresh();
+      }, { timeout: 2500 });
+    }
     timeoutHandle = window.setTimeout(() => {
       timeoutHandle = undefined;
       if (rICHandle !== undefined) window.cancelIdleCallback(rICHandle);
