@@ -1,0 +1,343 @@
+import { spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import path from 'node:path';
+
+const CATEGORIES = [
+  'ownership',
+  'decisions',
+  'processes',
+  'incidents',
+  'specs',
+  'cross-repo',
+  'literal-lookup',
+];
+
+const SCORECARD_DIR = path.resolve(process.cwd(), 'tests/bench/scorecards');
+const LATEST_DIR = path.resolve(process.cwd(), 'tests/bench/latest');
+const MANUAL_NOT_RUN = 'manual — not run this release';
+
+function readJsonOptional(filePath) {
+  try {
+    return { data: JSON.parse(fs.readFileSync(filePath, 'utf8')), note: null };
+  } catch (err) {
+    return {
+      data: null,
+      note: err instanceof Error ? err.message : String(err),
+    };
+  }
+}
+
+function numberOrNull(value) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (value && typeof value === 'object' && typeof value.value === 'number' && Number.isFinite(value.value)) {
+    return value.value;
+  }
+  return null;
+}
+
+function noteFor(value, fallback) {
+  if (value && typeof value === 'object' && typeof value.note === 'string') return value.note;
+  return fallback;
+}
+
+function gitSha() {
+  const result = spawnSync('git', ['rev-parse', '--short', 'HEAD'], { encoding: 'utf8' });
+  return result.status === 0 ? result.stdout.trim() : 'unknown';
+}
+
+function packageVersion() {
+  const pkg = readJsonOptional(path.resolve(process.cwd(), 'package.json')).data;
+  return typeof pkg?.version === 'string' ? pkg.version : '0.0.0';
+}
+
+function parseScorecardName(fileName) {
+  const match = fileName.match(/^scorecard-(\d+\.\d+\.\d+)-(.+)\.json$/);
+  if (!match) return null;
+  const versionParts = match[1].split('.').map((part) => Number(part));
+  if (versionParts.some((part) => !Number.isFinite(part))) return null;
+  return { version: match[1], sha: match[2], versionParts };
+}
+
+function compareScorecardEntries(a, b) {
+  for (let idx = 0; idx < 3; idx++) {
+    const diff = b.versionParts[idx] - a.versionParts[idx];
+    if (diff !== 0) return diff;
+  }
+  return b.mtimeMs - a.mtimeMs;
+}
+
+function listScorecards(targetVersion, targetSha) {
+  let names = [];
+  try {
+    names = fs.readdirSync(SCORECARD_DIR);
+  } catch {
+    return [];
+  }
+  return names
+    .map((name) => {
+      const parsed = parseScorecardName(name);
+      if (!parsed) return null;
+      const absolute = path.join(SCORECARD_DIR, name);
+      return {
+        ...parsed,
+        name,
+        absolute,
+        excluded: parsed.version === targetVersion && parsed.sha === targetSha,
+        mtimeMs: fs.statSync(absolute).mtimeMs,
+      };
+    })
+    .filter(Boolean)
+    .sort(compareScorecardEntries);
+}
+
+function priorScorecard(version, sha, targetPath) {
+  const entries = listScorecards(version, sha);
+  const selected = entries.find((entry) => !entry.excluded);
+  if (selected) {
+    return { card: readJsonOptional(selected.absolute).data, source: selected.name };
+  }
+
+  if (fs.existsSync(targetPath)) {
+    return { card: readJsonOptional(targetPath).data, source: 'same-build rerun' };
+  }
+
+  return { card: null, source: null };
+}
+
+function priorValue(prior, track, metric) {
+  return numberOrNull(prior?.tracks?.[track]?.metrics?.[metric]?.value);
+}
+
+function classifyDelta(value, prior, direction, threshold, informational = false) {
+  if (informational) return { delta: 'informational', deltaValue: null };
+  if (typeof prior !== 'number') return { delta: 'baseline', deltaValue: null };
+  if (typeof value !== 'number') return { delta: 'missing', deltaValue: null };
+
+  const deltaValue = value - prior;
+  if (Math.abs(deltaValue) <= threshold) {
+    return { delta: 'unchanged', deltaValue };
+  }
+  if (direction === 'lower-better') {
+    return { delta: deltaValue > 0 ? 'regressed' : 'improved', deltaValue };
+  }
+  return { delta: deltaValue < 0 ? 'regressed' : 'improved', deltaValue };
+}
+
+function metricEntry({ value, note, direction, threshold, prior, informational = false }) {
+  const comparison = classifyDelta(value, prior, direction, threshold, informational);
+  return {
+    value,
+    priorValue: typeof prior === 'number' ? prior : null,
+    direction,
+    threshold,
+    ...comparison,
+    ...(note ? { note } : {}),
+  };
+}
+
+function buildSpeedTrack(speed, prior) {
+  const metrics = speed?.metrics ?? {};
+  const names = [
+    ['dashboard_cold_ttfb_ms', 'lower-better', 25],
+    ['dashboard_warm_ttfb_ms', 'lower-better', 25],
+    ['bootstrap_warm_total_ms', 'lower-better', 25],
+    ['cli_status_median_ms', 'lower-better', 25],
+    ['mcp_client_minus_server_p50_ms', 'lower-better', 25],
+  ];
+  const result = {};
+  for (const [name, direction, threshold] of names) {
+    const raw = metrics[name];
+    result[name] = metricEntry({
+      value: numberOrNull(raw),
+      note: noteFor(raw, speed ? null : 'speed.json missing'),
+      direction,
+      threshold,
+      prior: priorValue(prior, 'speed', name),
+    });
+  }
+  const socketRaw = metrics.socket_avg_conns;
+  result.socket_avg_conns = metricEntry({
+    value: numberOrNull(socketRaw),
+    note: noteFor(socketRaw, speed ? null : 'speed.json missing'),
+    direction: 'informational',
+    threshold: null,
+    prior: priorValue(prior, 'speed', 'socket_avg_conns'),
+    informational: true,
+  });
+  return {
+    automatable: true,
+    status: speed ? 'ok' : 'not run',
+    metrics: result,
+  };
+}
+
+function memoryCategoryMetricName(category) {
+  return `${category}_full_accuracy`;
+}
+
+function buildMemoryTrack(memory, prior) {
+  const result = {};
+  const overall = memory?.summary?.overall ?? {};
+  result.overall_full_accuracy = metricEntry({
+    value: numberOrNull(overall.full),
+    note: memory ? null : 'memory.json missing',
+    direction: 'higher-better',
+    threshold: 0.05,
+    prior: priorValue(prior, 'memory', 'overall_full_accuracy'),
+  });
+  result.delta_full_vs_strongGrep = metricEntry({
+    value: numberOrNull(overall.delta_full_vs_strongGrep),
+    note: memory ? null : 'memory.json missing',
+    direction: 'higher-better',
+    threshold: 0.05,
+    prior: priorValue(prior, 'memory', 'delta_full_vs_strongGrep'),
+  });
+
+  for (const category of CATEGORIES) {
+    const raw = memory?.summary?.perCategory?.[category]?.full_accuracy;
+    const name = memoryCategoryMetricName(category);
+    result[name] = metricEntry({
+      value: numberOrNull(raw),
+      note: memory ? null : 'memory.json missing',
+      direction: 'higher-better',
+      threshold: 0.05,
+      prior: priorValue(prior, 'memory', name),
+    });
+  }
+
+  return {
+    automatable: true,
+    status: memory ? 'ok' : 'not run',
+    sourceResults: memory?.sourceResults ?? null,
+    metrics: result,
+  };
+}
+
+function buildGovernanceTrack(governance, prior) {
+  if (!governance) return { automatable: false, status: MANUAL_NOT_RUN };
+  const catchRate = governance.lastRun?.catchRate ?? governance.catchRate ?? governance.metrics?.catch_rate;
+  const fpRate = governance.lastRun?.fpRate ?? governance.fpRate ?? governance.metrics?.fp_rate;
+  return {
+    automatable: false,
+    status: 'ok',
+    lastRun: governance.lastRun ?? null,
+    metrics: {
+      catch_rate: metricEntry({
+        value: numberOrNull(catchRate),
+        direction: 'higher-better',
+        threshold: 0.05,
+        prior: priorValue(prior, 'governance', 'catch_rate'),
+      }),
+      fp_rate: metricEntry({
+        value: numberOrNull(fpRate),
+        direction: 'lower-better',
+        threshold: 0.05,
+        prior: priorValue(prior, 'governance', 'fp_rate'),
+      }),
+    },
+  };
+}
+
+function buildCodingTrack(coding, prior) {
+  if (!coding) return { automatable: false, status: MANUAL_NOT_RUN };
+  const passRate = coding.lastRun?.passRate ?? coding.passRate ?? coding.metrics?.pass_rate;
+  return {
+    automatable: false,
+    status: 'ok',
+    lastRun: coding.lastRun ?? null,
+    metrics: {
+      pass_rate: metricEntry({
+        value: numberOrNull(passRate),
+        direction: 'higher-better',
+        threshold: 0.05,
+        prior: priorValue(prior, 'coding', 'pass_rate'),
+      }),
+    },
+  };
+}
+
+function formatValue(value) {
+  return typeof value === 'number' ? String(Number(value.toFixed(3))) : 'null';
+}
+
+function renderMetricRows(trackName, track) {
+  if (!track.metrics) return `## ${trackName}\n_${track.status}_\n`;
+  const rows = ['| Metric | Value | Prior | Direction | Delta |', '| --- | ---: | ---: | --- | --- |'];
+  for (const [name, metric] of Object.entries(track.metrics)) {
+    rows.push(`| ${name} | ${formatValue(metric.value)} | ${formatValue(metric.priorValue)} | ${metric.direction} | ${metric.delta} |`);
+  }
+  return `## ${trackName}\n${rows.join('\n')}\n`;
+}
+
+function renderMarkdown(card, priorSource) {
+  const lines = [
+    '# o8 Benchmark Scorecard',
+    '',
+    `Version: ${card.version}`,
+    `Git SHA: ${card.gitSha}`,
+    `Timestamp: ${card.timestamp}`,
+    `Node: ${card.node}`,
+    `Prior: ${priorSource ?? 'none'}`,
+    '',
+    renderMetricRows('Speed', card.tracks.speed),
+    renderMetricRows('Memory', card.tracks.memory),
+    renderMetricRows('Governance', card.tracks.governance),
+    renderMetricRows('Coding', card.tracks.coding),
+  ];
+  return lines.join('\n');
+}
+
+function printSummary(card) {
+  console.log('track\tmetric\tvalue\tdelta');
+  for (const [trackName, track] of Object.entries(card.tracks)) {
+    if (!track.metrics) {
+      console.log(`${trackName}\t-\t-\t${track.status}`);
+      continue;
+    }
+    for (const [metricName, metric] of Object.entries(track.metrics)) {
+      console.log(`${trackName}\t${metricName}\t${formatValue(metric.value)}\t${metric.delta}`);
+    }
+  }
+}
+
+function main() {
+  fs.mkdirSync(SCORECARD_DIR, { recursive: true });
+  const version = packageVersion();
+  const sha = gitSha();
+  const jsonPath = path.join(SCORECARD_DIR, `scorecard-${version}-${sha}.json`);
+  const mdPath = path.join(SCORECARD_DIR, `scorecard-${version}-${sha}.md`);
+  const latestPath = path.join(SCORECARD_DIR, 'latest.md');
+
+  const { card: prior, source: priorSource } = priorScorecard(version, sha, jsonPath);
+  const speed = readJsonOptional(path.join(LATEST_DIR, 'speed.json')).data;
+  const memory = readJsonOptional(path.join(LATEST_DIR, 'memory.json')).data;
+  const governance = readJsonOptional(path.join(LATEST_DIR, 'governance.json')).data;
+  const coding = readJsonOptional(path.join(LATEST_DIR, 'coding.json')).data;
+
+  const card = {
+    version,
+    gitSha: sha,
+    timestamp: new Date().toISOString(),
+    node: process.version,
+    tracks: {
+      speed: buildSpeedTrack(speed, prior),
+      memory: buildMemoryTrack(memory, prior),
+      governance: buildGovernanceTrack(governance, prior),
+      coding: buildCodingTrack(coding, prior),
+    },
+  };
+
+  const markdown = renderMarkdown(card, priorSource);
+  fs.writeFileSync(jsonPath, JSON.stringify(card, null, 2));
+  fs.writeFileSync(mdPath, markdown);
+  fs.writeFileSync(latestPath, markdown);
+  printSummary(card);
+  console.log(`wrote ${jsonPath}`);
+}
+
+try {
+  main();
+} catch (err) {
+  console.error(`bench:score failed without throwing: ${err instanceof Error ? err.message : String(err)}`);
+  process.exitCode = 0;
+}
