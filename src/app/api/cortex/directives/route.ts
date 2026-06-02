@@ -31,6 +31,8 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { readAllDirectiveTrailers } from '@/lib/cortex/directive-merges';
 import { withTimingSync } from '@/lib/cortex/diagnostics';
 import { parseDirectiveFile, type ParsedDirective } from '@/lib/cortex/directives/parse';
+import { getSqlite } from '@/lib/db';
+import { refreshDirectiveFts } from '@/lib/db/v14-fts5-migration';
 import {
   type DirectiveProjectScope,
   directiveAppliesToRepo,
@@ -242,6 +244,14 @@ ${text}
 `;
 
     writeFileSync(filePath, frontmatter, 'utf-8');
+    try {
+      refreshDirectiveFts(getSqlite(), `${id}.md`, frontmatter);
+    } catch (error) {
+      console.warn(
+        '[cortex-directives] Failed to refresh directive FTS:',
+        error instanceof Error ? error.message : error,
+      );
+    }
 
     return NextResponse.json({ ok: true, id, path: filePath }, {
       headers: { 'Cache-Control': 'no-store, max-age=0' },

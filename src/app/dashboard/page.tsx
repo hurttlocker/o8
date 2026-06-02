@@ -50,6 +50,7 @@ import {
   subscribeO8PanelFocus,
 } from '@/lib/events/o8-panel-focus';
 import { fetchOnce } from '@/lib/panel/fetch-cache';
+import { safeCancelIdleCallback, safeRequestIdleCallback } from '@/lib/util/webview-safe';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
 import type { WorktreeInfo } from '@/lib/worktree/types';
 import type { MobileInboxSnapshot, MobileOrchestratorThread } from '@/lib/mobile/types';
@@ -586,21 +587,10 @@ function DashboardInner() {
     setInTauri(isTauri());
     // tauri-plugin-mcp no longer needs JS-side init — the eval_and_await
     // protocol shipped in #932 phase 2 invokes JS from Rust per call.
-    // Schedule the "interactive" mark on the first idle tick after mount.
-    // requestIdleCallback is unavailable in some webview / older browser
-    // environments, so we fall back to setTimeout(_, 0). Either way the
-    // measure runs after React has flushed the initial render and the
-    // browser has finished its first round of layout/paint.
-    const schedule: (cb: () => void) => () => void = (cb) => {
-      if (typeof window === 'undefined') return () => {};
-      if (typeof window.requestIdleCallback === 'function') {
-        const handle = window.requestIdleCallback(cb, { timeout: 1500 });
-        return () => window.cancelIdleCallback(handle);
-      }
-      const handle = window.setTimeout(cb, 0);
-      return () => window.clearTimeout(handle);
-    };
-    return schedule(() => markDashboardInteractive());
+    // Schedule the "interactive" mark after React has flushed the initial
+    // render and the browser has finished its first layout/paint pass.
+    const handle = safeRequestIdleCallback(() => markDashboardInteractive(), { timeout: 1500 });
+    return () => safeCancelIdleCallback(handle);
   }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
   const designMode = useDesignMode();
@@ -1199,12 +1189,8 @@ function DashboardInner() {
       import('@/components/desktop/workspace-terminal/OrchestratorTab');
       import('@/components/desktop/O8Panel');
     };
-    if (typeof requestIdleCallback === 'undefined') {
-      const timer = setTimeout(prefetch, 100);
-      return () => clearTimeout(timer);
-    }
-    const id = requestIdleCallback(prefetch);
-    return () => cancelIdleCallback(id);
+    const id = safeRequestIdleCallback(prefetch, { fallbackDelayMs: 100 });
+    return () => safeCancelIdleCallback(id);
   }, []);
 
   const { handleSetupComplete, setSetupWizardOpen, setupWizardOpen } = useSetupWizard();
@@ -1721,16 +1707,9 @@ function DashboardInner() {
         signal: controller.signal,
       }).catch(() => {});
     };
-    let cancel: () => void;
-    if (typeof window !== 'undefined' && typeof window.requestIdleCallback === 'function') {
-      const handle = window.requestIdleCallback(run, { timeout: 2000 });
-      cancel = () => window.cancelIdleCallback(handle);
-    } else {
-      const handle = setTimeout(run, 0);
-      cancel = () => clearTimeout(handle);
-    }
+    const handle = safeRequestIdleCallback(run, { timeout: 2000 });
     return () => {
-      cancel();
+      safeCancelIdleCallback(handle);
       controller.abort();
     };
   }, [activeWorkspace]);

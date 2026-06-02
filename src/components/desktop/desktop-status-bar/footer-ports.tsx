@@ -5,6 +5,7 @@ import { createPortal } from 'react-dom';
 import { ChevronRight, Copy, Send } from '../lucide-shims';
 import { Internet, Terminal as TerminalIcon, Database } from 'iconoir-react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
 
 type PortCategory = 'agent' | 'browser' | 'noise';
 
@@ -138,21 +139,19 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
         })
         .catch(() => {});
     }
-    let rICHandle: number | undefined;
+    let rICHandle: SafeIdleCallbackHandle | undefined;
     let timeoutHandle: number | undefined;
-    if (typeof window.requestIdleCallback === 'function') {
-      rICHandle = window.requestIdleCallback(() => {
-        rICHandle = undefined;
-        if (timeoutHandle !== undefined) {
-          clearTimeout(timeoutHandle);
-          timeoutHandle = undefined;
-        }
-        fetchAll();
-      }, { timeout: 3000 });
-    }
+    rICHandle = safeRequestIdleCallback(() => {
+      rICHandle = undefined;
+      if (timeoutHandle !== undefined) {
+        clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
+      fetchAll();
+    }, { timeout: 3000, fallbackDelayMs: 1500 });
     timeoutHandle = window.setTimeout(() => {
       timeoutHandle = undefined;
-      if (rICHandle !== undefined) window.cancelIdleCallback(rICHandle);
+      if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
       rICHandle = undefined;
       fetchAll();
     }, 1500);
@@ -161,7 +160,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
     const fallback = setInterval(fetchAll, 20_000);
     return () => {
       cancelled = true;
-      if (rICHandle !== undefined) window.cancelIdleCallback(rICHandle);
+      if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
       if (timeoutHandle !== undefined) clearTimeout(timeoutHandle);
       clearInterval(fallback);
       window.removeEventListener('o8:agent-lifecycle', handler);
