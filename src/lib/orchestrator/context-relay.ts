@@ -1,7 +1,7 @@
-import { eq } from 'drizzle-orm';
+import { asc, eq } from 'drizzle-orm';
 import { listApprovalsForContext } from '@/lib/approvals/store';
 import type { ApprovalAuditEvent, OrchestratorReviewFinding } from '@/lib/approvals/types';
-import { getDb, sessionOutcomes } from '@/lib/db';
+import { getDb, laneEvents, sessionOutcomes } from '@/lib/db';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import type { AgentSummary } from '@/lib/fleet/types';
@@ -480,8 +480,91 @@ export async function capturePacketCompletionContext(packetId: string, sessionKe
 // dispatch routing recommender doesn't score).
 type LedgerRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 const LEDGER_RUNTIMES: ReadonlySet<string> = new Set(['codex', 'claude-code', 'gemini', 'opencode']);
+const LANE_START_STATUSES: ReadonlySet<string> = new Set(['launching', 'running']);
+
 function isLedgerRuntime(r: string | null): r is LedgerRuntime {
   return r !== null && LEDGER_RUNTIMES.has(r);
+}
+
+type OutcomeStartDerivation = {
+  startedAt: string;
+  durationMs: number | null;
+  source: 'derived-start' | 'fallback';
+  detail: string;
+};
+
+function parseLaneEventPayload(payloadJson: string): Record<string, unknown> {
+  try {
+    const parsed = JSON.parse(payloadJson);
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // Bad historical event payloads should only disable start derivation.
+  }
+  return {};
+}
+
+function parseIsoMs(value: string): number | null {
+  const ms = new Date(value).getTime();
+  return Number.isFinite(ms) ? ms : null;
+}
+
+function fallbackOutcomeStart(completedAt: string, detail: string): OutcomeStartDerivation {
+  return {
+    startedAt: completedAt,
+    durationMs: null,
+    source: 'fallback',
+    detail,
+  };
+}
+
+function deriveOutcomeStartFromLaneEvents(
+  db: NonNullable<ReturnType<typeof getDb>>,
+  lane: Lane,
+  completedAt: string,
+): OutcomeStartDerivation {
+  try {
+    const rows = db
+      .select({
+        verb: laneEvents.verb,
+        payloadJson: laneEvents.payloadJson,
+        timestamp: laneEvents.timestamp,
+      })
+      .from(laneEvents)
+      .where(eq(laneEvents.laneId, lane.id))
+      .orderBy(asc(laneEvents.timestamp))
+      .all();
+    const startRow = rows.find((row) => {
+      if (row.verb === 'open_lane') {
+        return true;
+      }
+      if (row.verb !== 'status_change') {
+        return false;
+      }
+      const status = parseLaneEventPayload(row.payloadJson).status;
+      return typeof status === 'string' && LANE_START_STATUSES.has(status);
+    });
+
+    if (!startRow) {
+      return fallbackOutcomeStart(completedAt, 'no lane start event');
+    }
+
+    const startedMs = parseIsoMs(startRow.timestamp);
+    const completedMs = parseIsoMs(completedAt);
+    if (startedMs === null || completedMs === null || startedMs >= completedMs) {
+      return fallbackOutcomeStart(completedAt, `invalid start window from ${startRow.verb}`);
+    }
+
+    return {
+      startedAt: startRow.timestamp,
+      durationMs: Math.round(completedMs - startedMs),
+      source: 'derived-start',
+      detail: startRow.verb,
+    };
+  } catch (err) {
+    return fallbackOutcomeStart(completedAt, `lane start lookup failed: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 async function persistSessionOutcome(
@@ -502,6 +585,10 @@ async function persistSessionOutcome(
   const completedAt = context.completedAt;
   const sessionFingerprint = context.sessionKey.replace(/[^a-z0-9]/gi, '').slice(-24);
   const id = `outcome-${context.packetId.slice(0, 16)}-${sessionFingerprint}-${completedAt.slice(0, 19)}`;
+  const start = deriveOutcomeStartFromLaneEvents(db, lane, completedAt);
+  console.log(
+    `[context-relay] ${start.source} packet=${context.packetId} lane=${lane.id} startedAt=${start.startedAt} completedAt=${completedAt} durationMs=${start.durationMs ?? 'null'} detail=${start.detail}`,
+  );
 
   // Outcome derivation — coarse signal at capture time; merge will overwrite
   // mergedClean once it actually fires. selfReview presence is the cheapest
@@ -524,8 +611,9 @@ async function persistSessionOutcome(
       summary: (context.summary || '(no summary)').slice(0, 4000),
       changedFilesJson: JSON.stringify((context.changedFiles ?? []).slice(0, 50)),
       model: context.model ?? null,
-      startedAt: completedAt, // best available — runtime telemetry could refine
+      startedAt: start.startedAt,
       completedAt,
+      durationMs: start.durationMs,
       // mergedClean / reviewApproved / reviewFindingsCount left at defaults;
       // the merge handler stamps mergedClean via markOutcomeMerged() below
       // when the packet's branch actually lands on main. Without that hop the
