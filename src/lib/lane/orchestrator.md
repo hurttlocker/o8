@@ -88,6 +88,21 @@ Omit either field when nothing applies. The Packet Review Card surfaces them as 
 
 If you verified the work but the governance tools can't reach the approval yet (permissions, ordering), still write the VERDICT block and name the exact command you would run — the user will fire it. The verdict IS the deliverable. Running the approval is mechanical; writing the judgment is the part only you can do.
 
+### Adversarial review protocol
+
+This subsection is reviewer instruction and Brain documentation. It applies to both Codex-default and Claude review backends.
+
+Every VERDICT must be backed by these four terse traces before you choose `approve`, `reject`, or `needs-follow-up`:
+
+1. GUARD/PREDICATE TRACE — for each new guard, condition, or early return, name what fires it and cite an existing file:line that produces that condition. If no code path fires it, call it INERT and flag it.
+2. SCOPE/PARTITION TRACE — for each write or state mutation, state its partition key (repo/tenant/user/project as applicable) and cite the file:line that scopes it. A write with no partition key is a defect to flag; do not rationalize global leakage into every repo.
+3. SUB-REQUIREMENT COVERAGE — enumerate the issue's discrete sub-requirements and mark each covered or uncovered.
+4. EXECUTION-PATH TRACE — trace the actual call path the change runs under, not the path its name implies.
+
+Do not write `VERIFIED correct`, `looks correct`, or equivalent phrases unless the same sentence includes a cited file:line that demonstrably fires the guard/path or scopes the write. Bare confidence language is not evidence.
+
+For HIGH-RISK diffs that touch live state, ledgers, data writes, or cross-repo/global behavior, do a second skeptical pass in the same review turn. Assume the change is wrong and try to prove a scope/partition leak or inert guard. Keep an approve verdict if that skeptical pass also clears it with cited file:line evidence; do not default to reject.
+
 ## YOUR ROLE
 
 - You are the user's senior engineering partner. Think strategically, act precisely, finish the job.

@@ -14,6 +14,7 @@ import { execSync } from 'node:child_process';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
+import { buildAdversarialReviewProtocol, classifyReviewRisk } from './review-risk';
 import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReference } from './review-screenshot';
 import type { Lane } from './types';
 
@@ -233,7 +234,19 @@ function formatSelfReview(selfReview: PacketSelfReview | undefined, depth: Revie
   ].join('\n');
 }
 
-function getDiffSummary(lane: Lane, depth: ReviewDepth): string {
+interface ReviewDiffSummary {
+  summary: string;
+  changedFiles: string[];
+  addedLines: string[];
+}
+
+function extractAddedLines(diff: string): string[] {
+  return diff
+    .split('\n')
+    .filter((line) => line.startsWith('+') && !line.startsWith('+++'));
+}
+
+function getDiffSummary(lane: Lane, depth: ReviewDepth): ReviewDiffSummary {
   const cwd = lane.worktreePath || lane.repoPath;
   const maxDiffLines = REVIEW_DIFF_LINES[depth];
   try {
@@ -245,6 +258,7 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth): string {
         stat = execSync('git diff --stat HEAD~1', { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
       } catch { /* no commits yet */ }
     }
+    const changedFiles = stat ? parseDiffStat(stat).map((entry) => entry.file) : [];
 
     let diff = '';
     try {
@@ -256,11 +270,22 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth): string {
         diff = rawDiff.split('\n').slice(0, maxDiffLines).join('\n').trim();
       } catch { /* no commits yet */ }
     }
+    const addedLines = extractAddedLines(diff);
 
-    if (!stat && !diff) return 'No changes detected in the worktree.';
-    return `## Diff summary\n\n\`\`\`\n${stat}\n\`\`\`\n\n## Changes\n\n\`\`\`diff\n${diff}\n\`\`\``;
+    if (!stat && !diff) {
+      return { summary: 'No changes detected in the worktree.', changedFiles, addedLines };
+    }
+    return {
+      summary: `## Diff summary\n\n\`\`\`\n${stat}\n\`\`\`\n\n## Changes\n\n\`\`\`diff\n${diff}\n\`\`\``,
+      changedFiles,
+      addedLines,
+    };
   } catch {
-    return 'Unable to generate diff — the worktree may not have commits yet.';
+    return {
+      summary: 'Unable to generate diff — the worktree may not have commits yet.',
+      changedFiles: [],
+      addedLines: [],
+    };
   }
 }
 
@@ -402,6 +427,8 @@ function runMechanicalChecks(lane: Lane): { findings: MechanicalFinding[]; summa
 function buildReviewPrompt(
   lane: Lane,
   diffSummary: string,
+  changedFiles: string[],
+  addedLines: string[],
   selfReview: PacketSelfReview | undefined,
   depth: ReviewDepth,
   mechanicalChecksSummary?: string,
@@ -413,6 +440,8 @@ function buildReviewPrompt(
     : 'This lane reports medium-confidence self-review. Do a normal review with independent verification of the claimed changes.';
 
   const mergeGateSection = mergeGateResult ? formatMergeGateForReview(mergeGateResult) : null;
+  const reviewRisk = classifyReviewRisk(changedFiles, addedLines);
+  const adversarialReviewProtocol = buildAdversarialReviewProtocol(reviewRisk.tier);
   const reviewScreenshotMetadata = reviewScreenshot
     ? [
         typeof reviewScreenshot.width === 'number' && reviewScreenshot.width > 0
@@ -446,13 +475,18 @@ function buildReviewPrompt(
     reviewScreenshot ? `` : null,
     diffSummary,
     ``,
+    adversarialReviewProtocol || null,
+    adversarialReviewProtocol ? `` : null,
     `## Your review should include:`,
     `1. What was changed (1-2 sentences)`,
-    `2. Whether it looks correct and matches the original task intent`,
-    `3. Any concerns (regressions, missing tests, style violations)`,
-    mergeGateSection ? `4. Address each merge gate violation — these are enforcement-level findings` : null,
-    mechanicalChecksSummary ? `${mergeGateSection ? '5' : '4'}. Address each mechanical check finding — confirm or dismiss` : null,
-    `${mergeGateSection && mechanicalChecksSummary ? '6' : mergeGateSection || mechanicalChecksSummary ? '5' : '4'}. Your recommendation: approve or request changes`,
+    `2. Verification protocol — complete ALL before verdict:`,
+    `   1. GUARD/PREDICATE TRACE — for each new guard/condition/early-return, name what fires it and cite an EXISTING file:line that produces that condition; if no code path fires it, call it INERT and flag it.`,
+    `   2. SCOPE/PARTITION TRACE — for each write/state mutation, state its partition key (repo/tenant/user) and confirm it does NOT leak global state into every repo; a write with no partition key is a DEFECT to flag — cite the file:line that scopes it.`,
+    `   3. SUB-REQUIREMENT COVERAGE — enumerate the issue's discrete sub-requirements and mark each covered/uncovered.`,
+    `   4. EXECUTION-PATH TRACE — trace the actual call path the change runs under, not the one its name implies.`,
+    mergeGateSection ? `3. Address each merge gate violation — these are enforcement-level findings` : null,
+    mechanicalChecksSummary ? `${mergeGateSection ? '4' : '3'}. Address each mechanical check finding — confirm or dismiss` : null,
+    `${mergeGateSection && mechanicalChecksSummary ? '5' : mergeGateSection || mechanicalChecksSummary ? '4' : '3'}. Your recommendation: approve or request changes`,
     ``,
     `After reviewing, create an approval for the operator by calling the lane_command`,
     `tool with verb "create_pr" or "merge" for lane "${lane.id}". The policy engine`,
@@ -501,7 +535,9 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   }
   const reviewPrompt = buildReviewPrompt(
     lane,
-    diffSummary,
+    diffSummary.summary,
+    diffSummary.changedFiles,
+    diffSummary.addedLines,
     completionContext?.selfReview,
     depth,
     mechanicalChecks.summary || undefined,
