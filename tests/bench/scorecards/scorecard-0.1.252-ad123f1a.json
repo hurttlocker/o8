@@ -1,0 +1,150 @@
+{
+  "version": "0.1.252",
+  "gitSha": "ad123f1a",
+  "timestamp": "2026-06-02T04:34:39.364Z",
+  "node": "v22.22.2",
+  "tracks": {
+    "speed": {
+      "automatable": true,
+      "status": "ok",
+      "metrics": {
+        "dashboard_cold_ttfb_ms": {
+          "value": 35,
+          "priorValue": 44,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": -9
+        },
+        "dashboard_warm_ttfb_ms": {
+          "value": 25,
+          "priorValue": 20,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "unchanged",
+          "deltaValue": 5
+        },
+        "bootstrap_warm_total_ms": {
+          "value": 9,
+          "priorValue": 344,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "improved",
+          "deltaValue": -335
+        },
+        "cli_status_median_ms": {
+          "value": 629,
+          "priorValue": 1006,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "improved",
+          "deltaValue": -377
+        },
+        "mcp_client_minus_server_p50_ms": {
+          "value": null,
+          "priorValue": null,
+          "direction": "lower-better",
+          "threshold": 25,
+          "delta": "baseline",
+          "deltaValue": null,
+          "note": "metric not found"
+        },
+        "socket_avg_conns": {
+          "value": 3.07,
+          "priorValue": 20.63,
+          "direction": "informational",
+          "threshold": null,
+          "delta": "informational",
+          "deltaValue": null
+        }
+      }
+    },
+    "memory": {
+      "automatable": true,
+      "status": "ok",
+      "sourceResults": "/Users/marquisehurtt/cortex-ide/tests/qa-eval/three-way-results-2026-06-02T04-22-05-434Z.json",
+      "metrics": {
+        "overall_full_accuracy": {
+          "value": 0.6860526315789474,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "delta_full_vs_strongGrep": {
+          "value": 0.29078947368421054,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "ownership_full_accuracy": {
+          "value": 0.536,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "decisions_full_accuracy": {
+          "value": 0.72,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "processes_full_accuracy": {
+          "value": 0.8,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "incidents_full_accuracy": {
+          "value": 0.384,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "specs_full_accuracy": {
+          "value": 0.774,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "cross-repo_full_accuracy": {
+          "value": 0.4,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        },
+        "literal-lookup_full_accuracy": {
+          "value": 1,
+          "priorValue": null,
+          "direction": "higher-better",
+          "threshold": 0.05,
+          "delta": "baseline",
+          "deltaValue": null
+        }
+      }
+    },
+    "governance": {
+      "automatable": false,
+      "status": "manual — not run this release"
+    },
+    "coding": {
+      "automatable": false,
+      "status": "manual — not run this release"
+    }
+  }
+}
