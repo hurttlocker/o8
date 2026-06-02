@@ -4,7 +4,7 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
-import { DesktopWebSocketProvider, useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
+import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
 import { mergeTranscriptEntries } from '@/components/desktop/workspace-terminal/utils';
@@ -1500,6 +1500,9 @@ function DashboardInner() {
     })();
   }, [activeTileId, setActiveSessionKey, waitForWorkspaceTerminalTarget]);
 
+  const wsConnectionState = useWsConnectionState();
+  const wsConnectedRef = useRef<typeof wsConnectionState>('disconnected');
+  wsConnectedRef.current = wsConnectionState;
   const mobileRevealCursorRef = useRef(new Date(Date.now() - 3000).toISOString());
   useEffect(() => {
     if (typeof window === 'undefined') return;
@@ -1559,7 +1562,10 @@ function DashboardInner() {
 
     window.addEventListener('o8:orchestrator-threads', handleThreadEvent);
     void pollMobileRevealRequests();
-    const timer = window.setInterval(pollMobileRevealRequests, 1500);
+    const timer = window.setInterval(() => {
+      if (wsConnectedRef.current === 'connected') return;
+      void pollMobileRevealRequests();
+    }, 30000);
     return () => {
       disposed = true;
       window.clearInterval(timer);
