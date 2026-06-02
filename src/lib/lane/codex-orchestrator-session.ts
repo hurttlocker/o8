@@ -397,6 +397,10 @@ export async function sendToCodexOrchestrator(
         `model=${model}`,
         '-c',
         `model_reasoning_effort=${reasoningEffort}`,
+        // Disable the hosted image_generation tool (defaults to nonexistent
+        // gpt-image-2 in Codex CLI 0.130.0 → 400s every turn at spawn).
+        '-c',
+        'tools.image_generation=false',
         '--',
         message,
       ]
@@ -408,6 +412,8 @@ export async function sendToCodexOrchestrator(
         `model=${model}`,
         '-c',
         `model_reasoning_effort=${reasoningEffort}`,
+        '-c',
+        'tools.image_generation=false',
         '-C',
         session.repoPath,
         '--',
