@@ -21,6 +21,8 @@ import { createHash } from 'node:crypto';
 
 import { classifyQuestion } from '@/lib/cortex/qa/classifier';
 import { composeClassA, composeClassB, type SseEmit } from '@/lib/cortex/qa/composer';
+import { buildGrepArmTopRows } from '@/lib/cortex/qa/grep-arm';
+import { detectLiteralLookup } from '@/lib/cortex/qa/literal-lookup';
 import { retrieveAll, unionMerge } from '@/lib/cortex/qa/retrieve';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
 import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
@@ -64,6 +66,22 @@ function setCache(key: string, entry: Omit<CacheEntry, 'expiresAt'>): void {
   }
 }
 
+async function routeGrepArm(question: string, repoPath: string | undefined): Promise<TypedRow[] | null> {
+  if (process.env.O8_HYBRID_RETRIEVAL === '0' || !detectLiteralLookup(question)) {
+    console.info('[qa][router] arm=brain');
+    return null;
+  }
+  try {
+    const topRows = await buildGrepArmTopRows(question, repoPath);
+    if (topRows.length > 0) {
+      console.info('[qa][router] arm=grep');
+      return topRows;
+    }
+  } catch {}
+  console.info('[qa][router] arm=brain (grep-empty-fallback)');
+  return null;
+}
+
 // ── Pipeline ──────────────────────────────────────────────────────────────────
 
 export interface AskCortexResult {
@@ -104,22 +122,26 @@ export async function askCortex(
     }
   }
 
+  const grepStart = Date.now();
+  const grepRows = await routeGrepArm(question, repoPath);
   // 1. Classify
   const classifyStart = Date.now();
-  const classification = await classifyQuestion(question);
-  const classifyMs = Date.now() - classifyStart;
+  const classification = grepRows
+    ? { class: 'A' as const, bm25Variants: [question] }
+    : await classifyQuestion(question);
+  const classifyMs = grepRows ? 0 : Date.now() - classifyStart;
 
   // 2. Retrieve
   const retrievalStart = Date.now();
-  const results = await retrieveAll({
+  const results = grepRows ? [] : await retrieveAll({
     question,
     repoPath,
     projectId,
     bm25Variants: classification.bm25Variants,
     questionClass: classification.class,
   });
-  const topRows = unionMerge(results, { questionClass: classification.class });
-  const retrievalMs = Date.now() - retrievalStart;
+  const topRows = grepRows ?? unionMerge(results, { questionClass: classification.class });
+  const retrievalMs = grepRows ? Date.now() - grepStart : Date.now() - retrievalStart;
 
   // [qa-debug] Log retrieval diagnostics so we can trace empty-answer false-positives.
   const isDebug = process.env.QA_DEBUG === '1';
@@ -213,29 +235,36 @@ export async function runAskPipeline(
     }
   }
 
-  // 1. Classify — determines which composer + BM25 variants to use.
-  let classification: Awaited<ReturnType<typeof classifyQuestion>>;
-  try {
-    classification = await classifyQuestion(question);
-  } catch (err) {
-    console.warn('[qa][ask] classifier error:', err);
-    classification = { class: 'B', bm25Variants: [question] };
-  }
+  const grepRows = await routeGrepArm(question, repoPath);
+  let classification: Awaited<ReturnType<typeof classifyQuestion>> = {
+    class: 'A',
+    bm25Variants: [question],
+  };
+  let topRows: TypedRow[] = grepRows ?? [];
 
-  // 2. Retrieve — run all three retrievers in parallel, RRF-merge.
-  let topRows: TypedRow[];
-  try {
-    const results = await retrieveAll({
-      question,
-      repoPath,
-      projectId,
-      bm25Variants: classification.bm25Variants,
-      questionClass: classification.class,
-    });
-    topRows = unionMerge(results, { questionClass: classification.class });
-  } catch (err) {
-    console.warn('[qa][ask] retrieval error:', err);
-    topRows = [];
+  if (!grepRows) {
+    // 1. Classify — determines which composer + BM25 variants to use.
+    try {
+      classification = await classifyQuestion(question);
+    } catch (err) {
+      console.warn('[qa][ask] classifier error:', err);
+      classification = { class: 'B', bm25Variants: [question] };
+    }
+
+    // 2. Retrieve — run all three retrievers in parallel, RRF-merge.
+    try {
+      const results = await retrieveAll({
+        question,
+        repoPath,
+        projectId,
+        bm25Variants: classification.bm25Variants,
+        questionClass: classification.class,
+      });
+      topRows = unionMerge(results, { questionClass: classification.class });
+    } catch (err) {
+      console.warn('[qa][ask] retrieval error:', err);
+      topRows = [];
+    }
   }
 
   // 3. Compose — stream answer tokens + citations.
