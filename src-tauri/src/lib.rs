@@ -36,6 +36,10 @@ const KEYCHAIN_SERVICE: &str = "ai.o8.master-key";
 /// Keychain account name — a single per-install master key slot.
 const KEYCHAIN_ACCOUNT: &str = "default";
 
+fn env_flag_enabled(name: &str) -> bool {
+    matches!(std::env::var(name).as_deref(), Ok("1"))
+}
+
 /// Minimal URL-safe base64 encoder (no padding, no external crate).
 /// Used only for the 32-byte master key.
 fn base64_encode_url(data: &[u8]) -> String {
@@ -118,6 +122,9 @@ fn master_key_get() -> Result<String, String> {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn master_key_ensure() -> Result<String, String> {
+    if env_flag_enabled("O8_PRESHIP_GATE") {
+        return Err("preship-gate-keychain-disabled".to_string());
+    }
     if let Some(existing) = keychain_find_password() {
         return Ok(existing);
     }
@@ -2163,7 +2170,11 @@ fn ensure_cli_on_path(_cli_source: &Path) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    sanitize_window_state();
+    let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
+
+    if !preship_gate {
+        sanitize_window_state();
+    }
 
     // ── Shutdown safety net (issue #719) ──
     // Install panic + Unix-signal handlers BEFORE building Tauri so any
@@ -2206,10 +2217,14 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
-        // Auto-saves window size + position to the OS data dir on close and
-        // restores them on next launch.
-        .plugin(tauri_plugin_window_state::Builder::default().build());
+        .plugin(tauri_plugin_updater::Builder::new().build());
+
+    // Auto-saves window size + position to the OS data dir on close and
+    // restores them on next launch. The pre-ship gate launches a disposable
+    // child app and must not mutate the operator's saved window geometry.
+    if !preship_gate {
+        builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+    }
 
     // MCP plugin: exposes app to AI agents (screenshots, DOM, input simulation).
     // Optional dev-only feature. Requires a sibling checkout of tauri-plugin-mcp.
@@ -2240,14 +2255,16 @@ pub fn run() {
         // about errors in the main app shell.
         // PageLoadEvent fires twice per navigation (Started + Finished); we
         // inject on Started so the hook is in place before any user JS runs.
-        .on_page_load(|webview, payload| {
+        .on_page_load(move |webview, payload| {
             if webview.label() != "main" {
                 return;
             }
             if payload.event() != tauri::webview::PageLoadEvent::Started {
                 return;
             }
-            launch_updater::start_launch_update_check(webview.app_handle().clone());
+            if !preship_gate {
+                launch_updater::start_launch_update_check(webview.app_handle().clone());
+            }
             if let Err(err) = WebviewLatch::ConsoleErrorHook.fire(webview) {
                 log::warn!("[console-error-hook] inject failed: {}", err);
             }
@@ -2419,7 +2436,9 @@ pub fn run() {
             // Contents/Resources/server/bin/o8; symlink it onto PATH so the
             // operator + dispatched workers can just type `o8 <command>`.
             // Skip on failure — no permission, no /usr/local/bin, no problem.
-            ensure_cli_on_path(&server_dir.join("bin").join("o8"));
+            if !preship_gate {
+                ensure_cli_on_path(&server_dir.join("bin").join("o8"));
+            }
 
             // If a dev server is already running on the default port (e.g. the
             // user is running `npm run desktop:dev` in a terminal), defer to it
@@ -2431,7 +2450,9 @@ pub fn run() {
             // — we now classify the listener before deferring. An orphan gets
             // killed and we fall through to the bundled-spawn path so the new
             // shell owns both Next and ws-server.
-            let dev_server_running = if dev_frontend.is_some() {
+            let dev_server_running = if env_flag_enabled("O8_FORCE_BUNDLED_SERVERS") {
+                false
+            } else if dev_frontend.is_some() {
                 // The explicit frontend override owns API selection; probing
                 // :3001 here could kill an unrelated listener during hot reload.
                 false
