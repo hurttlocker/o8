@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { Mail, MailOpen } from 'iconoir-react';
+import { safeCancelIdleCallback, safeRequestIdleCallback, type SafeIdleCallbackHandle } from '@/lib/util/webview-safe';
 
 export function SupervisorInboxBadge() {
   const [humanRequiredCount, setHumanRequiredCount] = useState(0);
@@ -41,33 +42,30 @@ export function SupervisorInboxBadge() {
 
     window.addEventListener('o8:supervisor-inbox', handleUpdate);
     window.addEventListener('focus', handleFocus);
-    let rICHandle: number | undefined;
+    let rICHandle: SafeIdleCallbackHandle | undefined;
     let timeoutHandle: number | undefined;
-    if (typeof window.requestIdleCallback === 'function') {
-      rICHandle = window.requestIdleCallback(() => {
-        rICHandle = undefined;
-        if (timeoutHandle !== undefined) {
-          window.clearTimeout(timeoutHandle);
-          timeoutHandle = undefined;
-        }
-        void refresh();
-      }, { timeout: 2500 });
-    }
+    rICHandle = safeRequestIdleCallback(() => {
+      rICHandle = undefined;
+      if (timeoutHandle !== undefined) {
+        window.clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
+      void refresh();
+    }, { timeout: 2500, fallbackDelayMs: 1200 });
     timeoutHandle = window.setTimeout(() => {
       timeoutHandle = undefined;
-      if (rICHandle !== undefined) window.cancelIdleCallback(rICHandle);
+      if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
       rICHandle = undefined;
       void refresh();
     }, 1200);
-    const initialTimer = { rICHandle, timeoutHandle };
     const timer = window.setInterval(() => {
       void refresh();
     }, 15000);
     return () => {
       window.removeEventListener('o8:supervisor-inbox', handleUpdate);
       window.removeEventListener('focus', handleFocus);
-      if (initialTimer.rICHandle !== undefined) window.cancelIdleCallback(initialTimer.rICHandle);
-      if (initialTimer.timeoutHandle !== undefined) window.clearTimeout(initialTimer.timeoutHandle);
+      if (rICHandle !== undefined) safeCancelIdleCallback(rICHandle);
+      if (timeoutHandle !== undefined) window.clearTimeout(timeoutHandle);
       window.clearInterval(timer);
     };
   }, [refresh]);

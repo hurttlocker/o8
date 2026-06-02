@@ -12,6 +12,7 @@ import {
   startUnifiedSyncPolling,
   trackVisibilityRefresh,
 } from '../effects';
+import { safeCancelIdleCallback, safeRequestIdleCallback } from '@/lib/util/webview-safe';
 import type { MobileState } from './useMobileState';
 
 /**
@@ -261,20 +262,12 @@ export function useMobilePolling(state: MobileState, wsConnected: boolean, optio
     }
     if (adjacentKeys.length === 0) return;
 
-    // Use requestIdleCallback (or setTimeout fallback) to pre-fetch during idle
-    const idleCallback = typeof window.requestIdleCallback === 'function'
-      ? window.requestIdleCallback
-      : (cb: () => void) => window.setTimeout(cb, 2000);
-    const cancelIdle = typeof window.cancelIdleCallback === 'function'
-      ? window.cancelIdleCallback
-      : (id: number) => window.clearTimeout(id);
-
-    const id = idleCallback(() => {
+    const id = safeRequestIdleCallback(() => {
       for (const key of adjacentKeys) {
         void loadHistory(key).catch(() => undefined);
       }
-    });
-    return () => cancelIdle(id);
+    }, { fallbackDelayMs: 2000 });
+    return () => safeCancelIdleCallback(id);
   }, [selectedSessionKey, snapshot.sessions, historyBySession, historyLoading, loadHistory]);
 
   useEffect(() => {
