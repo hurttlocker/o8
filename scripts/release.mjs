@@ -59,19 +59,33 @@ for (const path of [DMG, APP_TAR, APP_SIG]) {
   }
 }
 
+try {
+  execFileSync('node', ['scripts/preship-webview-gate.mjs', '--mode=authoritative', APP_TAR], { stdio: 'inherit' });
+} catch {
+  process.exit(1);
+}
+
 const signature = readFileSync(APP_SIG, 'utf8').trim();
 const pubDate = new Date().toISOString();
 // Point latest.json download URLs at the PUBLIC MIRROR so the Tauri updater
 // can fetch artifacts anonymously. The private repo (REPO) returns 404 for
 // anonymous download requests even when the release is published.
 const downloadBase = `https://github.com/${PUBLIC_MIRROR}/releases/download/${tag}`;
+const gateReleaseNotePath = join(BUNDLE, 'macos', 'preship-webview-gate-release-note.txt');
+const gateReleaseNote = existsSync(gateReleaseNotePath)
+  ? readFileSync(gateReleaseNotePath, 'utf8').trim()
+  : '';
+const releaseNotes = gateReleaseNote
+  ? `o8 ${tag} — see installer assets.\n\n${gateReleaseNote}`
+  : `o8 ${tag} — see installer assets.`;
+const latestNotes = gateReleaseNote ? `o8 ${tag} — ${gateReleaseNote}` : `o8 ${tag}`;
 
 // Same signed binary works on x86_64 natively and aarch64 under Rosetta, so
 // point both platforms at the same artifact until a native arm64 runner
 // exists. Still signed with the same minisign key the installed app trusts.
 const latestJson = {
   version,
-  notes: `o8 ${tag}`,
+  notes: latestNotes,
   pub_date: pubDate,
   platforms: {
     'darwin-x86_64': {
@@ -108,6 +122,12 @@ const uploadArgs = [DMG, APP_TAR, APP_SIG, latestJsonPath];
 if (releaseExists) {
   console.log(`[release] ${tag} already exists — replacing assets`);
   execFileSync('gh', [
+    'release', 'edit', tag,
+    '--title', `o8 ${tag}`,
+    '--notes', releaseNotes,
+    '-R', REPO,
+  ], { stdio: 'inherit' });
+  execFileSync('gh', [
     'release', 'upload', tag, ...uploadArgs,
     '--clobber',
     '-R', REPO,
@@ -117,7 +137,7 @@ if (releaseExists) {
   execFileSync('gh', [
     'release', 'create', tag, ...uploadArgs,
     '--title', `o8 ${tag}`,
-    '--notes', `o8 ${tag} — see installer assets.`,
+    '--notes', releaseNotes,
     '-R', REPO,
   ], { stdio: 'inherit' });
 }
@@ -129,7 +149,9 @@ console.log(`[release] published ${tag}`);
 // of truth for code + full release notes; PUBLIC_MIRROR only carries the
 // updater payload. Failures here are logged but non-fatal — the private
 // publish above already succeeded.
-const mirrorNotes = `Auto-update artifacts for o8 ${tag}. See https://github.com/${REPO}/releases/tag/${tag} for details.`;
+const mirrorNotes = gateReleaseNote
+  ? `Auto-update artifacts for o8 ${tag}. See https://github.com/${REPO}/releases/tag/${tag} for details.\n\n${gateReleaseNote}`
+  : `Auto-update artifacts for o8 ${tag}. See https://github.com/${REPO}/releases/tag/${tag} for details.`;
 
 try {
   let mirrorExists = false;
@@ -140,6 +162,12 @@ try {
 
   if (mirrorExists) {
     console.log(`[release-mirror] ${tag} already exists on ${PUBLIC_MIRROR} — replacing assets`);
+    execFileSync('gh', [
+      'release', 'edit', tag,
+      '--title', `o8 ${tag}`,
+      '--notes', mirrorNotes,
+      '-R', PUBLIC_MIRROR,
+    ], { stdio: 'inherit' });
     execFileSync('gh', [
       'release', 'upload', tag, ...uploadArgs,
       '--clobber',
