@@ -727,6 +727,141 @@
         "citation_correctness_threshold": 0,
         "max_hallucinations": 1
       }
+    },
+    {
+      "id": "qa-031",
+      "category": "literal-lookup",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "In the Tauri sidecar (src-tauri/src/lib.rs), what port range does API_PORT_RANGE probe for the API port, and what range does WS_PORT_RANGE probe for the WebSocket port?",
+      "expectedAnswer": "API_PORT_RANGE is 3001..3050 and WS_PORT_RANGE is 3002..3100.",
+      "expectedFacts": [
+        "3001..3050",
+        "3002..3100"
+      ],
+      "expectedCitations": [],
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
+    },
+    {
+      "id": "qa-032",
+      "category": "literal-lookup",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What are the exact API paths mapped in the IPC_ROUTES table in src/lib/tauri/ipc-fetch.ts, and which Rust command does '/api/panel/commits' map to?",
+      "expectedAnswer": "IPC_ROUTES maps five paths: /api/panel/repos (read_repos), /api/panel/commits (read_local_commits), /api/worktrees (read_worktrees), /api/panel/approvals (read_approvals), and /api/panel/workspaces (read_workspaces). '/api/panel/commits' maps to read_local_commits.",
+      "expectedFacts": [
+        "/api/panel/commits",
+        "read_local_commits",
+        "read_repos",
+        "read_worktrees"
+      ],
+      "expectedCitations": [],
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
+    },
+    {
+      "id": "qa-033",
+      "category": "literal-lookup",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the exact string value of DEFAULT_CODEX_MODEL in src/lib/lane/codex-orchestrator-session.ts?",
+      "expectedAnswer": "DEFAULT_CODEX_MODEL is 'gpt-5.5'.",
+      "expectedFacts": [
+        "gpt-5.5"
+      ],
+      "expectedCitations": [],
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
+    },
+    {
+      "id": "qa-034",
+      "category": "literal-lookup",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the exact string value of OPENCODE_DEFAULT_MODEL in src/lib/opencode/owned.ts?",
+      "expectedAnswer": "OPENCODE_DEFAULT_MODEL is 'opencode/gpt-5-nano'.",
+      "expectedFacts": [
+        "opencode/gpt-5-nano"
+      ],
+      "expectedCitations": [],
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
+    },
+    {
+      "id": "qa-035",
+      "category": "literal-lookup",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "In src/ws-server.ts, what are the values of the three backpressure constants BACKPRESSURE_LIMIT, BACKPRESSURE_QUEUE_LIMIT, and BACKPRESSURE_FLUSH_MS?",
+      "expectedAnswer": "BACKPRESSURE_LIMIT is 64 * 1024 (64KB), BACKPRESSURE_QUEUE_LIMIT is 32 messages, and BACKPRESSURE_FLUSH_MS is 50 (ms).",
+      "expectedFacts": [
+        "64 * 1024",
+        "32",
+        "50"
+      ],
+      "expectedCitations": [],
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
+    },
+    {
+      "id": "qa-036",
+      "category": "literal-lookup",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the current value of DB_SCHEMA_VERSION in src/lib/db/index.ts (the latest schema migration marker version)?",
+      "expectedAnswer": "DB_SCHEMA_VERSION is 27.",
+      "expectedFacts": [
+        "27"
+      ],
+      "expectedCitations": [],
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
+    },
+    {
+      "id": "qa-037",
+      "category": "literal-lookup",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "In src/lib/mcp/o8-webview-client.ts, what exact Unix socket path template does O8WebviewClient construct in its constructor?",
+      "expectedAnswer": "It builds the socket path as /tmp/tauri-mcp-o8-${username}.sock, where username comes from os.userInfo().username.",
+      "expectedFacts": [
+        "/tmp/tauri-mcp-o8-",
+        ".sock"
+      ],
+      "expectedCitations": [],
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
+    },
+    {
+      "id": "qa-038",
+      "category": "literal-lookup",
+      "repoPath": "/Users/marquisehurtt/cortex-ide",
+      "question": "What is the value of TILE_LAYOUT_VERSION in src/lib/tiles/operations.ts?",
+      "expectedAnswer": "TILE_LAYOUT_VERSION is 4.",
+      "expectedFacts": [
+        "4"
+      ],
+      "expectedCitations": [],
+      "rubric": {
+        "factual_accuracy_threshold": 0.7,
+        "citation_correctness_threshold": 0,
+        "max_hallucinations": 1
+      }
     }
   ]
 }
