@@ -349,7 +349,7 @@ export class O8WebviewClient {
 
   constructor() {
     const username = os.userInfo().username;
-    this.socketPath = `/tmp/tauri-mcp-o8-${username}.sock`;
+    this.socketPath = process.env.O8_TAURI_MCP_SOCKET ?? `/tmp/tauri-mcp-o8-${username}.sock`;
     this.tokenPath = `${this.socketPath}.token`;
 
     const cleanup = () => {

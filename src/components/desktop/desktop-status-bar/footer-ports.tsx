@@ -401,6 +401,7 @@ export function FooterPorts({ onPortPreview }: { onPortPreview?: FooterPortsOnPo
 
   return (
     <div
+      data-footer-ports=""
       ref={anchorRef}
       onMouseEnter={showPopover}
       onMouseLeave={scheduleHide}

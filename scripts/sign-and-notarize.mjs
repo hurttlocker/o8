@@ -48,6 +48,12 @@ if (!existsSync(APP)) {
   process.exit(1);
 }
 
+try {
+  execFileSync('node', ['scripts/preship-webview-gate.mjs', '--mode=fail-fast'], { stdio: 'inherit' });
+} catch {
+  process.exit(1);
+}
+
 function walk(dir, predicate, results = []) {
   for (const name of readdirSync(dir)) {
     const full = join(dir, name);
