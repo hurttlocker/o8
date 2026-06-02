@@ -41,16 +41,31 @@ export function SupervisorInboxBadge() {
 
     window.addEventListener('o8:supervisor-inbox', handleUpdate);
     window.addEventListener('focus', handleFocus);
-    const initialTimer = window.setTimeout(() => {
+    let rICHandle: number | undefined;
+    let timeoutHandle: number | undefined;
+    rICHandle = window.requestIdleCallback(() => {
+      rICHandle = undefined;
+      if (timeoutHandle !== undefined) {
+        window.clearTimeout(timeoutHandle);
+        timeoutHandle = undefined;
+      }
       void refresh();
-    }, 0);
+    }, { timeout: 2500 });
+    timeoutHandle = window.setTimeout(() => {
+      timeoutHandle = undefined;
+      if (rICHandle !== undefined) window.cancelIdleCallback(rICHandle);
+      rICHandle = undefined;
+      void refresh();
+    }, 1200);
+    const initialTimer = { rICHandle, timeoutHandle };
     const timer = window.setInterval(() => {
       void refresh();
     }, 15000);
     return () => {
       window.removeEventListener('o8:supervisor-inbox', handleUpdate);
       window.removeEventListener('focus', handleFocus);
-      window.clearTimeout(initialTimer);
+      if (initialTimer.rICHandle !== undefined) window.cancelIdleCallback(initialTimer.rICHandle);
+      if (initialTimer.timeoutHandle !== undefined) window.clearTimeout(initialTimer.timeoutHandle);
       window.clearInterval(timer);
     };
   }, [refresh]);
