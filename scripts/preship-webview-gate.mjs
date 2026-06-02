@@ -7,7 +7,13 @@ import path from 'node:path';
 import process from 'node:process';
 import { setTimeout as sleep } from 'node:timers/promises';
 
-const BOOT_TIMEOUT_MS = 45_000;
+// Per-phase deadlines (each phase gets its OWN fresh budget — a shared budget
+// let a slow cold boot under machine load starve the later route/health checks
+// and flaky-fail the gate). Generous so a loaded build machine still boots the
+// child in time; a genuinely-broken app still fails when its phase deadline expires.
+const SOCKET_TIMEOUT_MS = 60_000;   // socket file + first connect (Next cold-spawn + bind)
+const ROUTE_TIMEOUT_MS = 120_000;   // webview window created + /dashboard route active
+const HEALTH_TIMEOUT_MS = 60_000;   // dashboard reaches the interactive mark, no error page
 const ERROR_WINDOW_MS = 8_000;
 const POLL_MS = 250;
 const REQUEST_TIMEOUT_MS = 10_000;
@@ -45,14 +51,18 @@ class WebviewSocketClient {
   async send(command, payload) {
     await this.ensureConnected();
     const id = `${Date.now()}${Math.random().toString(36).slice(2)}`;
-    const authToken = readFileSync(this.tokenPath, 'utf8').trim();
+    // The tauri-plugin-mcp socket runs UNAUTHENTICATED when no auth_token is
+    // configured — the operator app writes no `.token` sidecar by default.
+    // Only attach a token if one actually exists; otherwise connect without.
+    const authToken = existsSync(this.tokenPath) ? readFileSync(this.tokenPath, 'utf8').trim() : undefined;
+    const message = authToken ? { command, payload, id, authToken } : { command, payload, id };
     return await new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.pending.delete(id);
         reject(new Error(`Request timed out after ${REQUEST_TIMEOUT_MS}ms: ${command}`));
       }, REQUEST_TIMEOUT_MS);
       this.pending.set(id, { resolve, reject, timeout });
-      this.socket.write(`${JSON.stringify({ command, payload, id, authToken })}\n`, (error) => {
+      this.socket.write(`${JSON.stringify(message)}\n`, (error) => {
         if (!error) return;
         clearTimeout(timeout);
         this.pending.delete(id);
@@ -209,7 +219,9 @@ async function invokeTauri(client, command) {
 
 async function waitForSocket(client, deadline) {
   while (Date.now() < deadline) {
-    if (existsSync(client.socketPath) && existsSync(client.tokenPath)) {
+    // Wait only on the socket itself — no `.token` sidecar exists unless an
+    // auth_token is configured (the default is unauthenticated).
+    if (existsSync(client.socketPath)) {
       try {
         await client.connectOnly();
         return;
@@ -222,25 +234,65 @@ async function waitForSocket(client, deadline) {
   throw new Error('socket warmup timed out');
 }
 
+function isPortFree(port) {
+  return new Promise((resolve) => {
+    const srv = net.createServer();
+    srv.once('error', () => resolve(false));
+    srv.listen(port, '127.0.0.1', () => srv.close(() => resolve(true)));
+  });
+}
+
+async function findFreePortFrom(start) {
+  for (let p = start; p < start + 200; p += 1) {
+    if (await isPortFree(p)) return p;
+  }
+  throw new Error(`no free port from ${start}`);
+}
+
 async function waitForDashboard(client, deadline) {
+  let lastErr;
   while (Date.now() < deadline) {
-    const route = await invokeTauri(client, 'o8_view_active_route');
-    if (typeof route?.pathname === 'string' && route.pathname.includes('/dashboard')) {
-      return route.pathname;
+    try {
+      const route = await invokeTauri(client, 'o8_view_active_route');
+      if (typeof route?.pathname === 'string' && route.pathname.includes('/dashboard')) {
+        return route.pathname;
+      }
+    } catch (error) {
+      // Transient during boot — the webview window may not exist yet
+      // ("Webview window not found: main") or the socket may reset. Keep
+      // polling; a genuinely dead app fails when the deadline expires.
+      lastErr = error?.message ?? String(error);
     }
     await sleep(POLL_MS);
   }
-  throw new Error('dashboard route did not become active');
+  throw new Error(`dashboard route did not become active${lastErr ? ` (last error: ${lastErr})` : ''}`);
 }
 
-async function waitForStructuralProbe(client, deadline) {
-  const code = "!!document.querySelector('[data-mcp-scope=\"dashboard\"]') && !!document.querySelector('[data-footer-ports]')";
+async function waitForHealthyBoot(client, deadline) {
+  // Authoritative boot-health signal: the dashboard must reach the
+  // `o8:dashboard:interactive` perf mark — set only after a FULL, healthy mount
+  // (scheduled in DashboardInner's mount effect). The `data-mcp-scope` root is
+  // too weak: it's present even in a half-booted shell that hasn't run its
+  // effects. If Next.js renders its "Application error" page (a propagated crash
+  // — the 0.1.252 class showed exactly this), fail immediately. Never reaching
+  // interactive (blank / hang / crash-before-interactive) fails at the deadline.
+  const code = "(function(){var b=document.body;if(b&&b.innerText&&b.innerText.indexOf('Application error')!==-1)return 'app-error';return performance.getEntriesByName('o8:dashboard:interactive').length>0?'ready':'pending';})()";
+  let lastErr;
   while (Date.now() < deadline) {
-    const result = await executeJs(client, code);
-    if (result === 'true') return;
+    try {
+      const result = await executeJs(client, code);
+      if (result === 'app-error') throw new Error('dashboard rendered the Next.js "Application error" page');
+      if (result === 'ready') return;
+    } catch (error) {
+      const msg = error?.message ?? String(error);
+      // A real "Application error" verdict must propagate; transient eval
+      // errors (window not ready / busy JS) are tolerated until the deadline.
+      if (msg.indexOf('Application error') !== -1) throw error;
+      lastErr = msg;
+    }
     await sleep(POLL_MS);
   }
-  throw new Error('dashboard structural probe did not find required DOM nodes');
+  throw new Error(`dashboard never reached the interactive mark${lastErr ? ` (last error: ${lastErr})` : ''}`);
 }
 
 async function collectFatalConsoleErrors(client) {
@@ -248,9 +300,22 @@ async function collectFatalConsoleErrors(client) {
   const fatal = [];
   const deadline = Date.now() + ERROR_WINDOW_MS;
   while (Date.now() < deadline) {
-    const data = await invokeTauri(client, 'o8_view_console_errors');
+    let data;
+    try {
+      data = await invokeTauri(client, 'o8_view_console_errors');
+    } catch {
+      // transient read failure — keep polling within the window
+      await sleep(POLL_MS);
+      continue;
+    }
     for (const error of data?.errors ?? []) {
-      if (error?.source === 'console.error') continue;
+      // Ignore benign sources: mandated [feature] console.error logging, and
+      // the tauri-plugin-mcp bridge's own per-command trace
+      // ([mcp-entered]/[mcp-pre]/[mcp-resolved]) that the gate's OWN probing
+      // generates. A genuine uncaught crash arrives via a window 'error' event
+      // (source = a real filename) or 'unhandledrejection' — neither of which
+      // is filtered here.
+      if (error?.source === 'console.error' || error?.source === 'tauri-plugin-mcp') continue;
       const key = `${error?.message ?? ''}\n${error?.source ?? ''}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -360,6 +425,10 @@ async function main() {
   rmSync(`${socketPath}.token`, { force: true });
   if (existsSync(socketPath)) throw new Error(`socket path already exists: ${socketPath}`);
   const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-bootgate-'));
+  // Provision distinct free ports for the isolated child so it can never bind
+  // (or be confused with) the operator's live :3001/:3002.
+  const apiPort = await findFreePortFrom(3060);
+  const wsPort = await findFreePortFrom(apiPort + 1);
   const client = new WebviewSocketClient(socketPath);
   let child;
   let stdout = '';
@@ -378,20 +447,20 @@ async function main() {
         O8_DATA_DIR: dataDir,
         O8_FORCE_BUNDLED_SERVERS: '1',
         O8_PRESHIP_GATE: '1',
-        O8_API_PORT: '3060',
+        O8_API_PORT: String(apiPort),
+        O8_WS_PORT: String(wsPort),
         O8_MASTER_KEY: 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA',
       },
     });
     child.stdout.on('data', (chunk) => { stdout = tail(stdout + chunk.toString()); });
     child.stderr.on('data', (chunk) => { stderr = tail(stderr + chunk.toString()); });
 
-    const deadline = Date.now() + BOOT_TIMEOUT_MS;
     signalFailed = 'socket-warmup';
-    await waitForSocket(client, deadline);
+    await waitForSocket(client, Date.now() + SOCKET_TIMEOUT_MS);
     signalFailed = 'dashboard-route';
-    const dashboardRoute = await waitForDashboard(client, deadline);
-    signalFailed = 'dashboard-structural-probe';
-    await waitForStructuralProbe(client, deadline);
+    const dashboardRoute = await waitForDashboard(client, Date.now() + ROUTE_TIMEOUT_MS);
+    signalFailed = 'dashboard-boot-health';
+    await waitForHealthyBoot(client, Date.now() + HEALTH_TIMEOUT_MS);
     signalFailed = 'webview-console-errors';
     capturedConsoleErrors = await collectFatalConsoleErrors(client);
     if (capturedConsoleErrors.length > 0) {
