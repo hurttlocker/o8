@@ -221,6 +221,12 @@ function toolOutputPreview(value: unknown) {
 
 // ── Codex CLI argv builders ──────────────────────────────────────────────────
 
+// Codex CLI 0.130.0 injects the hosted `image_generation` tool defaulted to a
+// nonexistent `gpt-image-2` model, which OpenAI 400s on every turn — killing
+// dispatch at spawn. o8 workers write code, never images, so disable it. Scoped
+// to o8-dispatched workers; the user's interactive Codex.app is untouched.
+const DISABLE_IMAGE_TOOL = ['-c', 'tools.image_generation=false'];
+
 function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: string }): string[] {
   return [
     'exec',
@@ -228,6 +234,7 @@ function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: string }): 
     '--dangerously-bypass-approvals-and-sandbox',
     '-s',
     'danger-full-access',
+    ...DISABLE_IMAGE_TOOL,
     '-C',
     ctx.cwd,
     ...(ctx.model ? ['--model', ctx.model] : []),
@@ -244,6 +251,7 @@ function codexResumeArgs(ctx: { threadId: string; prompt: string; model?: string
     '--dangerously-bypass-approvals-and-sandbox',
     '-s',
     'danger-full-access',
+    ...DISABLE_IMAGE_TOOL,
     ctx.prompt,
   ];
 }

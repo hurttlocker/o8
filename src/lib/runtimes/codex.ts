@@ -271,7 +271,9 @@ export const codexRuntime: AgentRuntime = {
           : `Failed to resolve Codex binary: ${resolveErr instanceof Error ? resolveErr.message : String(resolveErr)}`;
         return { ok: false, note };
       }
-      execFileSync(codexBin, ['exec', 'resume', threadId, message, '--json', '--dangerously-bypass-approvals-and-sandbox'], {
+      // `-c tools.image_generation=false`: Codex CLI 0.130.0 injects a hosted
+      // image tool pinned to nonexistent gpt-image-2 → 400s the turn at spawn.
+      execFileSync(codexBin, ['exec', 'resume', threadId, message, '--json', '--dangerously-bypass-approvals-and-sandbox', '-c', 'tools.image_generation=false'], {
         cwd: process.env.HOME || os.homedir(),
         timeout: 120_000,
         maxBuffer: 10 * 1024 * 1024,
