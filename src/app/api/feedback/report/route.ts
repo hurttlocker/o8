@@ -143,7 +143,6 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
     field('OS', diagnostics.osLabel),
     field('Node', diagnostics.nodeVersion),
     field('Route', diagnostics.route),
-    field('User Agent', diagnostics.userAgent),
     ...(diagnostics.projectLabel ? [field('Project', diagnostics.projectLabel)] : []),
     field('Timestamp', diagnostics.timestamp),
   ];
