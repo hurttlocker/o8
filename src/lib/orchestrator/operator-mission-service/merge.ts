@@ -287,6 +287,7 @@ async function dispatchPacketMerge(
     laneId: lane.id,
     commitMessage: input.commitMessage?.trim() || undefined,
     reviewSummary: mapReviewSummary(packet),
+    // Advisory for merge-gate budget downgrade only; commands.ts re-derives merge authorization from the durable HEAD-matched review row.
     orchestratorReviewed: packet.review?.approved === true,
     expectedHeadSha: resolveExpectedHeadSha(input, packet),
     actor,

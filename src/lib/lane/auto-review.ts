@@ -488,9 +488,12 @@ function buildReviewPrompt(
     mechanicalChecksSummary ? `${mergeGateSection ? '4' : '3'}. Address each mechanical check finding — confirm or dismiss` : null,
     `${mergeGateSection && mechanicalChecksSummary ? '5' : mergeGateSection || mechanicalChecksSummary ? '4' : '3'}. Your recommendation: approve or request changes`,
     ``,
-    `After reviewing, create an approval for the operator by calling the lane_command`,
-    `tool with verb "create_pr" or "merge" for lane "${lane.id}". The policy engine`,
-    `will gate this and create the approval card automatically.`,
+    `After reviewing, FIRST record your verdict by calling submit_review with`,
+    `approved=true (plus any findings) for this packet. This writes the durable`,
+    `review record that authorizes merge/PR for the current HEAD. THEN call`,
+    `lane_command with verb "merge" (or "create_pr") for lane "${lane.id}".`,
+    `A merge or PR with no recorded approved review will surface an operator`,
+    `approval card instead of auto-continuing.`,
   ].filter((value): value is string => value !== null).join('\n');
 }
 
@@ -552,9 +555,9 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   //   - toggle ON              → Claude Opus 4.8 runs the review (existing
   //     behavior, bills against the user's Agent SDK credit pool).
   // Codex path lacks MCP wiring in this ship — codex writes its review verdict
-  // to the log but cannot call `lane_command` to create the approval card.
-  // Operator can still approve manually from the worktree; #1045 tracks the
-  // MCP plumbing follow-up.
+  // to the log but cannot call `submit_review` / `lane_command`, so the new
+  // durable-row gate safely falls through to an operator card. #1045 tracks
+  // the MCP plumbing follow-up.
   // Backend selected via the orchestrator-backend registry (#1075). Behavior
   // is byte-identical to the prior dual-path branch — see registry.ts.
   const { getActiveOrchestratorBackend } = await import('./orchestrator-backends/registry');

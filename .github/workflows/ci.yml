@@ -35,6 +35,20 @@ jobs:
       - run: npm ci --prefer-offline
       - run: npm run lint
 
+  governance-smoke:
+    name: Governance Smoke
+    runs-on: ubuntu-latest
+    needs: typecheck
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --prefer-offline
+      - name: Merge-requires-review governance gate
+        run: CORTEX_IDE_DATA_DIR=$(mktemp -d) NODE_OPTIONS=--conditions=react-server npx tsx scripts/smoke-merge-requires-review.ts
+
   build:
     name: Build
     runs-on: ubuntu-latest

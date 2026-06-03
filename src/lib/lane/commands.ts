@@ -37,6 +37,7 @@ import { evaluatePolicy, buildPolicyContext } from '@/lib/approvals/policies';
 import { createApproval, recordApprovalAudit } from '@/lib/approvals/store';
 import { cleanupRemoteMergeWorktree, fetchWorkerBranch } from '@/lib/lane/remote-fetch';
 import { FILE_SIZE_BLOCK_THRESHOLD_LINES } from '@/lib/orchestrator/dispatch';
+import { hasDurableApprovedReview } from '@/lib/lane/durable-review-approval';
 import { formatOversizedFiles, getOversizedChangedFilesForLane } from '@/lib/lane/file-size-policy';
 import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
@@ -136,22 +137,17 @@ function buildLanePolicyContext(
   lane: Pick<Lane, 'id' | 'repoPath'>,
   verb: 'create_pr' | 'merge',
   actor: LaneEventActor,
-  opts?: { orchestratorReviewed?: boolean; fileSizeLimitExceeded?: boolean; gatePassed?: boolean },
+  opts?: {
+    orchestratorReviewed?: boolean;
+    fileSizeLimitExceeded?: boolean;
+    gatePassed?: boolean;
+    hasApprovedReview?: boolean;
+  },
 ) {
-  // Auto-approve when:
-  //   (a) headless auto-review is active, OR
-  //   (b) the orchestrator already reviewed and approved the packet, OR
-  //   (c) the merge gate fully passed (no security / budget / integrity
-  //       violations) AND the caller is the orchestrator. F18 (#994):
-  //       previously every clean orchestrator-driven merge still asked
-  //       for an operator click; this lets the gate's pass verdict
-  //       carry the trust forward.
-  const autoReview = actor === 'orchestrator'
-    && (
-      isLaneAutoReviewInProgress(lane.id)
-      || opts?.orchestratorReviewed === true
-      || opts?.gatePassed === true
-    );
+  // Auto-approve only when the orchestrator has a durable, HEAD-matched,
+  // approved orchestrator_review row. In-progress auto-review, advisory
+  // orchestratorReviewed, and gatePassed no longer authorize by themselves.
+  const autoReview = actor === 'orchestrator' && opts?.hasApprovedReview === true;
   return buildPolicyContext('lane_command', {
     verb,
     laneId: lane.id,
@@ -162,6 +158,7 @@ function buildLanePolicyContext(
   });
 }
 
+// Retained pending removal: this status flag is no longer merge authorization.
 function isLaneAutoReviewInProgress(laneId: string) {
   try {
     const row = getSqlite()
@@ -598,7 +595,10 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       if (!lane.worktreePath) return { ok: false, laneId: command.laneId, note: 'No worktree to create PR from. Lane is on the main working tree.' };
 
       // Policy gate — require approval for PR creation
-      const prPolicy = evaluatePolicy(buildLanePolicyContext(lane, 'create_pr', actor));
+      const hasApprovedReview = actor === 'user' ? true : await hasDurableApprovedReview(lane);
+      const prPolicy = evaluatePolicy(buildLanePolicyContext(lane, 'create_pr', actor, {
+        hasApprovedReview,
+      }));
       if (prPolicy.requiresApproval && actor !== 'user') {
         return createLaneActionApproval(lane, actor, {
           verb: 'create_pr',
@@ -745,10 +745,15 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         });
       }
 
+      // Durable approved-review precondition. Computed after the merge gate so
+      // block-level gate findings still force an operator card regardless of review.
+      const hasApprovedReview = actor === 'user' ? true : await hasDurableApprovedReview(lane);
+
       // Policy gate — require approval for merge
       const mergePolicy = evaluatePolicy(buildLanePolicyContext(lane, 'merge', actor, {
         orchestratorReviewed: command.orchestratorReviewed,
         gatePassed: gateResult.passed,
+        hasApprovedReview,
       }));
       if (mergePolicy.requiresApproval && actor !== 'user') {
         return createLaneActionApproval(lane, actor, {
