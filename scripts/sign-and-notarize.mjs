@@ -147,7 +147,16 @@ execFileSync('xcrun', ['stapler', 'staple', APP], { stdio: 'inherit' });
 console.log('[sign-and-notarize] repackaging .app.tar.gz');
 if (existsSync(TAR)) rmSync(TAR);
 if (existsSync(TAR_SIG)) rmSync(TAR_SIG);
-execFileSync('tar', ['czf', TAR, '-C', join(BUNDLE, 'macos'), 'o8.app'], { stdio: 'inherit' });
+// COPYFILE_DISABLE=1: macOS `tar` otherwise stores every xattr/resource-fork as
+// an AppleDouble `._` member (`._o8.app`, `._Contents`, ...). macOS `tar -xzf`
+// silently merges those, but the Tauri updater's Rust tar extractor FAILS on
+// `._o8.app` ("failed to unpack ._o8.app") — which silently broke every
+// auto-update. Disabling AppleDouble keeps the updater tarball clean. The app's
+// code signature + staple are regular bundle files, unaffected.
+execFileSync('tar', ['czf', TAR, '-C', join(BUNDLE, 'macos'), 'o8.app'], {
+  stdio: 'inherit',
+  env: { ...process.env, COPYFILE_DISABLE: '1' },
+});
 
 console.log('[sign-and-notarize] minisign-signing the new tar.gz');
 // Newer cargo-tauri-cli rejects `--private-key-path` when
