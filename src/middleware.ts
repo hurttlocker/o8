@@ -138,6 +138,9 @@ const GATED_PREFIXES = [
   // Dictation (transcribe + polish) hits paid OpenRouter endpoints with
   // the operator's key. Loopback-only so a LAN client can't drain credits.
   '/api/dictation/',
+  // One-way beta feedback intake posts operator reports to the private team
+  // webhook. Keep it same-origin/loopback so the webhook can't be abused.
+  '/api/feedback/',
   // Setup routes are gated too — GET is allowlisted above, POST needs loopback
   // or a token (so an evil cross-origin page can't POST to /api/setup/claude-desktop
   // and silently write to the user's Claude config).
