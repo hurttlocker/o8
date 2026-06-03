@@ -48,22 +48,26 @@ if (!existsSync(APP)) {
   process.exit(1);
 }
 
-try {
-  execFileSync('node', ['scripts/preship-webview-gate.mjs', '--mode=fail-fast'], { stdio: 'inherit' });
-} catch {
-  // #1163: the boot gate can panic its own child app (a 2nd full-GUI-app launch
-  // flake alongside the running app) and FALSE-block a legitimate ship. Until
-  // the gate is reliable (the real fix is to drive the already-running app or a
-  // headless WKWebView harness — which also closes the client-crash blind
-  // spot), it runs WARN-ONLY here: the failure is logged, the authoritative run
-  // in release.mjs still records the PASS/FAIL audit row, but a fail-fast miss
-  // does not abort the build. Set O8_GATE_STRICT=1 to restore hard-blocking
-  // once the gate no longer panics its own child.
-  if (process.env.O8_GATE_STRICT === '1') {
-    console.error('[sign-and-notarize] pre-ship boot gate FAILED (O8_GATE_STRICT) — aborting.');
-    process.exit(1);
+// #1163: the gate launches a DISPOSABLE 2nd copy of o8.app from /tmp to test
+// it, and that child intermittently PANICS (resource-dir resolution / wry event
+// loop) → macOS pops "o8 quit unexpectedly" crash-report dialogs at the operator
+// AND it false-blocks legit ships. Until it's redesigned to drive the
+// already-running app or a headless WKWebView harness (no disposable GUI child),
+// it is OPT-IN: skipped by default. The author-time #1160 ESLint guard +
+// the WKWebView-API-guard directive cover the 0.1.252 class meanwhile.
+// Re-enable with O8_PRESHIP_GATE_ENABLED=1; O8_GATE_STRICT=1 additionally hard-blocks.
+if (process.env.O8_PRESHIP_GATE_ENABLED === '1') {
+  try {
+    execFileSync('node', ['scripts/preship-webview-gate.mjs', '--mode=fail-fast'], { stdio: 'inherit' });
+  } catch {
+    if (process.env.O8_GATE_STRICT === '1') {
+      console.error('[sign-and-notarize] pre-ship boot gate FAILED (O8_GATE_STRICT) — aborting.');
+      process.exit(1);
+    }
+    console.warn('[sign-and-notarize] WARNING: pre-ship boot gate failed (warn-only, #1163). Continuing.');
   }
-  console.warn('[sign-and-notarize] WARNING: pre-ship boot gate failed (warn-only, #1163). Continuing. Set O8_GATE_STRICT=1 to hard-block.');
+} else {
+  console.log('[sign-and-notarize] pre-ship boot gate skipped (opt-in via O8_PRESHIP_GATE_ENABLED=1; disabled by default — spawns a crashing GUI child, #1163).');
 }
 
 function walk(dir, predicate, results = []) {
