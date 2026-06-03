@@ -19,7 +19,7 @@ import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 
-import { resolveCli } from '@/lib/runtimes/shared/cli-resolver';
+import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
@@ -81,6 +81,7 @@ import type {
   OwnedTailEntry,
   OwnedTailGroup,
 } from './types';
+import { stageMissingCliRun } from './missing-cli';
 
 export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSessionStore {
   const runtimeId = adapter.runtimeId;
@@ -475,12 +476,36 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
 
     // Resolve CLI binary via the shared resolver (honours env overrides, nvm,
     // volta, Finder-launched Tauri env, etc.). Caches across calls.
-    const binary = await resolveCli({
-      runtimeId,
-      binaryName: adapter.binaryName,
-      envOverride: adapter.binaryEnvOverride,
-      extraEnvOverrides: adapter.binaryExtraEnvOverrides,
-    }).then((r) => r.path).catch(() => adapter.binaryName);
+    let binary: string;
+    try {
+      binary = (await resolveCli({
+        runtimeId,
+        binaryName: adapter.binaryName,
+        envOverride: adapter.binaryEnvOverride,
+        extraEnvOverrides: adapter.binaryExtraEnvOverrides,
+      })).path;
+    } catch (error) {
+      if (!(error instanceof CliNotFoundError)) {
+        binary = adapter.binaryName;
+      } else {
+        const run = await stageMissingCliRun({
+          runtimeId,
+          binaryName: adapter.binaryName,
+          humanLabel,
+          envOverride: adapter.binaryEnvOverride,
+          triedPaths: error.triedPaths,
+          session,
+          runId,
+          mode,
+          prompt,
+          stdoutPath,
+          stderrPath,
+          finishedAt: nowIso(),
+        });
+        await saveSession(session);
+        return run;
+      }
+    }
 
     let pid = 0;
     let terminalSessionName: string | undefined;
@@ -585,14 +610,17 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     };
 
     await saveSession(session);
-    await spawnOwnedRun(session, prompt, 'launch');
+    const run = await spawnOwnedRun(session, prompt, 'launch');
     invalidateFleetCache();
+    const failedBeforeLaunch = run.outcome === 'failed';
 
     return {
       ok: true,
       runtime: runtimeId,
       surfaceId: session.surfaceId,
-      note: `Owned ${adapter.squadShortName} run launched for ${repo.title}. It will become mutable through resume/interrupt only because Cortex IDE owns this surface.`,
+      note: failedBeforeLaunch
+        ? session.latestSummary
+        : `Owned ${adapter.squadShortName} run launched for ${repo.title}. It will become mutable through resume/interrupt only because Cortex IDE owns this surface.`,
     };
   }
 
@@ -610,11 +638,13 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       throw new Error(`This owned ${adapter.squadShortName} session does not have a thread id yet, so resume is not available.`);
     }
 
-    await spawnOwnedRun(session, prompt.trim(), 'resume');
+    const run = await spawnOwnedRun(session, prompt.trim(), 'resume');
     invalidateFleetCache();
     return {
-      ok: true,
-      note: `Queued a new turn on the IDE-owned ${adapter.squadShortName} session via resume.`,
+      ok: run.outcome !== 'failed',
+      note: run.outcome === 'failed'
+        ? session.latestSummary
+        : `Queued a new turn on the IDE-owned ${adapter.squadShortName} session via resume.`,
     };
   }
 

@@ -6,6 +6,7 @@ import { normalizeDetection } from '../utils';
 export function useSetupWizard() {
   const [setupWizardOpen, setSetupWizardOpen] = useState(false);
   const [setupDetection, setSetupDetection] = useState<DetectionResult | null>(null);
+  const [setupCompleteError, setSetupCompleteError] = useState<string | null>(null);
   const setupCheckedRef = useRef(false);
 
   useEffect(() => {
@@ -32,9 +33,9 @@ export function useSetupWizard() {
   }, []);
 
   const handleSetupComplete = useCallback(async () => {
-    setSetupWizardOpen(false);
+    setSetupCompleteError(null);
     try {
-      await fetch('/api/setup/config', {
+      const res = await fetch('/api/setup/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         // Write BOTH the canonical flag and the display timestamp.
@@ -46,7 +47,13 @@ export function useSetupWizard() {
           completedAt: new Date().toISOString(),
         }),
       });
-    } catch { /* silent */ }
+      if (!res.ok) throw new Error(`Setup completion save failed (${res.status})`);
+      setSetupWizardOpen(false);
+    } catch (error) {
+      console.error('[setup]', error);
+      setSetupCompleteError('Setup could not be saved. Try again to finish onboarding.');
+      setSetupWizardOpen(true);
+    }
   }, []);
 
   // Dev: trigger onboarding from settings without resetting config
@@ -58,6 +65,7 @@ export function useSetupWizard() {
 
   return {
     handleSetupComplete,
+    setupCompleteError,
     setupDetection,
     setupWizardOpen,
     setSetupWizardOpen,

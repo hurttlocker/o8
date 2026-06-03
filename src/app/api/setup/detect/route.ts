@@ -25,13 +25,27 @@ interface DetectionResult {
   hasEmbeddings: boolean;
   recommendedPath: 'ready' | 'quick-setup' | 'full-wizard';
   summary: string;
+  partial?: boolean;
+  timedOut?: boolean;
 }
 
-function safeExec(cmd: string, args: string[], timeoutMs = 2000): string {
+const ROUTE_DEADLINE_MS = 10_000;
+const MIN_PROBE_TIMEOUT_MS = 50;
+
+function boundedTimeout(timeoutMs: number, deadlineAt?: number): number {
+  if (!deadlineAt) return timeoutMs;
+  const remaining = deadlineAt - Date.now();
+  if (remaining < MIN_PROBE_TIMEOUT_MS) return 0;
+  return Math.min(timeoutMs, remaining);
+}
+
+function safeExec(cmd: string, args: string[], timeoutMs = 2000, deadlineAt?: number): string {
+  const timeout = boundedTimeout(timeoutMs, deadlineAt);
+  if (timeout === 0) return '';
   try {
     return execFileSync(cmd, args, {
       encoding: 'utf-8',
-      timeout: timeoutMs,
+      timeout,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {
@@ -39,11 +53,13 @@ function safeExec(cmd: string, args: string[], timeoutMs = 2000): string {
   }
 }
 
-function safeWhich(bin: string): string {
+function safeWhich(bin: string, deadlineAt?: number): string {
+  const timeout = boundedTimeout(1000, deadlineAt);
+  if (timeout === 0) return '';
   try {
     return execFileSync('which', [bin], {
       encoding: 'utf-8',
-      timeout: 1000,
+      timeout,
       stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {
@@ -51,27 +67,30 @@ function safeWhich(bin: string): string {
   }
 }
 
-async function safeFetch(url: string, timeoutMs = 2000): Promise<Response | null> {
+async function safeFetch(url: string, timeoutMs = 2000, deadlineAt?: number): Promise<Response | null> {
+  const timeout = boundedTimeout(timeoutMs, deadlineAt);
+  if (timeout === 0) return null;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeout);
   try {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(url, { signal: controller.signal });
-    clearTimeout(timeout);
     return res;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
-function detectCodex(): DetectedTool {
+function detectCodex(deadlineAt?: number): DetectedTool {
   const home = homedir();
-  const path = safeWhich('codex');
+  const path = safeWhich('codex', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
   let threadCount = 0;
 
   if (detected) {
-    version = safeExec('codex', ['--version']);
+    version = safeExec('codex', ['--version'], 2000, deadlineAt);
   }
 
   const sqlitePath = join(home, '.codex', 'state_5.sqlite');
@@ -80,7 +99,7 @@ function detectCodex(): DetectedTool {
       '-json',
       sqlitePath,
       'SELECT count(*) as cnt FROM threads WHERE archived=0',
-    ]);
+    ], 2000, deadlineAt);
     try {
       const parsed = JSON.parse(count) as Array<{ cnt: number }>;
       threadCount = parsed[0]?.cnt ?? 0;
@@ -99,15 +118,15 @@ function detectCodex(): DetectedTool {
   };
 }
 
-function detectClaudeCode(): DetectedTool {
+function detectClaudeCode(deadlineAt?: number): DetectedTool {
   const home = homedir();
-  const path = safeWhich('claude');
+  const path = safeWhich('claude', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
   let sessionCount = 0;
 
   if (detected) {
-    version = safeExec('claude', ['--version'], 2000);
+    version = safeExec('claude', ['--version'], 2000, deadlineAt);
   }
 
   const projectsDir = join(home, '.claude', 'projects');
@@ -139,13 +158,13 @@ function detectClaudeCode(): DetectedTool {
   };
 }
 
-function detectGemini(): DetectedTool {
-  const path = safeWhich('gemini');
+function detectGemini(deadlineAt?: number): DetectedTool {
+  const path = safeWhich('gemini', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
 
   if (detected) {
-    version = safeExec('gemini', ['--version']);
+    version = safeExec('gemini', ['--version'], 2000, deadlineAt);
   }
 
   return {
@@ -157,14 +176,14 @@ function detectGemini(): DetectedTool {
   };
 }
 
-function detectOpenCode(): DetectedTool {
-  const path = safeWhich('opencode');
+function detectOpenCode(deadlineAt?: number): DetectedTool {
+  const path = safeWhich('opencode', deadlineAt);
   const detected = !!path;
   let version: string | undefined;
   let authedProviders: string[] = [];
 
   if (detected) {
-    version = safeExec('opencode', ['--version'], 2000);
+    version = safeExec('opencode', ['--version'], 2000, deadlineAt);
   }
 
   // Best-effort: peek at the auth manifest to see which providers the user has authed.
@@ -191,8 +210,8 @@ function detectOpenCode(): DetectedTool {
   };
 }
 
-async function detectOllama(): Promise<DetectedTool> {
-  const res = await safeFetch('http://localhost:11434/api/tags', 2000);
+async function detectOllama(deadlineAt?: number): Promise<DetectedTool> {
+  const res = await safeFetch('http://localhost:11434/api/tags', 2000, deadlineAt);
   const detected = res?.ok ?? false;
   let models: string[] = [];
   let hasEmbed = false;
@@ -293,16 +312,7 @@ function buildSummary(tools: DetectedTool[]): string {
   return parts.join(' · ');
 }
 
-export async function GET() {
-  const tools: DetectedTool[] = [
-    detectCodex(),
-    detectClaudeCode(),
-    detectGemini(),
-    detectOpenCode(),
-    await detectOllama(),
-    detectApiKeys(),
-  ];
-
+function buildDetectionResult(tools: DetectedTool[], flags: { partial?: boolean; timedOut?: boolean } = {}): DetectionResult {
   const hasAgentSurface = false;
   const hasCliAgent = tools.some(t => ['codex', 'claude-code', 'gemini', 'opencode'].includes(t.id) && t.detected);
   const hasApiKey = tools.some(t => t.id === 'api-keys' && t.detected);
@@ -329,7 +339,28 @@ export async function GET() {
     hasEmbeddings,
     recommendedPath,
     summary,
+    ...flags,
   };
+  return result;
+}
+
+function isPastDeadline(deadlineAt: number) {
+  return Date.now() >= deadlineAt;
+}
+
+export async function GET() {
+  const deadlineAt = Date.now() + ROUTE_DEADLINE_MS;
+  const tools: DetectedTool[] = [];
+
+  if (!isPastDeadline(deadlineAt)) tools.push(detectCodex(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detectClaudeCode(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detectGemini(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detectOpenCode(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(await detectOllama(deadlineAt));
+  if (!isPastDeadline(deadlineAt)) tools.push(detectApiKeys());
+
+  const timedOut = isPastDeadline(deadlineAt);
+  const result = buildDetectionResult(tools, timedOut ? { partial: true, timedOut: true } : {});
 
   return NextResponse.json(result);
 }
