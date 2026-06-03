@@ -14,6 +14,7 @@ import {
   normalizeVersion,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { ReportIssueSection } from './ReportIssueSection';
 
 export function AboutTab() {
   const isProduction = process.env.NODE_ENV === 'production';
@@ -140,9 +141,11 @@ export function AboutTab() {
         </div>
       </section>
 
-      {/* 03 — CREDITS */}
+      <ReportIssueSection number="03" />
+
+      {/* 04 — CREDITS */}
       <section style={{ marginBottom: isProduction ? 0 : 32 }}>
-        <SectionLabel number="03">CREDITS</SectionLabel>
+        <SectionLabel number="04">CREDITS</SectionLabel>
         <div style={{
           paddingTop: 4,
           paddingBottom: 20,
@@ -159,7 +162,7 @@ export function AboutTab() {
       {/* Developer tools (dev only) */}
       {!isProduction ? (
         <section>
-          <SectionLabel number="04">DEVELOPER</SectionLabel>
+          <SectionLabel number="05">DEVELOPER</SectionLabel>
           <div style={{
             paddingTop: 4,
             paddingBottom: 4,
