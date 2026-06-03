@@ -174,6 +174,12 @@ function writeAudit(payload) {
         ...process.env,
         O8_DATA_DIR: liveDataDir(),
         CORTEX_IDE_DATA_DIR: liveDataDir(),
+        // #17: the audit writer imports @/lib/approvals/store, which transitively
+        // pulls `import 'server-only'` (via repos/projects.ts). Under plain tsx
+        // that guard throws ("cannot be imported from a Client Component"), so the
+        // DB write failed and we fell back to JSONL every ship. The react-server
+        // condition resolves 'server-only' to a no-op so the DB audit row lands.
+        NODE_OPTIONS: [process.env.NODE_OPTIONS, '--conditions=react-server'].filter(Boolean).join(' '),
       },
     });
     return;
