@@ -1193,7 +1193,7 @@ function DashboardInner() {
     return () => safeCancelIdleCallback(id);
   }, []);
 
-  const { handleSetupComplete, setSetupWizardOpen, setupWizardOpen } = useSetupWizard();
+  const { handleSetupComplete, setSetupWizardOpen, setupCompleteError, setupWizardOpen } = useSetupWizard();
 
   const refreshWorkspaceLifecycle = useCallback(async () => {
     try {
@@ -4574,7 +4574,7 @@ function DashboardInner() {
       {/* ── First Launch Onboarding ── */}
       {setupWizardOpen && (
         <Suspense fallback={null}>
-          <LazyOnboarding onComplete={handleSetupComplete} />
+          <LazyOnboarding onComplete={handleSetupComplete} completionError={setupCompleteError} />
         </Suspense>
       )}
 
