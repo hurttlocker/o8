@@ -142,7 +142,7 @@ Server-side TS: `import { getApiBase, resolvePortInfo } from '@/lib/panel/api-po
 
 ### API security (`src/middleware.ts`)
 
-Global Next middleware runs in Node runtime and gates these prefixes on loopback origin + bearer token (source: `GATED_PREFIXES` in `src/middleware.ts`): `/api/panel/`, `/api/orchestrator/`, `/api/directives`, `/api/cortex/`, `/api/runtime/`, `/api/lanes`, `/api/worktrees`, `/api/review/`, `/api/board/`, `/api/command-center/`, `/api/claude-code/`, `/api/codex/`, `/api/operator/`, `/api/setup/`, `/api/v2/chat`, `/api/projects`, `/api/automations`, `/api/repo-spec`, `/api/dictation/`, `/api/mobile/push/`.
+Global Next middleware runs in Node runtime and gates these prefixes on loopback origin + bearer token (source: `GATED_PREFIXES` in `src/middleware.ts`): `/api/panel/`, `/api/orchestrator/`, `/api/directives`, `/api/cortex/`, `/api/runtime/`, `/api/lanes`, `/api/worktrees`, `/api/review/`, `/api/board/`, `/api/command-center/`, `/api/claude-code/`, `/api/codex/`, `/api/operator/`, `/api/setup/`, `/api/v2/chat`, `/api/projects`, `/api/automations`, `/api/repo-spec`, `/api/dictation/`, `/api/feedback/`, `/api/mobile/push/`.
 
 - Loopback (`127.0.0.1`, `localhost`, `tauri://localhost`, `same-origin`) passes automatically.
 - Cross-origin must present `Authorization: Bearer <ws-token>` matching `~/.o8/ws-token` exactly.
