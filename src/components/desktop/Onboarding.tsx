@@ -18,7 +18,7 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ExtractedProfile, ImportProgress } from '@/lib/connectors/chatgpt/types';
 import { OnboardingDispatchStep } from './onboarding/OnboardingDispatchStep';
-import { RuntimeRow } from './onboarding/RuntimeRow';
+import { OnboardingRuntimeStep, type DetectedRuntime } from './onboarding/OnboardingRuntimeStep';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 
 // ── Shared constants ──
@@ -154,20 +154,11 @@ interface GithubRepo {
   clone_url: string;
 }
 
-// ── Runtime detection ──
-
-interface DetectedRuntime {
-  id: string;
-  name: string;
-  detected: boolean;
-  version?: string;
-}
-
 // ════════════════════════════════════════════════════════════
 // ── Main Component ──
 // ════════════════════════════════════════════════════════════
 
-export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete: () => void }) {
+export const Onboarding = memo(function Onboarding({ onComplete, completionError }: { onComplete: () => void; completionError?: string | null }) {
   const [step, setStep] = useState<OnboardingStep>('welcome');
 
   // Step 1: Welcome
@@ -186,7 +177,6 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
 
   // Step 3: Runtimes
   const [runtimes, setRuntimes] = useState<DetectedRuntime[]>([]);
-  const [runtimesLoading, setRuntimesLoading] = useState(false);
 
   // Step 4: Import
   const [importStatus, setImportStatus] = useState<ImportProgress['stage']>('uploading');
@@ -199,7 +189,6 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
     if (idx < STEP_ORDER.length - 1) {
       const nextStep = STEP_ORDER[idx + 1];
       if (nextStep === 'repos') setReposLoading(true);
-      if (nextStep === 'runtimes') setRuntimesLoading(true);
       setStep(nextStep);
     }
   }, [step]);
@@ -247,24 +236,6 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
         setReposLoading(false);
       })
       .catch(() => setReposLoading(false));
-  }, [step]);
-
-  // ── Detect runtimes when entering step 3 ──
-  useEffect(() => {
-    if (step !== 'runtimes') return;
-    fetch('/api/setup/detect')
-      .then(r => r.json())
-      .then((data) => {
-        const tools: DetectedRuntime[] = (data.tools ?? []).map((t: { id: string; name: string; detected: boolean; version?: string }) => ({
-          id: t.id,
-          name: t.name,
-          detected: t.detected,
-          version: t.version,
-        }));
-        setRuntimes(tools);
-        setRuntimesLoading(false);
-      })
-      .catch(() => setRuntimesLoading(false));
   }, [step]);
 
   // ── GitHub auth ──
@@ -586,50 +557,17 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
 
         {/* ── Step 3: Runtime Detection ── */}
         {step === 'runtimes' && (
-          <div style={{ maxWidth: 520, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5, textAlign: 'center' }}>
-              These power your assistant and agent sessions. No extra API keys needed.
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-              {runtimesLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 24, justifyContent: 'center', color: 'var(--t-text-secondary)', fontSize: 13 }}>
-                  <Spinner /> Scanning for tools...
-                </div>
-              ) : runtimes.length === 0 ? (
-                <div style={{ padding: 24, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
-                  No agent runtimes detected. Install Claude Code, Codex, or Gemini to get started, or add API keys in Settings.
-                </div>
-              ) : (
-                runtimes.map((rt) => <RuntimeRow key={rt.id} runtime={rt} />)
-              )}
-            </div>
-
-            {/* #633 — surface the zero-detected case so the user can choose
-                to continue without dispatching, instead of silently advancing
-                to a runtime picker that will fail at launch time. */}
-            {!runtimesLoading && runtimes.length > 0 && runtimes.every((rt) => !rt.detected) ? (
-              <div style={{
-                padding: '10px 12px',
-                borderRadius: 10,
-                border: '1px solid rgba(245, 158, 11, 0.24)',
-                background: 'rgba(245, 158, 11, 0.08)',
-                color: 'var(--t-text-secondary)',
-                fontSize: 11,
-                lineHeight: 1.5,
-              }}>
-                No runtimes are installed yet. You can still continue — dispatching packets will be disabled until you install at least one CLI.
-              </div>
-            ) : null}
-
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-              <button type="button" onClick={goNext} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Skip for now</button>
-              <GlassButton primary onClick={goNext}>
-                {!runtimesLoading && runtimes.length > 0 && runtimes.every((rt) => !rt.detected) ? 'Continue without runtimes' : 'Continue'}
+          <OnboardingRuntimeStep
+            runtimes={runtimes}
+            onRuntimesChange={setRuntimes}
+            onContinue={goNext}
+            renderButton={({ label, onClick }) => (
+              <GlassButton primary onClick={onClick}>
+                {label}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
               </GlassButton>
-            </div>
-          </div>
+            )}
+          />
         )}
 
         {/* ── Step 4: Default dispatch runtime ── */}
@@ -763,6 +701,11 @@ export const Onboarding = memo(function Onboarding({ onComplete }: { onComplete:
               Enter o8
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </GlassButton>
+            {completionError ? (
+              <div style={{ maxWidth: 420, textAlign: 'center', fontSize: 12, lineHeight: 1.5, color: 'var(--t-brand-red)' }}>
+                {completionError}
+              </div>
+            ) : null}
           </div>
         )}
 
