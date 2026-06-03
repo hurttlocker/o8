@@ -7,8 +7,9 @@ import type { MergePacketResult } from './operator-mission-service';
 // that never got registered in missionState (auto-attach race). Lane table is
 // the durable source of truth, so when approve_and_merge receives a packetId
 // missing from mission state, we fall through to a direct lane merge instead
-// of throwing "Packet not found." Approval audit still fires via
-// dispatchLaneCommand so governance semantics are preserved.
+// of throwing "Packet not found." Governance is enforced at the commands.ts
+// merge chokepoint: a durable approved orchestrator_review row must match the
+// current worktree HEAD, otherwise this path creates an operator card.
 export async function mergeOrphanLaneByPacket(
   packetId: string,
   commitMessage: string | undefined,
@@ -26,7 +27,6 @@ export async function mergeOrphanLaneByPacket(
     verb: 'merge',
     laneId: orphanLane.id,
     commitMessage: commitMessage?.trim() || undefined,
-    orchestratorReviewed: true,
     expectedHeadSha: expectedHeadSha?.trim() || undefined,
     actor: 'orchestrator',
   });
