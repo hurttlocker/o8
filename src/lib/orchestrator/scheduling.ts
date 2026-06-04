@@ -1,4 +1,4 @@
-import { execFile } from 'node:child_process';
+import { execFile, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 
@@ -32,6 +32,18 @@ export const MAX_RECOVERY_DISPATCHES = 2;
 const RECOVERY_COOLDOWN_MS = 60_000;
 const SESSION_RECOVERY_COMMIT_MESSAGE = 'auto-commit: session recovery';
 const execFileAsync = promisify(execFile);
+
+function isGitRepoSync(repoPath: string) {
+  try {
+    return execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
+      encoding: 'utf-8',
+      timeout: 5_000,
+      maxBuffer: 128 * 1024,
+    }).trim() === 'true';
+  } catch {
+    return false;
+  }
+}
 
 function buildComparisonGroupId() {
   return `cmp-${Date.now()}-${randomUUID().slice(0, 8)}`;
@@ -303,6 +315,9 @@ export function getDispatchBlocker(
   }
   if (!candidate.workspaceTargetPath) {
     return 'No workspace target';
+  }
+  if (!isGitRepoSync(candidate.workspaceTargetPath)) {
+    return 'This folder isn\'t a Git repository — initialize Git to dispatch agents into it.';
   }
   if (candidate.lane?.laneId || candidate.lane?.sessionKey || (candidate.lane?.tileId && candidate.lane?.tabId)) {
     // Allow retry if the lane's last event was a launch failure

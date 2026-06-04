@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,6 +21,17 @@ interface BranchInfo {
 }
 
 const STALE_THRESHOLD_DAYS = 3;
+
+function isGitRepo(repoPath: string): boolean {
+  try {
+    return execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
+      encoding: 'utf-8',
+      timeout: 2000,
+    }).trim() === 'true';
+  } catch {
+    return false;
+  }
+}
 
 function parseShortstat(raw: string): { additions: number; deletions: number } {
   // Format: " 5 files changed, 518 insertions(+), 169 deletions(-)"
@@ -51,6 +62,10 @@ export async function GET(req: NextRequest) {
   }
 
   try {
+    if (!isGitRepo(repoPath)) {
+      return NextResponse.json({ branches: [], repoPath, isGitRepo: false });
+    }
+
     // Resolve the default branch once so we can diff every branch against it.
     // Prefer origin/HEAD symbolic ref; fall back to main, then master.
     let defaultBranch = 'main';
@@ -236,6 +251,9 @@ export async function DELETE(req: NextRequest) {
     if (!repoPath || !branch) {
       return NextResponse.json({ error: 'path and branch required' }, { status: 400 });
     }
+    if (!isGitRepo(repoPath)) {
+      return NextResponse.json({ error: 'This folder is not a Git repository.' }, { status: 400 });
+    }
 
     // Prevent deleting main/master
     const protectedBranches = ['main', 'master', 'develop'];
@@ -312,6 +330,9 @@ export async function POST(req: NextRequest) {
 
     if (!repoPath || !branch) {
       return NextResponse.json({ error: 'path and branch required' }, { status: 400 });
+    }
+    if (!isGitRepo(repoPath)) {
+      return NextResponse.json({ error: 'This folder is not a Git repository.' }, { status: 400 });
     }
 
     // Validate branch name

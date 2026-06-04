@@ -57,6 +57,19 @@ function runGit(root: string, args: string[], maxBuffer = MAX_GIT_BUFFER) {
   });
 }
 
+function isGitRepo(root: string) {
+  try {
+    return execFileSync('git', ['rev-parse', '--is-inside-work-tree'], {
+      cwd: root,
+      encoding: 'utf-8',
+      timeout: 5_000,
+      maxBuffer: 128 * 1024,
+    }).trim() === 'true';
+  } catch {
+    return false;
+  }
+}
+
 function parseCount(value: string | undefined) {
   if (value === '-') return 0;
   const parsed = Number.parseInt(value ?? '', 10);
@@ -169,6 +182,8 @@ function buildPatchSection(lines: string[]) {
 
 export function getRecentWorkspaceCommits(root: string, limit = 20) {
   const resolvedRoot = resolvePanelWorkspaceRoot(root);
+  if (!isGitRepo(resolvedRoot)) return [];
+
   const safeLimit = Math.max(1, Math.min(limit, 30));
   const output = runGit(
     resolvedRoot,
@@ -218,6 +233,8 @@ export function getRecentWorkspaceCommits(root: string, limit = 20) {
 
 export function getWorkspaceCommitDiffFiles(root: string, sha: string) {
   const resolvedRoot = resolvePanelWorkspaceRoot(root);
+  if (!isGitRepo(resolvedRoot)) return [];
+
   const numstatOutput = runGit(resolvedRoot, ['diff-tree', '--no-commit-id', '--numstat', '-r', '-M', sha]);
   const statusOutput = runGit(resolvedRoot, ['diff-tree', '--no-commit-id', '--name-status', '-r', '-M', sha]);
   const rawPatch = runGit(

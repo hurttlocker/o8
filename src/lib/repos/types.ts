@@ -45,6 +45,7 @@ export interface RepoRegistryEntry {
   localPath: string;
   remoteUrl: string | null;
   defaultBranch: string;
+  isGitRepo?: boolean;
   addedAt: string;
   lastOpenedAt: string | null;
   setup: RepoSetupConfig;
@@ -61,6 +62,7 @@ export interface ValidatedRepoCandidate {
   localPath: string;
   remoteUrl: string | null;
   defaultBranch: string;
+  isGitRepo?: boolean;
   setup: RepoSetupConfig;
 }
 
