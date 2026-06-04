@@ -34,8 +34,7 @@ function generateProjectId(): string {
 
 /**
  * Slugify a name into a URL-safe identifier. Uniqueness is guarded by the
- * UNIQUE index on `projects.slug`; collisions retry by appending a 4-char
- * suffix until the row inserts.
+ * UNIQUE index on `projects.slug`; collisions append a numeric suffix.
  */
 function slugifyName(name: string): string {
   const base = name
@@ -46,6 +45,23 @@ function slugifyName(name: string): string {
     .replace(/^-+|-+$/g, '')
     .slice(0, 60);
   return base || 'project';
+}
+
+function makeUniqueSlug(sqlite: ReturnType<typeof db>, requested: string, ownerProjectId?: string): string {
+  const base = requested.trim().toLowerCase() || 'project';
+  const slugOwner = sqlite.prepare('SELECT id FROM projects WHERE slug = ? LIMIT 1');
+  let slug = base;
+  let suffix = 2;
+
+  while (true) {
+    const row = slugOwner.get(slug) as { id: string } | undefined;
+    if (!row || row.id === ownerProjectId) return slug;
+    if (suffix > 999) {
+      throw new Error(`Could not find a unique slug starting with "${base}".`);
+    }
+    slug = `${base}-${suffix}`;
+    suffix += 1;
+  }
 }
 
 interface ProjectRow {
@@ -109,22 +125,9 @@ export function createProject(input: CreateProjectInput): Project {
   const description = input.description?.trim() || null;
   const mainRepoId = input.mainRepoId?.trim() || null;
 
-  // Pick a slug: explicit > slugified name. Retry on UNIQUE collisions by
-  // appending a short random suffix (no parsing of the SQLite error needed —
-  // we just check whether a row with that slug already exists).
+  // Pick a slug: explicit > slugified name. Collisions append -2, -3, etc.
   const requested = (input.slug?.trim() || slugifyName(trimmedName)).toLowerCase();
-  const slugExists = sqlite.prepare(
-    'SELECT 1 FROM projects WHERE slug = ? LIMIT 1',
-  );
-  let slug = requested;
-  let attempts = 0;
-  while (slugExists.get(slug)) {
-    attempts += 1;
-    if (attempts > 6) {
-      throw new Error(`Could not find a unique slug starting with "${requested}".`);
-    }
-    slug = `${requested}-${randomUUID().slice(0, 4)}`;
-  }
+  const slug = makeUniqueSlug(sqlite, requested);
 
   sqlite.prepare(
     `INSERT INTO projects (id, name, slug, description, main_repo_id, created_at, updated_at)
@@ -212,8 +215,10 @@ export function updateProject(id: string, input: UpdateProjectInput): Project | 
   const existing = getProject(id);
   if (!existing) return null;
 
+  const sqlite = db();
   const updates: string[] = [];
   const values: Array<string | number | null> = [];
+  let nextName = existing.name;
 
   if (input.name !== undefined) {
     const trimmed = input.name.trim();
@@ -222,13 +227,17 @@ export function updateProject(id: string, input: UpdateProjectInput): Project | 
     }
     updates.push('name = ?');
     values.push(trimmed);
+    nextName = trimmed;
   }
-  if (input.slug !== undefined) {
-    const trimmed = input.slug.trim();
-    if (trimmed) {
-      updates.push('slug = ?');
-      values.push(trimmed);
-    }
+
+  const requestedSlug = input.slug !== undefined
+    ? input.slug.trim()
+    : input.name !== undefined
+      ? slugifyName(nextName)
+      : '';
+  if (requestedSlug) {
+    updates.push('slug = ?');
+    values.push(makeUniqueSlug(sqlite, requestedSlug, id));
   }
   if (input.description !== undefined) {
     const trimmed = input.description?.trim() ?? null;
@@ -238,7 +247,7 @@ export function updateProject(id: string, input: UpdateProjectInput): Project | 
   if (input.mainRepoId !== undefined) {
     const mainRepoId = input.mainRepoId?.trim() || null;
     if (mainRepoId) {
-      const linked = db().prepare(
+      const linked = sqlite.prepare(
         'SELECT 1 FROM project_repos WHERE project_id = ? AND repo_id = ? LIMIT 1',
       ).get(id, mainRepoId);
       if (!linked) {
@@ -258,7 +267,7 @@ export function updateProject(id: string, input: UpdateProjectInput): Project | 
   values.push(now);
   values.push(id);
 
-  db().prepare(
+  sqlite.prepare(
     `UPDATE projects SET ${updates.join(', ')} WHERE id = ?`,
   ).run(...values);
 
