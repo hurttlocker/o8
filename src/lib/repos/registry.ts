@@ -43,6 +43,8 @@ function normalizeSetupConfig(setup: Partial<RepoSetupConfig> | null | undefined
 function normalizeRepoEntry(repo: RepoRegistryEntry): RepoRegistryEntry {
   return {
     ...repo,
+    defaultBranch: repo.defaultBranch || 'main',
+    isGitRepo: repo.isGitRepo ?? true,
     setup: normalizeSetupConfig(repo.setup),
   };
 }
@@ -108,7 +110,9 @@ function normalizeBranchRef(value: string | null) {
   return trimmed.split('/').pop() ?? trimmed;
 }
 
-async function resolveDefaultBranch(repoRoot: string) {
+async function resolveDefaultBranch(repoRoot: string, isGitRepo = true) {
+  if (!isGitRepo) return 'main';
+
   const remoteHead = normalizeBranchRef(
     await gitValue(repoRoot, ['symbolic-ref', '--quiet', 'refs/remotes/origin/HEAD']),
   );
@@ -246,26 +250,30 @@ async function resolveRepoRoot(inputPath: string) {
     throw new Error('Path must point to a local folder.');
   }
 
-  let repoRoot: string;
   try {
     const { stdout } = await execFileAsync('git', ['-C', resolved, 'rev-parse', '--show-toplevel'], {
       maxBuffer: 256 * 1024,
       timeout: 10_000,
     });
-    repoRoot = stdout.trim();
+    const repoRoot = stdout.trim();
+    if (repoRoot) {
+      const realRoot = await realpath(repoRoot).catch(() => repoRoot);
+      return { localPath: path.resolve(realRoot), isGitRepo: true };
+    }
   } catch {
-    throw new Error('Folder is not a Git repository.');
+    const realRoot = await realpath(resolved).catch(() => resolved);
+    return { localPath: path.resolve(realRoot), isGitRepo: false };
   }
 
-  const realRoot = await realpath(repoRoot).catch(() => repoRoot);
-  return path.resolve(realRoot);
+  const realRoot = await realpath(resolved).catch(() => resolved);
+  return { localPath: path.resolve(realRoot), isGitRepo: false };
 }
 
 async function inspectLocalRepo(localPath: string): Promise<ValidatedRepoCandidate> {
-  const repoRoot = await resolveRepoRoot(localPath);
+  const { localPath: repoRoot, isGitRepo } = await resolveRepoRoot(localPath);
   const [remoteUrl, defaultBranch, setup] = await Promise.all([
-    gitValue(repoRoot, ['remote', 'get-url', 'origin']),
-    resolveDefaultBranch(repoRoot),
+    isGitRepo ? gitValue(repoRoot, ['remote', 'get-url', 'origin']) : null,
+    resolveDefaultBranch(repoRoot, isGitRepo),
     detectSetupConfig(repoRoot),
   ]);
 
@@ -274,6 +282,7 @@ async function inspectLocalRepo(localPath: string): Promise<ValidatedRepoCandida
     localPath: repoRoot,
     remoteUrl,
     defaultBranch,
+    isGitRepo,
     setup,
   };
 }
@@ -397,6 +406,7 @@ export async function addRepo(localPath: string) {
       name: candidate.name,
       remoteUrl: candidate.remoteUrl,
       defaultBranch: candidate.defaultBranch,
+      isGitRepo: candidate.isGitRepo ?? true,
       setup: normalizeSetupConfig(existing.setup ?? candidate.setup),
       lastOpenedAt: now,
     };
@@ -413,6 +423,7 @@ export async function addRepo(localPath: string) {
     localPath: candidate.localPath,
     remoteUrl: candidate.remoteUrl,
     defaultBranch: candidate.defaultBranch,
+    isGitRepo: candidate.isGitRepo ?? true,
     addedAt: now,
     lastOpenedAt: now,
     setup: candidate.setup,
