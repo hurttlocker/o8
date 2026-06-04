@@ -15,14 +15,23 @@ const DISCORD_DESCRIPTION_LIMIT = 4096;
 const DISCORD_FIELD_VALUE_LIMIT = 1024;
 const DISCORD_TITLE_LIMIT = 256;
 const DISCORD_EMBED_TOTAL_LIMIT = 6000;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024; // Discord's baseline webhook upload ceiling.
+const ALLOWED_IMAGE_MIME = new Set(['image/png', 'image/jpeg', 'image/gif', 'image/webp']);
 
 type FeedbackCategory = 'bug' | 'request';
+
+interface ParsedImage {
+  bytes: Buffer;
+  mime: string;
+  filename: string;
+}
 
 interface FeedbackBody {
   category?: unknown;
   message?: unknown;
   route?: unknown;
   userAgent?: unknown;
+  image?: unknown;
 }
 
 interface ReportDiagnostics {
@@ -86,6 +95,46 @@ function validateBody(body: FeedbackBody): { ok: true; category: FeedbackCategor
     route: truncate(stringValue(body.route, 'unknown'), DISCORD_FIELD_VALUE_LIMIT),
     userAgent: truncate(stringValue(body.userAgent, 'unknown'), DISCORD_FIELD_VALUE_LIMIT),
   };
+}
+
+/**
+ * Decode an optional base64 data-URL screenshot from the report body. Returns
+ * { image: null } when none was attached. Fails closed on a malformed/oversized
+ * payload so a bad attachment can't silently corrupt the whole report.
+ */
+function parseImage(raw: unknown): { ok: true; image: ParsedImage | null } | { ok: false; error: string } {
+  if (raw == null) return { ok: true, image: null };
+  if (typeof raw !== 'object') return { ok: false, error: 'Invalid attachment.' };
+  const dataUrl = typeof (raw as { dataUrl?: unknown }).dataUrl === 'string'
+    ? (raw as { dataUrl: string }).dataUrl
+    : '';
+  if (!dataUrl) return { ok: true, image: null };
+
+  const match = /^data:([^;,]+)(;base64)?,(.*)$/.exec(dataUrl);
+  if (!match) return { ok: false, error: 'Attachment must be an image.' };
+  const mime = match[1].toLowerCase();
+  if (!ALLOWED_IMAGE_MIME.has(mime)) {
+    return { ok: false, error: 'Attachment must be a PNG, JPEG, GIF, or WebP image.' };
+  }
+
+  let bytes: Buffer;
+  try {
+    bytes = Buffer.from(match[3], match[2] ? 'base64' : 'utf8');
+  } catch {
+    return { ok: false, error: 'Could not read the attached image.' };
+  }
+  if (bytes.length === 0) return { ok: true, image: null };
+  if (bytes.length > MAX_IMAGE_BYTES) {
+    return { ok: false, error: 'Screenshot is too large (max 8 MB). Try a smaller capture.' };
+  }
+
+  const ext = mime === 'image/jpeg' ? 'jpg' : (mime.split('/')[1] || 'png');
+  const rawName = typeof (raw as { name?: unknown }).name === 'string'
+    ? (raw as { name: string }).name
+    : '';
+  const sanitized = rawName.replace(/[^a-zA-Z0-9._-]/g, '_').replace(/^_+/, '').slice(0, 64);
+  const filename = sanitized && /\.[a-z0-9]+$/i.test(sanitized) ? sanitized : `screenshot.${ext}`;
+  return { ok: true, image: { bytes, mime, filename } };
 }
 
 async function resolveProjectLabel(): Promise<string | null> {
@@ -162,19 +211,35 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
   };
 }
 
-async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics): Promise<{ ok: true } | { ok: false; error: string }> {
+async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, image: ParsedImage | null): Promise<{ ok: true } | { ok: false; error: string }> {
   const webhookUrl = process.env.O8_FEEDBACK_WEBHOOK_URL?.trim() || DEFAULT_WEBHOOK_URL;
+  const embed = {
+    ...buildEmbed(category, message, diagnostics),
+    // Render the screenshot inline in the embed; the attachment:// URL must
+    // match the multipart file's filename below.
+    ...(image ? { image: { url: `attachment://${image.filename}` } } : {}),
+  };
   const payload = {
     username: 'o8 Report',
-    embeds: [buildEmbed(category, message, diagnostics)],
+    embeds: [embed],
   };
 
   try {
-    const response = await fetch(webhookUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    let response: Response;
+    if (image) {
+      // Discord renders an uploaded image only via multipart/form-data:
+      // a `payload_json` part (the embed) + a `files[0]` part (the bytes).
+      const form = new FormData();
+      form.append('payload_json', JSON.stringify(payload));
+      form.append('files[0]', new Blob([image.bytes], { type: image.mime }), image.filename);
+      response = await fetch(webhookUrl, { method: 'POST', body: form });
+    } else {
+      response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+    }
     if (!response.ok) {
       const detail = await response.text().catch(() => '');
       const suffix = detail.trim() ? `: ${truncate(detail.trim(), 180)}` : '';
@@ -200,9 +265,12 @@ export async function POST(request: NextRequest) {
   const validated = validateBody(body);
   if (!validated.ok) return jsonError(validated.error);
 
+  const parsedImage = parseImage(body.image);
+  if (!parsedImage.ok) return jsonError(parsedImage.error);
+
   try {
     const diagnostics = await buildDiagnostics(validated.route, validated.userAgent);
-    const posted = await postDiscordReport(validated.category, validated.message, diagnostics);
+    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImage.image);
     if (!posted.ok) return jsonError(posted.error, 502);
     return NextResponse.json({ ok: true });
   } catch (error) {
