@@ -189,6 +189,7 @@ export function AddRepoDialog({
   const selectedProject = effectiveProjectId === 'none'
     ? null
     : visibleProjects.find((project) => project.id === effectiveProjectId) ?? null;
+  const validationIsGitRepo = validationResult?.isGitRepo !== false;
 
   const reset = useCallback(() => {
     setRepoPathInput('');
@@ -422,7 +423,7 @@ export function AddRepoDialog({
             padding: 13,
             borderRadius: 12,
             border: '1px solid var(--t-panel-border)',
-            background: 'var(--t-bg-card, rgba(148, 163, 184, 0.06))',
+            background: 'var(--t-bg-card)',
           }}
         >
           <div style={{ display: 'flex', alignItems: 'center', gap: 11 }}>
@@ -473,11 +474,42 @@ export function AddRepoDialog({
                 {shortenPath(validationResult.localPath)}
               </div>
             </div>
-            <CheckCircle2 size={17} strokeWidth={2.3} style={{ color: '#16a34a', flexShrink: 0 }} />
+            <CheckCircle2
+              size={17}
+              strokeWidth={2.3}
+              style={{ color: validationIsGitRepo ? 'var(--t-success, var(--t-accent))' : 'var(--t-text-muted)', flexShrink: 0 }}
+            />
           </div>
 
+          {!validationIsGitRepo ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                paddingTop: 9,
+                paddingRight: 10,
+                paddingBottom: 9,
+                paddingLeft: 10,
+                borderRadius: 10,
+                border: '1px solid var(--t-divider-subtle)',
+                background: 'var(--t-input-bg)',
+                color: 'var(--t-text-secondary)',
+                fontSize: 12,
+                lineHeight: '16px',
+              }}
+            >
+              <AlertCircle size={14} strokeWidth={2} style={{ flexShrink: 0, marginTop: 1, color: 'var(--t-text-muted)' }} />
+              <span>Not a Git repository — you can add it to browse and work in; agent dispatch needs Git.</span>
+            </div>
+          ) : null}
+
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 7 }}>
-            <RepoChip icon={<GitBranch size={11} strokeWidth={2} />} label={validationResult.defaultBranch} />
+            {validationIsGitRepo ? (
+              <RepoChip icon={<GitBranch size={11} strokeWidth={2} />} label={validationResult.defaultBranch} />
+            ) : (
+              <RepoChip icon={<FolderOpen size={11} strokeWidth={2} />} label="Local folder" muted />
+            )}
             <RepoChip
               icon={<Globe size={11} strokeWidth={2} />}
               label={validationResult.remoteUrl ? prettyRemoteLabel(validationResult.remoteUrl) : 'No remote'}
@@ -546,11 +578,14 @@ export function AddRepoDialog({
             display: 'flex',
             alignItems: 'flex-start',
             gap: 8,
-            padding: '9px 10px',
+            paddingTop: 9,
+            paddingRight: 10,
+            paddingBottom: 9,
+            paddingLeft: 10,
             borderRadius: 10,
-            border: '1px solid rgba(239, 68, 68, 0.2)',
-            background: 'rgba(254, 226, 226, 0.24)',
-            color: '#ef4444',
+            border: '1px solid var(--t-danger-border, var(--t-divider-subtle))',
+            background: 'var(--t-danger-soft, var(--t-input-bg))',
+            color: 'var(--t-danger, var(--t-text-secondary))',
             fontSize: 12,
             lineHeight: '16px',
           }}
