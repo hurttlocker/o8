@@ -342,15 +342,23 @@ async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<
     .map(normalizeRepoPath);
 
   const repoPathsBySlug = new Map<string, string[]>();
+  const sqliteProjectById = new Map(sqliteProjects.map((project) => [project.id, project]));
+  const sqliteProjectBySlug = new Map(sqliteProjects.map((project) => [project.slug, project]));
   for (const sp of sqliteProjects) {
     repoPathsBySlug.set(sp.slug, pathsFor(sp));
   }
 
   // Override matched projects' repoPaths from SQLite (the canonical membership store).
-  const ledgerSlugs = new Set(ledger.projects.map((project) => projectNameToSlug(project.name)));
+  const representedSqliteProjectIds = new Set<string>();
   const projects: ProjectRecord[] = ledger.projects.map((project) => {
     const slug = projectNameToSlug(project.name);
-    const fresh = repoPathsBySlug.get(slug);
+    const matched = sqliteProjectById.get(project.id)
+      ?? (() => {
+        const bySlug = sqliteProjectBySlug.get(slug);
+        return bySlug?.name.toLowerCase() === project.name.toLowerCase() ? bySlug : undefined;
+      })();
+    if (matched) representedSqliteProjectIds.add(matched.id);
+    const fresh = matched ? repoPathsBySlug.get(matched.slug) : undefined;
     // SQLite is the membership source of truth: a ledger project with no SQLite
     // match owns no repos. Don't keep stale stored repoPaths — that's what kept
     // a repo "assigned" to a deleted project and hid it from the single-repo view.
@@ -363,7 +371,7 @@ async function enrichLedgerWithSqliteRepoPaths(ledger: ProjectsLedger): Promise<
   // orphaned and the dashboard keeps showing a stale one.
   let colorIndex = projects.length;
   for (const sp of sqliteProjects) {
-    if (ledgerSlugs.has(sp.slug)) continue;
+    if (representedSqliteProjectIds.has(sp.id)) continue;
     projects.push({
       id: sp.id,
       name: sp.name,
@@ -493,6 +501,22 @@ function pickAutoColor(used: Set<ProjectColor | undefined>): ProjectColor {
   return PROJECT_COLOR_PALETTE[0];
 }
 
+function uniqueProjectSlugForName(name: string, projects: ProjectRecord[], ownerProjectId?: string): string {
+  const base = projectNameToSlug(name);
+  const used = new Set(
+    projects
+      .filter((project) => project.id !== ownerProjectId)
+      .map((project) => projectNameToSlug(project.name)),
+  );
+  let slug = base;
+  let suffix = 2;
+  while (used.has(slug)) {
+    slug = `${base}-${suffix}`;
+    suffix += 1;
+  }
+  return slug;
+}
+
 export async function createProject(name: string): Promise<ProjectsLedger> {
   const trimmed = name.trim();
   if (!trimmed) throw new Error('Project name is required.');
@@ -500,14 +524,9 @@ export async function createProject(name: string): Promise<ProjectsLedger> {
   // Create the project in SQLite (the source of truth). It surfaces in the
   // ledger via the projection in enrich(), so we DON'T add a separate ledger
   // record (that double-created it) — we just point the active project at it.
-  const slug = projectNameToSlug(trimmed);
-  let sqlite;
-  try {
-    sqlite = createSqliteProject({ name: trimmed, slug, description: null });
-  } catch {
-    sqlite = getSqliteProjectBySlug(slug);
-  }
   const ledger = await getProjectsLedger();
+  const slug = uniqueProjectSlugForName(trimmed, ledger.projects);
+  const sqlite = createSqliteProject({ name: trimmed, slug, description: null });
   const next: ProjectsLedger = {
     ...ledger,
     activeProjectId: sqlite?.id ?? ledger.activeProjectId,
@@ -537,7 +556,12 @@ export async function renameProject(projectId: string, name: string): Promise<Pr
   // Rename in SQLite too so the slug stays aligned (the ledger↔SQLite bridge).
   if (target) {
     const sqlite = resolveSqliteProject(target);
-    if (sqlite) updateSqliteProject(sqlite.id, { name: trimmed, slug: projectNameToSlug(trimmed) });
+    if (sqlite) {
+      updateSqliteProject(sqlite.id, {
+        name: trimmed,
+        slug: uniqueProjectSlugForName(trimmed, ledger.projects, projectId),
+      });
+    }
   }
   const next: ProjectsLedger = {
     ...ledger,
