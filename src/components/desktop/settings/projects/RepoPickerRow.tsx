@@ -6,7 +6,8 @@
  * stays under the 800-line ceiling.
  */
 
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
@@ -22,6 +23,12 @@ import {
 } from './shared';
 import type { ProjectRole } from '@/lib/projects/types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+
+const ROLE_POPOVER_WIDTH = 160; const ROLE_POPOVER_GAP = 4; const ROLE_POPOVER_MARGIN = 8; const ROLE_POPOVER_ESTIMATED_HEIGHT = (CURATED_ROLES.length + 1) * 29 + 8;
+function computePopoverPosition(rect: DOMRect): { top: number; left: number } {
+  const belowTop = rect.bottom + ROLE_POPOVER_GAP; const aboveTop = rect.top - ROLE_POPOVER_GAP - ROLE_POPOVER_ESTIMATED_HEIGHT; const openAbove = belowTop + ROLE_POPOVER_ESTIMATED_HEIGHT > window.innerHeight - ROLE_POPOVER_MARGIN && aboveTop >= ROLE_POPOVER_MARGIN;
+  return { top: openAbove ? aboveTop : Math.max(ROLE_POPOVER_MARGIN, Math.min(belowTop, window.innerHeight - ROLE_POPOVER_ESTIMATED_HEIGHT - ROLE_POPOVER_MARGIN)), left: Math.max(ROLE_POPOVER_MARGIN, Math.min(rect.right - ROLE_POPOVER_WIDTH, window.innerWidth - ROLE_POPOVER_WIDTH - ROLE_POPOVER_MARGIN)) };
+}
 
 export function RepoPickerRow({
   repo,
@@ -41,6 +48,32 @@ export function RepoPickerRow({
   onChangeRole: (role: ProjectRole | null) => void;
 }) {
   const [openPopover, setOpenPopover] = useState(false);
+  const [popoverPosition, setPopoverPosition] = useState<{ top: number; left: number } | null>(null);
+  const triggerRef = useRef<HTMLButtonElement | null>(null); const popoverRef = useRef<HTMLDivElement | null>(null);
+
+  const togglePopover = () => {
+    if (openPopover) { setOpenPopover(false); return; }
+    if (!triggerRef.current || typeof window === 'undefined') return;
+    setPopoverPosition(computePopoverPosition(triggerRef.current.getBoundingClientRect()));
+    setOpenPopover(true);
+  };
+
+  useEffect(() => {
+    if (!checked && openPopover) { const timer = window.setTimeout(() => setOpenPopover(false), 0); return () => window.clearTimeout(timer); }
+    if (!openPopover) return;
+    const closePopover = () => setOpenPopover(false);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') { event.preventDefault(); closePopover(); }
+    };
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node | null;
+      if (target && !triggerRef.current?.contains(target) && !popoverRef.current?.contains(target)) closePopover();
+    };
+    window.addEventListener('keydown', handleKeyDown, true); window.addEventListener('resize', closePopover); window.addEventListener('scroll', closePopover, true); document.addEventListener('pointerdown', handlePointerDown, true);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, true); window.removeEventListener('resize', closePopover); window.removeEventListener('scroll', closePopover, true); document.removeEventListener('pointerdown', handlePointerDown, true);
+    };
+  }, [checked, openPopover]);
 
   return (
     <div
@@ -140,8 +173,9 @@ export function RepoPickerRow({
 
       {checked ? (
         <button
+          ref={triggerRef}
           type="button"
-          onClick={() => setOpenPopover((prev) => !prev)}
+          onClick={togglePopover}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
@@ -169,14 +203,15 @@ export function RepoPickerRow({
         </button>
       ) : null}
 
-      {openPopover && checked ? (
+      {openPopover && checked && popoverPosition && typeof document !== 'undefined' ? createPortal(
         <div
+          ref={popoverRef}
           style={{
-            position: 'absolute',
-            top: 'calc(100% - 4px)',
-            right: 8,
+            position: 'fixed',
+            top: popoverPosition.top,
+            left: popoverPosition.left,
             zIndex: 30,
-            minWidth: 160,
+            minWidth: ROLE_POPOVER_WIDTH,
             paddingTop: 4,
             paddingBottom: 4,
             borderRadius: 6,
@@ -206,7 +241,7 @@ export function RepoPickerRow({
             </button>
           ))}
         </div>
-      ) : null}
+      , document.body) : null}
     </div>
   );
 }
