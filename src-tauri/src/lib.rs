@@ -870,6 +870,62 @@ fn resolve_node_via_login_shell() -> Option<String> {
     None
 }
 
+/// Finder-launched apps inherit a minimal PATH (`/usr/bin:/bin:/usr/sbin:/sbin`)
+/// that omits the user's CLI dirs (`~/.npm-global/bin`, Homebrew, `~/.local/bin`,
+/// pnpm/volta shims). The bundled Next server then can't find `codex`/`claude`/
+/// `gh`/`pnpm`: setup detect shows "No tools detected", Codex dispatch spawn
+/// ENOENTs, and worktree `pnpm install` fails. Mirror the node/key login-shell
+/// resolution — ask a login shell for its PATH.
+fn resolve_login_shell_path() -> Option<String> {
+    let shells: [(&str, &[&str]); 3] = [
+        ("zsh", &["-l", "-c", "printf %s \"$PATH\""]),
+        ("bash", &["-l", "-c", "printf %s \"$PATH\""]),
+        ("sh", &["-l", "-c", "printf %s \"$PATH\""]),
+    ];
+    for (shell, args) in shells {
+        if let Ok(out) = Command::new(shell).args(args).output() {
+            if out.status.success() {
+                let path = String::from_utf8_lossy(&out.stdout).trim().to_string();
+                if !path.is_empty() {
+                    return Some(path);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Prepend the login-shell PATH onto this process's PATH so every child we
+/// spawn (Next server, ws-server, MCP, dispatched Codex workers) sees the same
+/// PATH a terminal would. The sidecar still launches on the explicit Node 22
+/// binary (`O8_NODE_BIN`), so this never disturbs the better-sqlite3 ABI pin —
+/// it only widens what children can find. Dedup'd; minimal PATH kept as fallback.
+fn augment_process_path_from_login_shell() {
+    let login_path = match resolve_login_shell_path() {
+        Some(p) => p,
+        None => {
+            log::warn!(
+                "Could not resolve login-shell PATH; sidecar children keep the minimal \
+                 Finder PATH — CLI detection (codex/claude/gh) and worktree installs may fail"
+            );
+            return;
+        }
+    };
+    let current = std::env::var("PATH").unwrap_or_default();
+    let mut merged: Vec<&str> = Vec::new();
+    for entry in login_path.split(':').chain(current.split(':')) {
+        if !entry.is_empty() && !merged.contains(&entry) {
+            merged.push(entry);
+        }
+    }
+    let merged = merged.join(":");
+    log::info!(
+        "Augmented PATH from login shell ({} entries) for sidecar children",
+        merged.split(':').count()
+    );
+    std::env::set_var("PATH", merged);
+}
+
 /// Pulls AI provider API keys from the user's login shell (~/.zshenv etc.)
 /// so Finder-launched packaged builds inherit keys the user already has.
 /// Returns a Vec of (KEY, VALUE) pairs for whichever known AI vars exist.
@@ -2559,6 +2615,12 @@ pub fn run() {
                 };
                 // Persist for child processes (MCP server, ws-server, etc.)
                 std::env::set_var("O8_NODE_BIN", &node_bin);
+
+                // Widen PATH from the login shell so the Next server's setup
+                // detect (`which codex`), Codex dispatch spawn, and worktree
+                // `pnpm install` can find the user's CLIs — Finder's minimal
+                // PATH hides ~/.npm-global/bin, Homebrew, ~/.local/bin, etc.
+                augment_process_path_from_login_shell();
 
                 if preship_gate {
                     // ── Pre-ship boot gate isolation ──
