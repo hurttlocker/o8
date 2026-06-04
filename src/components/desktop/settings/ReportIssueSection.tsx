@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useMemo, useState, type CSSProperties } from 'react';
+import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
@@ -20,16 +20,82 @@ interface ReportResponse {
 }
 
 const MAX_MESSAGE_LENGTH = 4000;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+
+interface AttachedImage {
+  dataUrl: string;
+  name: string;
+  size: number;
+}
 
 export function ReportIssueSection({ number }: { number: string }) {
   const [category, setCategory] = useState<ReportCategory>('bug');
   const [message, setMessage] = useState('');
+  const [image, setImage] = useState<AttachedImage | null>(null);
   const [state, setState] = useState<ReportState>('idle');
   const [error, setError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const trimmedMessage = message.trim();
   const canSend = trimmedMessage.length > 0 && state !== 'sending';
   const countLabel = useMemo(() => `${message.length}/${MAX_MESSAGE_LENGTH}`, [message.length]);
+
+  const attachImage = useCallback((file: File | null | undefined) => {
+    if (!file) return;
+    if (!file.type.startsWith('image/')) {
+      setState('error');
+      setError('Attachment must be an image (PNG, JPEG, GIF, or WebP).');
+      return;
+    }
+    if (file.size > MAX_IMAGE_BYTES) {
+      setState('error');
+      setError('Screenshot is too large (max 8 MB). Try a smaller capture.');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = typeof reader.result === 'string' ? reader.result : '';
+      if (!dataUrl) return;
+      setImage({ dataUrl, name: file.name || 'screenshot.png', size: file.size });
+      setState((prev) => (prev === 'sent' || prev === 'error' ? 'idle' : prev));
+      setError(null);
+    };
+    reader.onerror = () => {
+      setState('error');
+      setError('Could not read that image.');
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const handlePaste = useCallback((event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i += 1) {
+      const item = items[i];
+      if (item.type.startsWith('image/')) {
+        const file = item.getAsFile();
+        if (file) {
+          event.preventDefault();
+          attachImage(file);
+          return;
+        }
+      }
+    }
+  }, [attachImage]);
+
+  // Intercept file drops so the webview doesn't insert the file's local PATH
+  // as text (the original "it just posts the path" bug) — read the bytes instead.
+  const handleDrop = useCallback((event: React.DragEvent) => {
+    const file = event.dataTransfer?.files?.[0];
+    if (file) {
+      event.preventDefault();
+      attachImage(file);
+    }
+  }, [attachImage]);
+
+  const handleDragOver = useCallback((event: React.DragEvent) => {
+    if (event.dataTransfer?.types?.includes('Files')) event.preventDefault();
+  }, []);
 
   const sendReport = useCallback(async () => {
     if (!trimmedMessage) {
@@ -57,6 +123,7 @@ export function ReportIssueSection({ number }: { number: string }) {
           message: trimmedMessage,
           route,
           userAgent,
+          image: image ? { dataUrl: image.dataUrl, name: image.name } : undefined,
         }),
       });
       const body = await response.json().catch(() => null) as ReportResponse | null;
@@ -67,11 +134,12 @@ export function ReportIssueSection({ number }: { number: string }) {
       }
       setState('sent');
       setMessage('');
+      setImage(null);
     } catch (sendError) {
       setState('error');
       setError(sendError instanceof Error ? sendError.message : 'Report failed.');
     }
-  }, [category, trimmedMessage]);
+  }, [category, trimmedMessage, image]);
 
   return (
     <section style={{ marginBottom: 32 }}>
@@ -177,6 +245,9 @@ export function ReportIssueSection({ number }: { number: string }) {
               }}
               rows={6}
               style={textareaStyle}
+              onPaste={handlePaste}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
               onFocus={(event) => {
                 event.currentTarget.style.borderColor = RAMS_ACCENT;
               }}
@@ -185,6 +256,124 @@ export function ReportIssueSection({ number }: { number: string }) {
               }}
             />
           </label>
+
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/png,image/jpeg,image/gif,image/webp"
+            style={{ display: 'none' }}
+            onChange={(event) => {
+              attachImage(event.target.files?.[0]);
+              event.target.value = '';
+            }}
+          />
+
+          {image ? (
+            <div style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              paddingTop: 8,
+              paddingRight: 10,
+              paddingBottom: 8,
+              paddingLeft: 10,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-divider-subtle)',
+              borderRadius: 8,
+              background: 'var(--t-input-bg)',
+            }}>
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={image.dataUrl}
+                alt="attachment preview"
+                style={{
+                  height: 48,
+                  width: 64,
+                  objectFit: 'cover',
+                  borderRadius: 6,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: 'var(--t-divider-subtle)',
+                  flexShrink: 0,
+                }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{
+                  fontFamily: APP_FONT_STACK,
+                  fontSize: 13,
+                  fontWeight: 300,
+                  color: 'var(--t-text)',
+                  letterSpacing: '-0.005em',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {image.name}
+                </div>
+                <div style={{
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 10,
+                  fontWeight: 300,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  color: RAMS_INK_QUIET,
+                }}>
+                  {formatBytes(image.size)}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setImage(null)}
+                style={{
+                  border: 'none',
+                  background: 'transparent',
+                  color: 'var(--t-text-muted)',
+                  cursor: 'pointer',
+                  fontFamily: MONO_FONT_STACK,
+                  fontSize: 10,
+                  fontWeight: 400,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  padding: 6,
+                  flexShrink: 0,
+                }}
+              >
+                Remove
+              </button>
+            </div>
+          ) : (
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              onDrop={handleDrop}
+              onDragOver={handleDragOver}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                minHeight: 44,
+                paddingTop: 10,
+                paddingBottom: 10,
+                paddingLeft: 14,
+                paddingRight: 14,
+                borderWidth: 1,
+                borderStyle: 'dashed',
+                borderColor: 'var(--t-panel-border)',
+                borderRadius: 8,
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                cursor: 'pointer',
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 10,
+                fontWeight: 300,
+                letterSpacing: '0.1em',
+                textTransform: 'uppercase',
+              }}
+            >
+              Attach a screenshot — click, paste, or drop an image
+            </button>
+          )}
 
           <div style={{
             display: 'flex',
@@ -293,6 +482,12 @@ function StatusLine({ children, tone }: { children: React.ReactNode; tone: 'succ
       {children}
     </div>
   );
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
 const textareaStyle: CSSProperties = {
