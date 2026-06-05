@@ -94,18 +94,21 @@ function ComposerStatusBar({
     <div
       role="status"
       aria-live="polite"
-      aria-label={`${activeTargetLabel} running for ${formatElapsed(elapsed)}`}
+      aria-label={`${activeTargetLabel} working for ${formatElapsed(elapsed)}`}
       title={runningSummary ? `Running ${runningSummary}` : undefined}
       style={{
-        display: 'flex',
+        display: 'inline-flex',
         alignItems: 'center',
-        gap: 6,
-        height: 18,
+        gap: 7,
+        height: 24,
+        marginBottom: 8,
         paddingTop: 0,
-        paddingRight: 4,
-        paddingBottom: 7,
-        paddingLeft: 4,
-        color: 'var(--t-text-muted)',
+        paddingRight: 10,
+        paddingBottom: 0,
+        paddingLeft: 9,
+        borderRadius: 999,
+        background: 'var(--t-accent-soft)',
+        border: '1px solid var(--t-accent-border)',
       }}
     >
       {/* Shared status vocabulary — accent pulse while working, flips to the
@@ -114,11 +117,20 @@ function ComposerStatusBar({
           long orchestrator turn surfaces the orbit. */}
       <AgentStatusDot state="running" startedAt={turnStart} />
       <span style={{
+        fontSize: 12,
+        fontWeight: 600,
+        letterSpacing: '-0.01em',
+        color: 'var(--t-accent)',
+      }}>
+        Working
+      </span>
+      <span style={{
         fontSize: 11,
         fontWeight: 500,
         fontFamily: '"SF Mono", ui-monospace, monospace',
         letterSpacing: '0',
-        color: 'var(--t-text-secondary)',
+        color: 'var(--t-accent)',
+        opacity: 0.8,
       }}>
         {formatElapsed(elapsed)}
       </span>
