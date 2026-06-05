@@ -110,12 +110,17 @@ export async function resetPacket(input: ResetPacketInput) {
     }
   }
 
-  // Reset packet to dispatchable state
+  // Reset packet to a CLEAN, NON-auto-dispatchable state.
+  // #23 — queueState is 'held' (NOT 'queued') so the supervisor's headless
+  // dispatch tick does NOT relaunch it on its own. reset is a CLEANUP, not a
+  // relaunch — the old reset->queued->supervisor-auto-dispatch "boomerang" spawned
+  // surprise agents (even surviving an app restart). An explicit dispatch_mission()
+  // promotes held->queued when the operator actually wants to re-launch.
   // #455 — lane MUST be null, not a blank object. A truthy lane with empty laneId
   // causes the reconciler to see "has lane but no domain match" → 'recovering',
   // which races the next dispatch tick and traps the packet in a recovery loop.
   packet.status = 'draft';
-  packet.queueState = 'queued';
+  packet.queueState = 'held';
   packet.releaseState = 'pending';
   packet.blockedReason = null;
   packet.lane = null;
@@ -137,6 +142,6 @@ export async function resetPacket(input: ResetPacketInput) {
     referenceLabel: packet.referenceLabel,
     worktreePruned,
     branchDeleted,
-    note: `Packet ${packet.referenceLabel} reset to queued/draft. Old lane archived.${worktreePruned ? ' Worktree pruned.' : ''}${branchDeleted ? ' Branch deleted.' : ''} Ready for re-dispatch.`,
+    note: `Packet ${packet.referenceLabel} reset + held (will NOT auto-redispatch). Old lane archived.${worktreePruned ? ' Worktree pruned.' : ''}${branchDeleted ? ' Branch deleted.' : ''} Call dispatch_mission to re-launch.`,
   };
 }

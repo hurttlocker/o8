@@ -290,6 +290,13 @@ export async function dispatchMission(input: DispatchMissionInput) {
 
   // Use locked state to prevent race with headless loop tick
   const { result, state: finalState } = await withLockedState(async (current) => {
+    // #23 — an EXPLICIT dispatch re-arms any packet a prior reset_packet left in
+    // 'held'. Held packets are skipped by the supervisor's automatic dispatch tick
+    // (so reset doesn't boomerang); an explicit dispatch_mission is the operator
+    // opting back in, so promote held -> queued here before dispatching.
+    for (const packet of current.packets) {
+      if (packet.queueState === 'held') packet.queueState = 'queued';
+    }
     const afterDispatch = await runDispatchTick(current);
     writeOrchestratorControlPlaneState(afterDispatch);
 

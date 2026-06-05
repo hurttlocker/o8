@@ -452,6 +452,49 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
   return true;
 }
 
+// #23 — Auto-archive lanes whose Codex session is confirmed dead (silent_exit_* /
+// zombie_reap) and which have sat stale past a grace window. Without this they
+// stay in a non-terminal status forever ("orange" in the UI) when their work
+// landed out-of-band (direct salvage, the dogfood loop, an update-relaunch).
+// Archives BOTH the lane row and the owned-codex session dir so the UI/inventory
+// clears on its own.
+const ARCHIVE_DEAD_LANE_GRACE_MS = 30 * 60 * 1000;
+const DEAD_LANE_EVENT_LABELS = new Set<string>([
+  'silent_exit_work_present',
+  'silent_exit_no_work',
+  'silent_exit_verification_failed',
+  'zombie_reap',
+]);
+const ARCHIVABLE_STALE_STATUSES = new Set<Lane['status']>(['reviewing', 'recovering', 'awaiting_input']);
+
+async function archiveTerminallyDeadLanes(now: number): Promise<void> {
+  const { listLanes, archiveLane } = await import('@/lib/lane/registry');
+  const stale = listLanes().filter((lane) => {
+    if (!ARCHIVABLE_STALE_STATUSES.has(lane.status)) return false;
+    if (!lane.lastEventLabel || !DEAD_LANE_EVENT_LABELS.has(lane.lastEventLabel)) return false;
+    const ms = lane.lastEventAt ? new Date(lane.lastEventAt).getTime() : 0;
+    return Number.isFinite(ms) && ms > 0 && now - ms > ARCHIVE_DEAD_LANE_GRACE_MS;
+  });
+  for (const lane of stale) {
+    // Re-confirm the session is really dead so we never archive a revived one.
+    const alive = await probeSessionAlive(lane);
+    if (alive === true) continue;
+    const refreshed = getLane(lane.id);
+    if (!refreshed || !ARCHIVABLE_STALE_STATUSES.has(refreshed.status)) continue;
+    try {
+      archiveLane(lane.id, 'system');
+      const key = lane.sessionKey?.trim();
+      if (key?.startsWith('codex-owned:')) {
+        const { archiveOwnedCodexSession } = await import('@/lib/codex/owned');
+        await archiveOwnedCodexSession(key).catch(() => {});
+      }
+      console.log(`[silent-exit] Auto-archived stale dead lane ${lane.id} (${lane.lastEventLabel})`);
+    } catch (error) {
+      console.warn(`[silent-exit] Auto-archive failed for lane ${lane.id}:`, error);
+    }
+  }
+}
+
 async function silentExitTick(): Promise<void> {
   if (tickInFlight) return;
   tickInFlight = true;
@@ -486,6 +529,10 @@ async function silentExitTick(): Promise<void> {
         console.error(`[silent-exit] Triage failed for lane ${refreshed.id}:`, error);
       }
     }
+
+    // #23 — sweep lanes already declared dead + stale into 'archived' so they
+    // don't sit orange forever when their work landed out-of-band.
+    await archiveTerminallyDeadLanes(now);
   } finally {
     tickInFlight = false;
   }
