@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execFileSync, execSync } from 'child_process';
+import { execFileSync, execSync } from 'node:child_process';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,6 +27,7 @@ function isGitRepo(repoPath: string): boolean {
     return execFileSync('git', ['-C', repoPath, 'rev-parse', '--is-inside-work-tree'], {
       encoding: 'utf-8',
       timeout: 2000,
+      stdio: ['ignore', 'pipe', 'ignore'],
     }).trim() === 'true';
   } catch {
     return false;
