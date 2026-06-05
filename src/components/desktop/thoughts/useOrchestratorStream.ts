@@ -195,6 +195,11 @@ export function useOrchestratorStream(
   // events for > HEAL_STALE_AFTER_MS while the UI still thinks it's working).
   const eventCountRef = useRef(0);
   const lastEventAtRef = useRef<number>(Date.now());
+  // Wall-clock of the most recent local send(). The 3s reconnect heal uses this
+  // to avoid clearing a freshly-started turn's "busy" state: a send that fired
+  // after the socket opened means the turn is legitimately starting (and may be
+  // cold-starting the orchestrator before its first event), not stale carryover.
+  const lastSendAtRef = useRef(0);
   const RECONNECT_HEAL_DELAY_MS = 3000;
   const HEAL_STALE_AFTER_MS = 300_000;
   const HEAL_POLL_INTERVAL_MS = 30_000;
@@ -470,7 +475,12 @@ export function useOrchestratorStream(
 
     ws.onopen = () => {
       setConnected(true);
-      setStatus('connecting');
+      // Don't clobber a live turn's "busy" on a mid-turn reconnect. Downgrading
+      // to 'connecting' here made the working indicator (and the streaming reply,
+      // via socket.ts's currentAssistant guard) vanish on a network flap. A
+      // genuinely stale busy is still caught by the heal below + the 5-min
+      // stall watchdog.
+      setStatus(statusRef.current === 'busy' ? 'busy' : 'connecting');
 
       // Subscribe to orchestrator channel
       ws.send(JSON.stringify({
@@ -487,9 +497,14 @@ export function useOrchestratorStream(
       // is potentially stale. Give the server 3 seconds to push events for a
       // genuinely active turn; if nothing arrives, clear the stale indicators.
       const countAtOpen = eventCountRef.current;
+      const openedAt = Date.now();
       setTimeout(() => {
         if (ws !== wsRef.current) return;
         if (eventCountRef.current !== countAtOpen) return;
+        // A send fired after this socket opened → the busy is fresh (the
+        // orchestrator may still be cold-starting before its first event), not
+        // stale carryover. Leave it; the 5-min stall watchdog is the backstop.
+        if (lastSendAtRef.current >= openedAt) return;
         if (statusRef.current === 'busy' || currentAssistantRef.current) {
           healStaleBusyState('reconnect with no follow-up events after 3s');
         }
@@ -724,6 +739,11 @@ export function useOrchestratorStream(
     void (async () => {
       const activeRepoPath = repoPathRef.current;
       if (!activeRepoPath) return;
+      // Mark the send time so the reconnect heal won't clear this turn's busy
+      // before its first event, and reset the stall-watchdog clock to now (a
+      // turn that produces nothing for 5 min from *this* point is dead).
+      lastSendAtRef.current = Date.now();
+      lastEventAtRef.current = Date.now();
       const transcriptSnapshot = messagesRef.current;
       let planCaptureSource = transcriptSnapshot;
       const projectedTokens = estimateNextTurnTokens(message);
