@@ -664,7 +664,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           '--base', lane.baseBranch,
           '--head', lane.branch,
           '--title', prTitle,
-          '--body', `Automated PR from lane \`${lane.id}\`.\n\nRuntime: ${lane.runtime}\nPacket: ${lane.packetId ?? 'none'}`,
+          '--body', command.reviewSummary?.trim() || `Automated PR from lane \`${lane.id}\`.\n\nRuntime: ${lane.runtime}\nPacket: ${lane.packetId ?? 'none'}`,
         ], { cwd: lane.repoPath });
 
         const prUrl = prResult.stdout.trim();
