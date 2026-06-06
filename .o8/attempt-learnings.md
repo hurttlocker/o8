@@ -2,24 +2,6 @@
 
 Latest bounded learnings captured from failed retry attempts.
 
-## Packet pkt-f5a3163d-f91b-413b-b86c-94cb2fd73123 attempt 1
-
-```json
-{
-  "packetId": "pkt-f5a3163d-f91b-413b-b86c-94cb2fd73123",
-  "attempt": 1,
-  "timestamp": "2026-05-12T22:08:15.663Z",
-  "typecheckOutput": "Post-completion rule check failed. These are mechanical invariants — every violation is a user-visible bug waiting to ship.\n\nViolations (2) across 2 file(s):\n\n**src/lib/lane/registry.ts**\n- L809 [file-ceiling] File grew to 809 lines (was 808, max 800). Decompose before shipping — extract hooks, subcomponents, or types first.\n\n**src/lib/orchestrator/store.ts**\n- L892 [file-ceiling] File grew to 892 lines (was 880, max 800). Decompose before shipping — extract hooks, subcomponents, or types first.\n\nFix each violation, re-verify locally (`npm run rule-check`), then report completion again.\n\nThe platform enforces these rules mechanically because multi-constraint holding is where weaker models drop rules — CLAUDE.md invariants are not optional.",
-  "selfReviewSummary": "Agent completion did not include the required self-review block.",
-  "filesChanged": [
-    "src/lib/lane/registry.ts",
-    "src/lib/orchestrator/store.ts",
-    "CLAUDE.md"
-  ],
-  "summary": "Self-review: Agent completion did not include the required self-review block."
-}
-```
-
 ## Packet pkt-d397bec5-1b26-44a1-9875-77eda372828d attempt 1
 
 ```json
@@ -49,6 +31,24 @@ Latest bounded learnings captured from failed retry attempts.
   "filesChanged": [
     "src/components/desktop/onboarding/OnboardingRuntimeStep.tsx",
     "src/lib/runtimes/shared/owned-session/store.ts",
+    "CLAUDE.md"
+  ],
+  "summary": "Self-review: Agent completion did not include the required self-review block."
+}
+```
+
+## Packet pkt-3f51e736-bb6d-4b73-b322-2b47c30ced53 attempt 2
+
+```json
+{
+  "packetId": "pkt-3f51e736-bb6d-4b73-b322-2b47c30ced53",
+  "attempt": 2,
+  "timestamp": "2026-06-06T23:19:49.181Z",
+  "typecheckOutput": "Post-completion rule check failed. These are mechanical invariants — every violation is a user-visible bug waiting to ship.\n\nViolations (2) across 2 file(s):\n\n**src/components/desktop/thoughts/ThoughtsChatPanel.tsx**\n- L2117 [file-ceiling] File grew to 2117 lines (was 2071, max 800). Decompose before shipping — extract hooks, subcomponents, or types first.\n\n**src/components/desktop/thoughts/useOrchestratorStream.ts**\n- L897 [file-ceiling] File grew to 897 lines (was 887, max 800). Decompose before shipping — extract hooks, subcomponents, or types first.\n\nFix each violation, re-verify locally (`npm run rule-check`), then report completion again.\n\nThe platform enforces these rules mechanically because multi-constraint holding is where weaker models drop rules — CLAUDE.md invariants are not optional.",
+  "selfReviewSummary": "Agent completion did not include the required self-review block.",
+  "filesChanged": [
+    "src/components/desktop/thoughts/ThoughtsChatPanel.tsx",
+    "src/components/desktop/thoughts/useOrchestratorStream.ts",
     "CLAUDE.md"
   ],
   "summary": "Self-review: Agent completion did not include the required self-review block."
