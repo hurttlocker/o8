@@ -15,10 +15,7 @@ import {
 } from '@/lib/orchestrator/store';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
-import {
-  createOrchestratorDeliveryFailureEntry,
-  deliverOrchestratorPayload,
-} from './use-orchestrator-stream/delivery';
+import { appendOrchestratorDeliveryFailureEntry, deliverOrchestratorPayload } from './use-orchestrator-stream/delivery';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
 import {
   primeCompactedOrchestratorSession,
@@ -847,10 +844,7 @@ export function useOrchestratorStream(
       const delivered = await deliverOrchestratorPayload({
         payload,
         getWebSocket: () => wsRef.current,
-        connect: () => {
-          console.warn('[orchestrator-stream] WS not open, attempting reconnect...');
-          connect();
-        },
+        connect: () => { console.warn('[orchestrator-stream] WS not open, attempting reconnect...'); connect(); },
       });
 
       if (!delivered) {
@@ -858,18 +852,13 @@ export function useOrchestratorStream(
         statusRef.current = nextStatus;
         setStatus(nextStatus);
         resetFirstTurnPlanCapture();
-        setMessages((prev) => {
-          const next = [...prev, createOrchestratorDeliveryFailureEntry()];
-          messagesRef.current = next;
-          return next;
-        });
+        appendOrchestratorDeliveryFailureEntry(setMessages, messagesRef);
         return;
       }
 
-      // Mark the send time only after delivery so reconnect healing keeps its
-      // "fresh live turn" meaning and unsent payloads cannot pin busy forever.
-      lastSendAtRef.current = Date.now();
-      lastEventAtRef.current = Date.now();
+      const deliveredAt = Date.now();
+      lastSendAtRef.current = deliveredAt;
+      lastEventAtRef.current = deliveredAt;
       statusRef.current = 'busy';
       setStatus('busy');
     })();

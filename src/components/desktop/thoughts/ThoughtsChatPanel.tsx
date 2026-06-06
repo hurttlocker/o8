@@ -74,6 +74,8 @@ import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadN
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
+import { interruptRuntimeSurface } from './chat-panel/runtimeInterrupt';
+import { useSteerAutoFire } from './chat-panel/useSteerAutoFire';
 import type {
   ThoughtsChatPanelChromeState,
   ThoughtsChatPanelHandle,
@@ -307,18 +309,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return () => window.removeEventListener('o8:set-orchestration-mode', onSetMode as EventListener);
   }, [handleSelectOrchestrationMode, open]);
 
-  const handleSelectSingleRuntime = useCallback((next: OrchestratorRuntime) => {
-    setSingleRuntime(next);
-    if (onModePersist) {
-      onModePersist({ singleRuntime: next });
-    } else {
-      persistOrchestrationMode(workspaceModeKey, orchestrationMode, next);
-    }
-  }, [onModePersist, orchestrationMode, workspaceModeKey]);
-  const handleSelectChatModel = useCallback((next: ChatModelId) => {
-    setChatModelId(next);
-    onModePersist?.({ chatModelId: next });
-  }, [onModePersist]);
   const [operatorDefaults, setOperatorDefaults] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
   const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
@@ -337,8 +327,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // head row is being edited inline ([[borrow_conductor_steer_queue]]).
   const [pendingSteers, setPendingSteers] = useState<PendingSteer[]>([]);
   const [editingSteerId, setEditingSteerId] = useState<string | null>(null);
-  const firingSteerRef = useRef(false);
-  const firingSteerTimerRef = useRef<number | null>(null);
   const thinkingPreferenceTouchedRef = useRef(false);
   const pollRef = useRef<number | null>(null);
   const pollDelayRef = useRef<number | null>(null);
@@ -354,7 +342,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const responseSeenRef = useRef(false);
   const idlePollsRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const queuedSteerSendNowRef = useRef<(text?: string) => void>(() => {});
   const orchestratorSessionRef = useRef<string | null>(null);
   const singleRuntimeSessionRef = useRef<string | null>(null);
   const singleRuntimeLaunchPromiseRef = useRef<Promise<string | null> | null>(null);
@@ -731,7 +719,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       if (pollDelayRef.current !== null) window.clearTimeout(pollDelayRef.current);
       if (pollAbortRef.current !== null) pollAbortRef.current.abort();
       if (exportFeedbackTimerRef.current !== null) window.clearTimeout(exportFeedbackTimerRef.current);
-      if (firingSteerTimerRef.current !== null) window.clearTimeout(firingSteerTimerRef.current);
     };
   }, []);
 
@@ -750,25 +737,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       pollAbortRef.current.abort();
       pollAbortRef.current = null;
     }
-  }, []);
-
-  const clearFiringSteerLatch = useCallback(() => {
-    firingSteerRef.current = false;
-    if (firingSteerTimerRef.current !== null) {
-      window.clearTimeout(firingSteerTimerRef.current);
-      firingSteerTimerRef.current = null;
-    }
-  }, []);
-
-  const armFiringSteerLatch = useCallback(() => {
-    firingSteerRef.current = true;
-    if (firingSteerTimerRef.current !== null) {
-      window.clearTimeout(firingSteerTimerRef.current);
-    }
-    firingSteerTimerRef.current = window.setTimeout(() => {
-      firingSteerRef.current = false;
-      firingSteerTimerRef.current = null;
-    }, 6000);
   }, []);
 
   const setExportFeedback = useCallback((next: 'idle' | 'copying' | 'copied' | 'error') => {
@@ -963,7 +931,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       window.localStorage.setItem('o8:orchestrator:auto-restore-suppressed', '1');
     }
     cancelPendingPersist();
-    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
     if (isOrchestratorMode) {
@@ -1184,10 +1151,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // the empty-state check matches the empty-state-override condition.
   const composerRepoLabel = displayMessages.length === 0 ? null : composerRepoLabelBase;
   const displayWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : (waitingForReply || (isSingleMode && singleRuntimeSpawning));
-  useEffect(() => {
-    if (isOrchestratorMode || !displayWaiting) return;
-    clearFiringSteerLatch();
-  }, [clearFiringSteerLatch, displayWaiting, isOrchestratorMode]);
+  const { clearFiringSteerLatch } = useSteerAutoFire({
+    displayWaiting, isOrchestratorMode, pendingSteers, editingSteerId, setPendingSteers,
+    sendNowRef: queuedSteerSendNowRef,
+  });
   const displayPlanText = isOrchestratorMode && !isChatMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
   const activeTargetLabel = isChatMode
@@ -1733,6 +1700,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
   }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, waitingForReply]);
+  queuedSteerSendNowRef.current = sendNow;
 
   // ⌘⏎ steer handlers. enqueueSteer routes the typed input through the queue:
   // idle → fire immediately via sendNow; busy → push onto pendingSteers and let
@@ -1768,24 +1736,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       orchStream.interrupt?.();
     } else {
       const sessionKey = isSingleMode ? singleRuntimeSessionRef.current : targetSessionKey;
-      void (async () => {
-        try {
-          if (!sessionKey) return;
-          const response = await fetch('/api/runtime/action', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'interrupt', surfaceId: sessionKey }),
-          });
-          if (!response.ok) {
-            console.warn('[thoughts-chat] Failed to interrupt runtime steer target.');
-          }
-        } catch {
-          console.warn('[thoughts-chat] Failed to interrupt runtime steer target.');
-        } finally {
+      void interruptRuntimeSurface(sessionKey)
+        .finally(() => {
           clearPolling();
           setWaitingForReply(false);
-        }
-      })();
+        });
     }
   }, [clearPolling, isOrchestratorMode, isSingleMode, orchStream, targetSessionKey]);
 
@@ -1803,20 +1758,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
     setPendingSteers((prev) => prev.map((s) => (s.id === id ? { ...s, text: next } : s)));
   }, []);
-
-  // Auto-fire: when the agent goes idle and the queue has work, dequeue head
-  // and call sendNow. Skip if the head row is being inline-edited (Conductor's
-  // "queue pauses during edits" pattern).
-  useEffect(() => {
-    if (displayWaiting) return;
-    if (pendingSteers.length === 0) return;
-    if (firingSteerRef.current) return;
-    const head = pendingSteers[0];
-    if (editingSteerId === head.id) return;
-    armFiringSteerLatch();
-    setPendingSteers((prev) => prev.slice(1));
-    sendNow(head.text);
-  }, [armFiringSteerLatch, displayWaiting, pendingSteers, editingSteerId, sendNow]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 

@@ -1,3 +1,4 @@
+import type { Dispatch, MutableRefObject, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import { formatTimestampLabel } from './shared';
 
@@ -19,6 +20,18 @@ export function createOrchestratorDeliveryFailureEntry(): MobileTranscriptEntry 
     timestamp,
     timestampLabel: formatTimestampLabel(timestamp),
   };
+}
+
+export function appendOrchestratorDeliveryFailureEntry(
+  setMessages: Dispatch<SetStateAction<MobileTranscriptEntry[]>>,
+  messagesRef: MutableRefObject<MobileTranscriptEntry[]>,
+): void {
+  const failureEntry = createOrchestratorDeliveryFailureEntry();
+  setMessages((prev) => {
+    const next = [...prev, failureEntry];
+    messagesRef.current = next;
+    return next;
+  });
 }
 
 export async function deliverOrchestratorPayload({
