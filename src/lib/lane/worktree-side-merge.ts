@@ -9,6 +9,7 @@ import type {
   MergeStrategy,
 } from '@/lib/approvals/types';
 import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
+import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import {
   appendEvent,
   countLaneEventsByVerbSinceLastLaunch,
@@ -519,6 +520,8 @@ async function retryBaseAdvancedAfterRebase(
 
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
   const { lane, command, actor } = input;
+  // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
+  if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
   const worktreePath = lane.worktreePath;
   if (!worktreePath) {
     return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };

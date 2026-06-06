@@ -43,6 +43,7 @@ import { runMergeGate, formatMergeGateViolations } from '@/lib/lane/merge-gate';
 import { probeNoChangesProduced } from '@/lib/lane/no-changes-produced';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
 import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
+import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
@@ -681,6 +682,8 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
     case 'merge': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+      // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
+      if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
       const isRemoteCustomerLane = (lane.runtime as string) === 'remote-customer';
       if (!lane.worktreePath && !isRemoteCustomerLane) {
         return { ok: false, laneId: command.laneId, note: 'No worktree to merge. Lane is on the main working tree.' };
@@ -847,6 +850,8 @@ async function performRemoteCustomerMerge(
   command: MergeCommand,
   actor: LaneEventActor,
 ): Promise<LaneCommandResult> {
+  // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
+  if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };
   const workerRun = fetchWorkerRun(lane.id);
   if (!workerRun?.remoteBranch) {
     setLaneStatus(command.laneId, 'reviewing', 'system', 'remote_branch_missing');
