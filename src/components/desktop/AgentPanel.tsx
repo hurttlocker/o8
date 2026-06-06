@@ -886,6 +886,37 @@ function MiniProjectsMenu({
 
   useEffect(() => () => clearCloseTimer(), [clearCloseTimer]);
 
+  // B2 — rename is surfaced here because this is the live project list the user
+  // actually sees; the old ProjectsBottomBar rename UI is orphaned/unmounted.
+  // useProjects is multi-instance by design (mutations broadcast), so renaming
+  // here refreshes the parent's `projects` prop and the new name renders.
+  // Double-click a row to rename (default "Workspace" included).
+  const { renameProject } = useProjects();
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameDraft, setRenameDraft] = useState('');
+  const renameInputRef = useRef<HTMLInputElement | null>(null);
+  const beginRename = useCallback((project: ProjectRecord) => {
+    setRenamingId(project.id);
+    setRenameDraft(project.name);
+  }, []);
+  const cancelRename = useCallback(() => {
+    setRenamingId(null);
+    setRenameDraft('');
+  }, []);
+  const submitRename = useCallback(async (project: ProjectRecord) => {
+    const next = renameDraft.trim();
+    setRenamingId(null);
+    setRenameDraft('');
+    if (!next || next === project.name) return;
+    await renameProject(project.id, next);
+  }, [renameDraft, renameProject]);
+  useEffect(() => {
+    if (renamingId && renameInputRef.current) {
+      renameInputRef.current.focus();
+      renameInputRef.current.select();
+    }
+  }, [renamingId]);
+
   return (
     <div
       style={{
@@ -909,9 +940,46 @@ function MiniProjectsMenu({
           const visibleRepoPaths = project.repoPaths.filter((repoPath) => registeredRepoByPath.has(repoPath));
           return (
             <div key={project.id} style={{ paddingTop: 1, paddingBottom: 1 }}>
+              {project.id === renamingId ? (
+                <input
+                  ref={renameInputRef}
+                  type="text"
+                  value={renameDraft}
+                  onChange={(event) => setRenameDraft(event.target.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') { event.preventDefault(); void submitRename(project); }
+                    else if (event.key === 'Escape') { event.preventDefault(); cancelRename(); }
+                  }}
+                  onBlur={() => { void submitRename(project); }}
+                  placeholder={project.name}
+                  maxLength={60}
+                  style={{
+                    width: '100%',
+                    minHeight: 25,
+                    boxSizing: 'border-box',
+                    fontSize: 13.5,
+                    fontWeight: 440,
+                    letterSpacing: '-0.1px',
+                    color: 'var(--t-text)',
+                    background: 'var(--t-input-bg)',
+                    border: '1px solid var(--t-input-border, var(--t-divider))',
+                    borderRadius: 6,
+                    marginTop: 1,
+                    marginBottom: 1,
+                    paddingTop: 3,
+                    paddingBottom: 3,
+                    paddingLeft: 16,
+                    paddingRight: 16,
+                    outline: 'none',
+                    fontFamily: 'var(--font-sans-system)',
+                  }}
+                />
+              ) : (
               <button
                 type="button"
                 onClick={() => onProjectSelect(project)}
+                onDoubleClick={(event) => { event.preventDefault(); beginRename(project); }}
+                title={`Double-click to rename ${project.name}`}
                 style={{
                   width: '100%',
                   minHeight: 25,
@@ -1009,6 +1077,7 @@ function MiniProjectsMenu({
                   </svg>
                 </span>
               </button>
+              )}
               {visibleRepoPaths.length > 0 ? (
                 <div style={{ paddingTop: 1, display: 'flex', flexDirection: 'column' }}>
                   {visibleRepoPaths.map((repoPath) => {
