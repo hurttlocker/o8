@@ -433,6 +433,19 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'o8_view_open_browser',
+    description: "USE THIS to open o8's in-app Browser tab (and optionally point it at a URL such as a localhost dev server) in ONE deterministic call — instead of snapshotting/clicking to find and open it. Dispatches a window event the Browser panel handles synchronously, so it opens even if this call reports a busy-thread timeout (don't retry on timeout; take a screenshot to confirm). Omit `url` to just reveal the Browser tab with its detected localhost previews.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        url: {
+          type: 'string',
+          description: 'Optional URL to open (e.g. http://localhost:3000). A new tab is created if one for this URL does not already exist.',
+        },
+      },
+    },
+  },
+  {
     name: 'o8_view_scroll',
     description: 'Scroll the o8 webview — by direction (up/down, one viewport or a pixel amount), to a snapshot ref (scrollIntoView), or to top/bottom. Use to bring offscreen content into view before a screenshot or click.',
     inputSchema: {
@@ -532,6 +545,17 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
       const path = requiredString(args, 'path');
       const result = await getClient().navigate(path);
       return jsonResult(result);
+    }),
+
+    o8_view_open_browser: async (args) => withStructuredErrors(async () => {
+      const url = typeof args.url === 'string' && args.url.trim() ? args.url.trim() : null;
+      // Dispatch the window event O8Panel listens for: switch to the Browser tab
+      // and (if a URL is given) navigate the inner iframe. Fire-and-forget inside
+      // evalJs — the handler runs synchronously, so the browser opens even if the
+      // eval transport reports a busy-thread timeout.
+      const code = `(() => { try { window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url: ${JSON.stringify(url)} } })); return 'opened'; } catch (err) { return 'error: ' + String((err && err.message) || err); } })()`;
+      const result = await getClient().evalJs(code);
+      return jsonResult({ ok: true, url, raw: result.result });
     }),
 
     o8_view_scroll: async (args) => withStructuredErrors(async () => {
