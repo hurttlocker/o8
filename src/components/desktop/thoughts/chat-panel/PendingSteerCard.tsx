@@ -11,7 +11,7 @@
  * (stacked rows, Steer + Delete actions) merged with Conductor's inline edit.
  */
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 export type PendingSteer = {
   id: string;
@@ -20,6 +20,10 @@ export type PendingSteer = {
 
 type Props = {
   steers: PendingSteer[];
+  /** Index of the steer focused via keyboard nav (null = composer has focus). Highlights the row. */
+  focusedIndex?: number | null;
+  /** When set, begin inline-editing this steer (keyboard E from the composer). */
+  autoEditId?: string | null;
   /** Preempt: abort the running turn and fire this steer immediately. */
   onSteerNow: (id: string) => void;
   /** Discard a queued steer without firing. */
@@ -35,6 +39,8 @@ type Props = {
 
 export function PendingSteerCard({
   steers,
+  focusedIndex,
+  autoEditId,
   onSteerNow,
   onDelete,
   onEdit,
@@ -42,6 +48,16 @@ export function PendingSteerCard({
 }: Props) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [draft, setDraft] = useState('');
+
+  // Keyboard E from the composer asks us to begin editing a specific row.
+  useEffect(() => {
+    if (!autoEditId || editingId === autoEditId) return;
+    const target = steers.find((s) => s.id === autoEditId);
+    if (!target) return;
+    setEditingId(autoEditId);
+    setDraft(target.text);
+    onEditingChange?.(autoEditId);
+  }, [autoEditId, editingId, steers, onEditingChange]);
 
   if (steers.length === 0) return null;
 
@@ -83,12 +99,14 @@ export function PendingSteerCard({
       {steers.map((steer, idx) => {
         const isEditing = editingId === steer.id;
         const isFirst = idx === 0;
+        const isFocused = focusedIndex === idx;
         return (
           <SteerRow
             key={steer.id}
             steer={steer}
             isEditing={isEditing}
             isFirst={isFirst}
+            isFocused={isFocused}
             draft={draft}
             setDraft={setDraft}
             onBeginEdit={() => beginEdit(steer.id, steer.text)}
@@ -107,6 +125,7 @@ type RowProps = {
   steer: PendingSteer;
   isEditing: boolean;
   isFirst: boolean;
+  isFocused: boolean;
   draft: string;
   setDraft: (v: string) => void;
   onBeginEdit: () => void;
@@ -120,6 +139,7 @@ function SteerRow({
   steer,
   isEditing,
   isFirst,
+  isFocused,
   draft,
   setDraft,
   onBeginEdit,
@@ -142,7 +162,8 @@ function SteerRow({
         borderTopWidth: isFirst ? 0 : 1,
         borderTopStyle: 'solid',
         borderTopColor: 'var(--t-divider)',
-        background: 'transparent',
+        background: isFocused && !isEditing ? 'var(--t-hover)' : 'transparent',
+        boxShadow: isFocused && !isEditing ? 'inset 2px 0 0 var(--t-accent)' : 'none',
       }}
     >
       {/* Branch-arrow icon — Codex pattern */}
