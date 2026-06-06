@@ -7,6 +7,7 @@ import { join, resolve } from 'node:path';
 import {
   createClaudeCodeStreamJsonParser,
 } from './stream-json-parser';
+import { assertNoPrintFlag } from './assert-no-print-flag';
 import type {
   ClaudeCodeStreamJsonParser,
   ClaudeCodeStreamJsonParserEvent,
@@ -153,9 +154,7 @@ function buildClaudeArgs(
     args.push('--resume', normalizedResumeSessionId);
   }
 
-  if (args.includes('-p') || args.includes('--print')) {
-    throw new Error('Interactive Claude Code sessions must not use -p/--print');
-  }
+  assertNoPrintFlag(args, 'Interactive Claude Code sessions');
   if (args.includes('--dangerously-skip-permissions')) {
     throw new Error('Interactive Claude Code sessions must not default to --dangerously-skip-permissions');
   }

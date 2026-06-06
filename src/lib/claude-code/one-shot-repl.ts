@@ -34,6 +34,7 @@ import os from 'node:os';
 import {
   createClaudeCodeStreamJsonParser,
 } from './stream-json-parser';
+import { assertNoPrintFlag } from './assert-no-print-flag';
 
 export interface AskClaudeOneShotOptions {
   /** Explicit `claude` binary path. Caller resolves; we don't probe. */
@@ -52,7 +53,7 @@ export interface AskClaudeOneShotOptions {
  * NO `-p` / `--print` (those flip billing to the SDK pool).
  */
 function buildOneShotArgs(model: string): string[] {
-  return [
+  const args = [
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
     '--verbose',
@@ -60,6 +61,9 @@ function buildOneShotArgs(model: string): string[] {
     '--include-partial-messages',
     '--model', model,
   ];
+  // #1066 billing guard — enforce what line 52's comment only described.
+  assertNoPrintFlag(args, 'One-shot Claude REPL');
+  return args;
 }
 
 /**

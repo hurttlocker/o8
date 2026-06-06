@@ -27,6 +27,7 @@ import { homedir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
+import { assertNoPrintFlag } from '@/lib/claude-code/assert-no-print-flag';
 import {
   readOrchestratorBackendSessionId,
   writeOrchestratorBackendSessionId,
@@ -571,6 +572,9 @@ export async function sendToOrchestrator(
     // First message — inject orchestrator identity and context
     args.push('--append-system-prompt', buildOrchestratorSystemPrompt(session.repoPath));
   }
+
+  // #1066 billing guard — the orchestrator REPL must stay subscription-billed.
+  assertNoPrintFlag(args, 'Orchestrator REPL session');
 
   return new Promise<void>((resolve, reject) => {
     const proc = spawn(CLAUDE_BIN, args, {
