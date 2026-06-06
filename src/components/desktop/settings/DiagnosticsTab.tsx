@@ -30,6 +30,8 @@ import {
 interface DiagnosticTool {
   id: string;
   detected: boolean;
+  ready?: boolean;
+  authHint?: string;
   version?: string;
   path?: string;
 }
@@ -475,7 +477,8 @@ export function DiagnosticsTab() {
 }
 
 function ToolRow({ tool }: { tool: DiagnosticTool }) {
-  const dotColor = tool.detected ? RAMS_INK_QUIET : '#ef4444';
+  // Three states: not installed (red), installed-but-unauthed (amber), ready (quiet).
+  const dotColor = !tool.detected ? '#ef4444' : tool.ready === false ? '#f59e0b' : RAMS_INK_QUIET;
   return (
     <div style={{
       display: 'flex',
@@ -522,9 +525,9 @@ function ToolRow({ tool }: { tool: DiagnosticTool }) {
         fontSize: 11,
         fontWeight: 400,
         letterSpacing: '0.04em',
-        color: tool.detected ? 'var(--t-text-secondary)' : '#dc2626',
+        color: !tool.detected ? '#dc2626' : tool.ready === false ? '#b45309' : 'var(--t-text-secondary)',
       }}>
-        {tool.detected ? (tool.version ?? 'detected') : 'missing'}
+        {!tool.detected ? 'missing' : tool.ready === false ? (tool.authHint ?? 'auth missing') : (tool.version ?? 'detected')}
       </span>
     </div>
   );
