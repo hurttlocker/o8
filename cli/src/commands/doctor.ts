@@ -103,6 +103,29 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
     reapPayload = res.data;
   }
 
+  // Runtime readiness — binary present AND its auth (key/login) configured.
+  // Sourced from /api/setup/detect so the CLI stays in lockstep with the GUI dots.
+  type DetectRuntime = { id: string; name: string; detected: boolean; ready?: boolean; authHint?: string; version?: string };
+  let runtimes: DetectRuntime[] = [];
+  if (serverReachable) {
+    try {
+      const res = await apiFetch<{ tools: DetectRuntime[] }>(cfg, '/api/setup/detect');
+      const ids = ['codex', 'claude-code', 'gemini', 'opencode'];
+      runtimes = (res.data?.tools ?? []).filter((t) => ids.includes(t.id));
+    } catch {
+      // best-effort; server reachability is already reported above
+    }
+  }
+  for (const rt of runtimes) {
+    if (rt.detected && rt.ready === false) {
+      findings.push({
+        level: 'warn',
+        code: 'runtime_auth_missing',
+        message: `${rt.name}: installed but not authed — ${rt.authHint ?? 'configure its API key/login'}.`,
+      });
+    }
+  }
+
   const payload = {
     schema: 'o8/cli/doctor/v1',
     ok: serverReachable && !findings.some((f) => f.level === 'error'),
@@ -123,6 +146,13 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
       candidates: reapPayload.candidates,
       reaped: reapPayload.reaped ?? [],
     } : null,
+    runtimes: runtimes.map((rt) => ({
+      id: rt.id,
+      name: rt.name,
+      detected: rt.detected,
+      ready: rt.ready ?? rt.detected,
+      authHint: rt.authHint ?? null,
+    })),
     findings,
   };
 
@@ -135,6 +165,20 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
       ['data dir', cfg.dataDir ?? '(none)'],
       ['reachable', serverReachable ? 'yes' : 'no'],
     ]);
+    if (runtimes.length > 0) {
+      printHumanHeading('runtimes');
+      for (const rt of runtimes) {
+        const state = !rt.detected
+          ? 'not installed'
+          : rt.ready === false ? 'auth missing' : 'ready';
+        const extra = !rt.detected
+          ? ''
+          : rt.ready === false
+            ? ` — ${rt.authHint ?? ''}`
+            : rt.version ? ` (${rt.version})` : '';
+        process.stdout.write(`  ${rt.name}: ${state}${extra}\n`);
+      }
+    }
     if (findings.length > 0) {
       printHumanHeading('findings');
       for (const f of findings) {

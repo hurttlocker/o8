@@ -19,6 +19,8 @@ export interface DetectedRuntimeRow {
   id: string;
   name: string;
   detected: boolean;
+  ready?: boolean;
+  authHint?: string;
   version?: string;
 }
 
@@ -96,8 +98,8 @@ function RuntimeRowBase({ runtime }: { runtime: DetectedRuntimeRow }) {
             width: 10,
             height: 10,
             borderRadius: '50%',
-            background: detected ? '#22c55e' : 'var(--t-text-faint)',
-            boxShadow: detected ? '0 0 8px rgba(34, 197, 94, 0.3)' : 'none',
+            background: !detected ? 'var(--t-text-faint)' : runtime.ready === false ? '#f59e0b' : '#22c55e',
+            boxShadow: detected && runtime.ready !== false ? '0 0 8px rgba(34, 197, 94, 0.3)' : 'none',
             flexShrink: 0,
           }}
         />
@@ -105,8 +107,8 @@ function RuntimeRowBase({ runtime }: { runtime: DetectedRuntimeRow }) {
           <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', fontFamily: FONT }}>
             {runtime.name}
           </div>
-          <div style={{ fontSize: 11, color: detected ? '#22c55e' : 'var(--t-text-faint)', marginTop: 1, fontFamily: FONT }}>
-            {detected ? (runtime.version ? `v${runtime.version} — ready` : 'Ready') : 'Not installed'}
+          <div style={{ fontSize: 11, color: !detected ? 'var(--t-text-faint)' : runtime.ready === false ? '#b45309' : '#22c55e', marginTop: 1, fontFamily: FONT }}>
+            {!detected ? 'Not installed' : runtime.ready === false ? (runtime.authHint ?? 'Auth needed') : (runtime.version ? `v${runtime.version} — ready` : 'Ready')}
           </div>
         </div>
         {detected && (

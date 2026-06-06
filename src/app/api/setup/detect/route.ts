@@ -11,6 +11,10 @@ interface DetectedTool {
   id: string;
   name: string;
   detected: boolean;
+  /** Runtimes only: binary present AND its required auth (key/login) is configured. */
+  ready?: boolean;
+  /** When detected but not ready, the one-line fix (e.g. "set GEMINI_API_KEY"). */
+  authHint?: string;
   version?: string;
   path?: string;
   details?: Record<string, unknown>;
@@ -82,6 +86,40 @@ async function safeFetch(url: string, timeoutMs = 2000, deadlineAt?: number): Pr
   }
 }
 
+// --- Runtime auth readiness ---------------------------------------------------
+// A green "Ready" dot must mean the runtime will actually RUN, not just that the
+// binary is on PATH. Each runtime needs an API key or a CLI login. We check both
+// process.env (what the Tauri sidecar forwards to dispatched workers) and the
+// .env.local files. Lenient where a login can't be detected reliably (codex /
+// claude-code): only flag "auth missing" when we're confident none exists.
+function loadConfiguredKeyNames(): Set<string> {
+  const home = homedir();
+  const repoRoot = process.env.CORTEX_IDE_REPO_ROOT || process.cwd();
+  const names = new Set<string>();
+  for (const envPath of [join(home, '.o8', '.env.local'), join(repoRoot, '.env.local')]) {
+    if (!existsSync(envPath)) continue;
+    try {
+      for (const line of readFileSync(envPath, 'utf-8').split('\n')) {
+        const t = line.trim();
+        if (!t || t.startsWith('#')) continue;
+        const eq = t.indexOf('=');
+        if (eq === -1) continue;
+        const k = t.slice(0, eq).trim();
+        const v = t.slice(eq + 1).trim();
+        if (k && v && v !== '""' && v !== "''") names.add(k);
+      }
+    } catch { /* ignore */ }
+  }
+  return names;
+}
+
+function keyPresent(names: string[], configured: Set<string>): boolean {
+  return names.some((n) => {
+    const v = process.env[n];
+    return (typeof v === 'string' && v.trim().length > 0) || configured.has(n);
+  });
+}
+
 function detectCodex(deadlineAt?: number): DetectedTool {
   const home = homedir();
   const path = safeWhich('codex', deadlineAt);
@@ -108,13 +146,18 @@ function detectCodex(deadlineAt?: number): DetectedTool {
     }
   }
 
+  const authPresent = keyPresent(['OPENAI_API_KEY'], loadConfiguredKeyNames())
+    || existsSync(join(home, '.codex', 'auth.json'))
+    || threadCount > 0;
   return {
     id: 'codex',
     name: 'Codex CLI',
     detected,
+    ready: detected ? authPresent : undefined,
+    authHint: detected && !authPresent ? 'run: codex login (or set OPENAI_API_KEY)' : undefined,
     version,
     path,
-    details: { threadCount },
+    details: { threadCount, authPresent },
   };
 }
 
@@ -148,13 +191,18 @@ function detectClaudeCode(deadlineAt?: number): DetectedTool {
     }
   }
 
+  const authPresent = keyPresent(['ANTHROPIC_API_KEY'], loadConfiguredKeyNames())
+    || existsSync(join(home, '.claude', '.credentials.json'))
+    || sessionCount > 0;
   return {
     id: 'claude-code',
     name: 'Claude Code CLI',
     detected,
+    ready: detected ? authPresent : undefined,
+    authHint: detected && !authPresent ? 'log in by running claude once (or set ANTHROPIC_API_KEY)' : undefined,
     version,
     path,
-    details: { sessionCount },
+    details: { sessionCount, authPresent },
   };
 }
 
@@ -167,12 +215,19 @@ function detectGemini(deadlineAt?: number): DetectedTool {
     version = safeExec('gemini', ['--version'], 2000, deadlineAt);
   }
 
+  const authPresent = keyPresent(
+    ['GEMINI_API_KEY', 'GOOGLE_GENERATIVE_AI_API_KEY', 'GOOGLE_AI_API_KEY'],
+    loadConfiguredKeyNames(),
+  );
   return {
     id: 'gemini',
     name: 'Gemini CLI',
     detected,
+    ready: detected ? authPresent : undefined,
+    authHint: detected && !authPresent ? 'set GEMINI_API_KEY (or GOOGLE_GENERATIVE_AI_API_KEY)' : undefined,
     version,
     path,
+    details: { authPresent },
   };
 }
 
@@ -200,13 +255,16 @@ function detectOpenCode(deadlineAt?: number): DetectedTool {
     }
   }
 
+  const authPresent = authedProviders.length > 0;
   return {
     id: 'opencode',
     name: 'OpenCode CLI',
     detected,
+    ready: detected ? authPresent : undefined,
+    authHint: detected && !authPresent ? 'run: opencode auth login' : undefined,
     version,
     path,
-    details: { authedProviders },
+    details: { authedProviders, authPresent },
   };
 }
 
