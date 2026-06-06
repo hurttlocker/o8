@@ -337,6 +337,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // head row is being edited inline ([[borrow_conductor_steer_queue]]).
   const [pendingSteers, setPendingSteers] = useState<PendingSteer[]>([]);
   const [editingSteerId, setEditingSteerId] = useState<string | null>(null);
+  const firingSteerRef = useRef(false);
+  const firingSteerTimerRef = useRef<number | null>(null);
   const thinkingPreferenceTouchedRef = useRef(false);
   const pollRef = useRef<number | null>(null);
   const pollDelayRef = useRef<number | null>(null);
@@ -729,6 +731,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       if (pollDelayRef.current !== null) window.clearTimeout(pollDelayRef.current);
       if (pollAbortRef.current !== null) pollAbortRef.current.abort();
       if (exportFeedbackTimerRef.current !== null) window.clearTimeout(exportFeedbackTimerRef.current);
+      if (firingSteerTimerRef.current !== null) window.clearTimeout(firingSteerTimerRef.current);
     };
   }, []);
 
@@ -747,6 +750,25 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       pollAbortRef.current.abort();
       pollAbortRef.current = null;
     }
+  }, []);
+
+  const clearFiringSteerLatch = useCallback(() => {
+    firingSteerRef.current = false;
+    if (firingSteerTimerRef.current !== null) {
+      window.clearTimeout(firingSteerTimerRef.current);
+      firingSteerTimerRef.current = null;
+    }
+  }, []);
+
+  const armFiringSteerLatch = useCallback(() => {
+    firingSteerRef.current = true;
+    if (firingSteerTimerRef.current !== null) {
+      window.clearTimeout(firingSteerTimerRef.current);
+    }
+    firingSteerTimerRef.current = window.setTimeout(() => {
+      firingSteerRef.current = false;
+      firingSteerTimerRef.current = null;
+    }, 6000);
   }, []);
 
   const setExportFeedback = useCallback((next: 'idle' | 'copying' | 'copied' | 'error') => {
@@ -1162,6 +1184,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // the empty-state check matches the empty-state-override condition.
   const composerRepoLabel = displayMessages.length === 0 ? null : composerRepoLabelBase;
   const displayWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : (waitingForReply || (isSingleMode && singleRuntimeSpawning));
+  useEffect(() => {
+    if (isOrchestratorMode || !displayWaiting) return;
+    clearFiringSteerLatch();
+  }, [clearFiringSteerLatch, displayWaiting, isOrchestratorMode]);
   const displayPlanText = isOrchestratorMode && !isChatMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
   const activeTargetLabel = isChatMode
@@ -1254,6 +1280,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
     if (prev !== 'busy' && next === 'busy') {
       // New turn started — clear stale summary and snapshot the baseline.
+      clearFiringSteerLatch();
       setTurnSummary(null);
       turnStartRef.current = {
         startedAt: Date.now(),
@@ -1331,7 +1358,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         })();
       }
     }
-  }, [displayMessages, isChatMode, isOrchestratorMode, orchStream.runningTotal, orchStream.status, resolvedRepoPath]);
+  }, [clearFiringSteerLatch, displayMessages, isChatMode, isOrchestratorMode, orchStream.runningTotal, orchStream.status, resolvedRepoPath]);
 
   // Clear the summary when the thread changes — stale cards from a prior
   // thread should not bleed into the new one.
@@ -1739,11 +1766,28 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     // below will then dequeue + sendNow on the next render.
     if (isOrchestratorMode) {
       orchStream.interrupt?.();
-    } else if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
+    } else {
+      const sessionKey = isSingleMode ? singleRuntimeSessionRef.current : targetSessionKey;
+      void (async () => {
+        try {
+          if (!sessionKey) return;
+          const response = await fetch('/api/runtime/action', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'interrupt', surfaceId: sessionKey }),
+          });
+          if (!response.ok) {
+            console.warn('[thoughts-chat] Failed to interrupt runtime steer target.');
+          }
+        } catch {
+          console.warn('[thoughts-chat] Failed to interrupt runtime steer target.');
+        } finally {
+          clearPolling();
+          setWaitingForReply(false);
+        }
+      })();
     }
-  }, [isOrchestratorMode, orchStream]);
+  }, [clearPolling, isOrchestratorMode, isSingleMode, orchStream, targetSessionKey]);
 
   const handleDeleteSteer = useCallback((id: string) => {
     setPendingSteers((prev) => prev.filter((s) => s.id !== id));
@@ -1766,11 +1810,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   useEffect(() => {
     if (displayWaiting) return;
     if (pendingSteers.length === 0) return;
+    if (firingSteerRef.current) return;
     const head = pendingSteers[0];
     if (editingSteerId === head.id) return;
+    armFiringSteerLatch();
     setPendingSteers((prev) => prev.slice(1));
     sendNow(head.text);
-  }, [displayWaiting, pendingSteers, editingSteerId, sendNow]);
+  }, [armFiringSteerLatch, displayWaiting, pendingSteers, editingSteerId, sendNow]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 

@@ -15,6 +15,10 @@ import {
 } from '@/lib/orchestrator/store';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ThoughtsOrchestratorBusyState } from '@/components/desktop/thoughts/chat-panel/types';
+import {
+  createOrchestratorDeliveryFailureEntry,
+  deliverOrchestratorPayload,
+} from './use-orchestrator-stream/delivery';
 import { archiveMissionThread as archiveCompletedMissionThread } from './use-orchestrator-stream/mission-history';
 import {
   primeCompactedOrchestratorSession,
@@ -739,11 +743,6 @@ export function useOrchestratorStream(
     void (async () => {
       const activeRepoPath = repoPathRef.current;
       if (!activeRepoPath) return;
-      // Mark the send time so the reconnect heal won't clear this turn's busy
-      // before its first event, and reset the stall-watchdog clock to now (a
-      // turn that produces nothing for 5 min from *this* point is dead).
-      lastSendAtRef.current = Date.now();
-      lastEventAtRef.current = Date.now();
       const transcriptSnapshot = messagesRef.current;
       let planCaptureSource = transcriptSnapshot;
       const projectedTokens = estimateNextTurnTokens(message);
@@ -813,8 +812,6 @@ export function useOrchestratorStream(
         && !planCaptureSource.some((entry) => entry.role === 'assistant' || entry.role === 'system' || entry.role === 'tool');
       firstTurnPlanStartedRef.current = false;
       firstTurnPlanChunksRef.current = [];
-      statusRef.current = 'busy';
-      setStatus('busy');
 
       // Mint a threadId synchronously if the parent's state hasn't landed
       // yet. ws-server uses `threadId.startsWith('thoughts-')` to decide
@@ -847,23 +844,36 @@ export function useOrchestratorStream(
         ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
         model,
       });
-      const ws = wsRef.current;
-      if (ws?.readyState === WebSocket.OPEN) {
-        ws.send(payload);
+      const delivered = await deliverOrchestratorPayload({
+        payload,
+        getWebSocket: () => wsRef.current,
+        connect: () => {
+          console.warn('[orchestrator-stream] WS not open, attempting reconnect...');
+          connect();
+        },
+      });
+
+      if (!delivered) {
+        const nextStatus = wsRef.current?.readyState === WebSocket.OPEN || connected ? 'ready' : 'connecting';
+        statusRef.current = nextStatus;
+        setStatus(nextStatus);
+        resetFirstTurnPlanCapture();
+        setMessages((prev) => {
+          const next = [...prev, createOrchestratorDeliveryFailureEntry()];
+          messagesRef.current = next;
+          return next;
+        });
         return;
       }
-      console.warn('[orchestrator-stream] WS not open, attempting reconnect...');
-      connect();
-      const waitAndSend = setInterval(() => {
-        const currentWs = wsRef.current;
-        if (currentWs?.readyState === WebSocket.OPEN) {
-          clearInterval(waitAndSend);
-          currentWs.send(payload);
-        }
-      }, 200);
-      setTimeout(() => clearInterval(waitAndSend), 5000);
+
+      // Mark the send time only after delivery so reconnect healing keeps its
+      // "fresh live turn" meaning and unsent payloads cannot pin busy forever.
+      lastSendAtRef.current = Date.now();
+      lastEventAtRef.current = Date.now();
+      statusRef.current = 'busy';
+      setStatus('busy');
     })();
-  }, [connect, connected, estimateNextTurnTokens, primeCompactedSession, requestCompaction]);
+  }, [connect, connected, estimateNextTurnTokens, primeCompactedSession, requestCompaction, resetFirstTurnPlanCapture]);
 
   return {
     messages,
