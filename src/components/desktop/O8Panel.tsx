@@ -448,6 +448,13 @@ export function O8Panel({
   const utilityShellActive = activeTab === 'launcher' || activeUtilityTab !== null;
   const [utilityTabs, setUtilityTabs] = useState<RightUtilityTab[]>([]);
   const [localSelectedFile, setLocalSelectedFile] = useState<string | null>(null);
+  // #1169 — orchestrator-driven browser open. The o8:open-browser window event
+  // (fired by the o8_view_open_browser MCP tool) sets this; it overrides the
+  // parent-owned browserUrl prop so the agent can open the Browser tab to a URL
+  // in one call instead of snapshot/click-hunting. Cleared whenever the parent
+  // drives its own navigation so the prop is never shadowed by a stale value.
+  const [pendingBrowserUrl, setPendingBrowserUrl] = useState<string | null>(null);
+  useEffect(() => { setPendingBrowserUrl(null); }, [browserUrl]);
   // The shared O8RepoSelector in the workspace header owns repo switching now,
   // so hide ReviewPanel's built-in dropdown: a single-entry list trips its own
   // `registeredRepos.length > 1` guard and keeps the inline selector hidden.
@@ -519,6 +526,19 @@ export function O8Panel({
     return () => window.removeEventListener('o8:focus-review', handler);
   }, [onActiveTabChange, onRepoPathChange, onSelectedFileChange, repoPath]);
 
+  // #1169 — the o8_view_open_browser MCP tool dispatches `o8:open-browser`;
+  // reveal the Browser tab and (optionally) navigate it. One deterministic
+  // action instead of the snapshot/click hunt that cost the orchestrator ~5 min.
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const url = (event as CustomEvent<{ url?: string | null }>).detail?.url;
+      onActiveTabChange?.('browser');
+      if (typeof url === 'string' && url.trim()) setPendingBrowserUrl(url.trim());
+    };
+    window.addEventListener('o8:open-browser', handler);
+    return () => window.removeEventListener('o8:open-browser', handler);
+  }, [onActiveTabChange]);
+
   const renderUtilitySurface = (tab: RightUtilityTab, active: boolean) => {
     if (tab === 'files') {
       return (
@@ -561,7 +581,7 @@ export function O8Panel({
           previews={previews}
           onEditWithAI={onEditWithAI}
           onOpenFile={onOpenFile}
-          navigateToUrl={browserUrl}
+          navigateToUrl={pendingBrowserUrl ?? browserUrl}
           onActiveUrlChange={onBrowserActiveUrlChange}
         />
       );
@@ -700,7 +720,7 @@ export function O8Panel({
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' && !utilityShellActive ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
+        <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={pendingBrowserUrl ?? browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'activity' || activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8ActivityPane
