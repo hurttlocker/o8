@@ -17,6 +17,7 @@ import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './
 import { extractAddedLines, getLaneDiffFacts, parseDiffStat } from './lane-diff-facts';
 import { buildAdversarialReviewProtocol, classifyReviewRisk } from './review-risk';
 import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReference } from './review-screenshot';
+import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondPassVerdict } from './blind-second-pass-review';
 import type { Lane } from './types';
 
 const MAX_REVIEW_ATTEMPTS = 5;
@@ -578,5 +579,100 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     }
   });
 
+  const reviewRisk = classifyReviewRisk(diffSummary.changedFiles, diffSummary.addedLines);
+  if (reviewRisk.tier !== 'high') {
+    console.log(`[auto-review] Review complete for lane ${lane.id}`);
+    return;
+  }
+
+  const pendingSecondPass = await findPendingSecondPassApproval(lane);
+  if (!pendingSecondPass) {
+    console.log(`[auto-review] High-risk lane ${lane.id} has no current-head approval awaiting second pass`);
+    console.log(`[auto-review] Review complete for lane ${lane.id}`);
+    return;
+  }
+
+  const blindPrompt = buildBlindSecondPassPrompt(lane, diffSummary, reviewRisk.reasons);
+  const secondPassThreadId = `thoughts-second-pass-${lane.id}-${randomUUID().slice(0, 8)}`;
+  let secondPassText = '';
+  const secondPassErrors: string[] = [];
+
+  console.log(`[auto-review] Sending blind second-pass review to ${backend.label} for lane ${lane.id}`);
+  try {
+    await backend.sendTurn(lane.repoPath, blindPrompt, (event) => {
+      if (event.type === 'text') {
+        secondPassText += event.text;
+        console.log(`[auto-review] ${backend.label} second-pass: ${event.text.slice(0, 100)}`);
+      } else if (event.type === 'tool_use') {
+        console.log(`[auto-review] ${backend.label} second-pass called tool: ${event.name}`);
+      } else if (event.type === 'error') {
+        secondPassErrors.push(event.error);
+        console.error(`[auto-review] ${backend.label} second-pass error: ${event.error}`);
+      }
+    }, { threadId: secondPassThreadId });
+  } catch (error) {
+    secondPassErrors.push(error instanceof Error ? error.message : String(error));
+  }
+
+  const [{ normalizeHeadSha, readHeadSha }, { createApproval, markSecondPassAgreed }] = await Promise.all([
+    import('@/lib/lane/head-sha-lock'),
+    import('@/lib/approvals/store'),
+  ]);
+  let currentHeadSha: string | undefined;
+  try {
+    currentHeadSha = normalizeHeadSha(await readHeadSha(lane.worktreePath || lane.repoPath));
+  } catch (error) {
+    console.warn(`[auto-review] Failed to re-read HEAD after second pass for lane ${lane.id}:`, error);
+    return;
+  }
+  if (currentHeadSha !== pendingSecondPass.reviewedHeadSha) {
+    console.warn(`[auto-review] Second pass refused to stamp lane ${lane.id}: HEAD moved from ${pendingSecondPass.reviewedHeadSha} to ${currentHeadSha ?? '(unknown)'}`);
+    return;
+  }
+
+  const verdict = secondPassErrors.length > 0
+    ? { verdict: 'inconclusive' as const, reason: `turn error: ${secondPassErrors.join('; ').slice(0, 500)}` }
+    : parseSecondPassVerdict(secondPassText);
+
+  if (verdict.verdict === 'agree') {
+    markSecondPassAgreed(pendingSecondPass.approval.id);
+    const { dispatch } = await import('@/lib/lane/commands');
+    const mergeResult = await dispatch({ verb: 'merge', laneId: lane.id, actor: 'orchestrator' });
+    console.log(`[auto-review] Second-pass agreed for lane ${lane.id}; merge result ok=${mergeResult.ok} note=${mergeResult.note}`);
+    console.log(`[auto-review] Review complete for lane ${lane.id}`);
+    return;
+  }
+
+  const finding = verdict.verdict === 'disagree' ? verdict.finding : verdict.reason;
+  createApproval({
+    projectId: lane.projectId,
+    source: 'runtime',
+    runtime: lane.runtime,
+    agent: lane.label || lane.branch,
+    sessionKey: lane.sessionKey || `lane:${lane.id}`,
+    title: verdict.verdict === 'disagree' ? 'Second-pass reviewer disagreed' : 'Second-pass reviewer inconclusive',
+    description: `Blind second-pass review did not agree at HEAD ${pendingSecondPass.reviewedHeadSha}. Merge remains blocked until an operator reviews the finding.`,
+    summary: finding,
+    toolName: 'orchestrator_second_pass',
+    args: {
+      approvalId: pendingSecondPass.approval.id,
+      laneId: lane.id,
+      packetId: lane.packetId,
+      reviewedHeadSha: pendingSecondPass.reviewedHeadSha,
+      verdict: verdict.verdict,
+      finding,
+    },
+    editable: false,
+    risk: 'high',
+    metadata: {
+      Lane: lane.id,
+      Branch: lane.branch,
+      Base: lane.baseBranch,
+      Runtime: lane.runtime,
+      ...(lane.packetId ? { Packet: lane.packetId } : {}),
+      'Reviewed HEAD': pendingSecondPass.reviewedHeadSha,
+    },
+  });
+  console.warn(`[auto-review] Second pass blocked lane ${lane.id}: ${finding}`);
   console.log(`[auto-review] Review complete for lane ${lane.id}`);
 }
