@@ -543,7 +543,7 @@ export function AppearanceTab() {
           The 24-hour activity strip that lives below the title bar. Surfaces every
           Codex and Claude Code session on this machine — colored by what each
           minute was spent on (thinking, coding, testing) and red when an error
-          showed up. Hide it if you'd rather work without the live signal.
+          showed up. Hide it if you&apos;d rather work without the live signal.
         </p>
 
         <TimelineVisibilityToggle />

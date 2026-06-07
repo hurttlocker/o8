@@ -28,9 +28,19 @@ function mkReq(body: unknown) {
   });
 }
 
-async function callPost(body: unknown): Promise<{ status: number; payload: any }> {
+type ProjectPostPayload = {
+  error?: string;
+  project?: {
+    repos?: Array<{
+      repoId?: string;
+      role?: string | null;
+    }>;
+  };
+};
+
+async function callPost(body: unknown): Promise<{ status: number; payload: ProjectPostPayload }> {
   const res = await POST(mkReq(body));
-  const payload = await res.json();
+  const payload = await res.json() as ProjectPostPayload;
   return { status: res.status, payload };
 }
 

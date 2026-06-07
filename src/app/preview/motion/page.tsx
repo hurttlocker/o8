@@ -29,7 +29,7 @@ export default function MotionPreviewPage() {
           Motion lab
         </h1>
         <p style={{ fontSize: 13, color: 'var(--t-text-muted, #6b7280)', marginTop: 6, lineHeight: 1.5, maxWidth: 640 }}>
-          Loading / working indicators side-by-side. Picking one for the chat-row "agent working" pattern. <strong>3-dot pulse</strong> is currently the working choice (lives in <code>globals.css</code> as <code>.o8-dot-shimmer</code>). Hit the toggle below to compare the row with / without a focused-state title shimmer.
+          Loading / working indicators side-by-side. Picking one for the chat-row &quot;agent working&quot; pattern. <strong>3-dot pulse</strong> is currently the working choice (lives in <code>globals.css</code> as <code>.o8-dot-shimmer</code>). Hit the toggle below to compare the row with / without a focused-state title shimmer.
         </p>
         <button
           type="button"
@@ -61,7 +61,7 @@ export default function MotionPreviewPage() {
           Applied — motion vocabulary in context
         </h2>
         <p style={{ fontSize: 12, color: 'var(--t-text-muted)', marginBottom: 16, maxWidth: 640, lineHeight: 1.5 }}>
-          Three motion roles. A is <strong>static</strong> (state), B + C are <strong>animated</strong> (action). Same shape language across A and B — frozen 3-dot says "available", animated 3-dot says "working".
+          Three motion roles. A is <strong>static</strong> (state), B + C are <strong>animated</strong> (action). Same shape language across A and B — frozen 3-dot says &quot;available&quot;, animated 3-dot says &quot;working&quot;.
         </p>
         <div
           style={{
@@ -113,7 +113,7 @@ export default function MotionPreviewPage() {
             A — quiet-state candidates
           </h3>
           <p style={{ fontSize: 11.5, color: 'var(--t-text-muted)', marginBottom: 12, maxWidth: 560, lineHeight: 1.45 }}>
-            All static, no animation. Pick which "available but doing nothing" reads cleanest next to the animated B and C.
+            All static, no animation. Pick which &quot;available but doing nothing&quot; reads cleanest next to the animated B and C.
           </p>
           <div
             style={{
