@@ -69,10 +69,10 @@ function RiskBadge({ risk }: { risk: string }) {
 const GATE_LABELS: Record<string, string> = { security: 'Security', budget: 'Budget', integrity: 'Integrity' };
 
 function MobileGateReport({ approval, palette }: { approval: ApprovalItem; palette: MobilePalette }) {
+  const [open, setOpen] = useState(false);
   const gate = approval.gateResult;
   if (!gate || gate.violations.length === 0) return null;
 
-  const [open, setOpen] = useState(false);
   const blocks = gate.violations.filter((v) => v.severity === 'block').length;
   const warns = gate.violations.filter((v) => v.severity === 'warn').length;
 
@@ -172,10 +172,10 @@ function MobileConflictSection({
   resolving: { id: string; action: 'approve' | 'reject' } | null;
   palette: MobilePalette;
 }) {
+  const [strategy, setStrategy] = useState<string>('theirs');
   const conflict = approval.conflictReport;
   if (!conflict || conflict.files.length === 0) return null;
 
-  const [strategy, setStrategy] = useState<string>('theirs');
   const isBusy = resolving?.id === approval.id;
 
   return (
