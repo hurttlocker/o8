@@ -26,9 +26,12 @@ interface EntitlementFile {
   expiresAt?: string;
 }
 
-function getEntitlementPath() {
+// Canonical entitlement.json location (~/.o8 — same dir db/index.ts uses).
+// Exported so license.ts writes the exact path store.ts reads — they MUST agree
+// or a verified Pro license lands in a file the store never reads.
+export function getEntitlementPath() {
   return path.join(
-    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.cortex-ide'),
+    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
     ENTITLEMENT_FILE,
   );
 }
