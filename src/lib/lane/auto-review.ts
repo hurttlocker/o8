@@ -238,6 +238,7 @@ interface ReviewDiffSummary {
   summary: string;
   changedFiles: string[];
   addedLines: string[];
+  cwd: string;
 }
 
 function extractAddedLines(diff: string): string[] {
@@ -273,18 +274,20 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth): ReviewDiffSummary {
     const addedLines = extractAddedLines(diff);
 
     if (!stat && !diff) {
-      return { summary: 'No changes detected in the worktree.', changedFiles, addedLines };
+      return { summary: 'No changes detected in the worktree.', changedFiles, addedLines, cwd };
     }
     return {
       summary: `## Diff summary\n\n\`\`\`\n${stat}\n\`\`\`\n\n## Changes\n\n\`\`\`diff\n${diff}\n\`\`\``,
       changedFiles,
       addedLines,
+      cwd,
     };
   } catch {
     return {
       summary: 'Unable to generate diff — the worktree may not have commits yet.',
       changedFiles: [],
       addedLines: [],
+      cwd,
     };
   }
 }
@@ -434,6 +437,7 @@ function buildReviewPrompt(
   mechanicalChecksSummary?: string,
   mergeGateResult?: MergeGateResult,
   reviewScreenshot?: LaneReviewScreenshotReference | null,
+  reviewWorktreePath?: string,
 ): string {
   const depthGuidance = depth === 'deep-dive'
     ? 'This lane has low-confidence or missing self-review context. Perform a deep-dive review and challenge assumptions, edge cases, and missing validation.'
@@ -442,6 +446,7 @@ function buildReviewPrompt(
   const mergeGateSection = mergeGateResult ? formatMergeGateForReview(mergeGateResult) : null;
   const reviewRisk = classifyReviewRisk(changedFiles, addedLines);
   const adversarialReviewProtocol = buildAdversarialReviewProtocol(reviewRisk.tier);
+  const worktreePath = reviewWorktreePath || lane.worktreePath || lane.repoPath;
   const reviewScreenshotMetadata = reviewScreenshot
     ? [
         typeof reviewScreenshot.width === 'number' && reviewScreenshot.width > 0
@@ -452,6 +457,29 @@ function buildReviewPrompt(
         reviewScreenshot.capturedAt ? `captured ${reviewScreenshot.capturedAt}` : null,
       ].filter((value): value is string => Boolean(value)).join(' • ')
     : '';
+  const requiredTraceFormat = [
+    '## Required verification traces',
+    '',
+    'Before any verdict, recommendation, or submit_review call, emit a completed trace block in this exact format:',
+    `Worktree: ${worktreePath}`,
+    lane.packetId ? `Packet: ${lane.packetId}` : null,
+    '',
+    'SCOPE traces - required for every changed file that writes or mutates state:',
+    '`SCOPE: <file:line> partition=<repo|tenant|user|project|lane|packet|scope|slug|id|NONE>`',
+    'Then state the SINGLE intended destination and confirm the diff writes there and ONLY there. Flag output written to the wrong location or duplicated across locations.',
+    '',
+    'GUARD traces - required for every new guard, condition, or early return:',
+    '`GUARD: <file:line> fires-from=<file:line|INERT>`',
+    '',
+    'COVERAGE checklist - enumerate EACH sub-requirement from the packet scope:',
+    '`COVERAGE:`',
+    '`[x] <sub-requirement> - evidence <file:line|command output>`',
+    '`[ ] <sub-requirement> - gap <reason>`',
+    '',
+    'Hard approval rule: You may NOT approve if any guard is INERT, any write has partition=NONE, or any COVERAGE box is unchecked. Request changes instead.',
+    'To clear an intentional global write, cite the file:line that proves the global destination is correct.',
+    'Where the change has observable output (a file written, a command stdout, a function return), PREFER to run it in the worktree and inspect the ACTUAL output over reasoning about the diff.',
+  ].filter((value): value is string => value !== null).join('\n');
 
   return [
     `An agent has completed work on lane "${lane.label}" (branch: ${lane.branch}).`,
@@ -475,21 +503,20 @@ function buildReviewPrompt(
     reviewScreenshot ? `` : null,
     diffSummary,
     ``,
+    requiredTraceFormat,
+    ``,
     adversarialReviewProtocol || null,
     adversarialReviewProtocol ? `` : null,
     `## Your review should include:`,
     `1. What was changed (1-2 sentences)`,
-    `2. Verification protocol — complete ALL before verdict:`,
-    `   1. GUARD/PREDICATE TRACE — for each new guard/condition/early-return, name what fires it and cite an EXISTING file:line that produces that condition; if no code path fires it, call it INERT and flag it.`,
-    `   2. SCOPE/PARTITION TRACE — for each write/state mutation, state its partition key (repo/tenant/user) and confirm it does NOT leak global state into every repo; a write with no partition key is a DEFECT to flag — cite the file:line that scopes it.`,
-    `   3. SUB-REQUIREMENT COVERAGE — enumerate the issue's discrete sub-requirements and mark each covered/uncovered.`,
-    `   4. EXECUTION-PATH TRACE — trace the actual call path the change runs under, not the one its name implies.`,
-    mergeGateSection ? `3. Address each merge gate violation — these are enforcement-level findings` : null,
-    mechanicalChecksSummary ? `${mergeGateSection ? '4' : '3'}. Address each mechanical check finding — confirm or dismiss` : null,
-    `${mergeGateSection && mechanicalChecksSummary ? '5' : mergeGateSection || mechanicalChecksSummary ? '4' : '3'}. Your recommendation: approve or request changes`,
+    `2. The Required verification traces above, completed before the verdict`,
+    `3. EXECUTION-PATH TRACE — trace the actual call path the change runs under, not the one its name implies.`,
+    mergeGateSection ? `4. Address each merge gate violation — these are enforcement-level findings` : null,
+    mechanicalChecksSummary ? `${mergeGateSection ? '5' : '4'}. Address each mechanical check finding — confirm or dismiss` : null,
+    `${mergeGateSection && mechanicalChecksSummary ? '6' : mergeGateSection || mechanicalChecksSummary ? '5' : '4'}. Your recommendation: approve or request changes`,
     ``,
     `After reviewing, FIRST record your verdict by calling submit_review with`,
-    `approved=true (plus any findings) for this packet. This writes the durable`,
+    `approved=true only if all required traces clear; otherwise call it with approved=false and findings. This writes the durable`,
     `review record that authorizes merge/PR for the current HEAD. THEN call`,
     `lane_command with verb "merge" (or "create_pr") for lane "${lane.id}".`,
     `A merge or PR with no recorded approved review will surface an operator`,
@@ -546,6 +573,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     mechanicalChecks.summary || undefined,
     mergeGateResult,
     reviewScreenshot,
+    diffSummary.cwd,
   );
 
   // Dual-path routing (epic #1044): the `inAppOrchestratorEnabled` toggle is
