@@ -653,6 +653,7 @@ function DashboardInner() {
     tabId: string | null;
     kind: string | null;
     tabs: WorkspaceTabSummary[];
+    finishedTabCount: number;
     contextRailAvailable: boolean;
     contextRailVisible: boolean;
   };
@@ -664,6 +665,7 @@ function DashboardInner() {
         label?: string | null;
         tabId?: string | null;
         kind?: string | null;
+        finishedTabCount?: number;
         contextRailAvailable?: boolean;
         contextRailVisible?: boolean;
         removed?: boolean;
@@ -683,6 +685,7 @@ function DashboardInner() {
             tabs: Array.isArray((detail as { tabs?: WorkspaceTabSummary[] })?.tabs)
               ? (detail as { tabs?: WorkspaceTabSummary[] }).tabs ?? []
               : [],
+            finishedTabCount: typeof detail?.finishedTabCount === 'number' ? detail.finishedTabCount : 0,
             contextRailAvailable: Boolean(detail?.contextRailAvailable),
             contextRailVisible: detail?.contextRailVisible !== false,
           });
@@ -702,7 +705,7 @@ function DashboardInner() {
       const [only] = workspaceActiveMap.values();
       return only;
     }
-    return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], contextRailAvailable: false, contextRailVisible: false };
+    return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false };
   }, [workspaceActiveMap]);
 
   // Side-by-side header pills for splits — both workspaces' tabs land
@@ -714,6 +717,7 @@ function DashboardInner() {
       workspaceId,
       tabs: payload.tabs,
       activeTabId: payload.tabId,
+      finishedTabCount: payload.finishedTabCount,
       contextRailAvailable: payload.contextRailAvailable,
       contextRailVisible: payload.contextRailVisible,
     }));
@@ -4169,7 +4173,9 @@ function DashboardInner() {
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
           headerLabel={workspaceHeaderActive.label}
           headerTabs={workspaceHeaderActive.tabs}
+          workspaceId={workspaceHeaderActive.workspaceId}
           headerActiveTabId={workspaceHeaderActive.tabId}
+          finishedTabCount={workspaceHeaderActive.finishedTabCount}
           splitHeaderWorkspaces={splitHeaderWorkspaces}
           onTitleRenameSubmit={titleMenuActive ? handleTitleRenameSubmit : undefined}
           onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}

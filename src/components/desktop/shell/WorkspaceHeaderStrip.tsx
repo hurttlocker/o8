@@ -15,6 +15,8 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
 import { HeaderIconPill } from './HeaderIconPill';
+import { TabCleanupButton } from './TabCleanupButton';
+import { HeaderScrollArrow } from './HeaderScrollArrow';
 import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 
@@ -59,9 +61,13 @@ interface WorkspaceHeaderStripProps {
     runtime: string | null;
     packetStatus: string | null;
   }>;
+  /** Stable workspace id for routing header pill events back to the owning tile. */
+  workspaceId?: string | null;
   /** Active tab id from the headerTabs list — drives which pill renders
    *  as filled. */
   headerActiveTabId?: string | null;
+  /** Number of non-active finished CLI-session tabs eligible for explicit cleanup. */
+  finishedTabCount?: number;
   /** Header-owned toggle for the Codex-style project context rail.
    *  Hidden unless the active workspace tab can render that rail. */
   projectContextRailAvailable?: boolean;
@@ -75,6 +81,7 @@ interface WorkspaceHeaderStripProps {
     workspaceId: string;
     tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
     activeTabId: string | null;
+    finishedTabCount?: number;
     contextRailAvailable?: boolean;
     contextRailVisible?: boolean;
   }> | null;
@@ -105,7 +112,9 @@ export function WorkspaceHeaderStrip({
   onTitleArchive,
   onTitleShare,
   headerTabs,
+  workspaceId,
   headerActiveTabId,
+  finishedTabCount = 0,
   projectContextRailAvailable = false,
   projectContextRailVisible = true,
   onToggleProjectContextRail,
@@ -148,7 +157,12 @@ export function WorkspaceHeaderStrip({
       center={isSplit && splitHeaderWorkspaces ? (
         <SplitHeaderPillStrips workspaces={splitHeaderWorkspaces} />
       ) : usePillStrip ? (
-        <HeaderPillStrip tabs={tabs} activeTabId={headerActiveTabId ?? null} />
+        <HeaderPillStrip
+          tabs={tabs}
+          activeTabId={headerActiveTabId ?? null}
+          workspaceId={workspaceId}
+          finishedTabCount={finishedTabCount}
+        />
       ) : headerLabel ? (
         <div data-no-drag style={{ display: 'flex', alignItems: 'center', gap: 4, minWidth: 0 }}>
           {renameMode && onTitleRenameSubmit ? (
@@ -229,6 +243,7 @@ function SplitHeaderPillStrips({
     workspaceId: string;
     tabs: Array<{ id: string; label: string; kind: string; runtime: string | null; packetStatus: string | null }>;
     activeTabId: string | null;
+    finishedTabCount?: number;
     contextRailAvailable?: boolean;
     contextRailVisible?: boolean;
   }>;
@@ -272,6 +287,7 @@ function SplitHeaderPillStrips({
                 tabs={workspace.tabs}
                 activeTabId={workspace.activeTabId}
                 workspaceId={workspace.workspaceId}
+                finishedTabCount={workspace.finishedTabCount ?? 0}
               />
             </div>
             <div style={{ display: 'inline-flex', alignItems: 'center', gap: 2, paddingLeft: 4, paddingRight: 6, flexShrink: 0 }}>
@@ -363,6 +379,7 @@ function HeaderPillStrip({
   tabs,
   activeTabId,
   workspaceId,
+  finishedTabCount = 0,
 }: {
   tabs: Array<{
     id: string;
@@ -376,6 +393,7 @@ function HeaderPillStrip({
    *  WorkspaceTerminalRoot can claim them. Lets two strips coexist
    *  in split mode without selecting on the wrong pane. */
   workspaceId?: string | null;
+  finishedTabCount?: number;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Truncate to one word when the strip is crowded — Codex feel: at 5+
@@ -405,6 +423,9 @@ function HeaderPillStrip({
   }, [workspaceId]);
   const handleClose = useCallback((tabId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-close-tab', { detail: { tabId, workspaceId: workspaceId ?? null } }));
+  }, [workspaceId]);
+  const handleCleanup = useCallback(() => {
+    window.dispatchEvent(new CustomEvent('o8:request-cleanup-tabs', { detail: { workspaceId: workspaceId ?? null } }));
   }, [workspaceId]);
 
   // Click-to-scroll for mouse users. The wheel-map + edge fade aren't a
@@ -465,6 +486,8 @@ function HeaderPillStrip({
   // (masks the pills themselves) so it works over the vibrancy chrome where a
   // solid gradient overlay would read as a grey smear.
   const FADE = 18;
+  const cleanupButtonVisible = finishedTabCount >= 1;
+  const cleanupButtonSpace = cleanupButtonVisible ? 54 : 0;
   const maskImage = edges.left && edges.right
     ? `linear-gradient(to right, transparent 0, #000 ${FADE}px, #000 calc(100% - ${FADE}px), transparent 100%)`
     : edges.left
@@ -525,53 +548,26 @@ function HeaderPillStrip({
         ))}
       </AnimatePresence>
       </div>
+      {cleanupButtonVisible ? (
+        <div
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            paddingLeft: 4,
+            paddingRight: 6,
+            flexShrink: 0,
+          }}
+        >
+          <TabCleanupButton finishedTabCount={finishedTabCount} onCleanup={handleCleanup} />
+        </div>
+      ) : null}
       {/* Mouse-friendly scroll affordance — clickable chevrons appear at an
           overflowing edge so a regular mouse (no trackpad swipe) can still
           reach off-screen tabs. Siblings of the scroll container (not children)
           so they stay pinned while the pills scroll under them. 2026-05-30. */}
       {edges.left ? <HeaderScrollArrow side="left" onClick={() => scrollByStep(-1)} /> : null}
-      {edges.right ? <HeaderScrollArrow side="right" onClick={() => scrollByStep(1)} /> : null}
+      {edges.right ? <HeaderScrollArrow side="right" onClick={() => scrollByStep(1)} rightOffset={cleanupButtonSpace + 1} /> : null}
     </div>
-  );
-}
-
-function HeaderScrollArrow({ side, onClick }: { side: 'left' | 'right'; onClick: () => void }) {
-  const [hovered, setHovered] = useState(false);
-  return (
-    <button
-      type="button"
-      data-no-drag
-      onClick={onClick}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      aria-label={side === 'left' ? 'Scroll tabs left' : 'Scroll tabs right'}
-      title={side === 'left' ? 'Scroll left' : 'Scroll right'}
-      style={{
-        position: 'absolute',
-        top: '50%',
-        left: side === 'left' ? 1 : undefined,
-        right: side === 'right' ? 1 : undefined,
-        transform: 'translateY(-50%)',
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 20,
-        height: 20,
-        borderRadius: 6,
-        borderWidth: 0,
-        background: hovered ? 'var(--t-hover)' : 'var(--t-input-bg)',
-        color: hovered ? 'var(--t-text)' : 'var(--t-text-secondary)',
-        cursor: 'pointer',
-        padding: 0,
-        boxShadow: '0 0 0 0.5px var(--t-divider), 0 1px 3px rgba(0, 0, 0, 0.12)',
-        transition: 'background 120ms ease, color 120ms ease',
-        zIndex: 2,
-      }}
-    >
-      <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
-        {side === 'left' ? <path d="M15 18l-6-6 6-6" /> : <path d="M9 18l6-6-6-6" />}
-      </svg>
-    </button>
   );
 }
 

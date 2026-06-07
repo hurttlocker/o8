@@ -521,14 +521,24 @@ export function computeCloseTab(
 /*  isAutoArchiveEligible                                              */
 /* ------------------------------------------------------------------ */
 
-export function isAutoArchiveEligible(tab: TerminalTab): boolean {
-  if (tab.kind !== 'chat' || !tab.autoArchiveOnIdle) return false;
+function isFinishedWorkspaceChatStatus(tab: TerminalTab): boolean {
   const laneStatus = resolveWorkspaceChatLaneStatus(tab);
+  const supervisorStatus = tab.supervisorStatus?.trim().toLowerCase();
   return laneStatus === 'awaiting_review'
     || laneStatus === 'idle'
     || laneStatus === 'released'
-    || tab.supervisorStatus?.trim().toLowerCase() === 'completed'
-    || tab.supervisorStatus?.trim().toLowerCase() === 'failed';
+    || supervisorStatus === 'completed'
+    || supervisorStatus === 'failed';
+}
+
+export function isAutoArchiveEligible(tab: TerminalTab): boolean {
+  if (tab.kind !== 'chat' || !tab.autoArchiveOnIdle) return false;
+  return isFinishedWorkspaceChatStatus(tab);
+}
+
+export function isTabFinishedForCleanup(tab: TerminalTab): boolean {
+  if (tab.kind !== 'chat') return false;
+  return isFinishedWorkspaceChatStatus(tab);
 }
 
 /* ------------------------------------------------------------------ */
