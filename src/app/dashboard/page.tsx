@@ -142,6 +142,7 @@ import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data
 import { useMissionCompleteDetector } from '@/components/desktop/thoughts/mission-complete-detector';
 import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
 import { TileContainer } from '@/components/desktop/TileContainer';
+import { DashboardHydrationMarker } from './DashboardHydrationMarker';
 import type { AgentPanelChatInjectionPayload } from '@/lib/chat/injection';
 import {
   type DetectedLocalhostPreview,
@@ -4240,6 +4241,7 @@ function DashboardInner() {
               onResizeSplit={handleResizeSplit}
               onSplitTile={handleSplitTile}
             />
+            <DashboardHydrationMarker />
           </OrchestratorDataProvider>
         )}
 
