@@ -2,11 +2,100 @@ import { cleanupIssueBranch } from './branch-cleanup';
 import { currentMissionState, log } from './shared';
 import type { ResetPacketInput } from './types';
 
+async function resetPacketViaLaneFallback(input: ResetPacketInput) {
+  const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
+  const bound = listLanes().filter(
+    (lane) => lane.packetId === input.packetId
+      && lane.status !== 'archived'
+      && lane.status !== 'completed',
+  );
+
+  if (bound.length === 0) {
+    throw new Error(`Packet ${input.packetId} not found — no mission packet and no lane.`);
+  }
+
+  const cleanupTargets = new Map<string, { repoPath: string; branch: string; worktreePath: string | null }>();
+  let firstWorktreePath: string | null = null;
+  for (const lane of bound) {
+    if (!firstWorktreePath && lane.worktreePath) {
+      firstWorktreePath = lane.worktreePath;
+    }
+    cleanupTargets.set(`${lane.repoPath}\0${lane.branch}`, {
+      repoPath: lane.repoPath,
+      branch: lane.branch,
+      worktreePath: lane.worktreePath,
+    });
+    try {
+      updateLane(lane.id, { packetId: '', worktreePath: null, sessionKey: null });
+      console.log(`[reset-packet] cleared stale lane fields for ${lane.id}`);
+      archiveLane(lane.id, 'user');
+      console.log(`[reset-packet] Archived stale lane ${lane.id} for evicted packet ${input.packetId}`);
+    } catch (error) {
+      console.warn(
+        `[reset-packet] Could not archive lane ${lane.id} — may already be gone: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  }
+
+  let worktreePruned = false;
+  let branchDeleted = false;
+  if (input.clearWorktree) {
+    for (const target of cleanupTargets.values()) {
+      try {
+        const cleanup = await cleanupIssueBranch(target.repoPath, target.branch);
+        worktreePruned = worktreePruned || cleanup.worktreePruned;
+        branchDeleted = branchDeleted || cleanup.branchDeleted;
+        log(`[lane-reset] Cleared branch ${target.branch} for evicted packet ${input.packetId}`, cleanup);
+      } catch (error) {
+        const targetWorktreePath = target.worktreePath ?? firstWorktreePath;
+        log(
+          `[lane-reset] Could not clear branch ${target.branch}${targetWorktreePath ? ` at ${targetWorktreePath}` : ''} — may already be gone`,
+          error instanceof Error ? error.message : String(error),
+        );
+      }
+    }
+
+    // F33 fallback (#1025): mirror the in-mission reset sweep for packets
+    // missing from current mission state but still backed by durable lanes.
+    try {
+      const { readdir, rm } = await import('node:fs/promises');
+      const path = await import('node:path');
+      const repoPaths = new Set([...cleanupTargets.values()].map((target) => target.repoPath));
+      for (const repoPath of repoPaths) {
+        const baseDir = path.join(repoPath, '.cortex-worktrees');
+        const dirs = await readdir(baseDir).catch(() => [] as string[]);
+        const prefix = `packet-${input.packetId}`;
+        const orphans = dirs.filter((name) => name === prefix || name.startsWith(`${prefix}-`));
+        for (const name of orphans) {
+          const full = path.join(baseDir, name);
+          await rm(full, { recursive: true, force: true }).catch(() => {});
+          worktreePruned = true;
+          log(`[lane-reset] Removed orphan worktree dir ${full} for evicted packet ${input.packetId}`);
+        }
+      }
+    } catch (error) {
+      log(
+        `[lane-reset] Orphan worktree sweep failed for evicted packet ${input.packetId}`,
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+  }
+
+  return {
+    reset: true,
+    packetId: input.packetId,
+    referenceLabel: input.packetId,
+    worktreePruned,
+    branchDeleted,
+    note: `Packet ${input.packetId} reset via lane fallback — packet was not in mission state. Old lane archived.${worktreePruned ? ' Worktree pruned.' : ''}${branchDeleted ? ' Branch deleted.' : ''} Call dispatch_mission to re-launch.`,
+  };
+}
+
 export async function resetPacket(input: ResetPacketInput) {
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
   if (!packet) {
-    throw new Error(`Packet ${input.packetId} not found.`);
+    return resetPacketViaLaneFallback(input);
   }
 
   // Archive ALL stale lanes bound to this packet and clear their packet
