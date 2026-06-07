@@ -283,7 +283,7 @@ export function BillingTab() {
             fontWeight: 300,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
-            color: notice.tone === 'error' ? '#ef4444' : RAMS_ACCENT,
+            color: notice.tone === 'error' ? '#d94f3a' : RAMS_ACCENT,
             marginRight: 8,
           }}>
             {notice.tone === 'error' ? '[error]' : '[ok]'}
@@ -329,7 +329,7 @@ export function BillingTab() {
               {PLAN_TAGLINES[plan]}
             </p>
             {envManaged ? (
-              <p style={{ fontSize: 11.5, color: RAMS_INK_QUIET, lineHeight: 1.5, margin: 0, marginTop: 2 }}>
+              <p style={{ fontSize: 11.5, color: RAMS_INK_QUIET, lineHeight: 1.5, marginTop: 2, marginBottom: 0 }}>
                 Plan is pinned by the{' '}
                 <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>O8_PLAN</span>{' '}
                 environment variable. Unset it to manage a license from here.
