@@ -1,0 +1,34 @@
+{
+  "name": "o8-license-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "o8 license/entitlement server — Stripe webhook -> mint EdDSA license JWT matching the M4 desktop verifier; validate/revoke. Deploys to Railway.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "gen-keys": "node scripts/gen-keypair.mjs",
+    "contract-test": "tsx scripts/contract-test.ts",
+    "db:push": "drizzle-kit push",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@hono/node-server": "^1.13.7",
+    "dotenv": "^16.4.7",
+    "drizzle-orm": "^0.38.3",
+    "hono": "^4.6.14",
+    "jose": "^6.2.2",
+    "postgres": "^3.4.5",
+    "stripe": "^17.5.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "drizzle-kit": "^0.30.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.2"
+  }
+}
