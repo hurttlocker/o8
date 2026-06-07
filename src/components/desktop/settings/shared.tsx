@@ -55,7 +55,7 @@ export interface GitHubDeviceFlowState {
 
 export type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'diagnostics' | 'about';
+export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'billing' | 'diagnostics' | 'about';
 
 // ── Constants ──
 
@@ -243,6 +243,17 @@ export function MobileIcon() {
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <rect x="5" y="2" width="14" height="20" rx="2" ry="2"/>
       <path d="M12 18h.01"/>
+    </svg>
+  );
+}
+
+export function CreditCardIcon() {
+  // Card glyph for Settings → Billing (monetization M3). Hand-authored raw SVG
+  // so it renders inside the Tauri webview (React icon libs don't, per repo rule).
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="2" y="5" width="20" height="14" rx="2" />
+      <line x1="2" y1="10" x2="22" y2="10" />
     </svg>
   );
 }
