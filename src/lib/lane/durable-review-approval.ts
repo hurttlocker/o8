@@ -44,7 +44,9 @@ export async function hasDurableApprovedReview(
 
     return approved.some((approval) => {
       const reviewed = normalizeHeadSha(reviewedHeadForApproval(approval));
-      return reviewed !== undefined && reviewed === currentHead;
+      return reviewed !== undefined
+        && reviewed === currentHead
+        && !(approval.args?.requiresSecondPass === true && approval.args?.secondPassAgreed !== true);
     });
   } catch {
     return false;

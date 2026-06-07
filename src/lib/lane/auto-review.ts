@@ -14,6 +14,7 @@ import { execSync } from 'node:child_process';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
+import { extractAddedLines, getLaneDiffFacts, parseDiffStat } from './lane-diff-facts';
 import { buildAdversarialReviewProtocol, classifyReviewRisk } from './review-risk';
 import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReference } from './review-screenshot';
 import type { Lane } from './types';
@@ -241,16 +242,11 @@ interface ReviewDiffSummary {
   cwd: string;
 }
 
-function extractAddedLines(diff: string): string[] {
-  return diff
-    .split('\n')
-    .filter((line) => line.startsWith('+') && !line.startsWith('+++'));
-}
-
 function getDiffSummary(lane: Lane, depth: ReviewDepth): ReviewDiffSummary {
   const cwd = lane.worktreePath || lane.repoPath;
   const maxDiffLines = REVIEW_DIFF_LINES[depth];
   try {
+    const facts = getLaneDiffFacts(lane);
     let stat = '';
     try {
       stat = execSync(`git diff --stat ${lane.baseBranch}...HEAD`, { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
@@ -259,7 +255,6 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth): ReviewDiffSummary {
         stat = execSync('git diff --stat HEAD~1', { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
       } catch { /* no commits yet */ }
     }
-    const changedFiles = stat ? parseDiffStat(stat).map((entry) => entry.file) : [];
 
     let diff = '';
     try {
@@ -271,15 +266,14 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth): ReviewDiffSummary {
         diff = rawDiff.split('\n').slice(0, maxDiffLines).join('\n').trim();
       } catch { /* no commits yet */ }
     }
-    const addedLines = extractAddedLines(diff);
 
     if (!stat && !diff) {
-      return { summary: 'No changes detected in the worktree.', changedFiles, addedLines, cwd };
+      return { summary: 'No changes detected in the worktree.', changedFiles: facts.changedFiles, addedLines: facts.addedLines, cwd };
     }
     return {
       summary: `## Diff summary\n\n\`\`\`\n${stat}\n\`\`\`\n\n## Changes\n\n\`\`\`diff\n${diff}\n\`\`\``,
-      changedFiles,
-      addedLines,
+      changedFiles: facts.changedFiles,
+      addedLines: facts.addedLines,
       cwd,
     };
   } catch {
@@ -313,32 +307,6 @@ const SECURITY_PATTERNS: Array<{ pattern: RegExp; label: string; severity: 'high
   { pattern: /path\.join\s*\([^)]*(?:req\.|params\.|query\.|body\.)/, label: 'path.join on user input without bounds check', severity: 'high' },
   { pattern: /\.innerHTML\s*=/, label: 'direct innerHTML assignment', severity: 'warning' },
 ];
-
-/** Parse `git diff --stat` output into per-file insertion/deletion counts. */
-function parseDiffStat(stat: string): Array<{ file: string; insertions: number; deletions: number }> {
-  const results: Array<{ file: string; insertions: number; deletions: number }> = [];
-  for (const line of stat.split('\n')) {
-    // Format: " src/foo.ts | 42 +++++-----"  or  " src/foo.ts | 10 ++++"
-    const match = line.match(/^\s*(.+?)\s*\|\s*(\d+)\s/);
-    if (!match) continue;
-    const file = match[1].trim();
-    const plusMatch = line.match(/(\d+)\s*insertion/);
-    const minusMatch = line.match(/(\d+)\s*deletion/);
-    // Fallback: count + and - symbols in the bar chart
-    const barMatch = line.match(/\|\s*\d+\s+([\s+\-]+)$/);
-    let insertions = plusMatch ? parseInt(plusMatch[1], 10) : 0;
-    let deletions = minusMatch ? parseInt(minusMatch[1], 10) : 0;
-    if (!plusMatch && !minusMatch && barMatch) {
-      const bar = barMatch[1];
-      insertions = (bar.match(/\+/g) || []).length;
-      deletions = (bar.match(/-/g) || []).length;
-    }
-    if (file && (insertions > 0 || deletions > 0)) {
-      results.push({ file, insertions, deletions });
-    }
-  }
-  return results;
-}
 
 function runMechanicalChecks(lane: Lane): { findings: MechanicalFinding[]; summary: string } {
   const cwd = lane.worktreePath || lane.repoPath;
@@ -388,9 +356,7 @@ function runMechanicalChecks(lane: Lane): { findings: MechanicalFinding[]; summa
 
   if (rawDiff) {
     // Only scan added lines (lines starting with +, excluding +++ headers)
-    const addedLines = rawDiff
-      .split('\n')
-      .filter((line) => line.startsWith('+') && !line.startsWith('+++'));
+    const addedLines = extractAddedLines(rawDiff);
 
     for (const { pattern, label, severity } of SECURITY_PATTERNS) {
       for (const line of addedLines) {
@@ -582,10 +548,9 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   //     ChatGPT Plus / Codex sub users; no Anthropic Agent SDK draw.
   //   - toggle ON              → Claude Opus 4.8 runs the review (existing
   //     behavior, bills against the user's Agent SDK credit pool).
-  // Codex path lacks MCP wiring in this ship — codex writes its review verdict
-  // to the log but cannot call `submit_review` / `lane_command`, so the new
-  // durable-row gate safely falls through to an operator card. #1045 tracks
-  // the MCP plumbing follow-up.
+  // Both backends can call `submit_review` and `lane_command`. Fail-closed
+  // approval is enforced by the durable review gate (`requiresSecondPass`),
+  // not by backend capability asymmetry.
   // Backend selected via the orchestrator-backend registry (#1075). Behavior
   // is byte-identical to the prior dual-path branch — see registry.ts.
   const { getActiveOrchestratorBackend } = await import('./orchestrator-backends/registry');
