@@ -33,6 +33,7 @@ import {
   ActivityIcon,
   InfoIcon,
   SlidersIcon,
+  CreditCardIcon,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './settings/shared';
 import { GitHubTab } from './settings/GitHubTab';
@@ -44,6 +45,7 @@ import { ProjectsPanel } from './settings/ProjectsPanel';
 import { WorkersTab } from './settings/WorkersTab';
 import { CloudWorkersTab } from './settings/CloudWorkersTab';
 import { AppearanceTab } from './settings/AppearanceTab';
+import { BillingTab } from './settings/BillingTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
 import { AnalyticsPage } from './AnalyticsPage';
@@ -349,6 +351,7 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
 
         <SectionHeader>System</SectionHeader>
+        <TabButton label="Plan & Billing" icon={<CreditCardIcon />} active={activeTab === 'billing'} onClick={() => setActiveTab('billing')} />
         <TabButton label="Analytics" icon={<ActivityIcon />} active={activeTab === 'analytics'} onClick={() => setActiveTab('analytics')} />
         <TabButton label="Diagnostics" icon={<ActivityIcon />} active={activeTab === 'diagnostics'} onClick={() => setActiveTab('diagnostics')} />
         <TabButton label="About" icon={<InfoIcon />} active={activeTab === 'about'} onClick={() => setActiveTab('about')} />
@@ -418,6 +421,9 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         )}
         {activeTab === 'appearance' && (
           <AppearanceTab />
+        )}
+        {activeTab === 'billing' && (
+          <BillingTab />
         )}
         {activeTab === 'diagnostics' && (
           <DiagnosticsTab />
