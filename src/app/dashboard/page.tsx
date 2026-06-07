@@ -16,6 +16,7 @@ import { useLeftPanelProjectFocus } from '@/components/desktop/repo-focus/useLef
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import { AlertProvider, useAlerts } from '@/lib/alerts/context';
+import { EntitlementProvider } from '@/lib/entitlement/context';
 // ConnectionBanner retired — ConnectionPill in AgentPanel surfaces WS state.
 import { ThemeProvider, useTheme } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
@@ -556,11 +557,13 @@ export default function DashboardPage() {
   return (
     <ThemeProvider>
       <AlertProvider>
-        <ReactiveQueryProvider>
-          <DesktopWebSocketProvider>
-            <DashboardInner />
-          </DesktopWebSocketProvider>
-        </ReactiveQueryProvider>
+        <EntitlementProvider>
+          <ReactiveQueryProvider>
+            <DesktopWebSocketProvider>
+              <DashboardInner />
+            </DesktopWebSocketProvider>
+          </ReactiveQueryProvider>
+        </EntitlementProvider>
       </AlertProvider>
     </ThemeProvider>
   );
