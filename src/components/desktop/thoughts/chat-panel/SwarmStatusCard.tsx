@@ -73,7 +73,18 @@ function SwarmGlyph({ size = 13, color = SWARM_ACCENT }: { size?: number; color?
 }
 
 export function SwarmStatusCard({ packets }: { packets: OrchestratorPacket[] }) {
-  const active = packets.filter((packet) => ACTIVE_STATUSES.has(packet.status));
+  const active = packets.filter((packet) => {
+    if (!ACTIVE_STATUSES.has(packet.status)) return false;
+    if (packet.archivedAt) return false;
+    if (packet.releaseState === 'released') return false;
+    // Pre-dispatch packets only belong to the live crew once a lane is bound.
+    // Otherwise an archived lane hidden from the client's active-lane reconcile
+    // can revive an orphaned packet as a phantom "Queued" swarm card.
+    if ((packet.status === 'queued' || packet.status === 'launching') && !packet.lane?.laneId) {
+      return false;
+    }
+    return true;
+  });
   if (active.length === 0) return null;
 
   // Runtime breakdown for the header ("Codex 3").
