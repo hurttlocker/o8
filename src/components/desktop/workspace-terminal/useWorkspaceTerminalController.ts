@@ -30,7 +30,7 @@ import {
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { buildTerminalTabHandle } from '@/components/desktop/workspace-terminal/terminal-imperative-handle';
 import { readLastOrchestratorThreadTitle } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
-import { clearSessionTileStorage, scrubOrphanSessionTileKeys } from '@/components/desktop/workspace-terminal/use-session-tiles';
+import { scrubOrphanSessionTileKeys } from '@/components/desktop/workspace-terminal/use-session-tiles';
 import { canPreserveScopedTabs, computeRestoredTabs, loadInitialTabState, resetControllerRefs, shouldSkipRestoreKeyChange } from '@/components/desktop/workspace-terminal/terminal-restore';
 import {
   buildChatSessionSnapshots,
@@ -43,13 +43,11 @@ import {
   resolveActiveChatSessionKey,
 } from '@/components/desktop/workspace-terminal/terminal-session-ops';
 import {
-  archivePacket,
   buildHistoryChatTab,
   buildNewChatTab,
   buildNewLlmChatTab,
   buildPersistedState,
   computeCheckpointRestore,
-  computeCloseTab,
   computeNewTerminalTab,
   flushPendingCliCommands,
   isAutoArchiveEligible,
@@ -61,6 +59,7 @@ import {
   computeUpdatedChatMessages,
   computeUpdatedChatSessionKey,
 } from '@/components/desktop/workspace-terminal/terminal-tab-handlers';
+import { useWorkspaceTabCleanup } from '@/components/desktop/workspace-terminal/useWorkspaceTabCleanup';
 
 type ControllerProps = WorkspaceTerminalProps;
 
@@ -962,41 +961,31 @@ export function useWorkspaceTerminalController(
     }
   }, [requestTerminalForTab, sendTerminalInput, setActiveTabIdFromUser, tabs]);
 
-  const handleCloseTab = useCallback((tabId: string) => {
-    const result = computeCloseTab(tabsRef.current, tabId, activeTabId);
-    if (!result) return;
-    if (result.detachedSession) {
-      sendTerminalDetach(result.detachedSession);
-      panelRefs.current.delete(result.detachedSession);
-    }
-    // If the tab is still mid-spawn (no tmuxSession yet), detach the orphan
-    // session that will arrive via session-created after this close.
-    if (pendingSessionsRef.current.has(tabId)) {
-      pendingSessionsRef.current.delete(tabId);
-    }
-    pendingCliCommands.current.delete(tabId);
-    // Drop this tab's persisted session-tile layout so closed orchestrator
-    // tabs don't leave orphaned `…:session-tiles:tab:*` localStorage keys.
-    clearSessionTileStorage(tabId);
-    for (const [requestId, pendingTabId] of pendingRequestRef.current) {
-      if (pendingTabId === tabId) pendingRequestRef.current.delete(requestId);
-    }
-    setTabs(result.remaining);
-    if (result.nextActiveId !== null) setActiveTabIdFromUser(result.nextActiveId);
-    setPreviews((prev) => {
-      const toRemove = prev.filter((p) => p.tabId === tabId);
-      toRemove.forEach((p) => detectedPortsRef.current.delete(p.port));
-      return prev.filter((p) => p.tabId !== tabId);
-    });
-  }, [activeTabId, sendTerminalDetach, setActiveTabIdFromUser]);
+  const {
+    archiveWorkspaceTab,
+    cleanupFinishedTabs,
+    finishedTabCount,
+    handleCloseTab,
+    undoCleanup,
+  } = useWorkspaceTabCleanup({
+    activeTabId,
+    detectedPortsRef,
+    effectiveActiveTabId,
+    panelRefs,
+    pendingCliCommands,
+    pendingRequestRef,
+    pendingSessionsRef,
+    sendTerminalDetach,
+    setActiveTabIdFromUser,
+    setPreviews,
+    setTabs,
+    tabs,
+    tabsRef,
+  });
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/immutability -- mutable handler ref backs imperative/event close bridges.
     handleCloseTabRef.current = handleCloseTab;
-  }, [handleCloseTab]);
-
-  const archiveWorkspaceTab = useCallback((tabId: string, packetId?: string | null) => {
-    handleCloseTab(tabId);
-    archivePacket(packetId);
   }, [handleCloseTab]);
 
   useEffect(() => {
@@ -1099,6 +1088,8 @@ export function useWorkspaceTerminalController(
     activeTab,
     containerDivRef,
     effectiveActiveTabId,
+    cleanupFinishedTabs,
+    finishedTabCount,
     handleClosePreview,
     handleCloseTab,
     handleConsumeChatDraftInjection,
@@ -1133,6 +1124,7 @@ export function useWorkspaceTerminalController(
     spawnChatTab,
     spawnOrchestratorTab,
     handleUpdateTabMode,
+    undoCleanup,
     tabs,
     termWsConnected,
     visibleTabs,
