@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 
 import { serve } from '@hono/node-server';
 import { eq } from 'drizzle-orm';
@@ -15,11 +15,16 @@ const app = new Hono();
 
 const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team'];
 
-/** Constant-time-ish admin guard. Returns true when the bearer matches. */
+/** Constant-time admin guard. Returns true when the bearer matches. */
 function isAdmin(authHeader: string | undefined): boolean {
   if (!authHeader) return false;
   const token = authHeader.replace(/^Bearer\s+/i, '').trim();
-  return token.length > 0 && token === env.ADMIN_TOKEN;
+  if (token.length === 0) return false;
+  // SHA-256 both sides to fixed-length buffers, then compare in constant time —
+  // avoids the early-exit timing leak of === and the length leak of a length check.
+  const provided = createHash('sha256').update(token).digest();
+  const expected = createHash('sha256').update(env.ADMIN_TOKEN).digest();
+  return timingSafeEqual(provided, expected);
 }
 
 // ── Health ──────────────────────────────────────────────────────────────────
