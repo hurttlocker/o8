@@ -20,6 +20,7 @@
 import { execFileSync, execSync } from 'node:child_process';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { checkUntrackedImports } from './check-untracked-imports';
+import { hasScopePartitionToken } from './review-risk';
 import type { Lane } from './types';
 
 // ── Budget Constants (shared with dispatch.ts preservation envelope) ──
@@ -61,6 +62,13 @@ const HARD_BLOCK_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
   // Prototype pollution
   { pattern: /__proto__/, label: '__proto__ access — prototype pollution risk' },
   { pattern: /constructor\s*\[\s*['"]prototype['"]/, label: 'constructor.prototype access — prototype pollution risk' },
+];
+
+const SCOPE_PARTITION_WRITE_PATTERNS: Array<{ pattern: RegExp; label: string }> = [
+  { pattern: /\bwriteFile(?:Sync)?\s*\(/i, label: 'File write without partition token' },
+  { pattern: /\bmkdir\s*\(/i, label: 'Directory write without partition token' },
+  { pattern: /\b(?:INSERT|UPDATE)\b/i, label: 'Database write without partition token' },
+  { pattern: /\.(?:set|put)\s*\(/i, label: 'Store mutation without partition token' },
 ];
 
 // ── Types ──
@@ -331,6 +339,29 @@ function checkSecurityPatterns(addedLines: AddedDiffLine[]): MergeViolation[] {
   return violations;
 }
 
+function checkScopePartitionHeuristics(addedLines: AddedDiffLine[]): MergeViolation[] {
+  const violations: MergeViolation[] = [];
+
+  for (const { pattern, label } of SCOPE_PARTITION_WRITE_PATTERNS) {
+    for (const { file, text } of addedLines) {
+      if (!pattern.test(text) || hasScopePartitionToken(text)) {
+        continue;
+      }
+
+      violations.push({
+        category: 'integrity',
+        severity: 'warn',
+        label,
+        detail: `New write/mutation lacks an obvious partition token on the same line: ${text.slice(1).trim().slice(0, 120)}`,
+        file: file ?? undefined,
+      });
+      break; // One advisory finding per pattern
+    }
+  }
+
+  return violations;
+}
+
 // ── Check 2: Diff Budget Validation ──
 //
 // When `orchestratorApproved` is true, budget violations are downgraded
@@ -465,14 +496,21 @@ export function runMergeGate(
 
   const addedLines = getAddedLines(cwd, baseBranch);
   const securityViolations = checkSecurityPatterns(addedLines);
+  const scopePartitionViolations = checkScopePartitionHeuristics(addedLines);
   const budgetViolations = checkDiffBudgets(cwd, baseBranch, lane.repoPath, orchestratorApproved);
   const importViolations = checkUntrackedImportViolations(cwd, baseBranch);
   const integrityViolations = checkSelfReviewIntegrity(
     selfReview,
-    [...securityViolations, ...budgetViolations, ...importViolations],
+    [...securityViolations, ...scopePartitionViolations, ...budgetViolations, ...importViolations],
   );
 
-  const violations = [...securityViolations, ...budgetViolations, ...importViolations, ...integrityViolations];
+  const violations = [
+    ...securityViolations,
+    ...scopePartitionViolations,
+    ...budgetViolations,
+    ...importViolations,
+    ...integrityViolations,
+  ];
   const hasBlocks = violations.some((v) => v.severity === 'block');
 
   if (violations.length > 0) {
