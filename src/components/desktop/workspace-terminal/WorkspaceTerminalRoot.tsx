@@ -2,6 +2,7 @@
 /* eslint-disable react-hooks/refs -- useWorkspaceTerminalController returns render state and stable refs through one controller object. */
 
 import { forwardRef, useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { motion } from 'framer-motion';
 // RotateCcw shim removed with the in-workspace reconnect banner —
 // recovery now lives in the AgentPanel ConnectionPill.
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
