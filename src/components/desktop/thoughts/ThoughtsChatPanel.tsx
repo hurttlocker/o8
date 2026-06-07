@@ -74,6 +74,8 @@ import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadN
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
+import { interruptRuntimeSurface } from './chat-panel/runtimeInterrupt';
+import { useSteerAutoFire } from './chat-panel/useSteerAutoFire';
 import type {
   ThoughtsChatPanelChromeState,
   ThoughtsChatPanelHandle,
@@ -307,18 +309,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     return () => window.removeEventListener('o8:set-orchestration-mode', onSetMode as EventListener);
   }, [handleSelectOrchestrationMode, open]);
 
-  const handleSelectSingleRuntime = useCallback((next: OrchestratorRuntime) => {
-    setSingleRuntime(next);
-    if (onModePersist) {
-      onModePersist({ singleRuntime: next });
-    } else {
-      persistOrchestrationMode(workspaceModeKey, orchestrationMode, next);
-    }
-  }, [onModePersist, orchestrationMode, workspaceModeKey]);
-  const handleSelectChatModel = useCallback((next: ChatModelId) => {
-    setChatModelId(next);
-    onModePersist?.({ chatModelId: next });
-  }, [onModePersist]);
   const [operatorDefaults, setOperatorDefaults] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
   const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
@@ -352,7 +342,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const responseSeenRef = useRef(false);
   const idlePollsRef = useRef(0);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const abortRef = useRef<AbortController | null>(null);
+  const queuedSteerSendNowRef = useRef<(text?: string) => void>(() => {});
   const orchestratorSessionRef = useRef<string | null>(null);
   const singleRuntimeSessionRef = useRef<string | null>(null);
   const singleRuntimeLaunchPromiseRef = useRef<Promise<string | null> | null>(null);
@@ -941,7 +931,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       window.localStorage.setItem('o8:orchestrator:auto-restore-suppressed', '1');
     }
     cancelPendingPersist();
-    if (abortRef.current) { abortRef.current.abort(); abortRef.current = null; }
     singleRuntimeSessionRef.current = null;
     singleRuntimeLaunchPromiseRef.current = null;
     if (isOrchestratorMode) {
@@ -1162,6 +1151,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // the empty-state check matches the empty-state-override condition.
   const composerRepoLabel = displayMessages.length === 0 ? null : composerRepoLabelBase;
   const displayWaiting = isChatMode ? false : isOrchestratorMode ? orchStream.status === 'busy' : (waitingForReply || (isSingleMode && singleRuntimeSpawning));
+  const { clearFiringSteerLatch } = useSteerAutoFire({
+    displayWaiting, isOrchestratorMode, pendingSteers, editingSteerId, setPendingSteers,
+    sendNowRef: queuedSteerSendNowRef,
+  });
   const displayPlanText = isOrchestratorMode && !isChatMode && planText?.trim() ? planText.trim() : null;
   const hasAssistantActivity = displayMessages.some((message) => message.role !== 'user');
   const activeTargetLabel = isChatMode
@@ -1254,6 +1247,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
     if (prev !== 'busy' && next === 'busy') {
       // New turn started — clear stale summary and snapshot the baseline.
+      clearFiringSteerLatch();
       setTurnSummary(null);
       turnStartRef.current = {
         startedAt: Date.now(),
@@ -1331,7 +1325,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         })();
       }
     }
-  }, [displayMessages, isChatMode, isOrchestratorMode, orchStream.runningTotal, orchStream.status, resolvedRepoPath]);
+  }, [clearFiringSteerLatch, displayMessages, isChatMode, isOrchestratorMode, orchStream.runningTotal, orchStream.status, resolvedRepoPath]);
 
   // Clear the summary when the thread changes — stale cards from a prior
   // thread should not bleed into the new one.
@@ -1706,6 +1700,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
   }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, waitingForReply]);
+  queuedSteerSendNowRef.current = sendNow;
 
   // ⌘⏎ steer handlers. enqueueSteer routes the typed input through the queue:
   // idle → fire immediately via sendNow; busy → push onto pendingSteers and let
@@ -1739,11 +1734,15 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     // below will then dequeue + sendNow on the next render.
     if (isOrchestratorMode) {
       orchStream.interrupt?.();
-    } else if (abortRef.current) {
-      abortRef.current.abort();
-      abortRef.current = null;
+    } else {
+      const sessionKey = isSingleMode ? singleRuntimeSessionRef.current : targetSessionKey;
+      void interruptRuntimeSurface(sessionKey)
+        .finally(() => {
+          clearPolling();
+          setWaitingForReply(false);
+        });
     }
-  }, [isOrchestratorMode, orchStream]);
+  }, [clearPolling, isOrchestratorMode, isSingleMode, orchStream, targetSessionKey]);
 
   const handleDeleteSteer = useCallback((id: string) => {
     setPendingSteers((prev) => prev.filter((s) => s.id !== id));
@@ -1759,18 +1758,6 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
     setPendingSteers((prev) => prev.map((s) => (s.id === id ? { ...s, text: next } : s)));
   }, []);
-
-  // Auto-fire: when the agent goes idle and the queue has work, dequeue head
-  // and call sendNow. Skip if the head row is being inline-edited (Conductor's
-  // "queue pauses during edits" pattern).
-  useEffect(() => {
-    if (displayWaiting) return;
-    if (pendingSteers.length === 0) return;
-    const head = pendingSteers[0];
-    if (editingSteerId === head.id) return;
-    setPendingSteers((prev) => prev.slice(1));
-    sendNow(head.text);
-  }, [displayWaiting, pendingSteers, editingSteerId, sendNow]);
 
   const handleCopyMarkdownRef = useRef<() => Promise<boolean>>(async () => false);
 
