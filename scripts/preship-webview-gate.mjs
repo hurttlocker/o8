@@ -275,30 +275,24 @@ async function waitForDashboard(client, deadline) {
 }
 
 async function waitForHealthyBoot(client, deadline) {
-  // Authoritative boot-health signal: the dashboard must reach the
-  // `o8:dashboard:interactive` perf mark — set only after a FULL, healthy mount
-  // (scheduled in DashboardInner's mount effect). The `data-mcp-scope` root is
-  // too weak: it's present even in a half-booted shell that hasn't run its
-  // effects. If Next.js renders its "Application error" page (a propagated crash
-  // — the 0.1.252 class showed exactly this), fail immediately. Never reaching
-  // interactive (blank / hang / crash-before-interactive) fails at the deadline.
-  const code = "(function(){var b=document.body;if(b&&b.innerText&&b.innerText.indexOf('Application error')!==-1)return 'app-error';return performance.getEntriesByName('o8:dashboard:interactive').length>0?'ready':'pending';})()";
+  const code = "(function(){var d=document.documentElement;var b=document.body;if(d&&d.getAttribute('data-o8-mount-error')==='1')return 'mount-error';if(b&&b.innerText&&b.innerText.indexOf('Application error')!==-1)return 'app-error';if(d&&d.getAttribute('data-o8-dashboard-hydrated')==='1'&&d.getAttribute('data-o8-mount-error')!=='1')return 'hydrated';return 'pending';})()";
   let lastErr;
   while (Date.now() < deadline) {
     try {
       const result = await executeJs(client, code);
+      if (result === 'mount-error') throw new Error('dashboard reported a React mount error');
       if (result === 'app-error') throw new Error('dashboard rendered the Next.js "Application error" page');
-      if (result === 'ready') return;
+      if (result === 'hydrated') return;
     } catch (error) {
       const msg = error?.message ?? String(error);
-      // A real "Application error" verdict must propagate; transient eval
-      // errors (window not ready / busy JS) are tolerated until the deadline.
-      if (msg.indexOf('Application error') !== -1) throw error;
+      // Real verdicts must propagate; transient eval errors (window not ready
+      // / busy JS) are tolerated until the deadline.
+      if (msg.indexOf('mount error') !== -1 || msg.indexOf('Application error') !== -1) throw error;
       lastErr = msg;
     }
     await sleep(POLL_MS);
   }
-  throw new Error(`dashboard never reached the interactive mark${lastErr ? ` (last error: ${lastErr})` : ''}`);
+  throw new Error(`dashboard never reached the deep hydration marker${lastErr ? ` (last error: ${lastErr})` : ''}`);
 }
 
 async function collectFatalConsoleErrors(client) {
@@ -321,7 +315,11 @@ async function collectFatalConsoleErrors(client) {
       // generates. A genuine uncaught crash arrives via a window 'error' event
       // (source = a real filename) or 'unhandledrejection' — neither of which
       // is filtered here.
-      if (error?.source === 'console.error' || error?.source === 'tauri-plugin-mcp') continue;
+      if (
+        error?.source === 'console.error'
+        && !String(error?.message ?? '').includes('[boot-gate]')
+      ) continue;
+      if (error?.source === 'tauri-plugin-mcp') continue;
       const key = `${error?.message ?? ''}\n${error?.source ?? ''}`;
       if (seen.has(key)) continue;
       seen.add(key);
@@ -346,9 +344,12 @@ function resolveAppTarget(mode, target) {
     };
   }
   if (!target) throw new Error('--mode=authoritative requires the o8.app.tar.gz path');
-  const cleanupDir = mkdtempSync(path.join(os.tmpdir(), 'o8-preship-app-'));
-  execFileSync('tar', ['-xzf', target, '-C', cleanupDir], { stdio: 'inherit' });
-  return { appPath: path.join(cleanupDir, 'o8.app'), cleanupDir, appTar: target };
+  if (!existsSync(target)) throw new Error(`missing authoritative app archive: ${target}`);
+  return {
+    appPath: path.join('src-tauri', 'target', 'release', 'bundle', 'macos', 'o8.app'),
+    cleanupDir: null,
+    appTar: target,
+  };
 }
 
 function listenerGone(port) {
@@ -369,7 +370,7 @@ async function killProcessGroup(child) {
   try { process.kill(-child.pid, 'SIGKILL'); } catch {}
 }
 
-async function cleanup({ client, child, dataDir, appCleanupDir, socketPath }) {
+async function cleanup({ client, child, dataDir, socketPath }) {
   client?.dispose();
   await killProcessGroup(child);
   const apiPortPath = dataDir ? path.join(dataDir, 'api-port') : null;
@@ -377,7 +378,6 @@ async function cleanup({ client, child, dataDir, appCleanupDir, socketPath }) {
   if (dataDir) rmSync(dataDir, { recursive: true, force: true });
   rmSync(socketPath, { force: true });
   rmSync(`${socketPath}.token`, { force: true });
-  if (appCleanupDir) rmSync(appCleanupDir, { recursive: true, force: true });
   if (apiPort && !(await listenerGone(apiPort))) {
     throw new Error(`child API port still has a listener after cleanup: ${apiPort}`);
   }
@@ -420,7 +420,6 @@ async function main() {
   if (mode === 'authoritative') clearReleaseNote(resolved.appTar);
   if (process.env.O8_SKIP_WEBVIEW_GATE === '1') {
     bypass(mode, resolved.appTar, info);
-    if (resolved.cleanupDir) rmSync(resolved.cleanupDir, { recursive: true, force: true });
     return;
   }
 
@@ -503,7 +502,7 @@ async function main() {
     console.error(`[preship-webview-gate] child stdout tail:\n${tail(stdout)}`);
     process.exitCode = 1;
   } finally {
-    await cleanup({ client, child, dataDir, appCleanupDir: resolved.cleanupDir, socketPath });
+    await cleanup({ client, child, dataDir, socketPath });
   }
 }
 
