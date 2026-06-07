@@ -2,6 +2,8 @@
 
 import { memo, useCallback, useEffect, useRef, useState, type MouseEvent } from 'react';
 import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
+import { TabCleanupButton } from '@/components/desktop/workspace-terminal/TabCleanupButton';
+import type { TabCleanupResult } from '@/components/desktop/workspace-terminal/useWorkspaceTabCleanup';
 import {
   PhosphorCaretLeft,
   PhosphorCaretRight,
@@ -79,6 +81,9 @@ interface TabBarProps {
   canCloseTile?: boolean;
   onCloseTile?: () => void;
   onReorderTabs?: (draggedTabId: string, dropTargetTabId: string) => void;
+  finishedTabCount?: number;
+  cleanupFinishedTabs?: () => TabCleanupResult;
+  undoCleanup?: (closedTabs: TabCleanupResult['closedTabs']) => void;
   /** When false, the tab list scroll area is hidden but the workspace
    *  header strip still renders the launch picker + close-tile control.
    *  This is how the wide-viewport path keeps per-workspace play / close-split
@@ -102,6 +107,9 @@ export const TabBar = memo(function TabBar({
   canCloseTile,
   onCloseTile,
   onReorderTabs,
+  finishedTabCount = 0,
+  cleanupFinishedTabs,
+  undoCleanup,
   showTabList = true,
   headerLabel = null,
 }: TabBarProps) {
@@ -501,6 +509,12 @@ export const TabBar = memo(function TabBar({
           })}
         </div>
       </div>
+
+      <TabCleanupButton
+        finishedTabCount={finishedTabCount}
+        cleanupFinishedTabs={cleanupFinishedTabs}
+        undoCleanup={undoCleanup}
+      />
 
       <WorkspaceLaunchPicker
         launchRequestKey={launchRequestKey}

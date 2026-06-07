@@ -1,8 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/refs -- useWorkspaceTerminalController returns render state and stable refs through one controller object. */
 
-import { forwardRef, useEffect, useId, useMemo, useState } from 'react';
-import { motion } from 'framer-motion';
+import { forwardRef, useCallback, useEffect, useId, useMemo, useState } from 'react';
 // RotateCcw shim removed with the in-workspace reconnect banner —
 // recovery now lives in the AgentPanel ConnectionPill.
 import { PreviewPane } from '@/components/desktop/workspace-terminal/PreviewPane';
@@ -11,12 +10,17 @@ import { useWorkspaceTerminalController } from '@/components/desktop/workspace-t
 import { WorkspaceTerminalPanels } from '@/components/desktop/workspace-terminal/WorkspaceTerminalPanels';
 import { WorkspaceSpawnProvider, type WorkspaceSpawnHandlers } from '@/components/desktop/workspace-terminal/spawn-context';
 import { workspaceConversationHeaderLabel } from '@/components/desktop/workspace-terminal/utils';
-import type { TerminalTabHandle, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
+import type { TerminalTab, TerminalTabHandle, WorkspaceTerminalProps } from '@/components/desktop/workspace-terminal/types';
 
 export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerminalProps>(
   function WorkspaceTerminalRoot(props, ref) {
     const controller = useWorkspaceTerminalController(props, ref);
     const hasPreviews = (props.showPreviewPane ?? true) && controller.previews.length > 0;
+    const [cleanupToast, setCleanupToast] = useState<{
+      id: number;
+      closedCount: number;
+      closedTabs: TerminalTab[];
+    } | null>(null);
     const spawnHandlers = useMemo<WorkspaceSpawnHandlers>(() => ({
       spawnSingleRuntimeTab: controller.spawnSingleRuntimeTab,
       spawnChatTab: controller.spawnChatTab,
@@ -128,6 +132,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           tabId: activeTabId,
           kind: activeTabKind,
           tabs: tabsForBroadcast,
+          finishedTabCount: controller.finishedTabCount,
           contextRailAvailable: projectContextRailAvailable,
           contextRailVisible: projectContextRailVisible,
         },
@@ -140,13 +145,14 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
             tabId: null,
             kind: null,
             tabs: [],
+            finishedTabCount: 0,
             contextRailAvailable: false,
             contextRailVisible: false,
             removed: true,
           },
         }));
       };
-    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsForBroadcast, projectContextRailAvailable, projectContextRailVisible]);
+    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsForBroadcast, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible]);
 
     // Listen for chat-history rename so the workspace tab's label
     // refreshes in sync with the chat-history PATCH. The header strip
@@ -171,6 +177,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     // without crosstalk.
     const handleSelectTab = controller.handleSelectTab;
     const handleCloseTab = controller.handleCloseTab;
+    const cleanupFinishedTabs = controller.cleanupFinishedTabs;
     useEffect(() => {
       if (typeof window === 'undefined') return;
       const matchWorkspace = (eventWorkspaceId: string | null | undefined) => {
@@ -190,13 +197,40 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         if (!matchWorkspace(detail?.workspaceId)) return;
         if (detail?.tabId) handleCloseTab(detail.tabId);
       };
+      const onCleanup = (event: Event) => {
+        const detail = (event as CustomEvent<{ workspaceId?: string | null }>).detail;
+        if (!matchWorkspace(detail?.workspaceId)) return;
+        const result = cleanupFinishedTabs();
+        if (result.closedCount < 1) return;
+        setCleanupToast({
+          id: Date.now(),
+          closedCount: result.closedCount,
+          closedTabs: result.closedTabs,
+        });
+      };
       window.addEventListener('o8:request-select-tab', onSelect as EventListener);
       window.addEventListener('o8:request-close-tab', onClose as EventListener);
+      window.addEventListener('o8:request-cleanup-tabs', onCleanup as EventListener);
       return () => {
         window.removeEventListener('o8:request-select-tab', onSelect as EventListener);
         window.removeEventListener('o8:request-close-tab', onClose as EventListener);
+        window.removeEventListener('o8:request-cleanup-tabs', onCleanup as EventListener);
       };
-    }, [props.canCloseTile, handleSelectTab, handleCloseTab, workspaceInstanceId]);
+    }, [props.canCloseTile, handleSelectTab, handleCloseTab, cleanupFinishedTabs, workspaceInstanceId]);
+
+    useEffect(() => {
+      if (!cleanupToast) return;
+      const timer = window.setTimeout(() => {
+        setCleanupToast((current) => current?.id === cleanupToast.id ? null : current);
+      }, 5_000);
+      return () => window.clearTimeout(timer);
+    }, [cleanupToast]);
+
+    const undoCleanup = controller.undoCleanup;
+    const handleUndoCleanup = useCallback((closedTabs: TerminalTab[]) => {
+      undoCleanup(closedTabs);
+      setCleanupToast(null);
+    }, [undoCleanup]);
 
     return (
       <WorkspaceSpawnProvider value={spawnHandlers}>
@@ -295,6 +329,14 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           onSelectCommit={props.onSelectCommit}
           onLaunchWorkspaceTask={props.onLaunchWorkspaceTask}
         />
+        {cleanupToast ? (
+          <WorkspaceCleanupUndoToast
+            closedCount={cleanupToast.closedCount}
+            closedTabs={cleanupToast.closedTabs}
+            onDismiss={() => setCleanupToast(null)}
+            onUndo={handleUndoCleanup}
+          />
+        ) : null}
       </div>
       </WorkspaceSpawnProvider>
     );
@@ -303,3 +345,92 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
 
 // WorkspaceReconnectDot retired — see comment above where the
 // in-workspace reconnect banner used to render.
+
+function WorkspaceCleanupUndoToast({
+  closedCount,
+  closedTabs,
+  onDismiss,
+  onUndo,
+}: {
+  closedCount: number;
+  closedTabs: TerminalTab[];
+  onDismiss: () => void;
+  onUndo: (closedTabs: TerminalTab[]) => void;
+}) {
+  return (
+    <div
+      data-no-drag
+      role="status"
+      aria-live="polite"
+      style={{
+        position: 'absolute',
+        right: 14,
+        bottom: 14,
+        zIndex: 40,
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 8,
+        minHeight: 36,
+        paddingLeft: 12,
+        paddingRight: 8,
+        borderRadius: 9,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--t-divider-subtle)',
+        background: 'var(--t-panel)',
+        color: 'var(--t-text)',
+        boxShadow: 'var(--t-panel-shadow)',
+        fontFamily: 'var(--font-sans-system)',
+        fontSize: 12,
+        fontWeight: 400,
+        pointerEvents: 'auto',
+      }}
+    >
+      <span>
+        Closed {closedCount} finished {closedCount === 1 ? 'tab' : 'tabs'}
+      </span>
+      <span style={{ color: 'var(--t-text-muted)' }}>·</span>
+      <button
+        type="button"
+        onClick={() => onUndo(closedTabs)}
+        style={{
+          borderWidth: 0,
+          background: 'transparent',
+          color: 'var(--t-accent)',
+          cursor: 'pointer',
+          paddingTop: 4,
+          paddingBottom: 4,
+          paddingLeft: 2,
+          paddingRight: 2,
+          fontFamily: 'var(--font-sans-system)',
+          fontSize: 12,
+          fontWeight: 600,
+        }}
+      >
+        Undo
+      </button>
+      <button
+        type="button"
+        onClick={onDismiss}
+        aria-label="Dismiss cleanup message"
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 24,
+          height: 24,
+          borderRadius: 6,
+          borderWidth: 0,
+          background: 'transparent',
+          color: 'var(--t-text-muted)',
+          cursor: 'pointer',
+          padding: 0,
+        }}
+      >
+        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round">
+          <path d="M6 6l12 12M18 6L6 18" />
+        </svg>
+      </button>
+    </div>
+  );
+}
