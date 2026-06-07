@@ -32,7 +32,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { existsSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 
@@ -286,7 +286,7 @@ function loadRepoFullNameMap(): Map<string, string> {
   const reposJson = path.join(dataDir, 'repos.json');
   if (!existsSync(reposJson)) return map;
   try {
-    const raw = require('node:fs').readFileSync(reposJson, 'utf-8');
+    const raw = readFileSync(reposJson, 'utf-8');
     const parsed = JSON.parse(raw) as {
       repos?: Array<{ remoteUrl?: string | null; localPath?: string }>;
     };

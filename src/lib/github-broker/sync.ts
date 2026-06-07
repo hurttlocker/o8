@@ -93,7 +93,7 @@ async function syncIssues(repoFullName: string) {
 
   const firstPage = JSON.parse(bodyText) as GitHubIssuePayloadItem[];
   const allItems: GitHubIssuePayloadItem[] = [...firstPage];
-  let lastEtag = response.headers.get('etag');
+  const lastEtag = response.headers.get('etag');
 
   // Paginate if first page was full (may have more)
   if (firstPage.length >= 100) {
