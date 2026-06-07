@@ -11,11 +11,17 @@ const HIGH_RISK_PATH_RULES: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /migration/i, reason: 'path-glob: migration path' },
   { pattern: /(?:^|\/)(?:session[_-]?outcomes?|ledger)(?:\/|$)/i, reason: 'path-glob: session outcome or ledger writer' },
   { pattern: /(?:^|\/)(?:directives?|directive-store)(?:\/|$)/i, reason: 'path-glob: directive storage' },
+  { pattern: /^src\/lib\/lane\/(?:commands|reconcile|lifecycle|worktree-side-merge)\.ts$/i, reason: 'path-glob: live lane state machine' },
+  { pattern: /^src\/lib\/orchestrator\/.*(?:state|store|control-plane).*\.ts$/i, reason: 'path-glob: orchestrator state/control-plane' },
   {
     pattern: /^src\/lib\/cortex\/(?:spec-ingest|.*(?:store|writer|storage|persist|directive|ledger)).*\.ts$/i,
     reason: 'path-glob: cortex writer',
   },
   { pattern: /(?:getDataDir|\.o8|directives)/i, reason: 'path-glob: shared data directory writer' },
+];
+
+const HIGH_RISK_LINE_RULES: Array<{ pattern: RegExp; reason: string }> = [
+  { pattern: /\bsetLaneStatus\s*\(/, reason: 'code-symbol: lane status transition site' },
 ];
 
 const ADVISORY_LINE_RULES: Array<{ pattern: RegExp; reason: string }> = [
@@ -24,6 +30,12 @@ const ADVISORY_LINE_RULES: Array<{ pattern: RegExp; reason: string }> = [
   { pattern: /\.(?:set|put|append)\s*\(.*(?:global|all repos|every repo|getDataDir|\.o8|directives)/i, reason: 'advisory: global store mutation added' },
   { pattern: /['"`](?:global|all repos|every repo)['"`]/i, reason: 'advisory: global scope literal added' },
 ];
+
+const SCOPE_PARTITION_TOKEN_PATTERN = /\b(?:repo|tenant|user|project|lane|packet|scope|slug|id)\b/i;
+
+export function hasScopePartitionToken(line: string): boolean {
+  return SCOPE_PARTITION_TOKEN_PATTERN.test(line);
+}
 
 function addUnique(reasons: string[], seen: Set<string>, reason: string): void {
   if (seen.has(reason)) return;
@@ -53,6 +65,15 @@ export function classifyReviewRisk(
     }
   }
 
+  for (const rawLine of addedLines) {
+    const line = normalizeAddedLine(rawLine);
+    for (const rule of HIGH_RISK_LINE_RULES) {
+      if (rule.pattern.test(line)) {
+        addUnique(reasons, seen, rule.reason);
+      }
+    }
+  }
+
   const tier: ReviewRiskTier = reasons.length > 0 ? 'high' : 'standard';
   if (tier === 'high') {
     for (const rawLine of addedLines) {
@@ -64,7 +85,7 @@ export function classifyReviewRisk(
       }
       if (
         /\b(?:writeFile|writeFileSync|mkdir|mkdirSync)\s*\(/i.test(line)
-        && !/\b(?:repo|tenant|user|project|lane|packet|scope|slug|id)\b/i.test(line)
+        && !hasScopePartitionToken(line)
       ) {
         addUnique(reasons, seen, 'advisory: write added without an obvious partition key');
       }
