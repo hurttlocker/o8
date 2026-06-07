@@ -9,6 +9,7 @@ import type * as ApprovalsStore from '../src/lib/approvals/store';
 import type * as LaneCommands from '../src/lib/lane/commands';
 import type * as LaneRegistry from '../src/lib/lane/registry';
 import type * as HeadShaLock from '../src/lib/lane/head-sha-lock';
+import type * as DurableReviewApproval from '../src/lib/lane/durable-review-approval';
 import type * as OperatorMissionService from '../src/lib/orchestrator/operator-mission-service';
 
 const execFileAsync = promisify(execFile);
@@ -18,10 +19,12 @@ let tempHome = '';
 interface SmokeApi {
   createApproval: typeof ApprovalsStore.createApproval;
   listApprovalsForContext: typeof ApprovalsStore.listApprovalsForContext;
+  markSecondPassAgreed: typeof ApprovalsStore.markSecondPassAgreed;
   recordApprovalAudit: typeof ApprovalsStore.recordApprovalAudit;
   dispatch: typeof LaneCommands.dispatch;
   createLane: typeof LaneRegistry.createLane;
   submitPacketReview: typeof OperatorMissionService.submitPacketReview;
+  hasDurableApprovedReview: typeof DurableReviewApproval.hasDurableApprovedReview;
   readHeadSha: typeof HeadShaLock.readHeadSha;
 }
 
@@ -92,7 +95,7 @@ async function writeProjectLedger(projects: Array<{ id: string; name: string; re
   }, null, 2));
 }
 
-async function createCaseRepo(caseId: string, opts: { projectId?: string } = {}): Promise<CaseRepo> {
+async function createCaseRepo(caseId: string, opts: { highRisk?: boolean; projectId?: string } = {}): Promise<CaseRepo> {
   const root = await mkdtemp(join(tmpdir(), `o8-governance-${caseId}-`));
   const repoPath = join(root, 'repo');
   await mkdir(repoPath, { recursive: true });
@@ -139,8 +142,11 @@ async function createCaseRepo(caseId: string, opts: { projectId?: string } = {})
 
   const branch = `lane/${caseId}`;
   await git(repoPath, ['checkout', '-b', branch]);
-  const markerPath = `src/${caseId}.ts`;
+  const markerPath = opts.highRisk ? 'src/lib/db/schema.ts' : `src/${caseId}.ts`;
   const markerValue = `marker-${caseId}`;
+  if (opts.highRisk) {
+    await mkdir(join(repoPath, 'src', 'lib', 'db'), { recursive: true });
+  }
   await writeFile(
     join(repoPath, markerPath),
     `export const ${safeIdentifier(caseId)} = ${JSON.stringify(markerValue)};\n`,
@@ -201,12 +207,13 @@ function approvalsFor(repo: CaseRepo) {
   });
 }
 
-async function submitReview(repo: CaseRepo, approved: boolean): Promise<void> {
-  await api.submitPacketReview({
+async function submitReview(repo: CaseRepo, approved: boolean): Promise<string | null> {
+  const result = await api.submitPacketReview({
     packetId: repo.packetId,
     approved,
     findings: [],
   });
+  return result.auditApprovalId ?? null;
 }
 
 async function assertMainUnchanged(caseName: string, repo: CaseRepo): Promise<void> {
@@ -336,6 +343,41 @@ async function caseF(): Promise<void> {
   }
 }
 
+async function caseG(): Promise<void> {
+  const repo = await createCaseRepo('case-g', { highRisk: true });
+  try {
+    const approvalId = await submitReview(repo, true);
+    expectTruthy('CASE G', approvalId, 'orchestrator review approval id');
+    const reviewApproval = approvalsFor(repo).find((approval) => approval.id === approvalId);
+    expectEqual('CASE G', reviewApproval?.args?.requiresSecondPass, true, 'high-risk approval requires second pass');
+    expectEqual('CASE G', reviewApproval?.args?.secondPassAgreed, false, 'second pass starts unagreed');
+
+    const result = await api.dispatch({ verb: 'merge', laneId: repo.lane.id, actor: 'orchestrator' });
+    expectEqual('CASE G', result.ok, false, 'high-risk first-pass-only merge result.ok');
+    expectTruthy('CASE G', result.approvalId, 'approval card id');
+    await assertMainUnchanged('CASE G', repo);
+    expectEqual('CASE G', await api.hasDurableApprovedReview(repo.lane), false, 'first-pass high-risk review is not durable approval');
+  } finally {
+    await repo.cleanup();
+  }
+}
+
+async function caseH(): Promise<void> {
+  const repo = await createCaseRepo('case-h', { highRisk: true });
+  try {
+    const approvalId = await submitReview(repo, true);
+    expectTruthy('CASE H', approvalId, 'orchestrator review approval id');
+    api.markSecondPassAgreed(approvalId!);
+    expectEqual('CASE H', await api.hasDurableApprovedReview(repo.lane), true, 'second-pass agreement makes review durable');
+
+    const result = await api.dispatch({ verb: 'merge', laneId: repo.lane.id, actor: 'orchestrator' });
+    expectEqual('CASE H', result.ok, true, 'high-risk second-pass-agreed merge result.ok');
+    await assertMainAdvanced('CASE H', repo);
+  } finally {
+    await repo.cleanup();
+  }
+}
+
 async function main(): Promise<void> {
   tempHome = await mkdtemp(join(tmpdir(), 'o8-governance-home-'));
   const tempDataDir = process.env.CORTEX_IDE_DATA_DIR || await mkdtemp(join(tmpdir(), 'o8-governance-data-'));
@@ -353,20 +395,24 @@ async function main(): Promise<void> {
     laneRegistry,
     operatorMissionService,
     headShaLock,
+    durableReviewApproval,
   ] = await Promise.all([
     import('@/lib/approvals/store'),
     import('@/lib/lane/commands'),
     import('@/lib/lane/registry'),
     import('@/lib/orchestrator/operator-mission-service'),
     import('@/lib/lane/head-sha-lock'),
+    import('@/lib/lane/durable-review-approval'),
   ]);
   api = {
     createApproval: approvalsStore.createApproval,
     listApprovalsForContext: approvalsStore.listApprovalsForContext,
+    markSecondPassAgreed: approvalsStore.markSecondPassAgreed,
     recordApprovalAudit: approvalsStore.recordApprovalAudit,
     dispatch: laneCommands.dispatch,
     createLane: laneRegistry.createLane,
     submitPacketReview: operatorMissionService.submitPacketReview,
+    hasDurableApprovedReview: durableReviewApproval.hasDurableApprovedReview,
     readHeadSha: headShaLock.readHeadSha,
   };
 
@@ -376,7 +422,9 @@ async function main(): Promise<void> {
   await caseD();
   await caseE();
   await caseF();
-  console.log('smoke-merge-requires-review passed: 6/6 cases');
+  await caseG();
+  await caseH();
+  console.log('smoke-merge-requires-review passed: 8/8 cases');
 }
 
 void main().catch((error) => {

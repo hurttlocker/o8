@@ -1,7 +1,9 @@
 import { createApproval, recordApprovalAudit, resolveApproval } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+import { getLaneDiffFacts } from '@/lib/lane/lane-diff-facts';
 import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';
 import { findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
+import { classifyReviewRisk } from '@/lib/lane/review-risk';
 import type { Lane } from '@/lib/lane/types';
 import { writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { synthesizePacketFromLane } from '@/lib/orchestrator/synthesize-packet';
@@ -107,8 +109,23 @@ function deriveApprovalRisk(findings: OrchestratorReviewFinding[], approved: boo
   return 'low' as const;
 }
 
+function requiresSecondPassForLane(lane: Lane | null, approved: boolean) {
+  if (!approved || !lane?.worktreePath) {
+    return false;
+  }
+
+  try {
+    const facts = getLaneDiffFacts(lane);
+    return classifyReviewRisk(facts.changedFiles, facts.addedLines).tier === 'high';
+  } catch (error) {
+    console.warn(`[review] Failed to classify second-pass requirement for lane ${lane.id}:`, error);
+    return false;
+  }
+}
+
 function recordPacketReviewAudit(packet: OrchestratorPacket, findings: OrchestratorReviewFinding[], approved: boolean, summary: string, reviewedHeadSha?: string) {
   const lane = findLaneByPacket(packet.id);
+  const requiresSecondPass = requiresSecondPassForLane(lane, approved);
   const approval = createApproval({
     source: 'runtime',
     runtime: lane?.runtime ?? packet.runtime,
@@ -123,6 +140,8 @@ function recordPacketReviewAudit(packet: OrchestratorPacket, findings: Orchestra
       approved,
       findings,
       reviewedHeadSha,
+      requiresSecondPass,
+      secondPassAgreed: false,
     },
     risk: deriveApprovalRisk(findings, approved),
     metadata: {

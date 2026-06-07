@@ -391,6 +391,20 @@ export function getApproval(id: string) {
   return mapApprovalRow(row);
 }
 
+export function markSecondPassAgreed(approvalId: string): void {
+  const existing = getApproval(approvalId);
+  if (!existing) return;
+
+  updateApprovalRecord({
+    ...existing,
+    args: {
+      ...existing.args,
+      secondPassAgreed: true,
+    },
+    updatedAt: Date.now(),
+  });
+}
+
 function mapApprovalRows(rows: ApprovalRow[]) {
   return rows
     .map((row) => mapApprovalRow(row)!)
