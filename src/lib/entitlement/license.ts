@@ -1,11 +1,11 @@
 import 'server-only';
 
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 
 import { importSPKI, jwtVerify, errors as joseErrors } from 'jose';
 
+import { getEntitlementPath } from './store';
 import type { Plan } from './types';
 
 /**
@@ -28,7 +28,6 @@ import type { Plan } from './types';
 const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team'];
 const ALLOWED_ALGS = ['EdDSA', 'RS256'] as const;
 const DEFAULT_GRACE_DAYS = 30;
-const ENTITLEMENT_FILE = 'entitlement.json';
 
 /**
  * Claims carried by a signed license token. `exp` is seconds-since-epoch
@@ -202,13 +201,6 @@ interface EntitlementCacheFile {
   licenseKey?: string;
   status?: string;
   expiresAt?: string;
-}
-
-function getEntitlementPath(): string {
-  return path.join(
-    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
-    ENTITLEMENT_FILE,
-  );
 }
 
 /**
