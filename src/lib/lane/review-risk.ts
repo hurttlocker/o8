@@ -32,9 +32,13 @@ const ADVISORY_LINE_RULES: Array<{ pattern: RegExp; reason: string }> = [
 ];
 
 const SCOPE_PARTITION_TOKEN_PATTERN = /\b(?:repo|tenant|user|project|lane|packet|scope|slug|id)\b/i;
+const CAMEL_CASE_BOUNDARY_PATTERN = /([a-z0-9])([A-Z])/g;
 
 export function hasScopePartitionToken(line: string): boolean {
-  return SCOPE_PARTITION_TOKEN_PATTERN.test(line);
+  return (
+    SCOPE_PARTITION_TOKEN_PATTERN.test(line)
+    || SCOPE_PARTITION_TOKEN_PATTERN.test(line.replace(CAMEL_CASE_BOUNDARY_PATTERN, '$1 $2'))
+  );
 }
 
 function addUnique(reasons: string[], seen: Set<string>, reason: string): void {
