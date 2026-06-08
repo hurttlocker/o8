@@ -1,5 +1,8 @@
 mod dev_frontend;
+mod fn_hotkey;
 mod launch_updater;
+mod mac_perms;
+mod paste;
 mod sidecar_lifecycle;
 #[cfg(target_os = "macos")]
 mod stt;
@@ -2416,13 +2419,19 @@ mod stt_engine {
             // Read the recorded WAV so Gemini can hear what was actually said.
             let audio_wav = std::fs::read(&audio_file).ok();
 
+            // Pure-accuracy upgrade: walk the focused app's Accessibility tree so
+            // polish can spell on-screen proper nouns, resolve pronouns, and match
+            // the surrounding window's tone. Best-effort — empty/None for canvas /
+            // Electron apps that don't expose AX text. (System-wide Symon fold P1.)
+            let window_ctx = crate::paste::gather_window_context();
+
             let ctx = crate::stt::polish::PolishContext {
                 transcript: &raw_text,
                 audio_wav: audio_wav.as_deref(),
                 frontmost_app: None,
-                window_title: None,
-                selected_text: None,
-                ax_excerpt: None,
+                window_title: window_ctx.window_title,
+                selected_text: window_ctx.selected_text,
+                ax_excerpt: window_ctx.ax_excerpt,
                 dictionary: Vec::new(),
                 instructions: String::new(),
                 replacements: Vec::new(),
@@ -2439,17 +2448,40 @@ mod stt_engine {
             // Best-effort cleanup of the temp WAV.
             let _ = std::fs::remove_file(&audio_file);
 
-            let _ = app.emit(
-                "o8:stt-event",
-                serde_json::json!({
-                    "type": "polished",
-                    "sessionId": session_id,
-                    "text": polished,
-                    "rawText": raw_text,
-                    "appleText": apple_text,
-                    "whisperUsed": whisper_used,
-                }),
-            );
+            // ── Origin branch (system-wide Symon fold P2) ──
+            // A dictation started by the GLOBAL Fn hotkey pastes the polished text
+            // at the system caret and does NOT emit the composer-bound `polished`
+            // event (which would double-fire into the in-window composer). A
+            // dictation started by the in-window mic button emits as before. These
+            // are mutually exclusive — never paste AND emit.
+            if crate::fn_hotkey::is_system_origin() {
+                // Clear the flag first so a daemon hiccup can't re-paste a stale
+                // session, then paste into whatever app the user is focused on.
+                crate::fn_hotkey::set_system_origin(false);
+                crate::paste::paste_text(&polished);
+                // Silent/dock-only signal so a future dock pill can show "done"
+                // without the in-window DictationHost treating it as composer text.
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({
+                        "type": "system-pasted",
+                        "sessionId": session_id,
+                        "chars": polished.chars().count(),
+                    }),
+                );
+            } else {
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({
+                        "type": "polished",
+                        "sessionId": session_id,
+                        "text": polished,
+                        "rawText": raw_text,
+                        "appleText": apple_text,
+                        "whisperUsed": whisper_used,
+                    }),
+                );
+            }
         });
     }
 
@@ -2510,6 +2542,15 @@ fn o8_stt_stop() -> Result<(), String> {
 #[tauri::command]
 fn o8_stt_locale(locale: String) -> Result<(), String> {
     stt_engine::set_locale(&locale)
+}
+
+/// TEMPORARY debug command (system-wide Symon fold P1): paste `text` into the
+/// currently-focused 3rd-party app, so paste-into-frontmost is verifiable
+/// without the global Fn hotkey. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn o8_debug_paste(text: String) {
+    paste::paste_text(&text);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -2643,6 +2684,11 @@ pub fn run() {
             o8_stt_stop,
             #[cfg(target_os = "macos")]
             o8_stt_locale,
+            #[cfg(target_os = "macos")]
+            o8_debug_paste,
+            mac_perms::accessibility_permission_granted_cmd,
+            mac_perms::input_monitoring_granted_cmd,
+            mac_perms::fn_key_usage_type_cmd,
         ])
         .setup(move |app| {
             // ── System Tray (issue #731) ──
@@ -2725,6 +2771,15 @@ pub fn run() {
                     )
                     .try_init();
                 stt_engine::spawn(app.handle().clone());
+
+                // ── Global Fn hotkey → system-wide paste (system-wide Symon fold P2) ──
+                // Reuses the stt_engine daemon spawned just above — never spawns a
+                // second recognizer. On Fn-down it saves the focused app + starts
+                // dictation; on Fn-up the finalize chain pastes the polished text at
+                // the system caret (see the origin branch in run_finalize). Runs its
+                // own CGEventTap on a dedicated CFRunLoop thread, so it keeps working
+                // even when the main window is hidden.
+                fn_hotkey::start(app.handle().clone());
             }
 
             // ── Window Close → Hide to Tray ──
