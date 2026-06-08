@@ -482,6 +482,14 @@ fn begin_ask_dictation() {
                     payload.clone(),
                 );
                 let _ = app.emit("o8:stt-event", payload);
+                // Tell the dock's Ask answer panel to open (grow + show listening).
+                // The panel itself calls dock_set_expanded to resize; this event is
+                // the trigger. Dock-only — the in-window surface ignores it.
+                let _ = app.emit_to(
+                    crate::dock_window::DOCK_LABEL,
+                    "o8:ask-open",
+                    serde_json::json!({}),
+                );
             }
         });
     }
