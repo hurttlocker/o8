@@ -667,13 +667,24 @@ pub fn start(app: tauri::AppHandle) {
                     // LONG_FORM_ACTIVE so the common case (no long-form) stays the
                     // same cheap early return as before.
                     if matches!(event_type, CGEventType::KeyDown) {
-                        if LONG_FORM_ACTIVE.load(Ordering::SeqCst) {
+                        // Escape cancels an active long-form dictation AND stops
+                        // active TTS playback. Both atomic loads are cheap, so
+                        // the common case (neither active) stays the same early
+                        // return; the keycode is only read when one is live.
+                        let long_form = LONG_FORM_ACTIVE.load(Ordering::SeqCst);
+                        let tts_active = crate::tts::playback::is_active();
+                        if long_form || tts_active {
                             let keycode =
                                 event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                             if keycode == ESCAPE_KEYCODE {
-                                // Clear the toggle synchronously; discard off-tap.
-                                LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
-                                std::thread::spawn(cancel_long_form_dictation);
+                                if long_form {
+                                    // Clear the toggle synchronously; discard off-tap.
+                                    LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+                                    std::thread::spawn(cancel_long_form_dictation);
+                                }
+                                if tts_active {
+                                    std::thread::spawn(crate::tts::playback::stop);
+                                }
                             }
                         }
                         return None;

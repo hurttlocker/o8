@@ -1,41 +1,216 @@
-//! Audio playback for TTS — the MANDATORY `!Send` rodio thread pattern.
+//! Audio playback for TTS — a session-managed, single-flight, chunked engine.
 //!
 //! `rodio::OutputStream`/`Sink`/`Decoder` are `!Send` and held across `.await`,
 //! so they CANNOT run on Tauri's multithread async runtime (`async_runtime::
 //! spawn`) — it won't compile. Every playback runs on a DEDICATED OS thread with
 //! a `new_current_thread` tokio runtime built INSIDE it; synthesis (async
 //! reqwest) and decode/play happen on that same thread, never crossing a
-//! boundary. Ported from aqua `reading.rs:157-189` + `:267-330`.
+//! boundary. Ported from aqua `reading.rs` (the `ReadingSession` + chunked
+//! Speak-Selection pipeline).
+//!
+//! Two problems this fixes over the old fire-and-forget `play_thread`:
+//!   1. **Stacking.** Every old call spawned its own `OutputStream`+`Sink` with
+//!      no registry — re-triggering during a slow synth stacked overlapping
+//!      audio with no way to stop it. Now a module-global `CONTROLS` holds the
+//!      single active sink + a `generation` counter; a new speak STOPS the old
+//!      (single-flight), and `stop()` / `toggle_pause()` reach the live sink.
+//!   2. **Latency.** A long selection synthesized into ONE MP3 before any audio
+//!      played (~41s for 4k chars). Now text is split into chunks — a short
+//!      ~200-char lead chunk returns in ~1-2s and starts playing while the rest
+//!      synthesize via a one-chunk lookahead, so there is no silent gap.
+//!
+//! **Concurrency invariant:** the `(generation, is_active, sink)` triple is only
+//! mutated while holding the sink mutex (the prelude, `stop`, the publish, and
+//! the per-chunk append all take it). That serialization is what makes
+//! single-flight race-free — a superseded thread can never re-raise `is_active`
+//! after a `stop`, nor append into the winner's sink, because its in-lock
+//! `generation == my_gen` check fails. The `say` fallback is generation-polled
+//! so it is killable the same way.
 //!
 //! Diagnostics use `log::` (NOT `tracing::`) so they reach the bundled-app log
 //! at `~/Library/Logs/ai.o8.desktop/o8.log` (the tracing subscriber writes to
-//! stdout, which a Finder-launched .app discards). EVERY failure path falls back
-//! to the macOS `say` binary so the user always hears SOMETHING.
+//! stdout, which a Finder-launched .app discards). EVERY failure path before any
+//! audio plays falls back to the macOS `say` binary so the user always hears
+//! SOMETHING; a failure MID-read stops cleanly to keep the voice consistent.
 
 use super::TtsConfig;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use tokio::time::{sleep, timeout, Duration};
 
-/// Speak `text` with `config` on a dedicated OS thread (fire-and-forget). Any
-/// failure (synth OR audio device OR decode) falls back to the macOS `say`
-/// binary. Returns immediately; playback happens off-thread.
+/// Maximum characters per chunk before sentence-boundary splitting.
+const MAX_CHUNK_CHARS: usize = 800;
+/// The first chunk is kept short so the initial TTS round-trip returns fast and
+/// audio starts with minimal perceived latency.
+const LEAD_CHUNK_CHARS: usize = 200;
+/// Polling interval while waiting for a chunk to finish playing.
+const POLL_INTERVAL_MS: u64 = 100;
+/// Per-chunk synth timeout + retry budget (long chunks can take >15s).
+const CHUNK_TIMEOUT_SECS: u64 = 45;
+const CHUNK_RETRIES: usize = 1;
+
+/// Shared control handles for the single active TTS playback. Module-global so
+/// `play_thread` (start), `stop`, and `toggle_pause` all reach the same sink.
+struct Controls {
+    /// True while a playback is actively producing audio — including the `say`
+    /// fallback, so ⌘⇧S / Escape route to `stop()` rather than starting a
+    /// second voice. Mutated only under the `sink` lock.
+    is_active: Arc<AtomicBool>,
+    is_paused: Arc<AtomicBool>,
+    /// The live rodio `Sink`, created inside the playback thread and stored here
+    /// so `stop` / `toggle_pause` can reach it. Also the serialization mutex for
+    /// the whole `(generation, is_active, sink)` triple.
+    sink: Arc<Mutex<Option<rodio::Sink>>>,
+    /// Bumped on every new speak AND on every `stop`. The playback thread
+    /// captures its generation up front and bails the instant a newer speak (or
+    /// a stop) supersedes it — the belt to `is_active`'s suspenders.
+    generation: Arc<AtomicU64>,
+}
+
+impl Controls {
+    fn new() -> Self {
+        Self {
+            is_active: Arc::new(AtomicBool::new(false)),
+            is_paused: Arc::new(AtomicBool::new(false)),
+            sink: Arc::new(Mutex::new(None)),
+            generation: Arc::new(AtomicU64::new(0)),
+        }
+    }
+}
+
+static CONTROLS: OnceLock<Controls> = OnceLock::new();
+
+fn controls() -> &'static Controls {
+    CONTROLS.get_or_init(Controls::new)
+}
+
+/// Lock the sink mutex, recovering the guard on poison — a poisoned sink slot is
+/// not a correctness concern (we only ever store/take/stop a `Sink`).
+fn lock_recover<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
+    m.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Returns true while a TTS playback is active (used to make ⌘⇧S a toggle and
+/// to route Escape to a stop). True during the `say` fallback too.
+pub fn is_active() -> bool {
+    controls().is_active.load(Ordering::SeqCst)
+}
+
+/// Stop the active playback immediately. Bumps the generation (so any in-flight
+/// synth/say thread bails before touching the now-stopped sink) under the sink
+/// lock so a concurrently-publishing thread can't re-raise `is_active` after we
+/// clear it. Safe no-op when nothing is playing.
+pub fn stop() {
+    let ctl = controls();
+    let was_active;
+    {
+        let mut guard = lock_recover(&ctl.sink);
+        ctl.generation.fetch_add(1, Ordering::SeqCst);
+        was_active = ctl.is_active.swap(false, Ordering::SeqCst);
+        ctl.is_paused.store(false, Ordering::SeqCst);
+        if let Some(sink) = guard.take() {
+            sink.stop();
+        }
+    }
+    if was_active {
+        log::info!("[tts] stop: playback halted");
+    }
+    super::emit_dock("system-idle");
+    emit_tts_state("idle");
+}
+
+/// Toggle pause / resume on the active playback. Returns the resulting paused
+/// state (`true` = now paused). No-op (returns false) when nothing is playing.
+pub fn toggle_pause() -> bool {
+    let ctl = controls();
+    if !ctl.is_active.load(Ordering::SeqCst) {
+        return false;
+    }
+    let guard = lock_recover(&ctl.sink);
+    if let Some(sink) = guard.as_ref() {
+        if ctl.is_paused.load(Ordering::SeqCst) {
+            sink.play();
+            ctl.is_paused.store(false, Ordering::SeqCst);
+            log::info!("[tts] resumed");
+            emit_tts_state("playing");
+            return false;
+        } else {
+            sink.pause();
+            ctl.is_paused.store(true, Ordering::SeqCst);
+            log::info!("[tts] paused");
+            emit_tts_state("paused");
+            return true;
+        }
+    }
+    ctl.is_paused.load(Ordering::SeqCst)
+}
+
+/// Speak `text` with `config` on a dedicated OS thread (fire-and-forget, but
+/// single-flight: a new call STOPS the previous playback). Any failure before
+/// audio plays falls back to the macOS `say` binary. Returns immediately;
+/// playback happens off-thread.
 pub fn play_thread(text: String, config: TtsConfig) {
     if text.trim().is_empty() {
         return;
     }
+
+    let ctl = controls();
+    // Single-flight prelude: claim a fresh generation, clear is_active, and stop
+    // whatever is playing — ALL under the sink lock so the (generation,
+    // is_active, sink) triple moves atomically vs `stop` and the publish below.
+    let my_gen;
+    {
+        let mut guard = lock_recover(&ctl.sink);
+        my_gen = ctl.generation.fetch_add(1, Ordering::SeqCst) + 1;
+        ctl.is_active.store(false, Ordering::SeqCst);
+        ctl.is_paused.store(false, Ordering::SeqCst);
+        if let Some(sink) = guard.take() {
+            sink.stop();
+        }
+    }
+
+    let is_active = ctl.is_active.clone();
+    let is_paused = ctl.is_paused.clone();
+    let sink_slot = ctl.sink.clone();
+    let generation = ctl.generation.clone();
+
     std::thread::spawn(move || {
         let speed = config.speed;
-        log::info!("[tts] play_thread: {} chars, provider {:?}", text.len(), provider_label(&config));
+
+        // Supersession bail BEFORE any dock/state emit, so a thread that already
+        // lost the race never flips the dock to "playing" (which nothing would
+        // then clear). Only the current generation owns the active dock state.
+        if generation.load(Ordering::SeqCst) != my_gen {
+            return;
+        }
+
+        log::info!(
+            "[tts] play_thread: {} chars, provider {} (gen {my_gen})",
+            text.len(),
+            provider_label(&config)
+        );
 
         // Morph the screen dock to show TTS is active. The guard returns it to
-        // idle on EVERY exit path (success, synth-fail→say, rodio-fail→say) so
-        // the dock never gets stuck mid-morph.
+        // idle on EVERY exit path — but ONLY if this thread is still the current
+        // generation, so a superseded thread doesn't stomp the newer playback.
         super::emit_dock("system-start");
-        struct DockGuard;
+        emit_tts_state("playing");
+        struct DockGuard {
+            generation: Arc<AtomicU64>,
+            my_gen: u64,
+        }
         impl Drop for DockGuard {
             fn drop(&mut self) {
-                super::emit_dock("system-idle");
+                if self.generation.load(Ordering::SeqCst) == self.my_gen {
+                    super::emit_dock("system-idle");
+                    emit_tts_state("idle");
+                }
             }
         }
-        let _dock_guard = DockGuard;
+        let _dock_guard = DockGuard {
+            generation: generation.clone(),
+            my_gen,
+        };
 
         // Current-thread tokio runtime, built INSIDE this OS thread so the
         // !Send rodio handles never cross a thread boundary.
@@ -46,53 +221,260 @@ pub fn play_thread(text: String, config: TtsConfig) {
             Ok(rt) => rt,
             Err(e) => {
                 log::error!("[tts] failed to build playback runtime: {e}; falling back to say");
-                super::native_say::speak_with_say(&text, speed);
+                run_say_fallback(&text, speed, &is_active, &sink_slot, &generation, my_gen);
                 return;
             }
         };
 
-        // 1) Synthesize (async reqwest) on this thread's runtime.
-        let mp3 = match rt.block_on(async { super::speak(&text, &config).await }) {
-            Ok(bytes) => {
-                log::info!("[tts] synth ok: {} mp3 bytes", bytes.len());
-                bytes
-            }
-            Err(e) => {
-                log::warn!("[tts] provider synth failed ({e}); falling back to say");
-                super::native_say::speak_with_say(&text, speed);
-                return;
-            }
-        };
+        let mut tts_failed_before_audio = false;
 
-        // 2) Decode + play on the SAME OS thread. ANY failure here → say.
-        let (_stream, handle) = match rodio::OutputStream::try_default() {
-            Ok(s) => s,
-            Err(e) => {
-                log::error!("[tts] no audio output device ({e}); falling back to say");
-                super::native_say::speak_with_say(&text, speed);
-                return;
+        rt.block_on(async {
+            let chunks = build_chunks(&text);
+            let chunks = if chunks.is_empty() {
+                vec![text.clone()]
+            } else {
+                chunks
+            };
+            log::info!("[tts] split into {} chunk(s)", chunks.len());
+
+            // Audio device + sink, created on this thread.
+            let (_stream, handle) = match rodio::OutputStream::try_default() {
+                Ok(pair) => pair,
+                Err(e) => {
+                    log::error!("[tts] no audio output device ({e}); falling back to say");
+                    tts_failed_before_audio = true;
+                    return;
+                }
+            };
+            let sink = match rodio::Sink::try_new(&handle) {
+                Ok(s) => s,
+                Err(e) => {
+                    log::error!("[tts] failed to create audio sink ({e}); falling back to say");
+                    tts_failed_before_audio = true;
+                    return;
+                }
+            };
+
+            // Publish OUR sink + raise is_active ATOMICALLY with the gen check,
+            // under the lock — so a `stop`/new-speak that already bumped the
+            // generation is observed here and we bail without clobbering its
+            // state.
+            {
+                let mut guard = lock_recover(&sink_slot);
+                if generation.load(Ordering::SeqCst) != my_gen {
+                    return;
+                }
+                *guard = Some(sink);
+                is_active.store(true, Ordering::SeqCst);
+                is_paused.store(false, Ordering::SeqCst);
             }
-        };
-        let sink = match rodio::Sink::try_new(&handle) {
-            Ok(s) => s,
-            Err(e) => {
-                log::error!("[tts] failed to create audio sink ({e}); falling back to say");
-                super::native_say::speak_with_say(&text, speed);
-                return;
+
+            let mut any_chunk_played = false;
+            let mut stopped_mid_read = false;
+
+            // One-chunk lookahead: `pending` always holds the audio for chunk
+            // `i`, synthesized on the previous iteration, so there is no silent
+            // network gap between chunks.
+            let mut pending = Some(synthesize_chunk(&chunks[0], &config, 0).await);
+
+            for i in 0..chunks.len() {
+                // Stop / supersede check between chunks.
+                if !is_active.load(Ordering::SeqCst)
+                    || generation.load(Ordering::SeqCst) != my_gen
+                {
+                    break;
+                }
+
+                let chunk_audio = pending
+                    .take()
+                    .unwrap_or_else(|| Err("missing prefetched audio".to_string()));
+
+                let appended: Result<(), String> = match chunk_audio {
+                    Ok(audio_bytes) => {
+                        log::info!("[tts] chunk {i}: {} bytes", audio_bytes.len());
+                        match rodio::Decoder::new(std::io::Cursor::new(audio_bytes)) {
+                            Ok(decoder) => {
+                                // Read the generation INSIDE the sink lock so the
+                                // gen check and the append are atomic — a
+                                // superseding thread cannot publish its sink
+                                // between our check and our append.
+                                let guard = lock_recover(&sink_slot);
+                                if generation.load(Ordering::SeqCst) != my_gen {
+                                    Err("superseded".to_string())
+                                } else {
+                                    match guard.as_ref() {
+                                        Some(sink) => {
+                                            sink.append(decoder);
+                                            Ok(())
+                                        }
+                                        None => Err("sink gone".to_string()),
+                                    }
+                                }
+                            }
+                            Err(e) => Err(format!("rodio decode failed: {e}")),
+                        }
+                    }
+                    Err(e) => Err(e),
+                };
+
+                match appended {
+                    Ok(()) => {
+                        any_chunk_played = true;
+                        // Drain chunk `i` while synthesizing chunk `i+1` in
+                        // parallel, so the next audio is ready the moment this
+                        // one finishes.
+                        let prefetch = async {
+                            if i + 1 < chunks.len() {
+                                Some(synthesize_chunk(&chunks[i + 1], &config, i + 1).await)
+                            } else {
+                                None
+                            }
+                        };
+                        let (_, next) = tokio::join!(
+                            wait_for_sink_to_drain(&sink_slot, &is_active, &generation, my_gen),
+                            prefetch
+                        );
+                        pending = next;
+                    }
+                    Err(err) => {
+                        if err == "superseded" || err == "sink gone" {
+                            // A stop/new-speak took over — exit quietly.
+                            break;
+                        }
+                        if any_chunk_played {
+                            log::warn!(
+                                "[tts] chunk {i}: {err} — stopping to keep voice consistent"
+                            );
+                            stopped_mid_read = true;
+                            break;
+                        } else {
+                            log::warn!(
+                                "[tts] chunk {i}: {err} before any audio — falling back to say"
+                            );
+                            tts_failed_before_audio = true;
+                            break;
+                        }
+                    }
+                }
             }
-        };
-        match rodio::Decoder::new(std::io::Cursor::new(mp3)) {
-            Ok(decoder) => sink.append(decoder),
-            Err(e) => {
-                log::error!("[tts] failed to decode audio ({e}); falling back to say");
-                super::native_say::speak_with_say(&text, speed);
-                return;
+
+            if any_chunk_played {
+                wait_for_sink_to_drain(&sink_slot, &is_active, &generation, my_gen).await;
+                if stopped_mid_read {
+                    log::warn!("[tts] stopped before completion to keep voice consistent");
+                } else {
+                    log::info!("[tts] playback complete");
+                }
             }
+        });
+
+        // Fall back to macOS `say` only if cloud TTS failed before ANY audio
+        // played. `run_say_fallback` itself re-checks the generation, so a
+        // superseded thread never speaks the stale text.
+        if tts_failed_before_audio {
+            run_say_fallback(&text, speed, &is_active, &sink_slot, &generation, my_gen);
         }
-        log::info!("[tts] playing via rodio…");
-        sink.sleep_until_end();
-        log::info!("[tts] playback complete");
+
+        // Release our sink + flags if we're still current — under the lock, and
+        // re-checked inside it (a superseding speak/stop already owns the state).
+        let mut guard = lock_recover(&sink_slot);
+        if generation.load(Ordering::SeqCst) == my_gen {
+            is_active.store(false, Ordering::SeqCst);
+            is_paused.store(false, Ordering::SeqCst);
+            let _ = guard.take();
+        }
+        // DockGuard drops here → emits idle iff still current.
     });
+}
+
+/// Speak `text` via the macOS `say` fallback, holding `is_active` for its
+/// duration (so ⌘⇧S/Escape route to `stop`) and polling the generation so a
+/// stop / new speak kills it mid-utterance. No-op if already superseded.
+fn run_say_fallback(
+    text: &str,
+    speed: f32,
+    is_active: &Arc<AtomicBool>,
+    sink_slot: &Arc<Mutex<Option<rodio::Sink>>>,
+    generation: &Arc<AtomicU64>,
+    my_gen: u64,
+) {
+    // Raise is_active UNDER the sink lock with an in-lock gen re-check, mirroring
+    // the cloud publish path — so a concurrent stop()/new-speak that already
+    // bumped the generation is observed here and we neither speak nor re-raise
+    // is_active over the top of it.
+    {
+        let _guard = lock_recover(sink_slot);
+        if generation.load(Ordering::SeqCst) != my_gen {
+            return;
+        }
+        is_active.store(true, Ordering::SeqCst);
+    }
+    log::warn!("[tts] no audio played; falling back to macOS say");
+    super::native_say::speak_with_say_cancellable(text, speed, &|| {
+        generation.load(Ordering::SeqCst) != my_gen
+    });
+    // Clear is_active only if still current — under the lock, so a concurrent
+    // stop that already cleared it isn't clobbered.
+    let _guard = lock_recover(sink_slot);
+    if generation.load(Ordering::SeqCst) == my_gen {
+        is_active.store(false, Ordering::SeqCst);
+    }
+}
+
+/// Synthesize one chunk → MP3 bytes, with a timeout + one retry before giving up.
+async fn synthesize_chunk(chunk: &str, config: &TtsConfig, index: usize) -> Result<Vec<u8>, String> {
+    let mut last_error = String::new();
+    for attempt in 0..=CHUNK_RETRIES {
+        match timeout(
+            Duration::from_secs(CHUNK_TIMEOUT_SECS),
+            super::speak(chunk, config),
+        )
+        .await
+        {
+            Ok(Ok(bytes)) => return Ok(bytes),
+            Ok(Err(e)) => last_error = format!("synth failed: {e}"),
+            Err(_) => last_error = format!("timed out after {CHUNK_TIMEOUT_SECS}s"),
+        }
+        if attempt < CHUNK_RETRIES {
+            log::warn!("[tts] chunk {index}: {last_error}; retrying once");
+        }
+    }
+    Err(last_error)
+}
+
+/// Wait for the sink to drain — pause-aware (a paused sink is never empty so we
+/// keep waiting) and stop/supersede-aware (bails the moment is_active clears or
+/// the generation moves on).
+async fn wait_for_sink_to_drain(
+    sink_slot: &Arc<Mutex<Option<rodio::Sink>>>,
+    is_active: &Arc<AtomicBool>,
+    generation: &Arc<AtomicU64>,
+    my_gen: u64,
+) {
+    loop {
+        if !is_active.load(Ordering::SeqCst) || generation.load(Ordering::SeqCst) != my_gen {
+            break;
+        }
+        let empty = {
+            let guard = lock_recover(sink_slot);
+            guard.as_ref().map(|s| s.empty()).unwrap_or(true)
+        };
+        if empty {
+            break;
+        }
+        sleep(Duration::from_millis(POLL_INTERVAL_MS)).await;
+    }
+}
+
+/// Emit `o8:tts-state` so the dock / Ask panel can render a play/stop control.
+/// Direct `emit_to(DOCK_LABEL)` (the reliable path) + broadcast to `main`.
+fn emit_tts_state(state: &str) {
+    use tauri::Emitter;
+    if let Some(app) = super::app_handle() {
+        let payload = serde_json::json!({ "state": state });
+        let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:tts-state", payload.clone());
+        let _ = app.emit("o8:tts-state", payload);
+    }
 }
 
 fn provider_label(config: &TtsConfig) -> &'static str {
@@ -100,4 +482,99 @@ fn provider_label(config: &TtsConfig) -> &'static str {
         super::TtsProvider::ElevenLabs => "ElevenLabs",
         super::TtsProvider::Google => "Google",
     }
+}
+
+// ── Chunking (ported from aqua reading.rs) ──────────────────────────────────
+
+/// Returns the largest byte index ≤ `cap` on a UTF-8 char boundary so slicing
+/// multi-byte text (box-drawing, emoji, CJK) cannot panic.
+fn safe_boundary(text: &str, cap: usize) -> usize {
+    if cap >= text.len() {
+        return text.len();
+    }
+    let mut idx = cap;
+    while idx > 0 && !text.is_char_boundary(idx) {
+        idx -= 1;
+    }
+    idx
+}
+
+/// Builds the ordered list of TTS chunks. The FIRST chunk is short (≤200 chars
+/// at a sentence boundary) so the initial round-trip returns quickly; later
+/// chunks use the normal paragraph / 800-char split.
+fn build_chunks(extracted: &str) -> Vec<String> {
+    let mut chunks: Vec<String> = Vec::new();
+    let trimmed = extracted.trim_start();
+    let (lead, remainder) = carve_lead_chunk(trimmed, LEAD_CHUNK_CHARS);
+    if !lead.is_empty() {
+        chunks.push(lead);
+    }
+    for paragraph in remainder.split("\n\n") {
+        let para = paragraph.trim();
+        if para.is_empty() {
+            continue;
+        }
+        if para.len() <= MAX_CHUNK_CHARS {
+            chunks.push(para.to_string());
+        } else {
+            chunks.extend(split_long_paragraph(para));
+        }
+    }
+    chunks
+}
+
+/// Takes the first sentence-ish slice (≤ `max` chars) as a short lead chunk.
+/// Returns `(lead, rest)`. If the text is already shorter than `max`, returns it
+/// whole as the lead and an empty rest.
+fn carve_lead_chunk(text: &str, max: usize) -> (String, &str) {
+    if text.len() <= max {
+        return (text.to_string(), "");
+    }
+    let cap = safe_boundary(text, max);
+    let slice = &text[..cap];
+    let split = slice
+        .rfind(". ")
+        .or_else(|| slice.rfind("! "))
+        .or_else(|| slice.rfind("? "))
+        .or_else(|| slice.rfind(": "))
+        .or_else(|| slice.rfind(", "))
+        .or_else(|| slice.rfind(' '));
+    match split {
+        Some(pos) => {
+            let end = pos + 1;
+            (text[..end].trim().to_string(), text[end..].trim_start())
+        }
+        None => (String::new(), text),
+    }
+}
+
+/// Splits a paragraph longer than `MAX_CHUNK_CHARS` at sentence boundaries,
+/// falling back to the last space, then to a hard cut at a safe boundary.
+fn split_long_paragraph(text: &str) -> Vec<String> {
+    let mut chunks: Vec<String> = Vec::new();
+    let mut remaining = text;
+    while remaining.len() > MAX_CHUNK_CHARS {
+        let cap = safe_boundary(remaining, MAX_CHUNK_CHARS);
+        let slice = &remaining[..cap];
+        let split_pos = slice
+            .rfind(". ")
+            .or_else(|| slice.rfind("! "))
+            .or_else(|| slice.rfind("? "))
+            .or_else(|| slice.rfind(' '));
+        match split_pos {
+            Some(pos) => {
+                let end = pos + 1;
+                chunks.push(remaining[..end].trim().to_string());
+                remaining = remaining[end..].trim_start();
+            }
+            None => {
+                chunks.push(remaining[..cap].trim().to_string());
+                remaining = remaining[cap..].trim_start();
+            }
+        }
+    }
+    if !remaining.is_empty() {
+        chunks.push(remaining.trim().to_string());
+    }
+    chunks
 }
