@@ -167,7 +167,9 @@ export function useDictation() {
 
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      });
     } catch (err) {
       const name = err instanceof Error ? err.name : '';
       const friendly = name === 'NotAllowedError'

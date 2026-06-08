@@ -1,6 +1,8 @@
 mod dev_frontend;
 mod launch_updater;
 mod sidecar_lifecycle;
+#[cfg(target_os = "macos")]
+mod stt;
 mod webview_latch;
 
 use rusqlite::{Connection, OpenFlags};
@@ -2224,6 +2226,292 @@ fn ensure_cli_on_path(_cli_source: &Path) {
     // only shipping surface that needs the symlink.
 }
 
+// ── Voice STT engine wiring (lifted from aqua/Symon, de-Symonized) ──
+//
+// The Swift `speech_recognizer` sidecar streams Apple-Speech partials over
+// stdout; the Rust `LiveRecognizer` (src/stt/mod.rs) owns the daemon and hands
+// us a `TranscriptEvent` receiver. We spawn it ONCE in setup(), forward every
+// event to the webview as `o8:stt-event`, and on stop run the finalize chain
+// (Whisper re-transcribe → Gemini polish) before emitting the polished result.
+//
+// Anthropic is intentionally NOT a provider here — polish is Gemini-only,
+// transcription is Whisper-via-OpenRouter. Both bill outside the Anthropic
+// subscription pool, so this engine never touches the Claude REPL path.
+#[cfg(target_os = "macos")]
+mod stt_engine {
+    use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::{Mutex, OnceLock};
+
+    /// The single long-lived recognizer daemon. `start`/`stop`/`set_locale`
+    /// take `&mut self`, so the global is a Mutex (mirrors `tray_handle`).
+    fn recognizer() -> &'static Mutex<crate::stt::LiveRecognizer> {
+        static REC: OnceLock<Mutex<crate::stt::LiveRecognizer>> = OnceLock::new();
+        REC.get_or_init(|| Mutex::new(crate::stt::LiveRecognizer::new()))
+    }
+
+    /// Per-process monotonically increasing session id, handed to the Swift
+    /// helper so its rapid-tap fencing can discard stale sessions.
+    fn next_session_id() -> u64 {
+        static SEQ: AtomicU64 = AtomicU64::new(1);
+        SEQ.fetch_add(1, Ordering::SeqCst)
+    }
+
+    /// The session id of the currently-active dictation (set on start, read on
+    /// stop so the command layer doesn't need to thread it through JS).
+    fn active_session() -> &'static AtomicU64 {
+        static ACTIVE: AtomicU64 = AtomicU64::new(0);
+        &ACTIVE
+    }
+
+    /// Spawn the daemon once and install the stdout→webview router thread.
+    /// Safe to call once from setup(); a second call is a no-op (the daemon
+    /// reports "already running").
+    pub fn spawn(app: AppHandle) {
+        let rx = {
+            let mut guard = match recognizer().lock() {
+                Ok(g) => g,
+                Err(_) => {
+                    log::warn!("[stt] recognizer mutex poisoned; skipping daemon spawn");
+                    return;
+                }
+            };
+            match guard.spawn_daemon() {
+                Ok(rx) => rx,
+                Err(e) => {
+                    // Missing helper / spawn failure is non-fatal — the existing
+                    // webkitSpeechRecognition + HTTP dictation path still works.
+                    log::warn!("[stt] daemon spawn failed (non-fatal): {}", e);
+                    return;
+                }
+            }
+        };
+
+        std::thread::spawn(move || {
+            for event in rx {
+                forward_event(&app, event);
+            }
+            log::info!("[stt] event router thread exiting (daemon stopped)");
+        });
+
+        // Warm the Gemini TLS handshake in the background so the first polish
+        // call doesn't pay the cold-start cost.
+        std::thread::spawn(crate::stt::polish::warmup);
+    }
+
+    /// Forward one TranscriptEvent to the webview. Partial/Level events are
+    /// passed straight through for live UI; Final triggers the finalize chain.
+    fn forward_event(app: &AppHandle, event: crate::stt::TranscriptEvent) {
+        use crate::stt::TranscriptEvent as TE;
+        match event {
+            TE::Partial { session_id, text } => {
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({ "type": "partial", "sessionId": session_id, "text": text }),
+                );
+            }
+            TE::Level { session_id, level } => {
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({ "type": "level", "sessionId": session_id, "level": level }),
+                );
+            }
+            TE::Final { session_id, text } => {
+                // Stash Apple's transcript; the polished result is emitted once
+                // the AudioFile event lands (so polish can ground on the WAV).
+                stash_final(session_id, text.clone());
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({ "type": "final", "sessionId": session_id, "text": text }),
+                );
+            }
+            TE::AudioFile { session_id, path } => {
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({ "type": "audio_file", "sessionId": session_id, "path": path }),
+                );
+                run_finalize(app.clone(), session_id, path);
+            }
+            TE::Status { session_id, text } => {
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({ "type": "status", "sessionId": session_id, "text": text }),
+                );
+            }
+            TE::Error { session_id, text } => {
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({ "type": "error", "sessionId": session_id, "text": text }),
+                );
+            }
+            TE::Complete { session_id } => {
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({ "type": "complete", "sessionId": session_id }),
+                );
+            }
+            TE::Ready => {
+                let _ = app.emit("o8:stt-event", serde_json::json!({ "type": "ready" }));
+            }
+        }
+    }
+
+    /// The most recent Apple-Speech final transcript keyed by session id, held
+    /// until the AudioFile event arrives so the finalize chain can pair them.
+    fn final_store() -> &'static Mutex<Option<(u64, String)>> {
+        static STORE: OnceLock<Mutex<Option<(u64, String)>>> = OnceLock::new();
+        STORE.get_or_init(|| Mutex::new(None))
+    }
+
+    fn stash_final(session_id: u64, text: String) {
+        if let Ok(mut guard) = final_store().lock() {
+            *guard = Some((session_id, text));
+        }
+    }
+
+    fn take_final(session_id: u64) -> Option<String> {
+        let mut guard = final_store().lock().ok()?;
+        match guard.take() {
+            Some((sid, text)) if sid == session_id => Some(text),
+            other => {
+                // Mismatched session — put it back so a later matching AudioFile
+                // can still pair with it (rapid-tap ordering safety).
+                *guard = other;
+                None
+            }
+        }
+    }
+
+    /// Run the finalize chain on a background thread: Whisper re-transcribe
+    /// (default-on, OpenRouter) → Gemini polish (audio-grounded). The polished
+    /// result is emitted as `o8:stt-event` type `polished`. On any failure we
+    /// fall back to Apple's transcript so the user always gets text.
+    fn run_finalize(app: AppHandle, session_id: u64, audio_file: String) {
+        std::thread::spawn(move || {
+            let apple_text = take_final(session_id).unwrap_or_default();
+
+            // Whisper re-transcribes the recorded WAV BEFORE polish; on
+            // failure/empty it falls back to Apple's transcript.
+            let (raw_text, whisper_used) =
+                match (crate::stt::whisper::enabled(), audio_file.as_str()) {
+                    (true, path) if !path.is_empty() => {
+                        match crate::stt::whisper::transcribe_file(path) {
+                            Some(result) => {
+                                log::info!(
+                                    "[stt] whisper used (latency={}ms model={})",
+                                    result.latency_ms,
+                                    result.model
+                                );
+                                (result.text, true)
+                            }
+                            None => {
+                                log::warn!("[stt] whisper failed/empty; using Apple transcript");
+                                (apple_text.clone(), false)
+                            }
+                        }
+                    }
+                    _ => (apple_text.clone(), false),
+                };
+
+            // Read the recorded WAV so Gemini can hear what was actually said.
+            let audio_wav = std::fs::read(&audio_file).ok();
+
+            let ctx = crate::stt::polish::PolishContext {
+                transcript: &raw_text,
+                audio_wav: audio_wav.as_deref(),
+                frontmost_app: None,
+                window_title: None,
+                selected_text: None,
+                ax_excerpt: None,
+                dictionary: Vec::new(),
+                instructions: String::new(),
+                replacements: Vec::new(),
+            };
+
+            let polished = if crate::stt::polish::is_available()
+                && !crate::stt::polish::should_skip_polish(&ctx)
+            {
+                crate::stt::polish::polish(&ctx)
+            } else {
+                raw_text.clone()
+            };
+
+            // Best-effort cleanup of the temp WAV.
+            let _ = std::fs::remove_file(&audio_file);
+
+            let _ = app.emit(
+                "o8:stt-event",
+                serde_json::json!({
+                    "type": "polished",
+                    "sessionId": session_id,
+                    "text": polished,
+                    "rawText": raw_text,
+                    "appleText": apple_text,
+                    "whisperUsed": whisper_used,
+                }),
+            );
+        });
+    }
+
+    /// Begin a dictation. Returns the new session id so the JS side can match
+    /// subsequent `o8:stt-event` payloads.
+    pub fn start() -> Result<u64, String> {
+        let sid = next_session_id();
+        active_session().store(sid, Ordering::SeqCst);
+        let mut guard = recognizer()
+            .lock()
+            .map_err(|_| "STT recognizer unavailable".to_string())?;
+        // Respawn if the daemon died between sessions.
+        if !guard.is_running() {
+            log::warn!("[stt] daemon not running on start; respawning");
+            let _ = guard.respawn();
+        }
+        guard.start(sid)?;
+        Ok(sid)
+    }
+
+    /// End the active dictation. The finalize chain fires off the daemon's
+    /// final/audio_file stdout events.
+    pub fn stop() -> Result<(), String> {
+        let sid = active_session().load(Ordering::SeqCst);
+        let mut guard = recognizer()
+            .lock()
+            .map_err(|_| "STT recognizer unavailable".to_string())?;
+        guard.stop(sid);
+        Ok(())
+    }
+
+    /// Set the recognition locale (e.g. "en-US").
+    pub fn set_locale(locale: &str) -> Result<(), String> {
+        let mut guard = recognizer()
+            .lock()
+            .map_err(|_| "STT recognizer unavailable".to_string())?;
+        guard.set_locale(locale)
+    }
+}
+
+/// Begin a dictation via the native Apple-Speech sidecar. Returns the session
+/// id so the frontend can correlate `o8:stt-event` payloads. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn o8_stt_start() -> Result<u64, String> {
+    stt_engine::start()
+}
+
+/// End the active native dictation; triggers the finalize chain. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn o8_stt_stop() -> Result<(), String> {
+    stt_engine::stop()
+}
+
+/// Set the native recognizer locale (e.g. "en-US"). macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn o8_stt_locale(locale: String) -> Result<(), String> {
+    stt_engine::set_locale(&locale)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
@@ -2349,6 +2637,12 @@ pub fn run() {
             master_key_get,
             #[cfg(target_os = "macos")]
             master_key_ensure,
+            #[cfg(target_os = "macos")]
+            o8_stt_start,
+            #[cfg(target_os = "macos")]
+            o8_stt_stop,
+            #[cfg(target_os = "macos")]
+            o8_stt_locale,
         ])
         .setup(move |app| {
             // ── System Tray (issue #731) ──
@@ -2415,6 +2709,23 @@ pub fn run() {
             // count without waiting on a frontend WS subscription. Cheap
             // — one HTTP GET per tick, hits the same server as the panel.
             spawn_tray_badge_poller(app.handle().clone());
+
+            // ── Voice STT engine (lifted from aqua/Symon, de-Symonized) ──
+            // Install a tracing subscriber so the lifted STT modules' `tracing::`
+            // logs surface (idempotent — `try_init` no-ops if one already set),
+            // then spawn the Apple-Speech sidecar daemon ONCE. Both are
+            // best-effort: a missing Swift helper or a poisoned mutex is logged
+            // and skipped, leaving the existing dictation path intact. macOS only.
+            #[cfg(target_os = "macos")]
+            if !preship_gate {
+                let _ = tracing_subscriber::fmt()
+                    .with_env_filter(
+                        tracing_subscriber::EnvFilter::try_from_default_env()
+                            .unwrap_or_else(|_| tracing_subscriber::EnvFilter::new("info")),
+                    )
+                    .try_init();
+                stt_engine::spawn(app.handle().clone());
+            }
 
             // ── Window Close → Hide to Tray ──
             let app_handle = app.handle().clone();

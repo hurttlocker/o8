@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleIdentifier</key>
+  <string>ai.o8.desktop.speech-recognizer</string>
+  <key>CFBundleName</key>
+  <string>o8 Speech Helper</string>
+  <key>CFBundleExecutable</key>
+  <string>speech_recognizer</string>
+  <key>CFBundleShortVersionString</key>
+  <string>0.1.0</string>
+  <key>CFBundleVersion</key>
+  <string>0.1.0</string>
+  <key>LSUIElement</key>
+  <true/>
+  <key>NSMicrophoneUsageDescription</key>
+  <string>o8 uses the microphone only while you are actively dictating.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>o8 uses Apple Speech Recognition to turn your voice into text before polish runs.</string>
+</dict>
+</plist>
