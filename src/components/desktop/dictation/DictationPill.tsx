@@ -58,6 +58,12 @@ const WEIGHTS = (() => {
 // Symon's signature container easing.
 const SYMON_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
+// ── Symon notch idle sliver (verbatim from NotchSurface.svelte `.ndock--idle`) ──
+// The compact always-on idle capsule the screen dock paints at the top of the
+// screen when nothing is happening: a 128×16 brand-gradient sliver. Literal
+// Symon colors (documented temporary exception, see file header).
+const SYMON_IDLE_GRADIENT = 'linear-gradient(100deg, #aecdff 0%, #d7c2f1 46%, #f7d9bf 100%)';
+
 function formatTimer(durationMs: number): string {
   const total = Math.max(0, Math.floor(durationMs / 1000));
   const m = Math.floor(total / 60);
@@ -91,6 +97,15 @@ interface DictationPillViewProps {
   onCancel: () => void;
   /** Hide the cancel (X) button — the screen dock pill is not interactive. */
   hideCancel?: boolean;
+  /**
+   * Always-on dock mode: when the state is idle, render a compact Symon idle
+   * CAPSULE (the 128×16 top-of-screen sliver) instead of rendering nothing.
+   * The screen dock window (`/dictation-pill`) is ALWAYS-ON and must paint
+   * something at all times, morphing idle → recording → polishing → success →
+   * idle. The IN-WINDOW pill does NOT pass this — its idle-hides behavior is
+   * unchanged. See `docs/symon-systemwide-fold.md`.
+   */
+  persistentIdle?: boolean;
 }
 
 interface AnchorPos { left: number; bottom: number }
@@ -287,9 +302,11 @@ function SquiggleLoader({ label }: { label: string }) {
  *     always-on-top transparent window — the WINDOW provides the position.
  *
  * Self-driving: it computes its own per-state width, glow, glass, and body
- * and animates the morph with framer-motion. Idle → renders nothing.
+ * and animates the morph with framer-motion. Idle → renders nothing UNLESS
+ * `persistentIdle` is set (always-on dock), in which case idle renders the
+ * compact Symon idle capsule and the morph runs idle ↔ recording ↔ … ↔ idle.
  */
-export function DictationPillView({ snapshot, onCancel, hideCancel }: DictationPillViewProps) {
+export function DictationPillView({ snapshot, onCancel, hideCancel, persistentIdle }: DictationPillViewProps) {
   const { state, audioLevel, durationMs, error, partialTranscript } = snapshot;
   const visible = state !== 'idle';
 
@@ -511,12 +528,44 @@ export function DictationPillView({ snapshot, onCancel, hideCancel }: DictationP
     );
   }
 
+  // Always-on dock idle capsule: the compact Symon notch sliver. Painted only
+  // when idle AND persistentIdle (the screen dock). It morphs out as the full
+  // pill morphs in (shared AnimatePresence) when a recording starts.
+  const idleCapsule = persistentIdle && !visible ? (
+    <motion.div
+      key="dock-idle"
+      role="status"
+      aria-label="Voice idle"
+      initial={{ opacity: 0, y: -6, scale: 0.92 }}
+      animate={{ opacity: 1, y: 0, scale: 1 }}
+      exit={{ opacity: 0, y: -6, scale: 0.92 }}
+      transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+      style={{
+        width: 128,
+        height: 16,
+        borderRadius: '0 0 14px 14px',
+        background: SYMON_IDLE_GRADIENT,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'rgba(255, 255, 255, 0.45)',
+        borderTopWidth: 0,
+        boxShadow: '0 6px 20px rgba(0, 0, 0, 0.28), inset 0 -2px 6px rgba(120, 110, 160, 0.22)',
+        backdropFilter: 'blur(10px) saturate(160%)',
+        WebkitBackdropFilter: 'blur(10px) saturate(160%)',
+        userSelect: 'none',
+        pointerEvents: 'none',
+      } as React.CSSProperties}
+    />
+  ) : null;
+
   // Natural-size pill: no outer positioning. The caller decides where it lives
   // (fixed portal for the in-window path, centered window for the screen dock).
   return (
     <AnimatePresence>
+      {idleCapsule}
       {visible && (
         <motion.div
+          key="dock-active"
           role="status"
           aria-live="polite"
           initial={{ opacity: 0, y: 10, scale: 0.96 }}
