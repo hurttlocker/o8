@@ -861,7 +861,12 @@ pub(crate) fn simulate_cmd_c() {
 #[cfg(target_os = "macos")]
 pub(crate) fn grab_selection() -> Option<String> {
     // ── Strategy 1: Accessibility (no clipboard clobber) ──
-    if let Some(text) = read_selected_text_via_accessibility() {
+    // AX APIs SIGILL/return-nothing off the main thread on macOS 15.7+ (same
+    // rule as gather_window_context). grab_selection is called from a worker
+    // thread (the ⌘⇧S handler spawns it for the Cmd+C sleeps), so the AX read
+    // MUST hop to the main thread or it silently fails and we fall through to
+    // the held-modifier-broken Cmd+C path.
+    if let Some(text) = run_on_main_thread(read_selected_text_via_accessibility) {
         log::info!("[tts] grab_selection: AXSelectedText got {} chars", text.len());
         return Some(text);
     }
