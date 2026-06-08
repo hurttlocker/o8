@@ -27,7 +27,7 @@
 //! `stt_engine::spawn` (called once from `setup()`).
 
 #[cfg(target_os = "macos")]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::{Arc, Mutex, OnceLock};
 #[cfg(target_os = "macos")]
@@ -107,6 +107,87 @@ const FN_FLAG: u64 = 0x800000;
 #[cfg(target_os = "macos")]
 const FN_TAP_PRIMER_MAX_MS: u64 = 220;
 
+/// Max gap between two Fn brushes for them to count as a DOUBLE-TAP (which
+/// toggles long-form dictation). Verbatim from Symon's `LONG_FORM_FN_DOUBLE_TAP_MS`.
+#[cfg(target_os = "macos")]
+const LONG_FORM_FN_DOUBLE_TAP_MS: u64 = 480;
+
+/// macOS Escape key virtual keycode — cancels an active long-form dictation.
+#[cfg(target_os = "macos")]
+const ESCAPE_KEYCODE: i64 = 53;
+
+/// True while a DOUBLE-TAP-Fn long-form dictation is active. Unlike push-to-talk
+/// (which ends on Fn release), long-form stays on until a single Fn tap finishes
+/// it (or Escape cancels). Read by the tap callback + the poll fallback; written
+/// synchronously in the tap callback (toggle edges) + the begin/finish helpers.
+#[cfg(target_os = "macos")]
+static LONG_FORM_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// The stt_engine session id of the active long-form dictation (0 = none). Set
+/// when `begin_long_form_dictation` starts the recognizer; zeroed on finish /
+/// cancel. The finish edge requires this to be non-zero so a double-tap that
+/// raced a still-starting session can't finish a session that never began.
+#[cfg(target_os = "macos")]
+static LONG_FORM_SESSION_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Timestamp of the last sub-threshold Fn brush release. The next Fn-down within
+/// `LONG_FORM_FN_DOUBLE_TAP_MS` is a double-tap. Consumed on read.
+#[cfg(target_os = "macos")]
+static LAST_FN_BRUSH: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// The dictation session id whose finalize must be DROPPED (long-form
+/// Escape-cancel). 0 = none. Per-session (not a bare bool) so a concurrent,
+/// non-cancelled finalize can't consume a discard meant for the cancelled one.
+#[cfg(target_os = "macos")]
+static DISCARD_FINALIZE_SESSION: AtomicU64 = AtomicU64::new(0);
+
+/// The session id of the most recent push-to-talk / brush dictation. Lets the
+/// brush + release teardown fence on its OWN session (`stop_session`) so a late
+/// brush teardown can't kill a long-form session the user started right after.
+#[cfg(target_os = "macos")]
+static CURRENT_PTT_SESSION_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Request that session `sid`'s finalize be discarded (long-form Escape-cancel).
+#[cfg(target_os = "macos")]
+pub fn request_discard_finalize(sid: u64) {
+    DISCARD_FINALIZE_SESSION.store(sid, Ordering::SeqCst);
+}
+
+/// Whether session `sid`'s finalize should be dropped. Clears the request on a
+/// match (so ONLY that session is discarded). `run_finalize` calls this at its
+/// top with its own session id.
+#[cfg(target_os = "macos")]
+pub fn take_discard_finalize(sid: u64) -> bool {
+    sid != 0
+        && DISCARD_FINALIZE_SESSION
+            .compare_exchange(sid, 0, Ordering::SeqCst, Ordering::SeqCst)
+            .is_ok()
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn request_discard_finalize(_sid: u64) {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn take_discard_finalize(_sid: u64) -> bool {
+    false
+}
+
+/// Whether the just-arrived Fn-down completes a double-tap. Consumes the stored
+/// brush timestamp on BOTH branches so a single stale brush can't match twice.
+#[cfg(target_os = "macos")]
+fn consume_double_tap_brush() -> bool {
+    let mut guard = match LAST_FN_BRUSH.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let matched = matches!(
+        *guard,
+        Some(t) if t.elapsed() <= std::time::Duration::from_millis(LONG_FORM_FN_DOUBLE_TAP_MS)
+    );
+    *guard = None;
+    matched
+}
+
 /// CFMachPortRef of the Fn-key event tap, stored as raw pointer bits so the
 /// callback can re-enable the tap when macOS auto-disables it
 /// (`kCGEventTapDisabledByTimeout` / `kCGEventTapDisabledByUserInput`).
@@ -165,10 +246,17 @@ fn begin_system_dictation() {
     }
 
     match crate::stt_engine::start() {
-        Ok(sid) => tracing::info!("[fn-hotkey] system dictation started (session={sid})"),
+        Ok(sid) => {
+            CURRENT_PTT_SESSION_ID.store(sid, Ordering::SeqCst);
+            tracing::info!("[fn-hotkey] system dictation started (session={sid})");
+        }
         Err(e) => {
             tracing::error!("[fn-hotkey] failed to start dictation: {e}");
             set_system_origin(false);
+            // CURRENT_PTT_SESSION_ID is intentionally left at its previous value
+            // here — a failed start has no live session to stop, and a later
+            // release that loads the stale id will simply no-op in stop_session
+            // (active_session() has already moved past it). Safe by the fence.
             // The session never started — morph the always-on dock back to its
             // idle capsule (do NOT hide; the dock is always-on).
             morph_dock_idle();
@@ -208,7 +296,11 @@ fn morph_dock_idle() {
 /// `run_finalize` routes the polished text to `paste::paste_text`.
 #[cfg(target_os = "macos")]
 fn end_system_dictation() {
-    if let Err(e) = crate::stt_engine::stop() {
+    // Fence on the push-to-talk session so a release that raced a newer session
+    // (e.g. a double-tap that already promoted to long-form) can't stop the
+    // wrong one. For a normal hold this is just the active session.
+    let sid = CURRENT_PTT_SESSION_ID.load(Ordering::SeqCst);
+    if let Err(e) = crate::stt_engine::stop_session(sid) {
         tracing::warn!("[fn-hotkey] stop failed: {e}");
     }
 }
@@ -221,7 +313,93 @@ fn end_system_dictation() {
 #[cfg(target_os = "macos")]
 fn discard_brush() {
     set_system_origin(false);
-    let _ = crate::stt_engine::stop();
+    // Fence on the brush's OWN session — if a double-tap already promoted to a
+    // long-form session, this late brush teardown must NOT stop it (stop_session
+    // no-ops when a newer session is active).
+    let sid = CURRENT_PTT_SESSION_ID.load(Ordering::SeqCst);
+    let _ = crate::stt_engine::stop_session(sid);
+    morph_dock_idle();
+}
+
+/// Begin a DOUBLE-TAP-Fn long-form dictation. Like `begin_system_dictation` but
+/// records the session id so a later single tap can finish it, and the recognizer
+/// is NOT torn down on Fn release (the tap callback's up-edge + the poll skip it
+/// while `LONG_FORM_ACTIVE`). Runs on a worker thread, never the tap callback.
+/// `LONG_FORM_ACTIVE` is already set true synchronously by the tap callback.
+#[cfg(target_os = "macos")]
+fn begin_long_form_dictation() {
+    crate::paste::save_frontmost_app();
+    set_system_origin(true);
+
+    // Morph the always-on dock into 'recording' (same surface as push-to-talk —
+    // the user sees the waveform). Emit DIRECTLY to the dock window.
+    if let Some(app) = APP_HANDLE.get() {
+        let app = app.clone();
+        let _ = app.run_on_main_thread({
+            let app = app.clone();
+            move || {
+                crate::dock_window::show(&app);
+                let payload =
+                    serde_json::json!({ "type": "system-start", "origin": "system" });
+                log::info!("[fn-hotkey] morph dock → recording (long-form start)");
+                let _ = app.emit_to(
+                    crate::dock_window::DOCK_LABEL,
+                    "o8:stt-event",
+                    payload.clone(),
+                );
+                let _ = app.emit("o8:stt-event", payload);
+            }
+        });
+    }
+
+    match crate::stt_engine::start() {
+        Ok(sid) => {
+            LONG_FORM_SESSION_ID.store(sid, Ordering::SeqCst);
+            tracing::info!("[fn-hotkey] long-form dictation started (session={sid})");
+        }
+        Err(e) => {
+            tracing::error!("[fn-hotkey] failed to start long-form dictation: {e}");
+            // Roll the toggle back so a single tap doesn't try to finish a
+            // session that never started.
+            LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+            LONG_FORM_SESSION_ID.store(0, Ordering::SeqCst);
+            set_system_origin(false);
+            morph_dock_idle();
+        }
+    }
+}
+
+/// Finish an active long-form dictation (a single Fn tap toggled it off). Zero
+/// the session id, then stop the recognizer — the finalize chain pastes the
+/// polished text exactly like push-to-talk (origin is still system; the dock
+/// flashes the words via `run_finalize`). `LONG_FORM_ACTIVE` was already cleared
+/// synchronously by the tap callback.
+#[cfg(target_os = "macos")]
+fn finish_long_form_dictation() {
+    // Fence on the long-form session so a finish that raced a brand-new
+    // push-to-talk the user started right after can't stop the new session.
+    let sid = LONG_FORM_SESSION_ID.swap(0, Ordering::SeqCst);
+    if let Err(e) = crate::stt_engine::stop_session(sid) {
+        tracing::warn!("[fn-hotkey] long-form finish stop failed: {e}");
+    }
+}
+
+/// Cancel an active long-form dictation (Escape) WITHOUT pasting. Clear the
+/// origin AND request that the impending finalize be dropped entirely (no paste,
+/// no composer emit) BEFORE stopping the recognizer, so the finalize that `stop`
+/// triggers sees both flags. Morph the dock back to its idle capsule.
+#[cfg(target_os = "macos")]
+fn cancel_long_form_dictation() {
+    let sid = LONG_FORM_SESSION_ID.swap(0, Ordering::SeqCst);
+    set_system_origin(false);
+    // Mark THIS session's finalize for discard, then stop it (fenced). Order
+    // matters — the discard request must be set BEFORE stop() triggers the
+    // daemon finalize that run_finalize handles.
+    request_discard_finalize(sid);
+    if let Err(e) = crate::stt_engine::stop_session(sid) {
+        tracing::warn!("[fn-hotkey] long-form cancel stop failed: {e}");
+    }
+    log::info!("[fn-hotkey] long-form cancelled (Escape) — no paste");
     morph_dock_idle();
 }
 
@@ -231,6 +409,7 @@ fn discard_brush() {
 pub fn start(app: tauri::AppHandle) {
     use core_graphics::event::{
         CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
+        EventField,
     };
 
     // Stash the app handle so the off-tap worker threads can drive the screen
@@ -294,6 +473,13 @@ pub fn start(app: tauri::AppHandle) {
                     unsafe { (CGEventSourceFlagsState(CG_STATE_COMBINED_SESSION) & FN_FLAG) != 0 };
 
                 if was_held && !actual_held {
+                    // Long-form ignores Fn release — it ends only on a single tap,
+                    // never from the poll. Skip the teardown entirely (otherwise
+                    // the Fn-up after the double-tap would end the session).
+                    if LONG_FORM_ACTIVE.load(Ordering::SeqCst) {
+                        was_held = actual_held;
+                        continue;
+                    }
                     // Atomic claim against the tap's own Fn-up handler — whichever
                     // path swaps the latch first owns the release; the other skips.
                     if fn_held_poll.swap(false, Ordering::SeqCst) {
@@ -342,8 +528,22 @@ pub fn start(app: tauri::AppHandle) {
                 // (killing the Node sidecars). Convert any panic into a logged
                 // no-op so the app survives.
                 let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                    // Push-to-talk only: KeyDown events are ignored entirely.
+                    // KeyDown: the ONLY key we react to is Escape, and only to
+                    // CANCEL an active long-form dictation. This is a ListenOnly
+                    // tap — we never consume the key (always return None); the
+                    // keycode is read purely to detect Escape. The read is gated on
+                    // LONG_FORM_ACTIVE so the common case (no long-form) stays the
+                    // same cheap early return as before.
                     if matches!(event_type, CGEventType::KeyDown) {
+                        if LONG_FORM_ACTIVE.load(Ordering::SeqCst) {
+                            let keycode =
+                                event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                            if keycode == ESCAPE_KEYCODE {
+                                // Clear the toggle synchronously; discard off-tap.
+                                LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+                                std::thread::spawn(cancel_long_form_dictation);
+                            }
+                        }
                         return None;
                     }
 
@@ -368,18 +568,50 @@ pub fn start(app: tauri::AppHandle) {
                         if let Ok(mut t) = fn_press_time_cb.lock() {
                             *t = std::time::Instant::now();
                         }
-                        std::thread::spawn(begin_system_dictation);
-                    } else if up_edge {
-                        let press_time = fn_press_time_cb
-                            .lock()
-                            .map(|t| *t)
-                            .unwrap_or_else(|_| std::time::Instant::now());
-                        let hold = std::time::Instant::now().duration_since(press_time);
-                        if hold < std::time::Duration::from_millis(FN_TAP_PRIMER_MAX_MS) {
-                            // Sub-threshold brush — tear down silently, no paste.
-                            std::thread::spawn(discard_brush);
+                        // Ordered branches (the ORDER is load-bearing):
+                        //   (a) a single tap while long-form is active FINISHES it,
+                        //   (b) two quick taps START long-form (double-tap),
+                        //   (c) otherwise a normal push-to-talk hold.
+                        if LONG_FORM_ACTIVE.load(Ordering::SeqCst)
+                            && LONG_FORM_SESSION_ID.load(Ordering::SeqCst) != 0
+                        {
+                            // Clear toggle + edge latch synchronously so this tap's
+                            // impending Fn-up CAS fails (no brush/end) and the poll
+                            // skips. The recognizer stop + paste run off-tap.
+                            LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+                            fn_held_cb.store(false, Ordering::SeqCst);
+                            std::thread::spawn(finish_long_form_dictation);
+                        } else if consume_double_tap_brush() {
+                            // Promote to long-form. Set the toggle + clear the edge
+                            // latch synchronously so THIS tap's Fn-up no-ops.
+                            LONG_FORM_ACTIVE.store(true, Ordering::SeqCst);
+                            fn_held_cb.store(false, Ordering::SeqCst);
+                            std::thread::spawn(begin_long_form_dictation);
                         } else {
-                            std::thread::spawn(end_system_dictation);
+                            std::thread::spawn(begin_system_dictation);
+                        }
+                    } else if up_edge {
+                        // Fn release during long-form is a NO-OP — long-form ends
+                        // only on a single tap (down-edge above), never on release.
+                        // (begin_long_form already cleared fn_held, so this CAS
+                        // usually won't even fire mid-long-form; guard anyway.)
+                        if !LONG_FORM_ACTIVE.load(Ordering::SeqCst) {
+                            let press_time = fn_press_time_cb
+                                .lock()
+                                .map(|t| *t)
+                                .unwrap_or_else(|_| std::time::Instant::now());
+                            let hold = std::time::Instant::now().duration_since(press_time);
+                            if hold < std::time::Duration::from_millis(FN_TAP_PRIMER_MAX_MS) {
+                                // Sub-threshold brush — tear down silently, no paste,
+                                // and STAMP the brush so a quick second tap is read
+                                // as a double-tap (long-form start).
+                                if let Ok(mut g) = LAST_FN_BRUSH.lock() {
+                                    *g = Some(std::time::Instant::now());
+                                }
+                                std::thread::spawn(discard_brush);
+                            } else {
+                                std::thread::spawn(end_system_dictation);
+                            }
                         }
                     }
 
