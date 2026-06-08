@@ -37,6 +37,12 @@ src-tauri/target/
 .vercel
 out/
 
+# Voice STT sidecar — compiled binaries (build.rs regenerates from .swift).
+# The Swift source + Info.plist ARE tracked; the per-arch/universal/fat
+# Mach-O artifacts are not.
+src-tauri/helpers/speech_recognizer
+src-tauri/helpers/speech_recognizer-*
+
 # Design artifacts
 mockups/
 assets/mockups/

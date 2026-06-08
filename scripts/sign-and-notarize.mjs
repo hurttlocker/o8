@@ -40,6 +40,11 @@ const TAR = join(BUNDLE, 'macos/o8.app.tar.gz');
 const TAR_SIG = join(BUNDLE, 'macos/o8.app.tar.gz.sig');
 const DMG = join(BUNDLE, `dmg/o8_${version}_x64.dmg`);
 const ENTITLEMENTS = join(root, 'src-tauri/entitlements.plist');
+// Voice STT sidecar (lifted from aqua/Symon) ships as a Tauri externalBin in
+// Contents/MacOS/speech_recognizer. It needs its own entitlements (audio-input
+// + speech) and must be signed BEFORE the outer --deep re-seal, the same way
+// the nested node_modules Mach-O binaries are.
+const SPEECH_ENTITLEMENTS = join(root, 'src-tauri/entitlements.speech.plist');
 const SIGNING_KEY = `${process.env.HOME}/.tauri/cortex-ide.key`;
 
 if (!existsSync(APP)) {
@@ -109,6 +114,36 @@ for (const f of machO) {
     '--options', 'runtime',
     '--timestamp',
     '--sign', process.env.APPLE_SIGNING_IDENTITY,
+    f,
+  ], { stdio: 'inherit' });
+}
+
+// ── Voice STT sidecar (speech_recognizer externalBin) ──
+// Tauri drops the externalBin into Contents/MacOS/speech_recognizer (the
+// target-triple suffix is stripped at bundle time). It must be signed with
+// hardened runtime + the speech/audio-input entitlements BEFORE the outer
+// --deep re-seal, or notarization rejects it as unsigned.
+const macosDir = join(APP, 'Contents/MacOS');
+const speechCandidates = existsSync(macosDir)
+  ? readdirSync(macosDir).filter((name) => name.startsWith('speech_recognizer'))
+  : [];
+if (speechCandidates.length === 0) {
+  console.warn('[sign-and-notarize] WARNING: no speech_recognizer externalBin found in Contents/MacOS — voice STT may not have bundled');
+}
+for (const name of speechCandidates) {
+  const f = join(macosDir, name);
+  let isMachO = false;
+  try {
+    isMachO = execFileSync('file', [f], { encoding: 'utf8' }).includes('Mach-O');
+  } catch { /* skip */ }
+  if (!isMachO) continue;
+  console.log(`[sign-and-notarize] signing voice STT sidecar: ${name}`);
+  execFileSync('codesign', [
+    '--force',
+    '--options', 'runtime',
+    '--timestamp',
+    '--sign', process.env.APPLE_SIGNING_IDENTITY,
+    '--entitlements', SPEECH_ENTITLEMENTS,
     f,
   ], { stdio: 'inherit' });
 }

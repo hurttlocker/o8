@@ -44,6 +44,9 @@
     "active": true,
     "targets": "all",
     "createUpdaterArtifacts": true,
+    "externalBin": [
+      "helpers/speech_recognizer"
+    ],
     "resources": {
       "../out/server": "server/"
     },
