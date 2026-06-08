@@ -6,5 +6,7 @@
     <string>o8 uses your microphone for push-to-talk voice dictation.</string>
     <key>NSSpeechRecognitionUsageDescription</key>
     <string>o8 uses Apple Speech Recognition to turn your voice into text before polish runs.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>o8 uses Accessibility to capture the global Fn hotkey and paste dictated text into the app you are working in.</string>
 </dict>
 </plist>

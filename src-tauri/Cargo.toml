@@ -57,9 +57,14 @@ hex = "0.4"
 # ── Voice STT engine (lifted from aqua/Symon, de-Symonized) ──
 # The Swift sidecar (`helpers/speech_recognizer.swift`) does the audio capture
 # + Apple Speech recognition; these Rust crates power the streaming bridge, the
-# Gemini polish pass, and the optional Whisper re-transcription. Only the crates
-# the lifted `src/stt/*.rs` files actually import are added here — the STT path
-# does NOT pull objc2/AppKit/CoreGraphics (the Swift helper owns all of that).
+# Gemini polish pass, and the optional Whisper re-transcription.
+#
+# The STT *streaming* path stays Swift-owned, but the system-wide Symon fold
+# (paste-into-focused-app + the global Fn CGEventTap) DOES pull objc2/AppKit/
+# CoreGraphics on macOS — see the `[target.'cfg(target_os = "macos")'.dependencies]`
+# block below. `paste.rs` needs NSWorkspace/NSRunningApplication/NSPasteboard +
+# the Accessibility AX walk, and `fn_hotkey.rs` needs a raw CGEventTap; both are
+# genuinely native and cannot be expressed through the Swift helper.
 #   - tracing:   logging macros used verbatim by the lifted modules.
 #   - hound:     pure-Rust WAV parser for the PCM the Swift helper writes.
 #   - flacenc:   pure-Rust WAV→FLAC transcode (~3x) before Gemini upload.
@@ -77,3 +82,21 @@ base64 = "0.22"
 [target.'cfg(unix)'.dependencies]
 signal-hook = "0.3"
 libc = "0.2"
+
+# ── System-wide Symon fold: paste + global Fn hotkey (macOS only) ──
+# Versions pinned to aqua/Symon's exact stack so the lifted `paste.rs` +
+# `fn_hotkey.rs` compile verbatim and so this objc2 generation links cleanly
+# alongside `window-vibrancy 0.6` (which uses the older objc/cocoa generation —
+# the two coexist because they bind disjoint symbol sets).
+#   - objc2 / objc2-foundation: NSString + objc runtime for the AppKit calls.
+#   - objc2-app-kit: NSWorkspace (frontmost app), NSRunningApplication (activate),
+#     NSPasteboard (clipboard snapshot/write). NSVisualEffectView/quartz-core are
+#     NOT pulled — those are P3 dock-vibrancy only, out of scope for P0-P2.
+#   - core-graphics: the CGEventTap (Fn capture) + synthetic Cmd+V CGEvent.
+#   - core-foundation: CFDictionary/CFString/CFRunLoop for the AX + tap plumbing.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-foundation = "0.3"
+core-graphics = "0.24"
+core-foundation = "0.10"
+objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSPasteboard", "NSWindow", "NSScreen", "NSColor", "NSResponder", "NSView", "NSGraphics", "NSUserInterfaceItemIdentification"] }
