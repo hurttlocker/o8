@@ -2490,6 +2490,24 @@ mod stt_engine {
                         }
                         return;
                     }
+                    crate::stt::commands::CommandResult::Speak(t) => {
+                        // "say <text>" — speak it aloud, don't paste. Clear origin
+                        // + morph the dock back to idle.
+                        crate::fn_hotkey::set_system_origin(false);
+                        let _ = std::fs::remove_file(&audio_file);
+                        #[cfg(target_os = "macos")]
+                        {
+                            if !t.trim().is_empty() {
+                                crate::tts::playback::play_thread(t, crate::tts::load_config());
+                            }
+                            let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
+                            let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+                            let _ = app.emit("o8:stt-event", idle);
+                        }
+                        #[cfg(not(target_os = "macos"))]
+                        let _ = t;
+                        return;
+                    }
                 }
             } else {
                 raw_text
@@ -3097,6 +3115,27 @@ pub fn run() {
                             let _ = h.emit_to("main", "o8:open-settings", ());
                         }) {
                             log::warn!("[hotkey] failed to register CmdShiftComma (settings): {e}");
+                        }
+                    }
+
+                    // ⌘⇧S → speak the current text selection aloud (voice P4
+                    // "say" / speak-selection). grab_selection does clipboard
+                    // polling with sleeps, so run the whole thing off the
+                    // event-loop thread; play_thread then spawns its own audio
+                    // thread. Falls back to `say` inside play_thread.
+                    if let Ok(sc) = "CommandOrControl+Shift+S".parse::<Shortcut>() {
+                        if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
+                            if event.state != ShortcutState::Pressed {
+                                return;
+                            }
+                            std::thread::spawn(|| match crate::paste::grab_selection() {
+                                Some(text) => {
+                                    crate::tts::playback::play_thread(text, crate::tts::load_config());
+                                }
+                                None => log::info!("[tts] CmdShiftS: no selection to speak"),
+                            });
+                        }) {
+                            log::warn!("[hotkey] failed to register CmdShiftS (speak-selection): {e}");
                         }
                     }
                 }
