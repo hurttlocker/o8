@@ -122,7 +122,7 @@ fn begin_system_dictation() {
                 // Emit DIRECTLY to the dock window so the morph (idle → recording)
                 // always lands — the broadcast `app.emit` can miss the second
                 // (dock) webview. `emit_to(DOCK_LABEL, …)` is the reliable path.
-                tracing::info!("[fn-hotkey] morph dock → recording (system-start → dock)");
+                log::info!("[fn-hotkey] morph dock → recording (system-start → dock)");
                 let _ = app.emit_to(
                     crate::dock_window::DOCK_LABEL,
                     "o8:stt-event",
@@ -162,7 +162,7 @@ fn morph_dock_idle() {
                 let payload =
                     serde_json::json!({ "type": "system-idle", "origin": "system" });
                 // Direct-to-dock so the morph back to the idle capsule always lands.
-                tracing::info!("[fn-hotkey] morph dock → idle (system-idle → dock)");
+                log::info!("[fn-hotkey] morph dock → idle (system-idle → dock)");
                 let _ = app.emit_to(
                     crate::dock_window::DOCK_LABEL,
                     "o8:stt-event",

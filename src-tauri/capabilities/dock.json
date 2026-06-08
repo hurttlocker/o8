@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "dock",
+  "description": "Dock dictation-pill window. Scopes IPC + the o8:stt-event subscription to the 'dock' label so the always-on /dictation-pill webview can listen and morph (idle ⇄ recording ⇄ polishing ⇄ success). Without a capability whose `remote.urls` matches the bundled-Next origin AND whose `windows` includes 'dock', Tauri injects no __TAURI_INTERNALS__ into this remote-URL webview, so isTauri() is false and listen() never attaches — the dock paints its idle capsule but can never morph. Label-disciplined: events only, NO window-control / updater / process / shell perms (those stay main-only per dock_window.rs).",
+  "windows": ["dock"],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to"
+  ]
+}
