@@ -3047,6 +3047,8 @@ pub fn run() {
                     )
                     .try_init();
                 stt_engine::spawn(app.handle().clone());
+                // Let the off-thread TTS playback morph the screen dock while it speaks.
+                tts::set_app_handle(app.handle().clone());
 
                 // ── Global Fn hotkey → system-wide paste (system-wide Symon fold P2) ──
                 // Reuses the stt_engine daemon spawned just above — never spawns a

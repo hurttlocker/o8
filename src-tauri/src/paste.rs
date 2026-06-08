@@ -853,6 +853,34 @@ pub(crate) fn simulate_cmd_c() {
     simulate_command_keypress(0x08, "selection");
 }
 
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGEventSourceFlagsState(state_id: i32) -> u64;
+}
+
+/// Wait (≤700ms) for the ⌘ and ⇧ modifiers to be physically released before we
+/// synthesize Cmd+C. Posting Cmd+C while the ⌘⇧S chord is still held merges the
+/// held Shift into the event (→ Cmd+Shift+C) so the copy never happens. Matters
+/// for AX-opaque surfaces (o8's own WKWebView) where Strategy 1 returns None and
+/// we depend on the Cmd+C fallback. A tap releases in tens of ms; a long hold
+/// times out and we proceed best-effort.
+#[cfg(target_os = "macos")]
+fn wait_for_chord_release() {
+    // kCGEventFlagMaskCommand (1<<20) | kCGEventFlagMaskShift (1<<17).
+    const CHORD_MASK: u64 = 0x100000 | 0x20000;
+    // kCGEventSourceStateCombinedSessionState = 1.
+    const CG_STATE_COMBINED_SESSION: i32 = 1;
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(700);
+    while std::time::Instant::now() < deadline {
+        let held = unsafe { CGEventSourceFlagsState(CG_STATE_COMBINED_SESSION) } & CHORD_MASK;
+        if held == 0 {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 /// Read the user's current text selection (voice P4 "say" / speak-selection).
 /// Strategy 1: Accessibility `AXSelectedText` (no clipboard touch). Strategy 2:
 /// synthesize Cmd+C, poll the clipboard ≤180ms (10ms cadence), read it, then
@@ -872,6 +900,10 @@ pub(crate) fn grab_selection() -> Option<String> {
     }
 
     // ── Strategy 2: simulate Cmd+C → poll clipboard → restore ──
+    // Wait for the ⌘⇧S chord to release first so the synthetic Cmd+C isn't
+    // polluted by the still-held Shift (the held-modifier bug that left o8's own
+    // webview selection uncopyable).
+    wait_for_chord_release();
     let saved = capture_clipboard_snapshot();
     simulate_cmd_c();
 

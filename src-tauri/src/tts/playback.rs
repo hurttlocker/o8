@@ -25,6 +25,18 @@ pub fn play_thread(text: String, config: TtsConfig) {
         let speed = config.speed;
         log::info!("[tts] play_thread: {} chars, provider {:?}", text.len(), provider_label(&config));
 
+        // Morph the screen dock to show TTS is active. The guard returns it to
+        // idle on EVERY exit path (success, synth-fail→say, rodio-fail→say) so
+        // the dock never gets stuck mid-morph.
+        super::emit_dock("system-start");
+        struct DockGuard;
+        impl Drop for DockGuard {
+            fn drop(&mut self) {
+                super::emit_dock("system-idle");
+            }
+        }
+        let _dock_guard = DockGuard;
+
         // Current-thread tokio runtime, built INSIDE this OS thread so the
         // !Send rodio handles never cross a thread boundary.
         let rt = match tokio::runtime::Builder::new_current_thread()
