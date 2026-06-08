@@ -110,6 +110,15 @@ export default function DictationPillPage() {
       return;
     }
 
+    // Trace the morph path: confirms the dock webview is RECEIVING system events
+    // (the prior bug was the broadcast not reaching this second window — now
+    // Rust emit_to(DOCK_LABEL, …) targets it directly). Skip the per-frame
+    // `level` events so the trace stays brief — the morph-driving events
+    // (system-start/idle/pasted, final, audio_file, error) are what matter.
+    if (payload.type !== 'level' && payload.type !== 'partial') {
+      console.log('[dock-pill] system stt-event', payload.type, '→ state', stateRef.current);
+    }
+
     switch (payload.type) {
       case 'system-start':
         beginRecording();
@@ -226,7 +235,10 @@ export default function DictationPillPage() {
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'center',
-        paddingTop: 10,
+        // paddingTop 0 → the idle capsule's square top edge sits flush at the
+        // window top, which the Rust side anchors flush to the screen top edge
+        // (DOCK_TOP_INSET = 0). No gap above the capsule (Symon notch behavior).
+        paddingTop: 0,
         background: 'transparent',
         // The React layer keeps the dead-zone tight: the wrapper ignores
         // pointer events, only the pill itself (hideCancel = no buttons) sits

@@ -18,7 +18,7 @@
 //!     material would gray out the light pill).
 //!   - setLevel(25): one above the menu bar (level 24) so it hangs over the
 //!     true top of the screen.
-//!   - top-center anchor: x centered, y = screen origin_y + small offset.
+//!   - top-center anchor: x centered, y = screen origin_y (flush to top edge).
 //!   - NONACTIVATING: the window must never become key / steal focus from the
 //!     app the user is dictating into. Tauri windows are plain NSWindows (not
 //!     NSPanels) so `canBecomeKey` can't be overridden without subclassing; the
@@ -36,10 +36,14 @@ pub const DOCK_LABEL: &str = "dock";
 const DOCK_WIDTH: f64 = 520.0;
 #[cfg(target_os = "macos")]
 const DOCK_HEIGHT: f64 = 120.0;
-/// Small top inset below the true screen origin so the pill doesn't kiss the
-/// physical top edge / notch.
+/// Top inset below the true screen origin. ZERO so the window top sits flush at
+/// the very top edge of the screen — the idle capsule's square top edge
+/// (borderRadius 0 0 14 14) then hangs down from y=0 like the Symon notch.
+/// The window is level 25 (above the menu bar at 24), so overlapping the
+/// menu-bar zone is fine. Mirrors aqua's NotchSurface / resize_symon_window
+/// notch branch where y = mon_y.
 #[cfg(target_os = "macos")]
-const DOCK_TOP_INSET: f64 = 6.0;
+const DOCK_TOP_INSET: f64 = 0.0;
 
 /// Create the dock window and navigate it to `/dictation-pill` on the bundled
 /// Next server, then apply the macOS transparency + level + anchor recipe.
@@ -209,7 +213,8 @@ fn order_front_nonactivating(window: &tauri::WebviewWindow) {
 
 /// Top-center anchor the dock window on the active monitor (falls back to the
 /// primary). Logical coordinates, mirroring aqua's `resize_and_reposition`
-/// notch branch: x centered, y = monitor origin_y + a small inset.
+/// notch branch: x centered, y = monitor origin_y (flush to the very top edge,
+/// no inset) so the idle capsule's square top edge meets the screen top edge.
 #[cfg(target_os = "macos")]
 fn reposition(window: &tauri::WebviewWindow) {
     let monitor = window
