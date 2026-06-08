@@ -68,6 +68,35 @@ pub fn is_system_origin() -> bool {
     false
 }
 
+/// Last polished system-dictation transcript, stashed at the end of
+/// `run_finalize` so the ⌘⌥V global shortcut can re-paste it (voice P3). Holds
+/// only the most recent entry — the trimmed equivalent of Symon's transcript
+/// store, scoped to the single value ⌘⌥V needs.
+#[cfg(target_os = "macos")]
+static LAST_VOICE_TRANSCRIPT: Mutex<Option<String>> = Mutex::new(None);
+
+/// Record the latest polished system transcript (called from `run_finalize`).
+#[cfg(target_os = "macos")]
+pub fn set_last_voice_transcript(text: &str) {
+    if let Ok(mut g) = LAST_VOICE_TRANSCRIPT.lock() {
+        *g = Some(text.to_string());
+    }
+}
+
+/// The most recent polished system transcript, if any (⌘⌥V paste-last).
+#[cfg(target_os = "macos")]
+pub fn last_voice_transcript() -> Option<String> {
+    LAST_VOICE_TRANSCRIPT.lock().ok().and_then(|g| g.clone())
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_last_voice_transcript(_text: &str) {}
+
+#[cfg(not(target_os = "macos"))]
+pub fn last_voice_transcript() -> Option<String> {
+    None
+}
+
 /// NSEventModifierFlagFunction = 1 << 23.
 #[cfg(target_os = "macos")]
 const FN_FLAG: u64 = 0x800000;
