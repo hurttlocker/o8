@@ -54,7 +54,12 @@ fn set_output_volume(v: u32) {
 /// not block on it before STT can start.
 pub fn duck() {
     #[cfg(target_os = "macos")]
-    std::thread::spawn(|| {
+    {
+        // Gated by the `ducking_enabled` voice pref (default on).
+        if !crate::stt::keys::config_bool("ducking_enabled", true) {
+            return;
+        }
+        std::thread::spawn(|| {
         let mut saved = match SAVED_VOLUME.lock() {
             Ok(g) => g,
             Err(p) => p.into_inner(),
@@ -73,7 +78,8 @@ pub fn duck() {
         let target = (current as f32 * DUCK_SCALAR).round() as u32;
         set_output_volume(target);
         *saved = Some(current);
-    });
+        });
+    }
 }
 
 /// Restore the system volume to whatever it was before `duck()`. Safe to call

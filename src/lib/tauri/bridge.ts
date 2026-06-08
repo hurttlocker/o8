@@ -244,3 +244,13 @@ export async function backgroundModeSet(enabled: boolean): Promise<boolean> {
   const result = await invoke<boolean>('background_mode_set', { enabled });
   return result ?? enabled;
 }
+
+/** Voice preferences (`~/.o8/dictation.json`, secrets stripped). mtime-cached
+ * server-side, so a `voicePrefsSet` write applies live with no relaunch. */
+export async function voicePrefsGet(): Promise<Record<string, unknown> | null> {
+  return invoke<Record<string, unknown>>('voice_prefs_get');
+}
+
+export async function voicePrefsSet(key: string, value: unknown): Promise<void> {
+  await invoke('voice_prefs_set', { key, value });
+}

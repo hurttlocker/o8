@@ -13,7 +13,8 @@
 //! reaches a Finder-launched build without any extra config file.
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::Mutex;
+use std::time::SystemTime;
 
 /// Canonical o8 data dir (`~/.o8`, overridable via env). Mirrors the resolver
 /// in `lib.rs` but does NOT trigger the cortex-ide → o8 migration — STT only
@@ -34,17 +35,29 @@ fn config_path() -> PathBuf {
     o8_data_dir().join("dictation.json")
 }
 
-/// Lazily-loaded `~/.o8/dictation.json` as a JSON object. Cached for the
-/// process lifetime — STT prefs don't change mid-run, and re-reading on every
-/// dictation would add disk latency to the hot path.
-fn config() -> &'static serde_json::Value {
-    static CONFIG: OnceLock<serde_json::Value> = OnceLock::new();
-    CONFIG.get_or_init(|| {
-        std::fs::read_to_string(config_path())
-            .ok()
-            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
-            .unwrap_or(serde_json::Value::Null)
-    })
+/// mtime-keyed cache of `~/.o8/dictation.json`. Unlike the old process-lifetime
+/// `OnceLock`, this reloads when the file's mtime changes — so a settings write
+/// (the Voice settings panel) takes effect WITHOUT an app relaunch. Reads still
+/// avoid a full parse on the hot path: only a `stat()` + an mtime compare when
+/// the file is unchanged.
+static CONFIG_CACHE: Mutex<Option<(Option<SystemTime>, serde_json::Value)>> = Mutex::new(None);
+
+/// Load `~/.o8/dictation.json` as a JSON value, reloading on mtime change.
+fn config() -> serde_json::Value {
+    let path = config_path();
+    let current_mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+    let mut guard = CONFIG_CACHE.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some((cached_mtime, value)) = guard.as_ref() {
+        if *cached_mtime == current_mtime {
+            return value.clone();
+        }
+    }
+    let value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .unwrap_or(serde_json::Value::Null);
+    *guard = Some((current_mtime, value.clone()));
+    value
 }
 
 /// Read a string value from `~/.o8/dictation.json`, empty strings filtered out.
@@ -55,6 +68,74 @@ pub fn config_string(key: &str) -> Option<String> {
         .map(str::trim)
         .filter(|s| !s.is_empty())
         .map(ToOwned::to_owned)
+}
+
+/// Read a boolean pref — accepts real JSON bools or `"true"/"1"/"yes"` strings.
+/// Returns `default` when the key is absent or unparseable.
+pub fn config_bool(key: &str, default: bool) -> bool {
+    match config().get(key) {
+        Some(serde_json::Value::Bool(b)) => *b,
+        Some(serde_json::Value::String(s)) => match s.trim().to_ascii_lowercase().as_str() {
+            "true" | "1" | "yes" | "on" => true,
+            "false" | "0" | "no" | "off" => false,
+            _ => default,
+        },
+        _ => default,
+    }
+}
+
+/// Read a string-array pref (e.g. the custom dictionary). Empty when absent.
+pub fn config_string_list(key: &str) -> Vec<String> {
+    config()
+        .get(key)
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|x| x.as_str())
+                .map(|s| s.trim().to_string())
+                .filter(|s| !s.is_empty())
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// The prefs object with secret keys stripped — what the settings UI reads back,
+/// so the panel never round-trips API keys.
+pub fn config_public() -> serde_json::Value {
+    let mut value = config();
+    if let Some(obj) = value.as_object_mut() {
+        for secret in [
+            "gemini_api_key",
+            "openrouter_api_key",
+            "elevenlabs_api_key",
+            "google_tts_api_key",
+        ] {
+            obj.remove(secret);
+        }
+    }
+    value
+}
+
+/// Write a single key into `~/.o8/dictation.json` (read-modify-write, preserving
+/// all other keys incl. secrets), then drop the cache so the next read reloads.
+pub fn set_pref(key: &str, value: serde_json::Value) -> Result<(), String> {
+    let path = config_path();
+    let mut obj = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+        .and_then(|v| v.as_object().cloned())
+        .unwrap_or_default();
+    obj.insert(key.to_string(), value);
+    let serialized = serde_json::to_string_pretty(&serde_json::Value::Object(obj))
+        .map_err(|e| e.to_string())?;
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    std::fs::write(&path, serialized).map_err(|e| format!("write dictation.json: {e}"))?;
+    if let Ok(mut guard) = CONFIG_CACHE.lock() {
+        *guard = None;
+    }
+    Ok(())
 }
 
 /// Resolve the Gemini API key. Env-first (`GEMINI_API_KEY`), then the o8
