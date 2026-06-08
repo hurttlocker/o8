@@ -117,10 +117,20 @@ fn begin_system_dictation() {
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
-                let _ = app.emit(
+                let payload =
+                    serde_json::json!({ "type": "system-start", "origin": "system" });
+                // Emit DIRECTLY to the dock window so the morph (idle → recording)
+                // always lands — the broadcast `app.emit` can miss the second
+                // (dock) webview. `emit_to(DOCK_LABEL, …)` is the reliable path.
+                tracing::info!("[fn-hotkey] morph dock → recording (system-start → dock)");
+                let _ = app.emit_to(
+                    crate::dock_window::DOCK_LABEL,
                     "o8:stt-event",
-                    serde_json::json!({ "type": "system-start", "origin": "system" }),
+                    payload.clone(),
                 );
+                // Keep the broadcast too for any other listeners (no-op for the
+                // in-window pill, which ignores system-origin events).
+                let _ = app.emit("o8:stt-event", payload);
             }
         });
     }
@@ -149,10 +159,16 @@ fn morph_dock_idle() {
         let _ = app.run_on_main_thread({
             let app = app.clone();
             move || {
-                let _ = app.emit(
+                let payload =
+                    serde_json::json!({ "type": "system-idle", "origin": "system" });
+                // Direct-to-dock so the morph back to the idle capsule always lands.
+                tracing::info!("[fn-hotkey] morph dock → idle (system-idle → dock)");
+                let _ = app.emit_to(
+                    crate::dock_window::DOCK_LABEL,
                     "o8:stt-event",
-                    serde_json::json!({ "type": "system-idle", "origin": "system" }),
+                    payload.clone(),
                 );
+                let _ = app.emit("o8:stt-event", payload);
             }
         });
     }

@@ -2337,6 +2337,22 @@ mod stt_engine {
         }
     }
 
+    /// Emit one `o8:stt-event` payload. Always broadcasts (the in-window pill
+    /// listens on the broadcast); for SYSTEM-origin events it ALSO emits
+    /// directly to the screen `dock` window via `emit_to(DOCK_LABEL, …)` so the
+    /// live morph (recording waveform + transcript + paste flash) reliably lands
+    /// in the second webview — `app.emit` broadcast can miss the dock.
+    fn emit_stt(app: &AppHandle, origin: &str, payload: serde_json::Value) {
+        if origin == "system" {
+            let _ = app.emit_to(
+                crate::dock_window::DOCK_LABEL,
+                "o8:stt-event",
+                payload.clone(),
+            );
+        }
+        let _ = app.emit("o8:stt-event", payload);
+    }
+
     /// Forward one TranscriptEvent to the webview. Partial/Level events are
     /// passed straight through for live UI; Final triggers the finalize chain.
     fn forward_event(app: &AppHandle, event: crate::stt::TranscriptEvent) {
@@ -2344,53 +2360,32 @@ mod stt_engine {
         let origin = origin_str();
         match event {
             TE::Partial { session_id, text } => {
-                let _ = app.emit(
-                    "o8:stt-event",
-                    serde_json::json!({ "type": "partial", "origin": origin, "sessionId": session_id, "text": text }),
-                );
+                emit_stt(app, origin, serde_json::json!({ "type": "partial", "origin": origin, "sessionId": session_id, "text": text }));
             }
             TE::Level { session_id, level } => {
-                let _ = app.emit(
-                    "o8:stt-event",
-                    serde_json::json!({ "type": "level", "origin": origin, "sessionId": session_id, "level": level }),
-                );
+                emit_stt(app, origin, serde_json::json!({ "type": "level", "origin": origin, "sessionId": session_id, "level": level }));
             }
             TE::Final { session_id, text } => {
                 // Stash Apple's transcript; the polished result is emitted once
                 // the AudioFile event lands (so polish can ground on the WAV).
                 stash_final(session_id, text.clone());
-                let _ = app.emit(
-                    "o8:stt-event",
-                    serde_json::json!({ "type": "final", "origin": origin, "sessionId": session_id, "text": text }),
-                );
+                emit_stt(app, origin, serde_json::json!({ "type": "final", "origin": origin, "sessionId": session_id, "text": text }));
             }
             TE::AudioFile { session_id, path } => {
-                let _ = app.emit(
-                    "o8:stt-event",
-                    serde_json::json!({ "type": "audio_file", "origin": origin, "sessionId": session_id, "path": path }),
-                );
+                emit_stt(app, origin, serde_json::json!({ "type": "audio_file", "origin": origin, "sessionId": session_id, "path": path }));
                 run_finalize(app.clone(), session_id, path);
             }
             TE::Status { session_id, text } => {
-                let _ = app.emit(
-                    "o8:stt-event",
-                    serde_json::json!({ "type": "status", "origin": origin, "sessionId": session_id, "text": text }),
-                );
+                emit_stt(app, origin, serde_json::json!({ "type": "status", "origin": origin, "sessionId": session_id, "text": text }));
             }
             TE::Error { session_id, text } => {
-                let _ = app.emit(
-                    "o8:stt-event",
-                    serde_json::json!({ "type": "error", "origin": origin, "sessionId": session_id, "text": text }),
-                );
+                emit_stt(app, origin, serde_json::json!({ "type": "error", "origin": origin, "sessionId": session_id, "text": text }));
             }
             TE::Complete { session_id } => {
-                let _ = app.emit(
-                    "o8:stt-event",
-                    serde_json::json!({ "type": "complete", "origin": origin, "sessionId": session_id }),
-                );
+                emit_stt(app, origin, serde_json::json!({ "type": "complete", "origin": origin, "sessionId": session_id }));
             }
             TE::Ready => {
-                let _ = app.emit("o8:stt-event", serde_json::json!({ "type": "ready", "origin": origin }));
+                emit_stt(app, origin, serde_json::json!({ "type": "ready", "origin": origin }));
             }
         }
     }
@@ -2500,15 +2495,16 @@ mod stt_engine {
                 // composer text. The dock is ALWAYS-ON: it MORPHS (success flash
                 // → idle capsule) in place — we do NOT hide it. The /dictation-pill
                 // route returns to the idle capsule on its own after SUCCESS_FLASH_MS.
-                let _ = app.emit(
-                    "o8:stt-event",
-                    serde_json::json!({
-                        "type": "system-pasted",
-                        "origin": "system",
-                        "sessionId": session_id,
-                        "chars": polished.chars().count(),
-                    }),
-                );
+                // Emit DIRECTLY to the dock (emit_to DOCK_LABEL) so the flash always
+                // lands, plus the broadcast for any other listeners.
+                let pasted = serde_json::json!({
+                    "type": "system-pasted",
+                    "origin": "system",
+                    "sessionId": session_id,
+                    "chars": polished.chars().count(),
+                });
+                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", pasted.clone());
+                let _ = app.emit("o8:stt-event", pasted);
             } else {
                 let _ = app.emit(
                     "o8:stt-event",
@@ -2615,22 +2611,22 @@ fn o8_debug_show_dock(app: tauri::AppHandle) {
     }
     // Re-emit the demo state a few times: the dock webview may be waking from
     // hidden when the first events fire, so repeat until its route subscribes.
+    // Emit DIRECTLY to the dock window (emit_to DOCK_LABEL) — the same reliable
+    // path the real Fn flow uses — plus the broadcast for parity.
     let a = app.clone();
     std::thread::spawn(move || {
         for delay_ms in [250u64, 800, 1600] {
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-            let _ = a.emit(
-                "o8:stt-event",
+            tracing::info!("[dock-demo] morph dock → recording (system-start → dock)");
+            let events = [
                 serde_json::json!({ "type": "system-start", "origin": "system" }),
-            );
-            let _ = a.emit(
-                "o8:stt-event",
                 serde_json::json!({ "type": "partial", "text": "the o8 dock pill \u{2014} system-wide voice, anywhere", "origin": "system" }),
-            );
-            let _ = a.emit(
-                "o8:stt-event",
                 serde_json::json!({ "type": "level", "level": 0.62, "origin": "system" }),
-            );
+            ];
+            for payload in &events {
+                let _ = a.emit_to(dock_window::DOCK_LABEL, "o8:stt-event", payload.clone());
+                let _ = a.emit("o8:stt-event", payload.clone());
+            }
         }
     });
 }
