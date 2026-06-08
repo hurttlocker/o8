@@ -3699,6 +3699,27 @@ function DashboardInner() {
     return () => window.removeEventListener('keydown', handler);
   }, [dispatchSpawn, handleToggleO8Panel, toggleContextualPanelTile, toggleSettingsOverlay, toggleSidebarFromChrome]);
 
+  // ── Voice P3: ⌘⇧, global shortcut → open the settings overlay ──
+  // The Rust global-shortcut handler emits `o8:open-settings` (o8 settings is an
+  // overlay in THIS webview, not a separate window, so it can't be opened from
+  // Rust directly). Toggling matches the in-app ⌘, binding above. Tauri-only.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen('o8:open-settings', () => { toggleSettingsOverlay(); }))
+      .then((un) => {
+        if (disposed) { un(); return; }
+        unlisten = un;
+      })
+      .catch(() => { /* noop — never let the listener break the dashboard */ });
+    return () => {
+      disposed = true;
+      if (unlisten) { try { unlisten(); } catch { /* noop */ } }
+    };
+  }, [toggleSettingsOverlay]);
+
   const showSidebarColumn = sidebarVisible && !compactShell;
   const showRightPanelColumn = chatVisible && !compactShell;
   const workspaceInset = compactShell ? 2 : 4;

@@ -2499,6 +2499,9 @@ mod stt_engine {
                     let _ = app.emit("o8:stt-event", idle);
                 } else {
                     crate::paste::paste_text(&polished);
+                    // Remember the polished text so the ⌘⌥V global shortcut can
+                    // re-paste the last dictation (voice P3 paste-last).
+                    crate::fn_hotkey::set_last_voice_transcript(&polished);
                     // Dock-only success signal carrying the ACTUAL pasted words so
                     // the notch dock shows the text (Symon parity), not a generic
                     // "Pasted". The in-window DictationHost ignores system-origin,
@@ -2721,6 +2724,12 @@ pub fn run() {
             None,
         ));
 
+    // Voice P3 hotkeys: OS-global keyboard shortcuts. Installing the plugin is
+    // harmless on its own — the actual chord registrations live in the
+    // `!preship_gate` macOS setup() block so the disposable pre-ship child app
+    // never grabs system-wide shortcuts.
+    builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+
     // Auto-saves window size + position to the OS data dir on close and
     // restores them on next launch. The pre-ship gate launches a disposable
     // child app and must not mutate the operator's saved window geometry.
@@ -2936,6 +2945,68 @@ pub fn run() {
                 // own CGEventTap on a dedicated CFRunLoop thread, so it keeps working
                 // even when the main window is hidden.
                 fn_hotkey::start(app.handle().clone());
+
+                // ── Voice P3 global shortcuts ──
+                // OS-global chords (fire even when o8 is unfocused). The Fn /
+                // double-tap-Fn gestures stay on the CGEventTap above (modifier-
+                // only gestures the plugin can't bind); these three map to
+                // existing o8 capabilities. Registered INSIDE !preship_gate so the
+                // disposable pre-ship child app never grabs system-wide chords.
+                // Registration failures are logged, not fatal — a chord already
+                // owned by another app must not block boot.
+                {
+                    use tauri::{Emitter, Manager};
+                    use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
+
+                    // ⌘⇧Space → summon the o8 window to the front. o8's window is
+                    // the full IDE (not a tiny pill), so summon-to-front only —
+                    // never hide the whole IDE on a global chord.
+                    if let Ok(sc) = "CommandOrControl+Shift+Space".parse::<Shortcut>() {
+                        let h = app.handle().clone();
+                        if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
+                            if event.state != ShortcutState::Pressed {
+                                return;
+                            }
+                            if let Some(win) = h.get_webview_window("main") {
+                                let _ = win.show();
+                                let _ = win.set_focus();
+                            }
+                        }) {
+                            log::warn!("[hotkey] failed to register CmdShiftSpace (summon): {e}");
+                        }
+                    }
+
+                    // ⌘⌥V → paste the last voice dictation at the system caret.
+                    if let Ok(sc) = "CommandOrControl+Alt+V".parse::<Shortcut>() {
+                        if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
+                            if event.state != ShortcutState::Pressed {
+                                return;
+                            }
+                            if let Some(text) = fn_hotkey::last_voice_transcript() {
+                                // paste_text does clipboard + a synthetic ⌘V + a
+                                // focus settle — run it off the event-loop thread.
+                                std::thread::spawn(move || crate::paste::paste_text(&text));
+                            }
+                        }) {
+                            log::warn!("[hotkey] failed to register CmdAltV (paste-last): {e}");
+                        }
+                    }
+
+                    // ⌘⇧, → open the in-app settings overlay. o8 settings is an
+                    // overlay in the main webview (not a window), so emit to the
+                    // dashboard rather than showing a "settings" window.
+                    if let Ok(sc) = "CommandOrControl+Shift+,".parse::<Shortcut>() {
+                        let h = app.handle().clone();
+                        if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
+                            if event.state != ShortcutState::Pressed {
+                                return;
+                            }
+                            let _ = h.emit_to("main", "o8:open-settings", ());
+                        }) {
+                            log::warn!("[hotkey] failed to register CmdShiftComma (settings): {e}");
+                        }
+                    }
+                }
             }
 
             // ── Window Close → Hide to Tray ──

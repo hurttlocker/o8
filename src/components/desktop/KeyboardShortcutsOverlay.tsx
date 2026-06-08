@@ -75,6 +75,10 @@ const SECTIONS: ShortcutSection[] = [
     title: 'Voice',
     rows: [
       { label: 'Push-to-talk dictation', chords: [['Hold', '⌃']] },
+      { label: 'Dictate anywhere → paste at caret', chords: [['Hold', 'Fn']] },
+      { label: 'Summon o8', chords: [['⌘', '⇧', 'Space']] },
+      { label: 'Paste last dictation', chords: [['⌘', '⌥', 'V']] },
+      { label: 'Open settings (anywhere)', chords: [['⌘', '⇧', ',']] },
     ],
   },
   {
