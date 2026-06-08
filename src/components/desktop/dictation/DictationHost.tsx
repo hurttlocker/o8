@@ -22,6 +22,7 @@ import {
 } from 'react';
 import { DictationPill } from './DictationPill';
 import { useDictation } from './useDictation';
+import { isNativeDictationAvailable, useNativeDictation } from './useNativeDictation';
 import type { DictationStartOptions } from './types';
 
 interface DictationHostContextValue {
@@ -62,7 +63,31 @@ interface DictationHostProps {
 }
 
 export function DictationHost({ children }: DictationHostProps) {
-  const { snapshot, start: startInternal, stopAndSubmit, cancel } = useDictation();
+  // Both engines are mounted unconditionally (rules of hooks). The native
+  // path (Apple-Speech sidecar via Tauri `o8_stt_*` + `o8:stt-event`) is the
+  // preferred surface when the Tauri bridge is present; otherwise we fall back
+  // to the webkitSpeechRecognition + HTTP `/api/dictation` path. Both expose
+  // the identical { snapshot, start, stopAndSubmit, cancel } contract and the
+  // same DictationSnapshot shape, so push-to-talk behaves the same either way.
+  const webDictation = useDictation();
+  const nativeDictation = useNativeDictation();
+
+  // Resolve availability after mount — `isNativeDictationAvailable()` reads
+  // window.__TAURI__, which is undefined during SSR. Defaulting to false keeps
+  // the first server/client render in sync (no hydration mismatch); the effect
+  // promotes to the native path once the bridge is confirmed.
+  const [nativeAvailable, setNativeAvailable] = useState(false);
+  useEffect(() => {
+    const available = isNativeDictationAvailable();
+    setNativeAvailable(available);
+    if (available) {
+      console.log('[dictation] native on-device engine active (Apple-Speech sidecar)');
+    }
+  }, []);
+
+  const engine = nativeAvailable ? nativeDictation : webDictation;
+  const { snapshot, start: startInternal, stopAndSubmit, cancel } = engine;
+
   const anchorRef = useRef<HTMLElement | null>(null);
   const fillRef = useRef<((text: string) => void) | null>(null);
   // Force a re-render of the pill when the anchor element changes so it
