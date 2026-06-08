@@ -2297,6 +2297,13 @@ mod stt_engine {
         &ACTIVE
     }
 
+    /// The currently-active session id (0 = none). Used by the Right-Option Ask
+    /// path to force-stop a competing Fn / long-form session before it takes the
+    /// mic — the three voice modes share this one recognizer.
+    pub fn active_session_id() -> u64 {
+        active_session().load(Ordering::SeqCst)
+    }
+
     /// Spawn the daemon once and install the stdout→webview router thread.
     /// Safe to call once from setup(); a second call is a no-op (the daemon
     /// reports "already running").
@@ -2443,6 +2450,12 @@ mod stt_engine {
                 return;
             }
 
+            // Capture + CONSUME the Right-Option Ask flag at the TOP — before any
+            // early return below (discard / voice-command Cancel) could strand it
+            // true and mis-route the NEXT dictation to Ask. Routed at the bottom
+            // (after polish) via this local. Always false off the macOS Ask path.
+            let is_ask = crate::fn_hotkey::take_ask_mode();
+
             let apple_text = take_final(session_id).unwrap_or_default();
 
             // Whisper re-transcribes the recorded WAV BEFORE polish; on
@@ -2476,7 +2489,9 @@ mod stt_engine {
             // breaks. Gated to origin==system: the in-window composer path has its
             // own TS processor (`voice-commands.ts`), so we must NOT double-process
             // it. `is_system_origin()` is always false off the macOS system path.
-            let raw_text = if crate::fn_hotkey::is_system_origin() {
+            // Also skipped for an Ask question (`!is_ask`) — a spoken question
+            // must reach Gemini verbatim, not be mangled by the command parser.
+            let raw_text = if crate::fn_hotkey::is_system_origin() && !is_ask {
                 match crate::stt::commands::process(&raw_text) {
                     crate::stt::commands::CommandResult::Text(t) => t,
                     crate::stt::commands::CommandResult::Cancel => {
@@ -2560,6 +2575,22 @@ mod stt_engine {
 
             // Best-effort cleanup of the temp WAV.
             let _ = std::fs::remove_file(&audio_file);
+
+            // ── Ask mode (Right-Option) — the polished text is a QUESTION ──
+            // Route it to Gemini + speak the answer; do NOT paste or emit to the
+            // composer. Checked AFTER polish so the question is cleaned up, and
+            // BEFORE the paste/composer origin branch. The flag was already
+            // consumed at the top (`is_ask`) so a stray re-finalize can't re-ask.
+            #[cfg(target_os = "macos")]
+            if is_ask {
+                // The dock was morphed to 'recording' on ask-start; return it to
+                // idle now — the TTS playback re-morphs it when the answer speaks.
+                let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
+                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+                let _ = app.emit("o8:stt-event", idle);
+                crate::spawn_ask_and_speak(app.clone(), polished);
+                return;
+            }
 
             // ── Origin branch (system-wide Symon fold P2) ──
             // A dictation started by the GLOBAL Fn hotkey pastes the polished text
@@ -2708,14 +2739,17 @@ fn tts_speak(text: String) {
     tts::playback::play_thread(text, tts::load_config());
 }
 
-/// Ask o8 a question (voice P4 phase C): query Gemini DIRECT, emit the answer
-/// to the webview (`o8:ask-answer`), and SPEAK it through the TTS engine.
-/// Fire-and-forget on a dedicated OS thread (async reqwest + then !Send rodio).
-/// macOS only. Gemini only — NEVER Anthropic.
+/// Ask Gemini `question` on a dedicated OS thread, emit the answer to the webview
+/// (`o8:ask-answer` / `o8:ask-error`), and SPEAK it through the TTS engine.
+/// Shared by the `ask_question` command (text) and the Right-Option voice path
+/// (`run_finalize`). macOS only. Gemini only — NEVER Anthropic.
 #[cfg(target_os = "macos")]
-#[tauri::command]
-fn ask_question(app: tauri::AppHandle, text: String) {
+fn spawn_ask_and_speak(app: tauri::AppHandle, question: String) {
     use tauri::Emitter;
+    let question = question.trim().to_string();
+    if question.is_empty() {
+        return;
+    }
     std::thread::spawn(move || {
         let rt = match tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -2727,14 +2761,14 @@ fn ask_question(app: tauri::AppHandle, text: String) {
                 return;
             }
         };
-        log::info!("[ask] question: {} chars", text.len());
-        match rt.block_on(async { ai::gemini_ask::ask(&text, None).await }) {
+        log::info!("[ask] question: {} chars", question.len());
+        match rt.block_on(async { ai::gemini_ask::ask(&question, None).await }) {
             Ok(answer) => {
                 log::info!("[ask] answer: {} chars", answer.len());
                 let _ = app.emit_to(
                     "main",
                     "o8:ask-answer",
-                    serde_json::json!({ "question": text, "answer": answer }),
+                    serde_json::json!({ "question": question, "answer": answer }),
                 );
                 // Speak the answer through the TTS engine (spawns its own thread).
                 tts::playback::play_thread(answer, tts::load_config());
@@ -2745,6 +2779,14 @@ fn ask_question(app: tauri::AppHandle, text: String) {
             }
         }
     });
+}
+
+/// Ask o8 a question by text (voice P4 phase C). Thin wrapper over
+/// `spawn_ask_and_speak` — the Right-Option voice path calls the same helper.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn ask_question(app: tauri::AppHandle, text: String) {
+    spawn_ask_and_speak(app, text);
 }
 
 /// TEMPORARY debug command (system-wide Symon fold P1): paste `text` into the
