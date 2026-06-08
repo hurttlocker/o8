@@ -1,3 +1,4 @@
+mod background;
 mod dev_frontend;
 mod dock_window;
 mod fn_hotkey;
@@ -2604,6 +2605,45 @@ fn o8_debug_paste(text: String) {
     paste::paste_text(&text);
 }
 
+/// TEMP/debug: pop the screen dock pill in a sample "listening" state so the
+/// dock can be screenshotted without a live Fn dictation (which needs TCC perms
+/// + a physical Fn press). Not wired to any UI. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn o8_debug_show_dock(app: tauri::AppHandle) {
+    use tauri::{Emitter, Manager};
+    // NSWindow ops are main-thread-only — schedule show() on the main thread
+    // (the real Fn path does the same).
+    if let Some(win) = app.get_webview_window("main") {
+        let a = app.clone();
+        let _ = win.run_on_main_thread(move || {
+            dock_window::show(&a);
+        });
+    } else {
+        dock_window::show(&app);
+    }
+    // Re-emit the demo state a few times: the dock webview may be waking from
+    // hidden when the first events fire, so repeat until its route subscribes.
+    let a = app.clone();
+    std::thread::spawn(move || {
+        for delay_ms in [250u64, 800, 1600] {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+            let _ = a.emit(
+                "o8:stt-event",
+                serde_json::json!({ "type": "system-start", "origin": "system" }),
+            );
+            let _ = a.emit(
+                "o8:stt-event",
+                serde_json::json!({ "type": "partial", "text": "the o8 dock pill \u{2014} system-wide voice, anywhere", "origin": "system" }),
+            );
+            let _ = a.emit(
+                "o8:stt-event",
+                serde_json::json!({ "type": "level", "level": 0.62, "origin": "system" }),
+            );
+        }
+    });
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
@@ -2653,7 +2693,14 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_updater::Builder::new().build());
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        // Phase 4 (background presence): launch-at-login. LaunchAgent matches
+        // the resident-hotkey-app pattern. Default ON is bootstrapped once from
+        // setup() via background::initialize_autostart (marker-guarded).
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ));
 
     // Auto-saves window size + position to the OS data dir on close and
     // restores them on next launch. The pre-ship gate launches a disposable
@@ -2737,9 +2784,16 @@ pub fn run() {
             o8_stt_locale,
             #[cfg(target_os = "macos")]
             o8_debug_paste,
+            #[cfg(target_os = "macos")]
+            o8_debug_show_dock,
             mac_perms::accessibility_permission_granted_cmd,
             mac_perms::input_monitoring_granted_cmd,
             mac_perms::fn_key_usage_type_cmd,
+            background::autostart_is_enabled,
+            background::autostart_set,
+            background::background_mode_is_enabled,
+            background::background_mode_set,
+            background::open_system_settings,
         ])
         .setup(move |app| {
             // ── System Tray (issue #731) ──
@@ -2759,6 +2813,11 @@ pub fn run() {
                     let id = event.id.as_ref();
                     match id {
                         "show" => {
+                            // P4: the tray is the re-entry point. If background
+                            // mode hid the Dock icon (Accessory), restore Regular
+                            // so the user gets a window AND a Dock icon back —
+                            // never stranded windowless. Centralized in background.
+                            background::set_background_mode(app, false, true);
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
@@ -2772,6 +2831,7 @@ pub fn run() {
                             // window so the operator sees the review queue,
                             // then emit a Tauri event the frontend can pick
                             // up to scroll the AgentPanel to the lane.
+                            background::set_background_mode(app, false, true);
                             if let Some(window) = app.get_webview_window("main") {
                                 let _ = window.show();
                                 let _ = window.set_focus();
@@ -2790,6 +2850,9 @@ pub fn run() {
                     } = event
                     {
                         let app = tray.app_handle();
+                        // P4: tray left-click is also a deliberate "bring me
+                        // back" — restore Regular so the Dock icon returns.
+                        background::set_background_mode(app, false, true);
                         if let Some(window) = app.get_webview_window("main") {
                             let _ = window.show();
                             let _ = window.set_focus();
@@ -2806,6 +2869,27 @@ pub fn run() {
             // count without waiting on a frontend WS subscription. Cheap
             // — one HTTP GET per tick, hits the same server as the panel.
             spawn_tray_badge_poller(app.handle().clone());
+
+            // ── Background presence (system-wide Symon fold P4) ──
+            // 1. Launch-at-login defaults ON so the pill + Fn hotkey work without
+            //    opening o8; marker-guarded so it auto-enables exactly once.
+            // 2. Re-apply the persisted background-mode (Accessory/Regular) pref —
+            //    default OFF (Dock icon visible), so a fresh boot is never an
+            //    invisible app. This is the single boot-time activation-policy
+            //    apply; the Settings toggle is the only other caller.
+            // The pre-ship gate launches a disposable child app — never mutate the
+            // operator's autostart registration or activation policy from it.
+            if !preship_gate {
+                background::initialize_autostart(app.handle());
+                background::apply_persisted_background_mode(app.handle());
+
+                // ── Boot-time update check (P4 review MEDIUM) ──
+                // A background/autostart session that never opens the main window
+                // would otherwise never self-update (the on_page_load check only
+                // fires when main loads). Fire it here too — start_launch_update_check
+                // is AtomicBool-guarded, so this never double-fires with on_page_load.
+                launch_updater::start_launch_update_check(app.handle().clone());
+            }
 
             // ── Voice STT engine (lifted from aqua/Symon, de-Symonized) ──
             // Install a tracing subscriber so the lifted STT modules' `tracing::`

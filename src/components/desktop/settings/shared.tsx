@@ -55,7 +55,7 @@ export interface GitHubDeviceFlowState {
 
 export type GitHubActionKind = 'refresh' | 'switch' | 'logout' | 'login_token' | 'login_device' | 'cancel_device';
 
-export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'billing' | 'diagnostics' | 'about';
+export type SettingsTab = 'connectors' | 'api-keys' | 'mcp' | 'connections' | 'operator-defaults' | 'projects' | 'workers' | 'cloud-workers' | 'analytics' | 'appearance' | 'voice' | 'billing' | 'diagnostics' | 'about';
 
 // ── Constants ──
 
@@ -254,6 +254,18 @@ export function CreditCardIcon() {
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <rect x="2" y="5" width="20" height="14" rx="2" />
       <line x1="2" y1="10" x2="22" y2="10" />
+    </svg>
+  );
+}
+
+export function MicIcon() {
+  // Microphone glyph for Settings → Voice (system-wide Symon fold P4).
+  // Hand-authored raw SVG so it renders inside the Tauri webview.
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="9" y="2" width="6" height="12" rx="3" />
+      <path d="M5 10v1a7 7 0 0 0 14 0v-1" />
+      <line x1="12" y1="18" x2="12" y2="22" />
     </svg>
   );
 }
