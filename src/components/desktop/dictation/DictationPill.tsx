@@ -1,18 +1,49 @@
 'use client';
 
+/**
+ * DictationPill — the on-screen voice HUD.
+ *
+ * This is a React/inline-style port of Symon's (aqua-color) dictation
+ * overlay — the glass pill, the colorful EQ wave-bar, the live partial
+ * transcript tail (lead/fresh word split + blinking cursor), the audio
+ * level meter, and the squiggle "polishing" loader. The look (colors,
+ * gradients, geometry, motion) is lifted as-is from Symon's Svelte
+ * components:
+ *   - Pill.svelte            (container shape + per-state glow + layers)
+ *   - SymonPillWaveform.svelte (centered-bulge gaussian EQ canvas)
+ *   - SquiggleLoader.svelte   (dash-animated wave path)
+ *
+ * NOTE (operator directive): the literal color values below mirror Symon's
+ * palette verbatim and are a documented TEMPORARY exception to the
+ * "theme tokens, never raw rgba" rule. We reconcile to var(--t-*) later.
+ * Keeping the literals here is how we preserve Symon's exact LOOK while
+ * obeying the inline-styles-only rule (no CSS classes).
+ */
+
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { AnimatePresence, motion } from 'framer-motion';
 import { X } from '../lucide-shims';
 import type { DictationSnapshot, DictationState } from './types';
 
-const JAKARTA_STACK = 'var(--font-sans-system)';
+const UI_FONT = 'var(--font-sans-system)';
 const MONO_STACK = "'iA Writer Mono', 'JetBrains Mono', 'SF Mono', Menlo, ui-monospace, monospace";
 
-const BAR_COUNT = 18;
-const BAR_WIDTH = 3;
-const BAR_GAP = 3;
-const INNER_H = 18;
-const INNER_W = BAR_COUNT * BAR_WIDTH + (BAR_COUNT - 1) * BAR_GAP; // 105
+// ── Symon brand gradient (cyan → periwinkle → pink → gold) ──
+// Verbatim from SymonPillWaveform.svelte / SquiggleLoader.svelte.
+const GRADIENT_STOPS: Array<[number, string]> = [
+  [0.00, 'rgba(136, 209, 241, 0.92)'],
+  [0.42, 'rgba(177, 180, 229, 0.95)'],
+  [0.72, 'rgba(245, 184, 196, 0.92)'],
+  [1.00, 'rgba(244, 201, 119, 0.92)'],
+];
+
+// ── EQ canvas geometry — Symon's SymonPillWaveform.svelte values ──
+const BAR_COUNT = 30;
+const BAR_WIDTH = 2;
+const BAR_GAP = 2.5;
+const INNER_W = BAR_COUNT * BAR_WIDTH + (BAR_COUNT - 1) * BAR_GAP; // 132.5
+const INNER_H = 24;
 
 const WEIGHTS = (() => {
   const out = new Array<number>(BAR_COUNT);
@@ -24,22 +55,8 @@ const WEIGHTS = (() => {
   return out;
 })();
 
-const GRADIENT_STOPS: Array<[number, string]> = [
-  [0.00, 'rgba(136, 209, 241, 0.92)'],
-  [0.42, 'rgba(177, 180, 229, 0.95)'],
-  [0.72, 'rgba(245, 184, 196, 0.92)'],
-  [1.00, 'rgba(244, 201, 119, 0.92)'],
-];
-
-const DOT_COLOR: Record<DictationState, string> = {
-  'idle': 'transparent',
-  'requesting-mic': '#ef4444',
-  'recording': '#ef4444',
-  'transcribing': '#f59e0b',
-  'polishing': '#a78bfa',
-  'success': '#16a34a',
-  'error': '#ef4444',
-};
+// Symon's signature container easing.
+const SYMON_EASE = 'cubic-bezier(0.16, 1, 0.3, 1)';
 
 function formatTimer(durationMs: number): string {
   const total = Math.max(0, Math.floor(durationMs / 1000));
@@ -49,11 +66,9 @@ function formatTimer(durationMs: number): string {
 }
 
 function stateLabel(state: DictationState, error: string | null): string | null {
-  if (state === 'transcribing') return 'transcribing';
-  if (state === 'polishing') return 'polishing';
-  if (state === 'success') return 'done';
-  // Error: surface the full message so the user can read it. The pill
-  // widens for error states (see pillWidth below) so it has room.
+  if (state === 'transcribing') return 'Transcribing';
+  if (state === 'polishing') return 'Polishing';
+  if (state === 'success') return 'Pasted';
   if (state === 'error') return error ?? 'Mic error';
   return null;
 }
@@ -73,37 +88,224 @@ interface DictationPillProps {
 
 interface AnchorPos { left: number; bottom: number }
 
-export function DictationPill({ snapshot, onCancel, anchorRef, position }: DictationPillProps) {
-  const { state, audioLevel, durationMs, error, partialTranscript } = snapshot;
-  const visible = state !== 'idle';
-
+/**
+ * SymonWaveCanvas — the centered-bulge gaussian EQ, ported 1:1 from
+ * SymonPillWaveform.svelte. Drives off the live audio level + an ambient
+ * shimmer so it's never dead-flat while listening.
+ */
+function SymonWaveCanvas({
+  visible,
+  speaking,
+  listening,
+  levelRef,
+  reducedRef,
+}: {
+  visible: boolean;
+  speaking: boolean;
+  listening: boolean;
+  levelRef: React.RefObject<number>;
+  reducedRef: React.RefObject<number>;
+}) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const currentLevelsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
   const targetLevelsRef = useRef<number[]>(new Array(BAR_COUNT).fill(0));
   const rafRef = useRef<number | null>(null);
-  const stateRef = useRef<DictationState>(state);
+  const speakingRef = useRef(speaking);
+  const listeningRef = useRef(listening);
+  useEffect(() => { speakingRef.current = speaking; }, [speaking]);
+  useEffect(() => { listeningRef.current = listening; }, [listening]);
+
+  useEffect(() => {
+    if (!visible) {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+      currentLevelsRef.current = new Array(BAR_COUNT).fill(0);
+      targetLevelsRef.current = new Array(BAR_COUNT).fill(0);
+      return;
+    }
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const draw = (now: number) => {
+      const ctx = canvas.getContext('2d');
+      if (!ctx) return;
+      const dpr = Math.min(window.devicePixelRatio || 1, 2);
+      if (canvas.width !== INNER_W * dpr || canvas.height !== INNER_H * dpr) {
+        canvas.width = INNER_W * dpr;
+        canvas.height = INNER_H * dpr;
+        canvas.style.width = `${INNER_W}px`;
+        canvas.style.height = `${INNER_H}px`;
+      }
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx.clearRect(0, 0, INNER_W, INNER_H);
+
+      const t = now / 1000;
+      const isSpeaking = speakingRef.current;
+      const isListening = listeningRef.current;
+      const lvl = (levelRef.current ?? 0) * (reducedRef.current ?? 1);
+      const ambientBase = isSpeaking ? 0.22 : isListening ? 0.18 : 0.12;
+
+      const target = targetLevelsRef.current;
+      const current = currentLevelsRef.current;
+
+      for (let i = 0; i < BAR_COUNT; i++) {
+        const phase = i * 0.42;
+        const ambient = ambientBase + 0.08 * Math.sin(t * (isSpeaking ? 6 : 2.2) + phase);
+        const level = Math.max(0, Math.min(1, lvl));
+        const driven = (isSpeaking || isListening) ? level : 0;
+        const amp = Math.max(ambient, driven * WEIGHTS[i]) + driven * 0.08 * Math.sin(t * 12 + phase);
+        target[i] = Math.max(0.04, Math.min(1, amp));
+      }
+
+      const smoothing = isSpeaking ? 0.36 : 0.22;
+      const g = ctx.createLinearGradient(0, 0, INNER_W, 0);
+      for (const [stop, color] of GRADIENT_STOPS) g.addColorStop(stop, color);
+      ctx.fillStyle = g;
+
+      for (let i = 0; i < BAR_COUNT; i++) {
+        current[i] = lerp(current[i], target[i], smoothing);
+        const barH = Math.max(2, current[i] * INNER_H);
+        const x = i * (BAR_WIDTH + BAR_GAP);
+        const y = (INNER_H - barH) / 2;
+        const r = Math.min(BAR_WIDTH / 2, barH / 2);
+        ctx.beginPath();
+        ctx.moveTo(x + r, y);
+        ctx.lineTo(x + BAR_WIDTH - r, y);
+        ctx.quadraticCurveTo(x + BAR_WIDTH, y, x + BAR_WIDTH, y + r);
+        ctx.lineTo(x + BAR_WIDTH, y + barH - r);
+        ctx.quadraticCurveTo(x + BAR_WIDTH, y + barH, x + BAR_WIDTH - r, y + barH);
+        ctx.lineTo(x + r, y + barH);
+        ctx.quadraticCurveTo(x, y + barH, x, y + barH - r);
+        ctx.lineTo(x, y + r);
+        ctx.quadraticCurveTo(x, y, x + r, y);
+        ctx.closePath();
+        ctx.fill();
+      }
+
+      rafRef.current = requestAnimationFrame(draw);
+    };
+    rafRef.current = requestAnimationFrame(draw);
+    return () => {
+      if (rafRef.current !== null) {
+        cancelAnimationFrame(rafRef.current);
+        rafRef.current = null;
+      }
+    };
+  }, [visible, levelRef, reducedRef]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={INNER_W}
+      height={INNER_H}
+      style={{
+        width: INNER_W,
+        height: INNER_H,
+        display: 'block',
+        flexShrink: 0,
+        opacity: visible ? 1 : 0.9,
+        filter: (speaking || listening) ? 'saturate(1.06) brightness(1.04)' : 'saturate(0.96) brightness(0.98)',
+        transition: 'opacity 180ms ease, filter 180ms ease',
+      }}
+      aria-hidden="true"
+    />
+  );
+}
+
+/**
+ * SquiggleLoader — ported from SquiggleLoader.svelte. Dash-animated wave
+ * path stroked with the Symon brand gradient. Used for transcribing/polishing.
+ */
+const SQUIGGLE_PATH =
+  'M8 28C32 22 48 14 72 14C96 14 108 34 132 34C156 34 170 12 198 12C230 12 238 38 272 38C304 38 316 18 344 18C372 18 388 28 408 28';
+
+function SquiggleLoader({ label }: { label: string }) {
+  return (
+    <div
+      aria-label={label}
+      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', width: 176, height: 32, overflow: 'hidden' }}
+    >
+      <svg
+        viewBox="0 0 416 52"
+        preserveAspectRatio="xMidYMid meet"
+        style={{ display: 'block', width: 176, height: 32 }}
+        aria-hidden="true"
+      >
+        <defs>
+          <linearGradient id="o8-dict-squiggle" x1="0%" y1="50%" x2="100%" y2="50%">
+            <stop offset="0%" stopColor="#88D1F1" />
+            <stop offset="34%" stopColor="#B1B4E5" />
+            <stop offset="72%" stopColor="#F5B8C4" />
+            <stop offset="100%" stopColor="#F4C977" />
+          </linearGradient>
+        </defs>
+        <path
+          d={SQUIGGLE_PATH}
+          pathLength={100}
+          fill="none"
+          stroke="rgba(255, 255, 255, 0.09)"
+          strokeWidth={12}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
+        <path
+          d={SQUIGGLE_PATH}
+          pathLength={100}
+          fill="none"
+          stroke="url(#o8-dict-squiggle)"
+          strokeWidth={12}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{
+            strokeDasharray: '36 64',
+            strokeDashoffset: 0,
+            filter: 'drop-shadow(0 0 10px rgba(177, 180, 229, 0.24))',
+            animation: 'o8DictSquiggle 2.1s ease-in-out infinite alternate',
+          }}
+        />
+      </svg>
+    </div>
+  );
+}
+
+export function DictationPill({ snapshot, onCancel, anchorRef, position }: DictationPillProps) {
+  const { state, audioLevel, durationMs, error, partialTranscript } = snapshot;
+  const visible = state !== 'idle';
+
+  // Live refs for the canvas RAF loop (avoid re-running the effect per frame).
   const levelRef = useRef<number>(audioLevel);
+  const reducedRef = useRef<number>(1);
+  useEffect(() => { levelRef.current = audioLevel; }, [audioLevel]);
+  useEffect(() => {
+    reducedRef.current = (state === 'transcribing' || state === 'polishing') ? 0.4 : 1;
+  }, [state]);
+
   const [anchor, setAnchor] = useState<AnchorPos | null>(null);
 
-  useEffect(() => { stateRef.current = state; }, [state]);
-  useEffect(() => { levelRef.current = audioLevel; }, [audioLevel]);
+  const trimmedPartial = partialTranscript.trim();
+  const isRecording = state === 'recording' || state === 'requesting-mic';
+  const isBusy = state === 'transcribing' || state === 'polishing';
+  const isError = state === 'error';
+  const isSuccess = state === 'success';
+  const speaking = audioLevel > 0.08;
 
-  // Compute pill width — grows with the partial transcript so spoken
-  // words have room. Symon's design steps every ~3 words; we just clamp
-  // to a max so the pill stays readable.
+  // Symon's container width per state. Recording with a transcript tail
+  // widens (matching Pill.svelte's listening footprint that grows for words),
+  // everything else holds the compact 280 footprint Symon uses for
+  // idle/listening/polishing.
   const pillWidth = useMemo(() => {
-    if (state === 'error') return 460;
-    if (state === 'success') return 280;
-    if (state === 'transcribing' || state === 'polishing') return 280;
-    if (state === 'recording' && partialTranscript.trim().length > 0) {
-      // ~7px per char + chrome (dot + waveform + timer + button) ≈ 200
-      const estimated = 220 + Math.min(360, partialTranscript.length * 7);
-      return Math.max(360, Math.min(640, Math.round(estimated / 8) * 8));
+    if (isError) return 460;
+    if (isRecording && trimmedPartial.length > 0) {
+      const estimated = 200 + Math.min(360, trimmedPartial.length * 7);
+      return Math.max(360, Math.min(620, Math.round(estimated / 8) * 8));
     }
     return 280;
-  }, [state, partialTranscript]);
+  }, [isError, isRecording, trimmedPartial]);
 
-  // Compute anchor position whenever visible flips on or window resizes.
+  // Anchor: above the active composer, else bottom-center (Symon docks the
+  // pill at bottom-center of its own window).
   useEffect(() => {
     if (!visible) {
       setAnchor(null);
@@ -140,114 +342,27 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
     };
   }, [visible, anchorRef, position, pillWidth]);
 
-  // Canvas RAF loop — only while visible.
-  useEffect(() => {
-    if (!visible) {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-      currentLevelsRef.current = new Array(BAR_COUNT).fill(0);
-      targetLevelsRef.current = new Array(BAR_COUNT).fill(0);
-      return;
-    }
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    const draw = (now: number) => {
-      const ctx = canvas.getContext('2d');
-      if (!ctx) return;
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      if (canvas.width !== INNER_W * dpr || canvas.height !== INNER_H * dpr) {
-        canvas.width = INNER_W * dpr;
-        canvas.height = INNER_H * dpr;
-        canvas.style.width = `${INNER_W}px`;
-        canvas.style.height = `${INNER_H}px`;
-      }
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      ctx.clearRect(0, 0, INNER_W, INNER_H);
-
-      const t = now / 1000;
-      const s = stateRef.current;
-      const lvl = levelRef.current;
-      const speaking = lvl > 0.08;
-      const listening = s === 'recording';
-      const reduced = (s === 'transcribing' || s === 'polishing') ? 0.4 : 1;
-      const ambientBase = speaking ? 0.22 : listening ? 0.18 : 0.12;
-
-      const target = targetLevelsRef.current;
-      const current = currentLevelsRef.current;
-
-      for (let i = 0; i < BAR_COUNT; i++) {
-        const phase = i * 0.42;
-        const ambient = ambientBase + 0.08 * Math.sin(t * (speaking ? 6 : 2.2) + phase);
-        const level = Math.max(0, Math.min(1, lvl * reduced));
-        const driven = (speaking || listening) ? level : 0;
-        const amp = Math.max(ambient, driven * WEIGHTS[i]) + driven * 0.08 * Math.sin(t * 12 + phase);
-        target[i] = Math.max(0.04, Math.min(1, amp));
-      }
-
-      const smoothing = speaking ? 0.36 : 0.22;
-      const g = ctx.createLinearGradient(0, 0, INNER_W, 0);
-      for (const [stop, color] of GRADIENT_STOPS) g.addColorStop(stop, color);
-      ctx.fillStyle = g;
-
-      for (let i = 0; i < BAR_COUNT; i++) {
-        current[i] = lerp(current[i], target[i], smoothing);
-        const barH = Math.max(2, current[i] * INNER_H);
-        const x = i * (BAR_WIDTH + BAR_GAP);
-        const y = (INNER_H - barH) / 2;
-        const r = Math.min(BAR_WIDTH / 2, barH / 2);
-        ctx.beginPath();
-        ctx.moveTo(x + r, y);
-        ctx.lineTo(x + BAR_WIDTH - r, y);
-        ctx.quadraticCurveTo(x + BAR_WIDTH, y, x + BAR_WIDTH, y + r);
-        ctx.lineTo(x + BAR_WIDTH, y + barH - r);
-        ctx.quadraticCurveTo(x + BAR_WIDTH, y + barH, x + BAR_WIDTH - r, y + barH);
-        ctx.lineTo(x + r, y + barH);
-        ctx.quadraticCurveTo(x, y + barH, x, y + barH - r);
-        ctx.lineTo(x, y + r);
-        ctx.quadraticCurveTo(x, y, x + r, y);
-        ctx.closePath();
-        ctx.fill();
-      }
-
-      rafRef.current = requestAnimationFrame(draw);
-    };
-    rafRef.current = requestAnimationFrame(draw);
-    return () => {
-      if (rafRef.current !== null) {
-        cancelAnimationFrame(rafRef.current);
-        rafRef.current = null;
-      }
-    };
-  }, [visible]);
-
   const label = useMemo(() => stateLabel(state, error), [state, error]);
 
-  if (!visible || typeof document === 'undefined') return null;
-  if (!anchor) return null;
+  if (typeof document === 'undefined') return null;
 
-  const dotColor = DOT_COLOR[state] ?? '#ef4444';
-  const pulseDot = state === 'recording' || state === 'requesting-mic';
-  const isError = state === 'error';
-  const isRecording = state === 'recording' || state === 'requesting-mic';
-  const trimmedPartial = partialTranscript.trim();
+  // ── Per-state glow / border tint (verbatim from Pill.svelte) ──
+  const glow = isError
+    ? { border: '#ef4444', shadow: '0 0 0 1px rgba(239, 68, 68, 0.18), 0 16px 40px rgba(239, 68, 68, 0.22)' }
+    : isSuccess
+      ? { border: 'rgba(52, 211, 153, 0.34)', shadow: '0 0 0 1px rgba(52, 211, 153, 0.12), 0 10px 28px rgba(5, 150, 105, 0.14)' }
+      : isBusy
+        ? { border: 'rgba(196, 181, 253, 0.34)', shadow: '0 0 0 1px rgba(196, 181, 253, 0.08), 0 14px 30px rgba(177, 180, 229, 0.12)' }
+        : isRecording
+          ? { border: 'rgba(125, 211, 252, 0.40)', shadow: '0 0 0 1px rgba(125, 211, 252, 0.08), 0 16px 34px rgba(125, 211, 252, 0.10)' }
+          : { border: 'rgba(255, 255, 255, 0.34)', shadow: '0 16px 34px rgba(15, 23, 42, 0.18)' };
 
-  const dot = (
-    <span
-      aria-hidden
-      style={{
-        width: 10,
-        height: 10,
-        borderRadius: 9999,
-        background: dotColor,
-        boxShadow: pulseDot ? `0 0 0 0 ${dotColor}55` : 'none',
-        animation: pulseDot ? 'o8DictPulse 1.4s ease-out infinite' : 'none',
-        flexShrink: 0,
-      } as React.CSSProperties}
-    />
-  );
+  // Symon's glass — translucent white film + inset top highlight. Literal
+  // values preserved (documented temporary exception, see file header).
+  const glassBackground = isError
+    ? 'rgba(239, 68, 68, 0.08)'
+    : 'linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08)), var(--t-panel-solid, rgba(255,255,255,0.10))';
+
   const cancelButton = (
     <button
       type="button"
@@ -267,49 +382,83 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
         flexShrink: 0,
         padding: 0,
       }}
-      onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-hover)'; }}
+      onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(255,255,255,0.14)'; }}
       onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
     >
       <X size={12} />
     </button>
   );
 
-  // Layout per state.
-  // - recording: dot · waveform · partial-text (flex-1, scrolls right) · timer · ×
-  // - transcribing/polishing/success: dot · centered label · ×
-  // - error: dot · centered error message · ×
+  // ── Body per state ──
   let body: React.ReactNode;
   if (isRecording) {
+    // Recording: EQ wave canvas on the left, then either the live transcript
+    // tail (lead faded + fresh bright + blinking cursor — Symon's exact word
+    // split) or a "Listening…" placeholder, then the timer + cancel.
+    const tokens = trimmedPartial.split(/\s+/).filter(Boolean);
+    const recentCount = tokens.length > 6 ? 4 : Math.min(2, tokens.length);
+    const leadText = tokens.slice(0, Math.max(0, tokens.length - recentCount)).join(' ');
+    const freshText = tokens.slice(Math.max(0, tokens.length - recentCount)).join(' ');
     body = (
       <>
-        {dot}
-        <canvas
-          ref={canvasRef}
-          width={INNER_W}
-          height={INNER_H}
-          style={{ width: INNER_W, height: INNER_H, display: 'block', flexShrink: 0 }}
+        <SymonWaveCanvas
+          visible={visible}
+          speaking={speaking}
+          listening
+          levelRef={levelRef}
+          reducedRef={reducedRef}
         />
-        <span
+        <div
           style={{
             flex: 1,
             minWidth: 0,
-            fontSize: 12.5,
-            color: 'var(--t-text)',
-            letterSpacing: '-0.005em',
-            lineHeight: 1.35,
-            // Right-align text so newest words sit next to the timer
-            // (left-aligned would push the most recent words off-screen).
-            direction: 'ltr',
-            textAlign: 'left',
+            display: 'flex',
+            alignItems: 'center',
             overflow: 'hidden',
             whiteSpace: 'nowrap',
-            textOverflow: 'ellipsis',
-            opacity: trimmedPartial ? 1 : 0.45,
           }}
           title={trimmedPartial}
         >
-          {trimmedPartial || 'Listening…'}
-        </span>
+          {trimmedPartial ? (
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'baseline',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                fontSize: 12.5,
+                lineHeight: 1.3,
+                letterSpacing: '0.01em',
+                fontWeight: 500,
+                color: 'var(--t-text)',
+                direction: 'rtl', // keep the freshest words pinned in view
+              }}
+            >
+              <span style={{ direction: 'ltr', display: 'inline-flex', alignItems: 'baseline' }}>
+                {leadText && (
+                  <span style={{ opacity: 0.5, marginRight: 4 }}>{leadText}</span>
+                )}
+                <span style={{ opacity: 0.95 }}>{freshText}</span>
+                <span
+                  aria-hidden
+                  style={{
+                    display: 'inline-block',
+                    width: 1,
+                    height: 11,
+                    marginLeft: 3,
+                    alignSelf: 'center',
+                    background: 'var(--t-text)',
+                    animation: 'o8DictBlink 1s steps(2, start) infinite',
+                  }}
+                />
+              </span>
+            </span>
+          ) : (
+            <span style={{ fontSize: 12.5, color: 'var(--t-text-muted)', opacity: 0.7, letterSpacing: '0.01em' }}>
+              Listening…
+            </span>
+          )}
+        </div>
         <span
           style={{
             fontFamily: MONO_STACK,
@@ -324,28 +473,56 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
         {cancelButton}
       </>
     );
-  } else {
-    // Centered label for transcribing / polishing / success / error.
+  } else if (isBusy) {
+    // Transcribing / polishing: the squiggle loader + a soft label.
     body = (
       <>
-        {dot}
+        <SquiggleLoader label={label ?? 'Polishing'} />
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            textAlign: 'left',
+            fontSize: 12.5,
+            fontWeight: 500,
+            color: 'var(--t-text-muted)',
+            letterSpacing: '0.02em',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {label ?? ''}
+        </span>
+        {cancelButton}
+      </>
+    );
+  } else {
+    // Success / error: centered label.
+    body = (
+      <>
+        <span
+          aria-hidden
+          style={{
+            width: 10,
+            height: 10,
+            borderRadius: 9999,
+            background: isError ? '#ef4444' : 'rgba(52, 211, 153, 0.95)',
+            flexShrink: 0,
+          }}
+        />
         <span
           style={{
             flex: 1,
             minWidth: 0,
             textAlign: 'center',
             fontSize: isError ? 12 : 12.5,
-            fontWeight: isError ? 500 : 400,
+            fontWeight: isError ? 500 : 500,
             color: isError ? '#ef4444' : 'var(--t-text)',
             letterSpacing: '-0.005em',
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
-            // Compensate for the dot+button on the sides so the text
-            // visually centers on the pill axis (10 + 8 + 22 + 8 ≈ 48
-            // on the right; left has dot + 10 gap; pulling left by 12px
-            // balances).
-            paddingLeft: 0,
             paddingRight: 12,
           }}
           title={label ?? ''}
@@ -358,39 +535,51 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
   }
 
   const pillNode = (
-    <div
-      role="status"
-      aria-live="polite"
-      style={{
-        position: 'fixed',
-        left: anchor.left,
-        bottom: anchor.bottom,
-        width: pillWidth,
-        height: 58,
-        borderRadius: 29,
-        background: isError ? 'rgba(239, 68, 68, 0.08)' : 'var(--t-panel-solid, #ffffff)',
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: isError ? '#ef4444' : 'var(--t-border)',
-        boxShadow: isError ? '0 16px 40px rgba(239, 68, 68, 0.22)' : '0 16px 40px rgba(15, 23, 42, 0.18)',
-        paddingTop: 6,
-        paddingRight: 8,
-        paddingBottom: 6,
-        paddingLeft: 14,
-        backdropFilter: 'saturate(140%) blur(18px)',
-        WebkitBackdropFilter: 'saturate(140%) blur(18px)',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        fontFamily: JAKARTA_STACK,
-        zIndex: 2147483600,
-        userSelect: 'none',
-        transition: 'width 160ms cubic-bezier(0.22, 1, 0.36, 1)',
-      } as React.CSSProperties}
-    >
-      {body}
-      <style>{'@keyframes o8DictPulse { 0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.45);} 70% { box-shadow: 0 0 0 8px rgba(239,68,68,0);} 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0);} }'}</style>
-    </div>
+    <AnimatePresence>
+      {visible && anchor && (
+        <motion.div
+          role="status"
+          aria-live="polite"
+          initial={{ opacity: 0, y: 10, scale: 0.96 }}
+          animate={{ opacity: 1, y: isRecording || isBusy ? -2 : 0, scale: 1 }}
+          exit={{ opacity: 0, y: 8, scale: 0.97 }}
+          transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+          style={{
+            position: 'fixed',
+            left: anchor.left,
+            bottom: anchor.bottom,
+            width: pillWidth,
+            height: 58,
+            borderRadius: 29,
+            background: glassBackground,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: glow.border,
+            boxShadow: `inset 0 1px 0 rgba(255,255,255,0.28), ${glow.shadow}`,
+            paddingTop: 6,
+            paddingRight: 8,
+            paddingBottom: 6,
+            paddingLeft: 16,
+            backdropFilter: 'blur(18px) saturate(1.4)',
+            WebkitBackdropFilter: 'blur(18px) saturate(1.4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 12,
+            fontFamily: UI_FONT,
+            zIndex: 2147483600,
+            userSelect: 'none',
+            overflow: 'hidden',
+            transition: `width 160ms ${SYMON_EASE}, border-color 120ms ease, box-shadow 120ms ease`,
+          } as React.CSSProperties}
+        >
+          {body}
+          <style>{
+            '@keyframes o8DictBlink { 50% { opacity: 0; } }'
+            + ' @keyframes o8DictSquiggle { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -64; } }'
+          }</style>
+        </motion.div>
+      )}
+    </AnimatePresence>
   );
 
   return createPortal(pillNode, document.body);
