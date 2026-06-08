@@ -252,6 +252,7 @@ fn begin_system_dictation() {
     // Duck system audio so the mic hears over playing audio — including o8's
     // own TTS, so the user can talk back while it's still speaking (#1207).
     crate::audio_ducker::duck();
+    crate::sound::play_sound("Tink"); // start-listening cue (#1208)
     // Save the paste target BEFORE any focus could shift. Crucially this also
     // happens BEFORE the dock pill is ordered front — the dock window is
     // nonactivating so it shouldn't steal focus, but capturing the frontmost
@@ -347,6 +348,7 @@ fn morph_dock_idle() {
 fn end_system_dictation() {
     // Restore ducked volume the instant the user stops talking (#1207).
     crate::audio_ducker::restore();
+    crate::sound::play_sound("Pop"); // stop-listening cue (#1208)
     // Fence on the push-to-talk session so a release that raced a newer session
     // (e.g. a double-tap that already promoted to long-form) can't stop the
     // wrong one. For a normal hold this is just the active session.
@@ -380,6 +382,7 @@ fn discard_brush() {
 #[cfg(target_os = "macos")]
 fn begin_long_form_dictation() {
     crate::audio_ducker::duck();
+    crate::sound::play_sound("Tink");
     crate::paste::save_frontmost_app();
     set_system_origin(true);
 
@@ -429,6 +432,7 @@ fn begin_long_form_dictation() {
 #[cfg(target_os = "macos")]
 fn finish_long_form_dictation() {
     crate::audio_ducker::restore();
+    crate::sound::play_sound("Pop");
     // Fence on the long-form session so a finish that raced a brand-new
     // push-to-talk the user started right after can't stop the new session.
     let sid = LONG_FORM_SESSION_ID.swap(0, Ordering::SeqCst);
@@ -463,6 +467,7 @@ fn cancel_long_form_dictation() {
 #[cfg(target_os = "macos")]
 fn begin_ask_dictation() {
     crate::audio_ducker::duck();
+    crate::sound::play_sound("Tink");
     // Ask takes the mic: the three voice modes (push-to-talk, long-form, ask)
     // share ONE recognizer + active_session, so abandon any in-flight session
     // first. Clear the competing flags and discard the prior session's finalize
@@ -533,6 +538,7 @@ fn begin_ask_dictation() {
 #[cfg(target_os = "macos")]
 fn end_ask_dictation() {
     crate::audio_ducker::restore();
+    crate::sound::play_sound("Pop");
     let sid = ASK_SESSION_ID.swap(0, Ordering::SeqCst);
     if let Err(e) = crate::stt_engine::stop_session(sid) {
         tracing::warn!("[fn-hotkey] ask finish stop failed: {e}");

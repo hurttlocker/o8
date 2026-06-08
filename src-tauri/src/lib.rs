@@ -7,6 +7,7 @@ mod launch_updater;
 mod mac_perms;
 mod paste;
 mod sidecar_lifecycle;
+mod sound;
 #[cfg(target_os = "macos")]
 mod stt;
 #[cfg(target_os = "macos")]
@@ -2634,6 +2635,8 @@ mod stt_engine {
                     });
                     let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", pasted.clone());
                     let _ = app.emit("o8:stt-event", pasted);
+                    // Cue: paste landed (#1208).
+                    crate::sound::play_sound("Done");
                 }
             } else {
                 let _ = app.emit(
@@ -3174,6 +3177,9 @@ pub fn run() {
                     )
                     .try_init();
                 stt_engine::spawn(app.handle().clone());
+                // Boot the procedural sound-cue worker (#1208) — owns its own
+                // audio stream so cues never collide with TTS playback.
+                sound::spawn_worker();
                 // Let the off-thread TTS playback morph the screen dock while it speaks.
                 tts::set_app_handle(app.handle().clone());
 
