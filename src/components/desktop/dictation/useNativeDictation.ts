@@ -36,6 +36,7 @@ export function isNativeDictationAvailable(): boolean {
 interface SttEventPayload {
   type:
     | 'ready'
+    | 'system-start'
     | 'partial'
     | 'final'
     | 'level'
@@ -43,7 +44,18 @@ interface SttEventPayload {
     | 'status'
     | 'error'
     | 'complete'
-    | 'polished';
+    | 'polished'
+    | 'system-pasted';
+  /**
+   * Origin discriminator (system-wide Symon fold P3 review HIGH). `o8:stt-event`
+   * is broadcast to ALL windows; the SCREEN DOCK pill (`/dictation-pill`) owns
+   * `origin === 'system'` (global-Fn) sessions, and this in-window hook owns
+   * `in-window` (mic-button) sessions. We explicitly drop system-origin events
+   * so a global-Fn dictation never bleeds into the composer pill — even though
+   * `start()` gating already makes it inert, this is the belt-and-suspenders
+   * guard the review asked for.
+   */
+  origin?: 'system' | 'in-window';
   sessionId?: number;
   text?: string;
   level?: number;
@@ -90,6 +102,12 @@ export function useNativeDictation() {
   }, [returnToIdleAfter]);
 
   const handleEvent = useCallback((payload: SttEventPayload) => {
+    // Origin discriminator: the in-window pill never reacts to system (global-Fn)
+    // dictation — that surface is owned by the screen dock window. `system-pasted`
+    // is system by construction. See SttEventPayload.origin.
+    if (payload.origin === 'system' || payload.type === 'system-pasted' || payload.type === 'system-start') {
+      return;
+    }
     // Only react to events for the active session (rapid-tap safety).
     if (
       payload.sessionId !== undefined
