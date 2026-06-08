@@ -2464,6 +2464,35 @@ mod stt_engine {
                     _ => (apple_text.clone(), false),
                 };
 
+            // ── Voice commands (system-Fn path ONLY) ──
+            // Deterministic command phrases at the END of the transcript, run on
+            // the RAW text BEFORE polish (zero-latency, no LLM). "scratch that" /
+            // "cancel" / "never mind" discard the whole dictation; "remove that" /
+            // "undo" strips the last word; "new line" / "new paragraph" insert
+            // breaks. Gated to origin==system: the in-window composer path has its
+            // own TS processor (`voice-commands.ts`), so we must NOT double-process
+            // it. `is_system_origin()` is always false off the macOS system path.
+            let raw_text = if crate::fn_hotkey::is_system_origin() {
+                match crate::stt::commands::process(&raw_text) {
+                    crate::stt::commands::CommandResult::Text(t) => t,
+                    crate::stt::commands::CommandResult::Cancel => {
+                        // Cancelled — clear origin + morph the dock back to idle,
+                        // no paste, no composer emit.
+                        crate::fn_hotkey::set_system_origin(false);
+                        let _ = std::fs::remove_file(&audio_file);
+                        #[cfg(target_os = "macos")]
+                        {
+                            let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
+                            let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+                            let _ = app.emit("o8:stt-event", idle);
+                        }
+                        return;
+                    }
+                }
+            } else {
+                raw_text
+            };
+
             // Read the recorded WAV so Gemini can hear what was actually said.
             let audio_wav = std::fs::read(&audio_file).ok();
 
