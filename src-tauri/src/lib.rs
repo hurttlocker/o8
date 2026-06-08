@@ -2276,6 +2276,11 @@ mod stt_engine {
 
     /// Per-process monotonically increasing session id, handed to the Swift
     /// helper so its rapid-tap fencing can discard stale sessions.
+    ///
+    /// MUST stay strictly monotonic and never reuse ids: `stop_session`'s
+    /// id-fence (and the voice P3 long-form brush/finish/cancel races it closes)
+    /// rely on `active_session()` only ever advancing, so a stale stop no-ops.
+    /// Wrapping or resetting this would silently break every fence.
     fn next_session_id() -> u64 {
         static SEQ: AtomicU64 = AtomicU64::new(1);
         SEQ.fetch_add(1, Ordering::SeqCst)
@@ -2422,6 +2427,18 @@ mod stt_engine {
     /// fall back to Apple's transcript so the user always gets text.
     fn run_finalize(app: AppHandle, session_id: u64, audio_file: String) {
         std::thread::spawn(move || {
+            // Long-form Escape-cancel: drop THIS session's finalize entirely — no
+            // Whisper, no polish, no paste, no composer emit. Matched by session id
+            // so a concurrent (non-cancelled) finalize can't eat the discard. The
+            // cancel path already cleared the origin + morphed the dock to idle;
+            // just clear the stashed final + temp WAV and bail.
+            #[cfg(target_os = "macos")]
+            if crate::fn_hotkey::take_discard_finalize(session_id) {
+                let _ = take_final(session_id);
+                let _ = std::fs::remove_file(&audio_file);
+                return;
+            }
+
             let apple_text = take_final(session_id).unwrap_or_default();
 
             // Whisper re-transcribes the recorded WAV BEFORE polish; on
@@ -2475,6 +2492,20 @@ mod stt_engine {
             } else {
                 raw_text.clone()
             };
+
+            // Diagnostic: WHERE does emptiness enter the pipeline? Lengths only
+            // (never the text — privacy). apple = Apple SFSpeech final, raw =
+            // post-Whisper, polished = post-Gemini. Empty `polished` with a
+            // non-empty `raw` means polish ate it (Gemini key/failure); empty
+            // `apple` AND `raw` means STT produced nothing at all (Microphone /
+            // Speech-Recognition permission, not Accessibility).
+            log::info!(
+                "[stt] finalize lengths: apple={} raw={} whisper_used={} polished={}",
+                apple_text.chars().count(),
+                raw_text.chars().count(),
+                whisper_used,
+                polished.chars().count()
+            );
 
             // Best-effort cleanup of the temp WAV.
             let _ = std::fs::remove_file(&audio_file);
@@ -2563,6 +2594,26 @@ mod stt_engine {
             .lock()
             .map_err(|_| "STT recognizer unavailable".to_string())?;
         guard.stop(sid);
+        Ok(())
+    }
+
+    /// Stop a SPECIFIC dictation session — no-op if a newer session has already
+    /// superseded it (`active_session() != expected`). This fences the teardown
+    /// so a late stop (a long-form finish, or a brush teardown that raced a
+    /// long-form start) can never kill a session the user started afterwards.
+    /// `expected == 0` ("unknown") is always a no-op. (Voice P3 long-form.)
+    pub fn stop_session(expected: u64) -> Result<(), String> {
+        if expected == 0 || active_session().load(Ordering::SeqCst) != expected {
+            return Ok(());
+        }
+        let mut guard = recognizer()
+            .lock()
+            .map_err(|_| "STT recognizer unavailable".to_string())?;
+        // Re-check under the lock: a session could have superseded between the
+        // unlocked check above and acquiring the recognizer.
+        if active_session().load(Ordering::SeqCst) == expected {
+            guard.stop(expected);
+        }
         Ok(())
     }
 
