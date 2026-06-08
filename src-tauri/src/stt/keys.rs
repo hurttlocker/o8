@@ -77,3 +77,24 @@ pub fn get_openrouter_key() -> Option<String> {
         .filter(|s| !s.is_empty())
         .or_else(|| config_string("openrouter_api_key"))
 }
+
+/// Resolve the ElevenLabs API key for premium read-aloud / Ask voices (voice P4
+/// TTS). Env-first (`ELEVENLABS_API_KEY`), then `~/.o8/dictation.json`. UN-GATED
+/// — the key's PRESENCE is the de-facto premium gate (no proxy, no license).
+pub fn get_elevenlabs_key() -> Option<String> {
+    std::env::var("ELEVENLABS_API_KEY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| config_string("elevenlabs_api_key"))
+}
+
+/// Resolve the Google Cloud TTS API key (voice P4 TTS, direct — no proxy).
+/// Env-first (`GOOGLE_TTS_API_KEY`), then `~/.o8/dictation.json`.
+pub fn get_google_tts_key() -> Option<String> {
+    std::env::var("GOOGLE_TTS_API_KEY")
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .or_else(|| config_string("google_tts_api_key"))
+}

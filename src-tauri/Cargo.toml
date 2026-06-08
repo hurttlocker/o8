@@ -44,6 +44,16 @@ tauri-plugin-autostart = "2"
 # dictation, ⌘⇧, open-settings). The Fn / double-tap-Fn gestures stay on the raw
 # CGEventTap in fn_hotkey.rs (modifier-only gestures the plugin can't bind).
 tauri-plugin-global-shortcut = "2"
+# Voice P4 TTS: native audio playback for read-aloud / "say" / spoken Ask
+# answers (ElevenLabs + Google direct → MP3 → rodio). Pinned to 0.19 to match
+# aqua's stack — rodio 0.20+ changed the OutputStream/Sink/Decoder APIs the
+# lifted playback code uses.
+rodio = "0.19"
+# Already in the lock graph transitively (Tauri's async runtime). Promoted to a
+# direct dep so the TTS playback thread can build its own current-thread runtime
+# for async reqwest synth before handing MP3 bytes to !Send rodio. Zero binary
+# cost; features unify with Tauri's.
+tokio = { version = "1", features = ["rt", "net", "time"] }
 # Optional: see [features].dev-mcp-plugin above. Relative path so clones can
 # opt in by placing the plugin repo next to cortex-ide.
 tauri-plugin-mcp = { path = "../../tauri-plugin-mcp", optional = true }
