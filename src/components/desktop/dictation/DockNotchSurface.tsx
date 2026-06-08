@@ -229,8 +229,72 @@ function NotchSquiggle() {
   );
 }
 
+/** A small circular control button in the speaking capsule (raw SVG icon —
+ * React icon components don't render in the Tauri webview). */
+function NotchControlButton({ label, onClick, children }: {
+  label: string;
+  onClick: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        width: 26,
+        height: 26,
+        borderRadius: '50%',
+        background: 'rgba(255, 255, 255, 0.16)',
+        border: '1px solid rgba(255, 255, 255, 0.26)',
+        color: '#fff',
+        cursor: 'pointer',
+        flexShrink: 0,
+        padding: 0,
+        WebkitBackdropFilter: 'blur(4px)',
+        backdropFilter: 'blur(4px)',
+        transition: 'background 140ms ease, transform 120ms ease',
+      } as React.CSSProperties}
+    >
+      {children}
+    </button>
+  );
+}
+
+/** Play / pause / stop glyphs — raw SVG, 13px, currentColor. */
+function PlayGlyph() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M6.5 4.2a1 1 0 0 1 1.5-.87l8.5 4.93a1 1 0 0 1 0 1.73l-8.5 4.94A1 1 0 0 1 6.5 14.06V4.2Z" fill="currentColor" />
+    </svg>
+  );
+}
+function PauseGlyph() {
+  return (
+    <svg width="13" height="13" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="5" y="4" width="3.4" height="12" rx="1.2" fill="currentColor" />
+      <rect x="11.6" y="4" width="3.4" height="12" rx="1.2" fill="currentColor" />
+    </svg>
+  );
+}
+function StopGlyph() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="5" y="5" width="10" height="10" rx="2.4" fill="currentColor" />
+    </svg>
+  );
+}
+
 interface DockNotchSurfaceProps {
   snapshot: DictationSnapshot;
+  /** TTS playback state — when playing/paused (and not dictating), the dock
+   * morphs into the speaking capsule with play/pause + stop controls. */
+  ttsState?: 'idle' | 'playing' | 'paused';
+  onTogglePause?: () => void;
+  onStop?: () => void;
 }
 
 /**
@@ -239,9 +303,16 @@ interface DockNotchSurfaceProps {
  * One `.ndock` element. Its geometry/background animate per state via the
  * Symon spring; the content inside swaps. idle ⇄ listening ⇄ thinking ⇄ done.
  */
-export function DockNotchSurface({ snapshot }: DockNotchSurfaceProps) {
+export function DockNotchSurface({ snapshot, ttsState = 'idle', onTogglePause, onStop }: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
-  const mode = modeFor(state);
+  const dictationMode = modeFor(state);
+  // The speaking capsule shows whenever TTS is playing/paused. It WINS over the
+  // dictation morph: the TTS engine also emits `system-start` (which drives the
+  // dictation 'recording' waveform) so without this override the controls would
+  // be masked by the waveform during playback. Real dictation and TTS don't
+  // overlap in practice, so letting speaking win is safe.
+  const isSpeaking = ttsState === 'playing' || ttsState === 'paused';
+  const mode = dictationMode;
   const isError = state === 'error';
 
   // Live ref for the canvas RAF loop (avoid re-running the effect per frame).
@@ -253,6 +324,17 @@ export function DockNotchSurface({ snapshot }: DockNotchSurfaceProps) {
   // ── Per-mode geometry (verbatim Symon NotchSurface dimensions) ──
   // idle: 128×16 sliver. listening/thinking: 248×40 capsule. done: 420×44 wide.
   const geometry: React.CSSProperties = (() => {
+    if (isSpeaking) {
+      // Speaking capsule — the darkened brand surface with the controls.
+      return {
+        width: 196,
+        height: 40,
+        borderRadius: '0 0 20px 20px',
+        background: SYMON_CAPSULE_BG,
+        borderColor: 'rgba(255, 255, 255, 0.4)',
+        boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
+      } as React.CSSProperties;
+    }
     if (mode === 'idle') {
       return {
         width: 128,
@@ -303,7 +385,44 @@ export function DockNotchSurface({ snapshot }: DockNotchSurfaceProps) {
 
   // ── Inner content per mode ──
   let body: React.ReactNode = null;
-  if (mode === 'listening') {
+  if (isSpeaking) {
+    const playing = ttsState === 'playing';
+    body = (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 9,
+          width: '100%',
+          height: '100%',
+          paddingLeft: 14,
+          paddingRight: 14,
+          overflow: 'hidden',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 9.5,
+            fontWeight: 260,
+            letterSpacing: '0.4px',
+            textTransform: 'uppercase',
+            color: 'rgba(255, 255, 255, 0.82)',
+            textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {playing ? 'Speaking' : 'Paused'}
+        </span>
+        <NotchControlButton label={playing ? 'Pause' : 'Resume'} onClick={() => onTogglePause?.()}>
+          {playing ? <PauseGlyph /> : <PlayGlyph />}
+        </NotchControlButton>
+        <NotchControlButton label="Stop" onClick={() => onStop?.()}>
+          <StopGlyph />
+        </NotchControlButton>
+      </div>
+    );
+  } else if (mode === 'listening') {
     body = (
       <div
         style={{
