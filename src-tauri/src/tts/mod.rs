@@ -12,6 +12,29 @@ pub mod google;
 pub mod native_say;
 pub mod playback;
 
+use std::sync::OnceLock;
+
+/// App handle stored at setup() so the off-thread playback can morph the screen
+/// dock while TTS plays (so it shows activity instead of sitting idle).
+static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
+
+/// Store the app handle once (called from setup, after the dock window exists).
+pub fn set_app_handle(handle: tauri::AppHandle) {
+    let _ = APP_HANDLE.set(handle);
+}
+
+/// Emit an `o8:stt-event` to the screen dock so it morphs while TTS plays.
+/// Direct `emit_to(DOCK_LABEL)` (the reliable path) + broadcast. Thread-safe —
+/// Tauri events can be emitted from any thread.
+pub(crate) fn emit_dock(event_type: &str) {
+    use tauri::Emitter;
+    if let Some(app) = APP_HANDLE.get() {
+        let payload = serde_json::json!({ "type": event_type, "origin": "system" });
+        let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", payload.clone());
+        let _ = app.emit("o8:stt-event", payload);
+    }
+}
+
 /// The two shipping providers. (Edge → remapped to Google in aqua, Native is a
 /// perpetual stub — both omitted. `say` is the fallback, not a provider.)
 pub enum TtsProvider {
