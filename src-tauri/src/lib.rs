@@ -2495,8 +2495,11 @@ mod stt_engine {
                 // session, then paste into whatever app the user is focused on.
                 crate::fn_hotkey::set_system_origin(false);
                 crate::paste::paste_text(&polished);
-                // Silent/dock-only signal so a future dock pill can show "done"
-                // without the in-window DictationHost treating it as composer text.
+                // Silent/dock-only signal so the always-on dock pill flashes
+                // "Pasted" without the in-window DictationHost treating it as
+                // composer text. The dock is ALWAYS-ON: it MORPHS (success flash
+                // → idle capsule) in place — we do NOT hide it. The /dictation-pill
+                // route returns to the idle capsule on its own after SUCCESS_FLASH_MS.
                 let _ = app.emit(
                     "o8:stt-event",
                     serde_json::json!({
@@ -2506,20 +2509,6 @@ mod stt_engine {
                         "chars": polished.chars().count(),
                     }),
                 );
-                // Hide the dock pill after the React "Pasted" flash plays out
-                // (SUCCESS_FLASH_MS = 900ms in /dictation-pill). A slightly
-                // longer delay lets the flash + exit animation finish before the
-                // window is ordered out. We're already on a finalize worker
-                // thread, so a blocking sleep here is fine.
-                {
-                    let app_hide = app.clone();
-                    std::thread::spawn(move || {
-                        std::thread::sleep(std::time::Duration::from_millis(1100));
-                        let app_main = app_hide.clone();
-                        let _ = app_hide
-                            .run_on_main_thread(move || dock_window::hide(&app_main));
-                    });
-                }
             } else {
                 let _ = app.emit(
                     "o8:stt-event",
@@ -2605,9 +2594,11 @@ fn o8_debug_paste(text: String) {
     paste::paste_text(&text);
 }
 
-/// TEMP/debug: pop the screen dock pill in a sample "listening" state so the
-/// dock can be screenshotted without a live Fn dictation (which needs TCC perms
-/// + a physical Fn press). Not wired to any UI. macOS only.
+/// TEMP/debug: morph the always-on screen dock pill into a sample "listening"
+/// state so the dock can be screenshotted without a live Fn dictation (which
+/// needs TCC perms + a physical Fn press). The dock window is created visible at
+/// boot (idle capsule); this just re-asserts it + emits demo events to morph it
+/// to recording. Not wired to any UI. macOS only.
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn o8_debug_show_dock(app: tauri::AppHandle) {

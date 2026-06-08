@@ -45,6 +45,13 @@ const DOCK_TOP_INSET: f64 = 6.0;
 /// Next server, then apply the macOS transparency + level + anchor recipe.
 /// Idempotent: a second call is a no-op if the window already exists.
 ///
+/// ALWAYS-ON: the window is built `.visible(true)` and shown persistently at
+/// boot (ordered front nonactivating) so the Symon idle capsule paints at the
+/// top of the screen from launch — it never starts hidden. The `/dictation-pill`
+/// route always paints at least the idle capsule (`persistentIdle`), and the
+/// system Fn path MORPHS it (idle → recording → polishing → success → idle)
+/// rather than showing/hiding the window.
+///
 /// Call this from `setup()` AFTER the bundled Next server is confirmed up
 /// (mirrors the main → /dashboard loader pattern). `api_port` is the resolved
 /// Next port written to ~/.o8/api-port.
@@ -76,7 +83,10 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
         .skip_taskbar(true)
         // Nonactivating: do NOT make the window key/focused when it appears.
         .focused(false)
-        .visible(false)
+        // ALWAYS-ON: created visible so the idle capsule paints from boot. The
+        // underlying app keeps focus — we never make this window key (see
+        // order_front_nonactivating below).
+        .visible(true)
         // OS-level drag-drop bridge is main-only; the dock takes no drops.
         // dragDropEnabled:false on this window.
         .disable_drag_drop_handler()
@@ -95,12 +105,21 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
     // Keep the cursor dead-zone tight in the React layer, not by globally
     // ignoring cursor events on the Rust side (matches Symon's pill).
     let _ = window.set_ignore_cursor_events(false);
-    log::info!("[dock-window] dock pill window created → {url}");
+    // ALWAYS-ON: order it front WITHOUT making it key so the idle capsule is on
+    // screen from boot. The window was built `.visible(true)`, but on some Tauri
+    // versions a borderless transparent window built shown still needs an
+    // explicit nonactivating order-front to actually display — and the app the
+    // user is in keeps focus (we never call makeKeyAndOrderFront).
+    order_front_nonactivating(&window);
+    log::info!("[dock-window] dock pill window created (always-on) → {url}");
 }
 
-/// Show the dock pill for a SYSTEM (global-Fn) dictation. Re-anchors first (the
-/// active monitor may have changed since last show), then orders it front
-/// WITHOUT making it key — the app the user is dictating into keeps focus.
+/// Re-assert the always-on dock pill. The window is created visible at boot and
+/// stays up, so this is no longer a "show from hidden" — it re-anchors (the
+/// active monitor may have changed), re-applies the recipe, and re-orders it
+/// front WITHOUT making it key, so the app the user is dictating into keeps
+/// focus. Safe to call on system Fn-down (belt-and-suspenders re-assert) and
+/// from `o8_debug_show_dock`.
 #[cfg(target_os = "macos")]
 pub fn show(app: &tauri::AppHandle) {
     use tauri::Manager;
@@ -112,9 +131,12 @@ pub fn show(app: &tauri::AppHandle) {
     order_front_nonactivating(&window);
 }
 
-/// Hide the dock pill after the system paste lands (the React layer flashes
-/// "Pasted" first; Rust hides on a short delay). No-op if missing.
+/// Hide the dock pill. NOT called on the normal dictation flow anymore — the
+/// dock is ALWAYS-ON and morphs idle ↔ recording ↔ success in place rather than
+/// hiding. Retained for future use (e.g. an explicit "hide dock" toggle). No-op
+/// if missing.
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // always-on dock: retained for a future explicit hide toggle.
 pub fn hide(app: &tauri::AppHandle) {
     use tauri::Manager;
     if let Some(window) = app.get_webview_window(DOCK_LABEL) {

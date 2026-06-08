@@ -20,9 +20,11 @@
  *      `DictationPillView`, CENTERED in the window (the WINDOW provides the
  *      position — no `createPortal`, no fixed-bottom anchor).
  *
- * The window is shown by Rust on system Fn-down (`system-start` event) and
- * hidden by Rust after the success flash; this route just paints whatever the
- * stream says. Idle → the pill animates out (the window may already be hidden).
+ * The dock window is ALWAYS-ON: Rust creates it visible at boot and never hides
+ * it on the normal flow. This route therefore ALWAYS paints — at minimum the
+ * compact Symon idle capsule (`persistentIdle`) — and MORPHS idle → recording
+ * (`system-start`) → polishing → success → idle. A discarded Fn brush or a
+ * start error emits `system-idle` to morph back to the idle capsule.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -47,6 +49,7 @@ interface SttEventPayload {
   type:
     | 'ready'
     | 'system-start'
+    | 'system-idle'
     | 'partial'
     | 'final'
     | 'level'
@@ -110,6 +113,16 @@ export default function DictationPillPage() {
     switch (payload.type) {
       case 'system-start':
         beginRecording();
+        break;
+      case 'system-idle':
+        // Brush discarded / start error — morph the always-on dock back to its
+        // idle capsule (the window is never hidden). Clear any pending flash.
+        if (flashTimerRef.current) {
+          clearTimeout(flashTimerRef.current);
+          flashTimerRef.current = null;
+        }
+        stateRef.current = 'idle';
+        setSnapshot(IDLE_SNAPSHOT);
         break;
       case 'ready':
         // Fn-down can race the daemon's `ready`; treat it as a start signal if
@@ -222,7 +235,7 @@ export default function DictationPillPage() {
       }}
     >
       <div style={{ pointerEvents: 'auto' }}>
-        <DictationPillView snapshot={snapshot} onCancel={() => {}} hideCancel />
+        <DictationPillView snapshot={snapshot} onCancel={() => {}} hideCancel persistentIdle />
       </div>
     </div>
   );
