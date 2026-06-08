@@ -665,9 +665,32 @@ func requestAuthorization(completion: @escaping (Bool) -> Void) {
         emit("status", "speech_recognition:restricted")
         completion(true)
     case .notDetermined:
-        appleSpeechRecognitionEnabled = false
-        emit("status", "speech_recognition:not_determined")
-        completion(true)
+        // Brand-new app identity (o8 has NEVER been granted, unlike the legacy
+        // Symon bundle whose status is already .authorized): actually PROMPT for
+        // Speech Recognition. The prior report-only branch left a fresh install
+        // permanently notDetermined → appleSpeechRecognitionEnabled stayed false →
+        // startRecognitionSession early-returned → EMPTY transcripts (apple=0).
+        // This is SAFE to call here: the helper embeds NSSpeechRecognitionUsage-
+        // Description in its OWN __info_plist section (build.rs -sectcreate) and
+        // runs a main run loop, so the standard Apple API neither crashes (the
+        // "bare dev sidecar" crash needed a missing usage string) nor no-ops.
+        emit("status", "speech_recognition:requesting")
+        SFSpeechRecognizer.requestAuthorization { newStatus in
+            DispatchQueue.main.async {
+                switch newStatus {
+                case .authorized:
+                    appleSpeechRecognitionEnabled = true
+                    emit("status", "speech_recognition:authorized")
+                case .denied:
+                    emit("status", "speech_recognition:denied")
+                default:
+                    emit("status", "speech_recognition:restricted")
+                }
+                // Proceed regardless — even with speech denied the audio engine
+                // still records the WAV for the Whisper finalize fallback path.
+                completion(true)
+            }
+        }
     @unknown default:
         appleSpeechRecognitionEnabled = false
         emit("status", "speech_recognition:restricted")
