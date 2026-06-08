@@ -85,6 +85,8 @@ pub mod commands {
         Text(String),
         /// User cancelled dictation — don't paste anything.
         Cancel,
+        /// Read-aloud directive ("say <text>") — speak the text, don't paste it.
+        Speak(String),
     }
 
     /// Process voice commands at the END of a transcript (ported from aqua/Symon
@@ -103,6 +105,13 @@ pub mod commands {
         }
 
         let lower = trimmed.to_lowercase();
+
+        // Read-aloud directive — a "say <text>" LEADS the utterance (unlike the
+        // trailing cancel/remove commands), so check it FIRST so "say cancel"
+        // speaks "cancel" rather than cancelling. Net-new grammar (not in Symon).
+        if lower.starts_with("say ") {
+            return CommandResult::Speak(trimmed[4..].trim().to_string());
+        }
 
         // Full cancellation — any of these at the end cancels the paste.
         for cancel_cmd in &["scratch that", "cancel", "never mind", "nevermind"] {
