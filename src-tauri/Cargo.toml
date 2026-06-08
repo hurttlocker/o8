@@ -36,6 +36,10 @@ tauri-plugin-process = "2"
 tauri-plugin-notification = "2"
 tauri-plugin-store = "2"
 tauri-plugin-window-state = "2"
+# Phase 4 (background presence): launch-at-login. Default ON so the pill + Fn
+# hotkey work without opening o8. Plugin manipulated only from Rust via the
+# `background` module's commands — no JS-side autostart capability needed.
+tauri-plugin-autostart = "2"
 # Optional: see [features].dev-mcp-plugin above. Relative path so clones can
 # opt in by placing the plugin repo next to cortex-ide.
 tauri-plugin-mcp = { path = "../../tauri-plugin-mcp", optional = true }

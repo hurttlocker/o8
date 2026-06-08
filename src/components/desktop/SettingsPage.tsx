@@ -34,6 +34,7 @@ import {
   InfoIcon,
   SlidersIcon,
   CreditCardIcon,
+  MicIcon,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './settings/shared';
 import { GitHubTab } from './settings/GitHubTab';
@@ -45,6 +46,7 @@ import { ProjectsPanel } from './settings/ProjectsPanel';
 import { WorkersTab } from './settings/WorkersTab';
 import { CloudWorkersTab } from './settings/CloudWorkersTab';
 import { AppearanceTab } from './settings/AppearanceTab';
+import { VoiceTab } from './settings/VoiceTab';
 import { BillingTab } from './settings/BillingTab';
 import { DiagnosticsTab } from './settings/DiagnosticsTab';
 import { AboutTab } from './settings/AboutTab';
@@ -349,6 +351,7 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
 
         <SectionHeader>Presentation</SectionHeader>
         <TabButton label="Appearance" icon={<PaletteIcon />} active={activeTab === 'appearance'} onClick={() => setActiveTab('appearance')} />
+        <TabButton label="Voice" icon={<MicIcon />} active={activeTab === 'voice'} onClick={() => setActiveTab('voice')} />
 
         <SectionHeader>System</SectionHeader>
         <TabButton label="Plan & Billing" icon={<CreditCardIcon />} active={activeTab === 'billing'} onClick={() => setActiveTab('billing')} />
@@ -421,6 +424,9 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         )}
         {activeTab === 'appearance' && (
           <AppearanceTab />
+        )}
+        {activeTab === 'voice' && (
+          <VoiceTab />
         )}
         {activeTab === 'billing' && (
           <BillingTab />
