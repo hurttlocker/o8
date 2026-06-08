@@ -23,6 +23,12 @@ pub fn set_app_handle(handle: tauri::AppHandle) {
     let _ = APP_HANDLE.set(handle);
 }
 
+/// The stored app handle, if setup has run. Used by `playback` to emit
+/// `o8:tts-state` for the play/stop control surfaces.
+pub(crate) fn app_handle() -> Option<&'static tauri::AppHandle> {
+    APP_HANDLE.get()
+}
+
 /// Emit an `o8:stt-event` to the screen dock so it morphs while TTS plays.
 /// Direct `emit_to(DOCK_LABEL)` (the reliable path) + broadcast. Thread-safe —
 /// Tauri events can be emitted from any thread.

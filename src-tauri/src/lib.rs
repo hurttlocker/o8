@@ -2739,6 +2739,30 @@ fn tts_speak(text: String) {
     tts::playback::play_thread(text, tts::load_config());
 }
 
+/// Stop any active TTS playback immediately (the "say"/Ask voice). Single-flight
+/// stop — safe no-op when nothing is speaking. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn tts_stop() {
+    tts::playback::stop();
+}
+
+/// Toggle pause/resume on the active TTS playback. Returns the resulting paused
+/// state (`true` = now paused). macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn tts_toggle_pause() -> bool {
+    tts::playback::toggle_pause()
+}
+
+/// Whether TTS is currently speaking — lets the UI render the right play/stop
+/// control on mount. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn tts_is_active() -> bool {
+    tts::playback::is_active()
+}
+
 /// Ask Gemini `question` on a dedicated OS thread, emit the answer to the webview
 /// (`o8:ask-answer` / `o8:ask-error`), and SPEAK it through the TTS engine.
 /// Shared by the `ask_question` command (text) and the Right-Option voice path
@@ -3004,6 +3028,9 @@ pub fn run() {
             o8_stt_locale,
             #[cfg(target_os = "macos")]
             tts_speak,
+            tts_stop,
+            tts_toggle_pause,
+            tts_is_active,
             #[cfg(target_os = "macos")]
             ask_question,
             #[cfg(target_os = "macos")]
@@ -3214,6 +3241,14 @@ pub fn run() {
                         let h_speak = app.handle().clone();
                         if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
                             if event.state != ShortcutState::Pressed {
+                                return;
+                            }
+                            // ⌘⇧S is a toggle: if TTS is already speaking, this
+                            // press STOPS it instead of starting a second read.
+                            // This is the primary keyboard stop AND prevents the
+                            // re-trigger-stacking that forced a hard kill before.
+                            if crate::tts::playback::is_active() {
+                                std::thread::spawn(crate::tts::playback::stop);
                                 return;
                             }
                             // o8's own webview doesn't expose its text selection via
