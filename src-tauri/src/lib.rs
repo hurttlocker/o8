@@ -2489,22 +2489,35 @@ mod stt_engine {
                 // Clear the flag first so a daemon hiccup can't re-paste a stale
                 // session, then paste into whatever app the user is focused on.
                 crate::fn_hotkey::set_system_origin(false);
-                crate::paste::paste_text(&polished);
-                // Silent/dock-only signal so the always-on dock pill flashes
-                // "Pasted" without the in-window DictationHost treating it as
-                // composer text. The dock is ALWAYS-ON: it MORPHS (success flash
-                // → idle capsule) in place — we do NOT hide it. The /dictation-pill
-                // route returns to the idle capsule on its own after SUCCESS_FLASH_MS.
-                // Emit DIRECTLY to the dock (emit_to DOCK_LABEL) so the flash always
-                // lands, plus the broadcast for any other listeners.
-                let pasted = serde_json::json!({
-                    "type": "system-pasted",
-                    "origin": "system",
-                    "sessionId": session_id,
-                    "chars": polished.chars().count(),
-                });
-                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", pasted.clone());
-                let _ = app.emit("o8:stt-event", pasted);
+                if polished.trim().is_empty() {
+                    // Nothing transcribed (silence / STT miss) — morph the
+                    // always-on dock back to its idle capsule rather than flash a
+                    // false "Pasted". Symon parity: never claim a paste it didn't
+                    // make. emit_to(DOCK_LABEL) + broadcast (same reliable path).
+                    let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
+                    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+                    let _ = app.emit("o8:stt-event", idle);
+                } else {
+                    crate::paste::paste_text(&polished);
+                    // Dock-only success signal carrying the ACTUAL pasted words so
+                    // the notch dock shows the text (Symon parity), not a generic
+                    // "Pasted". The in-window DictationHost ignores system-origin,
+                    // so this never double-fires into the composer. The dock is
+                    // ALWAYS-ON: it MORPHS (success flash → idle capsule) in place;
+                    // the /dictation-pill route collapses to idle after
+                    // SUCCESS_FLASH_MS. Emit DIRECTLY to the dock (emit_to
+                    // DOCK_LABEL) so the flash always lands, plus the broadcast.
+                    let char_count = polished.chars().count();
+                    let pasted = serde_json::json!({
+                        "type": "system-pasted",
+                        "origin": "system",
+                        "sessionId": session_id,
+                        "text": polished,
+                        "chars": char_count,
+                    });
+                    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", pasted.clone());
+                    let _ = app.emit("o8:stt-event", pasted);
+                }
             } else {
                 let _ = app.emit(
                     "o8:stt-event",
