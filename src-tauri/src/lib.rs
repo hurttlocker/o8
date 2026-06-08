@@ -10,6 +10,8 @@ mod sidecar_lifecycle;
 mod stt;
 #[cfg(target_os = "macos")]
 mod tts;
+#[cfg(target_os = "macos")]
+mod ai;
 mod webview_latch;
 
 use rusqlite::{Connection, OpenFlags};
@@ -2706,6 +2708,45 @@ fn tts_speak(text: String) {
     tts::playback::play_thread(text, tts::load_config());
 }
 
+/// Ask o8 a question (voice P4 phase C): query Gemini DIRECT, emit the answer
+/// to the webview (`o8:ask-answer`), and SPEAK it through the TTS engine.
+/// Fire-and-forget on a dedicated OS thread (async reqwest + then !Send rodio).
+/// macOS only. Gemini only — NEVER Anthropic.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn ask_question(app: tauri::AppHandle, text: String) {
+    use tauri::Emitter;
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(e) => {
+                log::error!("[ask] failed to build runtime: {e}");
+                return;
+            }
+        };
+        log::info!("[ask] question: {} chars", text.len());
+        match rt.block_on(async { ai::gemini_ask::ask(&text, None).await }) {
+            Ok(answer) => {
+                log::info!("[ask] answer: {} chars", answer.len());
+                let _ = app.emit_to(
+                    "main",
+                    "o8:ask-answer",
+                    serde_json::json!({ "question": text, "answer": answer }),
+                );
+                // Speak the answer through the TTS engine (spawns its own thread).
+                tts::playback::play_thread(answer, tts::load_config());
+            }
+            Err(e) => {
+                log::warn!("[ask] failed: {e}");
+                let _ = app.emit_to("main", "o8:ask-error", serde_json::json!({ "message": e }));
+            }
+        }
+    });
+}
+
 /// TEMPORARY debug command (system-wide Symon fold P1): paste `text` into the
 /// currently-focused 3rd-party app, so paste-into-frontmost is verifiable
 /// without the global Fn hotkey. macOS only.
@@ -2921,6 +2962,8 @@ pub fn run() {
             o8_stt_locale,
             #[cfg(target_os = "macos")]
             tts_speak,
+            #[cfg(target_os = "macos")]
+            ask_question,
             #[cfg(target_os = "macos")]
             o8_debug_paste,
             #[cfg(target_os = "macos")]
