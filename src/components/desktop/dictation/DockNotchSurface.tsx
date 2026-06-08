@@ -240,7 +240,7 @@ interface DockNotchSurfaceProps {
  * Symon spring; the content inside swaps. idle ⇄ listening ⇄ thinking ⇄ done.
  */
 export function DockNotchSurface({ snapshot }: DockNotchSurfaceProps) {
-  const { state, audioLevel, partialTranscript, error } = snapshot;
+  const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
   const mode = modeFor(state);
   const isError = state === 'error';
 
@@ -369,7 +369,9 @@ export function DockNotchSurface({ snapshot }: DockNotchSurfaceProps) {
           textAlign: 'center',
         }}
       >
-        {isError ? (error ?? 'Dictation failed') : 'Pasted'}
+        {isError
+          ? (error ?? 'Dictation failed')
+          : (pastedText && pastedText.trim().length > 0 ? pastedText.trim() : 'Pasted')}
       </p>
     );
   }

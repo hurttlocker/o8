@@ -32,4 +32,10 @@ export interface DictationSnapshot {
    * canonical Whisper pass. Empty string when unavailable / silent.
    */
   partialTranscript: string;
+  /**
+   * The final pasted text, set on the `system-pasted` success flash so the
+   * screen dock shows the actual words (Symon parity) instead of a generic
+   * "Pasted". Dock-only; the in-window pill ignores it. Undefined elsewhere.
+   */
+  pastedText?: string | null;
 }
