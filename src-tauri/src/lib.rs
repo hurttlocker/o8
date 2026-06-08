@@ -2763,6 +2763,16 @@ fn tts_is_active() -> bool {
     tts::playback::is_active()
 }
 
+/// Grow / shrink the screen dock window for the Ask answer panel (voice P4
+/// phase C). Called from the `/dictation-pill` webview when it opens/collapses
+/// the Ask thread. The resize runs Rust-side so the dock webview needs no
+/// window-control permission. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn dock_set_expanded(app: tauri::AppHandle, expanded: bool) {
+    dock_window::set_expanded(&app, expanded);
+}
+
 /// Ask Gemini `question` on a dedicated OS thread, emit the answer to the webview
 /// (`o8:ask-answer` / `o8:ask-error`), and SPEAK it through the TTS engine.
 /// Shared by the `ask_question` command (text) and the Right-Option voice path
@@ -2789,17 +2799,20 @@ fn spawn_ask_and_speak(app: tauri::AppHandle, question: String) {
         match rt.block_on(async { ai::gemini_ask::ask(&question, None).await }) {
             Ok(answer) => {
                 log::info!("[ask] answer: {} chars", answer.len());
-                let _ = app.emit_to(
-                    "main",
-                    "o8:ask-answer",
-                    serde_json::json!({ "question": question, "answer": answer }),
-                );
+                let answer_payload =
+                    serde_json::json!({ "question": question, "answer": answer });
+                // Emit to BOTH the screen dock (the Ask answer panel lives in the
+                // dock webview — broadcasts don't reach it) and main.
+                let _ = app.emit_to(dock_window::DOCK_LABEL, "o8:ask-answer", answer_payload.clone());
+                let _ = app.emit_to("main", "o8:ask-answer", answer_payload);
                 // Speak the answer through the TTS engine (spawns its own thread).
                 tts::playback::play_thread(answer, tts::load_config());
             }
             Err(e) => {
                 log::warn!("[ask] failed: {e}");
-                let _ = app.emit_to("main", "o8:ask-error", serde_json::json!({ "message": e }));
+                let err_payload = serde_json::json!({ "message": e });
+                let _ = app.emit_to(dock_window::DOCK_LABEL, "o8:ask-error", err_payload.clone());
+                let _ = app.emit_to("main", "o8:ask-error", err_payload);
             }
         }
     });
@@ -3031,6 +3044,7 @@ pub fn run() {
             tts_stop,
             tts_toggle_pause,
             tts_is_active,
+            dock_set_expanded,
             #[cfg(target_os = "macos")]
             ask_question,
             #[cfg(target_os = "macos")]
