@@ -2602,7 +2602,11 @@ fn o8_debug_paste(text: String) {
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn o8_dock_log(msg: String) {
-    tracing::info!("[dock-route] {msg}");
+    // `log::` (captured by tauri_plugin_log → o8.log), NOT `tracing::` — the
+    // tracing subscriber writes to stdout, which a bundled .app discards, so the
+    // earlier `tracing::info!` here never surfaced in o8.log (false-negative that
+    // masked the dock-morph capability bug). `log::info!` is what reaches the file.
+    log::info!("[dock-route] {msg}");
 }
 
 /// TEMP/debug: morph the always-on screen dock pill into a sample "listening"
@@ -2632,7 +2636,7 @@ fn o8_debug_show_dock(app: tauri::AppHandle) {
     std::thread::spawn(move || {
         for delay_ms in [250u64, 800, 1600] {
             std::thread::sleep(std::time::Duration::from_millis(delay_ms));
-            tracing::info!("[dock-demo] morph dock → recording (system-start → dock)");
+            log::info!("[dock-demo] morph dock → recording (system-start → dock)");
             let events = [
                 serde_json::json!({ "type": "system-start", "origin": "system" }),
                 serde_json::json!({ "type": "partial", "text": "the o8 dock pill \u{2014} system-wide voice, anywhere", "origin": "system" }),
