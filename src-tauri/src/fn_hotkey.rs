@@ -34,8 +34,9 @@ use std::sync::{Arc, Mutex, OnceLock};
 use tauri::Emitter;
 
 /// The app handle, stored once at `start()`, so the off-tap worker threads can
-/// show the screen dock pill window + emit the `system-start` event on Fn-down
-/// (system-wide Symon fold P3). Cloned per use; AppHandle is cheap to clone.
+/// re-assert the always-on screen dock pill window + emit the `system-start`
+/// event on Fn-down (system-wide Symon fold P3). Cloned per use; AppHandle is
+/// cheap to clone.
 #[cfg(target_os = "macos")]
 static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
@@ -102,10 +103,14 @@ fn begin_system_dictation() {
     crate::paste::save_frontmost_app();
     set_system_origin(true);
 
-    // Show the screen dock pill (P3). The dock window filters `o8:stt-event` to
-    // origin==system; `system-start` makes it enter 'recording' immediately so
-    // the user sees the pill the instant they hold Fn, before the daemon's
-    // first partial lands. Both run on the main thread (window + emit).
+    // Morph the ALWAYS-ON screen dock pill into 'recording' (P3). The dock
+    // window is created visible at boot and stays up — we do NOT show it from
+    // hidden. `dock_window::show` here just RE-ASSERTS it (re-anchor to the
+    // active monitor + re-order front nonactivating). The dock filters
+    // `o8:stt-event` to origin==system; `system-start` morphs the idle capsule
+    // into 'recording' immediately so the user sees the waveform the instant they
+    // hold Fn, before the daemon's first partial lands. Both run on the main
+    // thread (window + emit).
     if let Some(app) = APP_HANDLE.get() {
         let app = app.clone();
         let _ = app.run_on_main_thread({
@@ -125,21 +130,31 @@ fn begin_system_dictation() {
         Err(e) => {
             tracing::error!("[fn-hotkey] failed to start dictation: {e}");
             set_system_origin(false);
-            // Hide the dock pill we just showed — the session never started.
-            hide_dock();
+            // The session never started — morph the always-on dock back to its
+            // idle capsule (do NOT hide; the dock is always-on).
+            morph_dock_idle();
         }
     }
 }
 
-/// Hide the screen dock pill from any worker thread (hops to the main thread).
-/// No-op if the app handle isn't stored yet or the window doesn't exist.
+/// Morph the ALWAYS-ON screen dock pill back to its idle capsule from any worker
+/// thread (hops to the main thread). Emits a `system-idle` event the
+/// `/dictation-pill` route reduces back to idle — the dock window stays on
+/// screen (it is never hidden on the normal flow). No-op if the app handle isn't
+/// stored yet.
 #[cfg(target_os = "macos")]
-fn hide_dock() {
+fn morph_dock_idle() {
     if let Some(app) = APP_HANDLE.get() {
-        let app_for_call = app.clone();
-        let app_for_closure = app.clone();
-        let _ = app_for_call
-            .run_on_main_thread(move || crate::dock_window::hide(&app_for_closure));
+        let app = app.clone();
+        let _ = app.run_on_main_thread({
+            let app = app.clone();
+            move || {
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({ "type": "system-idle", "origin": "system" }),
+                );
+            }
+        });
     }
 }
 
@@ -154,13 +169,15 @@ fn end_system_dictation() {
 }
 
 /// Discard a too-short Fn brush: stop the recognizer and clear the origin so a
-/// stray finalize doesn't paste an empty string into the focused app. Also hide
-/// the dock pill we flashed up on Fn-down so a brush doesn't leave it stuck.
+/// stray finalize doesn't paste an empty string into the focused app. Morph the
+/// always-on dock back to its idle capsule (we emitted `system-start` on Fn-down,
+/// so without this the brush would leave the dock stuck in 'recording'). The
+/// dock is NEVER hidden — it morphs back to idle.
 #[cfg(target_os = "macos")]
 fn discard_brush() {
     set_system_origin(false);
     let _ = crate::stt_engine::stop();
-    hide_dock();
+    morph_dock_idle();
 }
 
 /// Spawn the global Fn hotkey monitor. Call ONCE from `setup()` alongside
