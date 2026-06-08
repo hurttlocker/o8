@@ -36,6 +36,13 @@ pub const DOCK_LABEL: &str = "dock";
 const DOCK_WIDTH: f64 = 520.0;
 #[cfg(target_os = "macos")]
 const DOCK_HEIGHT: f64 = 120.0;
+/// Expanded height for the Ask answer panel (voice P4 phase C). The dock grows
+/// from the compact pill to this taller window so the panel (question + answer +
+/// context, ~440×360) has room; it shrinks back to `DOCK_HEIGHT` on collapse.
+/// Only tall WHILE the panel is up, so the larger click-capturing region never
+/// covers the top of the screen at rest.
+#[cfg(target_os = "macos")]
+const DOCK_EXPANDED_HEIGHT: f64 = 420.0;
 /// Top inset below the true screen origin. ZERO so the window top sits flush at
 /// the very top edge of the screen — the idle capsule's square top edge
 /// (borderRadius 0 0 14 14) then hangs down from y=0 like the Symon notch.
@@ -67,7 +74,18 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
         return;
     }
 
-    let url = format!("http://127.0.0.1:{}/dictation-pill", api_port);
+    // In dev-bridge mode (O8_DEV_FRONTEND_URL set), load the dock from the dev
+    // Next server too — otherwise it would load the BUNDLED frontend off
+    // `api_port` while `main` hot-reloads from dev, and dock UI edits wouldn't
+    // show. The dock capability's remote.urls already covers `http://localhost:*`.
+    let base = match crate::dev_frontend::from_env() {
+        Ok(Some(dev)) => {
+            log::info!("[dock-window] dev-bridge: loading dock from {}", dev.origin());
+            dev.origin().to_string()
+        }
+        _ => format!("http://127.0.0.1:{}", api_port),
+    };
+    let url = format!("{}/dictation-pill", base);
     let parsed = match url.parse() {
         Ok(u) => u,
         Err(e) => {
@@ -132,6 +150,26 @@ pub fn show(app: &tauri::AppHandle) {
     };
     reposition(&window);
     apply_macos_recipe(&window);
+    order_front_nonactivating(&window);
+}
+
+/// Grow / shrink the dock window for the Ask answer panel (voice P4 phase C).
+/// Resizes between the compact pill height and `DOCK_EXPANDED_HEIGHT`, keeping
+/// the top-center anchor, then re-orders front nonactivating. The React panel in
+/// `/dictation-pill` calls this (via a custom command) when it opens/collapses
+/// the Ask thread — the resize lives on the Rust side so the dock keeps its
+/// label-disciplined "no window-control perms in the webview" posture. No-op if
+/// the window is missing. Programmatic resize works despite `resizable(false)`
+/// (that only blocks user drag-resize).
+#[cfg(target_os = "macos")]
+pub fn set_expanded(app: &tauri::AppHandle, expanded: bool) {
+    use tauri::Manager;
+    let Some(window) = app.get_webview_window(DOCK_LABEL) else {
+        return;
+    };
+    let height = if expanded { DOCK_EXPANDED_HEIGHT } else { DOCK_HEIGHT };
+    let _ = window.set_size(tauri::LogicalSize::new(DOCK_WIDTH, height));
+    reposition(&window);
     order_front_nonactivating(&window);
 }
 
@@ -239,5 +277,7 @@ fn reposition(window: &tauri::WebviewWindow) {
 pub fn create(_app: &tauri::AppHandle, _api_port: u16) {}
 #[cfg(not(target_os = "macos"))]
 pub fn show(_app: &tauri::AppHandle) {}
+#[cfg(not(target_os = "macos"))]
+pub fn set_expanded(_app: &tauri::AppHandle, _expanded: bool) {}
 #[cfg(not(target_os = "macos"))]
 pub fn hide(_app: &tauri::AppHandle) {}
