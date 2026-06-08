@@ -188,3 +188,59 @@ export async function masterKeyGet(): Promise<string | null> {
 export async function masterKeyEnsure(): Promise<string | null> {
   return invoke<string>('master_key_ensure');
 }
+
+// ── Voice / system-dictation permissions (P0 helpers) ──
+
+/** Whether o8 has macOS Accessibility permission. Non-prompting. */
+export async function accessibilityPermissionGranted(): Promise<boolean> {
+  const result = await invoke<boolean>('accessibility_permission_granted_cmd');
+  return result ?? false;
+}
+
+/** Whether o8 has macOS Input Monitoring permission. Non-prompting. */
+export async function inputMonitoringGranted(): Promise<boolean> {
+  const result = await invoke<boolean>('input_monitoring_granted_cmd');
+  return result ?? false;
+}
+
+/**
+ * The current `AppleFnUsageType` (0 = "Do Nothing" — what o8 needs). null /
+ * unset should be treated as 3 = "Start Dictation", which hijacks the Fn key.
+ */
+export async function fnKeyUsageType(): Promise<number | null> {
+  return invoke<number>('fn_key_usage_type_cmd');
+}
+
+/**
+ * Open a macOS System Settings pane by its URL / bundle target. Used to jump
+ * the user to Accessibility / Input-Monitoring / Keyboard for granting.
+ */
+export async function openSystemSettings(target: string): Promise<void> {
+  await invoke('open_system_settings', { target });
+}
+
+// ── Background presence + autostart (P4) ──
+
+/** Whether "Launch at login" is currently registered. */
+export async function autostartIsEnabled(): Promise<boolean> {
+  const result = await invoke<boolean>('autostart_is_enabled');
+  return result ?? false;
+}
+
+/** Enable / disable "Launch at login". Returns the resulting state. */
+export async function autostartSet(enabled: boolean): Promise<boolean> {
+  const result = await invoke<boolean>('autostart_set', { enabled });
+  return result ?? enabled;
+}
+
+/** Whether background mode (Accessory / Dock icon hidden) is on. */
+export async function backgroundModeIsEnabled(): Promise<boolean> {
+  const result = await invoke<boolean>('background_mode_is_enabled');
+  return result ?? false;
+}
+
+/** Toggle background mode — hides/shows the Dock icon and persists the choice. */
+export async function backgroundModeSet(enabled: boolean): Promise<boolean> {
+  const result = await invoke<boolean>('background_mode_set', { enabled });
+  return result ?? enabled;
+}
