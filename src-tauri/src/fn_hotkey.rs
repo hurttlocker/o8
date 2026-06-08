@@ -116,6 +116,49 @@ const LONG_FORM_FN_DOUBLE_TAP_MS: u64 = 480;
 #[cfg(target_os = "macos")]
 const ESCAPE_KEYCODE: i64 = 53;
 
+/// NSEventModifierFlagOption = 1 << 19. Set for BOTH Option keys.
+#[cfg(target_os = "macos")]
+const OPTION_FLAG: u64 = 0x80000;
+
+/// Virtual keycode for the RIGHT Option key (Left Option = 58). The flag bit is
+/// shared, so the keycode is the only way to tell them apart — Ask is bound to
+/// Right-Option so Left-Option stays free for normal Option chords.
+#[cfg(target_os = "macos")]
+const RIGHT_OPTION_KEYCODE: i64 = 61;
+
+/// Right-Option hold under this is a brush (cancel, don't ask). Verbatim from
+/// Symon's 120ms Ask brush guard.
+#[cfg(target_os = "macos")]
+const ASK_BRUSH_MS: u64 = 120;
+
+/// True while a Right-Option ASK dictation is recording a question. `run_finalize`
+/// takes this to route the polished transcript to Gemini (speak the answer)
+/// instead of pasting it. Distinct from SYSTEM_DICTATION_ORIGIN (paste) and
+/// LONG_FORM_ACTIVE.
+#[cfg(target_os = "macos")]
+static ASK_MODE: AtomicBool = AtomicBool::new(false);
+
+/// Edge latch for the Right-Option key (dedupes duplicate FlagsChanged events).
+#[cfg(target_os = "macos")]
+static OPTION_HELD: AtomicBool = AtomicBool::new(false);
+
+/// The stt_engine session id of the active Ask dictation (0 = none). Fenced like
+/// the long-form session id so a late teardown can't kill a newer session.
+#[cfg(target_os = "macos")]
+static ASK_SESSION_ID: AtomicU64 = AtomicU64::new(0);
+
+/// Whether a Right-Option Ask dictation is currently recording. Read by
+/// `run_finalize` (via take_ask_mode) to route the result to Gemini.
+#[cfg(target_os = "macos")]
+pub fn take_ask_mode() -> bool {
+    ASK_MODE.swap(false, Ordering::SeqCst)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn take_ask_mode() -> bool {
+    false
+}
+
 /// True while a DOUBLE-TAP-Fn long-form dictation is active. Unlike push-to-talk
 /// (which ends on Fn release), long-form stays on until a single Fn tap finishes
 /// it (or Escape cancels). Read by the tap callback + the poll fallback; written
@@ -403,6 +446,92 @@ fn cancel_long_form_dictation() {
     morph_dock_idle();
 }
 
+/// Begin a Right-Option ASK dictation: mark ASK_MODE, morph the dock to
+/// 'recording' (so the user sees Ask is listening for the question), and start
+/// the SHARED recognizer. `run_finalize` routes the polished transcript to
+/// Gemini (speaks the answer) instead of pasting. Worker thread, never the tap.
+#[cfg(target_os = "macos")]
+fn begin_ask_dictation() {
+    // Ask takes the mic: the three voice modes (push-to-talk, long-form, ask)
+    // share ONE recognizer + active_session, so abandon any in-flight session
+    // first. Clear the competing flags and discard the prior session's finalize
+    // (so it never pastes); the start() below supersedes active_session. Without
+    // this, pressing Right-Option mid-Fn/long-form left the other mode's flags
+    // set + an un-finishable session over the shared recognizer.
+    LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+    LONG_FORM_SESSION_ID.store(0, Ordering::SeqCst);
+    set_system_origin(false);
+    let prev = crate::stt_engine::active_session_id();
+    if prev != 0 {
+        request_discard_finalize(prev);
+    }
+
+    ASK_MODE.store(true, Ordering::SeqCst);
+
+    if let Some(app) = APP_HANDLE.get() {
+        let app = app.clone();
+        let _ = app.run_on_main_thread({
+            let app = app.clone();
+            move || {
+                crate::dock_window::show(&app);
+                let payload = serde_json::json!({ "type": "system-start", "origin": "system" });
+                log::info!("[fn-hotkey] morph dock → recording (ask start)");
+                let _ = app.emit_to(
+                    crate::dock_window::DOCK_LABEL,
+                    "o8:stt-event",
+                    payload.clone(),
+                );
+                let _ = app.emit("o8:stt-event", payload);
+            }
+        });
+    }
+
+    match crate::stt_engine::start() {
+        Ok(sid) => {
+            // A sub-120ms brush (discard_ask_dictation) may have cleared ASK_MODE
+            // while we were starting — tear down the session we just started
+            // rather than leave a dangling recorder nobody stops.
+            if !ASK_MODE.load(Ordering::SeqCst) {
+                let _ = crate::stt_engine::stop_session(sid);
+                morph_dock_idle();
+                return;
+            }
+            ASK_SESSION_ID.store(sid, Ordering::SeqCst);
+            tracing::info!("[fn-hotkey] ask dictation started (session={sid})");
+        }
+        Err(e) => {
+            tracing::error!("[fn-hotkey] failed to start ask dictation: {e}");
+            ASK_MODE.store(false, Ordering::SeqCst);
+            ASK_SESSION_ID.store(0, Ordering::SeqCst);
+            morph_dock_idle();
+        }
+    }
+}
+
+/// Finish an Ask dictation (Right-Option released ≥120ms): stop the recognizer
+/// (fenced) → the finalize chain polishes the question, and run_finalize routes
+/// it to Gemini via take_ask_mode. ASK_MODE stays set until run_finalize takes it.
+#[cfg(target_os = "macos")]
+fn end_ask_dictation() {
+    let sid = ASK_SESSION_ID.swap(0, Ordering::SeqCst);
+    if let Err(e) = crate::stt_engine::stop_session(sid) {
+        tracing::warn!("[fn-hotkey] ask finish stop failed: {e}");
+    }
+}
+
+/// Discard a too-short Right-Option brush: clear ASK_MODE, drop the finalize, and
+/// stop the recognizer (fenced). Morph the dock back to its idle capsule.
+#[cfg(target_os = "macos")]
+fn discard_ask_dictation() {
+    let sid = ASK_SESSION_ID.swap(0, Ordering::SeqCst);
+    ASK_MODE.store(false, Ordering::SeqCst);
+    request_discard_finalize(sid);
+    if let Err(e) = crate::stt_engine::stop_session(sid) {
+        tracing::warn!("[fn-hotkey] ask cancel stop failed: {e}");
+    }
+    morph_dock_idle();
+}
+
 /// Spawn the global Fn hotkey monitor. Call ONCE from `setup()` alongside
 /// `stt_engine::spawn`. On non-macOS this is a no-op.
 #[cfg(target_os = "macos")]
@@ -455,6 +584,8 @@ pub fn start(app: tauri::AppHandle) {
     let fn_held = Arc::new(AtomicBool::new(false));
     // Fn-down instant, used to reject sub-threshold brushes on release.
     let fn_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
+    // Right-Option-down instant, used to reject the sub-120ms Ask brush.
+    let ask_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
 
     // ── Poll fallback for the dropped Fn-UP edge (Sequoia regression) ──
     // The tap delivers ONE FlagsChanged (Fn-down) then goes silent; the Fn-up
@@ -497,6 +628,7 @@ pub fn start(app: tauri::AppHandle) {
     // ── The CGEventTap thread ──
     let fn_held_cb = fn_held.clone();
     let fn_press_time_cb = fn_press_time.clone();
+    let ask_press_time_cb = ask_press_time.clone();
     std::thread::spawn(move || {
         let tap = CGEventTap::new(
             CGEventTapLocation::HID,
@@ -611,6 +743,46 @@ pub fn start(app: tauri::AppHandle) {
                                 std::thread::spawn(discard_brush);
                             } else {
                                 std::thread::spawn(end_system_dictation);
+                            }
+                        }
+                    }
+
+                    // ── Right-Option → Ask (voice question) ──
+                    // keycode 61 = Right-Option (58 = Left); both set OPTION_FLAG,
+                    // so the keycode is the only disambiguator. Hold to record a
+                    // question, release (≥120ms) to send it to Gemini and speak the
+                    // answer. Tap-only — aqua does the same (no poll fallback;
+                    // unlike Fn, Option up-edges are delivered reliably). All work
+                    // is offloaded; the tap callback only flips an atomic + spawns.
+                    {
+                        let keycode =
+                            event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                        if keycode == RIGHT_OPTION_KEYCODE {
+                            let option_down = (flags & OPTION_FLAG) != 0;
+                            let opt_down_edge = option_down
+                                && OPTION_HELD
+                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                    .is_ok();
+                            let opt_up_edge = !option_down
+                                && OPTION_HELD
+                                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                                    .is_ok();
+                            if opt_down_edge {
+                                if let Ok(mut t) = ask_press_time_cb.lock() {
+                                    *t = std::time::Instant::now();
+                                }
+                                std::thread::spawn(begin_ask_dictation);
+                            } else if opt_up_edge {
+                                let press = ask_press_time_cb
+                                    .lock()
+                                    .map(|t| *t)
+                                    .unwrap_or_else(|_| std::time::Instant::now());
+                                let hold = std::time::Instant::now().duration_since(press);
+                                if hold < std::time::Duration::from_millis(ASK_BRUSH_MS) {
+                                    std::thread::spawn(discard_ask_dictation);
+                                } else {
+                                    std::thread::spawn(end_ask_dictation);
+                                }
                             }
                         }
                     }
