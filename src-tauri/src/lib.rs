@@ -2548,8 +2548,12 @@ mod stt_engine {
                 window_title: window_ctx.window_title,
                 selected_text: window_ctx.selected_text,
                 ax_excerpt: window_ctx.ax_excerpt,
-                dictionary: Vec::new(),
-                instructions: String::new(),
+                // Custom dictionary + polish instructions from the Voice settings
+                // (`~/.o8/dictation.json`) — so the operator's proper nouns spell
+                // right and their guidance shapes the cleanup (#1209).
+                dictionary: crate::stt::keys::config_string_list("dictionary"),
+                instructions: crate::stt::keys::config_string("polish_instructions")
+                    .unwrap_or_default(),
                 replacements: Vec::new(),
             };
 
@@ -2775,6 +2779,22 @@ fn tts_is_active() -> bool {
 #[tauri::command]
 fn dock_set_expanded(app: tauri::AppHandle, expanded: bool) {
     dock_window::set_expanded(&app, expanded);
+}
+
+/// Read the voice preferences (`~/.o8/dictation.json`) for the settings panel,
+/// with API keys stripped. The config is mtime-cached, so writes apply live.
+#[tauri::command]
+fn voice_prefs_get() -> serde_json::Value {
+    crate::stt::keys::config_public()
+}
+
+/// Write one voice preference into `~/.o8/dictation.json` (read-modify-write).
+/// Takes effect on the next read without a relaunch (mtime cache). Keys:
+/// `ducking_enabled`, `sounds_enabled`, `dictionary` (array), `polish_instructions`,
+/// `reading_speed`, `tts_provider`, `tts_voice_id`, etc.
+#[tauri::command]
+fn voice_prefs_set(key: String, value: serde_json::Value) -> Result<(), String> {
+    crate::stt::keys::set_pref(&key, value)
 }
 
 /// Ask Gemini `question` on a dedicated OS thread, emit the answer to the webview
@@ -3049,6 +3069,8 @@ pub fn run() {
             tts_toggle_pause,
             tts_is_active,
             dock_set_expanded,
+            voice_prefs_get,
+            voice_prefs_set,
             #[cfg(target_os = "macos")]
             ask_question,
             #[cfg(target_os = "macos")]
@@ -3474,6 +3496,13 @@ pub fn run() {
                     ws_log.as_ref(),
                     &ai_keys,
                 );
+                // Dev-bridge: the bundled Next isn't spawned here, but the dev
+                // server IS up on `api_port` — create the dock pill against it.
+                // prewarm polls `:{api_port}/dashboard` (the dev server) then
+                // `dock_window::create` loads the dock from the dev origin. Without
+                // this the dock never appears in dev-bridge (prewarm was only wired
+                // into the bundled-spawn branch), so dock UI couldn't be iterated.
+                prewarm_bundled_next_server(app.handle().clone(), api_port);
             } else if dev_server_running {
                 log::info!("Dev server already running on :3001 — skipping bundled servers");
                 // Write the dev ports so MCP servers launched from this

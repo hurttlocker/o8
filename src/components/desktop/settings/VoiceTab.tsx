@@ -14,7 +14,7 @@
  * icon components inside the Tauri webview).
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import {
   isTauri,
   accessibilityPermissionGranted,
@@ -25,6 +25,8 @@ import {
   autostartSet,
   backgroundModeIsEnabled,
   backgroundModeSet,
+  voicePrefsGet,
+  voicePrefsSet,
 } from '@/lib/tauri/bridge';
 import {
   APP_FONT_STACK,
@@ -170,6 +172,25 @@ function ToggleRow({
   );
 }
 
+const textareaStyle: CSSProperties = {
+  width: '100%',
+  boxSizing: 'border-box',
+  fontFamily: APP_FONT_STACK,
+  fontSize: 13,
+  fontWeight: 300,
+  lineHeight: 1.5,
+  color: 'var(--t-text)',
+  background: 'var(--t-input-bg)',
+  border: '1px solid var(--t-border)',
+  borderRadius: 10,
+  paddingTop: 10,
+  paddingBottom: 10,
+  paddingLeft: 12,
+  paddingRight: 12,
+  resize: 'vertical',
+  outline: 'none',
+};
+
 export function VoiceTab() {
   const tauri = isTauri();
 
@@ -179,6 +200,11 @@ export function VoiceTab() {
   const [fnUsage, setFnUsage] = useState<number | null | undefined>(undefined);
   const [autostart, setAutostart] = useState(false);
   const [bgMode, setBgMode] = useState(false);
+  // Voice feedback + polish prefs (~/.o8/dictation.json, #1209).
+  const [ducking, setDucking] = useState(true);
+  const [sounds, setSounds] = useState(true);
+  const [dictionary, setDictionary] = useState('');
+  const [instructions, setInstructions] = useState('');
 
   const refreshPermissions = useCallback(async () => {
     if (!tauri) return;
@@ -194,13 +220,20 @@ export function VoiceTab() {
 
   const loadAll = useCallback(async () => {
     if (!tauri) return;
-    const [, auto, bg] = await Promise.all([
+    const [, auto, bg, prefs] = await Promise.all([
       refreshPermissions(),
       autostartIsEnabled(),
       backgroundModeIsEnabled(),
+      voicePrefsGet(),
     ]);
     setAutostart(auto);
     setBgMode(bg);
+    if (prefs) {
+      setDucking(prefs.ducking_enabled !== false); // default on
+      setSounds(prefs.sounds_enabled !== false);
+      setDictionary(Array.isArray(prefs.dictionary) ? (prefs.dictionary as string[]).join('\n') : '');
+      setInstructions(typeof prefs.polish_instructions === 'string' ? prefs.polish_instructions : '');
+    }
   }, [tauri, refreshPermissions]);
 
   useEffect(() => { void loadAll(); }, [loadAll]);
@@ -223,6 +256,27 @@ export function VoiceTab() {
     setBgMode(next);
     void backgroundModeSet(next).then(setBgMode);
   }, []);
+
+  const handleDucking = useCallback((next: boolean) => {
+    setDucking(next);
+    void voicePrefsSet('ducking_enabled', next);
+  }, []);
+
+  const handleSounds = useCallback((next: boolean) => {
+    setSounds(next);
+    void voicePrefsSet('sounds_enabled', next);
+  }, []);
+
+  // Persist on blur — the prefs file is mtime-cached so the next dictation picks
+  // it up without a relaunch.
+  const handleDictionaryBlur = useCallback(() => {
+    const arr = dictionary.split('\n').map((s) => s.trim()).filter(Boolean);
+    void voicePrefsSet('dictionary', arr);
+  }, [dictionary]);
+
+  const handleInstructionsBlur = useCallback(() => {
+    void voicePrefsSet('polish_instructions', instructions.trim());
+  }, [instructions]);
 
   // Fn hijack present when AppleFnUsageType is unset (treated as 3 = Start
   // Dictation) or set to anything other than 0 = Do Nothing.
@@ -364,6 +418,85 @@ export function VoiceTab() {
                 checked={bgMode}
                 onChange={handleBgMode}
               />
+            </div>
+          </section>
+
+          <section style={{ marginTop: 32 }}>
+            <SectionLabel number="03">FEEDBACK</SectionLabel>
+            <p
+              style={{
+                margin: 0,
+                marginTop: 4,
+                marginBottom: 10,
+                fontSize: 13,
+                lineHeight: 1.55,
+                color: 'var(--t-text-secondary)',
+                maxWidth: 620,
+              }}
+            >
+              How o8 responds while you dictate and while it speaks back.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column' }}>
+              <ToggleRow
+                label="Dim other audio while dictating"
+                detail="Lower the system volume to 20% while you hold Fn, so the mic hears you over whatever's playing — including o8's own voice when you talk back mid-answer."
+                checked={ducking}
+                onChange={handleDucking}
+              />
+              <HairlineRule />
+              <ToggleRow
+                label="Sound cues"
+                detail="Short tones for listen start/stop, paste landed, and read-aloud start/finish."
+                checked={sounds}
+                onChange={handleSounds}
+              />
+            </div>
+          </section>
+
+          <section style={{ marginTop: 32 }}>
+            <SectionLabel number="04">POLISH</SectionLabel>
+            <p
+              style={{
+                margin: 0,
+                marginTop: 4,
+                marginBottom: 12,
+                fontSize: 13,
+                lineHeight: 1.55,
+                color: 'var(--t-text-secondary)',
+                maxWidth: 620,
+              }}
+            >
+              Shape how o8 cleans up your dictation. Both apply on the next dictation — no relaunch.
+            </p>
+
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 620 }}>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.01em', marginBottom: 6 }}>
+                  Custom dictionary
+                </div>
+                <textarea
+                  value={dictionary}
+                  onChange={(e) => setDictionary(e.target.value)}
+                  onBlur={handleDictionaryBlur}
+                  placeholder="One per line — proper nouns o8 should always spell right (Karpathy, Tauri, o8…)"
+                  rows={4}
+                  style={textareaStyle}
+                />
+              </div>
+              <div>
+                <div style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.01em', marginBottom: 6 }}>
+                  Polish instructions
+                </div>
+                <textarea
+                  value={instructions}
+                  onChange={(e) => setInstructions(e.target.value)}
+                  onBlur={handleInstructionsBlur}
+                  placeholder="Guidance for cleanup — e.g. 'Keep my casual tone; always capitalize iOS; expand abbreviations.'"
+                  rows={3}
+                  style={textareaStyle}
+                />
+              </div>
             </div>
           </section>
         </>

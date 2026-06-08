@@ -26,6 +26,10 @@ static AUDIO_TX: OnceLock<mpsc::Sender<&'static str>> = OnceLock::new();
 /// Play a named cue (non-blocking — a single channel send). No-op for unknown
 /// names or before the worker boots.
 pub(crate) fn play_sound(name: &'static str) {
+    // Gated by the `sounds_enabled` voice pref (default on).
+    if !crate::stt::keys::config_bool("sounds_enabled", true) {
+        return;
+    }
     if let Some(tx) = AUDIO_TX.get() {
         let _ = tx.send(name);
     }
