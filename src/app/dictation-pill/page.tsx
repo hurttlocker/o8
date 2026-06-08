@@ -184,8 +184,10 @@ export default function DictationPillPage() {
         if (stateRef.current === 'transcribing') setState('polishing');
         break;
       case 'system-pasted':
-        // Paste landed in the focused app — brief "Pasted" flash, then idle.
-        setState('success', { audioLevel: 0 });
+        // Paste landed in the focused app — flash the ACTUAL pasted words in
+        // the dock (Symon parity: the notch shows the text, not just "Pasted"),
+        // then collapse back to the idle capsule.
+        setState('success', { audioLevel: 0, pastedText: payload.text ?? null });
         returnToIdleAfter(SUCCESS_FLASH_MS);
         break;
       case 'error':
