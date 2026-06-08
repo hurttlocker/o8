@@ -2,6 +2,13 @@ use std::fs;
 use std::path::Path;
 
 fn main() {
+  // ── Voice STT Swift sidecar compile (lifted from aqua/Symon) ──
+  // macOS: compile the Swift speech recognizer helper FIRST.
+  // IMPORTANT: This must run BEFORE tauri_build::build() because Tauri's
+  // build step validates that all externalBin sidecar files exist on disk.
+  // We need the triple-suffixed copies in place before that validation runs.
+  build_speech_recognizer();
+
   // #932: tauri-plugin-mcp permissions are only registered when the
   // `dev-mcp-plugin` Cargo feature is on. Tauri's compile-time capability
   // resolver needs the permission identifier (`mcp:*`) to exist at build
@@ -32,4 +39,274 @@ fn main() {
   }
 
   tauri_build::build()
+}
+
+/// Compile the Swift `speech_recognizer` helper into per-arch + universal
+/// sidecar binaries (lifted from aqua/Symon's build.rs, de-Symonized helper
+/// identifier). No-op on non-macOS and when the Swift source is absent.
+fn build_speech_recognizer() {
+  #[cfg(target_os = "macos")]
+  {
+    println!("cargo:rustc-link-lib=framework=Speech");
+    println!("cargo:rustc-link-lib=framework=AVFoundation");
+    println!("cargo:rustc-link-lib=framework=AppKit");
+    println!("cargo:rustc-link-lib=framework=ApplicationServices");
+
+    // Always rerun — we must produce per-arch copies for universal builds.
+    // A source-only rerun-if-changed causes Cargo to skip the second arch's
+    // build.rs invocation during `--target universal-apple-darwin`, which means
+    // the triple-suffixed copy for that arch is never created.
+    println!("cargo:rerun-if-changed=helpers/speech_recognizer.swift");
+    println!("cargo:rerun-if-changed=helpers/speech_recognizer_info.plist");
+    println!("cargo:rerun-if-changed=build.rs");
+
+    let helpers_dir = std::path::Path::new("helpers");
+    let swift_src = helpers_dir.join("speech_recognizer.swift");
+    let info_plist_src = helpers_dir.join("speech_recognizer_info.plist");
+
+    if swift_src.exists() {
+      // Use MACOSX_DEPLOYMENT_TARGET to ensure the binary runs on the current OS.
+      let deployment_target =
+        std::env::var("MACOSX_DEPLOYMENT_TARGET").unwrap_or_else(|_| "11.0".to_string());
+
+      let cargo_target =
+        std::env::var("TARGET").unwrap_or_else(|_| "aarch64-apple-darwin".to_string());
+      let profile = std::env::var("PROFILE").unwrap_or_default();
+      let target_dir = std::env::var("OUT_DIR").ok().and_then(|out_dir| {
+        // OUT_DIR is like target/debug/build/o8-xxx/out — go up to target/debug/.
+        std::path::PathBuf::from(out_dir)
+          .ancestors()
+          .nth(3)
+          .map(|path| path.to_path_buf())
+      });
+      let generated_dir = if profile == "release" {
+        helpers_dir.to_path_buf()
+      } else {
+        // Keep dev/check outputs out of src-tauri/helpers. Tauri dev watches
+        // that directory and restarts whenever build.rs rewrites a sidecar.
+        target_dir
+          .clone()
+          .unwrap_or_else(|| helpers_dir.to_path_buf())
+      };
+      let _ = std::fs::create_dir_all(&generated_dir);
+      let swift_bin = generated_dir.join("speech_recognizer");
+
+      // Strategy: always compile BOTH aarch64 and x86_64 slices and copy
+      // them to their respective triple-suffixed paths. This is idempotent
+      // and ensures both sidecar paths exist regardless of which cargo
+      // invocation (arch) we are currently in. Then lipo them into a fat
+      // binary for the unsuffixed path used in dev mode.
+      // Helper: skip work when output is newer than ALL inputs. The variadic
+      // input list matters — the helper binary depends on BOTH the Swift
+      // source and the embedded Info.plist, so we must rebuild when either
+      // changes (otherwise the plist-less pre-cache-gets-shipped bug bites).
+      fn needs_rebuild(out: &std::path::Path, sources: &[&std::path::Path]) -> bool {
+        let Ok(out_meta) = out.metadata() else {
+          return true;
+        };
+        let Ok(out_m) = out_meta.modified() else {
+          return true;
+        };
+        sources.iter().any(|src| {
+          let Ok(src_meta) = src.metadata() else {
+            return true;
+          };
+          let Ok(src_m) = src_meta.modified() else {
+            return true;
+          };
+          src_m > out_m
+        })
+      }
+
+      fn copy_if_changed(
+        src: &std::path::Path,
+        dst: &std::path::Path,
+      ) -> std::io::Result<bool> {
+        let src_bytes = std::fs::read(src)?;
+        if let Ok(dst_bytes) = std::fs::read(dst) {
+          if dst_bytes == src_bytes {
+            return Ok(false);
+          }
+        }
+
+        std::fs::write(dst, &src_bytes)?;
+        let permissions = std::fs::metadata(src)?.permissions();
+        std::fs::set_permissions(dst, permissions)?;
+        Ok(true)
+      }
+
+      fn has_codesign_identifier(path: &std::path::Path, identifier: &str) -> bool {
+        let Ok(output) = std::process::Command::new("codesign")
+          .args(["-dv", path.to_str().unwrap()])
+          .output()
+        else {
+          return false;
+        };
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        output.status.success() && stderr.contains(&format!("Identifier={identifier}"))
+      }
+
+      fn codesign_if_needed(path: &std::path::Path, identifier: &str) {
+        if has_codesign_identifier(path, identifier) {
+          return;
+        }
+
+        let _ = std::process::Command::new("codesign")
+          .args(["-s", "-", "-f", "-i", identifier, path.to_str().unwrap()])
+          .status();
+      }
+
+      let arches = ["aarch64", "x86_64"];
+      let mut arch_bins: Vec<std::path::PathBuf> = Vec::new();
+
+      for arch in &arches {
+        let swift_target = format!("{arch}-apple-macosx{deployment_target}");
+        let arch_bin = generated_dir.join(format!("speech_recognizer-{arch}-apple-darwin"));
+
+        if needs_rebuild(&arch_bin, &[&swift_src, &info_plist_src]) {
+          let info_plist = &info_plist_src;
+          let status = std::process::Command::new("swiftc")
+            .args([
+              "-O",
+              "-target",
+              &swift_target,
+              "-o",
+              arch_bin.to_str().unwrap(),
+              swift_src.to_str().unwrap(),
+              "-framework",
+              "Speech",
+              "-framework",
+              "AVFoundation",
+              "-Xlinker",
+              "-sectcreate",
+              "-Xlinker",
+              "__TEXT",
+              "-Xlinker",
+              "__info_plist",
+              "-Xlinker",
+              info_plist.to_str().unwrap(),
+            ])
+            .status()
+            .expect("Failed to run swiftc — is Xcode installed?");
+
+          assert!(
+            status.success(),
+            "Swift helper compilation failed for {arch} (exit code: {:?})",
+            status.code()
+          );
+
+          println!(
+            "cargo:warning=Compiled speech_recognizer [{arch}] → {}",
+            arch_bin.display()
+          );
+        }
+
+        arch_bins.push(arch_bin);
+      }
+
+      // Lipo the two slices into a fat universal binary for the unsuffixed
+      // path (used in dev mode and as the source for target-dir copy).
+      let mut fat_sources: Vec<&std::path::Path> = vec![&swift_src, &info_plist_src];
+      for arch_bin in &arch_bins {
+        fat_sources.push(arch_bin.as_path());
+      }
+
+      if needs_rebuild(&swift_bin, &fat_sources) {
+        let lipo_status = std::process::Command::new("lipo")
+          .arg("-create")
+          .args(arch_bins.iter().map(|p| p.to_str().unwrap()))
+          .arg("-output")
+          .arg(swift_bin.to_str().unwrap())
+          .status()
+          .expect("Failed to run lipo — is Xcode installed?");
+
+        assert!(
+          lipo_status.success(),
+          "lipo universal merge failed (exit code: {:?})",
+          lipo_status.code()
+        );
+      }
+
+      // Ad-hoc sign the fat binary with a stable identifier so macOS TCC
+      // permissions survive across recompilations.
+      const HELPER_IDENTIFIER: &str = "ai.o8.desktop.speech-recognizer";
+      codesign_if_needed(&swift_bin, HELPER_IDENTIFIER);
+      for arch_bin in &arch_bins {
+        codesign_if_needed(arch_bin, HELPER_IDENTIFIER);
+      }
+
+      // Tauri's externalBin validation runs in EVERY profile (debug check
+      // included) and resolves `helpers/speech_recognizer` → the
+      // current-target-triple suffix in `helpers/`. In dev/check, the per-arch
+      // binaries were generated into the target dir, so ensure the
+      // current-target triple copy is present in `helpers/` for the validator.
+      // copy_if_changed is a no-op when the bytes already match, so this won't
+      // trigger a dev-watch restart loop after the first build.
+      {
+        let arch_prefix = cargo_target.split('-').next().unwrap_or("aarch64");
+        let source_arch_bin =
+          generated_dir.join(format!("speech_recognizer-{arch_prefix}-apple-darwin"));
+        let helpers_target_triple = helpers_dir.join(format!("speech_recognizer-{cargo_target}"));
+        let helpers_arch_triple =
+          helpers_dir.join(format!("speech_recognizer-{arch_prefix}-apple-darwin"));
+        if source_arch_bin.exists() {
+          let _ = copy_if_changed(&source_arch_bin, &helpers_arch_triple);
+          if helpers_target_triple != helpers_arch_triple {
+            let _ = copy_if_changed(&source_arch_bin, &helpers_target_triple);
+          }
+          codesign_if_needed(&helpers_arch_triple, HELPER_IDENTIFIER);
+          if helpers_target_triple != helpers_arch_triple {
+            codesign_if_needed(&helpers_target_triple, HELPER_IDENTIFIER);
+          }
+        }
+      }
+
+      if profile == "release" {
+        // Tauri's bundler for `--target universal-apple-darwin` looks for a
+        // sidecar named with the literal `universal-apple-darwin` triple when
+        // assembling the .app.
+        let universal_bin = helpers_dir.join("speech_recognizer-universal-apple-darwin");
+        if let Err(e) = copy_if_changed(&swift_bin, &universal_bin) {
+          println!(
+            "cargo:warning=failed to copy universal sidecar {}: {e}",
+            universal_bin.display()
+          );
+        }
+
+        // In release mode, also create the triple-suffixed copy that Tauri's
+        // externalBin expects for the CURRENT cargo TARGET. The per-arch
+        // copies made above already cover both triple paths directly; this
+        // handles the case where the canonical Cargo target triple may differ
+        // from "<arch>-apple-darwin" (e.g. with version suffix).
+        let arch_prefix = cargo_target.split('-').next().unwrap_or("aarch64");
+        let canonical_arch_bin =
+          helpers_dir.join(format!("speech_recognizer-{arch_prefix}-apple-darwin"));
+        let sidecar = helpers_dir.join(format!("speech_recognizer-{cargo_target}"));
+        // Only copy if the canonical path differs from the sidecar path
+        // (they are the same when cargo_target == "<arch>-apple-darwin").
+        if canonical_arch_bin != sidecar {
+          let _ = copy_if_changed(&canonical_arch_bin, &sidecar);
+        }
+      }
+
+      // Also copy fat binary to target dir so the helper_path() lookup
+      // finds the correctly-built binary (Tauri/cargo may place a stale copy).
+      if let Some(target_dir) = target_dir.as_deref() {
+        let target_bin = target_dir.join("speech_recognizer");
+        if target_bin != swift_bin {
+          let _ = copy_if_changed(&swift_bin, &target_bin);
+        }
+      }
+
+      println!(
+        "cargo:warning=speech_recognizer universal binary → {}",
+        swift_bin.display()
+      );
+    } else {
+      println!(
+        "cargo:warning=Swift helper source not found at {}",
+        swift_src.display()
+      );
+    }
+  }
 }

@@ -50,9 +50,25 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 #   - sha2:    SHA-256 verification against the pinned upstream checksum
 #   - hex:     hex-encode the digest for comparison against the constant
 # rustls (not native-tls) keeps us off OpenSSL link issues on signed builds.
-reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls"] }
+reqwest = { version = "0.13", default-features = false, features = ["blocking", "rustls", "json", "http2"] }
 sha2 = "0.10"
 hex = "0.4"
+
+# ── Voice STT engine (lifted from aqua/Symon, de-Symonized) ──
+# The Swift sidecar (`helpers/speech_recognizer.swift`) does the audio capture
+# + Apple Speech recognition; these Rust crates power the streaming bridge, the
+# Gemini polish pass, and the optional Whisper re-transcription. Only the crates
+# the lifted `src/stt/*.rs` files actually import are added here — the STT path
+# does NOT pull objc2/AppKit/CoreGraphics (the Swift helper owns all of that).
+#   - tracing:   logging macros used verbatim by the lifted modules.
+#   - hound:     pure-Rust WAV parser for the PCM the Swift helper writes.
+#   - flacenc:   pure-Rust WAV→FLAC transcode (~3x) before Gemini upload.
+#   - base64:    inline_data audio encode for Gemini + OpenRouter Whisper.
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+hound = "3.5"
+flacenc = "0.5"
+base64 = "0.22"
 
 # Shutdown safety net (issue #719). Both crates are already in the lock graph
 # transitively; promoting them to direct deps is zero binary cost. Used to
