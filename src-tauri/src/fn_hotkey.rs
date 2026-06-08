@@ -30,6 +30,14 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 #[cfg(target_os = "macos")]
 use std::sync::{Arc, Mutex, OnceLock};
+#[cfg(target_os = "macos")]
+use tauri::Emitter;
+
+/// The app handle, stored once at `start()`, so the off-tap worker threads can
+/// show the screen dock pill window + emit the `system-start` event on Fn-down
+/// (system-wide Symon fold P3). Cloned per use; AppHandle is cheap to clone.
+#[cfg(target_os = "macos")]
+static APP_HANDLE: OnceLock<tauri::AppHandle> = OnceLock::new();
 
 /// True while a dictation was started by the global Fn hotkey (system path)
 /// rather than the in-window mic button. `run_finalize` reads this to decide
@@ -87,15 +95,51 @@ extern "C" {
 /// tap callback.
 #[cfg(target_os = "macos")]
 fn begin_system_dictation() {
-    // Save the paste target BEFORE any focus could shift.
+    // Save the paste target BEFORE any focus could shift. Crucially this also
+    // happens BEFORE the dock pill is ordered front — the dock window is
+    // nonactivating so it shouldn't steal focus, but capturing the frontmost
+    // app first is the belt-and-suspenders guarantee for the paste target.
     crate::paste::save_frontmost_app();
     set_system_origin(true);
+
+    // Show the screen dock pill (P3). The dock window filters `o8:stt-event` to
+    // origin==system; `system-start` makes it enter 'recording' immediately so
+    // the user sees the pill the instant they hold Fn, before the daemon's
+    // first partial lands. Both run on the main thread (window + emit).
+    if let Some(app) = APP_HANDLE.get() {
+        let app = app.clone();
+        let _ = app.run_on_main_thread({
+            let app = app.clone();
+            move || {
+                crate::dock_window::show(&app);
+                let _ = app.emit(
+                    "o8:stt-event",
+                    serde_json::json!({ "type": "system-start", "origin": "system" }),
+                );
+            }
+        });
+    }
+
     match crate::stt_engine::start() {
         Ok(sid) => tracing::info!("[fn-hotkey] system dictation started (session={sid})"),
         Err(e) => {
             tracing::error!("[fn-hotkey] failed to start dictation: {e}");
             set_system_origin(false);
+            // Hide the dock pill we just showed — the session never started.
+            hide_dock();
         }
+    }
+}
+
+/// Hide the screen dock pill from any worker thread (hops to the main thread).
+/// No-op if the app handle isn't stored yet or the window doesn't exist.
+#[cfg(target_os = "macos")]
+fn hide_dock() {
+    if let Some(app) = APP_HANDLE.get() {
+        let app_for_call = app.clone();
+        let app_for_closure = app.clone();
+        let _ = app_for_call
+            .run_on_main_thread(move || crate::dock_window::hide(&app_for_closure));
     }
 }
 
@@ -110,20 +154,27 @@ fn end_system_dictation() {
 }
 
 /// Discard a too-short Fn brush: stop the recognizer and clear the origin so a
-/// stray finalize doesn't paste an empty string into the focused app.
+/// stray finalize doesn't paste an empty string into the focused app. Also hide
+/// the dock pill we flashed up on Fn-down so a brush doesn't leave it stuck.
 #[cfg(target_os = "macos")]
 fn discard_brush() {
     set_system_origin(false);
     let _ = crate::stt_engine::stop();
+    hide_dock();
 }
 
 /// Spawn the global Fn hotkey monitor. Call ONCE from `setup()` alongside
 /// `stt_engine::spawn`. On non-macOS this is a no-op.
 #[cfg(target_os = "macos")]
-pub fn start(_app: tauri::AppHandle) {
+pub fn start(app: tauri::AppHandle) {
     use core_graphics::event::{
         CGEventTap, CGEventTapLocation, CGEventTapOptions, CGEventTapPlacement, CGEventType,
     };
+
+    // Stash the app handle so the off-tap worker threads can drive the screen
+    // dock pill window (show on Fn-down, hide on brush/error). Ignore a second
+    // call — `start()` is invoked once from setup().
+    let _ = APP_HANDLE.set(app.clone());
 
     // Trigger the native macOS Accessibility prompt if we don't already have
     // permission. CGEventTapCreate silently succeeds even without Accessibility

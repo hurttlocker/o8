@@ -1,4 +1,5 @@
 mod dev_frontend;
+mod dock_window;
 mod fn_hotkey;
 mod launch_updater;
 mod mac_perms;
@@ -709,7 +710,7 @@ fn child_stdio(file: Option<&std::fs::File>) -> std::process::Stdio {
     }
 }
 
-fn prewarm_bundled_next_server(api_port: u16) {
+fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
     std::thread::spawn(move || {
         let url = format!("http://127.0.0.1:{}/dashboard", api_port);
         std::thread::sleep(std::time::Duration::from_millis(150));
@@ -722,14 +723,33 @@ fn prewarm_bundled_next_server(api_port: u16) {
             Err(_) => return,
         };
 
-        for attempt in 0..4 {
+        // Poll the bundled server until it answers. The dock pill window
+        // (system-wide Symon fold P3) is created only AFTER the server is
+        // confirmed up — it navigates to /dictation-pill on the same port, so
+        // it must not be built against a dead listener (same reason main waits
+        // via the loader before /dashboard). The longer cap here (vs the old
+        // 4-attempt warm-only loop) gives a cold next-server time to bind.
+        let mut server_up = false;
+        for attempt in 0..40 {
             if client.get(&url).header("Connection", "close").send().is_ok() {
-                return;
+                server_up = true;
+                break;
             }
-            if attempt < 3 {
+            if attempt < 39 {
                 std::thread::sleep(std::time::Duration::from_millis(250));
             }
         }
+
+        if !server_up {
+            log::warn!("[dock-window] bundled Next server never answered; skipping dock pill");
+            return;
+        }
+
+        // Window creation must run on the main thread.
+        let app_main = app.clone();
+        let _ = app.run_on_main_thread(move || {
+            dock_window::create(&app_main, api_port);
+        });
     });
 }
 
@@ -2302,21 +2322,36 @@ mod stt_engine {
         std::thread::spawn(crate::stt::polish::warmup);
     }
 
+    /// Origin discriminator for the active dictation (system-wide Symon fold
+    /// P3 review HIGH). `o8:stt-event` is broadcast to ALL windows; this lets
+    /// the screen `dock` pill react only to global-Fn (`system`) sessions and
+    /// the in-window DictationHost react only to mic-button (`in-window`)
+    /// sessions, so neither double-renders. `is_system_origin()` is set at
+    /// Fn-down BEFORE `start()`, so it is stable for the whole session here.
+    fn origin_str() -> &'static str {
+        if crate::fn_hotkey::is_system_origin() {
+            "system"
+        } else {
+            "in-window"
+        }
+    }
+
     /// Forward one TranscriptEvent to the webview. Partial/Level events are
     /// passed straight through for live UI; Final triggers the finalize chain.
     fn forward_event(app: &AppHandle, event: crate::stt::TranscriptEvent) {
         use crate::stt::TranscriptEvent as TE;
+        let origin = origin_str();
         match event {
             TE::Partial { session_id, text } => {
                 let _ = app.emit(
                     "o8:stt-event",
-                    serde_json::json!({ "type": "partial", "sessionId": session_id, "text": text }),
+                    serde_json::json!({ "type": "partial", "origin": origin, "sessionId": session_id, "text": text }),
                 );
             }
             TE::Level { session_id, level } => {
                 let _ = app.emit(
                     "o8:stt-event",
-                    serde_json::json!({ "type": "level", "sessionId": session_id, "level": level }),
+                    serde_json::json!({ "type": "level", "origin": origin, "sessionId": session_id, "level": level }),
                 );
             }
             TE::Final { session_id, text } => {
@@ -2325,36 +2360,36 @@ mod stt_engine {
                 stash_final(session_id, text.clone());
                 let _ = app.emit(
                     "o8:stt-event",
-                    serde_json::json!({ "type": "final", "sessionId": session_id, "text": text }),
+                    serde_json::json!({ "type": "final", "origin": origin, "sessionId": session_id, "text": text }),
                 );
             }
             TE::AudioFile { session_id, path } => {
                 let _ = app.emit(
                     "o8:stt-event",
-                    serde_json::json!({ "type": "audio_file", "sessionId": session_id, "path": path }),
+                    serde_json::json!({ "type": "audio_file", "origin": origin, "sessionId": session_id, "path": path }),
                 );
                 run_finalize(app.clone(), session_id, path);
             }
             TE::Status { session_id, text } => {
                 let _ = app.emit(
                     "o8:stt-event",
-                    serde_json::json!({ "type": "status", "sessionId": session_id, "text": text }),
+                    serde_json::json!({ "type": "status", "origin": origin, "sessionId": session_id, "text": text }),
                 );
             }
             TE::Error { session_id, text } => {
                 let _ = app.emit(
                     "o8:stt-event",
-                    serde_json::json!({ "type": "error", "sessionId": session_id, "text": text }),
+                    serde_json::json!({ "type": "error", "origin": origin, "sessionId": session_id, "text": text }),
                 );
             }
             TE::Complete { session_id } => {
                 let _ = app.emit(
                     "o8:stt-event",
-                    serde_json::json!({ "type": "complete", "sessionId": session_id }),
+                    serde_json::json!({ "type": "complete", "origin": origin, "sessionId": session_id }),
                 );
             }
             TE::Ready => {
-                let _ = app.emit("o8:stt-event", serde_json::json!({ "type": "ready" }));
+                let _ = app.emit("o8:stt-event", serde_json::json!({ "type": "ready", "origin": origin }));
             }
         }
     }
@@ -2465,15 +2500,31 @@ mod stt_engine {
                     "o8:stt-event",
                     serde_json::json!({
                         "type": "system-pasted",
+                        "origin": "system",
                         "sessionId": session_id,
                         "chars": polished.chars().count(),
                     }),
                 );
+                // Hide the dock pill after the React "Pasted" flash plays out
+                // (SUCCESS_FLASH_MS = 900ms in /dictation-pill). A slightly
+                // longer delay lets the flash + exit animation finish before the
+                // window is ordered out. We're already on a finalize worker
+                // thread, so a blocking sleep here is fine.
+                {
+                    let app_hide = app.clone();
+                    std::thread::spawn(move || {
+                        std::thread::sleep(std::time::Duration::from_millis(1100));
+                        let app_main = app_hide.clone();
+                        let _ = app_hide
+                            .run_on_main_thread(move || dock_window::hide(&app_main));
+                    });
+                }
             } else {
                 let _ = app.emit(
                     "o8:stt-event",
                     serde_json::json!({
                         "type": "polished",
+                        "origin": "in-window",
                         "sessionId": session_id,
                         "text": polished,
                         "rawText": raw_text,
@@ -3111,7 +3162,7 @@ pub fn run() {
                         let pid = child.id();
                         log::info!("Next.js server started (pid: {})", pid);
                         sidecar_lifecycle::register_child(pid);
-                        prewarm_bundled_next_server(api_port);
+                        prewarm_bundled_next_server(app.handle().clone(), api_port);
                     }
                     Err(e) => {
                         log::error!("Failed to start server: {}", e);
