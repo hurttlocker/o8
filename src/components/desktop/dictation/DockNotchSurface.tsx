@@ -306,12 +306,12 @@ interface DockNotchSurfaceProps {
 export function DockNotchSurface({ snapshot, ttsState = 'idle', onTogglePause, onStop }: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
-  // The speaking capsule shows whenever TTS is playing/paused. It WINS over the
-  // dictation morph: the TTS engine also emits `system-start` (which drives the
-  // dictation 'recording' waveform) so without this override the controls would
-  // be masked by the waveform during playback. Real dictation and TTS don't
-  // overlap in practice, so letting speaking win is safe.
-  const isSpeaking = ttsState === 'playing' || ttsState === 'paused';
+  // The speaking capsule shows when TTS is playing/paused AND no dictation is
+  // active. The TTS engine drives the dock purely via `o8:tts-state` (it no
+  // longer emits the dictation `system-start`), so when the user holds Fn to
+  // talk OVER the TTS, real dictation sets `dictationMode` and wins the dock —
+  // they see their recording waveform, not the speaking controls.
+  const isSpeaking = dictationMode === 'idle' && (ttsState === 'playing' || ttsState === 'paused');
   const mode = dictationMode;
   const isError = state === 'error';
 

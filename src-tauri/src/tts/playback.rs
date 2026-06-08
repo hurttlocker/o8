@@ -115,7 +115,6 @@ pub fn stop() {
     if was_active {
         log::info!("[tts] stop: playback halted");
     }
-    super::emit_dock("system-idle");
     emit_tts_state("idle");
 }
 
@@ -193,7 +192,6 @@ pub fn play_thread(text: String, config: TtsConfig) {
         // Morph the screen dock to show TTS is active. The guard returns it to
         // idle on EVERY exit path — but ONLY if this thread is still the current
         // generation, so a superseded thread doesn't stomp the newer playback.
-        super::emit_dock("system-start");
         emit_tts_state("playing");
         struct DockGuard {
             generation: Arc<AtomicU64>,
@@ -202,7 +200,6 @@ pub fn play_thread(text: String, config: TtsConfig) {
         impl Drop for DockGuard {
             fn drop(&mut self) {
                 if self.generation.load(Ordering::SeqCst) == self.my_gen {
-                    super::emit_dock("system-idle");
                     emit_tts_state("idle");
                 }
             }

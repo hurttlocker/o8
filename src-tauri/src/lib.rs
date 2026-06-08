@@ -1,3 +1,4 @@
+mod audio_ducker;
 mod background;
 mod dev_frontend;
 mod dock_window;
