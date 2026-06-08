@@ -3126,8 +3126,18 @@ pub fn run() {
                     // event-loop thread; play_thread then spawns its own audio
                     // thread. Falls back to `say` inside play_thread.
                     if let Ok(sc) = "CommandOrControl+Shift+S".parse::<Shortcut>() {
+                        let h_speak = app.handle().clone();
                         if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
                             if event.state != ShortcutState::Pressed {
+                                return;
+                            }
+                            // o8's own webview doesn't expose its text selection via
+                            // AXSelectedText (and synthetic Cmd+C can't copy it), so
+                            // when o8 is frontmost ask the WEBVIEW for its selection
+                            // (window.getSelection) via the frontend. For any other
+                            // app, grab the selection natively (AX → Cmd+C).
+                            if crate::paste::frontmost_is_o8() {
+                                let _ = h_speak.emit_to("main", "o8:speak-selection", ());
                                 return;
                             }
                             std::thread::spawn(|| match crate::paste::grab_selection() {

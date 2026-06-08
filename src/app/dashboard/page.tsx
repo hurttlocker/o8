@@ -3720,6 +3720,34 @@ function DashboardInner() {
     };
   }, [toggleSettingsOverlay]);
 
+  // ── Voice P4: ⌘⇧S while o8 is frontmost → speak o8's OWN webview selection ──
+  // o8's WKWebView doesn't expose its text selection to the native AX/Cmd+C
+  // grab, so the Rust ⌘⇧S handler emits `o8:speak-selection` when o8 is the
+  // frontmost app; we read `window.getSelection()` here and speak it through the
+  // native TTS engine. For other apps the Rust side grabs the selection itself.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen('o8:speak-selection', () => {
+        const text = window.getSelection()?.toString().trim();
+        if (!text) return;
+        import('@tauri-apps/api/core')
+          .then(({ invoke }) => invoke('tts_speak', { text }))
+          .catch(() => { /* noop */ });
+      }))
+      .then((un) => {
+        if (disposed) { un(); return; }
+        unlisten = un;
+      })
+      .catch(() => { /* noop — never let the listener break the dashboard */ });
+    return () => {
+      disposed = true;
+      if (unlisten) { try { unlisten(); } catch { /* noop */ } }
+    };
+  }, []);
+
   const showSidebarColumn = sidebarVisible && !compactShell;
   const showRightPanelColumn = chatVisible && !compactShell;
   const workspaceInset = compactShell ? 2 : 4;
