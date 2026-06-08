@@ -8,6 +8,8 @@ mod paste;
 mod sidecar_lifecycle;
 #[cfg(target_os = "macos")]
 mod stt;
+#[cfg(target_os = "macos")]
+mod tts;
 mod webview_latch;
 
 use rusqlite::{Connection, OpenFlags};
@@ -2677,6 +2679,15 @@ fn o8_stt_locale(locale: String) -> Result<(), String> {
     stt_engine::set_locale(&locale)
 }
 
+/// Speak `text` aloud via the native TTS engine (voice P4): ElevenLabs/Google →
+/// macOS `say` fallback. Fire-and-forget on a dedicated OS thread (rodio is
+/// `!Send`), so it returns immediately and never blocks the webview. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn tts_speak(text: String) {
+    tts::playback::play_thread(text, tts::load_config());
+}
+
 /// TEMPORARY debug command (system-wide Symon fold P1): paste `text` into the
 /// currently-focused 3rd-party app, so paste-into-frontmost is verifiable
 /// without the global Fn hotkey. macOS only.
@@ -2890,6 +2901,8 @@ pub fn run() {
             o8_stt_stop,
             #[cfg(target_os = "macos")]
             o8_stt_locale,
+            #[cfg(target_os = "macos")]
+            tts_speak,
             #[cfg(target_os = "macos")]
             o8_debug_paste,
             #[cfg(target_os = "macos")]
