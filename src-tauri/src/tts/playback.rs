@@ -193,6 +193,7 @@ pub fn play_thread(text: String, config: TtsConfig) {
         // idle on EVERY exit path — but ONLY if this thread is still the current
         // generation, so a superseded thread doesn't stomp the newer playback.
         emit_tts_state("playing");
+        crate::sound::play_sound("ReadStart"); // read-aloud start cue (#1208)
         struct DockGuard {
             generation: Arc<AtomicU64>,
             my_gen: u64,
@@ -201,6 +202,7 @@ pub fn play_thread(text: String, config: TtsConfig) {
             fn drop(&mut self) {
                 if self.generation.load(Ordering::SeqCst) == self.my_gen {
                     emit_tts_state("idle");
+                    crate::sound::play_sound("ReadDone"); // read-aloud finish cue (#1208)
                 }
             }
         }
