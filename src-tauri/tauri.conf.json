@@ -58,7 +58,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "minimumSystemVersion": "10.15",
+      "minimumSystemVersion": "14.0",
       "signingIdentity": "Developer ID Application: Marquise Hurtt (3U3MXN796S)",
       "hardenedRuntime": true,
       "entitlements": "entitlements.plist"
