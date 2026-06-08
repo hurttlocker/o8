@@ -86,6 +86,13 @@ interface DictationPillProps {
   position?: { left: number; bottom: number };
 }
 
+interface DictationPillViewProps {
+  snapshot: DictationSnapshot;
+  onCancel: () => void;
+  /** Hide the cancel (X) button — the screen dock pill is not interactive. */
+  hideCancel?: boolean;
+}
+
 interface AnchorPos { left: number; bottom: number }
 
 /**
@@ -270,7 +277,19 @@ function SquiggleLoader({ label }: { label: string }) {
   );
 }
 
-export function DictationPill({ snapshot, onCancel, anchorRef, position }: DictationPillProps) {
+/**
+ * DictationPillView — the presentational pill (glass shell + EQ canvas +
+ * squiggle loader + state body). Position-agnostic: it renders the morphing
+ * pill at its natural size with NO outer positioning. Both surfaces share it:
+ *   - the in-window `DictationPill` wraps it in a `position: fixed` portal,
+ *     bottom-anchored above the active composer.
+ *   - the screen dock route (`/dictation-pill`) centers it inside its own
+ *     always-on-top transparent window — the WINDOW provides the position.
+ *
+ * Self-driving: it computes its own per-state width, glow, glass, and body
+ * and animates the morph with framer-motion. Idle → renders nothing.
+ */
+export function DictationPillView({ snapshot, onCancel, hideCancel }: DictationPillViewProps) {
   const { state, audioLevel, durationMs, error, partialTranscript } = snapshot;
   const visible = state !== 'idle';
 
@@ -281,8 +300,6 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
   useEffect(() => {
     reducedRef.current = (state === 'transcribing' || state === 'polishing') ? 0.4 : 1;
   }, [state]);
-
-  const [anchor, setAnchor] = useState<AnchorPos | null>(null);
 
   const trimmedPartial = partialTranscript.trim();
   const isRecording = state === 'recording' || state === 'requesting-mic';
@@ -304,47 +321,7 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
     return 280;
   }, [isError, isRecording, trimmedPartial]);
 
-  // Anchor: above the active composer, else bottom-center (Symon docks the
-  // pill at bottom-center of its own window).
-  useEffect(() => {
-    if (!visible) {
-      setAnchor(null);
-      return;
-    }
-    if (position) {
-      setAnchor(position);
-      return;
-    }
-    const compute = () => {
-      const el = anchorRef?.current;
-      if (!el) {
-        setAnchor({
-          left: Math.max(8, Math.floor((window.innerWidth - pillWidth) / 2)),
-          bottom: 24,
-        });
-        return;
-      }
-      const rect = el.getBoundingClientRect();
-      const centerX = rect.left + rect.width / 2;
-      const left = Math.min(
-        Math.max(8, Math.floor(centerX - pillWidth / 2)),
-        Math.max(8, window.innerWidth - pillWidth - 8),
-      );
-      const bottom = Math.max(8, window.innerHeight - rect.top + 8);
-      setAnchor({ left, bottom });
-    };
-    compute();
-    window.addEventListener('resize', compute);
-    window.addEventListener('scroll', compute, true);
-    return () => {
-      window.removeEventListener('resize', compute);
-      window.removeEventListener('scroll', compute, true);
-    };
-  }, [visible, anchorRef, position, pillWidth]);
-
   const label = useMemo(() => stateLabel(state, error), [state, error]);
-
-  if (typeof document === 'undefined') return null;
 
   // ── Per-state glow / border tint (verbatim from Pill.svelte) ──
   const glow = isError
@@ -363,7 +340,7 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
     ? 'rgba(239, 68, 68, 0.08)'
     : 'linear-gradient(180deg, rgba(255,255,255,0.22), rgba(255,255,255,0.08)), var(--t-panel-solid, rgba(255,255,255,0.10))';
 
-  const cancelButton = (
+  const cancelButton = hideCancel ? null : (
     <button
       type="button"
       onClick={onCancel}
@@ -534,9 +511,11 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
     );
   }
 
-  const pillNode = (
+  // Natural-size pill: no outer positioning. The caller decides where it lives
+  // (fixed portal for the in-window path, centered window for the screen dock).
+  return (
     <AnimatePresence>
-      {visible && anchor && (
+      {visible && (
         <motion.div
           role="status"
           aria-live="polite"
@@ -545,9 +524,6 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
           exit={{ opacity: 0, y: 8, scale: 0.97 }}
           transition={{ type: 'spring', stiffness: 420, damping: 32 }}
           style={{
-            position: 'fixed',
-            left: anchor.left,
-            bottom: anchor.bottom,
             width: pillWidth,
             height: 58,
             borderRadius: 29,
@@ -566,7 +542,6 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
             alignItems: 'center',
             gap: 12,
             fontFamily: UI_FONT,
-            zIndex: 2147483600,
             userSelect: 'none',
             overflow: 'hidden',
             transition: `width 160ms ${SYMON_EASE}, border-color 120ms ease, box-shadow 120ms ease`,
@@ -580,6 +555,87 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
         </motion.div>
       )}
     </AnimatePresence>
+  );
+}
+
+/**
+ * DictationPill — the in-window HUD. Anchors `DictationPillView` above the
+ * active composer (or bottom-center fallback) via a `position: fixed` portal.
+ * Unchanged behavior from before the view extraction.
+ */
+export function DictationPill({ snapshot, onCancel, anchorRef, position }: DictationPillProps) {
+  const { state, partialTranscript } = snapshot;
+  const visible = state !== 'idle';
+
+  const trimmedPartial = partialTranscript.trim();
+  const isRecording = state === 'recording' || state === 'requesting-mic';
+  const isError = state === 'error';
+
+  // Match the view's per-state width so the anchor math centers correctly.
+  const pillWidth = useMemo(() => {
+    if (isError) return 460;
+    if (isRecording && trimmedPartial.length > 0) {
+      const estimated = 200 + Math.min(360, trimmedPartial.length * 7);
+      return Math.max(360, Math.min(620, Math.round(estimated / 8) * 8));
+    }
+    return 280;
+  }, [isError, isRecording, trimmedPartial]);
+
+  const [anchor, setAnchor] = useState<AnchorPos | null>(null);
+
+  // Anchor: above the active composer, else bottom-center (Symon docks the
+  // pill at bottom-center of its own window).
+  useEffect(() => {
+    if (!visible) {
+      setAnchor(null);
+      return;
+    }
+    if (position) {
+      setAnchor(position);
+      return;
+    }
+    const compute = () => {
+      const el = anchorRef?.current;
+      if (!el) {
+        setAnchor({
+          left: Math.max(8, Math.floor((window.innerWidth - pillWidth) / 2)),
+          bottom: 24,
+        });
+        return;
+      }
+      const rect = el.getBoundingClientRect();
+      const centerX = rect.left + rect.width / 2;
+      const left = Math.min(
+        Math.max(8, Math.floor(centerX - pillWidth / 2)),
+        Math.max(8, window.innerWidth - pillWidth - 8),
+      );
+      const bottom = Math.max(8, window.innerHeight - rect.top + 8);
+      setAnchor({ left, bottom });
+    };
+    compute();
+    window.addEventListener('resize', compute);
+    window.addEventListener('scroll', compute, true);
+    return () => {
+      window.removeEventListener('resize', compute);
+      window.removeEventListener('scroll', compute, true);
+    };
+  }, [visible, anchorRef, position, pillWidth]);
+
+  if (typeof document === 'undefined') return null;
+
+  const pillNode = (
+    <div
+      style={{
+        position: 'fixed',
+        left: anchor?.left ?? 0,
+        bottom: anchor?.bottom ?? 0,
+        zIndex: 2147483600,
+        pointerEvents: anchor ? 'auto' : 'none',
+        opacity: anchor ? 1 : 0,
+      }}
+    >
+      <DictationPillView snapshot={snapshot} onCancel={onCancel} />
+    </div>
   );
 
   return createPortal(pillNode, document.body);
