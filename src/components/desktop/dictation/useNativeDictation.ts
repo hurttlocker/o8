@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { isTauri } from '@/lib/tauri/bridge';
 import type { DictationSnapshot, DictationStartOptions, DictationState } from './types';
 
 const SUCCESS_FLASH_MS = 600;
@@ -16,33 +17,20 @@ const ERROR_FLASH_MS = 2500;
  * This does NOT replace the webkitSpeechRecognition + HTTP `/api/dictation`
  * path in `useDictation.ts` — both ship. Callers choose the native path by
  * importing this hook (e.g. behind a settings flag). `isNativeDictationAvailable()`
- * reports whether the Tauri bridge + STT commands are present.
+ * reports whether the Tauri bridge is present.
+ *
+ * NOTE: o8 runs with `withGlobalTauri` off, so `window.__TAURI__` is undefined.
+ * Detection + invoke/listen go through the same path as `@/lib/tauri/bridge`
+ * (`'__TAURI_INTERNALS__' in window` + dynamic `import('@tauri-apps/api/*')`).
  */
 
-type TauriCore = {
-  invoke: <T>(cmd: string, args?: Record<string, unknown>) => Promise<T>;
-};
-
-type TauriEvent = {
-  listen: <T>(
-    event: string,
-    handler: (e: { payload: T }) => void,
-  ) => Promise<() => void>;
-};
-
-function getTauri(): { core: TauriCore; event: TauriEvent } | null {
-  if (typeof window === 'undefined') return null;
-  const w = window as unknown as {
-    __TAURI__?: { core?: TauriCore; event?: TauriEvent };
-  };
-  const core = w.__TAURI__?.core;
-  const event = w.__TAURI__?.event;
-  if (core?.invoke && event?.listen) return { core, event };
-  return null;
+async function sttInvoke<T>(cmd: string, args?: Record<string, unknown>): Promise<T> {
+  const { invoke } = await import('@tauri-apps/api/core');
+  return invoke<T>(cmd, args);
 }
 
 export function isNativeDictationAvailable(): boolean {
-  return getTauri() !== null;
+  return isTauri();
 }
 
 interface SttEventPayload {
@@ -165,11 +153,10 @@ export function useNativeDictation() {
 
   // Install the o8:stt-event listener once.
   useEffect(() => {
-    const tauri = getTauri();
-    if (!tauri) return;
+    if (!isTauri()) return;
     let disposed = false;
-    tauri.event
-      .listen<SttEventPayload>('o8:stt-event', (e) => handleEvent(e.payload))
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<SttEventPayload>('o8:stt-event', (e) => handleEvent(e.payload)))
       .then((unlisten) => {
         if (disposed) {
           unlisten();
@@ -191,8 +178,7 @@ export function useNativeDictation() {
 
   const start = useCallback(async (options: DictationStartOptions) => {
     if (stateRef.current !== 'idle' && stateRef.current !== 'error') return;
-    const tauri = getTauri();
-    if (!tauri) {
+    if (!isTauri()) {
       goError('Native dictation unavailable');
       return;
     }
@@ -203,7 +189,7 @@ export function useNativeDictation() {
     optionsRef.current = options;
     setState('requesting-mic', { audioLevel: 0, durationMs: 0, error: null, partialTranscript: '' });
     try {
-      const sessionId = await tauri.core.invoke<number>('o8_stt_start');
+      const sessionId = await sttInvoke<number>('o8_stt_start');
       sessionIdRef.current = sessionId;
       startTimeRef.current = Date.now();
       setState('recording', { audioLevel: 0, durationMs: 0, error: null, partialTranscript: '' });
@@ -216,13 +202,12 @@ export function useNativeDictation() {
 
   const stopAndSubmit = useCallback(async () => {
     if (stateRef.current !== 'recording') return;
-    const tauri = getTauri();
-    if (!tauri) return;
+    if (!isTauri()) return;
     // Move to transcribing; the `final`/`audio_file`/`polished` events drive
     // the rest of the state machine.
     setState('transcribing');
     try {
-      await tauri.core.invoke('o8_stt_stop');
+      await sttInvoke('o8_stt_stop');
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn('[native-dictation] o8_stt_stop failed', err);
@@ -232,11 +217,10 @@ export function useNativeDictation() {
 
   const cancel = useCallback(() => {
     if (stateRef.current === 'idle') return;
-    const tauri = getTauri();
     // Bump the session so any in-flight events are ignored.
     sessionIdRef.current += 1;
-    if (tauri) {
-      tauri.core.invoke('o8_stt_stop').catch(() => { /* noop */ });
+    if (isTauri()) {
+      sttInvoke('o8_stt_stop').catch(() => { /* noop */ });
     }
     setSnapshot({ state: 'idle', audioLevel: 0, durationMs: 0, error: null, partialTranscript: '' });
     stateRef.current = 'idle';
@@ -244,10 +228,9 @@ export function useNativeDictation() {
   }, []);
 
   const setLocale = useCallback(async (locale: string) => {
-    const tauri = getTauri();
-    if (!tauri) return;
+    if (!isTauri()) return;
     try {
-      await tauri.core.invoke('o8_stt_locale', { locale });
+      await sttInvoke('o8_stt_locale', { locale });
     } catch (err) {
       console.warn('[native-dictation] o8_stt_locale failed', err);
     }
