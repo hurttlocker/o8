@@ -29,18 +29,6 @@ pub(crate) fn app_handle() -> Option<&'static tauri::AppHandle> {
     APP_HANDLE.get()
 }
 
-/// Emit an `o8:stt-event` to the screen dock so it morphs while TTS plays.
-/// Direct `emit_to(DOCK_LABEL)` (the reliable path) + broadcast. Thread-safe —
-/// Tauri events can be emitted from any thread.
-pub(crate) fn emit_dock(event_type: &str) {
-    use tauri::Emitter;
-    if let Some(app) = APP_HANDLE.get() {
-        let payload = serde_json::json!({ "type": event_type, "origin": "system" });
-        let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", payload.clone());
-        let _ = app.emit("o8:stt-event", payload);
-    }
-}
-
 /// The two shipping providers. (Edge → remapped to Google in aqua, Native is a
 /// perpetual stub — both omitted. `say` is the fallback, not a provider.)
 pub enum TtsProvider {
