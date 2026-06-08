@@ -78,6 +78,80 @@ pub mod commands {
         result.push_str(&text[last_end..]);
         result
     }
+
+    /// Result of processing voice commands in a transcript.
+    pub enum CommandResult {
+        /// Modified text ready to paste.
+        Text(String),
+        /// User cancelled dictation — don't paste anything.
+        Cancel,
+    }
+
+    /// Process voice commands at the END of a transcript (ported from aqua/Symon
+    /// `stt/commands.rs::process`, de-Symonized). Case-insensitive, plain
+    /// `ends_with`/replace, zero latency. Runs on the RAW transcript BEFORE polish
+    /// on the system-Fn paste path (the in-window composer has its own TS
+    /// processor at `src/lib/dictation/voice-commands.ts`).
+    ///
+    /// - "scratch that" / "cancel" / "never mind" / "nevermind" → Cancel (no paste)
+    /// - "remove that" / "delete that" / "undo that" / "undo" → strip phrase + last word
+    /// - "new paragraph" → `\n\n` (anywhere) · "new line" → `\n` (anywhere)
+    pub fn process(transcript: &str) -> CommandResult {
+        let trimmed = transcript.trim();
+        if trimmed.is_empty() {
+            return CommandResult::Cancel;
+        }
+
+        let lower = trimmed.to_lowercase();
+
+        // Full cancellation — any of these at the end cancels the paste.
+        for cancel_cmd in &["scratch that", "cancel", "never mind", "nevermind"] {
+            if lower.ends_with(cancel_cmd) {
+                return CommandResult::Cancel;
+            }
+        }
+
+        let mut text = trimmed.to_string();
+
+        // Remove/delete/undo — strip the command phrase + the last remaining word.
+        let remove_commands: &[&str] = &["remove that", "delete that", "undo that", "undo"];
+        for cmd in remove_commands {
+            if lower.ends_with(cmd) {
+                let end = text.len() - cmd.len();
+                text.truncate(end);
+                text = text.trim_end().to_string();
+
+                // Drop trailing punctuation Apple may have added before the command.
+                while text.ends_with('.')
+                    || text.ends_with(',')
+                    || text.ends_with('!')
+                    || text.ends_with('?')
+                {
+                    text.pop();
+                    text = text.trim_end().to_string();
+                }
+
+                // Remove the last word (one word left → clear it → Cancel below).
+                if let Some(last_space) = text.rfind(' ') {
+                    text.truncate(last_space);
+                } else {
+                    text.clear();
+                }
+                break;
+            }
+        }
+
+        // Inline replacements (anywhere). Longer pattern first to avoid partials.
+        text = replace_case_insensitive(&text, "new paragraph", "\n\n");
+        text = replace_case_insensitive(&text, "new line", "\n");
+
+        let result = text.trim().to_string();
+        if result.is_empty() {
+            CommandResult::Cancel
+        } else {
+            CommandResult::Text(result)
+        }
+    }
 }
 
 /// JSON structure emitted by the Swift helper (one per line).
