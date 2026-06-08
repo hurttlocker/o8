@@ -211,6 +211,23 @@ fn get_current_frontmost_bundle_id() -> Option<String> {
     native_frontmost_app_info().map(|app| app.bundle_id)
 }
 
+/// Whether o8 ITSELF is the current frontmost app. ⌘⇧S speak-selection uses this
+/// to read o8's own webview selection (`window.getSelection()` via the frontend)
+/// instead of the AX/Cmd+C path — a WKWebView does NOT expose web-content
+/// selections through `AXSelectedText`, and the synthetic Cmd+C doesn't reliably
+/// copy them either.
+#[cfg(target_os = "macos")]
+pub(crate) fn frontmost_is_o8() -> bool {
+    native_frontmost_app_info()
+        .map(|app| app.bundle_id == O8_BUNDLE_ID)
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn frontmost_is_o8() -> bool {
+    false
+}
+
 /// Save the currently focused app and its focused window (call BEFORE showing the pill).
 /// Uses NSWorkspace to get the frontmost app — works correctly across multiple displays.
 #[cfg(target_os = "macos")]
