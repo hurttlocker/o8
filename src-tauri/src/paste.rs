@@ -853,6 +853,60 @@ pub(crate) fn simulate_cmd_c() {
     simulate_command_keypress(0x08, "selection");
 }
 
+/// Read the user's current text selection (voice P4 "say" / speak-selection).
+/// Strategy 1: Accessibility `AXSelectedText` (no clipboard touch). Strategy 2:
+/// synthesize Cmd+C, poll the clipboard ≤180ms (10ms cadence), read it, then
+/// restore the user's original clipboard. Ported from aqua/Symon
+/// `reading.rs::grab_selection` — the 180ms/10ms/accept-rule are verbatim.
+#[cfg(target_os = "macos")]
+pub(crate) fn grab_selection() -> Option<String> {
+    // ── Strategy 1: Accessibility (no clipboard clobber) ──
+    if let Some(text) = read_selected_text_via_accessibility() {
+        log::info!("[tts] grab_selection: AXSelectedText got {} chars", text.len());
+        return Some(text);
+    }
+
+    // ── Strategy 2: simulate Cmd+C → poll clipboard → restore ──
+    let saved = capture_clipboard_snapshot();
+    simulate_cmd_c();
+
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(180);
+    let mut copied_change_count = None;
+    while std::time::Instant::now() < deadline {
+        let current = clipboard_change_count();
+        if current != saved.change_count {
+            copied_change_count = Some(current);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+
+    let new_clipboard = copied_change_count.and_then(|_| read_clipboard_text());
+    if let Some(change_count) = copied_change_count {
+        let _ = restore_clipboard_if_match(&saved, change_count);
+    }
+
+    match (&new_clipboard, &saved.text) {
+        (Some(new), Some(old)) if new != old && !new.trim().is_empty() => {
+            log::info!("[tts] grab_selection: Cmd+C got {} chars", new.len());
+            new_clipboard
+        }
+        (Some(new), None) if !new.trim().is_empty() => {
+            log::info!("[tts] grab_selection: Cmd+C got {} chars (no prior clipboard)", new.len());
+            new_clipboard
+        }
+        _ => {
+            log::warn!("[tts] grab_selection: clipboard unchanged — no selection to speak");
+            None
+        }
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn grab_selection() -> Option<String> {
+    None
+}
+
 /// No-op on non-macOS platforms.
 #[cfg(not(target_os = "macos"))]
 pub fn paste_text(_text: &str) {
