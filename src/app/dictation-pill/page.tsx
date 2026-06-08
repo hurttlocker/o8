@@ -16,23 +16,41 @@
  *      global-Fn pill never mirrors an in-window mic session and vice-versa.
  *      The broadcast `o8:stt-event` reaches BOTH windows — the discriminator is
  *      what keeps them from double-rendering.
- *   3. Render the SAME pill VISUALS as the in-window HUD via the shared
- *      `DictationPillView`, CENTERED in the window (the WINDOW provides the
- *      position — no `createPortal`, no fixed-bottom anchor).
+ *   3. Render the ONE morphing notch pill via `DockNotchSurface` — a faithful
+ *      port of Symon's NotchSurface: a SINGLE element that morphs in place
+ *      (idle sliver ⇄ listening capsule ⇄ thinking squiggle ⇄ done flash),
+ *      CENTERED in the window (the WINDOW provides the position — no
+ *      `createPortal`, no fixed-bottom anchor). This is distinct from the
+ *      in-window floating pill (`DictationPill`), which is UNCHANGED.
  *
  * The dock window is ALWAYS-ON: Rust creates it visible at boot and never hides
  * it on the normal flow. This route therefore ALWAYS paints — at minimum the
- * compact Symon idle capsule (`persistentIdle`) — and MORPHS idle → recording
- * (`system-start`) → polishing → success → idle. A discarded Fn brush or a
- * start error emits `system-idle` to morph back to the idle capsule.
+ * compact Symon idle sliver — and MORPHS idle → recording (`system-start`) →
+ * polishing → success → idle, all on the SAME element. A discarded Fn brush or
+ * a start error emits `system-idle` to morph back to the idle sliver.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
-import { DictationPillView } from '@/components/desktop/dictation/DictationPill';
+import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurface';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Dock-route morph instrumentation. This route runs in a SECOND webview whose
+ * `console.log` does NOT reach `~/Library/Logs/ai.o8.desktop/o8.log`, so when
+ * the dock fails to morph there is no server trace to inspect. `o8_dock_log`
+ * (a thin Tauri command → `tracing::info!("[dock-route] …")`) lets us SEE which
+ * `o8:stt-event` payloads actually arrive at the dock webview. Fire-and-forget;
+ * never throws. Skip the high-frequency partial/level events at the call site.
+ */
+function dockLog(msg: string) {
+  if (!isTauri()) return;
+  import('@tauri-apps/api/core')
+    .then(({ invoke }) => invoke('o8_dock_log', { msg }))
+    .catch(() => { /* noop — never let logging break the morph */ });
+}
 
 const SUCCESS_FLASH_MS = 900;
 const ERROR_FLASH_MS = 2500;
@@ -112,11 +130,16 @@ export default function DictationPillPage() {
 
     // Trace the morph path: confirms the dock webview is RECEIVING system events
     // (the prior bug was the broadcast not reaching this second window — now
-    // Rust emit_to(DOCK_LABEL, …) targets it directly). Skip the per-frame
-    // `level` events so the trace stays brief — the morph-driving events
-    // (system-start/idle/pasted, final, audio_file, error) are what matter.
+    // Rust emit_to(DOCK_LABEL, …) targets it directly). This route's
+    // `console.log` does NOT reach the server log, so we ALSO write to the Rust
+    // tracing log via `o8_dock_log` — that's the only way to SEE in o8.log
+    // whether/which events arrive at the dock route. Skip the per-frame
+    // `level`/`partial` events so the trace stays brief — the morph-driving
+    // events (system-start/idle/pasted, final, audio_file, error) are what
+    // matter.
     if (payload.type !== 'level' && payload.type !== 'partial') {
       console.log('[dock-pill] system stt-event', payload.type, '→ state', stateRef.current);
+      dockLog(`stt-event ${payload.type} → state ${stateRef.current}`);
     }
 
     switch (payload.type) {
@@ -193,9 +216,13 @@ export default function DictationPillPage() {
           return;
         }
         unlistenRef.current = unlisten;
+        // Confirm the dock webview actually subscribed — surfaces in o8.log so
+        // we can tell a non-morphing dock from one that never wired the listener.
+        dockLog('subscribed to o8:stt-event');
       })
       .catch((err) => {
         console.warn('[dock-pill] failed to subscribe to o8:stt-event', err);
+        dockLog(`subscribe FAILED: ${err instanceof Error ? err.message : String(err)}`);
       });
     return () => {
       disposed = true;
@@ -247,7 +274,9 @@ export default function DictationPillPage() {
       }}
     >
       <div style={{ pointerEvents: 'auto' }}>
-        <DictationPillView snapshot={snapshot} onCancel={() => {}} hideCancel persistentIdle />
+        {/* The ONE morphing notch dock — idle ⇄ listening ⇄ thinking ⇄ done,
+            in place (Symon NotchSurface). Not the in-window floating pill. */}
+        <DockNotchSurface snapshot={snapshot} />
       </div>
     </div>
   );

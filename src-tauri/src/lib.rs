@@ -2590,6 +2590,21 @@ fn o8_debug_paste(text: String) {
     paste::paste_text(&text);
 }
 
+/// Dock-route morph instrumentation. The `/dictation-pill` route runs in a
+/// SECOND webview whose `console.log` does NOT reach `~/Library/Logs/
+/// ai.o8.desktop/o8.log` — so when the dock fails to morph there is no server
+/// trace to inspect. This thin command lets the dock route write a line to the
+/// Rust tracing log (`[dock-route] …`) so we can SEE which `o8:stt-event`
+/// payloads actually reach the dock webview (subscribe success + each
+/// system-start/system-idle/system-pasted/final/error). High-frequency
+/// partial/level events are intentionally NOT logged from the route. macOS only
+/// (the dock window is macOS-only).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn o8_dock_log(msg: String) {
+    tracing::info!("[dock-route] {msg}");
+}
+
 /// TEMP/debug: morph the always-on screen dock pill into a sample "listening"
 /// state so the dock can be screenshotted without a live Fn dictation (which
 /// needs TCC perms + a physical Fn press). The dock window is created visible at
@@ -2771,6 +2786,8 @@ pub fn run() {
             o8_stt_locale,
             #[cfg(target_os = "macos")]
             o8_debug_paste,
+            #[cfg(target_os = "macos")]
+            o8_dock_log,
             #[cfg(target_os = "macos")]
             o8_debug_show_dock,
             mac_perms::accessibility_permission_granted_cmd,
