@@ -52,6 +52,18 @@ function dockLog(msg: string) {
     .catch(() => { /* noop — never let logging break the morph */ });
 }
 
+/** Fire a Tauri command from the dock webview (TTS controls, dock resize).
+ * Fire-and-forget; never throws (the dock must never crash on a control tap). */
+function invokeCmd(cmd: string, args?: Record<string, unknown>) {
+  if (!isTauri()) return;
+  import('@tauri-apps/api/core')
+    .then(({ invoke }) => invoke(cmd, args))
+    .catch((err) => dockLog(`invoke ${cmd} failed: ${err instanceof Error ? err.message : String(err)}`));
+}
+
+/** TTS playback state mirrored from the native engine via `o8:tts-state`. */
+type TtsControlState = 'idle' | 'playing' | 'paused';
+
 const SUCCESS_FLASH_MS = 900;
 const ERROR_FLASH_MS = 2500;
 
@@ -88,6 +100,7 @@ interface SttEventPayload {
 
 export default function DictationPillPage() {
   const [snapshot, setSnapshot] = useState<DictationSnapshot>(IDLE_SNAPSHOT);
+  const [ttsState, setTtsState] = useState<TtsControlState>('idle');
 
   const stateRef = useRef<DictationState>('idle');
   const startTimeRef = useRef<number>(0);
@@ -235,6 +248,32 @@ export default function DictationPillPage() {
     };
   }, [handleEvent]);
 
+  // ── TTS playback state (o8:tts-state) — drives the play/pause/stop controls ──
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let off: (() => void) | null = null;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{ state?: TtsControlState }>('o8:tts-state', (e) => {
+        const next = e.payload?.state;
+        if (next === 'playing' || next === 'paused' || next === 'idle') {
+          setTtsState(next);
+        }
+      }))
+      .then((unlisten) => {
+        if (disposed) { unlisten(); return; }
+        off = unlisten;
+      })
+      .catch((err) => dockLog(`tts-state subscribe failed: ${err instanceof Error ? err.message : String(err)}`));
+    return () => {
+      disposed = true;
+      if (off) { try { off(); } catch { /* noop */ } off = null; }
+    };
+  }, []);
+
+  const handleTogglePause = useCallback(() => { invokeCmd('tts_toggle_pause'); }, []);
+  const handleStop = useCallback(() => { invokeCmd('tts_stop'); }, []);
+
   useEffect(() => {
     return () => {
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
@@ -278,7 +317,12 @@ export default function DictationPillPage() {
       <div style={{ pointerEvents: 'auto' }}>
         {/* The ONE morphing notch dock — idle ⇄ listening ⇄ thinking ⇄ done,
             in place (Symon NotchSurface). Not the in-window floating pill. */}
-        <DockNotchSurface snapshot={snapshot} />
+        <DockNotchSurface
+          snapshot={snapshot}
+          ttsState={ttsState}
+          onTogglePause={handleTogglePause}
+          onStop={handleStop}
+        />
       </div>
     </div>
   );
