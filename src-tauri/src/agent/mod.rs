@@ -189,6 +189,23 @@ fn confirm_spoken(tool_name: &str, args: &Value) -> String {
     format!("I'm about to {lowered}. Say yes, or cancel.")
 }
 
+/// Speak a brief "working on it" filler before the FIRST read tool of a task
+/// runs — so a slow lookup (especially the Brain's heavy-synthesis path) doesn't
+/// leave dead air before Symon answers. Fires once per task (flips `*spoke`) and
+/// is skipped for confirm-gated tools, which already spoke their proposal aloud.
+/// Fire-and-forget; it plays while the tool executes.
+pub fn maybe_speak_filler(spoke: &mut bool, tool_name: &str) {
+    if *spoke {
+        return;
+    }
+    let class = safety::tool_safety_class(tool_name);
+    if safety::requires_confirmation(class, safety::reversible_silent_consent()) {
+        return;
+    }
+    *spoke = true;
+    crate::tts::playback::play_thread("Let me check.".to_string(), crate::tts::load_config());
+}
+
 // ── dock events ──────────────────────────────────────────────────────────────
 // Dual-emit (emit_to dock + broadcast) — the dock is a second webview that a
 // bare `emit` can miss. Mirrors lib.rs's `emit_stt`.

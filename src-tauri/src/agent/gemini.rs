@@ -35,6 +35,8 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
 
     let mut tool_call_log: Vec<Value> = Vec::new();
     let mut result_text = String::new();
+    // Spoken-filler latch — "Let me check." before the first read tool runs.
+    let mut spoke_filler = false;
 
     for _turn in 0..MAX_TURNS {
         let body = json!({
@@ -91,6 +93,7 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
                         log::info!("[symon-agent] tool {tool_name} declined by user");
                         json!({ "error": "User declined this action", "declined_by_user": true })
                     } else {
+                        super::maybe_speak_filler(&mut spoke_filler, &tool_name);
                         match tools::dispatch_tool_call(&tool_name, tool_args.clone(), ctx).await {
                             Ok(output) => output,
                             Err(e) => {
