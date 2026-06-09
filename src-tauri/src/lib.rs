@@ -2831,8 +2831,9 @@ fn open_voice_settings(app: tauri::AppHandle) {
     };
     match WebviewWindowBuilder::new(&app, "voice-settings", WebviewUrl::External(parsed))
         .title("o8 Voice Settings")
-        .inner_size(560.0, 760.0)
-        .min_inner_size(460.0, 520.0)
+        // Symon settings window dimensions: 188px sidebar + content needs the room.
+        .inner_size(660.0, 720.0)
+        .min_inner_size(520.0, 560.0)
         .resizable(true)
         .center()
         .focused(true)
