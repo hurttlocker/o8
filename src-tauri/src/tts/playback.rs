@@ -153,6 +153,15 @@ pub fn play_thread(text: String, config: TtsConfig) {
         return;
     }
 
+    // Normalize for SPEECH only (the displayed/pasted text keeps the original):
+    // strip markdown/ANSI/tables/code-fences, expand currency/units/numbers, and
+    // shorten URLs + file paths so the voice doesn't read code/prices/links as
+    // gibberish. The chunker + say-fallback both operate on this spoken form.
+    let text = crate::speech_text::prepare_text_for_speech(&text);
+    if text.trim().is_empty() {
+        return;
+    }
+
     let ctl = controls();
     // Single-flight prelude: claim a fresh generation, clear is_active, and stop
     // whatever is playing — ALL under the sink lock so the (generation,
