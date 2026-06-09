@@ -2836,6 +2836,11 @@ fn open_voice_settings(app: tauri::AppHandle) {
         .resizable(true)
         .center()
         .focused(true)
+        // Symon glass: no native frame/traffic lights, transparent so the CSS
+        // glass card + rounded corners show, shadow in CSS (avoid double shadow).
+        .decorations(false)
+        .transparent(true)
+        .shadow(false)
         .build()
     {
         Ok(_) => log::info!("[voice-settings] window opened → {url}"),
