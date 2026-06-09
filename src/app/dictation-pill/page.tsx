@@ -120,6 +120,9 @@ export default function DictationPillPage() {
   const askLastClosedRef = useRef<number>(0);
   const askOpenRef = useRef(false);
   const askThreadRef = useRef<AskTurn[]>([]);
+  // The intent of the in-flight agent task, captured on `running` so the `done`
+  // event can show it as the "You" turn in the shared answer panel.
+  const agentIntentRef = useRef<string>('');
 
   const stateRef = useRef<DictationState>('idle');
   const startTimeRef = useRef<number>(0);
@@ -311,17 +314,20 @@ export default function DictationPillPage() {
     askIdleTimerRef.current = setTimeout(() => { closeAsk(); }, ASK_IDLE_COLLAPSE_MS);
   }, [closeAsk]);
 
+  // Grow the dock into the full answer panel. Shared by the Ask flow and the
+  // Symon agent flow (an agent result lands in the SAME Symon conversation).
+  const openPanel = useCallback(() => {
+    askOpenRef.current = true;
+    setAskOpen(true);
+    invokeCmd('dock_set_expanded', { expanded: true });
+    armAskIdleTimer();
+  }, [armAskIdleTimer]);
+
   // ── Ask answer panel events (o8:ask-open / -answer / -error) ──
   useEffect(() => {
     if (!isTauri()) return;
     let disposed = false;
     const offs: Array<() => void> = [];
-    const openPanel = () => {
-      askOpenRef.current = true;
-      setAskOpen(true);
-      invokeCmd('dock_set_expanded', { expanded: true });
-      armAskIdleTimer();
-    };
     import('@tauri-apps/api/event')
       .then(async ({ listen }) => {
         const add = (u: () => void) => { if (disposed) u(); else offs.push(u); };
@@ -362,7 +368,7 @@ export default function DictationPillPage() {
       disposed = true;
       for (const off of offs) { try { off(); } catch { /* noop */ } }
     };
-  }, [armAskIdleTimer]);
+  }, [armAskIdleTimer, openPanel]);
 
   // Resolve a pending agent confirm card → tell Rust, clear the card locally.
   const handleAgentConfirm = useCallback((taskId: string, allow: boolean) => {
@@ -385,16 +391,33 @@ export default function DictationPillPage() {
           dockLog(`agent-confirm ${tool}`);
           if (taskId) setAgentConfirm({ taskId, tool, summary });
         }));
-        add(await listen<{ kind?: string; status?: string; taskId?: string }>('o8:agent-task-event', (e) => {
+        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string }>('o8:agent-task-event', (e) => {
           if (e.payload?.kind !== 'status') return;
           const status = e.payload?.status;
           const tid = e.payload?.taskId;
           if (status === 'running') {
             setAgentWorking(true);
+            if (e.payload?.intent) agentIntentRef.current = e.payload.intent;
           } else if (status === 'done' || status === 'failed') {
             setAgentWorking(false);
             // Only clear a pending confirm if it belongs to THIS task.
             setAgentConfirm((c) => (c && c.taskId === tid ? null : c));
+            // Show the spoken answer in the panel instead of collapsing to idle.
+            // The agent IS Symon, so it lands in the same conversation thread:
+            // the intent as a "You" turn, the result as a "Symon" turn.
+            const intent = agentIntentRef.current.trim();
+            const answer = (e.payload?.result ?? '').trim()
+              || (status === 'failed' ? 'Symon hit an error.' : 'Done.');
+            agentIntentRef.current = '';
+            setAskThread((prev) => {
+              const turns: AskTurn[] = [];
+              if (intent) turns.push({ role: 'user', text: intent });
+              turns.push({ role: 'assistant', text: answer });
+              const next = [...prev, ...turns];
+              return next.length > ASK_MAX_TURNS ? next.slice(next.length - ASK_MAX_TURNS) : next;
+            });
+            setAskMode('answer');
+            openPanel();
           }
         }));
       })
@@ -403,7 +426,7 @@ export default function DictationPillPage() {
       disposed = true;
       for (const off of offs) { try { off(); } catch { /* noop */ } }
     };
-  }, []);
+  }, [openPanel]);
 
   // Escape collapses the open Ask panel.
   useEffect(() => {

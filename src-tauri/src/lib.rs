@@ -3107,6 +3107,15 @@ fn agent_task_status() -> Option<serde_json::Value> {
     agent::store::latest_task()
 }
 
+/// Run the Symon model-eval harness (live round-trip) over the read-only fixture
+/// set. Optionally pass model ids to A/B; empty/omitted = the configured brain.
+/// Returns the markdown scoreboard (also written to ~/.o8/agent-eval-latest.md).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+async fn agent_eval(app: tauri::AppHandle, models: Option<Vec<String>>) -> String {
+    agent::eval::run_eval(app, models.unwrap_or_default()).await
+}
+
 /// TEMPORARY debug command (system-wide Symon fold P1): paste `text` into the
 /// currently-focused 3rd-party app, so paste-into-frontmost is verifiable
 /// without the global Fn hotkey. macOS only.
@@ -3354,6 +3363,8 @@ pub fn run() {
             agent_confirm,
             #[cfg(target_os = "macos")]
             agent_task_status,
+            #[cfg(target_os = "macos")]
+            agent_eval,
             #[cfg(target_os = "macos")]
             o8_debug_paste,
             #[cfg(target_os = "macos")]

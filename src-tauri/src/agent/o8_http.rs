@@ -1,0 +1,95 @@
+//! Symon agent → o8 loopback HTTP client (Tier-2 transport).
+//!
+//! Symon is a third client of o8's own Next backend — the SAME routes the
+//! operator MCP wraps and the desktop UI calls — reached over `127.0.0.1`. No
+//! orchestration logic is duplicated here: the bridge tools (`tools/o8_bridge`)
+//! read o8 state and create gated missions through this client; o8's DB stays
+//! the single source of truth.
+//!
+//! Port + token resolve exactly like the tray's `http_get_local` in lib.rs:
+//! `O8_API_PORT` env first (set in-process by the sidecar), then `~/.o8/api-port`,
+//! default 3001. We send the `~/.o8/ws-token` as a Bearer header so the request
+//! passes `src/middleware.ts` even if loopback-origin detection doesn't fire.
+
+use serde_json::Value;
+use std::time::Duration;
+
+const TIMEOUT_SECS: u64 = 20;
+
+/// Resolve the API port: env first, then `~/.o8/api-port`, default 3001.
+fn api_port() -> u16 {
+    if let Ok(p) = std::env::var("O8_API_PORT") {
+        if let Ok(parsed) = p.parse() {
+            return parsed;
+        }
+    }
+    let path = super::agent_data_dir().join("api-port");
+    if let Ok(raw) = std::fs::read_to_string(&path) {
+        if let Ok(parsed) = raw.trim().parse() {
+            return parsed;
+        }
+    }
+    3001
+}
+
+/// The cross-origin auth token written by the sidecar (empty string if absent).
+fn ws_token() -> String {
+    let path = super::agent_data_dir().join("ws-token");
+    std::fs::read_to_string(&path)
+        .map(|s| s.trim().to_string())
+        .unwrap_or_default()
+}
+
+fn base() -> String {
+    format!("http://127.0.0.1:{}", api_port())
+}
+
+fn client() -> Result<reqwest::Client, String> {
+    reqwest::Client::builder()
+        .timeout(Duration::from_secs(TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("reqwest build failed: {e}"))
+}
+
+/// Attach the Bearer token when present so the middleware gate passes.
+fn with_auth(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
+    let token = ws_token();
+    if token.is_empty() {
+        req
+    } else {
+        req.bearer_auth(token)
+    }
+}
+
+/// GET a loopback path, parsing the JSON body.
+pub async fn get_json(path: &str) -> Result<Value, String> {
+    let url = format!("{}{}", base(), path);
+    let resp = with_auth(client()?.get(&url))
+        .send()
+        .await
+        .map_err(|e| format!("o8 GET {path} failed: {e}"))?;
+    read_json(path, resp).await
+}
+
+/// POST a JSON body to a loopback path, parsing the JSON response.
+pub async fn post_json(path: &str, body: Value) -> Result<Value, String> {
+    let url = format!("{}{}", base(), path);
+    let resp = with_auth(client()?.post(&url).json(&body))
+        .send()
+        .await
+        .map_err(|e| format!("o8 POST {path} failed: {e}"))?;
+    read_json(path, resp).await
+}
+
+async fn read_json(path: &str, resp: reqwest::Response) -> Result<Value, String> {
+    let status = resp.status();
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("o8 {path} read failed: {e}"))?;
+    if !status.is_success() {
+        let snippet = &text[..text.len().min(300)];
+        return Err(format!("o8 {path} error ({status}): {snippet}"));
+    }
+    serde_json::from_str(&text).map_err(|e| format!("o8 {path} returned bad JSON: {e}"))
+}

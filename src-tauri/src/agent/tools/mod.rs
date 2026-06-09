@@ -8,9 +8,16 @@
 //! card via `super::confirm_if_needed`.
 
 pub mod apps;
+pub mod csv;
+pub mod filesystem;
+pub mod git_github;
 pub mod mac_calendar;
+pub mod mac_contacts;
+pub mod mac_mail;
 pub mod mac_notes;
 pub mod mac_reminders;
+pub mod mac_shortcuts;
+pub mod o8_bridge;
 
 use super::{safety, TaskCtx};
 use chrono::{Datelike, Timelike};
@@ -121,6 +128,251 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["title"]
             }
         }),
+        json!({
+            "name": "mac_notes_append",
+            "description": "Append text to an existing Apple Note, found by its exact title.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Title of the note to append to." },
+                    "text": { "type": "string", "description": "Text to append (added on a new line)." }
+                },
+                "required": ["title", "text"]
+            }
+        }),
+        json!({
+            "name": "mac_calendar_delete_event",
+            "description": "Delete calendar events matching an exact title. Destructive — always confirmed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "Exact event title to delete." },
+                    "calendar_name": { "type": "string", "description": "Limit to one calendar. Omit to search all." }
+                },
+                "required": ["title"]
+            }
+        }),
+        json!({
+            "name": "mac_contacts_search",
+            "description": "Search Contacts by name; returns name, first email, and first phone.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Name or partial name to match." },
+                    "limit": { "type": "integer", "description": "Max contacts to return. Default 5." }
+                },
+                "required": ["query"]
+            }
+        }),
+        json!({
+            "name": "mac_mail_search",
+            "description": "Search Mail messages by subject or body text.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Text to search for." },
+                    "mailbox": { "type": "string", "description": "Mailbox to search. Default 'INBOX'." },
+                    "limit": { "type": "integer", "description": "Max messages. Default 10." }
+                },
+                "required": ["query"]
+            }
+        }),
+        json!({
+            "name": "mac_mail_read",
+            "description": "Read recent Mail messages (subject, sender, body preview).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "mailbox": { "type": "string", "description": "Mailbox to read. Default 'INBOX'." },
+                    "unread_only": { "type": "boolean", "description": "Only unread messages. Default true." },
+                    "limit": { "type": "integer", "description": "Max messages. Default 5." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "mac_mail_draft",
+            "description": "Create a Mail draft (saved, not sent). Reversible — confirmed before saving.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": { "type": "string", "description": "Recipient email address." },
+                    "subject": { "type": "string", "description": "Subject line." },
+                    "body": { "type": "string", "description": "Message body." }
+                },
+                "required": ["to", "subject"]
+            }
+        }),
+        json!({
+            "name": "mac_mail_send_draft",
+            "description": "Send an existing Mail draft matched by subject. Destructive — always confirmed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "subject": { "type": "string", "description": "Subject of the draft to send." }
+                },
+                "required": ["subject"]
+            }
+        }),
+        json!({
+            "name": "mac_shortcuts_list",
+            "description": "List the user's installed Shortcuts by name.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "mac_shortcuts_run",
+            "description": "Run a Shortcut by name, with optional text input. Destructive — always confirmed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "Exact Shortcut name." },
+                    "input": { "type": "string", "description": "Optional text input to pass." }
+                },
+                "required": ["name"]
+            }
+        }),
+        json!({
+            "name": "fs_read_text",
+            "description": "Read a UTF-8 text file (capped at 8 KB). Protected system/credential paths are refused.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute file path to read." }
+                },
+                "required": ["path"]
+            }
+        }),
+        json!({
+            "name": "fs_write_text",
+            "description": "Write a text file inside the agent sandbox (~/.o8/agent-output/ only). Reversible.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path under ~/.o8/agent-output/." },
+                    "content": { "type": "string", "description": "Text content to write." }
+                },
+                "required": ["path", "content"]
+            }
+        }),
+        json!({
+            "name": "fs_spotlight",
+            "description": "Spotlight (mdfind) search for files; returns matching paths.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Spotlight query string." },
+                    "limit": { "type": "integer", "description": "Max paths. Default 10." }
+                },
+                "required": ["query"]
+            }
+        }),
+        json!({
+            "name": "csv_read",
+            "description": "Read a CSV file into headers + rows.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path to the CSV file." }
+                },
+                "required": ["path"]
+            }
+        }),
+        json!({
+            "name": "csv_write",
+            "description": "Write a CSV into the agent sandbox (~/.o8/agent-output/) by bare filename. Reversible.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "filename": { "type": "string", "description": "Bare filename, e.g. 'results.csv'." },
+                    "headers": { "type": "array", "items": { "type": "string" }, "description": "Header row." },
+                    "rows": { "type": "array", "items": { "type": "array", "items": { "type": "string" } }, "description": "Rows of string cells." }
+                },
+                "required": ["filename"]
+            }
+        }),
+        // ── o8 bridge (Tier-2) — read what the coding agents are doing ─────────
+        json!({
+            "name": "o8_status",
+            "description": "Report what's currently shipping or in progress across o8's autonomous agent fleet — the active packets/lanes and their status (running, reviewing, etc.). Use for 'what's shipping?', 'what's in progress?', 'what are my agents doing?'. Optionally filter to one repo.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string", "description": "Filter to one repo by folder name, e.g. 'cortex-ide'. Omit for the whole fleet." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "o8_ask",
+            "description": "Ask o8's Engineering Brain a question about the codebase, recent work, or the fleet — e.g. 'what did Codex do today?', 'what changed in the orchestrator?', 'how does dispatch work?'. Returns a synthesized answer grounded in o8's organizational memory.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "question": { "type": "string", "description": "The natural-language question to ask the Brain." },
+                    "repo_path": { "type": "string", "description": "Optional absolute repo path to scope the answer. Omit for fleet-wide." }
+                },
+                "required": ["question"]
+            }
+        }),
+        json!({
+            "name": "o8_dispatch",
+            "description": "Hand a CODING task to o8's orchestrator — it dispatches an autonomous worker in an isolated worktree, reviews the diff, and surfaces a packet for the user's approval. Use when the user wants code written, changed, fixed, or investigated in a repo ('have the orchestrator fix the auth bug', 'kick off the tooltip work in cortex-ide'). You do NOT write code yourself — this delegates it. Always include the repo so the user can confirm by ear.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string", "description": "Repo folder name to work in, e.g. 'cortex-ide'." },
+                    "task": { "type": "string", "description": "A clear one-or-two-sentence description of what the orchestrator should do." },
+                    "base_branch": { "type": "string", "description": "Optional branch to fork from. Default 'main'." }
+                },
+                "required": ["repo", "task"]
+            }
+        }),
+        // ── GitHub + local git (Tier-3, read-only) ────────────────────────────
+        json!({
+            "name": "git_status",
+            "description": "Show the local git status (branch + changed files) of a repo. Use for 'what's the git status of cortex-ide?', 'is my working tree clean?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string", "description": "Repo folder name, e.g. 'cortex-ide'." }
+                },
+                "required": ["repo"]
+            }
+        }),
+        json!({
+            "name": "git_log",
+            "description": "Show recent commits (one line each) for a repo. Use for 'what are the recent commits on cortex-ide?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string", "description": "Repo folder name." },
+                    "count": { "type": "integer", "description": "How many commits. Default 10, max 30." }
+                },
+                "required": ["repo"]
+            }
+        }),
+        json!({
+            "name": "gh_pr_list",
+            "description": "List open pull requests for a repo (number, title, state, author) via the GitHub CLI. Use for 'any open PRs on cortex-ide?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string", "description": "Repo folder name." }
+                },
+                "required": ["repo"]
+            }
+        }),
+        json!({
+            "name": "gh_issue_list",
+            "description": "List open issues for a repo (number, title, state) via the GitHub CLI. Use for 'what issues are open on cortex-ide?'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string", "description": "Repo folder name." }
+                },
+                "required": ["repo"]
+            }
+        }),
     ]
 }
 
@@ -158,6 +410,27 @@ pub async fn dispatch_tool_call(name: &str, args: Value, _ctx: &TaskCtx) -> Resu
         "mac_calendar_create_event" => mac_calendar::create_event(args).await,
         "mac_notes_search" => mac_notes::search(args).await,
         "mac_notes_create" => mac_notes::create(args).await,
+        "mac_notes_append" => mac_notes::append(args).await,
+        "mac_calendar_delete_event" => mac_calendar::delete_event(args).await,
+        "mac_contacts_search" => mac_contacts::search(args).await,
+        "mac_mail_search" => mac_mail::search(args).await,
+        "mac_mail_read" => mac_mail::read(args).await,
+        "mac_mail_draft" => mac_mail::draft(args).await,
+        "mac_mail_send_draft" => mac_mail::send_draft(args).await,
+        "mac_shortcuts_list" => mac_shortcuts::list(args).await,
+        "mac_shortcuts_run" => mac_shortcuts::run(args).await,
+        "fs_read_text" => filesystem::read_text(args).await,
+        "fs_write_text" => filesystem::write_text(args).await,
+        "fs_spotlight" => filesystem::spotlight(args).await,
+        "csv_read" => csv::read(args).await,
+        "csv_write" => csv::write(args).await,
+        "o8_status" => o8_bridge::status(args).await,
+        "o8_ask" => o8_bridge::ask(args).await,
+        "o8_dispatch" => o8_bridge::dispatch(args).await,
+        "git_status" => git_github::git_status(args).await,
+        "git_log" => git_github::git_log(args).await,
+        "gh_pr_list" => git_github::pr_list(args).await,
+        "gh_issue_list" => git_github::issue_list(args).await,
         other => Err(format!("Unknown tool: {other}")),
     }
 }
