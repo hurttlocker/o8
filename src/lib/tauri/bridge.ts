@@ -254,3 +254,24 @@ export async function voicePrefsGet(): Promise<Record<string, unknown> | null> {
 export async function voicePrefsSet(key: string, value: unknown): Promise<void> {
   await invoke('voice_prefs_set', { key, value });
 }
+
+/** A persisted dictation/ask, newest-first — the settings History panel. */
+export interface DictationHistoryEntry {
+  id: string;
+  ts: number; // unix seconds
+  mode: string; // "dictation" | "ask" | "speak-selection"
+  text: string;
+  app: string; // target app bundle id, may be empty
+}
+
+export async function dictationHistoryGet(): Promise<DictationHistoryEntry[]> {
+  return (await invoke<DictationHistoryEntry[]>('dictation_history_get')) ?? [];
+}
+
+export async function dictationHistoryClear(): Promise<void> {
+  await invoke('dictation_history_clear');
+}
+
+export async function dictationHistoryDelete(id: string): Promise<void> {
+  await invoke('dictation_history_delete', { id });
+}
