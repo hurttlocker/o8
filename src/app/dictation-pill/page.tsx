@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurface';
+import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 
 export const dynamic = 'force-dynamic';
@@ -63,6 +64,12 @@ function invokeCmd(cmd: string, args?: Record<string, unknown>) {
 
 /** TTS playback state mirrored from the native engine via `o8:tts-state`. */
 type TtsControlState = 'idle' | 'playing' | 'paused';
+
+/** Ask answer panel (voice P4 C3). */
+type AskMode = 'idle' | 'listening' | 'answer';
+const ASK_IDLE_COLLAPSE_MS = 45_000; // auto-collapse the panel after idle
+const ASK_RESUME_WINDOW_MS = 60_000; // preserve the thread if reopened within
+const ASK_MAX_TURNS = 16; // 8 exchanges before trimming the oldest
 
 const SUCCESS_FLASH_MS = 900;
 const ERROR_FLASH_MS = 2500;
@@ -101,6 +108,13 @@ interface SttEventPayload {
 export default function DictationPillPage() {
   const [snapshot, setSnapshot] = useState<DictationSnapshot>(IDLE_SNAPSHOT);
   const [ttsState, setTtsState] = useState<TtsControlState>('idle');
+  const [askOpen, setAskOpen] = useState(false);
+  const [askMode, setAskMode] = useState<AskMode>('idle');
+  const [askThread, setAskThread] = useState<AskTurn[]>([]);
+  const askIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const askLastClosedRef = useRef<number>(0);
+  const askOpenRef = useRef(false);
+  const askThreadRef = useRef<AskTurn[]>([]);
 
   const stateRef = useRef<DictationState>('idle');
   const startTimeRef = useRef<number>(0);
@@ -274,6 +288,83 @@ export default function DictationPillPage() {
   const handleTogglePause = useCallback(() => { invokeCmd('tts_toggle_pause'); }, []);
   const handleStop = useCallback(() => { invokeCmd('tts_stop'); }, []);
 
+  // Keep a ref of the live thread for the open-time resume decision.
+  useEffect(() => { askThreadRef.current = askThread; }, [askThread]);
+
+  const closeAsk = useCallback(() => {
+    if (!askOpenRef.current) return;
+    askOpenRef.current = false;
+    askLastClosedRef.current = Date.now();
+    if (askIdleTimerRef.current) { clearTimeout(askIdleTimerRef.current); askIdleTimerRef.current = null; }
+    setAskOpen(false);
+    setAskMode('idle');
+    invokeCmd('dock_set_expanded', { expanded: false });
+  }, []);
+
+  const armAskIdleTimer = useCallback(() => {
+    if (askIdleTimerRef.current) clearTimeout(askIdleTimerRef.current);
+    askIdleTimerRef.current = setTimeout(() => { closeAsk(); }, ASK_IDLE_COLLAPSE_MS);
+  }, [closeAsk]);
+
+  // ── Ask answer panel events (o8:ask-open / -answer / -error) ──
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    const offs: Array<() => void> = [];
+    const openPanel = () => {
+      askOpenRef.current = true;
+      setAskOpen(true);
+      invokeCmd('dock_set_expanded', { expanded: true });
+      armAskIdleTimer();
+    };
+    import('@tauri-apps/api/event')
+      .then(async ({ listen }) => {
+        const add = (u: () => void) => { if (disposed) u(); else offs.push(u); };
+        add(await listen('o8:ask-open', () => {
+          const within = Date.now() - askLastClosedRef.current < ASK_RESUME_WINDOW_MS;
+          dockLog('ask-open');
+          if (within && askThreadRef.current.length > 0) {
+            setAskMode('answer');
+          } else {
+            if (!within) setAskThread([]);
+            setAskMode('listening');
+          }
+          openPanel();
+        }));
+        add(await listen<{ question?: string; answer?: string }>('o8:ask-answer', (e) => {
+          const q = e.payload?.question ?? '';
+          const a = e.payload?.answer ?? '';
+          dockLog(`ask-answer q="${q.slice(0, 40)}"`);
+          setAskThread((prev) => {
+            const next = [...prev, { role: 'user' as const, text: q }, { role: 'assistant' as const, text: a }];
+            return next.length > ASK_MAX_TURNS ? next.slice(next.length - ASK_MAX_TURNS) : next;
+          });
+          setAskMode('answer');
+          openPanel();
+        }));
+        add(await listen<{ message?: string }>('o8:ask-error', (e) => {
+          const msg = e.payload?.message ?? 'Ask failed';
+          dockLog(`ask-error ${msg.slice(0, 40)}`);
+          setAskThread((prev) => [...prev, { role: 'assistant' as const, text: `Error: ${msg}` }]);
+          setAskMode('answer');
+          openPanel();
+        }));
+      })
+      .catch((err) => dockLog(`ask subscribe failed: ${err instanceof Error ? err.message : String(err)}`));
+    return () => {
+      disposed = true;
+      for (const off of offs) { try { off(); } catch { /* noop */ } }
+    };
+  }, [armAskIdleTimer]);
+
+  // Escape collapses the open Ask panel.
+  useEffect(() => {
+    if (!isTauri()) return;
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape' && askOpenRef.current) closeAsk(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [closeAsk]);
+
   useEffect(() => {
     return () => {
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
@@ -314,14 +405,18 @@ export default function DictationPillPage() {
         pointerEvents: 'none',
       }}
     >
-      <div style={{ pointerEvents: 'auto' }}>
-        {/* The ONE morphing notch dock — idle ⇄ listening ⇄ thinking ⇄ done,
-            in place (Symon NotchSurface). Not the in-window floating pill. */}
+      <div style={{ pointerEvents: 'auto' }} onMouseMove={() => { if (askOpenRef.current) armAskIdleTimer(); }}>
+        {/* The ONE morphing notch dock — idle ⇄ listening ⇄ thinking ⇄ done ⇄
+            ask, in place (Symon NotchSurface). Not the in-window floating pill. */}
         <DockNotchSurface
           snapshot={snapshot}
           ttsState={ttsState}
           onTogglePause={handleTogglePause}
           onStop={handleStop}
+          askOpen={askOpen}
+          askMode={askMode}
+          askThread={askThread}
+          onCloseAsk={closeAsk}
         />
       </div>
     </div>
