@@ -385,14 +385,16 @@ export default function DictationPillPage() {
           dockLog(`agent-confirm ${tool}`);
           if (taskId) setAgentConfirm({ taskId, tool, summary });
         }));
-        add(await listen<{ kind?: string; status?: string }>('o8:agent-task-event', (e) => {
+        add(await listen<{ kind?: string; status?: string; taskId?: string }>('o8:agent-task-event', (e) => {
           if (e.payload?.kind !== 'status') return;
           const status = e.payload?.status;
+          const tid = e.payload?.taskId;
           if (status === 'running') {
             setAgentWorking(true);
           } else if (status === 'done' || status === 'failed') {
             setAgentWorking(false);
-            setAgentConfirm(null);
+            // Only clear a pending confirm if it belongs to THIS task.
+            setAgentConfirm((c) => (c && c.taskId === tid ? null : c));
           }
         }));
       })
