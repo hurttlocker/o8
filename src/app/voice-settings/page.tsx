@@ -87,6 +87,18 @@ async function startDrag(e: React.MouseEvent) {
   try { const { getCurrentWindow } = await import('@tauri-apps/api/window'); await getCurrentWindow().startDragging(); }
   catch { /* noop */ }
 }
+
+// Real window-drag UX: grab from any clear chrome area (around the title, the
+// sidebar, gaps between cards) — but never from a control or inside a settings
+// card (those carry data-drag-skip / are interactive), so clicks + text
+// selection still work.
+const DRAG_SKIP = 'button, input, select, textarea, a, [role="switch"], [data-drag-skip]';
+function maybeStartDrag(e: React.MouseEvent) {
+  if (e.button !== 0) return;
+  const el = e.target as HTMLElement | null;
+  if (el && el.closest(DRAG_SKIP)) return;
+  void startDrag(e);
+}
 async function closeWindow() {
   try {
     const { getCurrentWindow } = await import('@tauri-apps/api/window');
@@ -188,7 +200,7 @@ export default function VoiceSettingsWindow() {
 
   return (
     <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode] } as CSSProperties}>
-      <div style={sx.shell}>
+      <div style={sx.shell} onMouseDown={maybeStartDrag}>
         <div style={sx.scrim} aria-hidden />
         {sx.liquid ? (
           <div aria-hidden style={{
@@ -202,14 +214,14 @@ export default function VoiceSettingsWindow() {
           position: 'relative', zIndex: 1, width: 188, flexShrink: 0, display: 'flex', flexDirection: 'column',
           background: SIDEBAR_BG, borderRight: `1px solid ${GLASS_BORDER_SUBTLE}`,
         }}>
-          {/* Traffic lights (drag region) */}
-          <div onMouseDown={startDrag} style={{ display: 'flex', gap: 8, padding: '13px 14px 0' }}>
+          {/* Traffic lights — drag handled by the shell-level region */}
+          <div style={{ display: 'flex', gap: 8, padding: '13px 14px 0' }}>
             <CloseDot />
             <span style={{ width: 12, height: 12, borderRadius: '50%', background: TL_MIN }} />
             <span style={{ width: 12, height: 12, borderRadius: '50%', background: TL_ZOOM }} />
           </div>
-          {/* Brand (drag region) — Symon, o8's voice agent (≠ orchestrator) */}
-          <div onMouseDown={startDrag} style={{
+          {/* Brand — Symon, o8's voice agent (≠ orchestrator) */}
+          <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
             padding: '22px 18px 18px', borderBottom: `1px solid ${GLASS_BORDER_SUBTLE}`,
           }}>
@@ -231,7 +243,7 @@ export default function VoiceSettingsWindow() {
           overflowY: 'auto', overflowX: 'hidden', paddingLeft: 28, paddingRight: 28, paddingBottom: 28,
           background: `radial-gradient(circle at 1px 1px, ${GRID_DOT} 1px, transparent 0) 0 0 / 22px 22px, ${CONTENT_BG}`,
         }}>
-          <div onMouseDown={startDrag} style={{ height: 46, cursor: 'grab' }} aria-hidden />
+          <div style={{ height: 46, cursor: 'grab' }} aria-hidden />
           {tab === 'settings' ? <SettingsTab prefs={prefs} setPref={setPref} /> : null}
           {tab === 'polish' ? <PolishTab prefs={prefs} setPref={setPref} /> : null}
           {tab === 'theme' ? <ThemeTab controls={glass} onChange={updateGlass} /> : null}

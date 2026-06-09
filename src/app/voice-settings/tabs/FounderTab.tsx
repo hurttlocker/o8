@@ -13,7 +13,7 @@ import {
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, ICONS, SECTION_BORDER,
 } from '../tokens';
 import {
-  SectionCard, SectionTitle, SectionHint, ControlRow, ToggleRow, Select, Slider, AccentButton, GhostButton, Icon, PAGE_TITLE_STYLE,
+  SectionCard, SectionTitle, SectionHint, ControlRow, ToggleRow, Select, Slider, AccentButton, GhostButton, Icon, PageHeader,
 } from '../primitives';
 import { prefBool, prefStr, prefNum, prefVoiceLibrary, type VoicePreset, type TabProps } from '../helpers';
 import { ttsSpeak, ttsStop } from '@/lib/tauri/bridge';
@@ -84,7 +84,7 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Founder</h1>
+      <PageHeader icon={ICONS.crown} title="Founder" />
 
       {/* Voice library */}
       <SectionCard>

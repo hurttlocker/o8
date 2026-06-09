@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from 'react';
 import { ICONS, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, ACCENT_LIGHT, OK_GREEN, SECTION_BG, SECTION_BORDER } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, ControlRow, GhostButton, AccentButton, PAGE_TITLE_STYLE } from '../primitives';
+import { SectionCard, SectionTitle, SectionHint, ControlRow, GhostButton, AccentButton, PageHeader } from '../primitives';
 
 type Plan = 'free' | 'pro' | 'team' | null;
 
@@ -29,7 +29,7 @@ export default function AccountTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Account</h1>
+      <PageHeader icon={ICONS.user} title="Account" />
 
       <SectionCard>
         <SectionTitle icon={ICONS.user}>Plan</SectionTitle>

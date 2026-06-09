@@ -13,7 +13,7 @@ import {
 import {
   ACCENT_LIGHT, GLASS_BG_HOVER, GLASS_BORDER_SUBTLE, OK_GREEN, TEXT_PRIMARY, TEXT_TERTIARY, TRANS_FAST,
 } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, GhostButton, Icon, PAGE_TITLE_STYLE } from '../primitives';
+import { SectionCard, SectionTitle, SectionHint, GhostButton, Icon, PageHeader } from '../primitives';
 import { ICONS } from '../tokens';
 import type { ReactNode } from 'react';
 
@@ -74,13 +74,10 @@ export default function HistoryTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'center' }}>
-        <h1 style={PAGE_TITLE_STYLE}>History</h1>
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 8 }}>
-          <GhostButton label="Refresh" onClick={() => { void load(); }} />
-          {history.length > 0 ? <GhostButton label="Clear all" onClick={() => { void clearAll(); }} /> : null}
-        </span>
-      </div>
+      <PageHeader icon={ICONS.clock} title="History" right={<>
+        <GhostButton label="Refresh" onClick={() => { void load(); }} />
+        {history.length > 0 ? <GhostButton label="Clear all" onClick={() => { void clearAll(); }} /> : null}
+      </>} />
       <SectionCard>
         <SectionTitle icon={ICONS.clock}>Recent</SectionTitle>
         <SectionHint>Everything you dictated or asked, newest first. Stored locally on this Mac.</SectionHint>

@@ -13,7 +13,7 @@ import {
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, ACCENT_LIGHT, SECTION_BG, SECTION_BORDER,
 } from '../tokens';
 import { ICONS } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, GhostButton, Icon, PAGE_TITLE_STYLE } from '../primitives';
+import { SectionCard, SectionTitle, SectionHint, GhostButton, Icon, PageHeader } from '../primitives';
 import type { IconComp } from '../icons';
 
 const TYPING_WPM = 40;
@@ -67,10 +67,7 @@ export default function StatsTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <div style={{ display: 'flex', alignItems: 'center' }}>
-        <h1 style={PAGE_TITLE_STYLE}>Stats</h1>
-        <span style={{ marginLeft: 'auto' }}><GhostButton label="Refresh" onClick={() => { void load(); }} /></span>
-      </div>
+      <PageHeader icon={ICONS.chartBar} title="Stats" right={<GhostButton label="Refresh" onClick={() => { void load(); }} />} />
 
       {/* Time-saved hero */}
       <div style={{
