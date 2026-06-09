@@ -123,6 +123,10 @@ export default function DictationPillPage() {
   // The intent of the in-flight agent task, captured on `running` so the `done`
   // event can show it as the "You" turn in the shared answer panel.
   const agentIntentRef = useRef<string>('');
+  // Last agent task whose terminal (done/failed) event we've handled — guards
+  // the dual-emit (emit_to dock + broadcast both reach the dock window) from
+  // appending the answer twice.
+  const agentDoneRef = useRef<string>('');
 
   const stateRef = useRef<DictationState>('idle');
   const startTimeRef = useRef<number>(0);
@@ -399,6 +403,10 @@ export default function DictationPillPage() {
             setAgentWorking(true);
             if (e.payload?.intent) agentIntentRef.current = e.payload.intent;
           } else if (status === 'done' || status === 'failed') {
+            // Dual-emit guard: the dock receives this terminal event twice
+            // (emit_to dock + broadcast). Handle each task's done once.
+            if (tid && agentDoneRef.current === tid) return;
+            if (tid) agentDoneRef.current = tid;
             setAgentWorking(false);
             // Only clear a pending confirm if it belongs to THIS task.
             setAgentConfirm((c) => (c && c.taskId === tid ? null : c));
