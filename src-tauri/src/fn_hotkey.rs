@@ -122,9 +122,14 @@ const OPTION_FLAG: u64 = 0x80000;
 
 /// Virtual keycode for the RIGHT Option key (Left Option = 58). The flag bit is
 /// shared, so the keycode is the only way to tell them apart — Ask is bound to
-/// Right-Option so Left-Option stays free for normal Option chords.
+/// Right-Option, and the Symon voice AGENT is bound to Left-Option.
 #[cfg(target_os = "macos")]
 const RIGHT_OPTION_KEYCODE: i64 = 61;
+
+/// Virtual keycode for the LEFT Option key. Bound to the Symon voice AGENT:
+/// hold Left-Option, speak a command, release to run it. Right-Option = Ask.
+#[cfg(target_os = "macos")]
+const LEFT_OPTION_KEYCODE: i64 = 58;
 
 /// Right-Option hold under this is a brush (cancel, don't ask). Verbatim from
 /// Symon's 120ms Ask brush guard.
@@ -147,6 +152,21 @@ static OPTION_HELD: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static ASK_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
+/// True while a Left-Option AGENT dictation is recording a command. `run_finalize`
+/// takes this to route the polished transcript to the Symon voice agent. Distinct
+/// from ASK_MODE (Right-Option → Gemini) and the paste/long-form flags.
+#[cfg(target_os = "macos")]
+static AGENT_MODE: AtomicBool = AtomicBool::new(false);
+
+/// Edge latch for the LEFT Option key — separate from OPTION_HELD so the two
+/// Option gestures never collide on their down/up edges.
+#[cfg(target_os = "macos")]
+static LEFT_OPTION_HELD: AtomicBool = AtomicBool::new(false);
+
+/// The stt_engine session id of the active agent dictation (0 = none).
+#[cfg(target_os = "macos")]
+static AGENT_SESSION_ID: AtomicU64 = AtomicU64::new(0);
+
 /// Whether a Right-Option Ask dictation is currently recording. Read by
 /// `run_finalize` (via take_ask_mode) to route the result to Gemini.
 #[cfg(target_os = "macos")]
@@ -156,6 +176,18 @@ pub fn take_ask_mode() -> bool {
 
 #[cfg(not(target_os = "macos"))]
 pub fn take_ask_mode() -> bool {
+    false
+}
+
+/// Whether a Left-Option agent dictation is currently recording. Read by
+/// `run_finalize` (via take_agent_mode) to route the result to the voice agent.
+#[cfg(target_os = "macos")]
+pub fn take_agent_mode() -> bool {
+    AGENT_MODE.swap(false, Ordering::SeqCst)
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn take_agent_mode() -> bool {
     false
 }
 
@@ -564,6 +596,89 @@ fn discard_ask_dictation() {
     morph_dock_idle();
 }
 
+/// Begin a Left-Option AGENT dictation: mark AGENT_MODE, morph the dock to
+/// 'recording' (so the user sees the agent is listening for a command), and
+/// start the SHARED recognizer. `run_finalize` routes the polished transcript to
+/// the Symon voice agent (`agent::spawn_agent`) instead of pasting or asking.
+/// Mirror of `begin_ask_dictation`. Worker thread, never the tap.
+#[cfg(target_os = "macos")]
+fn begin_agent_dictation() {
+    crate::audio_ducker::duck();
+    crate::sound::play_sound("Tink");
+    // The three voice modes share ONE recognizer — abandon any in-flight session.
+    LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+    LONG_FORM_SESSION_ID.store(0, Ordering::SeqCst);
+    // System-origin so the live partial transcript + waveform reach the dock; the
+    // `is_agent` flag (taken in run_finalize) routes the command to the agent
+    // instead of pasting, so system-origin is safe. Reset on the agent finalize.
+    set_system_origin(true);
+    let prev = crate::stt_engine::active_session_id();
+    if prev != 0 {
+        request_discard_finalize(prev);
+    }
+
+    AGENT_MODE.store(true, Ordering::SeqCst);
+
+    if let Some(app) = APP_HANDLE.get() {
+        let app = app.clone();
+        let _ = app.run_on_main_thread({
+            let app = app.clone();
+            move || {
+                crate::dock_window::show(&app);
+                let payload = serde_json::json!({ "type": "system-start", "origin": "system" });
+                log::info!("[fn-hotkey] morph dock → recording (agent start)");
+                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", payload.clone());
+                let _ = app.emit("o8:stt-event", payload);
+            }
+        });
+    }
+
+    match crate::stt_engine::start() {
+        Ok(sid) => {
+            // A sub-120ms brush may have cleared AGENT_MODE while we were starting.
+            if !AGENT_MODE.load(Ordering::SeqCst) {
+                let _ = crate::stt_engine::stop_session(sid);
+                morph_dock_idle();
+                return;
+            }
+            AGENT_SESSION_ID.store(sid, Ordering::SeqCst);
+            tracing::info!("[fn-hotkey] agent dictation started (session={sid})");
+        }
+        Err(e) => {
+            tracing::error!("[fn-hotkey] failed to start agent dictation: {e}");
+            AGENT_MODE.store(false, Ordering::SeqCst);
+            AGENT_SESSION_ID.store(0, Ordering::SeqCst);
+            morph_dock_idle();
+        }
+    }
+}
+
+/// Finish a Left-Option agent dictation (released ≥120ms): stop the recognizer
+/// (fenced) → the finalize chain polishes the command, and run_finalize routes it
+/// to the agent via take_agent_mode. Mirror of `end_ask_dictation`.
+#[cfg(target_os = "macos")]
+fn end_agent_dictation() {
+    crate::audio_ducker::restore();
+    crate::sound::play_sound("Pop");
+    let sid = AGENT_SESSION_ID.swap(0, Ordering::SeqCst);
+    if let Err(e) = crate::stt_engine::stop_session(sid) {
+        tracing::warn!("[fn-hotkey] agent finish stop failed: {e}");
+    }
+}
+
+/// Discard a too-short Left-Option brush: clear AGENT_MODE, drop the finalize,
+/// and stop the recognizer (fenced). Mirror of `discard_ask_dictation`.
+#[cfg(target_os = "macos")]
+fn discard_agent_dictation() {
+    let sid = AGENT_SESSION_ID.swap(0, Ordering::SeqCst);
+    AGENT_MODE.store(false, Ordering::SeqCst);
+    request_discard_finalize(sid);
+    if let Err(e) = crate::stt_engine::stop_session(sid) {
+        tracing::warn!("[fn-hotkey] agent cancel stop failed: {e}");
+    }
+    morph_dock_idle();
+}
+
 /// Spawn the global Fn hotkey monitor. Call ONCE from `setup()` alongside
 /// `stt_engine::spawn`. On non-macOS this is a no-op.
 #[cfg(target_os = "macos")]
@@ -618,6 +733,8 @@ pub fn start(app: tauri::AppHandle) {
     let fn_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
     // Right-Option-down instant, used to reject the sub-120ms Ask brush.
     let ask_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
+    // Left-Option-down instant, used to reject the sub-120ms agent brush.
+    let agent_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
 
     // ── Poll fallback for the dropped Fn-UP edge (Sequoia regression) ──
     // The tap delivers ONE FlagsChanged (Fn-down) then goes silent; the Fn-up
@@ -661,6 +778,7 @@ pub fn start(app: tauri::AppHandle) {
     let fn_held_cb = fn_held.clone();
     let fn_press_time_cb = fn_press_time.clone();
     let ask_press_time_cb = ask_press_time.clone();
+    let agent_press_time_cb = agent_press_time.clone();
     std::thread::spawn(move || {
         let tap = CGEventTap::new(
             CGEventTapLocation::HID,
@@ -825,6 +943,44 @@ pub fn start(app: tauri::AppHandle) {
                                     std::thread::spawn(discard_ask_dictation);
                                 } else {
                                     std::thread::spawn(end_ask_dictation);
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Left-Option → Symon voice AGENT (voice command) ──
+                    // keycode 58 = Left-Option. Independent of the Right-Option
+                    // block above (own keycode + own LEFT_OPTION_HELD latch +
+                    // own press-time). Hold to record a command, release (≥120ms)
+                    // to run it through the agent loop + speak the result.
+                    {
+                        let keycode =
+                            event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                        if keycode == LEFT_OPTION_KEYCODE {
+                            let option_down = (flags & OPTION_FLAG) != 0;
+                            let opt_down_edge = option_down
+                                && LEFT_OPTION_HELD
+                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                    .is_ok();
+                            let opt_up_edge = !option_down
+                                && LEFT_OPTION_HELD
+                                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                                    .is_ok();
+                            if opt_down_edge {
+                                if let Ok(mut t) = agent_press_time_cb.lock() {
+                                    *t = std::time::Instant::now();
+                                }
+                                std::thread::spawn(begin_agent_dictation);
+                            } else if opt_up_edge {
+                                let press = agent_press_time_cb
+                                    .lock()
+                                    .map(|t| *t)
+                                    .unwrap_or_else(|_| std::time::Instant::now());
+                                let hold = std::time::Instant::now().duration_since(press);
+                                if hold < std::time::Duration::from_millis(ASK_BRUSH_MS) {
+                                    std::thread::spawn(discard_agent_dictation);
+                                } else {
+                                    std::thread::spawn(end_agent_dictation);
                                 }
                             }
                         }

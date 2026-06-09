@@ -7,10 +7,13 @@
  * flips on the Liquid-Glass specular sheen (Apple macOS 26 cue). Persisted to
  * localStorage by the shell.
  */
+import { useEffect, useState } from 'react';
 import { ICONS } from '../tokens';
 import { SURFACE_PRESETS, type GlassControls, type VsSurface } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, Segmented, Slider, ControlRow, PAGE_TITLE_STYLE } from '../primitives';
+import { SectionCard, SectionTitle, SectionHint, Segmented, Slider, ControlRow, PageHeader } from '../primitives';
 import { TEXT_TERTIARY } from '../tokens';
+
+const DOCK_THEME_KEY = 'o8:dock-theme';
 
 export default function ThemeTab({ controls, onChange }: { controls: GlassControls; onChange: (c: GlassControls) => void }) {
   const auto = controls.surface === 'auto';
@@ -22,9 +25,21 @@ export default function ThemeTab({ controls, onChange }: { controls: GlassContro
   };
   const setParam = (k: 'frost' | 'clarity' | 'saturate', v: number) => onChange({ ...controls, [k]: v });
 
+  // Dock appearance. Writing localStorage fires `storage` in the dock window
+  // (same origin), so it re-themes live. Start of dock theming — more to come.
+  const [dock, setDock] = useState<'symon' | 'glass'>('symon');
+  useEffect(() => {
+    try { setDock(localStorage.getItem(DOCK_THEME_KEY) === 'glass' ? 'glass' : 'symon'); } catch { /* noop */ }
+  }, []);
+  const setDockTheme = (v: string) => {
+    const next = v === 'glass' ? 'glass' : 'symon';
+    setDock(next);
+    try { localStorage.setItem(DOCK_THEME_KEY, next); } catch { /* noop */ }
+  };
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Theme</h1>
+      <PageHeader icon={ICONS.droplet} title="Theme" />
 
       <SectionCard>
         <SectionTitle icon={ICONS.eye}>Surface</SectionTitle>
@@ -57,6 +72,15 @@ export default function ThemeTab({ controls, onChange }: { controls: GlassContro
             </ControlRow>
           </>
         )}
+      </SectionCard>
+
+      <SectionCard>
+        <SectionTitle icon={ICONS.microphone}>Dock</SectionTitle>
+        <SectionHint>The Symon pill at the top of your screen. Keep the signature multicolor, or match it to the clear glass. More dock looks coming.</SectionHint>
+        <Segmented
+          full value={dock} onChange={setDockTheme}
+          options={[{ value: 'symon', label: 'Symon' }, { value: 'glass', label: 'Glass' }]}
+        />
       </SectionCard>
     </div>
   );

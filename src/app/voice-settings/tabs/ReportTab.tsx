@@ -10,7 +10,7 @@ import {
   ACCENT, ACCENT_GLOW, DANGER_RED, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER_SUBTLE, OK_GREEN, SF,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, ICONS,
 } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, Segmented, AccentButton, GhostButton, Icon, PAGE_TITLE_STYLE } from '../primitives';
+import { SectionCard, SectionTitle, SectionHint, Segmented, AccentButton, GhostButton, Icon, PageHeader } from '../primitives';
 
 const MAX_IMAGES = 5;
 
@@ -95,7 +95,7 @@ export default function ReportTab() {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Report Issue</h1>
+      <PageHeader icon={ICONS.warning} title="Report Issue" />
       <SectionCard>
         <SectionTitle icon={ICONS.warning}>Tell us what happened</SectionTitle>
         <SectionHint>Voice glitch or any o8 bug — it goes straight to the o8 team in Discord with your app version + OS attached.</SectionHint>

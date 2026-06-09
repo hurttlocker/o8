@@ -286,6 +286,36 @@ export async function sttSetInputDevice(deviceUid: string): Promise<void> {
   await invoke('stt_set_input_device', { deviceUid });
 }
 
+// ── Symon voice agent ──
+
+/** A persisted agent task's status (for polling the dock). */
+export interface AgentTaskStatus {
+  id: string;
+  status: string;
+  intent: string;
+  result: string | null;
+  model: string | null;
+  createdAt: number;
+  finishedAt: number | null;
+}
+
+/** Run the Symon voice agent on a text prompt (the tool-calling lane, separate
+ * from Ask). Fire-and-forget — progress + result reach the dock via events + TTS,
+ * and risky actions surface a confirm card. */
+export async function agentRun(prompt: string): Promise<void> {
+  await invoke('agent_run', { prompt });
+}
+
+/** Resolve a pending agent confirm card (Allow / Cancel). */
+export async function agentConfirm(taskId: string, allow: boolean): Promise<void> {
+  await invoke('agent_confirm', { taskId, allow });
+}
+
+/** The most recent agent task (status/result). Null until one has run. */
+export async function agentTaskStatus(): Promise<AgentTaskStatus | null> {
+  return invoke<AgentTaskStatus>('agent_task_status');
+}
+
 /** A persisted dictation/ask, newest-first — the settings History panel. */
 export interface DictationHistoryEntry {
   id: string;
