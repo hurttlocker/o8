@@ -255,6 +255,37 @@ export async function voicePrefsSet(key: string, value: unknown): Promise<void> 
   await invoke('voice_prefs_set', { key, value });
 }
 
+/** Apply the native recognizer locale live (e.g. "en-US"). Pairs with persisting
+ * `dictation_locale` via voicePrefsSet so the choice survives relaunch. */
+export async function sttSetLocale(locale: string): Promise<void> {
+  await invoke('o8_stt_locale', { locale });
+}
+
+/** Speak `text` through the TTS engine using the currently-saved voice + speed —
+ * powers the Voice Output "Preview" buttons. Fire-and-forget. */
+export async function ttsSpeak(text: string): Promise<void> {
+  await invoke('tts_speak', { text });
+}
+
+/** Stop any active TTS playback (preview / read-aloud). Safe no-op when idle. */
+export async function ttsStop(): Promise<void> {
+  await invoke('tts_stop');
+}
+
+/** An audio input device for the Settings mic picker. */
+export interface InputDevice { id: string; name: string; is_default: boolean }
+
+/** List connected audio input devices. Returns null until the Rust enumeration
+ * command ships — the mic picker degrades to "System Default" in that case. */
+export async function sttListInputDevices(): Promise<InputDevice[] | null> {
+  return invoke<InputDevice[]>('stt_list_input_devices');
+}
+
+/** Route dictation to a specific input device (uid). No-op until shipped. */
+export async function sttSetInputDevice(deviceUid: string): Promise<void> {
+  await invoke('stt_set_input_device', { deviceUid });
+}
+
 /** A persisted dictation/ask, newest-first — the settings History panel. */
 export interface DictationHistoryEntry {
   id: string;
