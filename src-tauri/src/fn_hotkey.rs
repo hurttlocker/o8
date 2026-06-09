@@ -476,7 +476,13 @@ fn begin_ask_dictation() {
     // set + an un-finishable session over the shared recognizer.
     LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
     LONG_FORM_SESSION_ID.store(0, Ordering::SeqCst);
-    set_system_origin(false);
+    // Ask is a SYSTEM-origin session so its live partial transcript + audio
+    // level reach the screen dock (emit_stt only forwards system-origin events
+    // there) — the user sees their words + the waveform while asking. The
+    // `is_ask` flag (consumed in run_finalize) still routes the question to
+    // Gemini instead of pasting, so system-origin is safe here. Reset on the
+    // Ask finalize branch.
+    set_system_origin(true);
     let prev = crate::stt_engine::active_session_id();
     if prev != 0 {
         request_discard_finalize(prev);
