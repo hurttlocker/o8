@@ -65,6 +65,33 @@ export const WAVE_STOPS = ['#88D1F1', '#B1B4E5', '#F5B8C4', '#F4C977'] as const;
 // Re-export the Iconoir icon map so `import { ICONS } from '../tokens'` keeps working.
 export { ICONS } from './icons';
 
+// ── Adjustable glass (Theme tab) ── frost = backdrop blur; clarity = how
+// see-through (drives a scrim opacity); saturate = backdrop saturation. A high
+// saturation flips on the "liquid" specular sheen (Apple Liquid Glass cue).
+export type VsSurface = 'auto' | 'glass' | 'solid' | 'liquid';
+export interface GlassControls { surface: VsSurface; frost: number; clarity: number; saturate: number }
+
+// Picking a surface seeds the sliders; 'auto' resolves from o8's transparency.
+export const SURFACE_PRESETS: Record<'glass' | 'solid' | 'liquid', { frost: number; clarity: number; saturate: number }> = {
+  glass: { frost: 28, clarity: 60, saturate: 115 },
+  solid: { frost: 0, clarity: 4, saturate: 100 },
+  // Operator-tuned "fire" look: clear, no blur, max color pop + the specular sheen.
+  liquid: { frost: 0, clarity: 100, saturate: 220 },
+};
+export const DEFAULT_GLASS: GlassControls = { surface: 'auto', frost: 28, clarity: 60, saturate: 115 };
+
+/** Resolve the live glass params. 'auto' follows o8's transparency; any other
+ * surface uses the live slider values (seeded from its preset when picked). */
+export function resolveGlass(c: GlassControls, o8Transparent: boolean): { frost: number; clarity: number; saturate: number } {
+  if (c.surface === 'auto') return o8Transparent ? SURFACE_PRESETS.glass : SURFACE_PRESETS.solid;
+  return { frost: c.frost, clarity: c.clarity, saturate: c.saturate };
+}
+
+/** clarity 0..100 → scrim opacity (0 = solid panel, 100 = clearest glass). */
+export function scrimOpacity(clarity: number): number {
+  return Math.max(0.05, Math.min(0.99, 1 - (clarity / 100) * 0.95));
+}
+
 // ── Theme var maps ── applied to the shell root by page.tsx. Light = Symon's
 // "frost" surface (dark ink on white glass); dark = the midnight glass.
 export type VsMode = 'light' | 'dark';
@@ -93,6 +120,7 @@ export const VS_THEME_VARS: Record<VsMode, Record<string, string>> = {
     '--vs-section-border': 'rgba(255,255,255,0.08)',
     '--vs-section-shadow': '0 18px 36px rgba(2,6,23,0.16)',
     '--vs-accent-radial': 'rgba(64,88,255,0.20)',
+    '--vs-scrim-rgb': '11,16,26',
   },
   light: {
     '--vs-text-primary': 'rgba(15,23,42,0.92)',
@@ -118,5 +146,6 @@ export const VS_THEME_VARS: Record<VsMode, Record<string, string>> = {
     '--vs-section-border': 'rgba(15,23,42,0.08)',
     '--vs-section-shadow': '0 14px 34px rgba(100,116,139,0.18)',
     '--vs-accent-radial': 'rgba(64,88,255,0.12)',
+    '--vs-scrim-rgb': '248,250,253',
   },
 };
