@@ -32,6 +32,7 @@
 
 import { useEffect, useRef } from 'react';
 import type { DictationSnapshot, DictationState } from './types';
+import { DockAskPanel, type AskTurn } from './DockAskPanel';
 
 // ── Symon brand gradient (cyan → periwinkle → pink → gold) ──
 // Verbatim from SymonPillWaveform.svelte / SquiggleLoader.svelte.
@@ -295,6 +296,12 @@ interface DockNotchSurfaceProps {
   ttsState?: 'idle' | 'playing' | 'paused';
   onTogglePause?: () => void;
   onStop?: () => void;
+  /** Ask answer panel (voice P4 C3) — when open (and not dictating/speaking)
+   * the dock grows into the Q/o8 thread panel. */
+  askOpen?: boolean;
+  askMode?: 'idle' | 'listening' | 'answer';
+  askThread?: AskTurn[];
+  onCloseAsk?: () => void;
 }
 
 /**
@@ -303,7 +310,16 @@ interface DockNotchSurfaceProps {
  * One `.ndock` element. Its geometry/background animate per state via the
  * Symon spring; the content inside swaps. idle ⇄ listening ⇄ thinking ⇄ done.
  */
-export function DockNotchSurface({ snapshot, ttsState = 'idle', onTogglePause, onStop }: DockNotchSurfaceProps) {
+export function DockNotchSurface({
+  snapshot,
+  ttsState = 'idle',
+  onTogglePause,
+  onStop,
+  askOpen = false,
+  askMode = 'idle',
+  askThread = [],
+  onCloseAsk,
+}: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
   // The speaking capsule shows when TTS is playing/paused AND no dictation is
@@ -312,6 +328,14 @@ export function DockNotchSurface({ snapshot, ttsState = 'idle', onTogglePause, o
   // talk OVER the TTS, real dictation sets `dictationMode` and wins the dock —
   // they see their recording waveform, not the speaking controls.
   const isSpeaking = dictationMode === 'idle' && (ttsState === 'playing' || ttsState === 'paused');
+  // The Ask panel renders while open, EXCEPT when a real dictation takes the
+  // dock (dictationMode !== idle wins — you can Fn-dictate over it). It DOES win
+  // over isSpeaking, because the Ask answer is itself read aloud and the panel
+  // should stay visible while its answer speaks.
+  const isAsking = askOpen && dictationMode === 'idle';
+  // While listening for the question (empty thread) the panel shows the compact
+  // capsule + waveform; once an answer lands it's the full grown panel.
+  const askListening = isAsking && askMode === 'listening' && askThread.length === 0;
   const mode = dictationMode;
   const isError = state === 'error';
 
@@ -324,6 +348,33 @@ export function DockNotchSurface({ snapshot, ttsState = 'idle', onTogglePause, o
   // ── Per-mode geometry (verbatim Symon NotchSurface dimensions) ──
   // idle: 128×16 sliver. listening/thinking: 248×40 capsule. done: 420×44 wide.
   const geometry: React.CSSProperties = (() => {
+    if (isAsking) {
+      if (askListening) {
+        // Listening for the question — the compact brand capsule + waveform.
+        return {
+          width: 248,
+          height: 40,
+          borderRadius: '0 0 20px 20px',
+          background: SYMON_CAPSULE_BG,
+          borderColor: 'rgba(255, 255, 255, 0.4)',
+          boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
+        } as React.CSSProperties;
+      }
+      // Answer panel — the full glass surface (the root width/height/radius
+      // transition animates the 248→420 grow for free).
+      return {
+        width: 420,
+        height: 380,
+        borderRadius: '0 0 26px 26px',
+        background:
+          'linear-gradient(rgba(13, 11, 26, 0.62), rgba(13, 11, 26, 0.62)),'
+          + ' linear-gradient(100deg, #aecdff 0%, #d7c2f1 46%, #f7d9bf 100%)',
+        borderColor: 'rgba(255, 255, 255, 0.4)',
+        boxShadow: '0 16px 34px rgba(0, 0, 0, 0.34)',
+        backdropFilter: 'blur(34px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(34px) saturate(140%)',
+      } as React.CSSProperties;
+    }
     if (isSpeaking) {
       // Speaking capsule — the darkened brand surface with the controls.
       return {
@@ -385,7 +436,31 @@ export function DockNotchSurface({ snapshot, ttsState = 'idle', onTogglePause, o
 
   // ── Inner content per mode ──
   let body: React.ReactNode = null;
-  if (isSpeaking) {
+  if (isAsking) {
+    if (askListening) {
+      body = (
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: 10,
+            width: '100%',
+            height: '100%',
+            paddingLeft: 14,
+            paddingRight: 14,
+            overflow: 'hidden',
+          }}
+        >
+          <div style={{ width: INNER_W, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <NotchWaveCanvas listening levelRef={levelRef} />
+          </div>
+        </div>
+      );
+    } else {
+      body = <DockAskPanel thread={askThread} onClose={() => onCloseAsk?.()} />;
+    }
+  } else if (isSpeaking) {
     const playing = ttsState === 'playing';
     body = (
       <div

@@ -2826,18 +2826,17 @@ fn spawn_ask_and_speak(app: tauri::AppHandle, question: String) {
                 log::info!("[ask] answer: {} chars", answer.len());
                 let answer_payload =
                     serde_json::json!({ "question": question, "answer": answer });
-                // Emit to BOTH the screen dock (the Ask answer panel lives in the
-                // dock webview — broadcasts don't reach it) and main.
-                let _ = app.emit_to(dock_window::DOCK_LABEL, "o8:ask-answer", answer_payload.clone());
-                let _ = app.emit_to("main", "o8:ask-answer", answer_payload);
+                // Emit ONLY to the screen dock — the Ask answer panel lives in the
+                // dock webview. (Emitting to `main` too made the dock receive it
+                // twice → duplicated turns.)
+                let _ = app.emit_to(dock_window::DOCK_LABEL, "o8:ask-answer", answer_payload);
                 // Speak the answer through the TTS engine (spawns its own thread).
                 tts::playback::play_thread(answer, tts::load_config());
             }
             Err(e) => {
                 log::warn!("[ask] failed: {e}");
                 let err_payload = serde_json::json!({ "message": e });
-                let _ = app.emit_to(dock_window::DOCK_LABEL, "o8:ask-error", err_payload.clone());
-                let _ = app.emit_to("main", "o8:ask-error", err_payload);
+                let _ = app.emit_to(dock_window::DOCK_LABEL, "o8:ask-error", err_payload);
             }
         }
     });
