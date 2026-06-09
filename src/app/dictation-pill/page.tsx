@@ -323,13 +323,15 @@ export default function DictationPillPage() {
         add(await listen('o8:ask-open', () => {
           const within = Date.now() - askLastClosedRef.current < ASK_RESUME_WINDOW_MS;
           dockLog('ask-open');
-          if (within && askThreadRef.current.length > 0) {
-            setAskMode('answer');
-          } else {
-            if (!within) setAskThread([]);
-            setAskMode('listening');
-          }
-          openPanel();
+          if (!within) setAskThread([]);
+          askOpenRef.current = true;
+          setAskOpen(true);
+          setAskMode('listening');
+          // Listening shows the compact capsule with the LIVE transcript +
+          // waveform (driven by the system-origin dictation events) — don't grow
+          // into the panel until the answer arrives.
+          invokeCmd('dock_set_expanded', { expanded: false });
+          armAskIdleTimer();
         }));
         add(await listen<{ question?: string; answer?: string }>('o8:ask-answer', (e) => {
           const q = e.payload?.question ?? '';

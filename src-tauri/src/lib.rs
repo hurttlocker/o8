@@ -2590,8 +2590,12 @@ mod stt_engine {
             // consumed at the top (`is_ask`) so a stray re-finalize can't re-ask.
             #[cfg(target_os = "macos")]
             if is_ask {
+                // Ask ran as a system-origin session (for the live dock
+                // transcript) — reset the flag so the next dictation isn't
+                // mistaken for system-origin.
+                crate::fn_hotkey::set_system_origin(false);
                 // The dock was morphed to 'recording' on ask-start; return it to
-                // idle now — the TTS playback re-morphs it when the answer speaks.
+                // idle now — the Ask answer panel takes over when the answer lands.
                 let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
                 let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
                 let _ = app.emit("o8:stt-event", idle);
