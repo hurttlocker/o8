@@ -248,6 +248,49 @@ function NotchSquiggle() {
   );
 }
 
+/** o8 binary-orbit — two dots 180° apart circling a center, the o8 "long-running
+ * op underway" motion (parity with the main app's orbit + the settings
+ * time-saved mark). Dainty/small; inline-animation + shared `<style>` keyframe
+ * (o8DockOrbit) so it obeys the inline-styles-only rule. 1.6s active cadence. */
+function NotchOrbit({ size = 13 }: { size?: number }) {
+  const dot = 3;
+  return (
+    <span aria-hidden style={{ position: 'relative', display: 'inline-block', width: size, height: size, flexShrink: 0, color: '#fff' }}>
+      <span style={{ position: 'absolute', inset: 0, animation: 'o8DockOrbit 1.6s linear infinite' }}>
+        <span style={{ position: 'absolute', top: 0, left: '50%', width: dot, height: dot, marginLeft: -dot / 2, borderRadius: '50%', background: 'currentColor' }} />
+        <span style={{ position: 'absolute', bottom: 0, left: '50%', width: dot, height: dot, marginLeft: -dot / 2, borderRadius: '50%', background: 'currentColor', opacity: 0.55 }} />
+      </span>
+    </span>
+  );
+}
+
+/** Live elapsed timer for the working capsule — ticks each second from when the
+ * task started, so a long synthesis reads as "still going". Compact: `7s` under
+ * a minute, `1:23` over. */
+function WorkingTimer({ startedAt }: { startedAt: number }) {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, []);
+  const sec = Math.max(0, Math.floor((now - startedAt) / 1000));
+  const label = sec < 60 ? `${sec}s` : `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')}`;
+  return (
+    <span
+      style={{
+        fontSize: 10.5,
+        fontWeight: 300,
+        letterSpacing: '0.2px',
+        color: 'rgba(255, 255, 255, 0.55)',
+        fontVariantNumeric: 'tabular-nums',
+        textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
+      }}
+    >
+      {label}
+    </span>
+  );
+}
+
 /** A small circular control button in the speaking capsule (raw SVG icon —
  * React icon components don't render in the Tauri webview). */
 function NotchControlButton({ label, onClick, children }: {
@@ -324,6 +367,10 @@ interface DockNotchSurfaceProps {
    * Cancel), the working indicator while the loop runs, and the resolver. */
   agentConfirm?: { taskId: string; tool: string; summary: string } | null;
   agentWorking?: boolean;
+  /** Current running tool (from tool_call events) — 'o8_ask' shows "Synthesizing…". */
+  agentTool?: string;
+  /** Epoch ms when the working task started, for the live elapsed timer. */
+  agentStartedAt?: number;
   onAgentConfirm?: (taskId: string, allow: boolean) => void;
 }
 
@@ -344,6 +391,8 @@ export function DockNotchSurface({
   onCloseAsk,
   agentConfirm = null,
   agentWorking = false,
+  agentTool = '',
+  agentStartedAt = 0,
   onAgentConfirm,
 }: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
@@ -617,13 +666,14 @@ export function DockNotchSurface({
       </div>
     );
   } else if (isAgentWorking) {
+    const synthesizing = agentTool === 'o8_ask';
     body = (
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 10,
+          gap: 9,
           width: '100%',
           height: '100%',
           paddingLeft: 14,
@@ -631,7 +681,7 @@ export function DockNotchSurface({
           overflow: 'hidden',
         }}
       >
-        <NotchSquiggle />
+        <NotchOrbit size={13} />
         <span
           style={{
             fontSize: 11,
@@ -642,8 +692,9 @@ export function DockNotchSurface({
             whiteSpace: 'nowrap',
           }}
         >
-          Symon is working…
+          {synthesizing ? 'Synthesizing…' : 'Working…'}
         </span>
+        {agentStartedAt ? <WorkingTimer startedAt={agentStartedAt} /> : null}
       </div>
     );
   } else if (isAsking) {
@@ -812,6 +863,8 @@ export function DockNotchSurface({
       {body}
       <style>{
         '@keyframes o8DockSquiggle { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -64; } }'
+        + '@keyframes o8DockOrbit { to { transform: rotate(360deg); } }'
+        + '@media (prefers-reduced-motion: reduce) { [style*="o8DockOrbit"] { animation: none !important; } }'
       }</style>
     </div>
   );
