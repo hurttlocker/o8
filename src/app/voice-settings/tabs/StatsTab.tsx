@@ -1,29 +1,47 @@
 'use client';
 
 /**
- * Stats tab — read-only local stats derived from the dictation history
- * (`~/.o8/dictation-history.json`). Honest subset of Symon's Stats: o8 keeps
- * only the recent-history ledger (no long-term WPM/streak telemetry), so we
- * surface what that ledger can prove — counts, words, today, top app, split.
+ * Stats tab — local usage stats derived from the dictation history
+ * (`~/.o8/dictation-history.json`). Symon-style: a Time-Saved hero + a grid of
+ * usage cards. Honest — o8 keeps only the recent-history ledger (no per-dictation
+ * duration), so Time Saved is modeled (typing 40 wpm vs speaking 150 wpm), not
+ * measured. Everything else is counted directly.
  */
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { dictationHistoryGet, type DictationHistoryEntry } from '@/lib/tauri/bridge';
-import { ICONS, TEXT_PRIMARY, TEXT_TERTIARY, ACCENT_LIGHT, SECTION_BG, SECTION_BORDER } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, GhostButton, PAGE_TITLE_STYLE } from '../primitives';
+import {
+  TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, ACCENT_LIGHT, SECTION_BG, SECTION_BORDER,
+} from '../tokens';
+import { ICONS } from '../tokens';
+import { SectionCard, SectionTitle, SectionHint, GhostButton, Icon, PAGE_TITLE_STYLE } from '../primitives';
+import type { IconComp } from '../icons';
+
+const TYPING_WPM = 40;
+const SPEAKING_WPM = 150;
 
 function wordCount(text: string): number {
   const t = text.trim();
   return t ? t.split(/\s+/).length : 0;
 }
-function isToday(tsSeconds: number): boolean {
-  const d = new Date(tsSeconds * 1000), n = new Date();
-  return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
+function dayKey(ts: number): string {
+  const d = new Date(ts * 1000);
+  return `${d.getFullYear()}-${d.getMonth()}-${d.getDate()}`;
+}
+function isToday(ts: number): boolean {
+  return dayKey(ts) === dayKey(Math.floor(Date.now() / 1000));
 }
 function appName(bundleId: string): string {
   if (!bundleId) return '';
   const parts = bundleId.split('.');
   const last = parts[parts.length - 1] || bundleId;
   return last.charAt(0).toUpperCase() + last.slice(1);
+}
+function fmtDuration(min: number): string {
+  if (min < 1) return '<1m';
+  if (min < 60) return `${Math.round(min)}m`;
+  const h = Math.floor(min / 60);
+  const m = Math.round(min % 60);
+  return m ? `${h}h ${m}m` : `${h}h`;
 }
 
 export default function StatsTab() {
@@ -35,10 +53,17 @@ export default function StatsTab() {
   const wordsToday = history.filter((e) => isToday(e.ts)).reduce((s, e) => s + wordCount(e.text), 0);
   const askCount = history.filter((e) => e.mode === 'ask').length;
   const dictCount = history.length - askCount;
+  const avgWords = history.length ? Math.round(totalWords / history.length) : 0;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+  const thisWeek = history.filter((e) => e.ts >= nowSec - 7 * 86400).length;
+  const activeDays = new Set(history.map((e) => dayKey(e.ts))).size;
 
   const appCounts = new Map<string, number>();
   for (const e of history) { const a = appName(e.app); if (a) appCounts.set(a, (appCounts.get(a) ?? 0) + 1); }
   const topApp = [...appCounts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0] ?? '—';
+
+  const savedMin = Math.max(0, totalWords / TYPING_WPM - totalWords / SPEAKING_WPM);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -46,30 +71,55 @@ export default function StatsTab() {
         <h1 style={PAGE_TITLE_STYLE}>Stats</h1>
         <span style={{ marginLeft: 'auto' }}><GhostButton label="Refresh" onClick={() => { void load(); }} /></span>
       </div>
+
+      {/* Time-saved hero */}
+      <div style={{
+        position: 'relative', overflow: 'hidden', padding: '18px 20px', borderRadius: 18,
+        border: `1px solid rgba(90,132,255,0.28)`,
+        background: 'radial-gradient(circle at 88% 18%, rgba(64,88,255,0.22), transparent 52%), linear-gradient(180deg, rgba(64,88,255,0.12), rgba(255,255,255,0.02))',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12, fontSize: 10, fontWeight: 300, letterSpacing: '0.12em', textTransform: 'uppercase', color: TEXT_SECONDARY }}>
+          <span style={{ color: ACCENT_LIGHT, display: 'flex' }}><Icon icon={ICONS.timer} size={14} /></span>
+          Time saved
+        </div>
+        <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+          <span style={{ fontSize: 38, fontWeight: 400, letterSpacing: '-0.03em', color: TEXT_PRIMARY, lineHeight: 1 }}>{fmtDuration(savedMin)}</span>
+          <span style={{ fontSize: 12.5, color: TEXT_TERTIARY }}>
+            vs typing {totalWords.toLocaleString()} words by hand
+          </span>
+        </div>
+      </div>
+
+      {/* Usage grid */}
       <SectionCard>
-        <SectionTitle icon={ICONS.chartBar}>This Mac</SectionTitle>
+        <SectionTitle icon={ICONS.chartBar}>Usage</SectionTitle>
         <SectionHint>Derived from your local dictation history (kept on this Mac, capped to the most recent entries).</SectionHint>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: 10, marginTop: 4 }}>
-          <Stat label="Total dictations" value={String(history.length)} />
-          <Stat label="Total words" value={totalWords.toLocaleString()} />
-          <Stat label="Words today" value={wordsToday.toLocaleString()} accent />
-          <Stat label="Top app" value={topApp} />
-          <Stat label="Held-Fn dictations" value={String(dictCount)} />
-          <Stat label="Asked" value={String(askCount)} />
+          <Stat icon={ICONS.words} label="Total words" value={totalWords.toLocaleString()} />
+          <Stat icon={ICONS.microphone} label="Total dictations" value={String(history.length)} />
+          <Stat icon={ICONS.flash} label="Words today" value={wordsToday.toLocaleString()} accent />
+          <Stat icon={ICONS.calendar} label="This week" value={String(thisWeek)} />
+          <Stat icon={ICONS.type} label="Avg per dictation" value={`${avgWords} words`} />
+          <Stat icon={ICONS.calendar} label="Active days" value={String(activeDays)} />
+          <Stat icon={ICONS.robot} label="Top app" value={topApp} />
+          <Stat icon={ICONS.sparkle} label="Held-Fn / Asked" value={`${dictCount} / ${askCount}`} />
         </div>
       </SectionCard>
     </div>
   );
 }
 
-function Stat({ label, value, accent }: { label: string; value: ReactNode; accent?: boolean }) {
+function Stat({ icon, label, value, accent }: { icon: IconComp; label: string; value: ReactNode; accent?: boolean }) {
   return (
     <div style={{
-      padding: '14px 16px', borderRadius: 14, border: `1px solid ${SECTION_BORDER}`,
-      background: SECTION_BG, display: 'flex', flexDirection: 'column', gap: 6,
+      padding: '13px 15px', borderRadius: 14, border: `1px solid ${SECTION_BORDER}`,
+      background: SECTION_BG, display: 'flex', flexDirection: 'column', gap: 8,
     }}>
-      <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.12em', textTransform: 'uppercase', color: TEXT_TERTIARY }}>{label}</span>
-      <span style={{ fontSize: 24, fontWeight: 400, letterSpacing: '-0.02em', color: accent ? ACCENT_LIGHT : TEXT_PRIMARY, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+        <span style={{ color: TEXT_TERTIARY, display: 'flex', opacity: 0.8 }}><Icon icon={icon} size={13} /></span>
+        <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.1em', textTransform: 'uppercase', color: TEXT_TERTIARY }}>{label}</span>
+      </div>
+      <span style={{ fontSize: 22, fontWeight: 400, letterSpacing: '-0.02em', color: accent ? ACCENT_LIGHT : TEXT_PRIMARY, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
     </div>
   );
 }

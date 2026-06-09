@@ -5,7 +5,7 @@
  * inline-style helpers, tuned to o8's hurttlocker spec: var(--font-sans-system),
  * weight 300 on chrome (never 600+), Iconoir icons. Every page stacks these.
  */
-import { useState, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useState, type CSSProperties, type ReactNode } from 'react';
 import {
   ACCENT, ACCENT_GLOW, ACCENT_LIGHT, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER,
   GLASS_BORDER_SUBTLE, OK_GREEN, SECTION_BG, SECTION_BORDER, SECTION_SHADOW, SF,
@@ -16,29 +16,61 @@ import { Icon, type IconComp } from './icons';
 
 export { Icon } from './icons';
 
-// ── Brand glyph — CSS-rendered gradient orb (not SVG), verbatim from aqua ──
-export function BrandGlyph({ size = 34 }: { size?: number }) {
-  const warp = '44% 56% 52% 48% / 38% 41% 59% 62%';
+// ── Symon brand glyph — living gradient orb. CSS-rendered (not SVG); evolves the
+// aqua orb with a soft breathing halo, a slow liquid drift, and a twinkling
+// spark. Motion is subtle and respects prefers-reduced-motion. ──
+const ORB_WARP = '44% 56% 52% 48% / 38% 41% 59% 62%';
+const ORB_KEYFRAMES = `
+@keyframes symon-glow{0%,100%{transform:scale(1);opacity:.82}50%{transform:scale(1.14);opacity:.55}}
+@keyframes symon-drift{0%{transform:rotate(-12deg) scale(1)}50%{transform:rotate(7deg) scale(1.03)}100%{transform:rotate(-12deg) scale(1)}}
+@keyframes symon-halo{0%,100%{transform:scale(.96);opacity:.0}50%{transform:scale(1.18);opacity:.5}}
+@keyframes symon-spark{0%,100%{opacity:.92;transform:scale(1)}50%{opacity:.4;transform:scale(.66)}}
+`;
+
+export function BrandGlyph({ size = 36 }: { size?: number }) {
+  const [reduce, setReduce] = useState(false);
+  useEffect(() => {
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReduce(mq.matches);
+    const on = () => setReduce(mq.matches);
+    mq.addEventListener?.('change', on);
+    return () => mq.removeEventListener?.('change', on);
+  }, []);
+  const anim = (a: string): string | undefined => (reduce ? undefined : a);
+
   return (
     <div style={{ position: 'relative', width: size, height: size, display: 'grid', placeItems: 'center' }}>
+      <style>{ORB_KEYFRAMES}</style>
+      {/* outer halo ring — pulses out */}
       <div style={{
-        position: 'absolute', inset: 2, borderRadius: warp, filter: 'blur(10px)', opacity: 0.92,
-        background:
-          'radial-gradient(circle at 24% 30%, rgba(136,209,241,0.36), transparent 36%),'
-          + 'radial-gradient(circle at 72% 66%, rgba(177,180,229,0.34), transparent 32%),'
-          + 'radial-gradient(circle at 60% 78%, rgba(245,184,196,0.30), transparent 34%)',
+        position: 'absolute', inset: -3, borderRadius: ORB_WARP,
+        background: 'radial-gradient(circle, transparent 52%, rgba(136,209,241,0.34) 66%, transparent 78%)',
+        animation: anim('symon-halo 6.5s ease-in-out infinite'), willChange: 'transform, opacity',
       }} />
+      {/* breathing glow */}
       <div style={{
-        position: 'absolute', inset: 6, borderRadius: warp, transform: 'rotate(-10deg)',
+        position: 'absolute', inset: 2, borderRadius: ORB_WARP, filter: 'blur(10px)',
         background:
-          'radial-gradient(circle at 66% 28%, rgba(255,255,255,0.88), transparent 26%),'
-          + 'radial-gradient(circle at 36% 68%, rgba(136,209,241,0.92), transparent 48%),'
-          + 'linear-gradient(135deg, #88d1f1, #b1b4e5 46%, #f5b8c4 78%, #f4c977)',
-        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.32), 0 10px 18px rgba(136,209,241,0.18)',
+          'radial-gradient(circle at 24% 30%, rgba(136,209,241,0.40), transparent 36%),'
+          + 'radial-gradient(circle at 72% 66%, rgba(177,180,229,0.36), transparent 32%),'
+          + 'radial-gradient(circle at 60% 78%, rgba(245,184,196,0.32), transparent 34%)',
+        animation: anim('symon-glow 5.5s ease-in-out infinite'), willChange: 'transform, opacity',
       }} />
+      {/* the orb — slow liquid drift */}
+      <div style={{
+        position: 'absolute', inset: 6, borderRadius: ORB_WARP, transform: 'rotate(-12deg)',
+        background:
+          'radial-gradient(circle at 66% 26%, rgba(255,255,255,0.92), transparent 28%),'
+          + 'radial-gradient(circle at 34% 70%, rgba(136,209,241,0.94), transparent 50%),'
+          + 'conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
+        boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.34), 0 10px 20px rgba(136,209,241,0.22)',
+        animation: anim('symon-drift 13s ease-in-out infinite'), willChange: 'transform',
+      }} />
+      {/* spark */}
       <div style={{
         position: 'absolute', width: 6, height: 6, right: 7, top: 7, borderRadius: 999,
-        background: 'rgba(255,255,255,0.92)', boxShadow: '0 0 10px rgba(255,255,255,0.55)',
+        background: 'rgba(255,255,255,0.94)', boxShadow: '0 0 10px rgba(255,255,255,0.6)',
+        animation: anim('symon-spark 3.4s ease-in-out infinite'), willChange: 'transform, opacity',
       }} />
     </div>
   );

@@ -53,6 +53,42 @@ export function prefReplacements(p: Prefs, key: string): ReplacementRule[] {
   });
 }
 
+// ── Founder voice library ── named presets of a full voice config, so you can
+// save the voices you like and recall them. Persisted as `voice_library`.
+export interface VoicePreset {
+  id: string;
+  name: string;
+  provider: string;
+  voiceId: string;
+  modelId: string;
+  stability: number;
+  similarity: number;
+  style: number;
+  speakerBoost: boolean;
+}
+
+export function prefVoiceLibrary(p: Prefs, key: string): VoicePreset[] {
+  const v = p[key];
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((x) => {
+    if (!x || typeof x !== 'object') return [];
+    const o = x as Record<string, unknown>;
+    const id = typeof o.id === 'string' ? o.id : '';
+    const name = typeof o.name === 'string' ? o.name : '';
+    if (!id || !name) return [];
+    return [{
+      id, name,
+      provider: typeof o.provider === 'string' ? o.provider : 'elevenlabs',
+      voiceId: typeof o.voiceId === 'string' ? o.voiceId : '',
+      modelId: typeof o.modelId === 'string' ? o.modelId : 'eleven_turbo_v2_5',
+      stability: typeof o.stability === 'number' ? o.stability : 0.5,
+      similarity: typeof o.similarity === 'number' ? o.similarity : 0.75,
+      style: typeof o.style === 'number' ? o.style : 0,
+      speakerBoost: o.speakerBoost !== false,
+    }];
+  });
+}
+
 // ── Option lists ──
 export const LOCALE_OPTIONS: { value: string; label: string }[] = [
   { value: 'en-US', label: 'English (US)' },
