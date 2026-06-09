@@ -3070,7 +3070,17 @@ pub fn run() {
     // restores them on next launch. The pre-ship gate launches a disposable
     // child app and must not mutate the operator's saved window geometry.
     if !preship_gate {
-        builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+        // Restore size + position, but NOT decorations: a window's decorated/
+        // borderless state must come from its creation config, never a stale
+        // restore. (The voice-settings glass window is created decorations(false)
+        // but the plugin was restoring decorations=true saved from an earlier
+        // build, re-adding the native title bar over the glass chrome.)
+        use tauri_plugin_window_state::StateFlags;
+        builder = builder.plugin(
+            tauri_plugin_window_state::Builder::default()
+                .with_state_flags(StateFlags::all() & !StateFlags::DECORATIONS)
+                .build(),
+        );
     }
 
     // MCP plugin: exposes app to AI agents (screenshots, DOM, input simulation).
