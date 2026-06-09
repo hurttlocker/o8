@@ -99,6 +99,28 @@ pub fn config_string_list(key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
+/// Snippet/phrase replacements from the Voice settings (`replacements` array of
+/// `{trigger, replacement}`). Applied as a deterministic post-pass on the cleaned
+/// transcript (Snippets tab). Empty triggers are dropped.
+pub fn config_replacements() -> Vec<crate::stt::commands::ReplacementRule> {
+    config()
+        .get("replacements")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|item| {
+                    let trigger = item.get("trigger")?.as_str()?.trim().to_string();
+                    let replacement = item.get("replacement")?.as_str()?.to_string();
+                    if trigger.is_empty() {
+                        return None;
+                    }
+                    Some(crate::stt::commands::ReplacementRule { trigger, replacement })
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
 /// The prefs object with secret keys stripped — what the settings UI reads back,
 /// so the panel never round-trips API keys.
 pub fn config_public() -> serde_json::Value {

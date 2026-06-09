@@ -2556,7 +2556,8 @@ mod stt_engine {
                 dictionary: crate::stt::keys::config_string_list("dictionary"),
                 instructions: crate::stt::keys::config_string("polish_instructions")
                     .unwrap_or_default(),
-                replacements: Vec::new(),
+                // Snippets tab → deterministic phrase expansion on the cleaned text.
+                replacements: crate::stt::keys::config_replacements(),
             };
 
             let polished = if crate::stt::polish::is_available()
@@ -2686,6 +2687,11 @@ mod stt_engine {
             log::warn!("[stt] daemon not running on start; respawning");
             let _ = guard.respawn();
         }
+        // Apply the saved microphone choice (Settings → Input). set_input_device
+        // early-returns when unchanged, so this is cheap; "default"/empty → system
+        // default. Read per-start so the choice survives an app restart.
+        let mic = crate::stt::keys::config_string("dictation_microphone_uid");
+        let _ = guard.set_input_device(mic.as_deref().filter(|s| !s.is_empty() && *s != "default"));
         guard.start(sid)?;
         Ok(sid)
     }
@@ -2728,6 +2734,58 @@ mod stt_engine {
             .map_err(|_| "STT recognizer unavailable".to_string())?;
         guard.set_locale(locale)
     }
+
+    /// Route dictation to a specific microphone (uid). `None` = system default.
+    pub fn set_input_device(uid: Option<&str>) -> Result<(), String> {
+        let mut guard = recognizer()
+            .lock()
+            .map_err(|_| "STT recognizer unavailable".to_string())?;
+        guard.set_input_device(uid)
+    }
+
+    /// Enumerate audio input devices by spawning the Swift helper with
+    /// `--input-devices-json` (prints one `{type:"input_devices",devices:[…]}`
+    /// line and exits). Each device → `{id,name,is_default}` for the mic picker.
+    pub fn list_input_devices() -> Result<Vec<crate::InputDeviceDto>, String> {
+        let helper = crate::stt::LiveRecognizer::helper_path();
+        let output = std::process::Command::new(&helper)
+            .arg("--input-devices-json")
+            .output()
+            .map_err(|e| format!("spawn speech_recognizer: {e}"))?;
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        for line in stdout.lines() {
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(line.trim()) else {
+                continue;
+            };
+            if v.get("type").and_then(|t| t.as_str()) != Some("input_devices") {
+                continue;
+            }
+            let devices = v
+                .get("devices")
+                .and_then(|d| d.as_array())
+                .map(|arr| {
+                    arr.iter()
+                        .filter_map(|d| {
+                            Some(crate::InputDeviceDto {
+                                id: d.get("uid")?.as_str()?.to_string(),
+                                name: d
+                                    .get("name")
+                                    .and_then(|n| n.as_str())
+                                    .unwrap_or("Microphone")
+                                    .to_string(),
+                                is_default: d
+                                    .get("is_default")
+                                    .and_then(|b| b.as_bool())
+                                    .unwrap_or(false),
+                            })
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            return Ok(devices);
+        }
+        Ok(Vec::new())
+    }
 }
 
 /// Begin a dictation via the native Apple-Speech sidecar. Returns the session
@@ -2750,6 +2808,30 @@ fn o8_stt_stop() -> Result<(), String> {
 #[tauri::command]
 fn o8_stt_locale(locale: String) -> Result<(), String> {
     stt_engine::set_locale(&locale)
+}
+
+/// One audio input device for the Settings mic picker.
+#[derive(serde::Serialize)]
+pub struct InputDeviceDto {
+    pub id: String,
+    pub name: String,
+    pub is_default: bool,
+}
+
+/// List connected audio input devices for the Settings mic picker. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn stt_list_input_devices() -> Result<Vec<InputDeviceDto>, String> {
+    stt_engine::list_input_devices()
+}
+
+/// Route dictation to a specific microphone (uid); applied live + saved per-start
+/// via the `dictation_microphone_uid` pref. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn stt_set_input_device(device_uid: String) -> Result<(), String> {
+    let uid = device_uid.trim();
+    stt_engine::set_input_device(if uid.is_empty() || uid == "default" { None } else { Some(uid) })
 }
 
 /// Speak `text` aloud via the native TTS engine (voice P4): ElevenLabs/Google →
@@ -3171,6 +3253,10 @@ pub fn run() {
             o8_stt_stop,
             #[cfg(target_os = "macos")]
             o8_stt_locale,
+            #[cfg(target_os = "macos")]
+            stt_list_input_devices,
+            #[cfg(target_os = "macos")]
+            stt_set_input_device,
             #[cfg(target_os = "macos")]
             tts_speak,
             tts_stop,
