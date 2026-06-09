@@ -2929,19 +2929,49 @@ fn open_voice_settings(app: tauri::AppHandle) {
         Ok(win) => {
             // Frosted-glass backdrop, like the main window — without this the
             // transparent window just shows the desktop behind the CSS tint and
-            // reads as a flat solid panel. Rounded to 22px so the vibrancy view
-            // matches the CSS card and the corners stay transparent.
+            // reads as a flat solid panel. No radius here: the content-view layer
+            // rounding below clips the vibrancy view AND the webview to 22px
+            // together and tracks window resize, so the bottom corners never go
+            // square behind the CSS card (the radius-on-the-effect-view approach
+            // went stale on resize).
             if let Err(e) = window_vibrancy::apply_vibrancy(
                 &win,
                 window_vibrancy::NSVisualEffectMaterial::HudWindow,
                 None,
-                Some(22.0),
+                None,
             ) {
                 log::warn!("[voice-settings] vibrancy failed: {e}");
             }
+            round_voice_window(&win, 22.0);
             log::info!("[voice-settings] window opened → {url}");
         }
         Err(e) => log::warn!("[voice-settings] failed to open window: {e}"),
+    }
+}
+
+/// Round all four corners of the voice-settings window by clipping its NSWindow
+/// content-view layer (cornerRadius + masksToBounds). The layer tracks the view
+/// bounds, so the rounding follows window resize — fixing the square corners that
+/// peeked behind the CSS card when the effect-view's own radius went stale.
+#[cfg(target_os = "macos")]
+fn round_voice_window(win: &tauri::WebviewWindow, radius: f64) {
+    use objc2::{msg_send, runtime::AnyObject};
+    let ptr = match win.ns_window() {
+        Ok(p) if !p.is_null() => p as *mut AnyObject,
+        _ => return,
+    };
+    unsafe {
+        let content: *mut AnyObject = msg_send![ptr, contentView];
+        if content.is_null() {
+            return;
+        }
+        let _: () = msg_send![content, setWantsLayer: true];
+        let layer: *mut AnyObject = msg_send![content, layer];
+        if layer.is_null() {
+            return;
+        }
+        let _: () = msg_send![layer, setCornerRadius: radius];
+        let _: () = msg_send![layer, setMasksToBounds: true];
     }
 }
 
