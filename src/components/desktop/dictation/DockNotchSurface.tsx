@@ -71,7 +71,10 @@ const SYMON_CAPSULE_BG =
 // ── Glass dock theme (Theme tab → Dock = Glass) — clear/frosted instead of the
 // Symon multicolor. The capsule/panel rely on backdrop blur for the frost.
 const GLASS_IDLE = 'linear-gradient(rgba(255,255,255,0.20), rgba(232,238,250,0.10))';
-const GLASS_CAPSULE_BG = 'linear-gradient(rgba(20,24,34,0.52), rgba(14,18,28,0.46))';
+// Near-opaque so the working / listening capsules keep full saturation even
+// when o8 isn't the focused app — translucent glass + backdrop saturate()
+// desaturates on an inactive window (the dock never becomes key).
+const GLASS_CAPSULE_BG = 'linear-gradient(rgba(22,26,36,0.96), rgba(14,18,28,0.94))';
 // Solid "always-regular" surface for the read panels (answer + confirm card).
 // The dock window is nonactivating (never key) + transparent, so a translucent
 // glass panel reads dim / "backgrounded" when another app is focused — which is
