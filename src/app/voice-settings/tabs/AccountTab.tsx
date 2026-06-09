@@ -8,7 +8,7 @@
  */
 import { useEffect, useState } from 'react';
 import { ICONS, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, ACCENT_LIGHT, OK_GREEN, SECTION_BG, SECTION_BORDER } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, ControlRow, GhostButton, AccentButton, PageHeader } from '../primitives';
+import { SectionCard, SectionTitle, ControlRow, GhostButton, AccentButton, PageHeader } from '../primitives';
 
 type Plan = 'free' | 'pro' | 'team' | null;
 
@@ -34,27 +34,29 @@ export default function AccountTab() {
       <SectionCard>
         <SectionTitle icon={ICONS.user}>Plan</SectionTitle>
         <div style={{
-          display: 'flex', alignItems: 'center', gap: 12, padding: '14px 16px', marginTop: 4,
+          display: 'flex', alignItems: 'center', gap: 16, padding: '16px 18px', marginTop: 8,
           borderRadius: 14, border: `1px solid ${SECTION_BORDER}`, background: SECTION_BG,
         }}>
           <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 15, fontWeight: 400, color: TEXT_PRIMARY }}>{planLabel}</span>
-              <span style={{
-                fontSize: 9, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase',
-                padding: '2px 8px', borderRadius: 999,
-                color: isPro ? OK_GREEN : TEXT_TERTIARY,
-                border: `1px solid ${isPro ? 'rgba(52,211,153,0.4)' : 'rgba(255,255,255,0.14)'}`,
-                background: isPro ? 'rgba(52,211,153,0.12)' : 'transparent',
-              }}>{isPro ? 'Active' : 'Free'}</span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+              <span style={{ fontSize: 16, fontWeight: 500, letterSpacing: '-0.01em', color: TEXT_PRIMARY }}>{planLabel}</span>
+              {isPro ? (
+                <span style={{
+                  fontSize: 9, fontWeight: 500, letterSpacing: '0.08em', textTransform: 'uppercase',
+                  padding: '2px 8px', borderRadius: 999, color: OK_GREEN,
+                  border: '1px solid rgba(52,211,153,0.4)', background: 'rgba(52,211,153,0.12)',
+                }}>Active</span>
+              ) : null}
             </div>
-            <div style={{ fontSize: 12, color: TEXT_TERTIARY, marginTop: 4 }}>
+            <div style={{ fontSize: 12.5, color: TEXT_TERTIARY, marginTop: 6, lineHeight: 1.45 }}>
               {isPro ? 'Pro features unlocked across o8.' : 'Voice, dictation, and history are free forever.'}
             </div>
           </div>
           {!isPro ? <AccentButton label="Upgrade" onClick={() => { window.open('https://o8.run/pricing', '_blank'); }} /> : null}
         </div>
-        <SectionHint>Manage billing, seats, and license keys in the main app → Settings → Plan &amp; Billing.</SectionHint>
+        <p style={{ fontSize: 12, color: TEXT_TERTIARY, lineHeight: 1.5, marginTop: 14, marginBottom: 0, maxWidth: 460 }}>
+          Manage billing, seats, and license keys in the main app → Settings → Plan &amp; Billing.
+        </p>
       </SectionCard>
 
       <SectionCard>
@@ -65,7 +67,7 @@ export default function AccountTab() {
         <ControlRow label="Release channel" detail="Signed builds from hurttlocker/cortex-ide.">
           <span style={{ fontSize: 13, color: ACCENT_LIGHT }}>Stable</span>
         </ControlRow>
-        <div style={{ marginTop: 12 }}>
+        <div style={{ marginTop: 14 }}>
           <GhostButton label="Release notes" onClick={() => { window.open('https://github.com/hurttlocker/o8/releases', '_blank'); }} />
         </div>
       </SectionCard>

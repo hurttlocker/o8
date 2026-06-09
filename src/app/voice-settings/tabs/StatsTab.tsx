@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import { dictationHistoryGet, type DictationHistoryEntry } from '@/lib/tauri/bridge';
 import {
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, ACCENT_LIGHT, SECTION_BG, SECTION_BORDER,
+  INK_ON_GLASS_1, INK_ON_GLASS_2, INK_ON_GLASS_3,
 } from '../tokens';
 import { ICONS } from '../tokens';
 import { SectionCard, SectionTitle, SectionHint, GhostButton, Icon, PageHeader } from '../primitives';
@@ -18,6 +19,22 @@ import type { IconComp } from '../icons';
 
 const TYPING_WPM = 40;
 const SPEAKING_WPM = 150;
+
+// o8 motion vocabulary C — the binary orbit (two dots 180° apart circling a
+// center). Slowed to a calm cadence for the time-saved hero (vs the 1.6s
+// loading speed) so it reads as time flowing, the o8 way. Honors reduced-motion.
+function OrbitMark({ size = 14, color }: { size?: number; color: string }) {
+  const dot = 3;
+  return (
+    <span aria-hidden style={{ position: 'relative', display: 'inline-block', width: size, height: size, flexShrink: 0, color }}>
+      <style>{'@keyframes vsOrbitSpin{to{transform:rotate(360deg)}}.vsOrbitRing{animation:vsOrbitSpin 7s linear infinite}@media (prefers-reduced-motion:reduce){.vsOrbitRing{animation:none}}'}</style>
+      <span className="vsOrbitRing" style={{ position: 'absolute', inset: 0 }}>
+        <span style={{ position: 'absolute', top: 0, left: '50%', width: dot, height: dot, marginLeft: -dot / 2, borderRadius: '50%', background: 'currentColor' }} />
+        <span style={{ position: 'absolute', bottom: 0, left: '50%', width: dot, height: dot, marginLeft: -dot / 2, borderRadius: '50%', background: 'currentColor', opacity: 0.55 }} />
+      </span>
+    </span>
+  );
+}
 
 function wordCount(text: string): number {
   const t = text.trim();
@@ -75,13 +92,13 @@ export default function StatsTab() {
         border: `1px solid rgba(90,132,255,0.28)`,
         background: 'radial-gradient(circle at 88% 18%, rgba(64,88,255,0.22), transparent 52%), linear-gradient(180deg, rgba(64,88,255,0.12), rgba(255,255,255,0.02))',
       }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12, fontSize: 10, fontWeight: 300, letterSpacing: '0.12em', textTransform: 'uppercase', color: TEXT_SECONDARY }}>
-          <span style={{ color: ACCENT_LIGHT, display: 'flex' }}><Icon icon={ICONS.timer} size={14} /></span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12, fontSize: 10, fontWeight: 300, letterSpacing: '0.12em', textTransform: 'uppercase', color: INK_ON_GLASS_2 }}>
+          <OrbitMark size={14} color={INK_ON_GLASS_2} />
           Time saved
         </div>
         <div style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-          <span style={{ fontSize: 38, fontWeight: 400, letterSpacing: '-0.03em', color: TEXT_PRIMARY, lineHeight: 1 }}>{fmtDuration(savedMin)}</span>
-          <span style={{ fontSize: 12.5, color: TEXT_TERTIARY }}>
+          <span style={{ fontSize: 38, fontWeight: 400, letterSpacing: '-0.03em', color: INK_ON_GLASS_1, textShadow: '0 1px 4px rgba(0,0,0,0.28)', lineHeight: 1 }}>{fmtDuration(savedMin)}</span>
+          <span style={{ fontSize: 12.5, color: INK_ON_GLASS_3, textShadow: '0 1px 2px rgba(0,0,0,0.22)' }}>
             vs typing {totalWords.toLocaleString()} words by hand
           </span>
         </div>
