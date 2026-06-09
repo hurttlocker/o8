@@ -319,22 +319,31 @@ function SegButton({ active, onClick, children }: { active: boolean; onClick: ()
 }
 
 // ── Slider ──
-export function Slider({ value, min, max, step, onChange, suffix }: {
-  value: number; min: number; max: number; step: number; onChange: (v: number) => void; suffix?: string;
+// `commitOnRelease`: keep the thumb + label live during a drag, but only fire
+// `onChange` on release. Used for the Frost backdrop-blur — applying the blur on
+// every drag tick makes WebKit re-rasterize the glass each frame and flicker.
+export function Slider({ value, min, max, step, onChange, suffix, commitOnRelease }: {
+  value: number; min: number; max: number; step: number; onChange: (v: number) => void; suffix?: string; commitOnRelease?: boolean;
 }) {
+  const [draft, setDraft] = useState<number | null>(null);
+  const shown = draft ?? value;
+  const handleInput = (v: number) => { if (commitOnRelease) setDraft(v); else onChange(v); };
+  const commit = () => { if (commitOnRelease && draft != null) { onChange(draft); setDraft(null); } };
+  const pct = ((shown - min) / (max - min)) * 100;
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
       <input
-        type="range" min={min} max={max} step={step} value={value}
-        onChange={(e) => onChange(parseFloat(e.target.value))}
+        type="range" min={min} max={max} step={step} value={shown}
+        onChange={(e) => handleInput(parseFloat(e.target.value))}
+        onPointerUp={commit} onKeyUp={commit} onBlur={commit}
         style={{
           WebkitAppearance: 'none', appearance: 'none', width: 130, height: 4, borderRadius: 2,
-          background: `linear-gradient(90deg, ${ACCENT} ${((value - min) / (max - min)) * 100}%, ${GLASS_BORDER} ${((value - min) / (max - min)) * 100}%)`,
+          background: `linear-gradient(90deg, ${ACCENT} ${pct}%, ${GLASS_BORDER} ${pct}%)`,
           outline: 'none', cursor: 'pointer', border: 'none',
         } as CSSProperties}
       />
       <span style={{ fontSize: 12, color: TEXT_SECONDARY, minWidth: 38, fontVariantNumeric: 'tabular-nums' }}>
-        {value.toFixed(2).replace(/0$/, '').replace(/\.$/, '')}{suffix ?? ''}
+        {shown.toFixed(2).replace(/0$/, '').replace(/\.$/, '')}{suffix ?? ''}
       </span>
     </div>
   );
@@ -353,7 +362,7 @@ export function StatusBadge({ ok, okLabel = 'Granted', warnLabel = 'Needs grant'
 }
 
 export const PAGE_TITLE_STYLE: CSSProperties = {
-  fontSize: 19, fontWeight: W_HEADING, letterSpacing: '-0.02em', color: TEXT_PRIMARY, margin: 0,
+  fontSize: 15.5, fontWeight: W_HEADING, letterSpacing: '-0.01em', color: TEXT_PRIMARY, margin: 0,
 };
 
 // Page title in a glass card (matches the section cards) instead of bare text on
