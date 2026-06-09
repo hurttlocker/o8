@@ -154,7 +154,7 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
             border: `1px solid rgba(248,113,113,0.3)`, background: 'rgba(248,113,113,0.08)',
             fontSize: 12, lineHeight: 1.5, color: TEXT_SECONDARY,
           }}>
-            <strong style={{ color: DANGER_RED, fontWeight: 600 }}>The Fn key is hijacked.</strong>{' '}
+            <strong style={{ color: DANGER_RED, fontWeight: 500 }}>The Fn key is hijacked.</strong>{' '}
             macOS starts Apple Dictation on Fn. Open Keyboard Settings → set &ldquo;Press 🌐 key to&rdquo; → &ldquo;Do Nothing&rdquo;.
           </div>
         ) : null}

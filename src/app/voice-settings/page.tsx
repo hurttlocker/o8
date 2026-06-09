@@ -18,22 +18,31 @@ import {
   TEXT_SECONDARY, TEXT_TERTIARY, TL_CLOSE, TL_CLOSE_HOVER, TL_MIN, TL_ZOOM, TRANS,
 } from './tokens';
 import { BrandGlyph, BrandWave, Icon } from './primitives';
+import type { IconComp } from './icons';
 import type { Prefs } from './helpers';
 import SettingsTab from './tabs/SettingsTab';
 import HistoryTab from './tabs/HistoryTab';
 import StatsTab from './tabs/StatsTab';
+import AccountTab from './tabs/AccountTab';
+import ReportTab from './tabs/ReportTab';
+import FounderTab from './tabs/FounderTab';
+import AgentTab from './tabs/AgentTab';
 import { DictionaryTab, SnippetsTab, InstructionsTab } from './tabs/DataTabs';
 
 export const dynamic = 'force-dynamic';
 
-type TabId = 'settings' | 'dictionary' | 'snippets' | 'instructions' | 'history' | 'stats';
-const TABS: { id: TabId; label: string; icon: string }[] = [
+type TabId = 'settings' | 'dictionary' | 'snippets' | 'instructions' | 'history' | 'stats' | 'account' | 'founder' | 'agent' | 'report';
+const TABS: { id: TabId; label: string; icon: IconComp }[] = [
   { id: 'settings', label: 'Settings', icon: ICONS.gear },
   { id: 'dictionary', label: 'Dictionary', icon: ICONS.bookOpen },
   { id: 'snippets', label: 'Snippets', icon: ICONS.arrowsLeftRight },
   { id: 'instructions', label: 'Instructions', icon: ICONS.notePencil },
   { id: 'history', label: 'History', icon: ICONS.clock },
   { id: 'stats', label: 'Stats', icon: ICONS.chartBar },
+  { id: 'account', label: 'Account', icon: ICONS.user },
+  { id: 'founder', label: 'Founder', icon: ICONS.crown },
+  { id: 'agent', label: 'Agent', icon: ICONS.robot },
+  { id: 'report', label: 'Report Issue', icon: ICONS.warning },
 ];
 
 const PAGE_ROOT: CSSProperties = {
@@ -135,7 +144,7 @@ export default function VoiceSettingsWindow() {
             padding: '22px 18px 18px', borderBottom: `1px solid ${GLASS_BORDER_SUBTLE}`,
           }}>
             <BrandGlyph size={34} />
-            <span style={{ fontSize: 11, fontWeight: 700, letterSpacing: '0.18em', color: TEXT_PRIMARY }}>O8 VOICE</span>
+            <span style={{ fontSize: 11, fontWeight: 600, letterSpacing: '0.18em', color: TEXT_PRIMARY }}>O8 VOICE</span>
             {version ? <span style={{ fontSize: 10, color: TEXT_TERTIARY }}>v{version}</span> : null}
             <div style={{ marginTop: 2 }}><BrandWave /></div>
           </div>
@@ -158,6 +167,10 @@ export default function VoiceSettingsWindow() {
           {tab === 'instructions' ? <InstructionsTab prefs={prefs} setPref={setPref} /> : null}
           {tab === 'history' ? <HistoryTab /> : null}
           {tab === 'stats' ? <StatsTab /> : null}
+          {tab === 'account' ? <AccountTab /> : null}
+          {tab === 'founder' ? <FounderTab prefs={prefs} setPref={setPref} /> : null}
+          {tab === 'agent' ? <AgentTab prefs={prefs} setPref={setPref} /> : null}
+          {tab === 'report' ? <ReportTab /> : null}
         </main>
       </div>
     </div>
@@ -176,7 +189,7 @@ function CloseDot() {
   );
 }
 
-function NavItem({ active, icon, label, onClick }: { active: boolean; icon: string; label: string; onClick: () => void }) {
+function NavItem({ active, icon, label, onClick }: { active: boolean; icon: IconComp; label: string; onClick: () => void }) {
   const [hover, setHover] = useState(false);
   const lit = active || hover;
   return (
@@ -194,7 +207,7 @@ function NavItem({ active, icon, label, onClick }: { active: boolean; icon: stri
         transition: `background ${TRANS}, color ${TRANS}, border-color ${TRANS}, transform ${TRANS}`,
       }}
     >
-      <span style={{ display: 'flex', opacity: active ? 1 : 0.85 }}><Icon d={icon} size={18} /></span>
+      <span style={{ display: 'flex', opacity: active ? 1 : 0.85 }}><Icon icon={icon} size={18} /></span>
       <span style={{ flex: 1 }}>{label}</span>
     </button>
   );
