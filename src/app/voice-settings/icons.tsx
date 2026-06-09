@@ -9,6 +9,7 @@
 import {
   Settings, Book, DataTransferBoth, EditPencil, ClockRotateRight, Reports,
   Microphone, SoundHigh, Eye, WarningTriangle, User, Crown, Computer, Sparks, Check,
+  Copy, Timer, Calendar, Flash, Type, Xmark,
 } from 'iconoir-react';
 import type { ComponentType } from 'react';
 
@@ -30,6 +31,13 @@ export const ICONS = {
   robot: Computer,
   sparkle: Sparks,
   check: Check,
+  copy: Copy,
+  close: Xmark,
+  timer: Timer,
+  calendar: Calendar,
+  flash: Flash,
+  type: Type,
+  words: Type,
 } as const satisfies Record<string, IconComp>;
 
 export function Icon({ icon: C, size = 16, color, strokeWidth = 1.7 }: {

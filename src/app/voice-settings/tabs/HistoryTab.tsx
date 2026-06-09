@@ -11,10 +11,29 @@ import {
   type DictationHistoryEntry,
 } from '@/lib/tauri/bridge';
 import {
-  ACCENT_LIGHT, GLASS_BORDER_SUBTLE, OK_GREEN, TEXT_PRIMARY, TEXT_TERTIARY, TRANS_FAST,
+  ACCENT_LIGHT, GLASS_BG_HOVER, GLASS_BORDER_SUBTLE, OK_GREEN, TEXT_PRIMARY, TEXT_TERTIARY, TRANS_FAST,
 } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, GhostButton, PAGE_TITLE_STYLE } from '../primitives';
+import { SectionCard, SectionTitle, SectionHint, GhostButton, Icon, PAGE_TITLE_STYLE } from '../primitives';
 import { ICONS } from '../tokens';
+import type { ReactNode } from 'react';
+
+function IconBtn({ label, onClick, color, children }: { label: string; onClick: () => void; color: string; children: ReactNode }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button" aria-label={label} onClick={onClick}
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 7,
+        border: `1px solid ${GLASS_BORDER_SUBTLE}`, background: hover ? GLASS_BG_HOVER : 'transparent',
+        color: color === TEXT_TERTIARY && hover ? TEXT_PRIMARY : color, cursor: 'pointer', padding: 0,
+        transition: `background ${TRANS_FAST}, color ${TRANS_FAST}`,
+      }}
+    >
+      {children}
+    </button>
+  );
+}
 
 function relativeTime(tsSeconds: number): string {
   const diff = Math.max(0, Math.floor(Date.now() / 1000) - tsSeconds);
@@ -100,28 +119,13 @@ function HistoryRow({ entry, first, copied, onCopy, onDelete }: {
         </span>
         <span style={{ fontSize: 11, color: TEXT_TERTIARY }}>{relativeTime(entry.ts)}</span>
         {app ? <span style={{ fontSize: 11, color: TEXT_TERTIARY }}>· {app}</span> : null}
-        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 4, opacity: hover || copied ? 1 : 0, transition: `opacity ${TRANS_FAST}` }}>
-          <button
-            type="button" aria-label={copied ? 'Copied' : 'Copy text'} onClick={onCopy}
-            style={{
-              height: 22, paddingLeft: 8, paddingRight: 8, borderRadius: 6,
-              border: `1px solid ${GLASS_BORDER_SUBTLE}`, background: 'transparent',
-              color: copied ? OK_GREEN : TEXT_TERTIARY, fontSize: 9.5, fontWeight: 500, letterSpacing: '0.04em', cursor: 'pointer',
-            }}
-          >
-            {copied ? 'COPIED' : 'COPY'}
-          </button>
-          <button
-            type="button" aria-label="Delete entry" onClick={onDelete}
-            style={{
-              display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 22, height: 22, borderRadius: 6,
-              border: `1px solid ${GLASS_BORDER_SUBTLE}`, background: 'transparent', color: TEXT_TERTIARY, cursor: 'pointer', padding: 0,
-            }}
-          >
-            <svg width="11" height="11" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-              <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-            </svg>
-          </button>
+        <span style={{ marginLeft: 'auto', display: 'inline-flex', gap: 5, opacity: hover || copied ? 1 : 0, transition: `opacity ${TRANS_FAST}` }}>
+          <IconBtn label={copied ? 'Copied' : 'Copy text'} onClick={onCopy} color={copied ? OK_GREEN : TEXT_TERTIARY}>
+            <Icon icon={copied ? ICONS.check : ICONS.copy} size={12.5} />
+          </IconBtn>
+          <IconBtn label="Delete entry" onClick={onDelete} color={TEXT_TERTIARY}>
+            <Icon icon={ICONS.close} size={13} />
+          </IconBtn>
         </span>
       </div>
       <div style={{ fontSize: 13, color: TEXT_PRIMARY, lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word', userSelect: 'text' }}>

@@ -1,16 +1,18 @@
 'use client';
 
 /**
- * Report Issue tab — a bug/request form that POSTs to o8's feedback endpoint
- * (`/api/feedback/report`, loopback-gated → reachable same-origin). Mirrors
- * Symon's Report Issue: type + summary + details, with submit status.
+ * Report Issue tab — bug/request form that POSTs to o8's shared feedback endpoint
+ * (`/api/feedback/report` → o8's Discord webhook, the same path the main app's
+ * Report Issue uses). Supports up to 5 screenshots (attach or paste ⌘V).
  */
-import { useState, type CSSProperties } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import {
   ACCENT, ACCENT_GLOW, DANGER_RED, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER_SUBTLE, OK_GREEN, SF,
-  TEXT_PRIMARY, TEXT_TERTIARY, TRANS_FAST, ICONS,
+  TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, ICONS,
 } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, Segmented, AccentButton, PAGE_TITLE_STYLE } from '../primitives';
+import { SectionCard, SectionTitle, SectionHint, Segmented, AccentButton, GhostButton, Icon, PAGE_TITLE_STYLE } from '../primitives';
+
+const MAX_IMAGES = 5;
 
 const INPUT_BASE: CSSProperties = {
   width: '100%', boxSizing: 'border-box', height: 36, paddingLeft: 12, paddingRight: 12,
@@ -27,15 +29,44 @@ function focusStyle(f: boolean): CSSProperties {
 }
 
 type Status = 'idle' | 'sending' | 'sent' | 'error';
+interface Shot { id: string; dataUrl: string; name: string }
 
 export default function ReportTab() {
   const [category, setCategory] = useState('bug');
   const [summary, setSummary] = useState('');
   const [details, setDetails] = useState('');
+  const [shots, setShots] = useState<Shot[]>([]);
   const [fS, setFS] = useState(false);
   const [fD, setFD] = useState(false);
   const [status, setStatus] = useState<Status>('idle');
   const [error, setError] = useState('');
+  const fileRef = useRef<HTMLInputElement>(null);
+  const idRef = useRef(0);
+
+  const attach = (files: FileList | File[] | null) => {
+    if (!files) return;
+    for (const file of Array.from(files)) {
+      if (!file.type.startsWith('image/')) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUrl = String(reader.result || '');
+        if (!dataUrl) return;
+        setShots((prev) => prev.length >= MAX_IMAGES ? prev : [...prev, { id: `s${idRef.current++}`, dataUrl, name: file.name || 'screenshot.png' }]);
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+  const remove = (id: string) => setShots((p) => p.filter((s) => s.id !== id));
+
+  const onPaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+    const files: File[] = [];
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith('image/')) { const f = item.getAsFile(); if (f) files.push(f); }
+    }
+    if (files.length) { e.preventDefault(); attach(files); }
+  };
 
   const submit = async () => {
     const message = [summary.trim(), details.trim()].filter(Boolean).join('\n\n');
@@ -45,11 +76,14 @@ export default function ReportTab() {
       const res = await fetch('/api/feedback/report', {
         method: 'POST', credentials: 'same-origin',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ category, message, route: '/voice-settings', userAgent: navigator.userAgent }),
+        body: JSON.stringify({
+          category, message, route: '/voice-settings', userAgent: navigator.userAgent,
+          images: shots.map((s) => ({ dataUrl: s.dataUrl, name: s.name })),
+        }),
       });
       const data = await res.json().catch(() => ({ ok: res.ok }));
       if (res.ok && data?.ok !== false) {
-        setStatus('sent'); setSummary(''); setDetails('');
+        setStatus('sent'); setSummary(''); setDetails(''); setShots([]);
         setTimeout(() => setStatus('idle'), 3000);
       } else {
         setStatus('error'); setError(typeof data?.error === 'string' ? data.error : 'Could not send — try again.');
@@ -64,7 +98,7 @@ export default function ReportTab() {
       <h1 style={PAGE_TITLE_STYLE}>Report Issue</h1>
       <SectionCard>
         <SectionTitle icon={ICONS.warning}>Tell us what happened</SectionTitle>
-        <SectionHint>Bug or request — it goes straight to the team with your app version + OS attached.</SectionHint>
+        <SectionHint>Voice glitch or any o8 bug — it goes straight to the o8 team in Discord with your app version + OS attached.</SectionHint>
 
         <div style={{ marginBottom: 14 }}>
           <Segmented value={category} onChange={setCategory} options={[{ value: 'bug', label: 'Bug' }, { value: 'request', label: 'Request' }]} />
@@ -77,17 +111,63 @@ export default function ReportTab() {
         />
         <textarea
           value={details} onChange={(e) => setDetails(e.target.value)}
+          onPaste={onPaste}
           onFocus={() => setFD(true)} onBlur={() => setFD(false)}
-          placeholder="What happened? What did you expect?" rows={5}
+          placeholder="What happened? What did you expect?  (paste screenshots here with ⌘V)" rows={5}
           style={{ ...TEXTAREA_BASE, ...focusStyle(fD) }}
         />
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+        {/* Attachments */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12, flexWrap: 'wrap' }}>
+          {shots.map((s) => <Thumb key={s.id} shot={s} onRemove={() => remove(s.id)} />)}
+          {shots.length < MAX_IMAGES ? (
+            <button
+              type="button" onClick={() => fileRef.current?.click()} aria-label="Attach screenshot"
+              style={{
+                display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 6, height: 52, paddingLeft: 14, paddingRight: 14,
+                borderRadius: 12, border: `1px dashed ${GLASS_BORDER_SUBTLE}`, background: GLASS_BG,
+                color: TEXT_SECONDARY, fontSize: 12, fontFamily: SF, cursor: 'pointer',
+              }}
+            >
+              <Icon icon={ICONS.copy} size={14} /> Attach
+            </button>
+          ) : null}
+          <input
+            ref={fileRef} type="file" accept="image/png,image/jpeg,image/gif,image/webp" multiple
+            style={{ display: 'none' }} onChange={(e) => { attach(e.target.files); e.target.value = ''; }}
+          />
+        </div>
+        <div style={{ fontSize: 11, color: TEXT_TERTIARY, marginTop: 6 }}>Up to {MAX_IMAGES} screenshots · 8 MB total</div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 16 }}>
           <AccentButton label={status === 'sending' ? 'Sending…' : 'Send report'} onClick={() => { if (status !== 'sending') void submit(); }} />
           {status === 'sent' ? <span style={{ fontSize: 12.5, color: OK_GREEN }}>Sent — thank you.</span> : null}
           {status === 'error' ? <span style={{ fontSize: 12.5, color: DANGER_RED }}>{error}</span> : null}
         </div>
       </SectionCard>
+    </div>
+  );
+}
+
+function Thumb({ shot, onRemove }: { shot: Shot; onRemove: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{ position: 'relative', width: 52, height: 52, borderRadius: 12, overflow: 'hidden', border: `1px solid ${GLASS_BORDER_SUBTLE}`, flexShrink: 0 }}
+    >
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={shot.dataUrl} alt={shot.name} style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }} />
+      <button
+        type="button" aria-label="Remove" onClick={onRemove}
+        style={{
+          position: 'absolute', top: 2, right: 2, width: 18, height: 18, borderRadius: '50%', border: 'none',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', padding: 0, cursor: 'pointer',
+          background: 'rgba(0,0,0,0.6)', color: 'white', opacity: hover ? 1 : 0.7,
+        }}
+      >
+        <Icon icon={ICONS.close} size={11} color="white" />
+      </button>
     </div>
   );
 }

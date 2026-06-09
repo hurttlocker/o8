@@ -1,20 +1,21 @@
 'use client';
 
 /**
- * Founder tab — ElevenLabs personal-voice config (Symon's Founder page). o8
- * already has the elevenlabs_* prefs (tts/elevenlabs.rs reads them); this is
- * their first UI surface. All persist via voice_prefs_set + round-trip through
- * voice_prefs_get. The API key itself is set via env / dictation.json (never
- * shown here — config_public strips it).
+ * Founder tab — Symon's voice engine + a personal Voice Library. Tune an
+ * ElevenLabs voice below, then save it by name into the library and recall it
+ * anytime. o8 already reads the elevenlabs_* prefs (tts/elevenlabs.rs); the
+ * library is a list of named presets persisted as `voice_library`. All via
+ * voice_prefs_set + round-trip through voice_prefs_get.
  */
 import { useState, type CSSProperties } from 'react';
 import {
-  ACCENT, ACCENT_GLOW, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER_SUBTLE, SF, TEXT_PRIMARY, TEXT_TERTIARY, TRANS_FAST, ICONS,
+  ACCENT, ACCENT_GLOW, ACCENT_LIGHT, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER_SUBTLE, OK_GREEN, SF,
+  TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, ICONS, SECTION_BORDER,
 } from '../tokens';
 import {
-  SectionCard, SectionTitle, SectionHint, ControlRow, ToggleRow, Select, Slider, AccentButton, GhostButton, PAGE_TITLE_STYLE,
+  SectionCard, SectionTitle, SectionHint, ControlRow, ToggleRow, Select, Slider, AccentButton, GhostButton, Icon, PAGE_TITLE_STYLE,
 } from '../primitives';
-import { prefBool, prefStr, prefNum, type TabProps } from '../helpers';
+import { prefBool, prefStr, prefNum, prefVoiceLibrary, type VoicePreset, type TabProps } from '../helpers';
 import { ttsSpeak, ttsStop } from '@/lib/tauri/bridge';
 
 const INPUT_BASE: CSSProperties = {
@@ -23,6 +24,8 @@ const INPUT_BASE: CSSProperties = {
   color: TEXT_PRIMARY, fontSize: 12, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
   outline: 'none', transition: `border-color ${TRANS_FAST}, box-shadow ${TRANS_FAST}`,
 };
+const focusRing = (f: boolean): CSSProperties =>
+  f ? { borderColor: ACCENT, boxShadow: `0 0 0 2px ${ACCENT_GLOW}`, background: GLASS_BG_HOVER } : {};
 
 const PROVIDER_OPTS = [
   { value: 'elevenlabs', label: 'ElevenLabs' },
@@ -38,6 +41,8 @@ const MODEL_OPTS = [
 export default function FounderTab({ prefs, setPref }: TabProps) {
   const [voiceFocus, setVoiceFocus] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  const [newName, setNewName] = useState('');
+  const [nameFocus, setNameFocus] = useState(false);
 
   const provider = prefStr(prefs, 'tts_provider', 'elevenlabs');
   const voiceId = prefStr(prefs, 'elevenlabs_voice_id', '');
@@ -46,6 +51,30 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
   const similarity = prefNum(prefs, 'elevenlabs_similarity_boost', 0.75);
   const style = prefNum(prefs, 'elevenlabs_style', 0.0);
   const speakerBoost = prefBool(prefs, 'elevenlabs_use_speaker_boost', true);
+
+  const library = prefVoiceLibrary(prefs, 'voice_library');
+
+  const saveCurrent = () => {
+    const name = newName.trim();
+    if (!name) return;
+    const preset: VoicePreset = {
+      id: `v${Date.now()}`, name, provider, voiceId, modelId, stability, similarity, style, speakerBoost,
+    };
+    // Replace a same-named preset rather than duplicate.
+    const next = [...library.filter((p) => p.name.toLowerCase() !== name.toLowerCase()), preset];
+    setPref('voice_library', next);
+    setNewName('');
+  };
+  const usePreset = (p: VoicePreset) => {
+    setPref('tts_provider', p.provider);
+    setPref('elevenlabs_voice_id', p.voiceId);
+    setPref('elevenlabs_model_id', p.modelId);
+    setPref('elevenlabs_stability', p.stability);
+    setPref('elevenlabs_similarity_boost', p.similarity);
+    setPref('elevenlabs_style', p.style);
+    setPref('elevenlabs_use_speaker_boost', p.speakerBoost);
+  };
+  const deletePreset = (id: string) => setPref('voice_library', library.filter((p) => p.id !== id));
 
   const onPreview = async () => {
     setPreviewing(true);
@@ -57,6 +86,34 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
       <h1 style={PAGE_TITLE_STYLE}>Founder</h1>
 
+      {/* Voice library */}
+      <SectionCard>
+        <SectionTitle icon={ICONS.crown}>Voice library</SectionTitle>
+        <SectionHint>Save the voices you like by name, then recall any one with a click. Saves your current voice config below.</SectionHint>
+        {library.length === 0 ? (
+          <p style={{ fontSize: 12.5, color: TEXT_TERTIARY, marginBottom: 12 }}>No saved voices yet — tune one below and save it.</p>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginBottom: 14 }}>
+            {library.map((p) => (
+              <VoiceCard
+                key={p.id} preset={p} active={p.voiceId === voiceId && p.provider === provider}
+                onUse={() => usePreset(p)} onDelete={() => deletePreset(p.id)}
+              />
+            ))}
+          </div>
+        )}
+        <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+          <input
+            value={newName} onChange={(e) => setNewName(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveCurrent(); } }}
+            onFocus={() => setNameFocus(true)} onBlur={() => setNameFocus(false)}
+            placeholder="Name this voice"
+            style={{ ...INPUT_BASE, flex: 1, fontFamily: SF, ...focusRing(nameFocus) }}
+          />
+          <AccentButton label="Save current" onClick={saveCurrent} />
+        </div>
+      </SectionCard>
+
       <SectionCard>
         <SectionTitle icon={ICONS.speakerHigh}>Engine</SectionTitle>
         <ControlRow label="TTS provider" detail="Which engine reads answers and selected text aloud.">
@@ -65,14 +122,13 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
       </SectionCard>
 
       <SectionCard>
-        <SectionTitle icon={ICONS.crown}>ElevenLabs voice</SectionTitle>
-        <SectionHint>Your personal voice. The API key is set via env or dictation.json and never shown here.</SectionHint>
+        <SectionTitle icon={ICONS.sparkle}>ElevenLabs voice</SectionTitle>
+        <SectionHint>Tune the voice, then save it to your library above. The API key is set via env or dictation.json and never shown here.</SectionHint>
         <ControlRow label="Voice ID" detail="The ElevenLabs voice to speak with.">
           <input
             value={voiceId} onChange={(e) => setPref('elevenlabs_voice_id', e.target.value)}
             onFocus={() => setVoiceFocus(true)} onBlur={() => setVoiceFocus(false)}
-            placeholder="voice id"
-            style={{ ...INPUT_BASE, ...(voiceFocus ? { borderColor: ACCENT, boxShadow: `0 0 0 2px ${ACCENT_GLOW}`, background: GLASS_BG_HOVER } : {}) }}
+            placeholder="voice id" style={{ ...INPUT_BASE, ...focusRing(voiceFocus) }}
           />
         </ControlRow>
         <ControlRow label="Model" detail="Quality vs latency.">
@@ -98,6 +154,50 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
             : <AccentButton label="Preview voice" onClick={() => { void onPreview(); }} />}
         </div>
       </SectionCard>
+    </div>
+  );
+}
+
+function VoiceCard({ preset, active, onUse, onDelete }: { preset: VoicePreset; active: boolean; onUse: () => void; onDelete: () => void }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <div
+      onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
+      style={{
+        display: 'flex', alignItems: 'center', gap: 10, padding: '10px 12px', borderRadius: 12,
+        border: `1px solid ${active ? 'rgba(64,88,255,0.40)' : SECTION_BORDER}`,
+        background: active ? 'rgba(64,88,255,0.12)' : GLASS_BG,
+      }}
+    >
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 400, color: TEXT_PRIMARY, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{preset.name}</div>
+        <div style={{ fontSize: 11, color: TEXT_TERTIARY, marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {preset.provider} · {preset.voiceId || 'no id'}
+        </div>
+      </div>
+      {active ? (
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, fontSize: 11, color: OK_GREEN }}>
+          <Icon icon={ICONS.check} size={13} /> Active
+        </span>
+      ) : (
+        <button
+          type="button" onClick={onUse}
+          style={{
+            height: 26, paddingLeft: 12, paddingRight: 12, borderRadius: 8, cursor: 'pointer',
+            border: '1px solid rgba(90,132,255,0.30)', background: hover ? 'rgba(90,132,255,0.22)' : 'rgba(90,132,255,0.14)',
+            color: ACCENT_LIGHT, fontSize: 11.5, fontFamily: SF,
+          }}
+        >Use</button>
+      )}
+      <button
+        type="button" aria-label={`Delete ${preset.name}`} onClick={onDelete}
+        style={{
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 24, height: 24, borderRadius: 7,
+          border: `1px solid ${GLASS_BORDER_SUBTLE}`, background: 'transparent', color: TEXT_TERTIARY, cursor: 'pointer', padding: 0,
+        }}
+      >
+        <Icon icon={ICONS.close} size={12} />
+      </button>
     </div>
   );
 }

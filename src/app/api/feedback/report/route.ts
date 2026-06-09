@@ -32,7 +32,10 @@ interface FeedbackBody {
   route?: unknown;
   userAgent?: unknown;
   image?: unknown;
+  images?: unknown;
 }
+
+const MAX_IMAGES = 5;
 
 interface ReportDiagnostics {
   version: string;
@@ -137,6 +140,45 @@ function parseImage(raw: unknown): { ok: true; image: ParsedImage | null } | { o
   return { ok: true, image: { bytes, mime, filename } };
 }
 
+/**
+ * Collect attachments from `body.images` (array) plus the legacy `body.image`
+ * (single), cap at MAX_IMAGES, enforce an 8 MB combined ceiling (Discord's
+ * baseline webhook upload limit), and de-dupe filenames so every `files[n]` part
+ * and its `attachment://` ref stay unique.
+ */
+function parseImages(body: FeedbackBody): { ok: true; images: ParsedImage[] } | { ok: false; error: string } {
+  const raw: unknown[] = [];
+  if (Array.isArray(body.images)) raw.push(...body.images);
+  if (body.image != null) raw.push(body.image);
+
+  const images: ParsedImage[] = [];
+  let total = 0;
+  for (const item of raw.slice(0, MAX_IMAGES)) {
+    const parsed = parseImage(item);
+    if (!parsed.ok) return parsed;
+    if (!parsed.image) continue;
+    total += parsed.image.bytes.length;
+    if (total > MAX_IMAGE_BYTES) {
+      return { ok: false, error: 'Attachments are too large (max 8 MB total). Remove one or use smaller images.' };
+    }
+    images.push(parsed.image);
+  }
+
+  const seen = new Set<string>();
+  for (const img of images) {
+    let name = img.filename;
+    let i = 1;
+    while (seen.has(name)) {
+      const dot = img.filename.lastIndexOf('.');
+      name = dot > 0 ? `${img.filename.slice(0, dot)}-${i}${img.filename.slice(dot)}` : `${img.filename}-${i}`;
+      i += 1;
+    }
+    img.filename = name;
+    seen.add(name);
+  }
+  return { ok: true, images };
+}
+
 async function resolveProjectLabel(): Promise<string | null> {
   try {
     const surface = readIdeSurfaceState();
@@ -211,13 +253,13 @@ function buildEmbed(category: FeedbackCategory, message: string, diagnostics: Re
   };
 }
 
-async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, image: ParsedImage | null): Promise<{ ok: true } | { ok: false; error: string }> {
+async function postDiscordReport(category: FeedbackCategory, message: string, diagnostics: ReportDiagnostics, images: ParsedImage[]): Promise<{ ok: true } | { ok: false; error: string }> {
   const webhookUrl = process.env.O8_FEEDBACK_WEBHOOK_URL?.trim() || DEFAULT_WEBHOOK_URL;
   const embed = {
     ...buildEmbed(category, message, diagnostics),
-    // Render the screenshot inline in the embed; the attachment:// URL must
-    // match the multipart file's filename below.
-    ...(image ? { image: { url: `attachment://${image.filename}` } } : {}),
+    // Render the first screenshot inline in the embed; the rest ride along as
+    // additional attachments. The attachment:// URL must match a file below.
+    ...(images[0] ? { image: { url: `attachment://${images[0].filename}` } } : {}),
   };
   const payload = {
     username: 'o8 Report',
@@ -226,12 +268,14 @@ async function postDiscordReport(category: FeedbackCategory, message: string, di
 
   try {
     let response: Response;
-    if (image) {
-      // Discord renders an uploaded image only via multipart/form-data:
-      // a `payload_json` part (the embed) + a `files[0]` part (the bytes).
+    if (images.length > 0) {
+      // Discord renders uploaded images via multipart/form-data: a `payload_json`
+      // part (the embed) + one `files[n]` part per image.
       const form = new FormData();
       form.append('payload_json', JSON.stringify(payload));
-      form.append('files[0]', new Blob([image.bytes], { type: image.mime }), image.filename);
+      images.forEach((img, i) => {
+        form.append(`files[${i}]`, new Blob([img.bytes], { type: img.mime }), img.filename);
+      });
       response = await fetch(webhookUrl, { method: 'POST', body: form });
     } else {
       response = await fetch(webhookUrl, {
@@ -265,12 +309,12 @@ export async function POST(request: NextRequest) {
   const validated = validateBody(body);
   if (!validated.ok) return jsonError(validated.error);
 
-  const parsedImage = parseImage(body.image);
-  if (!parsedImage.ok) return jsonError(parsedImage.error);
+  const parsedImages = parseImages(body);
+  if (!parsedImages.ok) return jsonError(parsedImages.error);
 
   try {
     const diagnostics = await buildDiagnostics(validated.route, validated.userAgent);
-    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImage.image);
+    const posted = await postDiscordReport(validated.category, validated.message, diagnostics, parsedImages.images);
     if (!posted.ok) return jsonError(posted.error, 502);
     return NextResponse.json({ ok: true });
   } catch (error) {

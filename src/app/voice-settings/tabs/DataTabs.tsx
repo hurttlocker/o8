@@ -1,10 +1,10 @@
 'use client';
 
 /**
- * Dictionary / Snippets / Instructions tabs. Dictionary is a chip list
- * (`dictionary` string[]). Snippets are {trigger → replacement} rows
- * (`replacements`). Instructions is a single freeform textarea
- * (`polish_instructions`). All persist via `voice_prefs_set`.
+ * Polish tab — everything that shapes how o8 cleans up your dictation, grouped so
+ * humans aren't hunting across three tabs: Custom words (dictionary), Snippets
+ * (trigger → replacement), and Instructions (freeform AI guidance). All persist
+ * via `voice_prefs_set` and feed the polish pass.
  */
 import { useState, type CSSProperties } from 'react';
 import {
@@ -27,15 +27,26 @@ const TEXTAREA_BASE: CSSProperties = {
   background: GLASS_BG, border: `1px solid ${GLASS_BORDER_SUBTLE}`, borderRadius: 12,
   color: TEXT_PRIMARY, fontSize: 13, fontFamily: SF, lineHeight: 1.6, outline: 'none', resize: 'vertical',
 };
-
 function focusStyle(focus: boolean): CSSProperties {
   return focus
     ? { borderColor: ACCENT, boxShadow: `0 0 0 2px ${ACCENT_GLOW}`, background: GLASS_BG_HOVER }
     : {};
 }
 
+// ── The merged tab ──
+export function PolishTab({ prefs, setPref }: TabProps) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      <h1 style={PAGE_TITLE_STYLE}>Polish</h1>
+      <DictionarySection prefs={prefs} setPref={setPref} />
+      <SnippetsSection prefs={prefs} setPref={setPref} />
+      <InstructionsSection prefs={prefs} setPref={setPref} />
+    </div>
+  );
+}
+
 // ── Dictionary ──
-export function DictionaryTab({ prefs, setPref }: TabProps) {
+function DictionarySection({ prefs, setPref }: TabProps) {
   const words = prefList(prefs, 'dictionary');
   const [draft, setDraft] = useState('');
   const [focus, setFocus] = useState(false);
@@ -49,30 +60,27 @@ export function DictionaryTab({ prefs, setPref }: TabProps) {
   const remove = (w: string) => setPref('dictionary', words.filter((x) => x !== w));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Dictionary</h1>
-      <SectionCard>
-        <SectionTitle icon={ICONS.bookOpen}>Custom words</SectionTitle>
-        <SectionHint>Proper nouns and terms o8 should always spell right. Applied on the next dictation — no relaunch.</SectionHint>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
-          <input
-            value={draft} onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-            onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
-            placeholder="Add a word and press Enter"
-            style={{ ...INPUT_BASE, flex: 1, ...focusStyle(focus) }}
-          />
-          <AccentButton label="Add" onClick={add} />
+    <SectionCard>
+      <SectionTitle icon={ICONS.bookOpen}>Custom words</SectionTitle>
+      <SectionHint>Proper nouns and terms o8 should always spell right. Applied on the next dictation — no relaunch.</SectionHint>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14 }}>
+        <input
+          value={draft} onChange={(e) => setDraft(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          onFocus={() => setFocus(true)} onBlur={() => setFocus(false)}
+          placeholder="Add a word and press Enter"
+          style={{ ...INPUT_BASE, flex: 1, ...focusStyle(focus) }}
+        />
+        <AccentButton label="Add" onClick={add} />
+      </div>
+      {words.length === 0 ? (
+        <p style={{ fontSize: 12.5, color: TEXT_TERTIARY }}>No custom words yet.</p>
+      ) : (
+        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          {words.map((w) => <Chip key={w} label={w} onRemove={() => remove(w)} />)}
         </div>
-        {words.length === 0 ? (
-          <p style={{ fontSize: 12.5, color: TEXT_TERTIARY }}>No custom words yet.</p>
-        ) : (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {words.map((w) => <Chip key={w} label={w} onRemove={() => remove(w)} />)}
-          </div>
-        )}
-      </SectionCard>
-    </div>
+      )}
+    </SectionCard>
   );
 }
 
@@ -95,16 +103,14 @@ function Chip({ label, onRemove }: { label: string; onRemove: () => void }) {
           borderRadius: '50%', border: 'none', background: 'transparent', color: TEXT_TERTIARY, cursor: 'pointer', padding: 0,
         }}
       >
-        <svg width="9" height="9" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-          <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-        </svg>
+        <Icon icon={ICONS.close} size={11} />
       </button>
     </span>
   );
 }
 
 // ── Snippets ──
-export function SnippetsTab({ prefs, setPref }: TabProps) {
+function SnippetsSection({ prefs, setPref }: TabProps) {
   const rules = prefReplacements(prefs, 'replacements');
   const [trigger, setTrigger] = useState('');
   const [replacement, setReplacement] = useState('');
@@ -122,35 +128,32 @@ export function SnippetsTab({ prefs, setPref }: TabProps) {
   const remove = (t: string) => setPref('replacements', rules.filter((x) => x.trigger !== t));
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Snippets</h1>
-      <SectionCard>
-        <SectionTitle icon={ICONS.arrowsLeftRight}>Text expansion</SectionTitle>
-        <SectionHint>Expand short triggers into longer phrases after dictation. Applied as a deterministic pass on the cleaned text.</SectionHint>
-        <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
-          <input
-            value={trigger} onChange={(e) => setTrigger(e.target.value)}
-            onFocus={() => setFT(true)} onBlur={() => setFT(false)}
-            placeholder="trigger" style={{ ...INPUT_BASE, flex: 1, minWidth: 0, ...focusStyle(fT) }}
-          />
-          <span style={{ color: TEXT_TERTIARY, display: 'flex' }}><Icon icon={ICONS.arrowsLeftRight} size={14} /></span>
-          <input
-            value={replacement} onChange={(e) => setReplacement(e.target.value)}
-            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
-            onFocus={() => setFR(true)} onBlur={() => setFR(false)}
-            placeholder="replacement" style={{ ...INPUT_BASE, flex: 1.6, minWidth: 0, ...focusStyle(fR) }}
-          />
-          <AccentButton label="Add" onClick={add} />
+    <SectionCard>
+      <SectionTitle icon={ICONS.arrowsLeftRight}>Snippets</SectionTitle>
+      <SectionHint>Expand short triggers into longer phrases after dictation. Applied as a deterministic pass on the cleaned text.</SectionHint>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 14, alignItems: 'center' }}>
+        <input
+          value={trigger} onChange={(e) => setTrigger(e.target.value)}
+          onFocus={() => setFT(true)} onBlur={() => setFT(false)}
+          placeholder="trigger" style={{ ...INPUT_BASE, flex: 1, minWidth: 0, ...focusStyle(fT) }}
+        />
+        <span style={{ color: TEXT_TERTIARY, display: 'flex' }}><Icon icon={ICONS.arrowsLeftRight} size={14} /></span>
+        <input
+          value={replacement} onChange={(e) => setReplacement(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
+          onFocus={() => setFR(true)} onBlur={() => setFR(false)}
+          placeholder="replacement" style={{ ...INPUT_BASE, flex: 1.6, minWidth: 0, ...focusStyle(fR) }}
+        />
+        <AccentButton label="Add" onClick={add} />
+      </div>
+      {rules.length === 0 ? (
+        <p style={{ fontSize: 12.5, color: TEXT_TERTIARY }}>No snippets yet.</p>
+      ) : (
+        <div style={{ display: 'flex', flexDirection: 'column' }}>
+          {rules.map((rule, i) => <SnippetRow key={rule.trigger} rule={rule} first={i === 0} onRemove={() => remove(rule.trigger)} />)}
         </div>
-        {rules.length === 0 ? (
-          <p style={{ fontSize: 12.5, color: TEXT_TERTIARY }}>No snippets yet.</p>
-        ) : (
-          <div style={{ display: 'flex', flexDirection: 'column' }}>
-            {rules.map((rule, i) => <SnippetRow key={rule.trigger} rule={rule} first={i === 0} onRemove={() => remove(rule.trigger)} />)}
-          </div>
-        )}
-      </SectionCard>
-    </div>
+      )}
+    </SectionCard>
   );
 }
 
@@ -172,35 +175,30 @@ function SnippetRow({ rule, first, onRemove }: { rule: ReplacementRule; first: b
           color: TEXT_TERTIARY, cursor: 'pointer', padding: 0, flexShrink: 0,
         }}
       >
-        <svg width="11" height="11" viewBox="0 0 20 20" fill="none" aria-hidden="true">
-          <path d="M5 5l10 10M15 5L5 15" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
-        </svg>
+        <Icon icon={ICONS.close} size={12} />
       </button>
     </div>
   );
 }
 
 // ── Instructions ──
-export function InstructionsTab({ prefs, setPref }: TabProps) {
+function InstructionsSection({ prefs, setPref }: TabProps) {
   const saved = prefStr(prefs, 'polish_instructions', '');
   const [value, setValue] = useState(saved);
   const [focus, setFocus] = useState(false);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Instructions</h1>
-      <SectionCard>
-        <SectionTitle icon={ICONS.notePencil}>Cleanup instructions</SectionTitle>
-        <SectionHint>Guidance for how o8 cleans up your dictation — e.g. &ldquo;Keep my casual tone; always capitalize iOS.&rdquo; Applied on the next dictation.</SectionHint>
-        <textarea
-          value={value} onChange={(e) => setValue(e.target.value)}
-          onFocus={() => setFocus(true)}
-          onBlur={() => { setFocus(false); setPref('polish_instructions', value.trim()); }}
-          placeholder="Tell o8 how to handle your dictation"
-          rows={6}
-          style={{ ...TEXTAREA_BASE, minHeight: 140, ...focusStyle(focus) }}
-        />
-      </SectionCard>
-    </div>
+    <SectionCard>
+      <SectionTitle icon={ICONS.notePencil}>Instructions</SectionTitle>
+      <SectionHint>Guidance for how o8 cleans up your dictation — e.g. &ldquo;Keep my casual tone; always capitalize iOS.&rdquo; Applied on the next dictation.</SectionHint>
+      <textarea
+        value={value} onChange={(e) => setValue(e.target.value)}
+        onFocus={() => setFocus(true)}
+        onBlur={() => { setFocus(false); setPref('polish_instructions', value.trim()); }}
+        placeholder="Tell o8 how to handle your dictation"
+        rows={5}
+        style={{ ...TEXTAREA_BASE, minHeight: 120, ...focusStyle(focus) }}
+      />
+    </SectionCard>
   );
 }
