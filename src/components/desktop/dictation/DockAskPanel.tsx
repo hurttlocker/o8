@@ -143,7 +143,7 @@ function AskTurnRow({
       onMouseEnter={() => setHover(true)}
       onMouseLeave={() => setHover(false)}
     >
-      <div style={LABEL_STYLE}>o8</div>
+      <div style={LABEL_STYLE}>Symon</div>
       <button
         type="button"
         aria-label={copied ? 'Copied' : 'Copy answer'}
@@ -213,16 +213,25 @@ export function DockAskPanel({ thread, onClose }: DockAskPanelProps) {
           paddingLeft: 16,
         }}
       >
+        {/* Symon mark — the voice agent answering */}
+        <span
+          aria-hidden
+          style={{
+            width: 15, height: 15, borderRadius: '50%', flexShrink: 0,
+            background: 'radial-gradient(circle at 64% 28%, rgba(255,255,255,0.9), transparent 30%), conic-gradient(from 210deg at 50% 50%, #88d1f1, #b1b4e5 32%, #f5b8c4 62%, #f4c977 82%, #88d1f1)',
+            boxShadow: '0 0 8px rgba(136,209,241,0.45)',
+          }}
+        />
         <span
           style={{
             fontSize: 12.5,
             fontWeight: 300,
-            letterSpacing: '-0.1px',
-            color: 'rgba(255, 255, 255, 0.55)',
+            letterSpacing: '0.04em',
+            color: 'rgba(255, 255, 255, 0.72)',
             textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
           }}
         >
-          Ask
+          Symon
         </span>
         <button
           type="button"

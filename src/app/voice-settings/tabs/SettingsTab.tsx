@@ -77,7 +77,12 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
     setTimeout(() => setPreviewing(false), 2600);
   };
 
-  const fnGranted = fn === 0;
+  // AppleFnUsageType: 0 = Do Nothing (free for o8). On macOS 26+ the key ships
+  // UNSET (null) yet Fn is still free — only an explicit 1/2/3 (input-source /
+  // emoji / Start-Dictation) actually hijacks it. Treat unset as OK so we don't
+  // false-alarm machines where Fn dictation already works.
+  const fnHijacked = typeof fn === 'number' && fn !== 0;
+  const fnGranted = fn !== undefined && !fnHijacked;
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
@@ -148,7 +153,7 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
         <PermRow label="Accessibility" granted={acc} onOpen={() => { void openSystemSettings(URL_ACCESSIBILITY); }} />
         <PermRow label="Input Monitoring" granted={input} onOpen={() => { void openSystemSettings(URL_INPUT_MONITORING); }} />
         <PermRow label="Fn key binding" granted={fn === undefined ? null : fnGranted} onOpen={() => { void openSystemSettings(URL_KEYBOARD); }} />
-        {fn !== undefined && !fnGranted ? (
+        {fnHijacked ? (
           <div style={{
             marginTop: 12, padding: 12, borderRadius: 12,
             border: `1px solid rgba(248,113,113,0.3)`, background: 'rgba(248,113,113,0.08)',
