@@ -36,14 +36,15 @@ export const GLASS_BG_ACTIVE = 'rgba(255,255,255,0.14)';
 export const GLASS_BORDER = 'rgba(255,255,255,0.14)';
 export const GLASS_BORDER_SUBTLE = 'rgba(255,255,255,0.08)';
 
-// ── Shell / chrome (dark) ── lighter than Symon's 0.88 so the macOS vibrancy
-// material (applied Rust-side) reads through as frosted glass, not a flat panel.
+// ── Shell / chrome (dark) ── translucent so the macOS vibrancy material
+// (applied Rust-side, HudWindow) reads through as frosted glass, not a flat
+// panel. Tints kept low; the vibrancy supplies the depth + frost.
 export const SHELL_BG =
-  'linear-gradient(180deg, rgba(10,16,26,0.62), rgba(9,14,24,0.50))';
-export const SHELL_BORDER = 'rgba(255,255,255,0.12)';
-export const SHELL_SHADOW = '0 24px 60px rgba(2,6,23,0.34)';
+  'linear-gradient(180deg, rgba(12,18,30,0.44), rgba(9,14,24,0.34))';
+export const SHELL_BORDER = 'rgba(255,255,255,0.14)';
+export const SHELL_SHADOW = '0 24px 60px rgba(2,6,23,0.40)';
 export const FROST_BASE =
-  'linear-gradient(180deg, rgba(10,16,26,0.34), rgba(9,14,24,0.26))';
+  'linear-gradient(180deg, rgba(10,16,26,0.18), rgba(9,14,24,0.12))';
 export const SIDEBAR_BG =
   'linear-gradient(180deg, rgba(255,255,255,0.09), rgba(255,255,255,0.04))';
 export const CONTENT_BG =
