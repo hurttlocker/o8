@@ -546,6 +546,9 @@ export function DockNotchSurface({
             type="button"
             onClick={() => onAgentConfirm?.(confirm.taskId, false)}
             style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               height: 28,
               paddingLeft: 14,
               paddingRight: 14,
@@ -556,6 +559,7 @@ export function DockNotchSurface({
               fontSize: 12,
               fontWeight: 400,
               letterSpacing: '-0.1px',
+              textAlign: 'center',
               cursor: 'pointer',
             }}
           >
@@ -565,6 +569,9 @@ export function DockNotchSurface({
             type="button"
             onClick={() => onAgentConfirm?.(confirm.taskId, true)}
             style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               height: 28,
               paddingLeft: 18,
               paddingRight: 18,
@@ -575,6 +582,7 @@ export function DockNotchSurface({
               fontSize: 12,
               fontWeight: 500,
               letterSpacing: '-0.1px',
+              textAlign: 'center',
               cursor: 'pointer',
             }}
           >

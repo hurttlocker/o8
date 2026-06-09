@@ -219,7 +219,7 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
             if !result.result_text.trim().is_empty() {
                 crate::tts::playback::play_thread(result.result_text.clone(), crate::tts::load_config());
             }
-            notify_done(&result.result_text);
+            notify_done(&app, &result.result_text);
             Ok(result.result_text)
         }
         Err(e) => {
@@ -257,14 +257,11 @@ pub fn spawn_agent(app: tauri::AppHandle, prompt: String) {
     });
 }
 
-/// Native macOS completion notification.
-fn notify_done(result: &str) {
-    let body = result
-        .chars()
-        .take(120)
-        .collect::<String>()
-        .replace('\\', "/")
-        .replace('"', "'");
-    let script = format!("display notification \"{body}\" with title \"Symon\"");
-    let _ = std::process::Command::new("osascript").args(["-e", &script]).output();
+/// Native completion notification — posted via tauri-plugin-notification so it
+/// carries the app icon (the Symon/o8 brand) instead of osascript's generic
+/// Script Editor icon.
+fn notify_done(app: &tauri::AppHandle, result: &str) {
+    use tauri_plugin_notification::NotificationExt;
+    let body: String = result.chars().take(160).collect();
+    let _ = app.notification().builder().title("Symon").body(&body).show();
 }
