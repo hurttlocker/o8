@@ -12,7 +12,9 @@
 //! registry of oneshot senders so the SYNC `agent_confirm` command can resolve
 //! the loop's `await` from a different thread.
 
+pub mod eval;
 pub mod gemini;
+pub mod o8_http;
 pub mod openrouter;
 pub mod router;
 pub mod safety;
@@ -50,12 +52,18 @@ pub(crate) fn system_prompt() -> String {
     format!(
         "You are Symon, a fast, helpful macOS voice assistant for o8. You control \
          the user's Mac through native tools (Reminders, Calendar, Notes, opening \
-         apps). Use the tools to actually DO what the user asks — don't just \
-         describe the steps. Give reminders and events a clear, specific Title Case \
-         title. When a tool needs a date or time, resolve it relative to the \
-         current local time and emit an ISO 8601 string (e.g. 2026-06-09T15:00:00). \
-         Your reply is spoken aloud, so keep it to one or two short, conversational \
-         sentences with no markdown. The current local time is {when}."
+         apps). You are also the operator's link into o8 itself: use `o8_status` \
+         to report what o8's autonomous coding agents are working on right now \
+         (\"what's shipping?\"), and `o8_ask` to ask o8's Engineering Brain about \
+         the code, recent work, or the fleet (\"what did Codex do today?\"). You \
+         are NOT the coder — when the user wants code written or changed, that is \
+         the orchestrator's job, not yours. Use the tools to actually DO what the \
+         user asks — don't just describe the steps. Give reminders and events a \
+         clear, specific Title Case title. When a tool needs a date or time, \
+         resolve it relative to the current local time and emit an ISO 8601 string \
+         (e.g. 2026-06-09T15:00:00). Your reply is spoken aloud, so keep it to one \
+         or two short, conversational sentences with no markdown. The current local \
+         time is {when}."
     )
 }
 
@@ -102,6 +110,11 @@ pub async fn confirm_if_needed(ctx: &TaskCtx, tool_name: &str, args: &Value) -> 
         chans.retain(|(id, _)| id != &ctx.task_id);
         chans.push((ctx.task_id.clone(), tx));
     }
+
+    // Speak the proposal aloud before showing the card (fire-and-forget). The
+    // card remains the binding gate — this just lets the user hear what's about
+    // to happen (esp. the repo on an o8_dispatch) and catch a mishear by ear.
+    crate::tts::playback::play_thread(confirm_spoken(tool_name, args), crate::tts::load_config());
 
     emit_confirm(
         &ctx.app,
@@ -156,8 +169,24 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         "mac_calendar_create_event" => format!("Add “{}” to your calendar", s("title")),
         "mac_notes_create" => format!("Create a note “{}”", s("title")),
         "mac_reminders_complete" => format!("Mark “{}” complete", s("title")),
+        "o8_dispatch" => format!("Dispatch the {} orchestrator to: {}", s("repo"), s("task")),
         other => format!("Run {other}"),
     }
+}
+
+/// Spoken phrasing for the confirm gate — the proposal Symon says ALOUD just
+/// before the dock card appears. In a hands-free voice flow this lets the user
+/// catch a misheard repo/title by ear; the card stays the binding gate (voice
+/// can mishear "yes"). Reuses `confirm_summary`, lowercasing the lead verb so it
+/// reads naturally after "I'm about to".
+fn confirm_spoken(tool_name: &str, args: &Value) -> String {
+    let summary = confirm_summary(tool_name, args);
+    let mut chars = summary.chars();
+    let lowered = match chars.next() {
+        Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
+        None => summary,
+    };
+    format!("I'm about to {lowered}. Say yes, or cancel.")
 }
 
 // ── dock events ──────────────────────────────────────────────────────────────

@@ -40,6 +40,39 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // Notes
         "mac_notes_search" => SafetyClass::ReadOnly,
         "mac_notes_create" => SafetyClass::Reversible,
+        "mac_notes_append" => SafetyClass::Reversible,
+        // Calendar (delete)
+        "mac_calendar_delete_event" => SafetyClass::Destructive,
+        // Contacts
+        "mac_contacts_search" => SafetyClass::ReadOnly,
+        // Mail
+        "mac_mail_search" => SafetyClass::ReadOnly,
+        "mac_mail_read" => SafetyClass::ReadOnly,
+        "mac_mail_draft" => SafetyClass::Reversible,
+        "mac_mail_send_draft" => SafetyClass::Destructive,
+        // Shortcuts
+        "mac_shortcuts_list" => SafetyClass::ReadOnly,
+        "mac_shortcuts_run" => SafetyClass::Destructive,
+        // Filesystem (writes sandboxed to ~/.o8/agent-output)
+        "fs_read_text" => SafetyClass::ReadOnly,
+        "fs_write_text" => SafetyClass::Reversible,
+        "fs_spotlight" => SafetyClass::ReadOnly,
+        // CSV (writes sandboxed to ~/.o8/agent-output)
+        "csv_read" => SafetyClass::ReadOnly,
+        "csv_write" => SafetyClass::Reversible,
+        // o8 bridge (Tier-2). Reads are autonomous. o8_dispatch launches an
+        // autonomous coding worker (compute + tokens) → Reversible so it ALWAYS
+        // shows the spoken-confirm card in V1 (blanket consent is hardcoded OFF).
+        // NOTE: if blanket consent ever ships, exclude o8_dispatch from it — a
+        // worker spawn must never go silent.
+        "o8_status" => SafetyClass::ReadOnly,
+        "o8_ask" => SafetyClass::ReadOnly,
+        "o8_dispatch" => SafetyClass::Reversible,
+        // GitHub + local git (Tier-3) — all read-only.
+        "git_status" => SafetyClass::ReadOnly,
+        "git_log" => SafetyClass::ReadOnly,
+        "gh_pr_list" => SafetyClass::ReadOnly,
+        "gh_issue_list" => SafetyClass::ReadOnly,
         // Unknown — default to destructive.
         _ => SafetyClass::Destructive,
     }

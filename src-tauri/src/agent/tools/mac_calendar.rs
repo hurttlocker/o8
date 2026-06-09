@@ -1,7 +1,7 @@
 //! Calendar tools — list_events (ReadOnly, JXA) / create_event (Reversible,
 //! AppleScript). Listing + querying use JXA; creation uses AppleScript because
 //! JXA event creation silently fails to persist. delete_event (Destructive) is
-//! deferred to v1.x.
+//! withheld from the model by `enabled_tools()` until the confirm gate is trusted.
 
 use super::{as_escape, date_setter_block, parse_due_components, run_applescript, run_osascript_jxa};
 use serde_json::{json, Value};
@@ -108,4 +108,39 @@ pub async fn create_event(args: Value) -> Result<Value, String> {
         .map_err(|e| format!("spawn_blocking error: {e}"))??;
 
     Ok(json!({ "success": true, "title": title }))
+}
+
+/// Delete events by exact title (Destructive — withheld from the model by
+/// `enabled_tools()`; reachable only after a confirm-card approval once
+/// re-enabled). Scans all calendars, or one when `calendar_name` is given.
+pub async fn delete_event(args: Value) -> Result<Value, String> {
+    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if title.is_empty() {
+        return Err("title is required".into());
+    }
+    let calendar_name = args.get("calendar_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let title_esc = as_escape(&title);
+    let cal_filter = as_escape(&calendar_name);
+
+    let script = format!(
+        "\ntell application \"Calendar\"\n\
+         \tset deleted to 0\n\
+         \trepeat with c in calendars\n\
+         \t\tif \"{cal_filter}\" is \"\" or (name of c) is \"{cal_filter}\" then\n\
+         \t\t\tset evs to (events of c whose summary is \"{title_esc}\")\n\
+         \t\t\trepeat with e in evs\n\
+         \t\t\t\tdelete e\n\
+         \t\t\t\tset deleted to deleted + 1\n\
+         \t\t\tend repeat\n\
+         \t\tend if\n\
+         \tend repeat\n\
+         \tdeleted as string\n\
+         end tell"
+    );
+
+    let result = tokio::task::spawn_blocking(move || run_applescript(&script))
+        .await
+        .map_err(|e| format!("spawn_blocking error: {e}"))??;
+
+    Ok(json!({ "success": true, "title": title, "deleted": result }))
 }
