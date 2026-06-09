@@ -882,6 +882,29 @@ fn build_prompt(ctx: &PolishContext, can_use_audio: bool) -> String {
     prompt.push_str("- Do NOT add or remove words that were actually spoken\n");
     prompt.push_str("- Capitalize proper nouns, names, brands, app names\n\n");
 
+    // Output tone (Settings → Input → Tone). `auto`/unset keeps the default
+    // preserve-the-speaker behavior above; the others steer cleanup intensity.
+    match crate::stt::keys::config_string("output_tone").as_deref() {
+        Some("raw") => prompt.push_str(
+            "OUTPUT TONE — Raw: Make only essential fixes (clear mishears). Keep filler \
+             words, false starts, and the exact phrasing. Do not smooth or restructure.\n\n",
+        ),
+        Some("clean") => prompt.push_str(
+            "OUTPUT TONE — Clean: Fix mishears and punctuation, and remove filler words \
+             (um, uh, like) and false starts — but keep the speaker's voice and word choice.\n\n",
+        ),
+        Some("formal") => prompt.push_str(
+            "OUTPUT TONE — Formal: Clean this into polished, professional prose. Expand \
+             contractions, fix grammar, drop slang and filler. This OVERRIDES the \
+             preserve-casual-speech rules above.\n\n",
+        ),
+        Some("casual") => prompt.push_str(
+            "OUTPUT TONE — Casual: Keep it relaxed and conversational. Keep contractions \
+             and casual phrasing; just fix mishears and add light punctuation.\n\n",
+        ),
+        _ => {}
+    }
+
     // Adaptive punctuation — the core upgrade
     prompt.push_str("ADAPTIVE PUNCTUATION — this is critical. Do NOT just add basic periods and commas. \
                      Read between the lines. Listen to HOW the person speaks and infer the punctuation \
