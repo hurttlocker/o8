@@ -95,7 +95,7 @@ function HistoryRow({ entry, first, copied, onCopy, onDelete }: {
       style={{ position: 'relative', paddingTop: 11, paddingBottom: 11, borderTop: first ? 'none' : `1px solid ${GLASS_BORDER_SUBTLE}` }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
-        <span style={{ fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', color: entry.mode === 'ask' ? ACCENT_LIGHT : TEXT_TERTIARY }}>
+        <span style={{ fontSize: 9, fontWeight: 500, letterSpacing: '0.08em', color: entry.mode === 'ask' ? ACCENT_LIGHT : TEXT_TERTIARY }}>
           {entry.mode.toUpperCase()}
         </span>
         <span style={{ fontSize: 11, color: TEXT_TERTIARY }}>{relativeTime(entry.ts)}</span>
@@ -106,7 +106,7 @@ function HistoryRow({ entry, first, copied, onCopy, onDelete }: {
             style={{
               height: 22, paddingLeft: 8, paddingRight: 8, borderRadius: 6,
               border: `1px solid ${GLASS_BORDER_SUBTLE}`, background: 'transparent',
-              color: copied ? OK_GREEN : TEXT_TERTIARY, fontSize: 9.5, fontWeight: 600, letterSpacing: '0.04em', cursor: 'pointer',
+              color: copied ? OK_GREEN : TEXT_TERTIARY, fontSize: 9.5, fontWeight: 500, letterSpacing: '0.04em', cursor: 'pointer',
             }}
           >
             {copied ? 'COPIED' : 'COPY'}

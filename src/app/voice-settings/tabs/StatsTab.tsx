@@ -68,8 +68,8 @@ function Stat({ label, value, accent }: { label: string; value: ReactNode; accen
       padding: '14px 16px', borderRadius: 14, border: `1px solid ${SECTION_BORDER}`,
       background: SECTION_BG, display: 'flex', flexDirection: 'column', gap: 6,
     }}>
-      <span style={{ fontSize: 10, fontWeight: 600, letterSpacing: '0.12em', textTransform: 'uppercase', color: TEXT_TERTIARY }}>{label}</span>
-      <span style={{ fontSize: 24, fontWeight: 560, letterSpacing: '-0.02em', color: accent ? ACCENT_LIGHT : TEXT_PRIMARY, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
+      <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.12em', textTransform: 'uppercase', color: TEXT_TERTIARY }}>{label}</span>
+      <span style={{ fontSize: 24, fontWeight: 400, letterSpacing: '-0.02em', color: accent ? ACCENT_LIGHT : TEXT_PRIMARY, lineHeight: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{value}</span>
     </div>
   );
 }

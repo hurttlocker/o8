@@ -133,7 +133,7 @@ export function SnippetsTab({ prefs, setPref }: TabProps) {
             onFocus={() => setFT(true)} onBlur={() => setFT(false)}
             placeholder="trigger" style={{ ...INPUT_BASE, flex: 1, minWidth: 0, ...focusStyle(fT) }}
           />
-          <span style={{ color: TEXT_TERTIARY, display: 'flex' }}><Icon d={ICONS.arrowsLeftRight} size={14} /></span>
+          <span style={{ color: TEXT_TERTIARY, display: 'flex' }}><Icon icon={ICONS.arrowsLeftRight} size={14} /></span>
           <input
             value={replacement} onChange={(e) => setReplacement(e.target.value)}
             onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); add(); } }}
@@ -162,7 +162,7 @@ function SnippetRow({ rule, first, onRemove }: { rule: ReplacementRule; first: b
       style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 10, paddingBottom: 10, borderTop: first ? 'none' : `1px solid ${GLASS_BORDER_SUBTLE}` }}
     >
       <span style={{ fontSize: 12.5, color: TEXT_PRIMARY, fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace', flexShrink: 0 }}>{rule.trigger}</span>
-      <span style={{ color: TEXT_TERTIARY, display: 'flex' }}><Icon d={ICONS.arrowsLeftRight} size={13} /></span>
+      <span style={{ color: TEXT_TERTIARY, display: 'flex' }}><Icon icon={ICONS.arrowsLeftRight} size={13} /></span>
       <span style={{ fontSize: 13, color: TEXT_SECONDARY, flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{rule.replacement}</span>
       <button
         type="button" aria-label="Remove snippet" onClick={onRemove}

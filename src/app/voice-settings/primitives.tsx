@@ -2,29 +2,19 @@
 
 /**
  * Voice-settings shared primitives — the Symon "design system" ported to React
- * inline-style helpers. Every settings page is built from these stacked. Raw SVG
- * icons (no React icon components — they don't render in the Tauri webview).
+ * inline-style helpers, tuned to o8's hurttlocker spec: var(--font-sans-system),
+ * weight 300 on chrome (never 600+), Iconoir icons. Every page stacks these.
  */
 import { useState, type CSSProperties, type ReactNode } from 'react';
 import {
   ACCENT, ACCENT_GLOW, ACCENT_LIGHT, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER,
   GLASS_BORDER_SUBTLE, OK_GREEN, SECTION_BG, SECTION_BORDER, SECTION_SHADOW, SF,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, WARN_AMBER, WAVE_STOPS,
+  W_BODY, W_HEADING, W_STRONG,
 } from './tokens';
+import { Icon, type IconComp } from './icons';
 
-// ── Icon ──
-export function Icon({ d, size = 16, viewBox = '0 0 256 256', color }: {
-  d: string; size?: number; viewBox?: string; color?: string;
-}) {
-  return (
-    <svg
-      width={size} height={size} viewBox={viewBox} fill={color ?? 'currentColor'}
-      aria-hidden="true" style={{ display: 'block', flexShrink: 0 }}
-    >
-      <path d={d} />
-    </svg>
-  );
-}
+export { Icon } from './icons';
 
 // ── Brand glyph — CSS-rendered gradient orb (not SVG), verbatim from aqua ──
 export function BrandGlyph({ size = 34 }: { size?: number }) {
@@ -110,8 +100,9 @@ export function GhostButton({ label, onClick, tone }: { label: string; onClick: 
       style={{
         height: 28, paddingLeft: 10, paddingRight: 10, borderRadius: 8,
         border: `1px solid ${GLASS_BORDER_SUBTLE}`, background: hover ? GLASS_BG_HOVER : 'transparent',
-        color: hover ? TEXT_PRIMARY : base, fontSize: 11, fontWeight: 500, fontFamily: SF,
+        color: hover ? TEXT_PRIMARY : base, fontSize: 11, fontWeight: W_BODY, fontFamily: SF,
         cursor: 'pointer', transition: `background ${TRANS_FAST}, color ${TRANS_FAST}`,
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
       }}
     >
       {label}
@@ -128,8 +119,8 @@ export function AccentButton({ label, onClick }: { label: string; onClick: () =>
       style={{
         height: 30, paddingLeft: 14, paddingRight: 14, borderRadius: 9,
         border: '1px solid rgba(90,132,255,0.30)', background: hover ? 'rgba(90,132,255,0.26)' : 'rgba(90,132,255,0.18)',
-        color: ACCENT_LIGHT, fontSize: 12, fontWeight: 600, fontFamily: SF, cursor: 'pointer',
-        transition: `background ${TRANS_FAST}`, display: 'inline-flex', alignItems: 'center', gap: 7,
+        color: ACCENT_LIGHT, fontSize: 12, fontWeight: W_HEADING, fontFamily: SF, cursor: 'pointer',
+        transition: `background ${TRANS_FAST}`, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', gap: 7,
       }}
     >
       {label}
@@ -152,18 +143,18 @@ export function SectionCard({ children, style }: { children: ReactNode; style?: 
 }
 
 export function SectionTitle({ icon, children, status, right }: {
-  icon: string; children: ReactNode; status?: string; right?: ReactNode;
+  icon: IconComp; children: ReactNode; status?: string; right?: ReactNode;
 }) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 6, marginBottom: 10,
-      fontSize: 10, fontWeight: 600, color: TEXT_SECONDARY, textTransform: 'uppercase', letterSpacing: '0.14em',
+      display: 'flex', alignItems: 'center', gap: 7, marginBottom: 12,
+      fontSize: 10, fontWeight: W_BODY, color: TEXT_SECONDARY, textTransform: 'uppercase', letterSpacing: '0.12em',
     }}>
-      <span style={{ color: ACCENT, display: 'flex', opacity: 0.9 }}><Icon d={icon} size={13} /></span>
+      <span style={{ color: ACCENT, display: 'flex', opacity: 0.95 }}><Icon icon={icon} size={14} /></span>
       <span style={{ marginRight: 'auto' }}>{children}</span>
       {status ? (
         <span style={{
-          padding: '2px 8px', borderRadius: 999, fontSize: 9, fontWeight: 700, letterSpacing: '0.12em',
+          padding: '2px 8px', borderRadius: 999, fontSize: 9, fontWeight: W_STRONG, letterSpacing: '0.1em',
           color: OK_GREEN, background: 'rgba(52,211,153,0.12)', border: '1px solid rgba(52,211,153,0.34)',
         }}>{status}</span>
       ) : null}
@@ -187,7 +178,7 @@ export function ToggleRow({ label, detail, checked, onChange, pro }: {
   return (
     <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12, paddingTop: 11, paddingBottom: 11, borderBottom: `1px solid ${GLASS_BORDER_SUBTLE}` }}>
       <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, color: TEXT_PRIMARY }}>
+        <div style={{ fontSize: 13, fontWeight: W_BODY, color: TEXT_PRIMARY }}>
           {label}{pro ? <ProPill /> : null}
         </div>
         {detail ? <div style={{ fontSize: 12, color: TEXT_TERTIARY, lineHeight: 1.45, marginTop: 4, maxWidth: 360 }}>{detail}</div> : null}
@@ -207,7 +198,7 @@ export function ControlRow({ label, detail, children, stacked }: {
       gap: stacked ? 10 : 16, paddingTop: 11, paddingBottom: 11, borderBottom: `1px solid ${GLASS_BORDER_SUBTLE}`,
     }}>
       <div style={{ flex: stacked ? undefined : 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13, color: TEXT_PRIMARY }}>{label}</div>
+        <div style={{ fontSize: 13, fontWeight: W_BODY, color: TEXT_PRIMARY }}>{label}</div>
         {detail ? <div style={{ fontSize: 12, color: TEXT_TERTIARY, lineHeight: 1.45, marginTop: 4, maxWidth: 360 }}>{detail}</div> : null}
       </div>
       <div style={{ flexShrink: 0, display: 'flex', alignItems: 'center', gap: 8 }}>{children}</div>
@@ -220,7 +211,7 @@ export function ProPill() {
     <span style={{
       display: 'inline-block', marginLeft: 7, padding: '1px 7px', borderRadius: 999,
       border: '1px solid rgba(125,211,252,0.45)', background: 'rgba(125,211,252,0.14)',
-      color: '#7dd3fc', fontSize: 9, fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase', verticalAlign: 'middle',
+      color: '#7dd3fc', fontSize: 9, fontWeight: W_STRONG, letterSpacing: '0.08em', textTransform: 'uppercase', verticalAlign: 'middle',
     }}>Pro</span>
   );
 }
@@ -282,7 +273,8 @@ function SegButton({ active, onClick, children }: { active: boolean; onClick: ()
       onMouseEnter={() => setHover(true)} onMouseLeave={() => setHover(false)}
       style={{
         minWidth: 54, height: 24, paddingLeft: 9, paddingRight: 9, border: 'none', borderRadius: 6,
-        fontSize: 11, fontFamily: SF, cursor: 'pointer',
+        fontSize: 11, fontWeight: W_BODY, fontFamily: SF, cursor: 'pointer',
+        display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
         color: active ? TEXT_PRIMARY : hover ? TEXT_PRIMARY : TEXT_TERTIARY,
         background: active ? 'rgba(64,88,255,0.18)' : hover ? GLASS_BG_HOVER : 'transparent',
         boxShadow: active ? 'inset 0 0 0 1px rgba(64,88,255,0.34)' : 'none',
@@ -329,5 +321,5 @@ export function StatusBadge({ ok, okLabel = 'Granted', warnLabel = 'Needs grant'
 }
 
 export const PAGE_TITLE_STYLE: CSSProperties = {
-  fontSize: 22, fontWeight: 560, letterSpacing: '-0.03em', color: TEXT_PRIMARY, margin: 0,
+  fontSize: 19, fontWeight: W_HEADING, letterSpacing: '-0.02em', color: TEXT_PRIMARY, margin: 0,
 };
