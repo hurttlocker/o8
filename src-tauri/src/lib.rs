@@ -2844,7 +2844,21 @@ fn open_voice_settings(app: tauri::AppHandle) {
         .shadow(false)
         .build()
     {
-        Ok(_) => log::info!("[voice-settings] window opened → {url}"),
+        Ok(win) => {
+            // Frosted-glass backdrop, like the main window — without this the
+            // transparent window just shows the desktop behind the CSS tint and
+            // reads as a flat solid panel. Rounded to 22px so the vibrancy view
+            // matches the CSS card and the corners stay transparent.
+            if let Err(e) = window_vibrancy::apply_vibrancy(
+                &win,
+                window_vibrancy::NSVisualEffectMaterial::HudWindow,
+                None,
+                Some(22.0),
+            ) {
+                log::warn!("[voice-settings] vibrancy failed: {e}");
+            }
+            log::info!("[voice-settings] window opened → {url}");
+        }
         Err(e) => log::warn!("[voice-settings] failed to open window: {e}"),
     }
 }
