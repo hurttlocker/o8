@@ -41,6 +41,7 @@ import {
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { VoiceHistorySection } from './VoiceHistorySection';
 
 // macOS System Settings deep-links.
 const URL_ACCESSIBILITY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
@@ -499,6 +500,8 @@ export function VoiceTab() {
               </div>
             </div>
           </section>
+
+          <VoiceHistorySection />
         </>
       )}
 
