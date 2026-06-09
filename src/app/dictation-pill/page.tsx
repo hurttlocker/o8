@@ -116,6 +116,10 @@ export default function DictationPillPage() {
     { taskId: string; tool: string; summary: string } | null
   >(null);
   const [agentWorking, setAgentWorking] = useState(false);
+  // Current running tool + when the task started — drive the working capsule's
+  // "Synthesizing…/Working…" label + live elapsed timer.
+  const [agentTool, setAgentTool] = useState<string>('');
+  const [agentStartedAt, setAgentStartedAt] = useState<number>(0);
   const askIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const askLastClosedRef = useRef<number>(0);
   const askOpenRef = useRef(false);
@@ -395,12 +399,21 @@ export default function DictationPillPage() {
           dockLog(`agent-confirm ${tool}`);
           if (taskId) setAgentConfirm({ taskId, tool, summary });
         }));
-        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string }>('o8:agent-task-event', (e) => {
-          if (e.payload?.kind !== 'status') return;
+        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string }>('o8:agent-task-event', (e) => {
+          const kind = e.payload?.kind;
+          if (kind === 'tool_call') {
+            // Track the live tool so the working capsule can say "Synthesizing…"
+            // for the Brain (o8_ask) vs a generic "Working…".
+            if (e.payload?.tool) setAgentTool(e.payload.tool);
+            return;
+          }
+          if (kind !== 'status') return;
           const status = e.payload?.status;
           const tid = e.payload?.taskId;
           if (status === 'running') {
             setAgentWorking(true);
+            setAgentTool('');
+            setAgentStartedAt(Date.now());
             if (e.payload?.intent) agentIntentRef.current = e.payload.intent;
           } else if (status === 'done' || status === 'failed') {
             // Dual-emit guard: the dock receives this terminal event twice
@@ -408,6 +421,7 @@ export default function DictationPillPage() {
             if (tid && agentDoneRef.current === tid) return;
             if (tid) agentDoneRef.current = tid;
             setAgentWorking(false);
+            setAgentTool('');
             // Only clear a pending confirm if it belongs to THIS task.
             setAgentConfirm((c) => (c && c.taskId === tid ? null : c));
             // Show the spoken answer in the panel instead of collapsing to idle.
@@ -509,6 +523,8 @@ export default function DictationPillPage() {
           onCloseAsk={closeAsk}
           agentConfirm={agentConfirm}
           agentWorking={agentWorking}
+          agentTool={agentTool}
+          agentStartedAt={agentStartedAt}
           onAgentConfirm={handleAgentConfirm}
         />
       </div>
