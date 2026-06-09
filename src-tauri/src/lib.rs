@@ -8,6 +8,7 @@ mod mac_perms;
 mod paste;
 mod sidecar_lifecycle;
 mod sound;
+mod speech_text;
 #[cfg(target_os = "macos")]
 mod stt;
 #[cfg(target_os = "macos")]
