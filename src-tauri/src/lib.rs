@@ -1,6 +1,7 @@
 mod audio_ducker;
 mod background;
 mod dev_frontend;
+mod dictation_history;
 mod dock_window;
 mod fn_hotkey;
 mod launch_updater;
@@ -2599,6 +2600,7 @@ mod stt_engine {
                 let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
                 let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
                 let _ = app.emit("o8:stt-event", idle);
+                crate::dictation_history::record("ask", &polished, None);
                 crate::spawn_ask_and_speak(app.clone(), polished);
                 return;
             }
@@ -2623,6 +2625,13 @@ mod stt_engine {
                     let _ = app.emit("o8:stt-event", idle);
                 } else {
                     crate::paste::paste_text(&polished);
+                    // Persist to dictation history so the operator can retrieve
+                    // what they said if the paste landed in the wrong place.
+                    crate::dictation_history::record(
+                        "dictation",
+                        &polished,
+                        crate::paste::get_frontmost_bundle_id(),
+                    );
                     // Remember the polished text so the ⌘⌥V global shortcut can
                     // re-paste the last dictation (voice P3 paste-last).
                     crate::fn_hotkey::set_last_voice_transcript(&polished);
@@ -2800,6 +2809,23 @@ fn voice_prefs_get() -> serde_json::Value {
 #[tauri::command]
 fn voice_prefs_set(key: String, value: serde_json::Value) -> Result<(), String> {
     crate::stt::keys::set_pref(&key, value)
+}
+
+/// Recent dictation history (newest first) for the settings History panel — the
+/// safety net to retrieve what you said when a paste went to the wrong place.
+#[tauri::command]
+fn dictation_history_get() -> Vec<dictation_history::HistoryEntry> {
+    dictation_history::list()
+}
+
+#[tauri::command]
+fn dictation_history_clear() {
+    dictation_history::clear();
+}
+
+#[tauri::command]
+fn dictation_history_delete(id: String) {
+    dictation_history::delete(&id);
 }
 
 /// Ask Gemini `question` on a dedicated OS thread, emit the answer to the webview
@@ -3075,6 +3101,9 @@ pub fn run() {
             dock_set_expanded,
             voice_prefs_get,
             voice_prefs_set,
+            dictation_history_get,
+            dictation_history_clear,
+            dictation_history_delete,
             #[cfg(target_os = "macos")]
             ask_question,
             #[cfg(target_os = "macos")]
