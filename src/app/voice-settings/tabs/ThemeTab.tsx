@@ -1,17 +1,16 @@
 'use client';
 
 /**
- * Theme tab — tune the glass. Surface picks the look (Auto follows o8's
- * transparency: glass when on, solid when off); Glass / Solid / Liquid seed the
- * sliders, then Frost / Clarity / Saturation fine-tune live. High saturation
- * flips on the Liquid-Glass specular sheen (Apple macOS 26 cue). Persisted to
- * localStorage by the shell.
+ * Theme tab — Surface picks the look (Auto follows o8's transparency: glass when
+ * on, solid when off; Glass is the locked tune; Solid is the opaque accessibility
+ * look). The glass tune is finalized in code; the only live knob is Frost, kept
+ * as the accessibility lever — more frost = more readable for low-vision users.
+ * Persisted to localStorage by the shell.
  */
 import { useEffect, useState } from 'react';
 import { ICONS } from '../tokens';
-import { SURFACE_PRESETS, type GlassControls, type VsSurface } from '../tokens';
+import { SURFACE_PRESETS, type GlassControls, type VsSurface, TEXT_TERTIARY } from '../tokens';
 import { SectionCard, SectionTitle, SectionHint, Segmented, Slider, ControlRow, PageHeader } from '../primitives';
-import { TEXT_TERTIARY } from '../tokens';
 
 const DOCK_THEME_KEY = 'o8:dock-theme';
 
@@ -21,12 +20,11 @@ export default function ThemeTab({ controls, onChange }: { controls: GlassContro
   const setSurface = (s: string) => {
     const surface = s as VsSurface;
     if (surface === 'auto') { onChange({ ...controls, surface }); return; }
-    onChange({ surface, ...SURFACE_PRESETS[surface] });
+    onChange({ ...controls, surface, ...SURFACE_PRESETS[surface] });
   };
-  const setParam = (k: 'frost' | 'clarity' | 'saturate', v: number) => onChange({ ...controls, [k]: v });
 
   // Dock appearance. Writing localStorage fires `storage` in the dock window
-  // (same origin), so it re-themes live. Start of dock theming — more to come.
+  // (same origin), so it re-themes live.
   const [dock, setDock] = useState<'symon' | 'glass'>('symon');
   useEffect(() => {
     try { setDock(localStorage.getItem(DOCK_THEME_KEY) === 'glass' ? 'glass' : 'symon'); } catch { /* noop */ }
@@ -43,32 +41,26 @@ export default function ThemeTab({ controls, onChange }: { controls: GlassContro
 
       <SectionCard>
         <SectionTitle icon={ICONS.eye}>Surface</SectionTitle>
-        <SectionHint>Auto follows o8 — transparent glass when o8&apos;s transparency is on, solid when it&apos;s off. Or pick a look to fine-tune.</SectionHint>
+        <SectionHint>Auto follows o8 — clear glass when o8&apos;s transparency is on, solid when it&apos;s off. Glass is the signature look; Solid is the high-contrast accessibility surface.</SectionHint>
         <Segmented
           full value={controls.surface} onChange={setSurface}
           options={[
             { value: 'auto', label: 'Auto' },
             { value: 'glass', label: 'Glass' },
             { value: 'solid', label: 'Solid' },
-            { value: 'liquid', label: 'Liquid' },
           ]}
         />
       </SectionCard>
 
       <SectionCard>
-        <SectionTitle icon={ICONS.sparkle}>Fine-tune</SectionTitle>
+        <SectionTitle icon={ICONS.sparkle}>Frost</SectionTitle>
         {auto ? (
-          <p style={{ fontSize: 12.5, color: TEXT_TERTIARY }}>Following o8. Pick Glass, Solid, or Liquid to adjust frost &amp; clarity yourself.</p>
+          <p style={{ fontSize: 12.5, color: TEXT_TERTIARY }}>Following o8. Pick Glass or Solid to adjust frost yourself.</p>
         ) : (
           <>
+            <SectionHint>Blurs the desktop behind the glass. Add frost if the clear glass is hard to read — it lifts contrast for low-vision use without leaving the Symon look.</SectionHint>
             <ControlRow label="Frost" detail="How much the background blurs behind the glass.">
-              <Slider value={controls.frost} min={0} max={44} step={1} suffix="px" onChange={(v) => setParam('frost', v)} />
-            </ControlRow>
-            <ControlRow label="Clarity" detail="How see-through the glass is — higher shows more of what's behind.">
-              <Slider value={controls.clarity} min={0} max={100} step={1} suffix="%" onChange={(v) => setParam('clarity', v)} />
-            </ControlRow>
-            <ControlRow label="Saturation" detail="Color vividness behind the glass. 150%+ turns on the Liquid-Glass sheen.">
-              <Slider value={controls.saturate} min={100} max={220} step={1} suffix="%" onChange={(v) => setParam('saturate', v)} />
+              <Slider value={controls.frost} min={0} max={44} step={1} suffix="px" onChange={(v) => onChange({ ...controls, frost: v })} />
             </ControlRow>
           </>
         )}
@@ -76,7 +68,7 @@ export default function ThemeTab({ controls, onChange }: { controls: GlassContro
 
       <SectionCard>
         <SectionTitle icon={ICONS.microphone}>Dock</SectionTitle>
-        <SectionHint>The Symon pill at the top of your screen. Keep the signature multicolor, or match it to the clear glass. More dock looks coming.</SectionHint>
+        <SectionHint>The Symon pill at the top of your screen. Keep the signature multicolor, or match it to the clear glass.</SectionHint>
         <Segmented
           full value={dock} onChange={setDockTheme}
           options={[{ value: 'symon', label: 'Symon' }, { value: 'glass', label: 'Glass' }]}

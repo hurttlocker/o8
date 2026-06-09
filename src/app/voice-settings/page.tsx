@@ -10,13 +10,13 @@
  * CSS glass card IS the window. Inline styles only, literal Symon dark-tone rgba
  * (no var(--t-*) — no ThemeProvider above this route), raw-SVG icons.
  */
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { isTauri, voicePrefsGet, voicePrefsSet } from '@/lib/tauri/bridge';
 import {
   CONTENT_BG, GLASS_BORDER_SUBTLE, GRID_DOT, ICONS, NAV_ACTIVE, NAV_BORDER,
   NAV_HOVER, SF, SHELL_BORDER, SHELL_SHADOW, SIDEBAR_BG, TEXT_PRIMARY,
   TEXT_SECONDARY, TEXT_TERTIARY, TL_CLOSE, TL_CLOSE_HOVER, TL_MIN, TL_ZOOM, TRANS,
-  VS_THEME_VARS, DEFAULT_GLASS, resolveGlass, scrimOpacity, type VsMode, type GlassControls,
+  VS_THEME_VARS, DEFAULT_GLASS, resolveGlass, scrimOpacity, type VsMode, type GlassControls, type VsText,
 } from './tokens';
 import { BrandGlyph, BrandWave, Icon } from './primitives';
 import type { IconComp } from './icons';
@@ -55,20 +55,21 @@ const GLASS_SHELL_BASE: CSSProperties = {
   position: 'relative', isolation: 'isolate', display: 'flex', width: '100%', height: '100%',
   borderRadius: 22, overflow: 'hidden', border: `1px solid ${SHELL_BORDER}`,
   boxShadow: SHELL_SHADOW,
+  // Keep the blurred pane on its own compositor layer so live Frost changes
+  // re-raster smoothly instead of flashing.
+  willChange: 'backdrop-filter',
 };
 
 /** Build the live shell + scrim styles from resolved glass params. The scrim
  * (palette base color at clarity-derived opacity) provides the tint over the
  * vibrancy; backdrop blur + saturate are the frost; liquid adds a specular edge. */
-function shellStyles(frost: number, saturate: number, clarity: number, liquid: boolean) {
-  // saturate + a hair of brightness lift the material; blur is the frost knob.
-  const filter = `blur(${Math.round(frost)}px) saturate(${(saturate / 100).toFixed(2)}) brightness(1.04)`;
-  // Directional rim (top-left light source) — the specular "tell" that makes the
-  // pane read as glass even at frost 0 / clarity 100 (Gemini's #1 note from the
-  // Liquid Glass breakdown). Stronger when liquid.
-  const rim = liquid
-    ? 'inset 0 1.5px 0 rgba(255,255,255,0.6), inset 1.5px 0 0 rgba(255,255,255,0.26), inset 0 0 46px rgba(255,255,255,0.06)'
-    : 'inset 0 1px 0 rgba(255,255,255,0.34), inset 1px 0 0 rgba(255,255,255,0.13)';
+function shellStyles(frost: number, saturate: number, clarity: number, brightness: number) {
+  // blur = frost, saturate = color, brightness = material lift (all live knobs).
+  const filter = `blur(${Math.round(frost)}px) saturate(${(saturate / 100).toFixed(2)}) brightness(${(brightness / 100).toFixed(2)})`;
+  // Fixed baseline directional rim (top-left light source) — today's flat-glass
+  // edge. Sheen + depth are added on top via a high-z finish overlay (below)
+  // so they actually show over the content; an inset rim here would hide behind it.
+  const rim = 'inset 0 1px 0 rgba(255,255,255,0.34), inset 1px 0 0 rgba(255,255,255,0.13)';
   const shell: CSSProperties = {
     ...GLASS_SHELL_BASE,
     background: 'radial-gradient(circle at top left, var(--vs-accent-radial), transparent 40%)',
@@ -79,7 +80,84 @@ function shellStyles(frost: number, saturate: number, clarity: number, liquid: b
     position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
     background: 'rgb(var(--vs-scrim-rgb))', opacity: scrimOpacity(clarity),
   };
-  return { shell, scrim, liquid };
+  return { shell, scrim };
+}
+
+/** Lighting — the specular gloss + bright top/left edge, rendered ABOVE the
+ * content (the shell fills the window, so an inset rim would hide behind the
+ * cards). This is the dock pill's "lit edge" feel brought to the settings.
+ * 0 → today's flat glass. */
+function lightingFinish(lighting: number): CSSProperties | null {
+  const l = Math.max(0, Math.min(100, lighting)) / 100;
+  if (l === 0) return null;
+  return {
+    position: 'absolute', inset: 0, zIndex: 20, pointerEvents: 'none', borderRadius: 22,
+    backgroundImage: `linear-gradient(180deg, rgba(255,255,255,${(l * 0.26).toFixed(3)}) 0%, rgba(255,255,255,${(l * 0.05).toFixed(3)}) 9%, transparent 20%)`,
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,${(0.34 + l * 0.56).toFixed(2)}), inset 1px 0 0 rgba(255,255,255,${(0.13 + l * 0.3).toFixed(2)}), inset 0 0 ${Math.round(l * 60)}px rgba(255,255,255,${(l * 0.08).toFixed(2)})`,
+  };
+}
+
+/** Diffusion — milky light-scattering (frosted softness). A uniform white veil
+ * BEHIND the content (next to the scrim) so it softens the glass without washing
+ * the text. 0 → clear. */
+function diffusionVeil(diffusion: number): CSSProperties | null {
+  const d = Math.max(0, Math.min(100, diffusion)) / 100;
+  if (d === 0) return null;
+  return {
+    position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
+    background: `rgba(255,255,255,${(d * 0.34).toFixed(3)})`,
+  };
+}
+
+/** Above clarity 100, fade ONLY the in-between (the content area behind/around
+ * the cards + its grid dots) toward transparent. The left sidebar and the
+ * section cards keep their frosty backgrounds — so you get clear glass between
+ * frosty surfaces, like the dock pill. Returns {} at/below 100 (normal look). */
+function clarityOverrides(mode: VsMode, clarity: number, clearPanels: boolean): Record<string, string> {
+  if (clarity <= 100) return {};
+  const k = 1 - Math.min(1, (clarity - 100) / 100); // 1 → 0 as clarity 100 → 200
+  const a = (base: number) => (base * k).toFixed(3);
+  const light = mode === 'light';
+  const out: Record<string, string> = light
+    ? {
+        '--vs-content-bg': `linear-gradient(180deg, rgba(255,255,255,${a(0.58)}), rgba(248,250,253,${a(0.42)}))`,
+        '--vs-grid-dot': `rgba(15,23,42,${a(0.09)})`,
+      }
+    : {
+        '--vs-content-bg': `linear-gradient(180deg, rgba(255,255,255,${a(0.05)}), rgba(255,255,255,${a(0.02)}))`,
+        '--vs-grid-dot': `rgba(255,255,255,${a(0.08)})`,
+      };
+  // Opt-in: also dissolve the sidebar + the section cards for the full all-clear look.
+  if (clearPanels) {
+    if (light) {
+      out['--vs-sidebar-bg'] = `linear-gradient(180deg, rgba(255,255,255,${a(0.82)}), rgba(244,247,251,${a(0.66)}))`;
+      out['--vs-section-bg'] = `linear-gradient(180deg, rgba(255,255,255,${a(0.86)}), rgba(248,250,253,${a(0.70)}))`;
+    } else {
+      out['--vs-sidebar-bg'] = `linear-gradient(180deg, rgba(255,255,255,${a(0.09)}), rgba(255,255,255,${a(0.04)}))`;
+      out['--vs-section-bg'] = `linear-gradient(180deg, rgba(255,255,255,${a(0.065)}), rgba(255,255,255,${a(0.025)}))`;
+    }
+  }
+  return out;
+}
+
+/** Ink override — Light forces white text (reads when the glass is pushed fully
+ * clear over a dark backdrop); Dark forces dark ink; Auto follows the palette. */
+function textOverrides(text: VsText): Record<string, string> {
+  if (text === 'light') {
+    return {
+      '--vs-text-primary': 'rgba(255,255,255,0.96)',
+      '--vs-text-secondary': 'rgba(255,255,255,0.74)',
+      '--vs-text-tertiary': 'rgba(255,255,255,0.52)',
+    };
+  }
+  if (text === 'dark') {
+    return {
+      '--vs-text-primary': 'rgba(15,23,42,0.92)',
+      '--vs-text-secondary': 'rgba(30,41,59,0.62)',
+      '--vs-text-tertiary': 'rgba(51,65,85,0.50)',
+    };
+  }
+  return {};
 }
 
 async function startDrag(e: React.MouseEvent) {
@@ -146,17 +224,32 @@ export default function VoiceSettingsWindow() {
   useEffect(() => {
     try {
       const raw = localStorage.getItem(VS_GLASS_KEY);
-      if (raw) setGlass({ ...DEFAULT_GLASS, ...JSON.parse(raw) });
+      if (raw) {
+        const parsed = { ...DEFAULT_GLASS, ...JSON.parse(raw) };
+        // The retired 'liquid' surface is now folded into 'glass' (same tune).
+        if ((parsed.surface as string) === 'liquid') parsed.surface = 'glass';
+        setGlass(parsed);
+      }
     } catch { /* noop */ }
   }, []);
+  // Live state updates instantly (smooth slider), but the localStorage write is
+  // debounced — a synchronous write every drag tick fires the cross-window
+  // `storage` event (re-rendering the dock too) and janks the frost glide.
+  const persistTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const updateGlass = useCallback((next: GlassControls) => {
     setGlass(next);
-    try { localStorage.setItem(VS_GLASS_KEY, JSON.stringify(next)); } catch { /* noop */ }
+    if (persistTimer.current) clearTimeout(persistTimer.current);
+    persistTimer.current = setTimeout(() => {
+      try { localStorage.setItem(VS_GLASS_KEY, JSON.stringify(next)); } catch { /* noop */ }
+    }, 150);
   }, []);
 
   const resolved = resolveGlass(glass, o8Transparent);
-  const liquid = resolved.saturate >= 150;
-  const sx = shellStyles(resolved.frost, resolved.saturate, resolved.clarity, liquid);
+  const sx = shellStyles(resolved.frost, resolved.saturate, resolved.clarity, resolved.brightness);
+  const lighting = lightingFinish(resolved.lighting);
+  const diffusion = diffusionVeil(resolved.diffusion);
+  const clearVars = clarityOverrides(mode, resolved.clarity, glass.clearPanels ?? false);
+  const inkVars = textOverrides(glass.text ?? 'auto');
 
   const loadPrefs = useCallback(async () => {
     const p = await voicePrefsGet();
@@ -189,7 +282,7 @@ export default function VoiceSettingsWindow() {
 
   if (mounted && !tauri) {
     return (
-      <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode] } as CSSProperties}><div style={sx.shell}>
+      <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode], ...clearVars, ...inkVars } as CSSProperties}><div style={sx.shell}>
         <div style={sx.scrim} aria-hidden />
         <p style={{ position: 'relative', zIndex: 1, margin: 'auto', fontSize: 13, color: TEXT_TERTIARY }}>
           Voice settings are only available in the desktop app.
@@ -199,15 +292,11 @@ export default function VoiceSettingsWindow() {
   }
 
   return (
-    <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode] } as CSSProperties}>
+    <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode], ...clearVars, ...inkVars } as CSSProperties}>
       <div style={sx.shell} onMouseDown={maybeStartDrag}>
         <div style={sx.scrim} aria-hidden />
-        {sx.liquid ? (
-          <div aria-hidden style={{
-            position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
-            background: 'linear-gradient(180deg, rgba(255,255,255,0.16), transparent 38%)',
-          }} />
-        ) : null}
+        {diffusion ? <div aria-hidden style={diffusion} /> : null}
+        {lighting ? <div aria-hidden style={lighting} /> : null}
 
         {/* Sidebar */}
         <aside style={{
@@ -285,8 +374,7 @@ function NavItem({ active, icon, label, onClick }: { active: boolean; icon: Icon
         background: active ? NAV_ACTIVE : hover ? NAV_HOVER : 'transparent',
         border: `1px solid ${active || hover ? NAV_BORDER : 'transparent'}`,
         boxShadow: active ? 'inset 0 1px 0 rgba(255,255,255,0.12)' : 'none',
-        transform: hover && !active ? 'translateY(-1px)' : 'none',
-        transition: `background ${TRANS}, color ${TRANS}, border-color ${TRANS}, transform ${TRANS}`,
+        transition: `background ${TRANS}, color ${TRANS}, border-color ${TRANS}`,
       }}
     >
       <span style={{ display: 'flex', opacity: active ? 1 : 0.85 }}><Icon icon={icon} size={18} /></span>
