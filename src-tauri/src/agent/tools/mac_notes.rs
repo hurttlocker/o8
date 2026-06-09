@@ -78,3 +78,33 @@ pub async fn create(args: Value) -> Result<Value, String> {
 
     Ok(json!({ "success": true, "title": title }))
 }
+
+pub async fn append(args: Value) -> Result<Value, String> {
+    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if title.is_empty() {
+        return Err("title is required".into());
+    }
+    let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if text.is_empty() {
+        return Err("text is required".into());
+    }
+    let title_esc = as_escape(&title);
+    // Notes bodies are HTML — append on a fresh line via <br>.
+    let text_esc = as_escape(&text);
+
+    let script = format!(
+        "\ntell application \"Notes\"\n\
+         \tset matches to notes whose name is \"{title_esc}\"\n\
+         \tif (count of matches) is 0 then return \"not found\"\n\
+         \tset n to item 1 of matches\n\
+         \tset body of n to (body of n) & \"<br>\" & \"{text_esc}\"\n\
+         \t\"appended\"\n\
+         end tell"
+    );
+
+    let result = tokio::task::spawn_blocking(move || run_applescript(&script))
+        .await
+        .map_err(|e| format!("spawn_blocking error: {e}"))??;
+
+    Ok(json!({ "success": result == "appended", "title": title, "status": result }))
+}
