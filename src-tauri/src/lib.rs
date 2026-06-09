@@ -2795,6 +2795,54 @@ fn dock_set_expanded(app: tauri::AppHandle, expanded: bool) {
     dock_window::set_expanded(&app, expanded);
 }
 
+/// Open the standalone Voice settings window (Symon parity). Double-tapping the
+/// dock pill invokes this — it works even when the main o8 window is closed,
+/// since the dock is always-on. Creates the window on first call, then just
+/// shows/focuses it. Renders `/voice-settings` (the same VoiceTab as the main
+/// settings overlay).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn open_voice_settings(app: tauri::AppHandle) {
+    use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
+    if let Some(win) = app.get_webview_window("voice-settings") {
+        let _ = win.center();
+        let _ = win.show();
+        let _ = win.set_focus();
+        return;
+    }
+    // Resolve the frontend origin the same way the dock does (dev-bridge aware).
+    let base = match dev_frontend::from_env() {
+        Ok(Some(dev)) => dev.origin().to_string(),
+        _ => {
+            let port = std::env::var("O8_API_PORT")
+                .ok()
+                .and_then(|s| s.parse::<u16>().ok())
+                .unwrap_or(3001);
+            format!("http://127.0.0.1:{}", port)
+        }
+    };
+    let url = format!("{}/voice-settings", base);
+    let parsed = match url.parse() {
+        Ok(u) => u,
+        Err(e) => {
+            log::warn!("[voice-settings] bad url {url}: {e}");
+            return;
+        }
+    };
+    match WebviewWindowBuilder::new(&app, "voice-settings", WebviewUrl::External(parsed))
+        .title("o8 Voice Settings")
+        .inner_size(560.0, 760.0)
+        .min_inner_size(460.0, 520.0)
+        .resizable(true)
+        .center()
+        .focused(true)
+        .build()
+    {
+        Ok(_) => log::info!("[voice-settings] window opened → {url}"),
+        Err(e) => log::warn!("[voice-settings] failed to open window: {e}"),
+    }
+}
+
 /// Read the voice preferences (`~/.o8/dictation.json`) for the settings panel,
 /// with API keys stripped. The config is mtime-cached, so writes apply live.
 #[tauri::command]
@@ -3099,6 +3147,7 @@ pub fn run() {
             tts_toggle_pause,
             tts_is_active,
             dock_set_expanded,
+            open_voice_settings,
             voice_prefs_get,
             voice_prefs_set,
             dictation_history_get,

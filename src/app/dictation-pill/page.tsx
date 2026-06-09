@@ -407,7 +407,18 @@ export default function DictationPillPage() {
         pointerEvents: 'none',
       }}
     >
-      <div style={{ pointerEvents: 'auto' }} onMouseMove={() => { if (askOpenRef.current) armAskIdleTimer(); }}>
+      <div
+        style={{ pointerEvents: 'auto' }}
+        onMouseMove={() => { if (askOpenRef.current) armAskIdleTimer(); }}
+        onDoubleClick={() => {
+          // Double-tap the IDLE dock to open the standalone Voice settings
+          // window (Symon parity — works even with the main app closed). Gated
+          // to idle so it never fires over the ask panel / speaking controls.
+          if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen) {
+            invokeCmd('open_voice_settings');
+          }
+        }}
+      >
         {/* The ONE morphing notch dock — idle ⇄ listening ⇄ thinking ⇄ done ⇄
             ask, in place (Symon NotchSurface). Not the in-window floating pill. */}
         <DockNotchSurface
