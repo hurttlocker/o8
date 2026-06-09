@@ -55,9 +55,6 @@ const GLASS_SHELL_BASE: CSSProperties = {
   position: 'relative', isolation: 'isolate', display: 'flex', width: '100%', height: '100%',
   borderRadius: 22, overflow: 'hidden', border: `1px solid ${SHELL_BORDER}`,
   boxShadow: SHELL_SHADOW,
-  // Keep the blurred pane on its own compositor layer so live Frost changes
-  // re-raster smoothly instead of flashing.
-  willChange: 'backdrop-filter',
 };
 
 /** Build the live shell + scrim styles from resolved glass params. The scrim
@@ -250,6 +247,20 @@ export default function VoiceSettingsWindow() {
   const diffusion = diffusionVeil(resolved.diffusion);
   const clearVars = clarityOverrides(mode, resolved.clarity, glass.clearPanels ?? false);
   const inkVars = textOverrides(glass.text ?? 'auto');
+  // On-glass ink for modal-less sections: white when floating on the clear Glass
+  // surface, the themed ink when on the opaque Solid surface.
+  const onGlass = glass.surface === 'glass' || (glass.surface === 'auto' && o8Transparent);
+  const onGlassInk: Record<string, string> = onGlass
+    ? {
+        '--vs-ink-onglass-1': 'rgba(255,255,255,0.96)',
+        '--vs-ink-onglass-2': 'rgba(255,255,255,0.82)',
+        '--vs-ink-onglass-3': 'rgba(255,255,255,0.70)',
+      }
+    : {
+        '--vs-ink-onglass-1': 'var(--vs-text-primary)',
+        '--vs-ink-onglass-2': 'var(--vs-text-secondary)',
+        '--vs-ink-onglass-3': 'var(--vs-text-tertiary)',
+      };
 
   const loadPrefs = useCallback(async () => {
     const p = await voicePrefsGet();
@@ -282,7 +293,7 @@ export default function VoiceSettingsWindow() {
 
   if (mounted && !tauri) {
     return (
-      <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode], ...clearVars, ...inkVars } as CSSProperties}><div style={sx.shell}>
+      <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode], ...clearVars, ...inkVars, ...onGlassInk } as CSSProperties}><div style={sx.shell}>
         <div style={sx.scrim} aria-hidden />
         <p style={{ position: 'relative', zIndex: 1, margin: 'auto', fontSize: 13, color: TEXT_TERTIARY }}>
           Voice settings are only available in the desktop app.
@@ -292,7 +303,7 @@ export default function VoiceSettingsWindow() {
   }
 
   return (
-    <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode], ...clearVars, ...inkVars } as CSSProperties}>
+    <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode], ...clearVars, ...inkVars, ...onGlassInk } as CSSProperties}>
       <div style={sx.shell} onMouseDown={maybeStartDrag}>
         <div style={sx.scrim} aria-hidden />
         {diffusion ? <div aria-hidden style={diffusion} /> : null}

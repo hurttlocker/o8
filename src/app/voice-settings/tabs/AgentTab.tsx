@@ -8,6 +8,7 @@
  */
 import {
   ICONS, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, GLASS_BORDER_SUBTLE, WARN_AMBER, SECTION_BG, SECTION_BORDER,
+  INK_ON_GLASS_1, INK_ON_GLASS_3,
 } from '../tokens';
 import { SectionCard, SectionTitle, SectionHint, ToggleRow, Icon, PageHeader, ProPill } from '../primitives';
 import { prefBool, type TabProps } from '../helpers';
@@ -64,9 +65,9 @@ export default function AgentTab({ prefs, setPref }: TabProps) {
       }}>
         <span style={{ color: WARN_AMBER, display: 'flex', marginTop: 1, flexShrink: 0 }}><Icon icon={ICONS.warning} size={16} /></span>
         <div>
-          <div style={{ fontSize: 12.5, fontWeight: 400, color: TEXT_PRIMARY, marginBottom: 6 }}>Safety — what it never does</div>
+          <div style={{ fontSize: 12.5, fontWeight: 500, color: INK_ON_GLASS_1, textShadow: '0 1px 3px rgba(0,0,0,0.28)', marginBottom: 6 }}>Safety — what it never does</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            {NEVER.map((n) => <span key={n} style={{ fontSize: 12, color: TEXT_TERTIARY, lineHeight: 1.45 }}>· {n}</span>)}
+            {NEVER.map((n) => <span key={n} style={{ fontSize: 12, color: INK_ON_GLASS_3, textShadow: '0 1px 2px rgba(0,0,0,0.22)', lineHeight: 1.45 }}>· {n}</span>)}
           </div>
         </div>
       </div>

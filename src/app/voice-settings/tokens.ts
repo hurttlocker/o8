@@ -20,6 +20,14 @@ export const TEXT_PRIMARY = 'var(--vs-text-primary)';
 export const TEXT_SECONDARY = 'var(--vs-text-secondary)';
 export const TEXT_TERTIARY = 'var(--vs-text-tertiary)';
 
+// ── On-glass ink (auto) ── for modal-less sections that float directly on the
+// clear glass (Stats time-saved hero, Agent safety note) with no card behind
+// them. page.tsx sets these to white on the clear Glass surface and to the
+// themed ink on the opaque Solid surface, so the text always reads.
+export const INK_ON_GLASS_1 = 'var(--vs-ink-onglass-1)';
+export const INK_ON_GLASS_2 = 'var(--vs-ink-onglass-2)';
+export const INK_ON_GLASS_3 = 'var(--vs-ink-onglass-3)';
+
 // ── Accent (theme-independent o8 voice blue) ──
 export const ACCENT = '#4058FF';
 export const ACCENT_LIGHT = '#6B7FFF';
