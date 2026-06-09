@@ -2957,7 +2957,10 @@ fn open_voice_settings(app: tauri::AppHandle) {
             if let Err(e) = window_vibrancy::apply_vibrancy(
                 &win,
                 window_vibrancy::NSVisualEffectMaterial::HudWindow,
-                None,
+                // Active (not the default follows-window-state) so the glass stays
+                // vibrant when another window is focused — no jarring grey "blur"
+                // swap on blur/focus.
+                Some(window_vibrancy::NSVisualEffectState::Active),
                 None,
             ) {
                 log::warn!("[voice-settings] vibrancy failed: {e}");
