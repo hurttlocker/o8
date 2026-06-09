@@ -367,10 +367,29 @@ export function DockNotchSurface({
   useEffect(() => { levelRef.current = audioLevel; }, [audioLevel]);
 
   // Dock theme (Theme tab → Dock). 'symon' = the multicolor brand surface,
-  // 'glass' = clear/frosted. Shared-origin localStorage; tracks the storage event.
+  // 'glass' = clear/frosted. Shared-origin localStorage; tracks the storage
+  // event. Also reads the Theme-tab glass sliders ('o8:vs-glass') so the dock
+  // glass pushes with the SAME Frost / Saturation / Brightness knobs as the
+  // settings shell — null until the user tunes (falls back to the dock default).
   const [dockTheme, setDockTheme] = useState<'symon' | 'glass'>('symon');
+  const [tunedBlur, setTunedBlur] = useState<React.CSSProperties | null>(null);
   useEffect(() => {
-    const read = () => { try { setDockTheme(localStorage.getItem('o8:dock-theme') === 'glass' ? 'glass' : 'symon'); } catch { /* noop */ } };
+    const read = () => {
+      try {
+        setDockTheme(localStorage.getItem('o8:dock-theme') === 'glass' ? 'glass' : 'symon');
+        const raw = localStorage.getItem('o8:vs-glass');
+        if (raw) {
+          const c = JSON.parse(raw);
+          const frost = typeof c.frost === 'number' ? c.frost : 26;
+          const sat = typeof c.saturate === 'number' ? c.saturate : 150;
+          const bright = typeof c.brightness === 'number' ? c.brightness : 104;
+          const f = `blur(${Math.round(frost)}px) saturate(${(sat / 100).toFixed(2)}) brightness(${(bright / 100).toFixed(2)})`;
+          setTunedBlur({ backdropFilter: f, WebkitBackdropFilter: f });
+        } else {
+          setTunedBlur(null);
+        }
+      } catch { /* noop */ }
+    };
     read();
     window.addEventListener('storage', read);
     return () => window.removeEventListener('storage', read);
@@ -378,7 +397,7 @@ export function DockNotchSurface({
   const glassDock = dockTheme === 'glass';
   const idleBg = glassDock ? GLASS_IDLE : SYMON_IDLE_GRADIENT;
   const capsuleBg = glassDock ? GLASS_CAPSULE_BG : SYMON_CAPSULE_BG;
-  const capsuleBlur: React.CSSProperties = glassDock ? GLASS_BLUR : {};
+  const capsuleBlur: React.CSSProperties = glassDock ? (tunedBlur ?? GLASS_BLUR) : {};
 
   const trimmedPartial = partialTranscript.trim();
 

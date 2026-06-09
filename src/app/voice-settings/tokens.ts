@@ -68,28 +68,63 @@ export { ICONS } from './icons';
 // ── Adjustable glass (Theme tab) ── frost = backdrop blur; clarity = how
 // see-through (drives a scrim opacity); saturate = backdrop saturation. A high
 // saturation flips on the "liquid" specular sheen (Apple Liquid Glass cue).
-export type VsSurface = 'auto' | 'glass' | 'solid' | 'liquid';
-export interface GlassControls { surface: VsSurface; frost: number; clarity: number; saturate: number }
-
-// Picking a surface seeds the sliders; 'auto' resolves from o8's transparency.
-export const SURFACE_PRESETS: Record<'glass' | 'solid' | 'liquid', { frost: number; clarity: number; saturate: number }> = {
-  glass: { frost: 28, clarity: 60, saturate: 115 },
-  solid: { frost: 0, clarity: 4, saturate: 100 },
-  // Operator-tuned "fire" look: clear, no blur, max color pop + the specular sheen.
-  liquid: { frost: 0, clarity: 100, saturate: 220 },
-};
-export const DEFAULT_GLASS: GlassControls = { surface: 'auto', frost: 28, clarity: 60, saturate: 115 };
-
-/** Resolve the live glass params. 'auto' follows o8's transparency; any other
- * surface uses the live slider values (seeded from its preset when picked). */
-export function resolveGlass(c: GlassControls, o8Transparent: boolean): { frost: number; clarity: number; saturate: number } {
-  if (c.surface === 'auto') return o8Transparent ? SURFACE_PRESETS.glass : SURFACE_PRESETS.solid;
-  return { frost: c.frost, clarity: c.clarity, saturate: c.saturate };
+export type VsSurface = 'auto' | 'glass' | 'solid';
+// Ink override (Theme tab) — Light reads when the glass is pushed fully clear;
+// Auto follows the o8 palette.
+export type VsText = 'auto' | 'light' | 'dark';
+// frost = backdrop blur; clarity = see-through (scrim opacity); saturate =
+// backdrop saturation; brightness = material lift (%); lighting = specular gloss
+// + bright edges (light playing on the surface, 0 = flat); diffusion = milky
+// light-scattering (frosted softness, 0 = clear). All 0 → today's exact glass.
+export interface GlassControls {
+  surface: VsSurface;
+  frost: number;
+  clarity: number;
+  saturate: number;
+  brightness: number;
+  lighting: number;
+  diffusion: number;
+  text: VsText;
+  // When true (+ high clarity), the sidebar and the section cards go clear too,
+  // not just the in-between — the full all-clear look for white-on-glass.
+  clearPanels: boolean;
 }
 
-/** clarity 0..100 → scrim opacity (0 = solid panel, 100 = clearest glass). */
+// `text` + `clearPanels` are modes, not glass numbers — kept out of resolved params.
+type GlassParams = Omit<GlassControls, 'surface' | 'text' | 'clearPanels'>;
+
+// The locked "glass" tune (operator-finalized). Only Frost stays adjustable —
+// it's the accessibility lever (more frost = more readable for low-vision users);
+// the rest of the glass is fixed here so "glass" always means this exact look.
+const GLASS_TUNE = { clarity: 200, saturate: 220, brightness: 135, lighting: 0, diffusion: 0 };
+
+// Picking a surface seeds the look; 'auto' resolves from o8's transparency. Glass
+// is the locked tune (frost 0 default); Solid is the opaque accessibility look.
+export const SURFACE_PRESETS: Record<'glass' | 'solid', GlassParams> = {
+  glass: { frost: 0, ...GLASS_TUNE },
+  solid: { frost: 0, clarity: 4, saturate: 100, brightness: 100, lighting: 0, diffusion: 0 },
+};
+export const DEFAULT_GLASS: GlassControls = {
+  surface: 'auto', frost: 0, ...GLASS_TUNE, text: 'auto', clearPanels: false,
+};
+
+/** Resolve the live glass params. 'auto' follows o8's transparency; any other
+ * surface uses the live slider values (seeded from its preset when picked).
+ * `?? default` keeps older persisted JSON safe across param renames. */
+export function resolveGlass(c: GlassControls, o8Transparent: boolean): GlassParams {
+  if (c.surface === 'auto') return o8Transparent ? SURFACE_PRESETS.glass : SURFACE_PRESETS.solid;
+  // The tune is locked — only Frost varies. Force the preset values for
+  // everything else so stale persisted experiments can't change the look.
+  const preset = c.surface === 'solid' ? SURFACE_PRESETS.solid : SURFACE_PRESETS.glass;
+  return { ...preset, frost: c.frost };
+}
+
+/** clarity → scrim opacity (0 = solid panel; higher = clearer glass). 0..100 is
+ * the original curve (1 → 0.05); 100..200 pushes the last sliver of tint away
+ * (0.05 → 0) so you can fine-tune all the way to fully-clear, dock-style glass. */
 export function scrimOpacity(clarity: number): number {
-  return Math.max(0.05, Math.min(0.99, 1 - (clarity / 100) * 0.95));
+  if (clarity <= 100) return Math.max(0.05, Math.min(0.99, 1 - (clarity / 100) * 0.95));
+  return Math.max(0, 0.05 - ((clarity - 100) / 100) * 0.05);
 }
 
 // ── Theme var maps ── applied to the shell root by page.tsx. Light = Symon's
@@ -133,7 +168,9 @@ export const VS_THEME_VARS: Record<VsMode, Record<string, string>> = {
     '--vs-glass-border-subtle': 'rgba(15,23,42,0.09)',
     // Opaque enough to read crisp-light over the (dark) HudWindow material.
     '--vs-shell-bg': 'linear-gradient(180deg, rgba(248,250,253,0.94), rgba(241,245,250,0.88))',
-    '--vs-shell-border': 'rgba(255,255,255,0.90)',
+    // Softer than pure white — a 0.90 white bezel reads stark/distracting against
+    // the now-clear glass. Soft neutral edge; the drop shadow carries definition.
+    '--vs-shell-border': 'rgba(226,232,240,0.55)',
     '--vs-shell-shadow': '0 24px 60px rgba(100,116,139,0.26)',
     '--vs-frost-base': 'linear-gradient(180deg, rgba(255,255,255,0.62), rgba(248,250,253,0.50))',
     '--vs-sidebar-bg': 'linear-gradient(180deg, rgba(255,255,255,0.82), rgba(244,247,251,0.66))',
