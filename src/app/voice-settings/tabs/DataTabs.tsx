@@ -12,7 +12,7 @@ import {
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, ICONS,
 } from '../tokens';
 import {
-  SectionCard, SectionTitle, SectionHint, AccentButton, Icon, PAGE_TITLE_STYLE,
+  SectionCard, SectionTitle, SectionHint, AccentButton, Icon, PageHeader,
 } from '../primitives';
 import { prefList, prefReplacements, prefStr, type ReplacementRule, type TabProps } from '../helpers';
 
@@ -37,7 +37,7 @@ function focusStyle(focus: boolean): CSSProperties {
 export function PolishTab({ prefs, setPref }: TabProps) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Polish</h1>
+      <PageHeader icon={ICONS.sparkle} title="Polish" />
       <DictionarySection prefs={prefs} setPref={setPref} />
       <SnippetsSection prefs={prefs} setPref={setPref} />
       <InstructionsSection prefs={prefs} setPref={setPref} />

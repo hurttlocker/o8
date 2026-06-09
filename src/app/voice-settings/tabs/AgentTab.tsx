@@ -9,7 +9,7 @@
 import {
   ICONS, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, GLASS_BORDER_SUBTLE, WARN_AMBER, SECTION_BG, SECTION_BORDER,
 } from '../tokens';
-import { SectionCard, SectionTitle, SectionHint, ToggleRow, Icon, PAGE_TITLE_STYLE, ProPill } from '../primitives';
+import { SectionCard, SectionTitle, SectionHint, ToggleRow, Icon, PageHeader, ProPill } from '../primitives';
 import { prefBool, type TabProps } from '../helpers';
 
 const ALLOWED = [
@@ -29,7 +29,7 @@ export default function AgentTab({ prefs, setPref }: TabProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Agent <span style={{ fontSize: 12 }}><ProPill /></span></h1>
+      <PageHeader icon={ICONS.robot} title="Agent" right={<ProPill />} />
 
       <SectionCard>
         <SectionTitle icon={ICONS.robot}>Advanced context</SectionTitle>

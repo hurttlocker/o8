@@ -18,7 +18,7 @@ import {
 } from '../tokens';
 import {
   SectionCard, SectionTitle, SectionHint, ToggleRow, ControlRow, Select, Segmented, Slider,
-  StatusBadge, GhostButton, AccentButton, PAGE_TITLE_STYLE,
+  StatusBadge, GhostButton, AccentButton, PageHeader,
 } from '../primitives';
 import {
   prefBool, prefStr, prefNum, LOCALE_OPTIONS, TONE_OPTIONS, VOICE_OPTIONS, PREVIEW_LINE,
@@ -86,7 +86,7 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <h1 style={PAGE_TITLE_STYLE}>Settings</h1>
+      <PageHeader icon={ICONS.gear} title="Settings" />
 
       {/* Input */}
       <SectionCard>

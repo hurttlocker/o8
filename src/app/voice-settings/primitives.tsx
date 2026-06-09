@@ -163,7 +163,7 @@ export function AccentButton({ label, onClick }: { label: string; onClick: () =>
 // ── Section card + title ──
 export function SectionCard({ children, style }: { children: ReactNode; style?: CSSProperties }) {
   return (
-    <div style={{
+    <div data-drag-skip="" style={{
       padding: '16px 18px', borderRadius: 18, border: `1px solid ${SECTION_BORDER}`,
       background: SECTION_BG, boxShadow: SECTION_SHADOW,
       backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
@@ -355,3 +355,19 @@ export function StatusBadge({ ok, okLabel = 'Granted', warnLabel = 'Needs grant'
 export const PAGE_TITLE_STYLE: CSSProperties = {
   fontSize: 19, fontWeight: W_HEADING, letterSpacing: '-0.02em', color: TEXT_PRIMARY, margin: 0,
 };
+
+// Page title in a glass card (matches the section cards) instead of bare text on
+// the background — leading accent icon + title, optional right-side actions.
+export function PageHeader({ icon, title, right }: { icon?: IconComp; title: string; right?: ReactNode }) {
+  return (
+    <div data-drag-skip="" style={{
+      display: 'flex', alignItems: 'center', gap: 11, padding: '13px 18px', borderRadius: 16,
+      border: `1px solid ${SECTION_BORDER}`, background: SECTION_BG, boxShadow: SECTION_SHADOW,
+      backdropFilter: 'blur(12px)', WebkitBackdropFilter: 'blur(12px)',
+    }}>
+      {icon ? <span style={{ color: ACCENT, display: 'flex', opacity: 0.95 }}><Icon icon={icon} size={18} /></span> : null}
+      <h1 style={PAGE_TITLE_STYLE}>{title}</h1>
+      {right ? <span style={{ marginLeft: 'auto', display: 'inline-flex', alignItems: 'center', gap: 8 }}>{right}</span> : null}
+    </div>
+  );
+}

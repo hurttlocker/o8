@@ -16,6 +16,8 @@ mod stt;
 mod tts;
 #[cfg(target_os = "macos")]
 mod ai;
+#[cfg(target_os = "macos")]
+mod agent;
 mod webview_latch;
 
 use rusqlite::{Connection, OpenFlags};
@@ -2459,6 +2461,9 @@ mod stt_engine {
             // true and mis-route the NEXT dictation to Ask. Routed at the bottom
             // (after polish) via this local. Always false off the macOS Ask path.
             let is_ask = crate::fn_hotkey::take_ask_mode();
+            // Same for the Left-Option agent flag — routed at the bottom to the
+            // Symon voice agent. Always false off the macOS agent path.
+            let is_agent = crate::fn_hotkey::take_agent_mode();
 
             let apple_text = take_final(session_id).unwrap_or_default();
 
@@ -2495,7 +2500,7 @@ mod stt_engine {
             // it. `is_system_origin()` is always false off the macOS system path.
             // Also skipped for an Ask question (`!is_ask`) — a spoken question
             // must reach Gemini verbatim, not be mangled by the command parser.
-            let raw_text = if crate::fn_hotkey::is_system_origin() && !is_ask {
+            let raw_text = if crate::fn_hotkey::is_system_origin() && !is_ask && !is_agent {
                 match crate::stt::commands::process(&raw_text) {
                     crate::stt::commands::CommandResult::Text(t) => t,
                     crate::stt::commands::CommandResult::Cancel => {
@@ -2603,6 +2608,21 @@ mod stt_engine {
                 let _ = app.emit("o8:stt-event", idle);
                 crate::dictation_history::record("ask", &polished, None);
                 crate::spawn_ask_and_speak(app.clone(), polished);
+                return;
+            }
+
+            // ── Agent mode (Left-Option) — the polished text is a COMMAND ──
+            // Route it to the Symon voice agent (tool-calling loop), which
+            // streams progress + a spoken result to the dock and surfaces a
+            // confirm card for any risky action. Same teardown as Ask.
+            #[cfg(target_os = "macos")]
+            if is_agent {
+                crate::fn_hotkey::set_system_origin(false);
+                let idle = serde_json::json!({ "type": "system-idle", "origin": "system" });
+                let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
+                let _ = app.emit("o8:stt-event", idle);
+                crate::dictation_history::record("agent", &polished, None);
+                crate::agent::spawn_agent(app.clone(), polished);
                 return;
             }
 
@@ -3060,6 +3080,30 @@ fn ask_question(app: tauri::AppHandle, text: String) {
     spawn_ask_and_speak(app, text);
 }
 
+/// Run the Symon voice agent on `prompt` (a separate lane from Ask). Fire-and-
+/// forget: the tool-calling loop runs on its own thread; progress + the final
+/// spoken answer reach the user via `o8:agent-task-event` + TTS, and any
+/// risky action surfaces a confirm card via `o8:agent-confirm`.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_run(app: tauri::AppHandle, prompt: String) {
+    agent::spawn_agent(app, prompt);
+}
+
+/// Resolve a pending agent confirm card (Allow / Cancel).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_confirm(task_id: String, allow: bool) {
+    agent::resolve_confirm(&task_id, allow);
+}
+
+/// The most recent agent task (status/result), for the dock to poll if needed.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_task_status() -> Option<serde_json::Value> {
+    agent::store::latest_task()
+}
+
 /// TEMPORARY debug command (system-wide Symon fold P1): paste `text` into the
 /// currently-focused 3rd-party app, so paste-into-frontmost is verifiable
 /// without the global Fn hotkey. macOS only.
@@ -3301,6 +3345,12 @@ pub fn run() {
             dictation_history_delete,
             #[cfg(target_os = "macos")]
             ask_question,
+            #[cfg(target_os = "macos")]
+            agent_run,
+            #[cfg(target_os = "macos")]
+            agent_confirm,
+            #[cfg(target_os = "macos")]
+            agent_task_status,
             #[cfg(target_os = "macos")]
             o8_debug_paste,
             #[cfg(target_os = "macos")]

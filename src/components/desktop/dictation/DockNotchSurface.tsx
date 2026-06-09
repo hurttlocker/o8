@@ -30,7 +30,7 @@
  * preserves Symon's exact LOOK while obeying the inline-styles-only rule.
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { DictationSnapshot, DictationState } from './types';
 import { DockAskPanel, type AskTurn } from './DockAskPanel';
 
@@ -67,6 +67,15 @@ const SYMON_IDLE_GRADIENT = 'linear-gradient(100deg, #aecdff 0%, #d7c2f1 46%, #f
 const SYMON_CAPSULE_BG =
   'linear-gradient(rgba(13, 11, 26, 0.5), rgba(13, 11, 26, 0.5)),'
   + ' linear-gradient(100deg, #aecdff 0%, #d7c2f1 46%, #f7d9bf 100%)';
+
+// ── Glass dock theme (Theme tab → Dock = Glass) — clear/frosted instead of the
+// Symon multicolor. The capsule/panel rely on backdrop blur for the frost.
+const GLASS_IDLE = 'linear-gradient(rgba(255,255,255,0.20), rgba(232,238,250,0.10))';
+const GLASS_CAPSULE_BG = 'linear-gradient(rgba(20,24,34,0.52), rgba(14,18,28,0.46))';
+const GLASS_PANEL_BG = 'linear-gradient(rgba(16,20,30,0.52), rgba(12,16,26,0.46))';
+const GLASS_BLUR: React.CSSProperties = {
+  backdropFilter: 'blur(26px) saturate(150%)', WebkitBackdropFilter: 'blur(26px) saturate(150%)',
+};
 
 // SquiggleLoader path — verbatim from SquiggleLoader.svelte.
 const SQUIGGLE_PATH =
@@ -302,6 +311,11 @@ interface DockNotchSurfaceProps {
   askMode?: 'idle' | 'listening' | 'answer';
   askThread?: AskTurn[];
   onCloseAsk?: () => void;
+  /** Symon voice agent — a pending confirm card for a risky action (Allow /
+   * Cancel), the working indicator while the loop runs, and the resolver. */
+  agentConfirm?: { taskId: string; tool: string; summary: string } | null;
+  agentWorking?: boolean;
+  onAgentConfirm?: (taskId: string, allow: boolean) => void;
 }
 
 /**
@@ -319,6 +333,9 @@ export function DockNotchSurface({
   askMode = 'idle',
   askThread = [],
   onCloseAsk,
+  agentConfirm = null,
+  agentWorking = false,
+  onAgentConfirm,
 }: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
@@ -338,16 +355,58 @@ export function DockNotchSurface({
   const askListening = isAsking && askMode === 'listening' && askThread.length === 0;
   const mode = dictationMode;
   const isError = state === 'error';
+  // Symon voice agent surfaces. A pending confirm wins over everything except a
+  // real dictation (you can Left-Option talk over it). The working indicator
+  // shows while the loop runs and nothing else owns the dock.
+  const isConfirming = !!agentConfirm && dictationMode === 'idle';
+  const isAgentWorking =
+    agentWorking && !isConfirming && dictationMode === 'idle' && !isAsking && !isSpeaking;
 
   // Live ref for the canvas RAF loop (avoid re-running the effect per frame).
   const levelRef = useRef<number>(audioLevel);
   useEffect(() => { levelRef.current = audioLevel; }, [audioLevel]);
+
+  // Dock theme (Theme tab → Dock). 'symon' = the multicolor brand surface,
+  // 'glass' = clear/frosted. Shared-origin localStorage; tracks the storage event.
+  const [dockTheme, setDockTheme] = useState<'symon' | 'glass'>('symon');
+  useEffect(() => {
+    const read = () => { try { setDockTheme(localStorage.getItem('o8:dock-theme') === 'glass' ? 'glass' : 'symon'); } catch { /* noop */ } };
+    read();
+    window.addEventListener('storage', read);
+    return () => window.removeEventListener('storage', read);
+  }, []);
+  const glassDock = dockTheme === 'glass';
+  const idleBg = glassDock ? GLASS_IDLE : SYMON_IDLE_GRADIENT;
+  const capsuleBg = glassDock ? GLASS_CAPSULE_BG : SYMON_CAPSULE_BG;
+  const capsuleBlur: React.CSSProperties = glassDock ? GLASS_BLUR : {};
 
   const trimmedPartial = partialTranscript.trim();
 
   // ── Per-mode geometry (verbatim Symon NotchSurface dimensions) ──
   // idle: 128×16 sliver. listening/thinking: 248×40 capsule. done: 420×44 wide.
   const geometry: React.CSSProperties = (() => {
+    if (isConfirming) {
+      // Confirm card — wide enough for the summary + Allow/Cancel. Fits the
+      // collapsed 520×120 dock window, so no expand needed.
+      return {
+        width: 420,
+        height: 96,
+        borderRadius: '0 0 24px 24px',
+        background: capsuleBg, ...capsuleBlur,
+        borderColor: 'rgba(255, 255, 255, 0.4)',
+        boxShadow: '0 14px 32px rgba(40, 40, 80, 0.36)',
+      } as React.CSSProperties;
+    }
+    if (isAgentWorking) {
+      return {
+        width: 248,
+        height: 40,
+        borderRadius: '0 0 20px 20px',
+        background: capsuleBg, ...capsuleBlur,
+        borderColor: 'rgba(255, 255, 255, 0.4)',
+        boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
+      } as React.CSSProperties;
+    }
     if (isAsking) {
       if (askListening) {
         // Listening for the question — the compact brand capsule + waveform.
@@ -355,7 +414,7 @@ export function DockNotchSurface({
           width: 248,
           height: 40,
           borderRadius: '0 0 20px 20px',
-          background: SYMON_CAPSULE_BG,
+          background: capsuleBg, ...capsuleBlur,
           borderColor: 'rgba(255, 255, 255, 0.4)',
           boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
         } as React.CSSProperties;
@@ -366,9 +425,10 @@ export function DockNotchSurface({
         width: 420,
         height: 380,
         borderRadius: '0 0 26px 26px',
-        background:
-          'linear-gradient(rgba(13, 11, 26, 0.62), rgba(13, 11, 26, 0.62)),'
-          + ' linear-gradient(100deg, #aecdff 0%, #d7c2f1 46%, #f7d9bf 100%)',
+        background: glassDock
+          ? GLASS_PANEL_BG
+          : 'linear-gradient(rgba(13, 11, 26, 0.62), rgba(13, 11, 26, 0.62)),'
+            + ' linear-gradient(100deg, #aecdff 0%, #d7c2f1 46%, #f7d9bf 100%)',
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 16px 34px rgba(0, 0, 0, 0.34)',
         backdropFilter: 'blur(34px) saturate(140%)',
@@ -381,7 +441,7 @@ export function DockNotchSurface({
         width: 196,
         height: 40,
         borderRadius: '0 0 20px 20px',
-        background: SYMON_CAPSULE_BG,
+        background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
       } as React.CSSProperties;
@@ -391,7 +451,7 @@ export function DockNotchSurface({
         width: 128,
         height: 16,
         borderRadius: '0 0 14px 14px',
-        background: SYMON_IDLE_GRADIENT,
+        background: idleBg,
         borderColor: 'rgba(255, 255, 255, 0.45)',
         boxShadow: '0 6px 20px rgba(0, 0, 0, 0.28), inset 0 -2px 6px rgba(120, 110, 160, 0.22)',
         backdropFilter: 'blur(10px) saturate(160%)',
@@ -407,7 +467,7 @@ export function DockNotchSurface({
         borderRadius: '0 0 20px 20px',
         background: isError
           ? 'linear-gradient(rgba(40, 12, 12, 0.55), rgba(40, 12, 12, 0.55)), linear-gradient(100deg, #ffb4b4 0%, #f7c2c2 46%, #f7d9bf 100%)'
-          : SYMON_CAPSULE_BG,
+          : capsuleBg,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: isError
           ? '0 8px 22px rgba(80, 30, 30, 0.34), inset 0 -2px 0 #ef4444'
@@ -428,7 +488,7 @@ export function DockNotchSurface({
       width,
       height: 40,
       borderRadius: '0 0 20px 20px',
-      background: SYMON_CAPSULE_BG,
+      background: capsuleBg, ...capsuleBlur,
       borderColor: 'rgba(255, 255, 255, 0.4)',
       boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
     } as React.CSSProperties;
@@ -436,7 +496,124 @@ export function DockNotchSurface({
 
   // ── Inner content per mode ──
   let body: React.ReactNode = null;
-  if (isAsking) {
+  if (isConfirming && agentConfirm) {
+    const confirm = agentConfirm;
+    body = (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          justifyContent: 'center',
+          gap: 9,
+          width: '100%',
+          height: '100%',
+          paddingLeft: 18,
+          paddingRight: 18,
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0 }}>
+          <span
+            style={{
+              fontSize: 9.5,
+              fontWeight: 260,
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase',
+              color: 'rgba(255, 255, 255, 0.7)',
+              textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
+            }}
+          >
+            Symon wants to
+          </span>
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 320,
+              letterSpacing: '-0.1px',
+              color: '#fff',
+              textShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+            title={confirm.summary}
+          >
+            {confirm.summary}
+          </span>
+        </div>
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <button
+            type="button"
+            onClick={() => onAgentConfirm?.(confirm.taskId, false)}
+            style={{
+              height: 28,
+              paddingLeft: 14,
+              paddingRight: 14,
+              borderRadius: 14,
+              border: '1px solid rgba(255, 255, 255, 0.32)',
+              background: 'rgba(255, 255, 255, 0.12)',
+              color: 'rgba(255, 255, 255, 0.92)',
+              fontSize: 12,
+              fontWeight: 400,
+              letterSpacing: '-0.1px',
+              cursor: 'pointer',
+            }}
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => onAgentConfirm?.(confirm.taskId, true)}
+            style={{
+              height: 28,
+              paddingLeft: 18,
+              paddingRight: 18,
+              borderRadius: 14,
+              border: '1px solid rgba(255, 255, 255, 0.5)',
+              background: 'rgba(255, 255, 255, 0.92)',
+              color: '#1a1730',
+              fontSize: 12,
+              fontWeight: 500,
+              letterSpacing: '-0.1px',
+              cursor: 'pointer',
+            }}
+          >
+            Allow
+          </button>
+        </div>
+      </div>
+    );
+  } else if (isAgentWorking) {
+    body = (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 10,
+          width: '100%',
+          height: '100%',
+          paddingLeft: 14,
+          paddingRight: 14,
+          overflow: 'hidden',
+        }}
+      >
+        <NotchSquiggle />
+        <span
+          style={{
+            fontSize: 11,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            color: 'rgba(255, 255, 255, 0.9)',
+            textShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Symon is working…
+        </span>
+      </div>
+    );
+  } else if (isAsking) {
     if (askListening) {
       body = (
         <div

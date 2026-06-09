@@ -111,6 +111,11 @@ export default function DictationPillPage() {
   const [askOpen, setAskOpen] = useState(false);
   const [askMode, setAskMode] = useState<AskMode>('idle');
   const [askThread, setAskThread] = useState<AskTurn[]>([]);
+  // Symon voice agent: a pending confirm card + the working indicator.
+  const [agentConfirm, setAgentConfirm] = useState<
+    { taskId: string; tool: string; summary: string } | null
+  >(null);
+  const [agentWorking, setAgentWorking] = useState(false);
   const askIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const askLastClosedRef = useRef<number>(0);
   const askOpenRef = useRef(false);
@@ -359,6 +364,45 @@ export default function DictationPillPage() {
     };
   }, [armAskIdleTimer]);
 
+  // Resolve a pending agent confirm card → tell Rust, clear the card locally.
+  const handleAgentConfirm = useCallback((taskId: string, allow: boolean) => {
+    invokeCmd('agent_confirm', { taskId, allow });
+    setAgentConfirm(null);
+  }, []);
+
+  // ── Symon voice agent events (o8:agent-confirm / o8:agent-task-event) ──
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    const offs: Array<() => void> = [];
+    import('@tauri-apps/api/event')
+      .then(async ({ listen }) => {
+        const add = (u: () => void) => { if (disposed) u(); else offs.push(u); };
+        add(await listen<{ taskId?: string; tool?: string; summary?: string }>('o8:agent-confirm', (e) => {
+          const taskId = e.payload?.taskId ?? '';
+          const tool = e.payload?.tool ?? '';
+          const summary = e.payload?.summary ?? 'Run this action?';
+          dockLog(`agent-confirm ${tool}`);
+          if (taskId) setAgentConfirm({ taskId, tool, summary });
+        }));
+        add(await listen<{ kind?: string; status?: string }>('o8:agent-task-event', (e) => {
+          if (e.payload?.kind !== 'status') return;
+          const status = e.payload?.status;
+          if (status === 'running') {
+            setAgentWorking(true);
+          } else if (status === 'done' || status === 'failed') {
+            setAgentWorking(false);
+            setAgentConfirm(null);
+          }
+        }));
+      })
+      .catch((err) => dockLog(`agent subscribe failed: ${err instanceof Error ? err.message : String(err)}`));
+    return () => {
+      disposed = true;
+      for (const off of offs) { try { off(); } catch { /* noop */ } }
+    };
+  }, []);
+
   // Escape collapses the open Ask panel.
   useEffect(() => {
     if (!isTauri()) return;
@@ -430,6 +474,9 @@ export default function DictationPillPage() {
           askMode={askMode}
           askThread={askThread}
           onCloseAsk={closeAsk}
+          agentConfirm={agentConfirm}
+          agentWorking={agentWorking}
+          onAgentConfirm={handleAgentConfirm}
         />
       </div>
     </div>
