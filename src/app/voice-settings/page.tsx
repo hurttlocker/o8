@@ -13,10 +13,10 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
 import { isTauri, voicePrefsGet, voicePrefsSet } from '@/lib/tauri/bridge';
 import {
-  CONTENT_BG, FROST_BASE, GLASS_BORDER_SUBTLE, GRID_DOT, ICONS, NAV_ACTIVE, NAV_BORDER,
-  NAV_HOVER, SF, SHELL_BG, SHELL_BORDER, SHELL_SHADOW, SIDEBAR_BG, TEXT_PRIMARY,
+  CONTENT_BG, GLASS_BORDER_SUBTLE, GRID_DOT, ICONS, NAV_ACTIVE, NAV_BORDER,
+  NAV_HOVER, SF, SHELL_BORDER, SHELL_SHADOW, SIDEBAR_BG, TEXT_PRIMARY,
   TEXT_SECONDARY, TEXT_TERTIARY, TL_CLOSE, TL_CLOSE_HOVER, TL_MIN, TL_ZOOM, TRANS,
-  VS_THEME_VARS, type VsMode,
+  VS_THEME_VARS, DEFAULT_GLASS, resolveGlass, scrimOpacity, type VsMode, type GlassControls,
 } from './tokens';
 import { BrandGlyph, BrandWave, Icon } from './primitives';
 import type { IconComp } from './icons';
@@ -28,14 +28,16 @@ import AccountTab from './tabs/AccountTab';
 import ReportTab from './tabs/ReportTab';
 import FounderTab from './tabs/FounderTab';
 import AgentTab from './tabs/AgentTab';
+import ThemeTab from './tabs/ThemeTab';
 import { PolishTab } from './tabs/DataTabs';
 
 export const dynamic = 'force-dynamic';
 
-type TabId = 'settings' | 'polish' | 'history' | 'stats' | 'account' | 'founder' | 'agent' | 'report';
+type TabId = 'settings' | 'polish' | 'theme' | 'history' | 'stats' | 'account' | 'founder' | 'agent' | 'report';
 const TABS: { id: TabId; label: string; icon: IconComp }[] = [
   { id: 'settings', label: 'Settings', icon: ICONS.gear },
   { id: 'polish', label: 'Polish', icon: ICONS.sparkle },
+  { id: 'theme', label: 'Theme', icon: ICONS.droplet },
   { id: 'history', label: 'History', icon: ICONS.clock },
   { id: 'stats', label: 'Stats', icon: ICONS.chartBar },
   { id: 'account', label: 'Account', icon: ICONS.user },
@@ -44,20 +46,41 @@ const TABS: { id: TabId; label: string; icon: IconComp }[] = [
   { id: 'report', label: 'Report Issue', icon: ICONS.warning },
 ];
 
+const VS_GLASS_KEY = 'o8:vs-glass';
+
 const PAGE_ROOT: CSSProperties = {
   width: '100vw', height: '100vh', margin: 0, padding: 0, background: 'transparent', overflow: 'hidden', fontFamily: SF,
 };
-const GLASS_SHELL: CSSProperties = {
+const GLASS_SHELL_BASE: CSSProperties = {
   position: 'relative', isolation: 'isolate', display: 'flex', width: '100%', height: '100%',
   borderRadius: 22, overflow: 'hidden', border: `1px solid ${SHELL_BORDER}`,
-  background: `radial-gradient(circle at top left, var(--vs-accent-radial), transparent 38%), ${SHELL_BG}`,
-  backdropFilter: 'blur(28px) saturate(1.08)', WebkitBackdropFilter: 'blur(28px) saturate(1.08)',
   boxShadow: SHELL_SHADOW,
 };
-const FROST_LAYER: CSSProperties = {
-  position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
-  background: FROST_BASE, backdropFilter: 'blur(30px)', WebkitBackdropFilter: 'blur(30px)',
-};
+
+/** Build the live shell + scrim styles from resolved glass params. The scrim
+ * (palette base color at clarity-derived opacity) provides the tint over the
+ * vibrancy; backdrop blur + saturate are the frost; liquid adds a specular edge. */
+function shellStyles(frost: number, saturate: number, clarity: number, liquid: boolean) {
+  // saturate + a hair of brightness lift the material; blur is the frost knob.
+  const filter = `blur(${Math.round(frost)}px) saturate(${(saturate / 100).toFixed(2)}) brightness(1.04)`;
+  // Directional rim (top-left light source) — the specular "tell" that makes the
+  // pane read as glass even at frost 0 / clarity 100 (Gemini's #1 note from the
+  // Liquid Glass breakdown). Stronger when liquid.
+  const rim = liquid
+    ? 'inset 0 1.5px 0 rgba(255,255,255,0.6), inset 1.5px 0 0 rgba(255,255,255,0.26), inset 0 0 46px rgba(255,255,255,0.06)'
+    : 'inset 0 1px 0 rgba(255,255,255,0.34), inset 1px 0 0 rgba(255,255,255,0.13)';
+  const shell: CSSProperties = {
+    ...GLASS_SHELL_BASE,
+    background: 'radial-gradient(circle at top left, var(--vs-accent-radial), transparent 40%)',
+    backdropFilter: filter, WebkitBackdropFilter: filter,
+    boxShadow: `${SHELL_SHADOW}, ${rim}`,
+  };
+  const scrim: CSSProperties = {
+    position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
+    background: 'rgb(var(--vs-scrim-rgb))', opacity: scrimOpacity(clarity),
+  };
+  return { shell, scrim, liquid };
+}
 
 async function startDrag(e: React.MouseEvent) {
   if (e.button !== 0) return;
@@ -77,19 +100,28 @@ async function closeWindow() {
 
 export default function VoiceSettingsWindow() {
   const tauri = isTauri();
+  // Gate the tauri-only fallback on mount so SSR (no window → !tauri) and the
+  // first client paint render the same tree — otherwise hydration mismatches and
+  // Next surfaces a "1 Issue". After mount, a real browser still gets the notice.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
   const [tab, setTab] = useState<TabId>('settings');
   const [prefs, setPrefs] = useState<Prefs>({});
   const [version, setVersion] = useState('');
   const [mode, setMode] = useState<VsMode>('dark');
+  const [o8Transparent, setO8Transparent] = useState(true);
+  const [glass, setGlass] = useState<GlassControls>(DEFAULT_GLASS);
 
-  // Follow o8's palette. The main window persists it to localStorage
-  // (`cortex-theme-palette`), which this same-origin window shares; the `storage`
-  // event fires here when the main window flips light/midnight, so it tracks live.
+  // Follow o8's palette + transparency. The main window persists both to
+  // localStorage (`cortex-theme-palette`, `cortex-reduce-transparency`), which
+  // this same-origin window shares; `storage` fires here when o8 flips them.
   useEffect(() => {
     const read = () => {
       try {
         const p = localStorage.getItem('cortex-theme-palette') || localStorage.getItem('cortex-theme') || '';
         setMode(p === 'light' ? 'light' : 'dark');
+        // reduce-transparency 'on' = transparency OFF (solid surfaces).
+        setO8Transparent(localStorage.getItem('cortex-reduce-transparency') !== 'on');
       } catch { /* noop */ }
     };
     read();
@@ -97,6 +129,22 @@ export default function VoiceSettingsWindow() {
     window.addEventListener('focus', read);
     return () => { window.removeEventListener('storage', read); window.removeEventListener('focus', read); };
   }, []);
+
+  // Load the operator's glass fine-tune (Theme tab) from localStorage.
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(VS_GLASS_KEY);
+      if (raw) setGlass({ ...DEFAULT_GLASS, ...JSON.parse(raw) });
+    } catch { /* noop */ }
+  }, []);
+  const updateGlass = useCallback((next: GlassControls) => {
+    setGlass(next);
+    try { localStorage.setItem(VS_GLASS_KEY, JSON.stringify(next)); } catch { /* noop */ }
+  }, []);
+
+  const resolved = resolveGlass(glass, o8Transparent);
+  const liquid = resolved.saturate >= 150;
+  const sx = shellStyles(resolved.frost, resolved.saturate, resolved.clarity, liquid);
 
   const loadPrefs = useCallback(async () => {
     const p = await voicePrefsGet();
@@ -127,10 +175,10 @@ export default function VoiceSettingsWindow() {
     import('@tauri-apps/api/app').then((m) => m.getVersion()).then(setVersion).catch(() => { /* noop */ });
   }, [tauri]);
 
-  if (!tauri) {
+  if (mounted && !tauri) {
     return (
-      <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode] } as CSSProperties}><div style={GLASS_SHELL}>
-        <div style={{ ...FROST_LAYER }} />
+      <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode] } as CSSProperties}><div style={sx.shell}>
+        <div style={sx.scrim} aria-hidden />
         <p style={{ position: 'relative', zIndex: 1, margin: 'auto', fontSize: 13, color: TEXT_TERTIARY }}>
           Voice settings are only available in the desktop app.
         </p>
@@ -140,8 +188,14 @@ export default function VoiceSettingsWindow() {
 
   return (
     <div style={{ ...PAGE_ROOT, ...VS_THEME_VARS[mode] } as CSSProperties}>
-      <div style={GLASS_SHELL}>
-        <div style={FROST_LAYER} aria-hidden />
+      <div style={sx.shell}>
+        <div style={sx.scrim} aria-hidden />
+        {sx.liquid ? (
+          <div aria-hidden style={{
+            position: 'absolute', inset: 0, zIndex: 0, pointerEvents: 'none',
+            background: 'linear-gradient(180deg, rgba(255,255,255,0.16), transparent 38%)',
+          }} />
+        ) : null}
 
         {/* Sidebar */}
         <aside style={{
@@ -180,6 +234,7 @@ export default function VoiceSettingsWindow() {
           <div onMouseDown={startDrag} style={{ height: 46, cursor: 'grab' }} aria-hidden />
           {tab === 'settings' ? <SettingsTab prefs={prefs} setPref={setPref} /> : null}
           {tab === 'polish' ? <PolishTab prefs={prefs} setPref={setPref} /> : null}
+          {tab === 'theme' ? <ThemeTab controls={glass} onChange={updateGlass} /> : null}
           {tab === 'history' ? <HistoryTab /> : null}
           {tab === 'stats' ? <StatsTab /> : null}
           {tab === 'account' ? <AccountTab /> : null}
