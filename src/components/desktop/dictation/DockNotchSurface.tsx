@@ -408,7 +408,7 @@ export function DockNotchSurface({
   const mode = dictationMode;
   const isError = state === 'error';
   // Symon voice agent surfaces. A pending confirm wins over everything except a
-  // real dictation (you can Left-Option talk over it). The working indicator
+  // real dictation (you can Option-talk over it). The working indicator
   // shows while the loop runs and nothing else owns the dock.
   const isConfirming = !!agentConfirm && dictationMode === 'idle';
   const isAgentWorking =
