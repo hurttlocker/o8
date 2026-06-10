@@ -3614,18 +3614,23 @@ pub fn run() {
                         }
                     }
 
-                    // ⌘⇧S → speak the current text selection aloud (voice P4
-                    // "say" / speak-selection). grab_selection does clipboard
-                    // polling with sleeps, so run the whole thing off the
-                    // event-loop thread; play_thread then spawns its own audio
-                    // thread. Falls back to `say` inside play_thread.
-                    if let Ok(sc) = "CommandOrControl+Shift+S".parse::<Shortcut>() {
+                    // ⌥S → speak the current text selection aloud (voice P4
+                    // "say" / speak-selection). Was ⌘⇧S — three keys, and ⌘S
+                    // adjacency made it feel like a save-chord; a single modifier
+                    // is the operator-requested shape. ⌥S is registered globally
+                    // (the plugin consumes it), and the Option agent hold-gesture
+                    // is combo-guarded: the S KeyDown cancels any just-started
+                    // recording, so the chord stays clean. grab_selection does
+                    // clipboard polling with sleeps, so run the whole thing off
+                    // the event-loop thread; play_thread then spawns its own
+                    // audio thread. Falls back to `say` inside play_thread.
+                    if let Ok(sc) = "Alt+S".parse::<Shortcut>() {
                         let h_speak = app.handle().clone();
                         if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
                             if event.state != ShortcutState::Pressed {
                                 return;
                             }
-                            // ⌘⇧S is a toggle: if TTS is already speaking, this
+                            // ⌥S is a toggle: if TTS is already speaking, this
                             // press STOPS it instead of starting a second read.
                             // This is the primary keyboard stop AND prevents the
                             // re-trigger-stacking that forced a hard kill before.
@@ -3646,10 +3651,10 @@ pub fn run() {
                                 Some(text) => {
                                     crate::tts::playback::play_thread(text, crate::tts::load_config());
                                 }
-                                None => log::info!("[tts] CmdShiftS: no selection to speak"),
+                                None => log::info!("[tts] AltS: no selection to speak"),
                             });
                         }) {
-                            log::warn!("[hotkey] failed to register CmdShiftS (speak-selection): {e}");
+                            log::warn!("[hotkey] failed to register AltS (speak-selection): {e}");
                         }
                     }
                 }
