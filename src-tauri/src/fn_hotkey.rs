@@ -161,6 +161,26 @@ static ASK_MODE: AtomicBool = AtomicBool::new(false);
 #[cfg(target_os = "macos")]
 static OPTION_HELD: AtomicBool = AtomicBool::new(false);
 
+/// Raw physical state of the Option key, updated on every Option FlagsChanged.
+/// Unlike `OPTION_HELD` (the gesture edge-latch, cleared early by the ⌥-chord
+/// guard), this tracks the actual finger. The ⌥S say path polls it so the
+/// synthetic Cmd+C selection grab never fires under a still-held Option.
+#[cfg(target_os = "macos")]
+static OPTION_PHYSICALLY_DOWN: AtomicBool = AtomicBool::new(false);
+
+/// Block (≤`cap_ms`) until the user's finger leaves the Option key. Call from
+/// a worker thread only — never the event tap.
+#[cfg(target_os = "macos")]
+pub(crate) fn wait_for_option_release(cap_ms: u64) {
+    let deadline = std::time::Instant::now() + std::time::Duration::from_millis(cap_ms);
+    while OPTION_PHYSICALLY_DOWN.load(Ordering::SeqCst) {
+        if std::time::Instant::now() >= deadline {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(10));
+    }
+}
+
 /// The stt_engine session id of the active Ask dictation (0 = none). Fenced like
 /// the long-form session id so a late teardown can't kill a newer session.
 #[cfg(target_os = "macos")]
@@ -990,6 +1010,13 @@ pub fn start(app: tauri::AppHandle) {
                             event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                         if keycode == LEFT_OPTION_KEYCODE || keycode == RIGHT_OPTION_KEYCODE {
                             let option_down = (flags & OPTION_FLAG) != 0;
+                            // Physical-key truth for the ⌥S say path: the
+                            // synthetic Cmd+C selection grab must wait until
+                            // the user's finger leaves Option, or the held
+                            // modifier merges into the synthetic event (⌥C —
+                            // no copy). Tracked separately from OPTION_HELD,
+                            // which the S-chord guard clears early on purpose.
+                            OPTION_PHYSICALLY_DOWN.store(option_down, Ordering::SeqCst);
                             let opt_down_edge = option_down
                                 && OPTION_HELD
                                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
