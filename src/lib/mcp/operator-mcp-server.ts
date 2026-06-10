@@ -668,8 +668,10 @@ rl.on('line', (line) => {
         send({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: String(err) } });
       }
     });
-  } catch {
-    // Malformed JSON — ignore
+  } catch (err) {
+    // Malformed JSON-RPC line — log it (a silent drop leaves the client
+    // hanging until its own timeout) but keep the server alive.
+    console.error(`[o8-operator] Dropped malformed JSON-RPC line (${line.length} bytes): ${err}`);
   }
 });
 

@@ -10,9 +10,7 @@ export const dynamic = 'force-dynamic';
 import { NextRequest, NextResponse } from 'next/server';
 import { sanitizeErrorMessage } from '@/lib/api/error-format';
 
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const GEMINI_MODEL = 'gemini-2.0-flash';
-const GEMINI_URL = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
 
 const SYSTEM_PROMPT = `You are a prompt engineer for AI coding agents. Your job is to enhance user prompts to be clearer, more specific, and more effective.
 
@@ -35,11 +33,16 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Prompt too short' }, { status: 400 });
     }
 
-    if (!GEMINI_API_KEY) {
+    // Resolve at request time, not module load — keys written to env after
+    // boot (BYOK flow) would otherwise bake `key=undefined` into the URL
+    // until the process restarts.
+    const geminiApiKey = process.env.GEMINI_API_KEY;
+    if (!geminiApiKey) {
       return NextResponse.json({ error: 'GEMINI_API_KEY not configured' }, { status: 500 });
     }
 
-    const res = await fetch(GEMINI_URL, {
+    const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${geminiApiKey}`;
+    const res = await fetch(geminiUrl, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

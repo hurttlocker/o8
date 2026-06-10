@@ -34,7 +34,7 @@ export const config = {
 
 // ── Token loader (cached, refreshed on mtime change) ──
 
-let _cachedToken: { value: string; mtimeMs: number } | null = null;
+let _cachedToken: { value: string; mtimeMs: number; size: number } | null = null;
 
 function loadPanelToken(): string | null {
   try {
@@ -43,15 +43,17 @@ function loadPanelToken(): string | null {
     const tokenPath = join(dataDir, 'ws-token');
     if (!existsSync(tokenPath)) return null;
 
-    // Cheap mtime check to avoid re-reading every request.
+    // Cheap stat check to avoid re-reading every request. mtime alone has
+    // ~1s resolution on some filesystems — include size so a same-tick token
+    // rewrite can't keep validating against the stale value.
     const stat = statSync(tokenPath);
-    if (_cachedToken && _cachedToken.mtimeMs === stat.mtimeMs) {
+    if (_cachedToken && _cachedToken.mtimeMs === stat.mtimeMs && _cachedToken.size === stat.size) {
       return _cachedToken.value;
     }
 
     const raw = readFileSync(tokenPath, 'utf-8').trim();
     if (!raw) return null;
-    _cachedToken = { value: raw, mtimeMs: stat.mtimeMs };
+    _cachedToken = { value: raw, mtimeMs: stat.mtimeMs, size: stat.size };
     return raw;
   } catch {
     return null;

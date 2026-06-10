@@ -77,7 +77,10 @@ export async function discoverAllSessions(): Promise<RuntimeSession[]> {
       if (!session.cwd) return true;
       try {
         const { stdout } = await execAsync('git branch --list', { cwd: session.cwd, timeout: 2000 });
-        const branchExists = stdout.split('\n').some((line) => line.trim().replace(/^\* /, '') === session.branch);
+        // `git branch --list` prefixes the current branch with `* ` and a
+        // branch checked out in a linked worktree with `+ ` — strip both, or
+        // live worktree sessions get wrongly auto-cleaned.
+        const branchExists = stdout.split('\n').some((line) => line.trim().replace(/^[*+] /, '') === session.branch);
         if (!branchExists) {
           console.log(`[runtime-registry] Auto-cleaning session ${session.sessionKey} — branch "${session.branch}" no longer exists`);
           return false;

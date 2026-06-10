@@ -49,10 +49,7 @@ function buildPacketFromTask(
 export async function dispatchApprovedPlan(
   plan: PlanApprovalContinuation,
 ): Promise<{ ok: boolean; missionId: string; packetCount: number; note: string }> {
-  const {
-    readOrchestratorControlPlaneState,
-    writeOrchestratorControlPlaneState,
-  } = await import('@/lib/orchestrator/control-plane');
+  const { withLockedState } = await import('@/lib/orchestrator/control-plane');
   const { runHeadlessSprintTick } = await import('@/lib/orchestrator/headless-loop');
 
   const packets = plan.tasks.map((task, index) =>
@@ -62,29 +59,33 @@ export async function dispatchApprovedPlan(
   const missionId = `intake-${plan.issueNumber}-${Date.now().toString(36)}`;
   console.log(`${LOG_PREFIX} Creating mission ${missionId} with ${packets.length} packet(s) for issue #${plan.issueNumber}`);
 
-  const current = readOrchestratorControlPlaneState();
+  // Read-modify-write under the control-plane lock (#460) — a raw write here
+  // races the headless loop and concurrent approvals (last writer wins,
+  // silently dropping packets).
+  await withLockedState((current) => {
+    // If there's an active mission with running packets, append. Otherwise fresh.
+    const hasActivePackets = current.packets.some((p) =>
+      p.status === 'running' || p.status === 'launching' || p.status === 'queued',
+    );
 
-  // If there's an active mission with running packets, append. Otherwise fresh.
-  const hasActivePackets = current.packets.some((p) =>
-    p.status === 'running' || p.status === 'launching' || p.status === 'queued',
-  );
-
-  writeOrchestratorControlPlaneState({
-    version: 2,
-    missionId: hasActivePackets ? current.missionId : missionId,
-    prompt: hasActivePackets
-      ? current.prompt
-      : `GitHub intake: issue #${plan.issueNumber} — ${plan.issueTitle}`,
-    summary: hasActivePackets
-      ? current.summary
-      : `Intake mission for #${plan.issueNumber}: ${plan.issueTitle}`,
-    repoPath: plan.repoPath,
-    runtime: plan.runtime,
-    constraints: plan.constraints || current.constraints || '',
-    packets: hasActivePackets
-      ? [...current.packets, ...packets]
-      : packets,
-    updatedAt: new Date().toISOString(),
+    return {
+      ...current,
+      version: 2,
+      missionId: hasActivePackets ? current.missionId : missionId,
+      prompt: hasActivePackets
+        ? current.prompt
+        : `GitHub intake: issue #${plan.issueNumber} — ${plan.issueTitle}`,
+      summary: hasActivePackets
+        ? current.summary
+        : `Intake mission for #${plan.issueNumber}: ${plan.issueTitle}`,
+      repoPath: plan.repoPath,
+      runtime: plan.runtime,
+      constraints: plan.constraints || current.constraints || '',
+      packets: hasActivePackets
+        ? [...current.packets, ...packets]
+        : packets,
+      updatedAt: new Date().toISOString(),
+    };
   });
 
   // Trigger the headless loop to pick up the new packets

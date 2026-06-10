@@ -24,7 +24,15 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: error instanceof Error ? error.message : 'Webhook verification failed.' }, { status: 500 });
   }
 
-  const payload = JSON.parse(rawBody) as {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(rawBody);
+  } catch {
+    // Signature-verified but malformed body — acknowledge instead of throwing
+    // (an unhandled 500 makes GitHub retry the same malformed delivery).
+    return NextResponse.json({ ok: true, ignored: 'malformed JSON body' });
+  }
+  const payload = parsed as {
     action?: string;
     installation?: {
       id?: number;

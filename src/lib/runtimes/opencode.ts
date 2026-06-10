@@ -205,6 +205,8 @@ export const opencodeRuntime: AgentRuntime = {
       for (const agent of owned.value.agents) {
         sessions.push(mapAgentToSession(agent));
       }
+    } else {
+      console.error('[opencode-runtime] owned-session discovery failed:', owned.reason);
     }
 
     return sessions;
