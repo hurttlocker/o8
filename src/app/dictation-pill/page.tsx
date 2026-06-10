@@ -33,6 +33,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { DockNotchSurface } from '@/components/desktop/dictation/DockNotchSurface';
+import { useDockFileDrop, type StagedChip } from '@/components/desktop/dictation/useDockFileDrop';
 import type { AskTurn } from '@/components/desktop/dictation/DockAskPanel';
 import type { DictationSnapshot, DictationState } from '@/components/desktop/dictation/types';
 
@@ -458,6 +459,23 @@ export default function DictationPillPage() {
     return () => window.removeEventListener('keydown', onKey);
   }, [closeAsk]);
 
+  // Drag-files-into-Symon (dossier #3): a Finder drag over the dock morphs the
+  // sliver into the glass drop zone; a drop stages content for the next ⌥-ask
+  // (agent_files_stage) and shows the chips for a beat before relaxing.
+  const [stagedChips, setStagedChips] = useState<StagedChip[] | null>(null);
+  const stagedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const dropActive = useDockFileDrop(useCallback((chips: StagedChip[]) => {
+    setStagedChips(chips);
+    dockLog(`staged ${chips.length} dropped file(s)`);
+    if (stagedTimerRef.current) clearTimeout(stagedTimerRef.current);
+    stagedTimerRef.current = setTimeout(() => setStagedChips(null), 6000);
+  }, []));
+  useEffect(() => {
+    return () => {
+      if (stagedTimerRef.current) clearTimeout(stagedTimerRef.current);
+    };
+  }, []);
+
   useEffect(() => {
     return () => {
       if (flashTimerRef.current) clearTimeout(flashTimerRef.current);
@@ -526,6 +544,8 @@ export default function DictationPillPage() {
           agentTool={agentTool}
           agentStartedAt={agentStartedAt}
           onAgentConfirm={handleAgentConfirm}
+          dropActive={dropActive}
+          stagedFiles={stagedChips}
         />
       </div>
     </div>
