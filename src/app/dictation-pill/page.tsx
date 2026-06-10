@@ -100,11 +100,19 @@ interface SttEventPayload {
   /** Origin discriminator (system-wide Symon fold P3 review HIGH). Only the
    * dock window reacts to `system`; the in-window pill reacts to the rest. */
   origin?: 'system' | 'in-window';
+  /** Lane marker — `agent` on the Option-gesture start, so a dictation that
+   * begins mid-conversation can render INSIDE the open panel as a pending
+   * chat turn instead of collapsing the panel to the listening capsule. */
+  lane?: string;
   sessionId?: number;
   text?: string;
   level?: number;
   chars?: number;
 }
+
+/** Pending in-panel dictation (chat continuity): listening → polishing →
+ * handoff (final transcript on its way to the agent). */
+type PanelPending = { phase: 'listening' | 'polishing' | 'handoff'; text: string };
 
 export default function DictationPillPage() {
   const [snapshot, setSnapshot] = useState<DictationSnapshot>(IDLE_SNAPSHOT);
@@ -132,6 +140,19 @@ export default function DictationPillPage() {
   // the dual-emit (emit_to dock + broadcast both reach the dock window) from
   // appending the answer twice.
   const agentDoneRef = useRef<string>('');
+
+  // Chat continuity: an agent-lane dictation that starts while the conversation
+  // panel is open renders as a pending turn INSIDE the panel — the dock never
+  // collapses to the capsule mid-conversation. Ref mirrors state so the stable
+  // stt-event handler can read it without re-subscribing.
+  const [panelPending, setPanelPending] = useState<PanelPending | null>(null);
+  const panelPendingRef = useRef<PanelPending | null>(null);
+  const pendingHandoffTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const agentWorkingRef = useRef(false);
+  const updatePanelPending = useCallback((next: PanelPending | null) => {
+    panelPendingRef.current = next;
+    setPanelPending(next);
+  }, []);
 
   const stateRef = useRef<DictationState>('idle');
   const startTimeRef = useRef<number>(0);
@@ -188,11 +209,38 @@ export default function DictationPillPage() {
 
     switch (payload.type) {
       case 'system-start':
+        // Chat continuity: an AGENT-lane dictation starting while the
+        // conversation panel is open (with turns) renders inside the panel as
+        // a pending You turn — the panel keeps the dock, no capsule collapse.
+        if (payload.lane === 'agent' && askOpenRef.current && askThreadRef.current.length > 0) {
+          if (pendingHandoffTimerRef.current) {
+            clearTimeout(pendingHandoffTimerRef.current);
+            pendingHandoffTimerRef.current = null;
+          }
+          updatePanelPending({ phase: 'listening', text: '' });
+          // Suspend the idle auto-collapse while the user is mid-turn.
+          if (askIdleTimerRef.current) {
+            clearTimeout(askIdleTimerRef.current);
+            askIdleTimerRef.current = null;
+          }
+        }
         beginRecording();
         break;
       case 'system-idle':
-        // Brush discarded / start error — morph the always-on dock back to its
-        // idle capsule (the window is never hidden). Clear any pending flash.
+        // Brush discarded / start error / agent finalize teardown — morph the
+        // dock back. With a pending in-panel turn this is the HANDOFF moment
+        // (polish done, transcript on its way to the agent): hold the pending
+        // turn briefly; if no `running` status claims it, it was a discard.
+        if (panelPendingRef.current) {
+          updatePanelPending({ ...panelPendingRef.current, phase: 'handoff' });
+          if (pendingHandoffTimerRef.current) clearTimeout(pendingHandoffTimerRef.current);
+          pendingHandoffTimerRef.current = setTimeout(() => {
+            pendingHandoffTimerRef.current = null;
+            if (panelPendingRef.current?.phase === 'handoff' && !agentWorkingRef.current) {
+              updatePanelPending(null);
+            }
+          }, 5000);
+        }
         if (flashTimerRef.current) {
           clearTimeout(flashTimerRef.current);
           flashTimerRef.current = null;
@@ -216,12 +264,18 @@ export default function DictationPillPage() {
         break;
       case 'partial':
         if (stateRef.current === 'recording' && typeof payload.text === 'string') {
+          if (panelPendingRef.current?.phase === 'listening') {
+            updatePanelPending({ phase: 'listening', text: payload.text });
+          }
           setSnapshot((prev) => (prev.state === 'recording' && prev.partialTranscript !== payload.text
             ? { ...prev, partialTranscript: payload.text ?? '' }
             : prev));
         }
         break;
       case 'final':
+        if (panelPendingRef.current?.phase === 'listening') {
+          updatePanelPending({ ...panelPendingRef.current, phase: 'polishing' });
+        }
         if (stateRef.current === 'recording') setState('transcribing');
         break;
       case 'audio_file':
@@ -235,6 +289,9 @@ export default function DictationPillPage() {
         returnToIdleAfter(SUCCESS_FLASH_MS);
         break;
       case 'error':
+        // A failed dictation clears any pending in-panel turn — the existing
+        // error capsule takes the dock (worth the morph for a real failure).
+        if (panelPendingRef.current) updatePanelPending(null);
         if (
           stateRef.current === 'recording'
           || stateRef.current === 'transcribing'
@@ -248,7 +305,7 @@ export default function DictationPillPage() {
       default:
         break;
     }
-  }, [beginRecording, returnToIdleAfter, setState]);
+  }, [beginRecording, returnToIdleAfter, setState, updatePanelPending]);
 
   // Subscribe to the broadcast STT event stream.
   useEffect(() => {
@@ -310,6 +367,9 @@ export default function DictationPillPage() {
 
   const closeAsk = useCallback(() => {
     if (!askOpenRef.current) return;
+    // Never collapse mid-turn: a pending in-panel dictation or a working agent
+    // owns the panel until its answer lands (openPanel re-arms the idle timer).
+    if (panelPendingRef.current || agentWorkingRef.current) return;
     askOpenRef.current = false;
     askLastClosedRef.current = Date.now();
     if (askIdleTimerRef.current) { clearTimeout(askIdleTimerRef.current); askIdleTimerRef.current = null; }
@@ -459,16 +519,34 @@ export default function DictationPillPage() {
           const tid = e.payload?.taskId;
           if (status === 'running') {
             setAgentWorking(true);
+            agentWorkingRef.current = true;
             setAgentTool('');
             setAgentStartedAt(Date.now());
             if (e.payload?.intent) agentIntentRef.current = e.payload.intent;
+            // The agent claimed the pending in-panel turn: lock its text to
+            // the polished intent and cancel the discard timeout.
+            if (panelPendingRef.current) {
+              if (pendingHandoffTimerRef.current) {
+                clearTimeout(pendingHandoffTimerRef.current);
+                pendingHandoffTimerRef.current = null;
+              }
+              updatePanelPending({
+                phase: 'handoff',
+                text: e.payload?.intent || panelPendingRef.current.text,
+              });
+            }
           } else if (status === 'done' || status === 'failed') {
             // Dual-emit guard: the dock receives this terminal event twice
             // (emit_to dock + broadcast). Handle each task's done once.
             if (tid && agentDoneRef.current === tid) return;
             if (tid) agentDoneRef.current = tid;
             setAgentWorking(false);
+            agentWorkingRef.current = false;
             setAgentTool('');
+            // The real turns replace the pending in-panel rows in place — but
+            // ONLY a handed-off pending. A listening/polishing pending belongs
+            // to a NEWER dictation the user already started over this task.
+            if (panelPendingRef.current?.phase === 'handoff') updatePanelPending(null);
             // Only clear a pending confirm if it belongs to THIS task.
             setAgentConfirm((c) => (c && c.taskId === tid ? null : c));
             // Show the spoken answer in the panel instead of collapsing to idle.
@@ -495,7 +573,7 @@ export default function DictationPillPage() {
       disposed = true;
       for (const off of offs) { try { off(); } catch { /* noop */ } }
     };
-  }, [openPanel, showGlint]);
+  }, [openPanel, showGlint, updatePanelPending]);
 
   // Escape collapses the open Ask panel.
   useEffect(() => {
@@ -636,6 +714,7 @@ export default function DictationPillPage() {
             workerCount={workers.count}
             workerRepos={workers.repos}
             showWorkers={showWorkers}
+            panelPending={panelPending}
           />
         </div>
         {glint ? (
