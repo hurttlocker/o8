@@ -249,9 +249,12 @@ export default function DictationPillPage() {
         setSnapshot(IDLE_SNAPSHOT);
         break;
       case 'ready':
-        // Fn-down can race the daemon's `ready`; treat it as a start signal if
-        // we somehow missed `system-start` (defensive — system-start is primary).
-        if (stateRef.current === 'idle') beginRecording();
+        // Recognizer lifecycle signal only. It must NOT re-enter recording:
+        // the engine emits `ready` after every session teardown, including a
+        // cancelled one — treating it as a start signal left the dock stuck
+        // on "listening" after an ⌥S say-cancel (operator-reported). The
+        // lost-broadcast race the old defensive start covered was fixed by
+        // emit_to(DOCK_LABEL) — system-start is the only start signal now.
         break;
       case 'level':
         if (stateRef.current === 'recording' && typeof payload.level === 'number') {
