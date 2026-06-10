@@ -219,7 +219,7 @@ export function VoiceHistorySection() {
 
       {entries.length === 0 ? (
         <p style={{ fontSize: 12.5, fontWeight: 300, color: 'var(--t-text-faint)', paddingTop: 8, paddingBottom: 8 }}>
-          No dictations yet — hold Fn and speak, and they'll show up here.
+          No dictations yet — hold Fn and speak, and they&apos;ll show up here.
         </p>
       ) : (
         <div

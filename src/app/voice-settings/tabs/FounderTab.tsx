@@ -65,7 +65,8 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
     setPref('voice_library', next);
     setNewName('');
   };
-  const usePreset = (p: VoicePreset) => {
+  // Not a hook — the `use` prefix tripped react-hooks/rules-of-hooks.
+  const applyPreset = (p: VoicePreset) => {
     setPref('tts_provider', p.provider);
     setPref('elevenlabs_voice_id', p.voiceId);
     setPref('elevenlabs_model_id', p.modelId);
@@ -97,7 +98,7 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
             {library.map((p) => (
               <VoiceCard
                 key={p.id} preset={p} active={p.voiceId === voiceId && p.provider === provider}
-                onUse={() => usePreset(p)} onDelete={() => deletePreset(p.id)}
+                onUse={() => applyPreset(p)} onDelete={() => deletePreset(p.id)}
               />
             ))}
           </div>
