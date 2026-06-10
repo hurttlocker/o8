@@ -708,6 +708,10 @@ async function runAwaitingReviewAutoReleaseSweep(): Promise<void> {
     if (packet.status !== 'awaiting_review' || packet.releaseState === 'released') continue;
     const lane = (packet.lane?.laneId ? getLane(packet.lane.laneId) : null) ?? findLaneByPacket(packet.id);
     if (!lane?.repoPath || lane.status === 'archived') continue;
+    // Never auto-release while a real merge is in flight — forcing the lane
+    // terminal here would make the in-flight merge's status writes get
+    // rejected by the terminal-state guard, losing its actual outcome.
+    if (lane.status === 'merging') continue;
     if (recentEventWithinWindow([packet.lastEventAt, lane.lastEventAt], now)) continue;
 
     const throttleKey = `${lane.repoPath}\0${packet.id}`;

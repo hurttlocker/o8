@@ -87,7 +87,7 @@ pub async fn run_eval(app: tauri::AppHandle, models: Vec<String>) -> String {
                     };
                     (first.unwrap_or_else(|| "—".into()), ok)
                 }
-                Err(e) => (format!("ERR: {}", &e[..e.len().min(40)]), false),
+                Err(e) => (format!("ERR: {}", crate::utf8_head(&e, 40)), false),
             };
             if ok {
                 correct += 1;

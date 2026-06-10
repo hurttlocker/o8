@@ -80,6 +80,10 @@ async function runCompactionCycle(): Promise<void> {
 
     const db = new Database(dbPath);
     db.pragma('foreign_keys = ON');
+    // Other processes (Next server, MCP servers) write to this DB concurrently;
+    // without a busy_timeout a contended write throws SQLITE_BUSY immediately
+    // and silently aborts the whole compaction cycle.
+    db.pragma('busy_timeout = 5000');
 
     const result = runCompaction(
       {

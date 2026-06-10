@@ -486,6 +486,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       })).path;
     } catch (error) {
       if (!(error instanceof CliNotFoundError)) {
+        // Don't silently degrade to a bare binary name — log why resolution
+        // failed so a PATH-stripped spawn failure is diagnosable.
+        console.error(`[owned-session] ${runtimeId} CLI resolution failed, falling back to bare "${adapter.binaryName}":`, error);
         binary = adapter.binaryName;
       } else {
         const run = await stageMissingCliRun({

@@ -63,6 +63,9 @@ git log --since="$SINCE" --format="%as|%h|%s" --no-merges | while IFS='|' read -
     -e 's/Cortex ?[Mm]emory/memory/gi' \
     -e 's/Cortex/o8/gi' \
     -e 's/Rainwater/o8/gi' \
+    -e 's/Symon/voice agent/gi' \
+    -e 's/Hurttlocker/design system/gi' \
+    -e 's/aqua-color/the voice stack/gi' \
     -e 's/OpenClaw/agent runtime/gi' \
     -e 's/NemoClaw/agent runtime/gi' \
     -e 's/PicoClaw/bundled runtime/gi' \
@@ -97,7 +100,7 @@ git log --since="$SINCE" --format="%as|%h|%s" --no-merges | while IFS='|' read -
 done
 
 # Blocklist check
-BLOCKLIST=(Cortex Rainwater OpenClaw NemoClaw PicoClaw Codex opencode Tauri Drizzle better-sqlite tmux Anthropic Claude Gemini GPT-4 GPT-5 Opus Sonnet Haiku xhigh BYOK Cursor Conductor monetization "API key" cortexrules CortexClient ".cortex" ".o8-ide")
+BLOCKLIST=(Cortex Rainwater Symon Hurttlocker aqua-color OpenClaw NemoClaw PicoClaw Codex opencode Tauri Drizzle better-sqlite tmux Anthropic Claude Gemini GPT-4 GPT-5 Opus Sonnet Haiku xhigh BYOK Cursor Conductor monetization "API key" cortexrules CortexClient ".cortex" ".o8-ide")
 LEAKED=""
 for term in "${BLOCKLIST[@]}"; do
   if grep -qi "$term" "$OUT_CHANGELOG"; then

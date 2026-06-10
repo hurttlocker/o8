@@ -7,7 +7,9 @@ import { findLaneBySession, getLane } from '@/lib/lane/registry';
 import { parseSessionCost } from '@/lib/runtimes/cost-parser';
 import type { RuntimeTelemetry } from '@/lib/runtimes/types';
 
-const USAGE_LOG_DIR = path.join(os.homedir(), '.cortex-ide');
+const USAGE_LOG_DIR = process.env.O8_DATA_DIR
+  || process.env.CORTEX_IDE_DATA_DIR
+  || path.join(os.homedir(), '.o8');
 const USAGE_LOG_PATH = path.join(USAGE_LOG_DIR, 'usage.jsonl');
 const inFlightUsageDispatches = new Set<string>();
 

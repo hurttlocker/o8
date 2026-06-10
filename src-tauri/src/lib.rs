@@ -512,6 +512,18 @@ fn ensure_codebase_memory_binary(app: AppHandle) {
 const API_PORT_RANGE: std::ops::Range<u16> = 3001..3050;
 const WS_PORT_RANGE: std::ops::Range<u16> = 3002..3100;
 
+/// Take at most `max` bytes from the head of `s`, floored to a char boundary.
+/// `&s[..n]` panics when byte `n` lands mid-UTF-8-sequence — error bodies from
+/// provider APIs routinely contain multibyte characters, and the panic fires
+/// on exactly the path that was trying to report a failure.
+pub(crate) fn utf8_head(s: &str, max: usize) -> &str {
+    let mut end = s.len().min(max);
+    while !s.is_char_boundary(end) {
+        end -= 1;
+    }
+    &s[..end]
+}
+
 /// Returns the first port in the range that can be bound to on 127.0.0.1.
 /// `skip` lets the caller avoid picking the same port for API and WS.
 fn find_free_port(range: std::ops::Range<u16>, skip: Option<u16>) -> Option<u16> {

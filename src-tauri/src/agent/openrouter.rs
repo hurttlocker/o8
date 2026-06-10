@@ -65,7 +65,7 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         let status = resp.status();
         if !status.is_success() {
             let err_body = resp.text().await.unwrap_or_default();
-            let snippet = &err_body[..err_body.len().min(300)];
+            let snippet = crate::utf8_head(&err_body, 300);
             return Err(format!("OpenRouter API error ({status}): {snippet}"));
         }
 

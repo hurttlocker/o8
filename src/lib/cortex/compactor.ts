@@ -566,9 +566,13 @@ function cosineNearDupMerge(
 
   console.log(`[cosine-dedup] comparing ${rows.length} embedded facts at threshold ${threshold}`);
 
-  const vecs: Float32Array[] = rows.map(
-    (r) => new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4),
-  );
+  const vecs: Float32Array[] = rows.map((r) => {
+    // Copy out of better-sqlite3's shared Buffer pool: the slice's byteOffset
+    // is often not 4-aligned (a direct Float32Array view throws RangeError).
+    const copy = new Uint8Array(r.embedding.byteLength);
+    copy.set(r.embedding);
+    return new Float32Array(copy.buffer, 0, Math.floor(r.embedding.byteLength / 4));
+  });
 
   const byKind = new Map<string, number[]>();
   for (let i = 0; i < rows.length; i++) {

@@ -538,7 +538,10 @@ export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): P
     }
 
     const mgr = getWorktreeManager(lane.repoPath);
-    const worktreeId = worktreePath.split('/').filter(Boolean).pop()!;
+    // Resolve the manager's worktree id from metadata; the path's last segment
+    // is only a fallback (a divergent dir name makes cleanup silently no-op).
+    const worktreeId = (await mgr.list()).find((w) => w.path === worktreePath)?.id
+      ?? worktreePath.split('/').filter(Boolean).pop()!;
 
     const headLock = await checkExpectedHeadSha(worktreePath, command.expectedHeadSha);
     if (!headLock.ok) {
@@ -562,9 +565,12 @@ export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): P
     if (command.commitMessage) {
       try {
         await commitDirtyWorktree(worktreePath, command.commitMessage);
-      } catch {
+      } catch (err) {
         // Preserve historical merge behavior: a clean tree or failed empty commit
-        // attempt should not block the merge path.
+        // attempt should not block the merge path. Log it — a genuinely failed
+        // commit (lock contention, hooks, disk) otherwise resurfaces later as a
+        // confusing "rebase conflict" with no cause attached.
+        console.warn(`[lane-merge] commitDirtyWorktree non-fatal: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
 
