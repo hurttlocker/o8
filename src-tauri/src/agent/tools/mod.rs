@@ -338,6 +338,38 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "o8_needs_me",
+            "description": "List everything waiting on the USER across o8 — pending approval cards (merges, plans, gated commands) and agent lanes stuck needing attention. Use for 'what needs me?', 'anything waiting on me?', 'do I have approvals?'. ALWAYS call this before o8_approve_item or o8_reject_item to learn the exact pending titles.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        json!({
+            "name": "o8_approve_item",
+            "description": "Approve ONE pending o8 approval card by its title. Call o8_needs_me first and pass the exact title you read there — never guess. The user confirms on a card before this executes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "The exact title of the pending approval, as returned by o8_needs_me." }
+                },
+                "required": ["title"]
+            }
+        }),
+        json!({
+            "name": "o8_reject_item",
+            "description": "Reject ONE pending o8 approval card by its title. Call o8_needs_me first and pass the exact title you read there — never guess. The user confirms on a card before this executes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "The exact title of the pending approval, as returned by o8_needs_me." },
+                    "reason": { "type": "string", "description": "Optional short reason the user gave for rejecting." }
+                },
+                "required": ["title"]
+            }
+        }),
+        json!({
             "name": "o8_dispatch",
             "description": "Hand a CODING task to o8's orchestrator — it dispatches an autonomous worker in an isolated worktree, reviews the diff, and surfaces a packet for the user's approval. Use when the user wants code written, changed, fixed, or investigated in a repo ('have the orchestrator fix the auth bug', 'kick off the tooltip work in o8'). You do NOT write code yourself — this delegates it. Always include the repo so the user can confirm by ear.",
             "parameters": {
@@ -460,6 +492,9 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
             crate::agent::edit_ctx::apply(&ctx.app, edit, new_text)
         }
         "o8_status" => o8_bridge::status(args).await,
+        "o8_needs_me" => o8_bridge::needs_me(args).await,
+        "o8_approve_item" => o8_bridge::approve_item(args).await,
+        "o8_reject_item" => o8_bridge::reject_item(args).await,
         "o8_ask" => o8_bridge::ask(args).await,
         "o8_dispatch" => o8_bridge::dispatch(args).await,
         "git_status" => git_github::git_status(args).await,

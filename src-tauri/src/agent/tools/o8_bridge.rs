@@ -60,6 +60,229 @@ pub async fn status(args: Value) -> Result<Value, String> {
     }))
 }
 
+/// Lane states that won't move without the operator (or at least someone)
+/// looking — the "needs attention" half of `o8_needs_me`. Mirrors `LaneStatus`
+/// in `src/lib/lane/types.ts`.
+const ATTENTION_STATUSES: &[&str] = &[
+    "awaiting_input",
+    "awaiting_orchestrator",
+    "recovering",
+    "reviewing",
+    "failed",
+];
+
+/// `o8_needs_me` — everything waiting on the OPERATOR right now (magic
+/// roadmap #2: voice approval triage). Two signals, both read-through:
+/// pending approval cards (`/api/panel/approvals`) and lanes stuck in an
+/// attention state (`/api/lanes?active=true`). Projects a compact,
+/// spoken-friendly list; the model reads exact titles from here before any
+/// `o8_approve_item` / `o8_reject_item` call.
+pub async fn needs_me(_args: Value) -> Result<Value, String> {
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    let resp = o8_http::get_json("/api/panel/approvals").await?;
+    let approvals = resp
+        .get("approvals")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut cards: Vec<Value> = Vec::new();
+    for a in &approvals {
+        let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
+        let summary = a.get("summary").and_then(|v| v.as_str()).unwrap_or("");
+        let mut card = json!({
+            "title": title,
+            "agent": a.get("agent").and_then(|v| v.as_str()).unwrap_or(""),
+            "risk": a.get("risk").and_then(|v| v.as_str()).unwrap_or("low"),
+            "summary": summary.chars().take(160).collect::<String>(),
+        });
+        // createdAt is a ms epoch — surface age so the model can say "from
+        // twenty minutes ago". Guard the range so a seconds-epoch or zero
+        // value never produces a nonsense age.
+        if let Some(created) = a.get("createdAt").and_then(|v| v.as_i64()) {
+            if created > 1_000_000_000_000 && now_ms > created {
+                card["age_minutes"] = json!((now_ms - created) / 60_000);
+            }
+        }
+        cards.push(card);
+    }
+
+    let lanes_resp = o8_http::get_json("/api/lanes?active=true").await?;
+    let lanes = lanes_resp
+        .get("lanes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut stuck: Vec<Value> = Vec::new();
+    for lane in &lanes {
+        let status = lane.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        if !ATTENTION_STATUSES.contains(&status) {
+            continue;
+        }
+        let repo_path = lane.get("repoPath").and_then(|v| v.as_str()).unwrap_or("");
+        let repo = repo_path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
+        stuck.push(json!({
+            "label": lane.get("label").and_then(|v| v.as_str()).unwrap_or("Untitled"),
+            "status": status,
+            "repo": repo,
+        }));
+    }
+
+    let all_clear = cards.is_empty() && stuck.is_empty();
+    let mut out = json!({
+        "approval_count": cards.len(),
+        "approvals": cards,
+        "attention_count": stuck.len(),
+        "attention_lanes": stuck,
+    });
+    if all_clear {
+        out["note"] = json!("Nothing is waiting on the user right now.");
+    }
+    Ok(out)
+}
+
+/// Resolve a spoken/near title to exactly one PENDING approval `(id, title)`.
+///
+/// The agent loop is stateless between asks, so the id can't be remembered —
+/// it has to re-resolve against the live queue at decision time (which also
+/// means an approval resolved elsewhere in the meantime is a safe miss, not a
+/// double-fire). Ladder: exact case-insensitive title → title substring →
+/// summary/agent substring. Anything other than exactly one match errors with
+/// a spoken-friendly message the model relays.
+async fn resolve_pending_approval(which: &str) -> Result<(String, String), String> {
+    let resp = o8_http::get_json("/api/panel/approvals").await?;
+    let approvals = resp
+        .get("approvals")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let pending: Vec<(String, String, String, String)> = approvals
+        .iter()
+        .filter_map(|a| {
+            let id = a.get("id").and_then(|v| v.as_str())?.to_string();
+            let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled").to_string();
+            let summary = a.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+            let agent = a.get("agent").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+            Some((id, title, summary, agent))
+        })
+        .collect();
+
+    if pending.is_empty() {
+        return Err("There are no pending approvals in o8 right now.".into());
+    }
+
+    let needle = which.trim().to_lowercase();
+    if needle.is_empty() {
+        if pending.len() == 1 {
+            let (id, title, _, _) = pending.into_iter().next().unwrap();
+            return Ok((id, title));
+        }
+        let titles: Vec<&str> = pending.iter().take(3).map(|(_, t, _, _)| t.as_str()).collect();
+        return Err(format!(
+            "There are {} pending approvals — say which one: {}.",
+            pending.len(),
+            titles.join("; ")
+        ));
+    }
+
+    if let Some((id, title, _, _)) = pending.iter().find(|(_, t, _, _)| t.to_lowercase() == needle) {
+        return Ok((id.clone(), title.clone()));
+    }
+
+    let mut matches: Vec<&(String, String, String, String)> = pending
+        .iter()
+        .filter(|(_, t, _, _)| t.to_lowercase().contains(&needle))
+        .collect();
+    if matches.is_empty() {
+        matches = pending
+            .iter()
+            .filter(|(_, _, s, a)| s.contains(&needle) || a.contains(&needle))
+            .collect();
+    }
+
+    match matches.len() {
+        1 => {
+            let (id, title, _, _) = matches[0];
+            Ok((id.clone(), title.clone()))
+        }
+        0 => {
+            let titles: Vec<&str> = pending.iter().take(3).map(|(_, t, _, _)| t.as_str()).collect();
+            Err(format!(
+                "Nothing pending matches '{which}'. The queue has: {}.",
+                titles.join("; ")
+            ))
+        }
+        _ => {
+            let titles: Vec<&str> = matches.iter().take(3).map(|(_, t, _, _)| t.as_str()).collect();
+            Err(format!(
+                "'{which}' matches more than one pending approval — say which: {}.",
+                titles.join("; ")
+            ))
+        }
+    }
+}
+
+/// `o8_approve_item` — approve one pending o8 approval card by (near-)title.
+/// Reversible in `super::super::safety`, so the loop speaks the proposal and
+/// shows the dock confirm card BEFORE this runs — the card is the binding
+/// gate; this just executes the operator's decision against the same endpoint
+/// the desktop Approve button uses.
+pub async fn approve_item(args: Value) -> Result<Value, String> {
+    let which = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    let (id, title) = resolve_pending_approval(which).await?;
+
+    let resp = o8_http::post_json(
+        "/api/panel/approvals",
+        json!({ "action": "approve", "id": id }),
+    )
+    .await?;
+    if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
+        return Err(format!("Couldn't approve \u{201c}{title}\u{201d}: {err}"));
+    }
+
+    Ok(json!({
+        "approved": true,
+        "title": title,
+        "note": resp.get("note").and_then(|v| v.as_str()).unwrap_or(""),
+    }))
+}
+
+/// `o8_reject_item` — reject one pending o8 approval card by (near-)title.
+/// Same resolve + gate story as `o8_approve_item`. The optional spoken reason
+/// rides the request body for the audit trail.
+pub async fn reject_item(args: Value) -> Result<Value, String> {
+    let which = args.get("title").and_then(|v| v.as_str()).unwrap_or("");
+    let (id, title) = resolve_pending_approval(which).await?;
+
+    let mut body = json!({ "action": "reject", "id": id });
+    if let Some(reason) = args
+        .get("reason")
+        .and_then(|v| v.as_str())
+        .filter(|s| !s.trim().is_empty())
+    {
+        body["reason"] = json!(reason.trim());
+    }
+
+    let resp = o8_http::post_json("/api/panel/approvals", body).await?;
+    if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
+        return Err(format!("Couldn't reject \u{201c}{title}\u{201d}: {err}"));
+    }
+
+    Ok(json!({
+        "rejected": true,
+        "title": title,
+        "note": resp.get("note").and_then(|v| v.as_str()).unwrap_or(""),
+    }))
+}
+
 /// `o8_ask` — ask o8's Engineering Brain about the code, recent work, or the
 /// fleet ("what did Codex do today?", "how does dispatch work?"). POSTs to the
 /// same Brain Q&A endpoint as the desktop "Ask the Brain" composer + the

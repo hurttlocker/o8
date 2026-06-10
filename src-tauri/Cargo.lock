@@ -3147,7 +3147,7 @@ dependencies = [
 
 [[package]]
 name = "o8"
-version = "0.1.318"
+version = "0.1.319"
 dependencies = [
  "base64 0.22.1",
  "chrono",
