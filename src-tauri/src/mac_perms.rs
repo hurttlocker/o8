@@ -107,6 +107,59 @@ pub(crate) fn fn_key_usage_type() -> Option<u32> {
     None
 }
 
+/// Screen Recording (`kTCCServiceScreenCapture`) — powers Symon's screen sight
+/// (Points / Guide / "what's on my screen"). KNOWN CAVEAT: after an app-bundle
+/// rebind `CGPreflightScreenCaptureAccess` can return stale truth (the pane
+/// says ON, capture fails) — the fix is a fresh grant after
+/// `tccutil reset ScreenCapture ai.o8.desktop`. As a *displayed status* this is
+/// still the best probe available; the capture path itself is attempt-first.
+#[cfg(target_os = "macos")]
+pub(crate) fn screen_capture_granted() -> bool {
+    #[link(name = "CoreGraphics", kind = "framework")]
+    extern "C" {
+        fn CGPreflightScreenCaptureAccess() -> bool;
+    }
+    unsafe { CGPreflightScreenCaptureAccess() }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn screen_capture_granted() -> bool {
+    true
+}
+
+/// Microphone TCC status via `AVCaptureDevice authorizationStatusForMediaType:`
+/// (AVFoundation force-linked just for this lookup; the class is resolved at
+/// runtime so no objc2-av-foundation crate is needed). Returns `Some(true)`
+/// authorized, `Some(false)` denied/restricted, `None` when the user was never
+/// asked (notDetermined — the first dictation will prompt).
+#[cfg(target_os = "macos")]
+pub(crate) fn mic_permission_granted() -> Option<bool> {
+    use objc2::msg_send;
+    use objc2::runtime::AnyClass;
+    use objc2_foundation::NSString;
+
+    // Force-link AVFoundation so AVCaptureDevice exists in the runtime.
+    #[link(name = "AVFoundation", kind = "framework")]
+    extern "C" {}
+
+    let cls = AnyClass::get(c"AVCaptureDevice")?;
+    // AVMediaTypeAudio == "soun" (the constant's value; avoids binding the
+    // extern NSString constant).
+    let media = NSString::from_str("soun");
+    // AVAuthorizationStatus: 0 notDetermined, 1 restricted, 2 denied, 3 authorized.
+    let status: isize = unsafe { msg_send![cls, authorizationStatusForMediaType: &*media] };
+    match status {
+        3 => Some(true),
+        0 => None,
+        _ => Some(false),
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub(crate) fn mic_permission_granted() -> Option<bool> {
+    Some(true)
+}
+
 // ── Tauri commands (frontend onboarding / permission-recovery surface) ──
 
 /// Whether o8 has macOS Accessibility permission. Non-prompting — safe to poll.
@@ -127,4 +180,18 @@ pub fn input_monitoring_granted_cmd() -> bool {
 #[tauri::command]
 pub fn fn_key_usage_type_cmd() -> Option<u32> {
     fn_key_usage_type()
+}
+
+/// Whether o8 has macOS Screen Recording permission (per CGPreflight — can be
+/// stale after an app rebind; see `screen_capture_granted`). Non-prompting.
+#[tauri::command]
+pub fn screen_capture_granted_cmd() -> bool {
+    screen_capture_granted()
+}
+
+/// Microphone TCC status: true authorized, false denied/restricted, null when
+/// never asked (first dictation will prompt). Non-prompting.
+#[tauri::command]
+pub fn mic_permission_granted_cmd() -> Option<bool> {
+    mic_permission_granted()
 }
