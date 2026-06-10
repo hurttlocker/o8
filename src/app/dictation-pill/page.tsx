@@ -756,6 +756,14 @@ export default function DictationPillPage() {
               style={{
                 marginTop: 6,
                 height: 24,
+                // Flex-center the label — WKWebView's default button baseline
+                // centering drifts visibly high at this size (operator-reported).
+                display: 'inline-flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                lineHeight: 1,
+                paddingTop: 0,
+                paddingBottom: 0,
                 paddingLeft: 11,
                 paddingRight: 11,
                 borderRadius: 12,

@@ -78,6 +78,12 @@ pub(crate) fn system_prompt() -> String {
          browser at a URL (\"open my settings\", \"show the QR code\", \"open \
          the browser to anthropic dot com\"). `o8_panel_read` lists what's \
          configured inside o8 — automations, projects, or connected repos. You \
+         can also survey and drive the user's TERMINAL windows: `term_list` \
+         shows what's up (titles carry each session's task — read those out, \
+         shortened), `term_read` checks what one is saying, and `term_send` \
+         types a command or a message to an agent REPL there — always \
+         term_list first, and pass the title to term_send so the user hears \
+         the target. You \
          are NOT the coder — when the user wants code written or changed, that is \
          the orchestrator's job, not yours. Routing ladder, in order: a structured \
          native tool first (never guess what a tool can tell you); o8_ask for \
@@ -309,6 +315,20 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         "mac_notes_create" => format!("Create a note “{}”", s("title")),
         "mac_reminders_complete" => format!("Mark “{}” complete", s("title")),
         "o8_dispatch" => format!("Dispatch the {} orchestrator to: {}", s("repo"), s("task")),
+        // The model passes the terminal's title from term_list so the card
+        // names the real target window, not a bare id.
+        "term_send" => {
+            let title = s("title");
+            let target = if title.is_empty() {
+                "the terminal".to_string()
+            } else {
+                // Titles carry "cwd — task — proc — 117×56"; the first two
+                // segments identify the window by ear without the noise.
+                let short: String = title.split(" — ").take(2).collect::<Vec<_>>().join(" — ");
+                format!("“{short}”")
+            };
+            format!("Send “{}” to {target}", s("command"))
+        }
         // The model passes the exact title it just read from o8_needs_me, so
         // the card (and the spoken proposal) names the real pending item.
         "o8_approve_item" => format!("Approve “{}” in o8", s("title")),
