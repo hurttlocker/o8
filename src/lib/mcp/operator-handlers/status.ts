@@ -155,7 +155,85 @@ export const STATUS_TOOLS: McpTool[] = [
       required: ['packetId'],
     },
   },
+  {
+    name: 'o8_operator_defaults',
+    description:
+      'Read or set the global operator-panel defaults that govern dispatches — the programmatic equivalent of Settings → Operator. Call with NO args to read the current defaults. Pass any subset to update; returns the updated defaults. USE THIS to pick the orchestrator brain before a mission (e.g. Sonnet for routine sweeps, Opus for hard problems) or to tune governance for a sprint. Settings are GLOBAL and persist across missions: read first, change what you need, restore prior values after if the change was for one mission only. Example: o8_operator_defaults({orchestratorModel: "claude-sonnet-4-6", thinkingEffort: "high"}).',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        orchestratorModel: {
+          type: 'string',
+          description: 'Orchestrator model id, e.g. "claude-opus-4-8" or "claude-sonnet-4-6". Non-empty string.',
+        },
+        thinkingEffort: {
+          type: 'string',
+          enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
+          description: 'Orchestrator thinking-effort level.',
+        },
+        overlapGate: {
+          type: 'string',
+          enum: ['advisory', 'strict'],
+          description: 'Overlap gate mode for parallel packets touching the same files.',
+        },
+        parallelCap: {
+          type: 'number',
+          description: 'Max packets running in parallel (1-32).',
+        },
+        defaultDispatchRuntime: {
+          type: 'string',
+          enum: ['codex', 'claude-code', 'gemini', 'opencode'],
+          description: 'Default worker runtime for dispatches.',
+        },
+        healBotEnabled: {
+          type: 'boolean',
+          description: 'Enable the heal bot for stuck packets.',
+        },
+        supervisorAutoEscalate: {
+          type: 'boolean',
+          description: 'Auto-escalate stuck packets to the supervisor.',
+        },
+        promptCachingEnabled: {
+          type: 'boolean',
+          description: 'Enable prompt caching for orchestrator sessions.',
+        },
+      },
+    },
+  },
 ];
+
+const OPERATOR_DEFAULTS_KEYS = [
+  'orchestratorModel',
+  'thinkingEffort',
+  'overlapGate',
+  'parallelCap',
+  'defaultDispatchRuntime',
+  'healBotEnabled',
+  'supervisorAutoEscalate',
+  'promptCachingEnabled',
+] as const;
+
+export async function handleOperatorDefaults(args: Record<string, unknown>): Promise<McpToolResult> {
+  try {
+    const update: Record<string, unknown> = {};
+    for (const key of OPERATOR_DEFAULTS_KEYS) {
+      if (args[key] !== undefined) update[key] = args[key];
+    }
+    const data = Object.keys(update).length === 0
+      ? await apiFetch('/api/panel/operator-defaults')
+      : await apiFetch('/api/panel/operator-defaults', {
+          method: 'POST',
+          body: JSON.stringify(update),
+        });
+    if (data && typeof data === 'object' && 'error' in (data as Record<string, unknown>)) {
+      return textResult(`o8_operator_defaults failed: ${(data as Record<string, unknown>).error}`, true);
+    }
+    return jsonResult(data);
+  } catch (err) {
+    console.error(`[o8-operator] o8_operator_defaults failed: ${err}`);
+    return textResult(`Failed to read/update operator defaults: ${err}`, true);
+  }
+}
 
 export async function handleSend(args: Record<string, unknown>): Promise<McpToolResult> {
   try {
