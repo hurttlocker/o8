@@ -35,8 +35,9 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "mac_reminders_list" => SafetyClass::ReadOnly,
         "mac_reminders_create" => SafetyClass::Reversible,
         "mac_reminders_complete" => SafetyClass::Reversible,
-        // Apps — launching an app has no destructive side effect.
+        // Apps — launching/listing apps has no destructive side effect.
         "open_app" => SafetyClass::ReadOnly,
+        "list_apps" => SafetyClass::ReadOnly,
         // Notes
         "mac_notes_search" => SafetyClass::ReadOnly,
         "mac_notes_create" => SafetyClass::Reversible,
