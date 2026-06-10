@@ -80,6 +80,13 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // destructive side effect (same reasoning as open_app).
         "o8_ui_open" => SafetyClass::ReadOnly,
         "o8_panel_read" => SafetyClass::ReadOnly,
+        // Apple Music — playback control mutates no data and pause undoes it
+        // instantly; a confirm card on "play my playlist" kills the magic.
+        "mac_music_playlists" => SafetyClass::ReadOnly,
+        "mac_music_play" => SafetyClass::ReadOnly,
+        "mac_music_pause" => SafetyClass::ReadOnly,
+        "mac_music_next" => SafetyClass::ReadOnly,
+        "mac_music_now_playing" => SafetyClass::ReadOnly,
         "o8_dispatch" => SafetyClass::Reversible,
         // Approval triage (magic roadmap #2). Semantically these RELEASE a
         // gated action (a merge, a plan, a command) — Destructive in spirit,
