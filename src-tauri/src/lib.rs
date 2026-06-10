@@ -524,6 +524,41 @@ pub(crate) fn utf8_head(s: &str, max: usize) -> &str {
     &s[..end]
 }
 
+#[cfg(test)]
+mod utf8_head_tests {
+    use super::utf8_head;
+
+    #[test]
+    fn returns_whole_string_when_under_max() {
+        assert_eq!(utf8_head("hello", 10), "hello");
+        assert_eq!(utf8_head("", 10), "");
+    }
+
+    #[test]
+    fn cuts_ascii_exactly_at_max() {
+        assert_eq!(utf8_head("hello world", 5), "hello");
+    }
+
+    #[test]
+    fn floors_to_char_boundary_instead_of_panicking() {
+        // 'é' is 2 bytes (0xC3 0xA9); cutting at byte 1 lands mid-sequence.
+        assert_eq!(utf8_head("é", 1), "");
+        // "aé" = [a][C3 A9]; cutting at byte 2 lands mid-é → floor to "a".
+        assert_eq!(utf8_head("aé", 2), "a");
+        // 4-byte emoji: every interior cut floors to the previous boundary.
+        let s = "x😀y";
+        assert_eq!(utf8_head(s, 2), "x");
+        assert_eq!(utf8_head(s, 3), "x");
+        assert_eq!(utf8_head(s, 4), "x");
+        assert_eq!(utf8_head(s, 5), "x😀");
+    }
+
+    #[test]
+    fn max_zero_returns_empty() {
+        assert_eq!(utf8_head("anything", 0), "");
+    }
+}
+
 /// Returns the first port in the range that can be bound to on 127.0.0.1.
 /// `skip` lets the caller avoid picking the same port for API and WS.
 fn find_free_port(range: std::ops::Range<u16>, skip: Option<u16>) -> Option<u16> {

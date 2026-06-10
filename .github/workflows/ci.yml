@@ -35,6 +35,18 @@ jobs:
       - run: npm ci --prefer-offline
       - run: npm run lint
 
+  test:
+    name: Unit Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci --prefer-offline
+      - run: npm test
+
   governance-smoke:
     name: Governance Smoke
     runs-on: ubuntu-latest
