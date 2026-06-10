@@ -668,11 +668,17 @@ export async function sendToCodexOrchestrator(
       if (threadId) session.threadId = threadId;
       session.status = code === 0 ? 'ready' : 'dead';
 
-      onEvent({ type: 'done', sessionId: threadId, cost });
-
-      if (code !== 0 && stderr) {
-        onEvent({ type: 'error', error: stderr.slice(0, 500) });
+      if (code !== 0) {
+        // Always surface a non-zero exit — and BEFORE the done event, so
+        // consumers don't treat the turn as a normal completion. A crash
+        // with empty stderr used to produce a clean `done` and nothing else.
+        onEvent({
+          type: 'error',
+          error: stderr.trim() ? stderr.slice(0, 500) : `codex exited with code ${code}`,
+        });
       }
+
+      onEvent({ type: 'done', sessionId: threadId, cost });
 
       promiseResolve();
     });

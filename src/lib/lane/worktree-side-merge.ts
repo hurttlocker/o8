@@ -515,6 +515,13 @@ async function retryBaseAdvancedAfterRebase(
       console.log(`[lane-merge] Rebased ${opts.actualBranch} onto latest ${lane.baseBranch} after base-moved retry ${attemptLabel}`);
     } catch (error) {
       if (error instanceof WorktreeRebaseConflictError) {
+        if (error.conflictFiles.length === 0) {
+          // The rebase failed for a NON-conflict reason (timeout, strategy
+          // arg, corrupt rebase state) and was already aborted clean — there
+          // is nothing to "resolve". Routing it to a conflict card sent the
+          // operator hunting for conflicts that don't exist.
+          return createFastForwardFailureApproval(input, error);
+        }
         return createRebaseConflictApproval(input, error);
       }
       if (error instanceof WorktreeFetchUnreachableError) {
@@ -658,6 +665,13 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       console.log(`[lane-merge] Rebased ${actualBranch} onto latest ${lane.baseBranch} in worktree`);
     } catch (error) {
       if (error instanceof WorktreeRebaseConflictError) {
+        if (error.conflictFiles.length === 0) {
+          // The rebase failed for a NON-conflict reason (timeout, strategy
+          // arg, corrupt rebase state) and was already aborted clean — there
+          // is nothing to "resolve". Routing it to a conflict card sent the
+          // operator hunting for conflicts that don't exist.
+          return createFastForwardFailureApproval(input, error);
+        }
         return createRebaseConflictApproval(input, error);
       }
       if (error instanceof WorktreeFetchUnreachableError) {

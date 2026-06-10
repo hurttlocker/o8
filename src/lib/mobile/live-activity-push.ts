@@ -138,7 +138,10 @@ function optionalString(value: string | undefined) {
 
 function apnsConfigPath() {
   return process.env.O8_APNS_CONFIG_PATH?.trim()
-    || join(process.env.O8_DATA_DIR || join(os.homedir(), '.o8'), 'apns.json');
+    || join(
+      process.env.O8_DATA_DIR || process.env.CORTEX_IDE_DATA_DIR || join(os.homedir(), '.o8'),
+      'apns.json',
+    );
 }
 
 function readApnsConfigFile(): ApnsConfigFile | null {

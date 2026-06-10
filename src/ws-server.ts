@@ -1701,6 +1701,10 @@ async function buildResyncEvents(stream: RealtimeStreamKey) {
 
   try {
     const entries = await getSessionTranscript(sessionKey, 24, true);
+    // An empty snapshot with replace:true would wipe transcript entries the
+    // client accumulated via deltas — getSessionTranscript is currently a
+    // stub, so never broadcast a destructive empty replace.
+    if (entries.length === 0) return [] as RealtimeEventEnvelope[];
     return [
       buildRealtimeEnvelope(
         stream,
@@ -1798,6 +1802,8 @@ async function buildBootstrapEvents(stream: RealtimeStreamKey) {
 
   try {
     const entries = await getSessionTranscript(sessionKey, 24, false);
+    // Same guard as the replay-gap path — never replace client history with nothing.
+    if (entries.length === 0) return [] as RealtimeEventEnvelope[];
     return [
       buildRealtimeEnvelope(
         stream,
@@ -1996,6 +2002,9 @@ async function publishSessionHistoryRealtimeSnapshot(sessionKey: string, fresh =
   if (!sessionKey) return;
   try {
     const entries = await getSessionTranscript(sessionKey, 24, fresh);
+    // Stub returns [] — broadcasting an empty snapshot tells clients their
+    // transcript is now empty. Skip until a real transcript source exists.
+    if (entries.length === 0) return;
     const fingerprint = fingerprintHistory(sessionKey, entries);
     if (!fresh && lastRealtimeFingerprint.history.get(sessionKey) === fingerprint) return;
     lastRealtimeFingerprint.history.set(sessionKey, fingerprint);

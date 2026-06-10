@@ -32,10 +32,12 @@ interface SubscriptionKeys {
  */
 export function encryptPayload(payload: Buffer | string, sub: SubscriptionKeys): Buffer {
   const plaintext = typeof payload === 'string' ? Buffer.from(payload, 'utf-8') : payload;
-  if (plaintext.length > 4078) {
-    // RFC 8188 caps payload at 4096 bytes minus the 16-byte tag; we leave a
-    // bit of headroom for the padding byte we always add.
-    throw new Error(`[push-encrypt] payload too large: ${plaintext.length} bytes (max 4078)`);
+  if (plaintext.length > 3993) {
+    // Push services cap the total request body at 4096 bytes. The body is
+    // salt(16) + rs(4) + idlen(1) + keyid(65) + ciphertext(plaintext + 1 pad
+    // byte) + tag(16) = plaintext + 103, so plaintext must stay ≤ 3993 or the
+    // push service rejects the POST and the device gets unsubscribed.
+    throw new Error(`[push-encrypt] payload too large: ${plaintext.length} bytes (max 3993)`);
   }
 
   // 1. Generate ephemeral ECDH keypair (sender / "as_pub").
