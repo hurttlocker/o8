@@ -93,6 +93,16 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "term_interrupt" => SafetyClass::Reversible,
         "term_key" => SafetyClass::Reversible,
         "term_new" => SafetyClass::Reversible,
+        // Watching only observes a window the user explicitly named; the
+        // one-shot spoken announcement is the entire side effect.
+        "term_watch" => SafetyClass::ReadOnly,
+        // Packet verbs reach a live worker / spawn a fresh one → carded.
+        "o8_packet_steer" => SafetyClass::Reversible,
+        "o8_packet_rerun" => SafetyClass::Reversible,
+        // Drafts only — the user presses send, so the draft IS the gate.
+        "o8_orchestrator_draft" => SafetyClass::ReadOnly,
+        // Writes to the public tracker → carded.
+        "gh_issue_create" => SafetyClass::Reversible,
         // Apple Music — playback control mutates no data and pause undoes it
         // instantly; a confirm card on "play my playlist" kills the magic.
         "mac_music_playlists" => SafetyClass::ReadOnly,

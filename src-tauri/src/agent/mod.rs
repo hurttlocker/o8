@@ -21,6 +21,7 @@ pub mod router;
 pub mod safety;
 pub mod screen;
 pub mod store;
+pub mod term_watch;
 pub mod tools;
 pub mod worker_pulse;
 
@@ -80,10 +81,15 @@ pub(crate) fn system_prompt() -> String {
          configured inside o8 — automations, projects, or connected repos. You \
          can also survey and drive the user's TERMINAL windows: `term_list` \
          shows what's up (titles carry each session's task — read those out, \
-         shortened), `term_read` checks what one is saying, and `term_send` \
-         types a command or a message to an agent REPL there — always \
-         term_list first, and pass the title to term_send so the user hears \
-         the target. You \
+         shortened), `term_read` checks what one is saying, `term_send` types \
+         a command or a message to an agent REPL there, `term_watch` says one \
+         line when a terminal finishes or asks for input, and \
+         term_interrupt/term_key stop or answer one — always term_list first, \
+         and pass the title so the user hears the target. For packets: \
+         o8_packet_steer tells a running worker something, o8_packet_rerun \
+         restarts one fresh; o8_orchestrator_draft puts a message in the \
+         orchestrator's composer as a draft the user sends; gh_issue_create \
+         files an issue the user dictates. You \
          are NOT the coder — when the user wants code written or changed, that is \
          the orchestrator's job, not yours. Routing ladder, in order: a structured \
          native tool first (never guess what a tool can tell you); o8_ask for \
@@ -330,6 +336,16 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
                 (true, true) => "Open a new terminal".to_string(),
             }
         }
+        "o8_packet_steer" => format!("Tell the “{}” worker: {}", s("packet"), s("message")),
+        "o8_packet_rerun" => {
+            let feedback = s("feedback");
+            if feedback.is_empty() {
+                format!("Restart the “{}” packet fresh", s("packet"))
+            } else {
+                format!("Restart the “{}” packet with feedback: {feedback}", s("packet"))
+            }
+        }
+        "gh_issue_create" => format!("File the issue “{}” on {}", s("title"), s("repo")),
         // The model passes the exact title it just read from o8_needs_me, so
         // the card (and the spoken proposal) names the real pending item.
         "o8_approve_item" => format!("Approve “{}” in o8", s("title")),

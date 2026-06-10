@@ -531,7 +531,7 @@ export default function DictationPillPage() {
           dockLog(`agent-confirm ${tool}`);
           if (taskId) setAgentConfirm({ taskId, tool, summary });
         }));
-        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string; glint?: string }>('o8:agent-task-event', (e) => {
+        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string; glint?: string; text?: string }>('o8:agent-task-event', (e) => {
           const kind = e.payload?.kind;
           if (kind === 'tool_call') {
             // Track the live tool so the working capsule can say "Synthesizing…"
@@ -541,9 +541,11 @@ export default function DictationPillPage() {
           }
           if (kind === 'glint') {
             // Memory surfaced (dossier #4): one quiet line under the dock.
+            // Free-text glints carry their own line (terminal watcher etc.).
             const g = e.payload?.glint;
             if (g === 'recovered') showGlint('Recovered — found another way');
             else if (g === 'remembered') showGlint('Remembered');
+            else if (typeof e.payload?.text === 'string' && e.payload.text) showGlint(e.payload.text);
             return;
           }
           if (kind !== 'status') return;

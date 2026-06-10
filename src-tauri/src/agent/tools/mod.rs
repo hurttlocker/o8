@@ -530,6 +530,66 @@ pub fn all_tools() -> Vec<Value> {
                 "required": []
             }
         }),
+        json!({
+            "name": "term_watch",
+            "description": "Watch a Terminal window and SAY one line when it finishes, asks for input, or closes — 'tell me when that terminal is done', 'let me know when the audit needs me'. One-shot: speaks once then stops watching (45-minute cap). Pass id and title from term_list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
+                    "title": { "type": "string", "description": "The terminal's title from term_list." }
+                },
+                "required": ["id", "title"]
+            }
+        }),
+        json!({
+            "name": "o8_packet_steer",
+            "description": "Get a spoken message to a running packet's worker — 'tell the tooltip packet to also fix the colors'. Steers the warm session when one exists, else restarts the worker with the message as feedback. Identify the packet by part of its name (from o8_status / o8_needs_me). The user confirms first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "packet": { "type": "string", "description": "Part of the packet's name, enough to identify it." },
+                    "message": { "type": "string", "description": "What to tell the worker." }
+                },
+                "required": ["packet", "message"]
+            }
+        }),
+        json!({
+            "name": "o8_packet_rerun",
+            "description": "Restart a packet fresh — 'retry the failed packet', 'run the tooltip work again'. Optionally include spoken feedback about what went wrong last time. Identify the packet by part of its name. The user confirms first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "packet": { "type": "string", "description": "Part of the packet's name, enough to identify it." },
+                    "feedback": { "type": "string", "description": "Optional: what went wrong / what to do differently." }
+                },
+                "required": ["packet"]
+            }
+        }),
+        json!({
+            "name": "o8_orchestrator_draft",
+            "description": "Put a spoken message into o8's orchestrator chat composer as a DRAFT — 'tell the orchestrator to look at the failing CI'. Never sends: the user reviews the draft and presses send themselves. Use for messages/questions TO the orchestrator; use o8_dispatch when the user wants actual coding work kicked off.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": { "type": "string", "description": "The message to draft into the orchestrator composer." }
+                },
+                "required": ["message"]
+            }
+        }),
+        json!({
+            "name": "gh_issue_create",
+            "description": "File a GitHub issue on a repo — voice capture to the tracker: 'file an issue on o8: the dock flickers on wake'. Give it a clear Title Case title and put the user's full description in the body. The user confirms first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": { "type": "string", "description": "Repo folder name, e.g. 'o8'." },
+                    "title": { "type": "string", "description": "Short, clear issue title." },
+                    "body": { "type": "string", "description": "The full description, in the user's words plus any useful detail." }
+                },
+                "required": ["repo", "title"]
+            }
+        }),
         // ── GitHub + local git (Tier-3, read-only) ────────────────────────────
         json!({
             "name": "git_status",
@@ -655,6 +715,11 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "term_interrupt" => terminal_ctl::interrupt(args).await,
         "term_key" => terminal_ctl::key(args).await,
         "term_new" => terminal_ctl::new(args).await,
+        "term_watch" => terminal_ctl::watch(&ctx.app, args),
+        "o8_packet_steer" => o8_bridge::packet_steer(args).await,
+        "o8_packet_rerun" => o8_bridge::packet_rerun(args).await,
+        "o8_orchestrator_draft" => o8_ui::orchestrator_draft(&ctx.app, args),
+        "gh_issue_create" => git_github::issue_create(args).await,
         "mac_music_playlists" => mac_music::playlists(args).await,
         "mac_music_play" => mac_music::play(args).await,
         "mac_music_pause" => mac_music::pause(args).await,

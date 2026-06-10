@@ -73,6 +73,33 @@ pub fn open(app: &tauri::AppHandle, args: Value) -> Result<Value, String> {
     Ok(json!({ "opened": surface }))
 }
 
+/// `o8_orchestrator_draft` — drop a spoken message into the orchestrator
+/// composer as a DRAFT. Never sends: the user reviews and presses Enter, so
+/// this stays ReadOnly — the draft IS the governance (same contract as the
+/// resolve-blocker pill).
+pub fn orchestrator_draft(app: &tauri::AppHandle, args: Value) -> Result<Value, String> {
+    let message = args
+        .get("message")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    if message.is_empty() {
+        return Err("o8_orchestrator_draft needs a 'message'".into());
+    }
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+    let _ = app.emit_to(
+        "main",
+        "o8:ui-command",
+        json!({ "surface": "orchestrator_draft", "text": message }),
+    );
+    log::info!("[symon-o8ui] orchestrator draft ({} chars)", message.len());
+    Ok(json!({ "drafted": true, "note": "The message is in the orchestrator composer — the user sends it." }))
+}
+
 /// Spoken URLs arrive bare ("anthropic.com") — give them a scheme.
 fn normalize_url(u: &str) -> String {
     if u.starts_with("http://") || u.starts_with("https://") {
