@@ -3699,6 +3699,66 @@ function DashboardInner() {
     return () => window.removeEventListener('keydown', handler);
   }, [dispatchSpawn, handleToggleO8Panel, toggleContextualPanelTile, toggleSettingsOverlay, toggleSidebarFromChrome]);
 
+  // ── Symon o8-control: `o8:ui-command` → open a named o8 surface ──
+  // The voice agent's `o8_ui_open` tool emits this (src-tauri/src/agent/tools/
+  // o8_ui.rs). Routes to the SAME handlers the buttons use — settings overlay,
+  // mobile-pairing canvas tab, right-panel tabs, browser pane — so voice and
+  // click stay in lockstep. voice_settings never arrives here (Rust opens the
+  // standalone window directly).
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | null = null;
+    let disposed = false;
+    const O8_TAB_SURFACES: Record<string, O8Tab> = {
+      inbox: 'inbox',
+      prs: 'prs',
+      activity: 'activity',
+      review: 'review',
+      o8md: 'spec',
+      workspace: 'workspace',
+      files: 'files',
+      terminal: 'terminal',
+      browser: 'browser',
+    };
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{ surface: string; url?: string }>('o8:ui-command', (event) => {
+        const surface = event.payload?.surface ?? '';
+        if (surface === 'settings') {
+          handleOpenSettingsTab('connectors');
+          return;
+        }
+        if (surface === 'mobile_qr') {
+          openMobilePairing();
+          return;
+        }
+        if (surface === 'automations') {
+          window.dispatchEvent(new CustomEvent('o8:open-automations'));
+          return;
+        }
+        const tab = O8_TAB_SURFACES[surface];
+        if (!tab) return;
+        setRightPanelKind('o8');
+        openRightPanelFromUser();
+        setO8ActiveTab(tab);
+        if (surface === 'browser' && event.payload?.url) {
+          // Let the pane mount before pushing the URL into it.
+          const url = event.payload.url;
+          setTimeout(() => {
+            window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url } }));
+          }, 250);
+        }
+      }))
+      .then((un) => {
+        if (disposed) { un(); return; }
+        unlisten = un;
+      })
+      .catch(() => { /* noop — never let the listener break the dashboard */ });
+    return () => {
+      disposed = true;
+      if (unlisten) { try { unlisten(); } catch { /* noop */ } }
+    };
+  }, [handleOpenSettingsTab, openMobilePairing, openRightPanelFromUser]);
+
   // ── Voice P3: ⌘⇧, global shortcut → open the settings overlay ──
   // The Rust global-shortcut handler emits `o8:open-settings` (o8 settings is an
   // overlay in THIS webview, not a separate window, so it can't be opened from

@@ -23,6 +23,7 @@ import {
 import { DictationPill } from './DictationPill';
 import { useDictation } from './useDictation';
 import { isNativeDictationAvailable, useNativeDictation } from './useNativeDictation';
+import { useSymonEditBridge } from './useSymonEditBridge';
 import type { DictationStartOptions } from './types';
 
 interface DictationHostContextValue {
@@ -71,6 +72,9 @@ export function DictationHost({ children }: DictationHostProps) {
   // same DictationSnapshot shape, so push-to-talk behaves the same either way.
   const webDictation = useDictation();
   const nativeDictation = useNativeDictation();
+  // Symon's in-place edit lane for text inside o8's own webview (the AX path
+  // can't see a WKWebView) — answers o8:edit-capture / o8:edit-apply.
+  useSymonEditBridge();
 
   // Resolve availability after mount — `isNativeDictationAvailable()` reads
   // window.__TAURI__, which is undefined during SSR. Defaulting to false keeps

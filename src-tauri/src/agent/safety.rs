@@ -76,6 +76,10 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "o8_status" => SafetyClass::ReadOnly,
         "o8_needs_me" => SafetyClass::ReadOnly,
         "o8_ask" => SafetyClass::ReadOnly,
+        // o8 UI control — showing a surface of o8's own window has no
+        // destructive side effect (same reasoning as open_app).
+        "o8_ui_open" => SafetyClass::ReadOnly,
+        "o8_panel_read" => SafetyClass::ReadOnly,
         "o8_dispatch" => SafetyClass::Reversible,
         // Approval triage (magic roadmap #2). Semantically these RELEASE a
         // gated action (a merge, a plan, a command) — Destructive in spirit,
