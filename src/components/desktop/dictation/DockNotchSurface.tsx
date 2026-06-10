@@ -378,6 +378,10 @@ interface DockNotchSurfaceProps {
   workerRepos?: string[];
   /** Tap-the-sliver expansion: a transient capsule naming the in-flight work. */
   showWorkers?: boolean;
+  /** Chat continuity: an agent-lane dictation running INSIDE the open panel.
+   * While set, the panel keeps the dock (no capsule collapse) and renders the
+   * live transcript as a pending You turn. */
+  panelPending?: { phase: 'listening' | 'polishing' | 'handoff'; text: string } | null;
 }
 
 /**
@@ -405,6 +409,7 @@ export function DockNotchSurface({
   workerCount = 0,
   workerRepos = [],
   showWorkers = false,
+  panelPending = null,
 }: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
@@ -417,8 +422,10 @@ export function DockNotchSurface({
   // The Ask panel renders while open, EXCEPT when a real dictation takes the
   // dock (dictationMode !== idle wins — you can Fn-dictate over it). It DOES win
   // over isSpeaking, because the Ask answer is itself read aloud and the panel
-  // should stay visible while its answer speaks.
-  const isAsking = askOpen && dictationMode === 'idle';
+  // should stay visible while its answer speaks. Chat continuity: a pending
+  // in-panel dictation (panelPending) keeps the panel through the recording —
+  // the live words render as a pending turn INSIDE it, not in the capsule.
+  const isAsking = askOpen && (dictationMode === 'idle' || !!panelPending);
   // While listening for the question (empty thread) the panel shows the compact
   // capsule + waveform; once an answer lands it's the full grown panel.
   const askListening = isAsking && askMode === 'listening' && askThread.length === 0;
@@ -939,7 +946,49 @@ export function DockNotchSurface({
         </div>
       );
     } else {
-      body = <DockAskPanel thread={askThread} onClose={() => onCloseAsk?.()} />;
+      // Chat continuity: pending rows render INSIDE the conversation. The You
+      // turn carries the live transcript + a compact waveform while listening
+      // (orbit + "Polishing…" after release); the Symon turn carries the
+      // working orbit + live timer once the agent claims the transcript.
+      const showPolish = panelPending && panelPending.phase !== 'listening' && !agentWorking;
+      const pendingUser = panelPending
+        ? {
+            text: panelPending.text,
+            visual: panelPending.phase === 'listening' ? (
+              <div style={{ width: INNER_W, height: 22, display: 'flex', alignItems: 'center' }}>
+                <NotchWaveCanvas listening levelRef={levelRef} />
+              </div>
+            ) : showPolish ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
+                <NotchOrbit size={11} />
+                <span style={{ fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'rgba(255, 255, 255, 0.6)' }}>
+                  Polishing…
+                </span>
+              </div>
+            ) : null,
+          }
+        : null;
+      const pendingAssistant = agentWorking
+        ? {
+            visual: (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <NotchOrbit size={13} />
+                <span style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'rgba(255, 255, 255, 0.9)' }}>
+                  {agentTool === 'o8_ask' ? 'Synthesizing…' : 'Working…'}
+                </span>
+                {agentStartedAt ? <WorkingTimer startedAt={agentStartedAt} /> : null}
+              </div>
+            ),
+          }
+        : null;
+      body = (
+        <DockAskPanel
+          thread={askThread}
+          onClose={() => onCloseAsk?.()}
+          pendingUser={pendingUser}
+          pendingAssistant={pendingAssistant}
+        />
+      );
     }
   } else if (isSpeaking) {
     const playing = ttsState === 'playing';

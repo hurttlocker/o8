@@ -665,7 +665,10 @@ fn begin_agent_dictation() {
             let app = app.clone();
             move || {
                 crate::dock_window::show(&app);
-                let payload = serde_json::json!({ "type": "system-start", "origin": "system" });
+                // `lane: agent` lets the dock distinguish this from a plain Fn
+                // paste dictation — mid-conversation the panel keeps the dock
+                // and renders the live transcript as a pending chat turn.
+                let payload = serde_json::json!({ "type": "system-start", "origin": "system", "lane": "agent" });
                 log::info!("[fn-hotkey] morph dock → recording (agent start)");
                 let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", payload.clone());
                 let _ = app.emit("o8:stt-event", payload);
