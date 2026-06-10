@@ -1,0 +1,16 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "point-overlay",
+  "description": "Symon Points overlay window. Scopes IPC to the 'point-overlay' label so the click-through /point-overlay webview can receive o8:point-show / o8:point-hide and animate the pointer. Without a capability whose `remote.urls` matches the bundled-Next origin AND whose `windows` includes 'point-overlay', Tauri injects no __TAURI_INTERNALS__ into this remote-URL webview, so listen() never attaches and the pointer never paints. Label-disciplined: events only, NO window-control / updater / process / shell perms (those stay main-only).",
+  "windows": ["point-overlay"],
+  "remote": {
+    "urls": ["http://localhost:*", "http://127.0.0.1:*", "https://localhost:*", "https://127.0.0.1:*"]
+  },
+  "permissions": [
+    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "core:event:allow-emit",
+    "core:event:allow-emit-to"
+  ]
+}
