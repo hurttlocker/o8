@@ -432,6 +432,22 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "o8_recap",
+            "description": "What happened across o8's agent fleet recently — packets completed / failed / sent to review, what's still running, approvals resolved. Use for 'what happened while I was gone?', 'what did I miss?', 'how did the day go?'. Default window 8 hours.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "hours": { "type": "integer", "description": "Look-back window in hours (1-72, default 8)." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "o8_usage",
+            "description": "How much Claude / Codex CLI quota is left — the rate-limit windows (used percent, tokens, when they reset). Use for 'how much Codex do I have left?', 'where are my rate limits?'.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
             "name": "o8_panel_read",
             "description": "List what's configured inside o8: 'automations' (scheduled/triggered jobs and their last run), 'projects' (project groupings), or 'repos' (connected repositories). Use for 'what automations do I have?', 'what projects are in o8?', 'which repos are connected?'. For PRs, issues, or commits use the git/gh tools instead.",
             "parameters": {
@@ -473,6 +489,45 @@ pub fn all_tools() -> Vec<Value> {
                     "tab": { "type": "integer", "description": "Tab number within the window (default 1)." }
                 },
                 "required": ["id", "command", "title"]
+            }
+        }),
+        json!({
+            "name": "term_interrupt",
+            "description": "Send Ctrl+C to a Terminal window — stop whatever is running there ('stop that terminal', 'interrupt the audit'). Pass id and title from term_list. The user confirms first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
+                    "title": { "type": "string", "description": "The target terminal's title from term_list — spoken on the confirm card." },
+                    "tab": { "type": "integer", "description": "Tab number (default 1)." }
+                },
+                "required": ["id", "title"]
+            }
+        }),
+        json!({
+            "name": "term_key",
+            "description": "Press ONE key in a Terminal window — answer an agent's permission prompt or menu there: 'enter', 'escape', 'up', 'down', 'y', 'n', or a digit ('approve what that terminal is asking' → read it with term_read first, then press the right key). Pass id and title from term_list. The user confirms first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
+                    "key": { "type": "string", "description": "enter, escape, ctrl_c, up, down, or a single letter/digit." },
+                    "title": { "type": "string", "description": "The target terminal's title from term_list — spoken on the confirm card." },
+                    "tab": { "type": "integer", "description": "Tab number (default 1)." }
+                },
+                "required": ["id", "key", "title"]
+            }
+        }),
+        json!({
+            "name": "term_new",
+            "description": "Open a NEW Terminal window, optionally in a directory and running a command — 'open a terminal in the o8 repo', 'start a claude session in the rainwater repo' (command: 'claude'). Resolve a spoken repo name to its path with o8_panel_read repos + the known registry first when unsure. The user confirms first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "directory": { "type": "string", "description": "Absolute path (or ~ path) to cd into. Omit for home." },
+                    "command": { "type": "string", "description": "Command to run there, e.g. 'claude'. Omit for a plain shell." }
+                },
+                "required": []
             }
         }),
         // ── GitHub + local git (Tier-3, read-only) ────────────────────────────
@@ -592,9 +647,14 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_dispatch" => o8_bridge::dispatch(args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_panel_read" => o8_bridge::panel_read(args).await,
+        "o8_recap" => o8_bridge::recap(args).await,
+        "o8_usage" => o8_bridge::usage(args).await,
         "term_list" => terminal_ctl::list(args).await,
         "term_read" => terminal_ctl::read(args).await,
         "term_send" => terminal_ctl::send(args).await,
+        "term_interrupt" => terminal_ctl::interrupt(args).await,
+        "term_key" => terminal_ctl::key(args).await,
+        "term_new" => terminal_ctl::new(args).await,
         "mac_music_playlists" => mac_music::playlists(args).await,
         "mac_music_play" => mac_music::play(args).await,
         "mac_music_pause" => mac_music::pause(args).await,

@@ -391,6 +391,155 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
     }))
 }
 
+/// `o8_recap` — what happened across the fleet in the last N hours: packets
+/// that completed / failed / went to review, what's still running, and which
+/// approvals got resolved. The "what happened while I was gone?" answer —
+/// reads the same lanes + approvals stores the desktop renders, no new state.
+pub async fn recap(args: Value) -> Result<Value, String> {
+    let hours = args.get("hours").and_then(|v| v.as_i64()).unwrap_or(8).clamp(1, 72);
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+    let cutoff_ms = now_ms - hours * 3_600_000;
+
+    let lanes_resp = o8_http::get_json("/api/lanes?active=false").await?;
+    let lanes = lanes_resp
+        .get("lanes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let mut completed: Vec<Value> = Vec::new();
+    let mut failed: Vec<Value> = Vec::new();
+    let mut reviewing: Vec<Value> = Vec::new();
+    let mut needs_attention: Vec<Value> = Vec::new();
+    let mut running = 0usize;
+    for lane in &lanes {
+        let status = lane.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        let updated = lane
+            .get("updatedAt")
+            .and_then(|v| {
+                v.as_str()
+                    .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                    .map(|d| d.timestamp_millis())
+                    .or_else(|| v.as_i64())
+            })
+            .unwrap_or(0);
+        if matches!(status, "running" | "launching" | "merging") {
+            running += 1;
+        }
+        if updated < cutoff_ms {
+            continue;
+        }
+        let repo = lane
+            .get("repoPath")
+            .and_then(|v| v.as_str())
+            .unwrap_or("")
+            .trim_end_matches('/')
+            .rsplit('/')
+            .next()
+            .unwrap_or("")
+            .to_string();
+        let item = json!({
+            "label": lane.get("label").and_then(|v| v.as_str()).unwrap_or("Untitled"),
+            "repo": repo,
+        });
+        match status {
+            "completed" => completed.push(item),
+            "failed" => failed.push(item),
+            "reviewing" => reviewing.push(item),
+            "awaiting_input" | "awaiting_orchestrator" | "recovering" => needs_attention.push(item),
+            _ => {}
+        }
+    }
+
+    let approvals_resp = o8_http::get_json("/api/panel/approvals?status=all").await?;
+    let approvals = approvals_resp
+        .get("approvals")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let resolved: Vec<Value> = approvals
+        .iter()
+        .filter(|a| {
+            a.get("resolvedAt").and_then(|v| v.as_i64()).is_some_and(|t| t >= cutoff_ms)
+        })
+        .map(|a| {
+            json!({
+                "title": a.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled"),
+                "action": a.get("status").and_then(|v| v.as_str()).unwrap_or(""),
+            })
+        })
+        .collect();
+
+    let quiet = completed.is_empty()
+        && failed.is_empty()
+        && reviewing.is_empty()
+        && needs_attention.is_empty()
+        && resolved.is_empty();
+    let mut out = json!({
+        "window_hours": hours,
+        "completed": completed,
+        "failed": failed,
+        "reviewing": reviewing,
+        "needs_attention": needs_attention,
+        "still_running": running,
+        "approvals_resolved": resolved,
+    });
+    if quiet {
+        out["note"] = json!("A quiet stretch — nothing finished, failed, or got resolved in that window.");
+    }
+    Ok(out)
+}
+
+/// `o8_usage` — how much CLI quota is left (Claude / Codex rate windows), from
+/// the same snapshot the desktop settings drawer shows.
+pub async fn usage(_args: Value) -> Result<Value, String> {
+    let resp = o8_http::get_json("/api/panel/cli-usage").await?;
+    let now_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
+
+    let project = |runtime: &Value| -> Value {
+        let window = |w: &Value| -> Value {
+            let mut o = json!({});
+            if let Some(mins) = w.get("windowMinutes").and_then(|v| v.as_i64()) {
+                o["window_hours"] = json!(mins as f64 / 60.0);
+            }
+            if let Some(p) = w.get("usedPercent").and_then(|v| v.as_f64()) {
+                o["used_percent"] = json!(p.round());
+            }
+            if let Some(t) = w.get("tokens").and_then(|v| v.as_i64()) {
+                o["tokens_used"] = json!(t);
+            }
+            if let Some(r) = w.get("resetsAt").and_then(|v| v.as_i64()) {
+                if r > now_ms {
+                    o["resets_in_minutes"] = json!((r - now_ms) / 60_000);
+                }
+            }
+            o
+        };
+        let mut o = json!({});
+        if let Some(p) = runtime.get("primary").filter(|v| !v.is_null()) {
+            o["session_window"] = window(p);
+        }
+        if let Some(s) = runtime.get("secondary").filter(|v| !v.is_null()) {
+            o["weekly_window"] = window(s);
+        }
+        if o.as_object().map(|m| m.is_empty()).unwrap_or(true) {
+            o["note"] = json!("no usage data available right now");
+        }
+        o
+    };
+
+    Ok(json!({
+        "claude": project(resp.get("claude").unwrap_or(&Value::Null)),
+        "codex": project(resp.get("codex").unwrap_or(&Value::Null)),
+    }))
+}
+
 /// `o8_panel_read` — what's CONFIGURED inside o8: automations, projects, or
 /// connected repos. Read-through loopback projections, spoken-friendly. (PRs,
 /// issues, and commits stay with the per-repo git/gh tools — no overlap.)
