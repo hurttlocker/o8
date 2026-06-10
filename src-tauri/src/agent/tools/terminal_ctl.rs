@@ -241,6 +241,31 @@ fn shell_quote(s: &str) -> String {
     format!("'{}'", s.replace('\'', r"'\''"))
 }
 
+/// `term_watch` — "tell me when that terminal finishes or needs me." Registers
+/// a one-shot watch (poller + heuristics in `agent::term_watch`); Symon speaks
+/// ONCE when the terminal goes idle, asks for input, or closes — then the
+/// watch dies. ReadOnly: it only observes a window the user explicitly named.
+pub fn watch(app: &tauri::AppHandle, args: Value) -> Result<Value, String> {
+    let id = args.get("id").and_then(|v| v.as_i64()).ok_or(
+        "term_watch needs the terminal 'id' from term_list".to_string(),
+    )?;
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .split(" — ")
+        .take(2)
+        .collect::<Vec<_>>()
+        .join(" — ");
+    let title = if title.is_empty() { "that".to_string() } else { title };
+    let count = crate::agent::term_watch::add(app, id, title.clone());
+    Ok(json!({
+        "watching": title,
+        "active_watches": count,
+        "note": "Symon will say one line when it finishes or asks for input; the watch expires quietly after 45 minutes.",
+    }))
+}
+
 /// Terminal-not-running and consent timeouts both arrive as raw osascript
 /// errors — keep them short and speakable.
 fn spoken_err(e: String) -> String {

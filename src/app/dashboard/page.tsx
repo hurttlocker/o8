@@ -3735,6 +3735,12 @@ function DashboardInner() {
           window.dispatchEvent(new CustomEvent('o8:open-automations'));
           return;
         }
+        if (surface === 'orchestrator_draft') {
+          // Symon's "tell the orchestrator…" — drafts only, the user sends.
+          const text = (event.payload as { text?: string })?.text;
+          if (text) setThoughtsDraftInjection({ id: `symon-${Date.now()}`, text });
+          return;
+        }
         const tab = O8_TAB_SURFACES[surface];
         if (!tab) return;
         setRightPanelKind('o8');
@@ -3757,7 +3763,7 @@ function DashboardInner() {
       disposed = true;
       if (unlisten) { try { unlisten(); } catch { /* noop */ } }
     };
-  }, [handleOpenSettingsTab, openMobilePairing, openRightPanelFromUser]);
+  }, [handleOpenSettingsTab, openMobilePairing, openRightPanelFromUser, setThoughtsDraftInjection]);
 
   // ── Voice P3: ⌘⇧, global shortcut → open the settings overlay ──
   // The Rust global-shortcut handler emits `o8:open-settings` (o8 settings is an
