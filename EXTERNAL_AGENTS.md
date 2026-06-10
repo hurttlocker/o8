@@ -30,6 +30,15 @@ approve_and_merge({packetId})                     # ship
 
 If a gate blocks: `o8_merge_preview` names the check; `o8_packet_diff` shows the offending lines; `rerun_with_feedback` or `submit_review({approved:false, findings})` sends it back with instructions. Never bypass a gate.
 
+## Packet states & failure triage
+
+- **Terminal-good:** `awaiting_review` (your cue to diff + gate-check) · `released` (merged).
+- **Terminal-bad:** `failed` · `archived`.
+- **Stuck — needs YOUR intervention; more waiting will not help:** `blocked` / `awaiting_input`, and last-events like `silent_exit_no_work` or `agent_failed`. `wait_for_mission_ready` does **not** treat these as terminal — inspect `get_mission_status` on every wake; a timeout does NOT mean still-running.
+- **First move on any failure or empty diff: read `o8_packet_transcript`.** The worker's real error (quota exhaustion, auth, build break) lives in the transcript, not in the status label.
+- **Recovery selection:** warm parked session → `steer_packet` · dead/no-work session → `rerun_with_feedback` (fresh worker, same packet) · start truly clean → `reset_packet` then `dispatch_mission`. One rework round, then stop and report to the operator.
+- **Worker quota exhaustion** (e.g. Codex usage limits) presents as `silent_exit_no_work` or `agent_failed` with an **empty diff** — confirm in the transcript, then wait for the reset or switch runtime. Do not redispatch into the same wall.
+
 ## Tool inventory (by job)
 
 - **Configure**: `o8_operator_defaults` (read/set orchestratorModel, thinkingEffort, overlapGate, parallelCap, defaultDispatchRuntime, healBot, supervisor, promptCaching — global, persistent)
@@ -70,6 +79,7 @@ Exit codes: 0 ok · 1 invalid args · 2 connection refused · 3 unauthorized · 
 ## Gotchas
 
 - The app must be running; `connection refused` (CLI exit 2) means launch o8.app.
+- Long-poll calls (`wait_for_mission_ready`, `mission_tail`) can transiently report "API unreachable" while the app is fine — re-probe with `get_mission_status` and resume. Only a hard `connection refused` means the app is down.
 - `o8_packet_diff` is byte-bounded (64KB default, 512KB cap via `maxBytes`) — check `truncated` before judging a large diff.
 - `create_mission` dispatches immediately by default — pass `dispatch: false` to stage.
 - Claude runs as the orchestrator only; packet workers are Codex/Gemini.
