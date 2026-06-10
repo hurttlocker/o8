@@ -116,6 +116,22 @@ export function metadataPath(sessionDir: string) {
   return path.join(sessionDir, METADATA_FILE);
 }
 
+/**
+ * The command line currently running under `pid`, or null when the process
+ * is gone. Used to verify a stored PID still belongs to OUR run before
+ * signaling it — PIDs get recycled, and `kill(-pid)` against a recycled
+ * group leader SIGINTs an innocent process group.
+ */
+export async function pidCommandLine(pid: number): Promise<string | null> {
+  try {
+    const { stdout } = await promisify(execFile)('ps', ['-o', 'command=', '-p', String(pid)]);
+    const line = stdout.trim();
+    return line || null;
+  } catch {
+    return null;
+  }
+}
+
 // ── Workspace / repo helpers ─────────────────────────────────────────────────
 
 export async function validateWorkspace(targetCwd: string) {

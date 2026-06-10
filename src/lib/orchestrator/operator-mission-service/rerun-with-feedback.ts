@@ -105,6 +105,10 @@ function resetPacketFields(packet: OrchestratorPacket) {
   packet.lastEventLabel = null;
   packet.recoveryCount = 0;
   packet.lastRecoveryAt = null;
+  // Deliberately NOT reset: packet.typecheckAutoRetries. The auto-rerun
+  // budget (#1108 layer 1) must survive redispatch — zeroing it here would
+  // let a persistently type-broken packet loop full workers forever. Only
+  // operator reset_packet refreshes it.
 }
 
 export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
