@@ -1,6 +1,6 @@
 # Issue Map — Cortex IDE v1
 
-Repo: `hurttlocker/cortex-ide`
+Repo: `hurttlocker/o8`
 
 ## How the issue system is structured
 

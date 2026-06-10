@@ -77,5 +77,5 @@ npx tsc --noEmit -p cli/tsconfig.json
 
 ## See also
 
-- Epic [#926](https://github.com/hurttlocker/cortex-ide/issues/926) — full
+- Epic [#926](https://github.com/hurttlocker/o8/issues/926) — full
   command surface and design principles.

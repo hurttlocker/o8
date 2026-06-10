@@ -168,7 +168,7 @@ Day-one honesty caveat the operator must accept: **there is no absolute external
 
 ### 3.3 Task curation (held-out)
 
-Mine the **~1152 GH issues** on `hurttlocker/cortex-ide` (verified via `gh search`). Filter to **closed issues that map to a single merged PR** (issue text = spec, merged diff = ground-truth reference). **Hold out a set NOT seen during dev.** Bucket by diff size (single-file / multi-file / cross-cutting) so the crossover is visible.
+Mine the **~1152 GH issues** on `hurttlocker/o8` (verified via `gh search`). Filter to **closed issues that map to a single merged PR** (issue text = spec, merged diff = ground-truth reference). **Hold out a set NOT seen during dev.** Bucket by diff size (single-file / multi-file / cross-cutting) so the crossover is visible.
 
 ### 3.4 Cold vs warm
 
@@ -271,7 +271,7 @@ The deck/story leads with the **moat**, uses speed as proof of seriousness:
 - **0.1** Confirm current build (v0.1.249 ✓) and resolve live port from `~/.o8/api-port` (3001 ✓, status route 200 @3.6ms ✓).
 - **0.2** **Re-derive all `lane_events` SQL against the real verbs/status payloads** (done in §3.5) — verify each query returns rows on the live DB.
 - **0.3** **Resolve the `usage.jsonl` path vs clean-bench conflict (Q3):** test whether usage logging respects `CORTEX_IDE_DATA_DIR` or always writes `~/.cortex-ide/usage.jsonl`. Decide ONE canonical timing source and verify it populates under bench isolation.
-- **0.4** **Confirm prior signed builds (v0.1.225, v0.1.228) are installable (Q1)** — check `hurttlocker/cortex-ide` releases for archived `.app.tar.gz` NOW. Without them, kill the regression spine + bug-reproduction proof and say so.
+- **0.4** **Confirm prior signed builds (v0.1.225, v0.1.228) are installable (Q1)** — check `hurttlocker/o8` releases for archived `.app.tar.gz` NOW. Without them, kill the regression spine + bug-reproduction proof and say so.
 - **0.5** **Patch `measure-render-speed.sh`**: add `-L`, record both the `/`→307 hop and `/dashboard`; confirm `?fresh=1` degraded behavior captured (verified working on mobile/bootstrap).
 - **0.6** Commit `baseline.json` from the first clean `measure:render` + hydration run. All app-speed gates are regression-relative to it.
 - **0.7** **Expand `cases.json` from 4 → ~30 + ~8 literal-lookup (Q5).** Build **strong-grep** in `baselines.ts` (Q4). Add `composeMs`+token+$ instrumentation to the Brain composer/adapters.

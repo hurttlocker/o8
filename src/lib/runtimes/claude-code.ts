@@ -367,7 +367,7 @@ async function waitForClaudeRunToFinish(sessionId: string, startedAtMs: number) 
 
 /**
  * Extract a human-readable project name from the path.
- * e.g., "/Users/alice/projects/cortex-ide" → "cortex-ide"
+ * e.g., "/Users/alice/projects/o8" → "o8"
  */
 function projectDisplayName(projectPath: string): string {
   return path.basename(projectPath) || projectPath;

@@ -4,8 +4,8 @@
  * Appears in the agent pill when an agent session completes with dirty files.
  * Three actions: Create PR, Merge to main, Discard.
  *
- * @see https://github.com/hurttlocker/cortex-ide/issues/67
- * @see https://github.com/hurttlocker/cortex-ide/issues/70
+ * @see https://github.com/hurttlocker/o8/issues/67
+ * @see https://github.com/hurttlocker/o8/issues/70
  */
 
 import { memo, useCallback, useState } from 'react';

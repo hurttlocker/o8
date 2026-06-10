@@ -90,7 +90,7 @@ This is the thesis Rainwater is building toward: **the orchestrator replaces you
 Prerequisites: **Node.js 22+** (ABI-pinned for `better-sqlite3`), **Rust stable**, **Xcode CLT** (macOS) / build-essential (Linux). Optional: **Codex CLI** (mission dispatch), **`gh` CLI** (`create_mission` from issues).
 
 ```bash
-git clone https://github.com/hurttlocker/cortex-ide.git
+git clone https://github.com/hurttlocker/o8.git
 cd cortex-ide
 cp .env.example .env.local      # optional API keys
 npm install

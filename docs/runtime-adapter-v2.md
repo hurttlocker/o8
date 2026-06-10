@@ -59,7 +59,7 @@ export interface RuntimeSession {
   cwd: string;
   /** Git branch if known */
   branch?: string;
-  /** Repository slug if known (e.g., "hurttlocker/cortex-ide") */
+  /** Repository slug if known (e.g., "hurttlocker/o8") */
   repoSlug?: string;
   /** Current status */
   status: 'running' | 'idle' | 'waiting' | 'reviewing' | 'failed';

@@ -5,7 +5,7 @@
  * POST /api/worktrees                — Create a new worktree
  * DELETE /api/worktrees              — Cleanup/prune worktrees
  *
- * @see https://github.com/hurttlocker/cortex-ide/issues/67
+ * @see https://github.com/hurttlocker/o8/issues/67
  */
 
 export const dynamic = 'force-dynamic';

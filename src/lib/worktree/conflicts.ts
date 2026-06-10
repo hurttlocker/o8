@@ -5,7 +5,7 @@
  * Line-level analysis runs on-demand when file overlap is detected.
  * Merge order recommendations calculated from change scope + completion order.
  *
- * @see https://github.com/hurttlocker/cortex-ide/issues/69
+ * @see https://github.com/hurttlocker/o8/issues/69
  */
 
 import { execFile } from 'node:child_process';

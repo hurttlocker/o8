@@ -1,6 +1,6 @@
 //! Symon Tier-3 tools — read-only local git + GitHub (via the `gh` CLI).
 //!
-//! Lets Symon answer "any open PRs on cortex-ide?", "what's the git status?",
+//! Lets Symon answer "any open PRs on o8?", "what's the git status?",
 //! "recent commits?" by voice. All ReadOnly: only read subcommands run
 //! (status/log, `gh ... list`). The repo name resolves to an absolute path via
 //! `super::o8_bridge::resolve_repo_path`; commands run with that path as cwd so
@@ -43,7 +43,7 @@ fn run(cmd: &str, args: &[&str], cwd: &str) -> Result<String, String> {
 async fn repo_arg(args: &Value) -> Result<String, String> {
     let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("").trim();
     if repo.is_empty() {
-        return Err("which repo? (e.g. 'cortex-ide')".into());
+        return Err("which repo? (e.g. 'o8')".into());
     }
     resolve_repo_path(repo).await
 }

@@ -16,7 +16,7 @@
  *
  * Both routes are gated by the loopback + ws-token middleware.
  *
- * Issue: https://github.com/hurttlocker/cortex-ide/issues/639
+ * Issue: https://github.com/hurttlocker/o8/issues/639
  */
 
 import { NextRequest, NextResponse } from 'next/server';
