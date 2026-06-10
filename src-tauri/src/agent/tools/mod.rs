@@ -20,6 +20,7 @@ pub mod mac_music;
 pub mod mac_shortcuts;
 pub mod o8_bridge;
 pub mod o8_ui;
+pub mod terminal_ctl;
 
 use super::{safety, TaskCtx};
 use chrono::{Datelike, Timelike};
@@ -441,6 +442,39 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["kind"]
             }
         }),
+        // ── Terminal control (the dev frontier) ───────────────────────────────
+        json!({
+            "name": "term_list",
+            "description": "List the user's open Terminal windows — each with a stable id, its title (titles carry the working directory and the live session/task name, e.g. a Claude Code session's current task), and whether it's busy. Use for 'what terminals are up?', 'what are my terminals doing?'. ALWAYS call this before term_read or term_send to get the id.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "term_read",
+            "description": "Read the last lines visible in one Terminal window — 'what is the o8 terminal saying?', 'did the tests finish in that terminal?'. Pass the id from term_list.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
+                    "lines": { "type": "integer", "description": "How many trailing lines (default 25, max 80)." },
+                    "tab": { "type": "integer", "description": "Tab number within the window (default 1)." }
+                },
+                "required": ["id"]
+            }
+        }),
+        json!({
+            "name": "term_send",
+            "description": "Type and submit ONE line in a Terminal window — a shell command, or a message to an agent REPL (like Claude Code) running there. Pass the id from term_list, and include 'title' (the terminal's title from term_list) so the user hears which terminal on the confirm card. The user confirms before it runs.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
+                    "command": { "type": "string", "description": "The single line to type and submit." },
+                    "title": { "type": "string", "description": "The target terminal's title from term_list — spoken on the confirm card." },
+                    "tab": { "type": "integer", "description": "Tab number within the window (default 1)." }
+                },
+                "required": ["id", "command", "title"]
+            }
+        }),
         // ── GitHub + local git (Tier-3, read-only) ────────────────────────────
         json!({
             "name": "git_status",
@@ -558,6 +592,9 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_dispatch" => o8_bridge::dispatch(args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_panel_read" => o8_bridge::panel_read(args).await,
+        "term_list" => terminal_ctl::list(args).await,
+        "term_read" => terminal_ctl::read(args).await,
+        "term_send" => terminal_ctl::send(args).await,
         "mac_music_playlists" => mac_music::playlists(args).await,
         "mac_music_play" => mac_music::play(args).await,
         "mac_music_pause" => mac_music::pause(args).await,
