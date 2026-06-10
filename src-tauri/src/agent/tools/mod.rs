@@ -16,6 +16,7 @@ pub mod mac_contacts;
 pub mod mac_mail;
 pub mod mac_notes;
 pub mod mac_reminders;
+pub mod mac_music;
 pub mod mac_shortcuts;
 pub mod o8_bridge;
 pub mod o8_ui;
@@ -383,6 +384,39 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["repo", "task"]
             }
         }),
+        // ── Apple Music (app-control frontier) ────────────────────────────────
+        json!({
+            "name": "mac_music_playlists",
+            "description": "List the names of the user's Apple Music playlists. Use for 'what playlists do I have?' or before playing from a playlist whose exact name you don't know.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "mac_music_play",
+            "description": "Play music in Apple Music: a named playlist, a searched song/artist, or just resume playback. Use for 'play my chill playlist', 'play some Sade', 'play music'. If a playlist name might be off, call mac_music_playlists first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "playlist": { "type": "string", "description": "Exact playlist name to play. Omit when playing a song or resuming." },
+                    "song": { "type": "string", "description": "Song, artist, or album to search the library for and play the top match. Omit when playing a playlist or resuming." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "mac_music_pause",
+            "description": "Pause Apple Music playback. Use for 'pause the music', 'stop the song'.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "mac_music_next",
+            "description": "Skip to the next track in Apple Music. Use for 'next song', 'skip this'.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
+            "name": "mac_music_now_playing",
+            "description": "What's currently playing in Apple Music (track, artist, player state). Use for 'what song is this?'.",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
         // ── o8 UI control (the o8-control frontier v1) ────────────────────────
         json!({
             "name": "o8_ui_open",
@@ -524,6 +558,11 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_dispatch" => o8_bridge::dispatch(args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_panel_read" => o8_bridge::panel_read(args).await,
+        "mac_music_playlists" => mac_music::playlists(args).await,
+        "mac_music_play" => mac_music::play(args).await,
+        "mac_music_pause" => mac_music::pause(args).await,
+        "mac_music_next" => mac_music::next(args).await,
+        "mac_music_now_playing" => mac_music::now_playing(args).await,
         "git_status" => git_github::git_status(args).await,
         "git_log" => git_github::git_log(args).await,
         "gh_pr_list" => git_github::pr_list(args).await,
