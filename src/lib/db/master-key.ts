@@ -36,24 +36,39 @@ const DEV_STATIC_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
 
 let _cachedKey: string | null = null;
 
+type KeychainRead =
+  | { status: 'found'; key: string }
+  | { status: 'absent' }
+  | { status: 'error'; detail: string };
+
 /**
  * Read the master key directly from the macOS Keychain using the `security`
  * CLI. This is the server-side path — no Tauri IPC needed because the Next.js
  * server process runs on the same macOS machine.
  *
- * Returns null if the entry does not exist, is inaccessible, or this is not macOS.
+ * Distinguishes "entry genuinely absent" (exit 44, errSecItemNotFound — safe
+ * to create a fresh key) from "read FAILED" (locked Keychain, denied ACL —
+ * the entry may exist, and generating a replacement would orphan every blob
+ * encrypted under it).
  */
-function readKeychainKey(): string | null {
-  if (process.platform !== 'darwin') return null;
+function readKeychainKey(): KeychainRead {
+  if (process.platform !== 'darwin') return { status: 'absent' };
   try {
     const { execSync: exec } = require('node:child_process') as typeof import('node:child_process');
     const out = exec(
       `security find-generic-password -s '${KEYCHAIN_SERVICE}' -a '${KEYCHAIN_ACCOUNT}' -w`,
       { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] },
     ).trim();
-    return out.length >= 40 ? out : null;
-  } catch {
-    return null;
+    // An existing-but-too-short entry is invalid (key is >=40 chars) — treat
+    // as absent so a valid key replaces it.
+    return out.length >= 40 ? { status: 'found', key: out } : { status: 'absent' };
+  } catch (err) {
+    const exitStatus = (err as { status?: number | null }).status;
+    if (exitStatus === 44) return { status: 'absent' }; // errSecItemNotFound
+    return {
+      status: 'error',
+      detail: err instanceof Error ? err.message : String(err),
+    };
   }
 }
 
@@ -104,9 +119,25 @@ export async function resolveMasterKey(): Promise<string> {
 
   // 2. macOS Keychain (server-side direct CLI call).
   if (process.platform === 'darwin') {
-    let keychainKey = readKeychainKey();
+    const read = readKeychainKey();
+
+    if (read.status === 'error') {
+      // The entry may EXIST but be unreadable right now (locked Keychain,
+      // ACL change after an OS update). Anything we'd do silently here is
+      // wrong: generating a fresh key with `add-generic-password -U` would
+      // OVERWRITE the real entry and orphan every previously-encrypted blob;
+      // falling to the dev key would re-encrypt new secrets under a
+      // non-secret value. Fail loudly — feature unavailable beats silent
+      // data loss. Not cached, so a later call retries.
+      console.error(`[master-key] Keychain read FAILED (not "absent"): ${read.detail}`);
+      throw new Error(
+        `Keychain read failed — refusing to rotate or downgrade the master key. Unlock the login Keychain and retry. (${read.detail})`,
+      );
+    }
+
+    let keychainKey = read.status === 'found' ? read.key : null;
     if (!keychainKey) {
-      // First run — generate and persist.
+      // Genuinely absent (first run) — generate and persist.
       const newKey = generateKey();
       if (writeKeychainKey(newKey)) {
         keychainKey = newKey;

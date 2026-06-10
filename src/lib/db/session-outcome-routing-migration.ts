@@ -15,15 +15,26 @@ function columnExists(sqlite: Database.Database, table: string, column: string):
   return rows.some((row) => row.name === column);
 }
 
+// Multiple processes run this at boot — tolerate losing the check-then-ALTER
+// race (the column existing is the desired end state either way).
+function addColumnTolerant(sqlite: Database.Database, sql: string): void {
+  try {
+    sqlite.exec(sql);
+  } catch (err) {
+    if (err instanceof Error && /duplicate column name/i.test(err.message)) return;
+    throw err;
+  }
+}
+
 export function ensureSessionOutcomeRoutingColumns(sqlite: Database.Database): void {
   if (!columnExists(sqlite, 'session_outcomes', 'skipped_tests')) {
-    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN skipped_tests INTEGER');
+    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN skipped_tests INTEGER');
   }
   if (!columnExists(sqlite, 'session_outcomes', 'reworked')) {
-    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN reworked INTEGER');
+    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN reworked INTEGER');
   }
   if (!columnExists(sqlite, 'session_outcomes', 'merged_clean')) {
-    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN merged_clean INTEGER');
+    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN merged_clean INTEGER');
     // Backfill: a prior outcome with `outcome='succeeded'` AND
     // `review_approved=1` is a clean merge. Failed outcomes mark
     // `merged_clean=0`. Everything else (NULL approved, partial, interrupted)

@@ -53,7 +53,12 @@ export function ensureV18FactsSourceAuthoritySchema(
   }
 
   if (!tableColumnExists(sqlite, 'facts', 'source_authority')) {
-    sqlite.exec(`ALTER TABLE facts ADD COLUMN source_authority REAL NOT NULL DEFAULT 0.5`);
+    try {
+      sqlite.exec(`ALTER TABLE facts ADD COLUMN source_authority REAL NOT NULL DEFAULT 0.5`);
+    } catch (err) {
+      // Another boot process won the check-then-ALTER race — column exists.
+      if (!(err instanceof Error && /duplicate column name/i.test(err.message))) throw err;
+    }
   }
 
   backfillSourceAuthority(sqlite);

@@ -53,7 +53,13 @@ export function ensureV20FactsEmbeddingSchema(
     return { applied: false };
   }
 
-  sqlite.exec(`ALTER TABLE facts ADD COLUMN embedding BLOB`);
+  try {
+    sqlite.exec(`ALTER TABLE facts ADD COLUMN embedding BLOB`);
+  } catch (err) {
+    // Another boot process won the check-then-ALTER race — column exists.
+    if (!(err instanceof Error && /duplicate column name/i.test(err.message))) throw err;
+    return { applied: false };
+  }
   console.log('[db][v20] Added facts.embedding BLOB column (null for un-embedded rows)');
   return { applied: true };
 }

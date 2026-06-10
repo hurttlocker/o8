@@ -203,7 +203,7 @@ function ensureAutomationsTable(sqlite: Database.Database): void {
 
 function ensureAutomationsErrorColumn(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'automations', 'last_error_message')) {
-    sqlite.exec('ALTER TABLE automations ADD COLUMN last_error_message TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE automations ADD COLUMN last_error_message TEXT');
   }
 }
 
@@ -267,10 +267,10 @@ function ensureAppStateTable(sqlite: Database.Database): void {
  */
 function ensureProjectsLedgerColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'projects', 'color')) {
-    sqlite.exec('ALTER TABLE projects ADD COLUMN color TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE projects ADD COLUMN color TEXT');
   }
   if (!tableColumnExists(sqlite, 'projects', 'sort_order')) {
-    sqlite.exec('ALTER TABLE projects ADD COLUMN sort_order INTEGER DEFAULT 0');
+    addColumnTolerant(sqlite, 'ALTER TABLE projects ADD COLUMN sort_order INTEGER DEFAULT 0');
   }
 }
 
@@ -933,42 +933,60 @@ function tableColumnExists(sqlite: Database.Database, tableName: string, columnN
   return columns.some((column) => column.name === columnName);
 }
 
+/**
+ * Run an ADD COLUMN statement, tolerating "duplicate column name".
+ *
+ * Three processes open this DB and run the column-add path at boot (Next
+ * server, ws-server, compactor). The `tableColumnExists` check-then-ALTER is
+ * a cross-process TOCTOU: both can observe "missing", and the loser's ALTER
+ * throws out of getDb(), leaving that process with no DB. A duplicate-column
+ * error means the column exists — exactly the desired end state.
+ */
+function addColumnTolerant(sqlite: Database.Database, sql: string): void {
+  try {
+    sqlite.exec(sql);
+  } catch (err) {
+    if (err instanceof Error && /duplicate column name/i.test(err.message)) return;
+    throw err;
+  }
+}
+
 function ensureApprovalContextColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'approvals', 'packet_id')) {
-    sqlite.exec('ALTER TABLE approvals ADD COLUMN packet_id TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE approvals ADD COLUMN packet_id TEXT');
   }
   if (!tableColumnExists(sqlite, 'approvals', 'lane_id')) {
-    sqlite.exec('ALTER TABLE approvals ADD COLUMN lane_id TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE approvals ADD COLUMN lane_id TEXT');
   }
   if (!tableColumnExists(sqlite, 'approvals', 'gate_result_json')) {
-    sqlite.exec('ALTER TABLE approvals ADD COLUMN gate_result_json TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE approvals ADD COLUMN gate_result_json TEXT');
   }
   if (!tableColumnExists(sqlite, 'approvals', 'conflict_report_json')) {
-    sqlite.exec('ALTER TABLE approvals ADD COLUMN conflict_report_json TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE approvals ADD COLUMN conflict_report_json TEXT');
   }
 }
 
 function ensureWatchedAgentColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'watched_agents', 'last_event_at')) {
-    sqlite.exec('ALTER TABLE watched_agents ADD COLUMN last_event_at INTEGER NOT NULL DEFAULT 0');
+    addColumnTolerant(sqlite, 'ALTER TABLE watched_agents ADD COLUMN last_event_at INTEGER NOT NULL DEFAULT 0');
   }
 }
 
 function ensureChatHistoryColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'chat_history', 'plan_text')) {
-    sqlite.exec('ALTER TABLE chat_history ADD COLUMN plan_text TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE chat_history ADD COLUMN plan_text TEXT');
   }
 }
 
 function ensureLaneHeartbeatColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'lanes', 'last_heartbeat_at')) {
-    sqlite.exec('ALTER TABLE lanes ADD COLUMN last_heartbeat_at INTEGER');
+    addColumnTolerant(sqlite, 'ALTER TABLE lanes ADD COLUMN last_heartbeat_at INTEGER');
   }
 }
 
 function ensureSessionOutcomeColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'session_outcomes', 'plan_text')) {
-    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN plan_text TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN plan_text TEXT');
   }
   // #745 — Temporal validity windows. SQLite ALTER TABLE ADD COLUMN rejects
   // any non-literal DEFAULT (even CURRENT_TIMESTAMP) on the bundled
@@ -977,13 +995,13 @@ function ensureSessionOutcomeColumns(sqlite: Database.Database): void {
   // `datetime('now')` for fresh inserts. Fresh DBs get the NOT NULL DEFAULT
   // (datetime('now')) shape via the CREATE TABLE in ensureTables() above.
   if (!tableColumnExists(sqlite, 'session_outcomes', 'valid_from')) {
-    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN valid_from TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN valid_from TEXT');
     sqlite.exec(
       "UPDATE session_outcomes SET valid_from = COALESCE(completed_at, created_at, datetime('now')) WHERE valid_from IS NULL OR valid_from = ''",
     );
   }
   if (!tableColumnExists(sqlite, 'session_outcomes', 'valid_to')) {
-    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN valid_to TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN valid_to TEXT');
   }
   // Index on valid_to to keep "live entries only" recall queries cheap.
   sqlite.exec('CREATE INDEX IF NOT EXISTS idx_so_valid_to ON session_outcomes(valid_to)');
@@ -1246,7 +1264,7 @@ function ensureProjectsTables(sqlite: Database.Database): void {
   `);
 
   if (!tableColumnExists(sqlite, 'projects', 'main_repo_id')) {
-    sqlite.exec('ALTER TABLE projects ADD COLUMN main_repo_id TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE projects ADD COLUMN main_repo_id TEXT');
   }
   sqlite.exec(`
     UPDATE projects
@@ -1285,13 +1303,13 @@ function ensureProjectsTables(sqlite: Database.Database): void {
  */
 function ensureProjectScopeColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'session_outcomes', 'project_id')) {
-    sqlite.exec('ALTER TABLE session_outcomes ADD COLUMN project_id TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE session_outcomes ADD COLUMN project_id TEXT');
   }
   if (!tableColumnExists(sqlite, 'approvals', 'project_id')) {
-    sqlite.exec('ALTER TABLE approvals ADD COLUMN project_id TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE approvals ADD COLUMN project_id TEXT');
   }
   if (!tableColumnExists(sqlite, 'lanes', 'project_id')) {
-    sqlite.exec('ALTER TABLE lanes ADD COLUMN project_id TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE lanes ADD COLUMN project_id TEXT');
   }
   sqlite.exec(`
     CREATE INDEX IF NOT EXISTS idx_session_outcomes_project_id ON session_outcomes(project_id);
@@ -1315,13 +1333,13 @@ function ensureProjectScopeColumns(sqlite: Database.Database): void {
  */
 function ensureExternalMcpServerColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'external_mcp_servers', 'team_id')) {
-    sqlite.exec('ALTER TABLE external_mcp_servers ADD COLUMN team_id TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE external_mcp_servers ADD COLUMN team_id TEXT');
   }
   if (!tableColumnExists(sqlite, 'external_mcp_servers', 'url')) {
-    sqlite.exec('ALTER TABLE external_mcp_servers ADD COLUMN url TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE external_mcp_servers ADD COLUMN url TEXT');
   }
   if (!tableColumnExists(sqlite, 'external_mcp_servers', 'oauth_token')) {
-    sqlite.exec('ALTER TABLE external_mcp_servers ADD COLUMN oauth_token TEXT');
+    addColumnTolerant(sqlite, 'ALTER TABLE external_mcp_servers ADD COLUMN oauth_token TEXT');
   }
   // Ensure team_id index exists (may be missing on pre-v8 databases)
   sqlite.exec(`
