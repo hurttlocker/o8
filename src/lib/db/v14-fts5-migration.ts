@@ -41,10 +41,12 @@ export function isFts5Available(sqlite: Database.Database): boolean {
   try {
     const opts = sqlite.pragma('compile_options') as Array<{ compile_options: string }>;
     _fts5Available = opts.some((row) => row.compile_options === 'ENABLE_FTS5');
+    return _fts5Available;
   } catch {
-    _fts5Available = false;
+    // Don't cache a transient probe failure — a permanently-cached `false`
+    // would silently disable every FTS write for the process lifetime.
+    return false;
   }
-  return _fts5Available;
 }
 
 // ── Schema (v14) ──

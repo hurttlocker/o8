@@ -6,7 +6,7 @@
  */
 
 import { execFile } from 'node:child_process';
-import { access, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
+import { access, mkdir, readFile, realpath, rename, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -105,7 +105,11 @@ export async function readJsonFile<T>(filePath: string) {
 }
 
 export async function writeJsonFile(filePath: string, value: unknown) {
-  await writeFile(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  // Write-then-rename so concurrent readers (the 15s refresh timer, discovery,
+  // resume/interrupt) never observe a torn/partial JSON file.
+  const tmpPath = `${filePath}.${process.pid}.${Math.random().toString(36).slice(2)}.tmp`;
+  await writeFile(tmpPath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
+  await rename(tmpPath, filePath);
 }
 
 export function metadataPath(sessionDir: string) {

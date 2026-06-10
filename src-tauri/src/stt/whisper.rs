@@ -191,7 +191,7 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
             let body_text = response.text().unwrap_or_default();
             tracing::warn!(
                 "Whisper Turbo STT API error ({status}): {}",
-                &body_text[..body_text.len().min(200)]
+                crate::utf8_head(&body_text, 200)
             );
             None
         }

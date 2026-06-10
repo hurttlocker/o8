@@ -1213,14 +1213,28 @@ function extractText(delta: ChatDelta): string {
  */
 function isLossyMessage(json: string): boolean {
   // Fast path: avoid parsing — check for known lossy patterns
-  if (json.includes('"channel":"pong"')) return true;
-  // Chat deltas (not done/error) are lossy
-  if (json.includes('"channel":"chat"') && json.includes('"event":"delta"')) return true;
-  // Terminal data frames are lossy (PTY output is best-effort)
-  if (json.includes('"channel":"terminal"') && json.includes('"event":"data"')) return true;
-  // Orchestrator output chunks are lossy (intermediate deltas can be dropped)
-  if (json.includes('"channel":"orchestrator"') && json.includes('"event":"output"')) return true;
-  return false;
+  const maybeLossy =
+    json.includes('"channel":"pong"') ||
+    // Chat deltas (not done/error) are lossy
+    (json.includes('"channel":"chat"') && json.includes('"event":"delta"')) ||
+    // Terminal data frames are lossy (PTY output is best-effort)
+    (json.includes('"channel":"terminal"') && json.includes('"event":"data"')) ||
+    // Orchestrator output chunks are lossy (intermediate deltas can be dropped)
+    (json.includes('"channel":"orchestrator"') && json.includes('"event":"output"'));
+  if (!maybeLossy) return false;
+  // Confirm with a real parse: payload text that merely *contains* one of the
+  // marker substrings (e.g. an agent quoting protocol frames) must not cause
+  // a durable message to be silently dropped. Only runs under backpressure.
+  try {
+    const msg = JSON.parse(json) as { channel?: unknown; event?: unknown };
+    if (msg.channel === 'pong') return true;
+    if (msg.channel === 'chat' && msg.event === 'delta') return true;
+    if (msg.channel === 'terminal' && msg.event === 'data') return true;
+    if (msg.channel === 'orchestrator' && msg.event === 'output') return true;
+    return false;
+  } catch {
+    return false; // unparseable → treat as durable (safer)
+  }
 }
 
 /** Flush any queued durable messages once backpressure clears. */
@@ -1269,6 +1283,17 @@ function send(client: ClientState, msg: Record<string, unknown>) {
   // Flush any pending queue first (maintain ordering)
   if (client.backpressureQueue.length > 0) {
     flushBackpressureQueue(client);
+    if (client.backpressureQueue.length > 0) {
+      // Flush paused mid-drain (buffer re-pressured) — sending now would jump
+      // ahead of queued durable messages and reorder them.
+      if (isLossyMessage(json)) return;
+      if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
+        client.backpressureQueue.shift();
+      }
+      client.backpressureQueue.push(json);
+      startFlushTimer(client);
+      return;
+    }
   }
   client.ws.send(json);
 }
@@ -1286,6 +1311,15 @@ function sendRaw(client: ClientState, preStringified: string) {
   }
   if (client.backpressureQueue.length > 0) {
     flushBackpressureQueue(client);
+    if (client.backpressureQueue.length > 0) {
+      if (isLossyMessage(preStringified)) return;
+      if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
+        client.backpressureQueue.shift();
+      }
+      client.backpressureQueue.push(preStringified);
+      startFlushTimer(client);
+      return;
+    }
   }
   client.ws.send(preStringified);
 }
@@ -3590,6 +3624,11 @@ const httpServer = createServer((req, res) => {
       }
 
       if (payload.kind === 'mutation') {
+        if (!payload.mutation || typeof payload.mutation !== 'object') {
+          res.writeHead(400);
+          res.end('missing mutation');
+          return;
+        }
         const event = buildRealtimeEnvelope(
           'global',
           'mutation',
@@ -3625,6 +3664,11 @@ const httpServer = createServer((req, res) => {
       }
 
       if (payload.kind === 'refresh') {
+        if (!Array.isArray(payload.targets)) {
+          res.writeHead(400);
+          res.end('missing targets');
+          return;
+        }
         if (payload.targets.includes('global')) {
           scheduleRealtimeRuntimeRefresh({ fresh: payload.fresh, reason: payload.reason });
         }
@@ -4199,8 +4243,11 @@ if (existsSync(GIT_DIR)) {
   // Watch refs (branch tips change on commit/push)
   const refsDir = resolve(GIT_DIR, 'refs');
   if (existsSync(refsDir)) {
+    // An unhandled FSWatcher 'error' (refs pruned during rebase/gc) crashes the process.
     watch(refsDir, { recursive: true }, () => {
       scheduleReviewRefresh();
+    }).on('error', (err) => {
+      console.warn('[ws-server] git refs watcher error:', err);
     });
   }
   // Watch index (staged files change)
@@ -4208,6 +4255,8 @@ if (existsSync(GIT_DIR)) {
   if (existsSync(indexFile)) {
     watch(indexFile, () => {
       scheduleReviewRefresh();
+    }).on('error', (err) => {
+      console.warn('[ws-server] git index watcher error:', err);
     });
   }
   console.log(`[ws-server] Watching git at ${GIT_DIR} for diff changes`);
@@ -4231,13 +4280,15 @@ httpServer.on('error', (err: NodeJS.ErrnoException) => {
       if (pids) {
         execSync(`kill -9 ${pids.split('\n').join(' ')}`, { encoding: 'utf-8' });
         console.log(`[ws-server] Killed stale process(es): ${pids.replace(/\n/g, ', ')}`);
-        // Retry once after a short delay
-        setTimeout(() => {
-          httpServer.listen(WS_PORT, '0.0.0.0', () => {
-            console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
-          });
-        }, 500);
+      } else {
+        console.log(`[ws-server] Port ${WS_PORT} reported in use but no listener found — retrying`);
       }
+      // Retry once after a short delay (also covers the holder having already exited)
+      setTimeout(() => {
+        httpServer.listen(WS_PORT, '0.0.0.0', () => {
+          console.log(`[ws-server] o8 WebSocket server listening on ws://0.0.0.0:${WS_PORT}/ws`);
+        });
+      }, 500);
     } catch {
       console.error(`[ws-server] Failed to clear port ${WS_PORT} — exiting`);
       process.exit(1);

@@ -180,6 +180,12 @@ export async function handleSend(args: Record<string, unknown>): Promise<McpTool
       }) as Record<string, unknown>;
     }
 
+    if (result.ok === false) {
+      // Don't synthesize a "Launched agent…" summary when the backend said no.
+      const reason = (result.error as string) || (result.note as string) || 'unknown error';
+      return textResult(`Failed to launch agent: ${reason}`, true);
+    }
+
     let status: Record<string, unknown> = {};
     try {
       status = await apiFetch('/api/operator/status') as Record<string, unknown>;

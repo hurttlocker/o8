@@ -524,7 +524,9 @@ pub fn gather_window_context() -> WindowContext {
 #[cfg(target_os = "macos")]
 fn reactivate_previous_app() -> ActivationOutcome {
     let saved = {
-        let prev = PREVIOUS_APP.lock().unwrap();
+        // Recover from poisoning like every other lock in the crate — the
+        // guarded data is a plain clone-able value, safe to take as-is.
+        let prev = PREVIOUS_APP.lock().unwrap_or_else(|p| p.into_inner());
         prev.clone()
     };
 

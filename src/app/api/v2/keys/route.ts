@@ -140,6 +140,11 @@ async function parseEnvFile(): Promise<Map<string, string>> {
     const plain = await decodeStoredValue(v);
     if (plain !== null) {
       decoded.set(k, plain);
+    } else {
+      // decodeStoredValue only returns null for enc: blobs that failed GCM
+      // auth — wrong master key or corrupt blob. Dropping silently makes
+      // stored keys "vanish" with zero diagnostics.
+      console.warn(`[keys] failed to decrypt ${k} — wrong master key or corrupt blob; skipping`);
     }
   }
   return decoded;

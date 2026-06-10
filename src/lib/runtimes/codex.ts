@@ -177,12 +177,16 @@ export const codexRuntime: AgentRuntime = {
       for (const agent of discovered.value.agents) {
         sessions.push(mapAgentToSession(agent));
       }
+    } else {
+      console.error('[codex-runtime] discovered-session discovery failed:', discovered.reason);
     }
 
     if (owned.status === 'fulfilled') {
       for (const agent of owned.value.agents) {
         sessions.push(mapAgentToSession(agent));
       }
+    } else {
+      console.error('[codex-runtime] owned-session discovery failed:', owned.reason);
     }
 
     return sessions;
@@ -252,7 +256,8 @@ export const codexRuntime: AgentRuntime = {
     // Discovered Codex sessions: resume directly via CLI
     const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
     try {
-      const { execFileSync } = await import('node:child_process');
+      const { execFile } = await import('node:child_process');
+      const { promisify } = await import('node:util');
       const os = await import('node:os');
       const { resolveCli, CliNotFoundError } = await import('@/lib/runtimes/shared/cli-resolver');
       let codexBin: string;
@@ -273,7 +278,9 @@ export const codexRuntime: AgentRuntime = {
       }
       // `-c tools.image_generation=false`: Codex CLI 0.130.0 injects a hosted
       // image tool pinned to nonexistent gpt-image-2 → 400s the turn at spawn.
-      execFileSync(codexBin, ['exec', 'resume', threadId, message, '--json', '--dangerously-bypass-approvals-and-sandbox', '-c', 'tools.image_generation=false'], {
+      // Async execFile: the sync variant blocked the whole Node event loop
+      // (every API route, the WS bridge, timers) for up to 120s per resume.
+      await promisify(execFile)(codexBin, ['exec', 'resume', threadId, message, '--json', '--dangerously-bypass-approvals-and-sandbox', '-c', 'tools.image_generation=false'], {
         cwd: process.env.HOME || os.homedir(),
         timeout: 120_000,
         maxBuffer: 10 * 1024 * 1024,

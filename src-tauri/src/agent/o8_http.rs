@@ -88,7 +88,7 @@ async fn read_json(path: &str, resp: reqwest::Response) -> Result<Value, String>
         .await
         .map_err(|e| format!("o8 {path} read failed: {e}"))?;
     if !status.is_success() {
-        let snippet = &text[..text.len().min(300)];
+        let snippet = crate::utf8_head(&text, 300);
         return Err(format!("o8 {path} error ({status}): {snippet}"));
     }
     serde_json::from_str(&text).map_err(|e| format!("o8 {path} returned bad JSON: {e}"))

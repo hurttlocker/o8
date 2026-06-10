@@ -109,7 +109,7 @@ export async function checkApiHealth(): Promise<boolean> {
   try {
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 3000);
-    const res = await fetch(`${_apiBase}/api/panel/repos`, { signal: controller.signal });
+    const res = await fetch(`${resolveApiBaseLive()}/api/panel/repos`, { signal: controller.signal });
     clearTimeout(timer);
     _apiHealthy = res.ok;
   } catch {
@@ -160,10 +160,27 @@ export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<un
         headers: { ...baseHeaders, ...fetchInit.headers },
       });
       clearTimeout(timer);
+      if (!res.ok) {
+        // Surface HTTP errors instead of returning the error body as if it
+        // were a successful payload (a 403/500 body has no `ok` field and
+        // used to masquerade as success-shaped data downstream).
+        const bodyText = await res.text().catch(() => '');
+        const snippet = bodyText.slice(0, 300).replace(/\s+/g, ' ').trim();
+        const httpError = new Error(
+          `o8 API ${res.status} for ${path}${snippet ? `: ${snippet}` : ''}`,
+        ) as Error & { noRetry?: boolean };
+        // 4xx (auth, validation) won't fix itself — fail fast, no retry storm.
+        if (res.status < 500) httpError.noRetry = true;
+        throw httpError;
+      }
       _apiHealthy = true;
       return res.json();
     } catch (err) {
       lastError = err instanceof Error ? err : new Error(String(err));
+      if ((lastError as Error & { noRetry?: boolean }).noRetry) {
+        _apiHealthy = true; // backend responded; the request itself was rejected
+        throw lastError;
+      }
       _apiHealthy = false;
       if (lastError.name === 'AbortError') {
         lastError = new Error(`Request to ${path} timed out after ${timeoutMs}ms`);

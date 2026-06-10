@@ -93,7 +93,7 @@ pub async fn ask(question: &str, context: Option<&str>) -> Result<String, String
     let status = response.status();
     if !status.is_success() {
         let body = response.text().await.unwrap_or_default();
-        let snippet = &body[..body.len().min(300)];
+        let snippet = crate::utf8_head(&body, 300);
         return Err(format!("Ask API error ({status}): {snippet}"));
     }
 

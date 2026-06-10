@@ -43,8 +43,12 @@ export function encodeEmbedding(vec: Float32Array): Buffer {
  */
 export function decodeEmbedding(blob: Buffer | null | undefined): Float32Array | null {
   if (!blob) return null;
-  // better-sqlite3 returns BLOB as a Buffer; wrap it in a Float32Array view.
-  return new Float32Array(blob.buffer, blob.byteOffset, blob.byteLength / 4);
+  // better-sqlite3 Buffers are slices of a shared pool: byteOffset is often
+  // not 4-aligned (a direct Float32Array view throws RangeError) and the pool
+  // is reused on later reads. Copy into a standalone, aligned buffer.
+  const copy = new Uint8Array(blob.byteLength);
+  copy.set(blob);
+  return new Float32Array(copy.buffer, 0, Math.floor(blob.byteLength / 4));
 }
 
 /**

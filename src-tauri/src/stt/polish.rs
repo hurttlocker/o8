@@ -652,7 +652,7 @@ fn polish_with_gemini(ctx: &PolishContext, config: &PolishModelConfig) -> ModelR
                 Ok(response) => {
                     let status = response.status();
                     let body_text = response.text().unwrap_or_default();
-                    let body_snippet = body_text[..body_text.len().min(200)].to_string();
+                    let body_snippet = crate::utf8_head(&body_text, 200).to_string();
                     if attempt < PROVIDER_MAX_ATTEMPTS && should_retry_status(status) {
                         tracing::warn!(
                             "{label} transient API error on attempt {attempt}/{PROVIDER_MAX_ATTEMPTS} ({status}): {body_snippet}"
