@@ -101,7 +101,6 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
                     &ctx.app,
                     json!({ "taskId": ctx.task_id, "kind": "tool_call", "tool": tool_name, "args": tool_args }),
                 );
-                tool_call_log.push(json!({ "tool": tool_name, "args": tool_args }));
 
                 let tool_result: Value =
                     if !super::confirm_if_needed(ctx, &tool_name, &tool_args).await {
@@ -117,6 +116,13 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
                             }
                         }
                     };
+                // Logged AFTER the result so the ledger records the outcome —
+                // the glint derivation (remembered / recovered) reads `ok`.
+                tool_call_log.push(json!({
+                    "tool": tool_name,
+                    "args": tool_args,
+                    "ok": tool_result.get("error").is_none(),
+                }));
 
                 super::emit_agent_event(
                     &ctx.app,

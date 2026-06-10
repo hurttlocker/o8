@@ -21,6 +21,7 @@ pub mod safety;
 pub mod screen;
 pub mod store;
 pub mod tools;
+pub mod worker_pulse;
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
@@ -66,9 +67,11 @@ pub(crate) fn system_prompt() -> String {
          user asks — don't just describe the steps. Give reminders and events a \
          clear, specific Title Case title. When a tool needs a date or time, \
          resolve it relative to the current local time and emit an ISO 8601 string \
-         (e.g. 2026-06-09T15:00:00). Your reply is spoken aloud, so keep it to one \
-         or two short, conversational sentences with no markdown. The current local \
-         time is {when}."
+         (e.g. 2026-06-09T15:00:00). If your first approach failed and you got \
+         there another way, say so in a few words (\"the calendar lookup failed, \
+         so I checked Reminders instead\") — the user should hear the recovery. \
+         Your reply is spoken aloud, so keep it to one or two short, \
+         conversational sentences with no markdown. The current local time is {when}."
     )
 }
 
@@ -305,6 +308,40 @@ pub fn emit_agent_event(app: &tauri::AppHandle, payload: Value) {
     let _ = app.emit("o8:agent-task-event", payload);
 }
 
+/// Surface the memory we already have (dossier #4): derive a quiet dock glint
+/// from the tool ledger. `recovered` (a failed tool followed by a later
+/// success) outranks `remembered` (the answer drew on o8's Engineering Brain /
+/// Cortex memory via `o8_ask`). One line, fades — pure surfacing, zero new
+/// infrastructure.
+fn glint_for(tool_calls_json: &str) -> Option<&'static str> {
+    let calls: Vec<Value> = serde_json::from_str(tool_calls_json).ok()?;
+    let ok_of = |c: &Value| c.get("ok").and_then(|v| v.as_bool());
+    let mut saw_failure = false;
+    let mut recovered = false;
+    let mut remembered = false;
+    for call in &calls {
+        match ok_of(call) {
+            Some(false) => saw_failure = true,
+            Some(true) => {
+                if saw_failure {
+                    recovered = true;
+                }
+                if call.get("tool").and_then(|v| v.as_str()) == Some("o8_ask") {
+                    remembered = true;
+                }
+            }
+            None => {}
+        }
+    }
+    if recovered {
+        Some("recovered")
+    } else if remembered {
+        Some("remembered")
+    } else {
+        None
+    }
+}
+
 fn emit_confirm(app: &tauri::AppHandle, payload: Value) {
     let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:agent-confirm", payload.clone());
     let _ = app.emit("o8:agent-confirm", payload);
@@ -387,6 +424,12 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
                 &app,
                 json!({ "taskId": task_id, "kind": "status", "status": "done", "result": clean_text }),
             );
+            if let Some(glint) = glint_for(&result.tool_calls_json) {
+                emit_agent_event(
+                    &app,
+                    json!({ "taskId": task_id, "kind": "glint", "glint": glint }),
+                );
+            }
             if !clean_text.trim().is_empty() {
                 crate::tts::playback::play_thread(clean_text.clone(), crate::tts::load_config());
             }

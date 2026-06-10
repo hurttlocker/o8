@@ -156,6 +156,10 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
         }));
     }
 
+    // Wake the worker-pulse poller so the dock's orbit + count appears within
+    // ~2s of the dispatch instead of the next scheduled poll.
+    crate::agent::worker_pulse::nudge();
+
     Ok(json!({
         "dispatched": true,
         "packet_id": packet_id,

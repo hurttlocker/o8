@@ -246,10 +246,10 @@ function NotchSquiggle() {
  * op underway" motion (parity with the main app's orbit + the settings
  * time-saved mark). Dainty/small; inline-animation + shared `<style>` keyframe
  * (o8DockOrbit) so it obeys the inline-styles-only rule. 1.6s active cadence. */
-function NotchOrbit({ size = 13 }: { size?: number }) {
-  const dot = 3;
+function NotchOrbit({ size = 13, color = '#fff' }: { size?: number; color?: string }) {
+  const dot = size <= 10 ? 2.5 : 3;
   return (
-    <span aria-hidden style={{ position: 'relative', display: 'inline-block', width: size, height: size, flexShrink: 0, color: '#fff' }}>
+    <span aria-hidden style={{ position: 'relative', display: 'inline-block', width: size, height: size, flexShrink: 0, color }}>
       <span style={{ position: 'absolute', inset: 0, animation: 'o8DockOrbit 1.6s linear infinite' }}>
         <span style={{ position: 'absolute', top: 0, left: '50%', width: dot, height: dot, marginLeft: -dot / 2, borderRadius: '50%', background: 'currentColor' }} />
         <span style={{ position: 'absolute', bottom: 0, left: '50%', width: dot, height: dot, marginLeft: -dot / 2, borderRadius: '50%', background: 'currentColor', opacity: 0.55 }} />
@@ -372,6 +372,12 @@ interface DockNotchSurfaceProps {
   /** Files just staged by a drop — shown as chips, then the dock relaxes back
    * to idle (the staged context lives on the Rust side for the next ask). */
   stagedFiles?: { name: string; size: number }[] | null;
+  /** Fleet visibility (dossier #8) — packets in flight from `o8:worker-status`.
+   * count > 0 puts the slow orbit + count in the idle sliver. */
+  workerCount?: number;
+  workerRepos?: string[];
+  /** Tap-the-sliver expansion: a transient capsule naming the in-flight work. */
+  showWorkers?: boolean;
 }
 
 /**
@@ -396,6 +402,9 @@ export function DockNotchSurface({
   onAgentConfirm,
   dropActive = false,
   stagedFiles = null,
+  workerCount = 0,
+  workerRepos = [],
+  showWorkers = false,
 }: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
@@ -428,6 +437,10 @@ export function DockNotchSurface({
   const isStagedChips =
     !isDropTarget && !!stagedFiles?.length && dictationMode === 'idle'
     && !isConfirming && !isAsking && !isSpeaking && !isAgentWorking;
+  // Transient workers capsule (tap the sliver while the orbit is up).
+  const isWorkersInfo =
+    showWorkers && workerCount > 0 && dictationMode === 'idle' && !isConfirming
+    && !isAsking && !isSpeaking && !isAgentWorking && !isDropTarget && !isStagedChips;
 
   // Live ref for the canvas RAF loop (avoid re-running the effect per frame).
   const levelRef = useRef<number>(audioLevel);
@@ -510,6 +523,16 @@ export function DockNotchSurface({
       return {
         width: 248,
         height: 40,
+        borderRadius: '0 0 20px 20px',
+        background: capsuleBg, ...capsuleBlur,
+        borderColor: 'rgba(255, 255, 255, 0.4)',
+        boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
+      } as React.CSSProperties;
+    }
+    if (isWorkersInfo) {
+      return {
+        width: 320,
+        height: 44,
         borderRadius: '0 0 20px 20px',
         background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
@@ -857,6 +880,43 @@ export function DockNotchSurface({
         {agentStartedAt ? <WorkingTimer startedAt={agentStartedAt} /> : null}
       </div>
     );
+  } else if (isWorkersInfo) {
+    body = (
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 9,
+          width: '100%',
+          height: '100%',
+          paddingLeft: 16,
+          paddingRight: 16,
+          overflow: 'hidden',
+        }}
+      >
+        <NotchOrbit size={13} />
+        <span
+          style={{
+            fontSize: 11.5,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            color: '#fff',
+            textShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
+            whiteSpace: 'nowrap',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+          }}
+        >
+          {workerCount} packet{workerCount === 1 ? '' : 's'} in flight
+          {workerRepos.length ? (
+            <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
+              {' '}· {workerRepos.join(', ')}
+            </span>
+          ) : null}
+        </span>
+      </div>
+    );
   } else if (isAsking) {
     if (askListening) {
       body = (
@@ -988,6 +1048,26 @@ export function DockNotchSurface({
           ? (error ?? 'Dictation failed')
           : (pastedText && pastedText.trim().length > 0 ? pastedText.trim() : 'Pasted')}
       </p>
+    );
+  } else if (mode === 'idle' && workerCount > 0) {
+    // Fleet visibility in the resting sliver: the slow orbit + count while
+    // packets are in flight. Dark ink — the sliver surface is light in both
+    // dock themes (brand pastel / light glass).
+    body = (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, width: '100%', height: '100%' }}>
+        <NotchOrbit size={9} color="rgba(28, 28, 46, 0.78)" />
+        <span
+          style={{
+            fontSize: 9.5,
+            fontWeight: 500,
+            letterSpacing: '0.2px',
+            color: 'rgba(28, 28, 46, 0.8)',
+            fontVariantNumeric: 'tabular-nums',
+          }}
+        >
+          {workerCount}
+        </span>
+      </div>
     );
   }
 
