@@ -2,10 +2,7 @@
   "mcpServers": {
     "o8": {
       "command": "npx",
-      "args": ["tsx", "src/lib/mcp/operator-mcp-server.ts"],
-      "env": {
-        "O8_API_BASE": "http://127.0.0.1:3010"
-      }
+      "args": ["tsx", "src/lib/mcp/operator-mcp-server.ts"]
     }
   }
 }
