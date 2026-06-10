@@ -12,6 +12,7 @@ import { getActiveProjectScopeForRepoSync } from '@/lib/repos/projects';
 import { publishPacketTailEvent } from './packet-tail';
 import { publishLaneLifecycleEvent } from './lifecycle';
 import { extractLaneReviewScreenshot } from './review-screenshot';
+import { isRefusedTerminalTransition } from './terminal-states';
 import type {
   Lane,
   LaneEvent,
@@ -487,14 +488,7 @@ export function updateLane(
   return resolvedLane;
 }
 
-// Terminal lane states. Once a lane lands here, only 'archived' is a valid
-// successor — everything else (awaiting_input, running, etc.) is a regression
-// and we refuse it. This guard caught a race in the supervisor that was
-// overwriting a successfully-merged lane back to awaiting_input/agent_failed
-// after the codex PTY exited (#531). Defense in depth — the supervisor
-// already avoids the double-fire at source, this stops any future caller
-// from accidentally re-opening a closed lane.
-const TERMINAL_LANE_STATUSES: ReadonlySet<LaneStatus> = new Set(['failed', 'completed', 'archived']);
+// Terminal-state guard lives in terminal-states.ts (pure module, unit-tested).
 const SILENT_EXIT_EVENT_PREFIX = 'silent_exit_';
 
 export function derivePacketType(lane: Pick<Lane, 'label'>) {
@@ -530,12 +524,7 @@ export function setLaneStatus(
   eventLabel?: string,
 ): Lane | null {
   const existing = getLane(laneId);
-  if (
-    existing
-    && TERMINAL_LANE_STATUSES.has(existing.status)
-    && status !== 'archived'
-    && existing.status !== status
-  ) {
+  if (existing && isRefusedTerminalTransition(existing.status, status)) {
     console.warn(
       `[lane-registry] Refusing to transition lane ${laneId} from terminal state ${existing.status} → ${status} (event=${eventLabel ?? status}, actor=${actor}).`,
     );

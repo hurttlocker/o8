@@ -19,6 +19,7 @@ import {
 } from '@/lib/lane/registry';
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
+import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import {
   WorktreeFetchUnreachableError,
@@ -572,10 +573,7 @@ async function retryBaseAdvancedAfterRebase(
 const repoMergeChains = new Map<string, Promise<unknown>>();
 
 function withRepoMergeLock<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
-  const prev = repoMergeChains.get(repoPath) ?? Promise.resolve();
-  const run = prev.then(fn, fn);
-  repoMergeChains.set(repoPath, run.then(() => undefined, () => undefined));
-  return run;
+  return chainOnKey(repoMergeChains, repoPath, fn);
 }
 
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {

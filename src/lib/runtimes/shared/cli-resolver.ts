@@ -57,6 +57,13 @@ export interface CliResolverSpec {
   versionArgs?: string[];
   /** Regex to extract a semver-like version from the version output. */
   versionPattern?: RegExp;
+  /**
+   * Oldest CLI version this adapter's protocol assumptions have been validated
+   * against. Older installs get a LOUD console warning (never a hard block —
+   * the operator may know better). Falls back to KNOWN_MIN_VERSIONS by
+   * runtimeId when unset.
+   */
+  minVersion?: string;
 }
 
 /** Thrown when a binary cannot be found via any strategy. */
@@ -69,6 +76,63 @@ export class CliNotFoundError extends Error {
     );
     this.name = 'CliNotFoundError';
     this.triedPaths = triedPaths;
+  }
+}
+
+// ── Version skew armor ────────────────────────────────────────────────────────
+
+/**
+ * Oldest CLI versions the adapters in this repo are known to work against.
+ * Applied to every resolveCli call for that runtimeId regardless of which
+ * call site built the spec. Keep entries conservative — only versions that
+ * the dispatch path has actually been validated on.
+ */
+const KNOWN_MIN_VERSIONS: Record<string, string> = {
+  // codex exec --json + `-c model_reasoning_effort=...` config syntax —
+  // validated on codex-cli 0.130.0; older builds used different flags
+  // (`--reasoning-effort`) and different JSON event names.
+  codex: '0.130.0',
+};
+
+/**
+ * Compare two dotted numeric version strings (e.g. '0.130.0' vs '0.9.1').
+ * Returns <0 when a is older, 0 when equal, >0 when a is newer. Non-numeric
+ * segments compare as 0 — good enough for the CLI versions we probe.
+ * Exported for tests.
+ */
+export function compareCliVersions(a: string, b: string): number {
+  const pa = a.split('.').map((s) => Number.parseInt(s, 10) || 0);
+  const pb = b.split('.').map((s) => Number.parseInt(s, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i += 1) {
+    const diff = (pa[i] ?? 0) - (pb[i] ?? 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
+/**
+ * Warn (never block) when the resolved CLI is older than the adapter's
+ * validated minimum, or when the version could not be determined at all.
+ * The 10-minute resolver cache naturally rate-limits these warnings.
+ */
+function warnOnVersionSkew(spec: CliResolverSpec, resolved: ResolvedCli): void {
+  const minVersion = spec.minVersion ?? KNOWN_MIN_VERSIONS[spec.runtimeId];
+  if (!resolved.version) {
+    console.warn(
+      `[cli-resolver] Could not determine the version of '${spec.binaryName}' at ${resolved.path}. `
+      + `The ${spec.runtimeId} integration is version-sensitive — if dispatches fail with `
+      + `unknown-flag or protocol errors, check '${spec.binaryName} --version' manually.`,
+    );
+    return;
+  }
+  if (minVersion && compareCliVersions(resolved.version, minVersion) < 0) {
+    console.warn(
+      `[cli-resolver] '${spec.binaryName}' v${resolved.version} at ${resolved.path} is OLDER than `
+      + `v${minVersion}, the oldest version o8's ${spec.runtimeId} adapter has been validated against. `
+      + `Flags and JSON output may differ; dispatches can fail in confusing ways. `
+      + `Upgrade the CLI, or point ${spec.envOverride} at a newer install.`,
+    );
   }
 }
 
@@ -314,13 +378,21 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
 
   console.log(`[cli-resolver] Resolving '${spec.binaryName}' for runtime '${spec.runtimeId}'...`);
 
+  // Single accept point: every successful strategy passes through the version
+  // skew check before being cached, so the warning fires at most once per
+  // cache fill (10-minute TTL).
+  const accept = (resolved: ResolvedCli): ResolvedCli => {
+    warnOnVersionSkew(spec, resolved);
+    resolverCache.set(spec.runtimeId, { resolved, cachedAt: Date.now() });
+    return resolved;
+  };
+
   const triedPaths: string[] = [];
 
   // --- Strategy 1: env overrides ---
   const fromEnv = await resolveViaEnv(spec);
   if (fromEnv) {
-    resolverCache.set(spec.runtimeId, { resolved: fromEnv, cachedAt: Date.now() });
-    return fromEnv;
+    return accept(fromEnv);
   }
   const envKeys = [spec.envOverride, ...(spec.extraEnvOverrides ?? [])].filter((k) => process.env[k]);
   if (envKeys.length === 0) {
@@ -331,8 +403,7 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 2: which ---
   const fromWhich = await resolveViaWhich(spec);
   if (fromWhich) {
-    resolverCache.set(spec.runtimeId, { resolved: fromWhich, cachedAt: Date.now() });
-    return fromWhich;
+    return accept(fromWhich);
   }
   for (const name of binaryNames(spec)) {
     triedPaths.push(`which:${name}`);
@@ -341,8 +412,7 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 3: login-shell ---
   const fromShell = await resolveViaLoginShell(spec);
   if (fromShell) {
-    resolverCache.set(spec.runtimeId, { resolved: fromShell, cachedAt: Date.now() });
-    return fromShell;
+    return accept(fromShell);
   }
   for (const name of binaryNames(spec)) {
     triedPaths.push(`login-shell:${name}`);
@@ -351,8 +421,7 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // --- Strategy 4: static fallbacks ---
   const fromFallback = await resolveViaStaticFallbacks(spec);
   if (fromFallback) {
-    resolverCache.set(spec.runtimeId, { resolved: fromFallback, cachedAt: Date.now() });
-    return fromFallback;
+    return accept(fromFallback);
   }
   for (const { dir } of staticFallbackDirs()) {
     for (const name of binaryNames(spec)) {

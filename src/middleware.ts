@@ -25,6 +25,7 @@ import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   O8_CLIENT_ADDR_HEADER,
+  hostHeaderToHostname,
   isLoopbackAddress,
   isLoopbackHostname,
 } from '@/lib/auth/loopback-request';
@@ -216,7 +217,7 @@ function isTrustedLocalRequest(req: NextRequest): boolean {
   if (!origin && !fetchSite && isLoopbackHostname(req.nextUrl.hostname)) return true;
 
   // Also trust the host header matching loopback (some clients set only Host).
-  const host = req.headers.get('host')?.split(':')[0];
+  const host = hostHeaderToHostname(req.headers.get('host'));
   if (!origin && !fetchSite && isLoopbackHostname(host)) return true;
 
   return false;
@@ -252,7 +253,8 @@ function optionalEnv(name: string): string | undefined {
   return value || undefined;
 }
 
-function panelGateMiddleware(req: NextRequest): NextResponse {
+/** Exported for the vitest gate suite (tests/middleware-gate.test.ts). */
+export function panelGateMiddleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
   const method = req.method.toUpperCase();
 
