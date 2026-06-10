@@ -63,7 +63,13 @@ items require more than a spoken yes.
 - This is the o8 moat (operator approval surface) rendered as voice. Neither
   Clicky can build it — they have no approval surface to speak.
 
-### 3. The Guide pointer — the un-lost button (days)
+### 3. The Guide pointer — the un-lost button (days) — **BUILT 0.1.321**
+
+*Shipped as the `[GUIDE:x,y:label]` tag: the marker flies in, then dwells with
+a soft sonar ping until the user's cursor reaches it (2.5s grace, 90s cap,
+generation-guarded). E2E verified: model chose GUIDE unprompted for an "I'm
+lost" question, ring persisted past the old 20s cap, and released ~3s after
+the cursor arrived at the target.*
 
 "Where do I click to reply?" / "I don't know what I'm looking at" → one
 intent-gated screenshot → Symon names the screen plainly and the orange ring
