@@ -40,7 +40,7 @@ export interface ZombieLaneCandidate {
   staleMs: number;
   lastHeartbeatAt: number | null;
   probe: LaneOwnerProbe;
-  reason: 'missing_heartbeat' | 'stale_heartbeat';
+  reason: 'missing_heartbeat' | 'stale_heartbeat' | 'stale_merging';
 }
 
 function getLaneDb() {
@@ -247,6 +247,27 @@ export async function listZombieLaneCandidates(now: number = Date.now()): Promis
     });
   }
 
+  // Lanes stuck in `merging`: the merge runs inside the Next server process
+  // and doesn't heartbeat, so a hard process death mid-merge leaves the lane
+  // in `merging` forever — invisible to both this reaper (running-only) and
+  // the silent-exit detector. Real merges, including time queued behind the
+  // per-repo merge lock, finish in minutes; long silence means the owning
+  // process died.
+  const MERGING_STALE_MS = 30 * 60 * 1000;
+  const mergingLanes = listActiveLanes().filter((lane) => lane.status === 'merging');
+  for (const lane of mergingLanes) {
+    const lastTouch = lane.lastEventAt ? Date.parse(lane.lastEventAt) : Number.NaN;
+    const staleMs = Number.isFinite(lastTouch) ? now - lastTouch : Number.MAX_SAFE_INTEGER;
+    if (staleMs <= MERGING_STALE_MS) continue;
+    candidates.push({
+      lane,
+      staleMs,
+      lastHeartbeatAt: lane.lastHeartbeatAt,
+      probe: { alive: false, source: 'merging-stale', note: 'merge owner process presumed dead (no lane events for 30m+)' },
+      reason: 'stale_merging',
+    });
+  }
+
   return candidates;
 }
 
@@ -255,7 +276,7 @@ export async function reapZombieLane(
   options: { source: 'sidecar' | 'manual'; force?: boolean },
 ): Promise<Lane | null> {
   const before = getLane(candidate.lane.id);
-  if (!before || before.status !== 'running') return before;
+  if (!before || (before.status !== 'running' && before.status !== 'merging')) return before;
 
   const payload = {
     source: options.source,

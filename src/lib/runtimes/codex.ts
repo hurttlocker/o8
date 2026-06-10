@@ -18,7 +18,8 @@ import type {
 // Side-effect import: registers the 'codex' cost parser in the registry.
 import '@/lib/runtimes/codex-cost-parser';
 import { parseCost } from '@/lib/runtimes/shared/cost-parser-registry';
-import { getCodexDiscoveredFleetAdditions, getCodexRolloutPath, getCodexRuntimeTail } from '@/lib/codex/sessions';
+import { getCodexDiscoveredFleetAdditions, getCodexRolloutPath, getCodexRuntimeTail, queryCodexThreadById } from '@/lib/codex/sessions';
+import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import { monitorUsageDispatch, usageSnapshotFromTelemetry, type UsageSnapshot } from '@/lib/usage-log';
 
 import {
@@ -173,8 +174,18 @@ export const codexRuntime: AgentRuntime = {
 
     const sessions: RuntimeSession[] = [];
 
+    // An owned run is a normal `codex exec` under the hood — it writes its
+    // thread into ~/.codex state like any user session, so discovery surfaces
+    // the SAME work twice (once as codex-owned:<id>, once as codex:<thread>).
+    // Skip the discovered twin; the owned card is the one with full control.
+    const ownedThreadIds = owned.status === 'fulfilled'
+      ? new Set(owned.value.ownedThreadIds)
+      : new Set<string>();
+
     if (discovered.status === 'fulfilled') {
       for (const agent of discovered.value.agents) {
+        const threadId = agent.sessionKey?.replace(/^codex:/, '');
+        if (threadId && ownedThreadIds.has(threadId)) continue;
         sessions.push(mapAgentToSession(agent));
       }
     } else {
@@ -394,15 +405,39 @@ export const codexRuntime: AgentRuntime = {
   },
 
   async getChangedFiles(sessionKey: string): Promise<RuntimeChangedFile[]> {
+    // Owned sessions: review packet from the owned store.
+    if (sessionKey.startsWith('codex-owned:')) {
+      try {
+        const packet = await getOwnedCodexReviewPacket(sessionKey);
+        return (packet.changedFiles ?? []).map((f) => ({
+          path: f.path,
+          status: (f.status ?? 'modified') as RuntimeChangedFile['status'],
+          additions: f.additions ?? 0,
+          deletions: f.deletions ?? 0,
+        }));
+      } catch (err) {
+        console.error('[codex-runtime] getChangedFiles failed for owned session:', err);
+        return [];
+      }
+    }
+
+    // Discovered sessions: derive from the thread's cwd. These used to route
+    // through the owned store, which always threw ("packet not found") into a
+    // silent catch — the review UI showed "no changes" for every
+    // user-terminal session despite advertising reviewDiffs.
     try {
-      const packet = await getOwnedCodexReviewPacket(sessionKey);
-      return (packet.changedFiles ?? []).map((f) => ({
+      const threadId = sessionKey.replace(/^codex:/, '').replace(/^codex-discovered:/, '');
+      const thread = await queryCodexThreadById(threadId);
+      if (!thread?.cwd) return [];
+      const review = await getRuntimeRepoReview(thread.cwd);
+      return (review.changedFiles ?? []).map((f) => ({
         path: f.path,
         status: (f.status ?? 'modified') as RuntimeChangedFile['status'],
         additions: f.additions ?? 0,
         deletions: f.deletions ?? 0,
       }));
-    } catch {
+    } catch (err) {
+      console.error('[codex-runtime] getChangedFiles failed for discovered session:', err);
       return [];
     }
   },
