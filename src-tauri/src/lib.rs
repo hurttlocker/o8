@@ -3151,6 +3151,17 @@ fn agent_confirm(task_id: String, allow: bool) {
     agent::resolve_confirm(&task_id, allow);
 }
 
+/// Stage files dropped onto the dock as context for the NEXT agent run
+/// (Clicky-parity dossier #3). The dock webview reads content via the HTML5
+/// File API (WKWebView exposes no absolute paths) and sends bounded text
+/// excerpts; they drain into the next `agent_run` prompt within 5 minutes.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_files_stage(files: Vec<agent::StagedFileIn>) {
+    agent::stage_files(files);
+    sound::play_sound("Pop");
+}
+
 /// The most recent agent task (status/result), for the dock to poll if needed.
 #[cfg(target_os = "macos")]
 #[tauri::command]
@@ -3412,6 +3423,8 @@ pub fn run() {
             agent_run,
             #[cfg(target_os = "macos")]
             agent_confirm,
+            #[cfg(target_os = "macos")]
+            agent_files_stage,
             #[cfg(target_os = "macos")]
             agent_task_status,
             #[cfg(target_os = "macos")]
