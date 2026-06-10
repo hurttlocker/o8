@@ -621,6 +621,138 @@ pub async fn panel_read(args: Value) -> Result<Value, String> {
     }
 }
 
+/// Resolve a spoken packet/lane descriptor to exactly one lane
+/// `(packet_id, session_key, label)` — same stateless re-resolve story as the
+/// approval resolver: label substring against all lanes, most recently
+/// updated match wins ties ONLY when one candidate is clearly current;
+/// otherwise a spoken ambiguity error.
+async fn resolve_lane(which: &str) -> Result<(String, Option<String>, String), String> {
+    let resp = o8_http::get_json("/api/lanes?active=false").await?;
+    let lanes = resp
+        .get("lanes")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+
+    let needle = which.trim().to_lowercase();
+    if needle.is_empty() {
+        return Err("Say which packet — give me part of its name.".into());
+    }
+    let mut matches: Vec<&Value> = lanes
+        .iter()
+        .filter(|l| {
+            l.get("packetId").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
+                && l.get("status").and_then(|v| v.as_str()) != Some("archived")
+                && l.get("label")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_lowercase().contains(&needle))
+                    .unwrap_or(false)
+        })
+        .collect();
+    // Newest first — a packet redispatched twice shares its label.
+    matches.sort_by_key(|l| {
+        std::cmp::Reverse(
+            l.get("updatedAt")
+                .and_then(|v| {
+                    v.as_str()
+                        .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
+                        .map(|d| d.timestamp_millis())
+                        .or_else(|| v.as_i64())
+                })
+                .unwrap_or(0),
+        )
+    });
+
+    match matches.len() {
+        0 => Err(format!("No packet matches '{which}'. Ask me what's shipping to hear the names.")),
+        1 => {
+            let l = matches[0];
+            Ok((
+                l.get("packetId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                l.get("sessionKey").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                l.get("label").and_then(|v| v.as_str()).unwrap_or("Untitled").to_string(),
+            ))
+        }
+        _ => {
+            // Distinct labels → ambiguous; same label → take the newest.
+            let first_label = matches[0].get("label").and_then(|v| v.as_str()).unwrap_or("");
+            if matches.iter().all(|l| l.get("label").and_then(|v| v.as_str()) == Some(first_label)) {
+                let l = matches[0];
+                return Ok((
+                    l.get("packetId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    l.get("sessionKey").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                    first_label.to_string(),
+                ));
+            }
+            let names: Vec<&str> = matches
+                .iter()
+                .take(3)
+                .filter_map(|l| l.get("label").and_then(|v| v.as_str()))
+                .collect();
+            Err(format!("'{which}' matches more than one packet — say which: {}.", names.join("; ")))
+        }
+    }
+}
+
+/// `o8_packet_steer` — get a spoken message to a packet's worker: steer the
+/// warm session when one exists, else redispatch fresh with the message as
+/// feedback. One verb for "tell the tooltip packet to also fix X".
+pub async fn packet_steer(args: Value) -> Result<Value, String> {
+    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
+    let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if message.is_empty() {
+        return Err("o8_packet_steer needs a 'message'".into());
+    }
+    let (packet_id, session_key, label) = resolve_lane(which).await?;
+
+    if let Some(session_key) = session_key.filter(|s| !s.is_empty()) {
+        let resp = o8_http::post_json(
+            "/api/runtime/action",
+            json!({ "action": "steer", "surfaceId": session_key, "message": message }),
+        )
+        .await?;
+        if resp.get("ok").and_then(|v| v.as_bool()) != Some(false) {
+            return Ok(json!({ "steered": true, "packet": label, "how": "warm session" }));
+        }
+        // Steer refused (session gone) — fall through to a fresh rerun.
+    }
+    let resp = o8_http::post_json(
+        "/api/orchestrator/rerun-with-feedback",
+        json!({ "packetId": packet_id, "feedback": message }),
+    )
+    .await?;
+    if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
+        return Err(format!("Couldn't reach the \u{201c}{label}\u{201d} worker: {err}"));
+    }
+    Ok(json!({ "steered": true, "packet": label, "how": "fresh worker with the message as feedback" }))
+}
+
+/// `o8_packet_rerun` — restart a packet fresh ("retry the failed packet"),
+/// optionally with spoken feedback about what went wrong.
+pub async fn packet_rerun(args: Value) -> Result<Value, String> {
+    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
+    let feedback = args
+        .get("feedback")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .unwrap_or("Retry: the previous attempt did not land. Re-read the task and try again carefully.");
+    let (packet_id, _, label) = resolve_lane(which).await?;
+
+    let resp = o8_http::post_json(
+        "/api/orchestrator/rerun-with-feedback",
+        json!({ "packetId": packet_id, "feedback": feedback }),
+    )
+    .await?;
+    if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
+        return Err(format!("Couldn't restart \u{201c}{label}\u{201d}: {err}"));
+    }
+    crate::agent::worker_pulse::nudge();
+    Ok(json!({ "restarted": true, "packet": label }))
+}
+
 /// Resolve a repo folder name (or an absolute path) to a registered absolute
 /// path via `/api/panel/repos`. Exact name match wins; otherwise a substring
 /// match. Returns a spoken-friendly error when nothing matches. Shared with the

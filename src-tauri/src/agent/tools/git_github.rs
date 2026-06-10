@@ -1,8 +1,8 @@
 //! Symon Tier-3 tools — read-only local git + GitHub (via the `gh` CLI).
 //!
 //! Lets Symon answer "any open PRs on o8?", "what's the git status?",
-//! "recent commits?" by voice. All ReadOnly: only read subcommands run
-//! (status/log, `gh ... list`). The repo name resolves to an absolute path via
+//! "recent commits?" by voice. ReadOnly except `gh_issue_create` (voice
+//! capture to the tracker — Reversible, carded). The repo name resolves to an absolute path via
 //! `super::o8_bridge::resolve_repo_path`; commands run with that path as cwd so
 //! `git`/`gh` auto-detect the repo + its remote.
 
@@ -84,4 +84,33 @@ pub async fn issue_list(args: Value) -> Result<Value, String> {
     let issues: Value = serde_json::from_str(&out).unwrap_or_else(|_| json!([]));
     let count = issues.as_array().map(|a| a.len()).unwrap_or(0);
     Ok(json!({ "count": count, "issues": issues }))
+}
+
+/// `gh_issue_create` — voice capture straight to the repo tracker ("file an
+/// issue: the dock flickers on wake"). The ONE write in this module —
+/// Reversible in `safety`, so the confirm card speaks the title + repo before
+/// anything lands on GitHub.
+pub async fn issue_create(args: Value) -> Result<Value, String> {
+    let path = repo_arg(&args).await?;
+    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim();
+    if title.is_empty() {
+        return Err("gh_issue_create needs a 'title'".into());
+    }
+    let body = args
+        .get("body")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string())
+        .unwrap_or_else(|| "Filed by voice via Symon.".to_string());
+
+    let out = run("gh", &["issue", "create", "--title", title, "--body", &body], &path)?;
+    // gh prints the new issue URL on success.
+    let url = out
+        .lines()
+        .rev()
+        .find(|l| l.contains("github.com"))
+        .unwrap_or("")
+        .trim();
+    Ok(json!({ "created": true, "title": title, "url": url }))
 }
