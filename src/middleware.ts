@@ -20,8 +20,14 @@
 
 import { clerkMiddleware } from '@clerk/nextjs/server';
 import { NextResponse, type NextRequest } from 'next/server';
+import { timingSafeEqual } from 'node:crypto';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
+import {
+  O8_CLIENT_ADDR_HEADER,
+  isLoopbackAddress,
+  isLoopbackHostname,
+} from '@/lib/auth/loopback-request';
 import { migrateDataDirOnce } from '@/lib/data-dir-migration';
 
 migrateDataDirOnce();
@@ -59,8 +65,6 @@ function loadPanelToken(): string | null {
     return null;
   }
 }
-
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1', '[::1]']);
 
 /**
  * Paths that are allowed to pass through the middleware without auth.
@@ -147,57 +151,83 @@ const GATED_PREFIXES = [
   // or a token (so an evil cross-origin page can't POST to /api/setup/claude-desktop
   // and silently write to the user's Claude config).
   '/api/setup/',
-  // Push subscription writes mutate stored push endpoints + can fan out test
-  // notifications. /api/mobile/push/public-key is read-only allow-listed above.
-  '/api/mobile/push/',
-  // ActivityKit Live Activity tokens are per-device credentials. Mobile sends
-  // the paired ws-token; do not expose registration/sync cross-origin.
-  '/api/mobile/live-activity/',
-  // Send-to-mobile URL push (#782). Loopback writes from the desktop chip
-  // pass; cross-origin must present the bearer token.
-  '/api/mobile/push-url',
+  // The ENTIRE mobile family. It includes the agent-control surface
+  // (/api/mobile/action approves merges + launches workers), transcript/history
+  // readers, and the token-issuing pairing endpoint. Mobile clients already
+  // send `Authorization: Bearer <ws-token>` on every call (token delivered via
+  // the pairing QR / loopback-embedded meta tag), so gating costs them nothing.
+  // /api/mobile/push/public-key stays read-only allow-listed above.
+  '/api/mobile/',
+  // CLI + LLM proxies spawn agent CLIs / spend the operator's LLM keys.
+  // Desktop callers are loopback; nothing legitimate calls these from LAN
+  // without the token.
+  '/api/v2/proxy/',
+  // Connector imports (ChatGPT export upload) parse large archives in-process
+  // and write profile data into the operator's Brain context.
+  '/api/connectors/',
 ];
 
-function isLoopbackHost(hostname?: string | null): boolean {
-  if (!hostname) return false;
-  // Normalize IPv6 brackets.
-  const stripped = hostname.startsWith('[') && hostname.endsWith(']')
-    ? hostname.slice(1, -1)
-    : hostname;
-  return LOOPBACK_HOSTS.has(stripped);
-}
-
 function isTrustedLocalRequest(req: NextRequest): boolean {
+  // Tier 1 — socket truth. The bundled production server stamps the real TCP
+  // peer address into x-o8-client-addr on EVERY request, overwriting anything
+  // the client sent (see the server.js wrapper in scripts/tauri-export.mjs).
+  // When present it is authoritative: every header below (Origin, Host,
+  // sec-fetch-*) is client-controlled, so a direct LAN connection can spoof
+  // them all. A known-remote socket can only be authorized by the bearer token.
+  const clientAddr = req.headers.get(O8_CLIENT_ADDR_HEADER);
+  if (clientAddr) {
+    return isLoopbackAddress(clientAddr);
+  }
+
+  // Tier 2 — dev fallback (next dev / dev-bridge run Next's stock server,
+  // which doesn't stamp the header). Best-effort heuristics; a deliberate
+  // spoofer on the LAN can defeat these in dev, which is the accepted
+  // trade-off for keeping curl/scripts/dev-browser friction-free.
+
   // Origin header (CORS-ish) — set by browsers, not by curl or same-origin fetches.
   const origin = req.headers.get('origin');
   if (origin) {
     try {
       const url = new URL(origin);
-      if (isLoopbackHost(url.hostname)) return true;
+      if (isLoopbackHostname(url.hostname)) return true;
     } catch {
       // Malformed origin — fall through.
     }
-    if (origin === req.nextUrl.origin) return true;
     // Tauri webview uses `tauri://localhost` as origin.
+    // NOTE: `origin === req.nextUrl.origin` was deliberately REMOVED — a LAN
+    // browser that loaded our page is same-origin too, which made the gate a
+    // no-op for any phone/laptop on the network.
     if (origin === 'tauri://localhost') return true;
   }
 
-  // sec-fetch-site is set by modern browsers. same-origin/none means the
-  // request came from our own page, not a cross-origin attacker.
+  // sec-fetch-site from a browser is only meaningful when the page was served
+  // to a loopback client — a LAN browser's fetches are same-origin as well,
+  // and non-browser clients can fabricate the header. Require loopback Host.
   const fetchSite = req.headers.get('sec-fetch-site');
-  if (fetchSite === 'same-origin' || fetchSite === 'none') return true;
+  if (
+    (fetchSite === 'same-origin' || fetchSite === 'none')
+    && isLoopbackHostname(req.nextUrl.hostname)
+  ) {
+    return true;
+  }
 
   // Direct fetches without a browser (curl, MCP server, Node scripts) won't
-  // send origin or sec-fetch-*. Accept if the request arrived on a loopback
-  // interface — Next.js nextUrl.hostname reflects the Host header, which
-  // matches the bound interface when the caller used 127.0.0.1/localhost.
-  if (!origin && !fetchSite && isLoopbackHost(req.nextUrl.hostname)) return true;
+  // send origin or sec-fetch-*. Accept if the Host targets loopback.
+  if (!origin && !fetchSite && isLoopbackHostname(req.nextUrl.hostname)) return true;
 
   // Also trust the host header matching loopback (some clients set only Host).
   const host = req.headers.get('host')?.split(':')[0];
-  if (!origin && !fetchSite && isLoopbackHost(host)) return true;
+  if (!origin && !fetchSite && isLoopbackHostname(host)) return true;
 
   return false;
+}
+
+/** Constant-time token comparison (length leak is fine — tokens are fixed-size). */
+function tokenMatches(presented: string, expected: string): boolean {
+  const a = Buffer.from(presented, 'utf-8');
+  const b = Buffer.from(expected, 'utf-8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 function isAllowlisted(pathname: string, method: string): boolean {
@@ -249,11 +279,11 @@ function panelGateMiddleware(req: NextRequest): NextResponse {
   const panelToken = loadPanelToken();
   if (panelToken) {
     const auth = req.headers.get('authorization');
-    if (auth?.startsWith('Bearer ') && auth.slice(7).trim() === panelToken) {
+    if (auth?.startsWith('Bearer ') && tokenMatches(auth.slice(7).trim(), panelToken)) {
       return NextResponse.next();
     }
     const queryToken = req.nextUrl.searchParams.get('token');
-    if (queryToken && queryToken === panelToken) {
+    if (queryToken && tokenMatches(queryToken, panelToken)) {
       return NextResponse.next();
     }
   }

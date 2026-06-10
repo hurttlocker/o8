@@ -170,6 +170,10 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         "mac_notes_create" => format!("Create a note “{}”", s("title")),
         "mac_reminders_complete" => format!("Mark “{}” complete", s("title")),
         "o8_dispatch" => format!("Dispatch the {} orchestrator to: {}", s("repo"), s("task")),
+        // Show the real target path — approving a write without seeing where
+        // it lands defeats the point of the card.
+        "fs_write_text" => format!("Write a file to {}", s("path")),
+        "mac_shortcuts_run" => format!("Run the Shortcut “{}”", s("name")),
         other => format!("Run {other}"),
     }
 }

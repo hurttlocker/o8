@@ -16,6 +16,7 @@ import {
   type MobilePalette,
 } from '@/app/mobile/mobile-approvals-shared';
 import { mobileSafeBottom } from '@/app/mobile/mobile-shell-primitives';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import type {
   MobileSearchCategory,
   MobileSearchResponse,
@@ -51,8 +52,7 @@ interface MobileSearchSheetProps {
 }
 
 function getWsToken(): string {
-  if (typeof document === 'undefined') return '';
-  return document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
+  return getMobileWsToken();
 }
 
 function readRecentEntries(): MobileSearchRecentEntry[] {

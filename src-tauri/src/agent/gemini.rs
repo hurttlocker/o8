@@ -122,6 +122,26 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
             contents.push(json!({ "role": "user", "parts": function_responses }));
             continue;
         }
+
+        // No tool calls this turn. If the model also produced no text and no
+        // tools ran at any point, this is a failed/blocked response (safety
+        // block, empty candidate) — surface it instead of letting the loop
+        // fall through to a false "Done."
+        if result_text.is_empty() && tool_call_log.is_empty() {
+            let finish = resp_json
+                .pointer("/candidates/0/finishReason")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            let block = resp_json
+                .pointer("/promptFeedback/blockReason")
+                .and_then(|v| v.as_str());
+            return Err(match block {
+                Some(reason) => {
+                    format!("Gemini returned no answer (blocked: {reason}, finishReason: {finish})")
+                }
+                None => format!("Gemini returned no answer (finishReason: {finish})"),
+            });
+        }
         break;
     }
 
