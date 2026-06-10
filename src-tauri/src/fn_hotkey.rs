@@ -1,8 +1,15 @@
 //! Global Fn hotkey → system-wide push-to-talk dictation (macOS only).
 //!
-//! Lifted from aqua/Symon's `start_fn_key_monitor` and trimmed to push-to-talk
-//! only — the Fn+R screen-reading, double-tap long-form, and Right-Option Ask
-//! paths are intentionally dropped. What remains:
+//! Lifted from aqua/Symon's `start_fn_key_monitor`. The live gesture map:
+//!
+//! - Hold Fn → push-to-talk dictation (paste at the caret on release).
+//! - Double-tap Fn → long-form dictation (single Fn tap finishes, Esc cancels).
+//! - Hold EITHER Option key → Symon voice AGENT (tool-calling loop; release
+//!   ≥120ms runs the command, a KeyDown mid-hold cancels so ⌥-chords stay safe).
+//! - Double-tap Option → long-form AGENT question (single Option tap finishes,
+//!   Esc cancels).
+//!
+//! Implementation notes:
 //!
 //! - A raw `CGEventTap` at `CGEventTapLocation::HID` (Sequoia 15.7.x has a
 //!   confirmed regression where SESSION-level taps silently stop delivering
@@ -121,13 +128,16 @@ const ESCAPE_KEYCODE: i64 = 53;
 const OPTION_FLAG: u64 = 0x80000;
 
 /// Virtual keycode for the RIGHT Option key (Left Option = 58). The flag bit is
-/// shared, so the keycode is the only way to tell them apart — Ask is bound to
-/// Right-Option, and the Symon voice AGENT is bound to Left-Option.
+/// shared, so the keycode tells the two keys apart — but since v0.1.312 BOTH
+/// Option keys drive the Symon voice AGENT (the invisible left/right split sent
+/// half of all presses to the toolless Ask lane: "I cannot open applications").
 #[cfg(target_os = "macos")]
 const RIGHT_OPTION_KEYCODE: i64 = 61;
 
-/// Virtual keycode for the LEFT Option key. Bound to the Symon voice AGENT:
-/// hold Left-Option, speak a command, release to run it. Right-Option = Ask.
+/// Virtual keycode for the LEFT Option key. Either Option key = the Symon voice
+/// AGENT: hold, speak a command or question, release to run it through the
+/// tool-calling loop. Double-tap Option = long-form agent (open mic for a long
+/// question; single Option tap finishes, Escape cancels).
 #[cfg(target_os = "macos")]
 const LEFT_OPTION_KEYCODE: i64 = 58;
 
@@ -136,32 +146,43 @@ const LEFT_OPTION_KEYCODE: i64 = 58;
 #[cfg(target_os = "macos")]
 const ASK_BRUSH_MS: u64 = 120;
 
-/// True while a Right-Option ASK dictation is recording a question. `run_finalize`
-/// takes this to route the polished transcript to Gemini (speak the answer)
-/// instead of pasting it. Distinct from SYSTEM_DICTATION_ORIGIN (paste) and
-/// LONG_FORM_ACTIVE.
+/// True while an ASK dictation is recording a question. `run_finalize` takes
+/// this to route the polished transcript to Gemini (speak the answer) instead
+/// of pasting it. The Ask lane currently has NO keyboard binding — both Option
+/// keys drive the agent (which answers questions too, with tools). The plumbing
+/// stays for a future dock-panel initiator.
 #[cfg(target_os = "macos")]
 static ASK_MODE: AtomicBool = AtomicBool::new(false);
 
-/// Edge latch for the Right-Option key (dedupes duplicate FlagsChanged events).
+/// Edge latch for the Option agent gesture. ONE latch covers BOTH Option keys:
+/// the OPTION_FLAG bit reflects either key held, so chorded left+right holds
+/// collapse into a single gesture (no double-begin, releases only end the
+/// gesture when the last Option key comes up).
 #[cfg(target_os = "macos")]
 static OPTION_HELD: AtomicBool = AtomicBool::new(false);
 
 /// The stt_engine session id of the active Ask dictation (0 = none). Fenced like
 /// the long-form session id so a late teardown can't kill a newer session.
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Ask lane unbound from keys; kept for a future initiator.
 static ASK_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
-/// True while a Left-Option AGENT dictation is recording a command. `run_finalize`
+/// True while an Option AGENT dictation is recording a command. `run_finalize`
 /// takes this to route the polished transcript to the Symon voice agent. Distinct
-/// from ASK_MODE (Right-Option → Gemini) and the paste/long-form flags.
+/// from ASK_MODE and the paste/long-form flags.
 #[cfg(target_os = "macos")]
 static AGENT_MODE: AtomicBool = AtomicBool::new(false);
 
-/// Edge latch for the LEFT Option key — separate from OPTION_HELD so the two
-/// Option gestures never collide on their down/up edges.
+/// True while a DOUBLE-TAP-Option long-form AGENT dictation is active: open mic
+/// for a long question, ended by a single Option tap (or Escape cancel). Mirrors
+/// LONG_FORM_ACTIVE for the Fn dictation lane.
 #[cfg(target_os = "macos")]
-static LEFT_OPTION_HELD: AtomicBool = AtomicBool::new(false);
+static AGENT_LONG_FORM_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+/// Timestamp of the last sub-threshold Option brush release. The next Option-down
+/// within `LONG_FORM_FN_DOUBLE_TAP_MS` is a double-tap (long-form agent start).
+#[cfg(target_os = "macos")]
+static LAST_OPTION_BRUSH: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 
 /// The stt_engine session id of the active agent dictation (0 = none).
 #[cfg(target_os = "macos")]
@@ -252,6 +273,22 @@ pub fn take_discard_finalize(_sid: u64) -> bool {
 #[cfg(target_os = "macos")]
 fn consume_double_tap_brush() -> bool {
     let mut guard = match LAST_FN_BRUSH.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let matched = matches!(
+        *guard,
+        Some(t) if t.elapsed() <= std::time::Duration::from_millis(LONG_FORM_FN_DOUBLE_TAP_MS)
+    );
+    *guard = None;
+    matched
+}
+
+/// Whether the just-arrived Option-down completes a double-tap (long-form agent
+/// start). Mirror of `consume_double_tap_brush` for the Option gesture.
+#[cfg(target_os = "macos")]
+fn consume_option_double_tap_brush() -> bool {
+    let mut guard = match LAST_OPTION_BRUSH.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -497,6 +534,7 @@ fn cancel_long_form_dictation() {
 /// the SHARED recognizer. `run_finalize` routes the polished transcript to
 /// Gemini (speaks the answer) instead of pasting. Worker thread, never the tap.
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Ask lane unbound from keys (both Options = agent); kept for a future initiator.
 fn begin_ask_dictation() {
     crate::audio_ducker::duck();
     crate::sound::play_sound("Tink");
@@ -574,6 +612,7 @@ fn begin_ask_dictation() {
 /// (fenced) → the finalize chain polishes the question, and run_finalize routes
 /// it to Gemini via take_ask_mode. ASK_MODE stays set until run_finalize takes it.
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Ask lane unbound from keys (both Options = agent); kept for a future initiator.
 fn end_ask_dictation() {
     crate::audio_ducker::restore();
     crate::sound::play_sound("Pop");
@@ -586,6 +625,7 @@ fn end_ask_dictation() {
 /// Discard a too-short Right-Option brush: clear ASK_MODE, drop the finalize, and
 /// stop the recognizer (fenced). Morph the dock back to its idle capsule.
 #[cfg(target_os = "macos")]
+#[allow(dead_code)] // Ask lane unbound from keys (both Options = agent); kept for a future initiator.
 fn discard_ask_dictation() {
     let sid = ASK_SESSION_ID.swap(0, Ordering::SeqCst);
     ASK_MODE.store(false, Ordering::SeqCst);
@@ -647,6 +687,7 @@ fn begin_agent_dictation() {
         Err(e) => {
             tracing::error!("[fn-hotkey] failed to start agent dictation: {e}");
             AGENT_MODE.store(false, Ordering::SeqCst);
+            AGENT_LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
             AGENT_SESSION_ID.store(0, Ordering::SeqCst);
             morph_dock_idle();
         }
@@ -672,6 +713,7 @@ fn end_agent_dictation() {
 fn discard_agent_dictation() {
     let sid = AGENT_SESSION_ID.swap(0, Ordering::SeqCst);
     AGENT_MODE.store(false, Ordering::SeqCst);
+    AGENT_LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
     request_discard_finalize(sid);
     if let Err(e) = crate::stt_engine::stop_session(sid) {
         tracing::warn!("[fn-hotkey] agent cancel stop failed: {e}");
@@ -731,9 +773,7 @@ pub fn start(app: tauri::AppHandle) {
     let fn_held = Arc::new(AtomicBool::new(false));
     // Fn-down instant, used to reject sub-threshold brushes on release.
     let fn_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
-    // Right-Option-down instant, used to reject the sub-120ms Ask brush.
-    let ask_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
-    // Left-Option-down instant, used to reject the sub-120ms agent brush.
+    // Option-down instant (either key), used to reject the sub-120ms agent brush.
     let agent_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
 
     // ── Poll fallback for the dropped Fn-UP edge (Sequoia regression) ──
@@ -777,7 +817,6 @@ pub fn start(app: tauri::AppHandle) {
     // ── The CGEventTap thread ──
     let fn_held_cb = fn_held.clone();
     let fn_press_time_cb = fn_press_time.clone();
-    let ask_press_time_cb = ask_press_time.clone();
     let agent_press_time_cb = agent_press_time.clone();
     std::thread::spawn(move || {
         let tap = CGEventTap::new(
@@ -817,13 +856,30 @@ pub fn start(app: tauri::AppHandle) {
                     // LONG_FORM_ACTIVE so the common case (no long-form) stays the
                     // same cheap early return as before.
                     if matches!(event_type, CGEventType::KeyDown) {
-                        // Escape cancels an active long-form dictation AND stops
-                        // active TTS playback. Both atomic loads are cheap, so
-                        // the common case (neither active) stays the same early
-                        // return; the keycode is only read when one is live.
+                        // Option+<key> chords (⌥-arrow word jumps, ⌥S say, special
+                        // characters) are NOT push-to-talk: any KeyDown while the
+                        // Option hold-gesture is recording cancels it. Clearing the
+                        // latch here also makes the eventual Option-up CAS fail, so
+                        // the release can't end/discard a second time. Long-form
+                        // (Option already released) is unaffected — it ends on a
+                        // tap or Escape only. ListenOnly: the chord still reaches
+                        // the frontmost app untouched.
+                        if OPTION_HELD
+                            .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                            .is_ok()
+                        {
+                            std::thread::spawn(discard_agent_dictation);
+                        }
+
+                        // Escape cancels an active long-form dictation (Fn or
+                        // agent) AND stops active TTS playback. The atomic loads
+                        // are cheap, so the common case (none active) stays the
+                        // same early return; the keycode is only read when one is
+                        // live.
                         let long_form = LONG_FORM_ACTIVE.load(Ordering::SeqCst);
+                        let agent_long_form = AGENT_LONG_FORM_ACTIVE.load(Ordering::SeqCst);
                         let tts_active = crate::tts::playback::is_active();
-                        if long_form || tts_active {
+                        if long_form || agent_long_form || tts_active {
                             let keycode =
                                 event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                             if keycode == ESCAPE_KEYCODE {
@@ -831,6 +887,10 @@ pub fn start(app: tauri::AppHandle) {
                                     // Clear the toggle synchronously; discard off-tap.
                                     LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
                                     std::thread::spawn(cancel_long_form_dictation);
+                                }
+                                if agent_long_form {
+                                    AGENT_LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+                                    std::thread::spawn(discard_agent_dictation);
                                 }
                                 if tts_active {
                                     std::thread::spawn(crate::tts::playback::stop);
@@ -908,17 +968,24 @@ pub fn start(app: tauri::AppHandle) {
                         }
                     }
 
-                    // ── Right-Option → Ask (voice question) ──
-                    // keycode 61 = Right-Option (58 = Left); both set OPTION_FLAG,
-                    // so the keycode is the only disambiguator. Hold to record a
-                    // question, release (≥120ms) to send it to Gemini and speak the
-                    // answer. Tap-only — aqua does the same (no poll fallback;
-                    // unlike Fn, Option up-edges are delivered reliably). All work
-                    // is offloaded; the tap callback only flips an atomic + spawns.
+                    // ── Option (either side) → Symon voice AGENT ──
+                    // Both Option keycodes (58 left, 61 right) drive the SAME
+                    // agent gesture — the old left=agent / right=Ask split was
+                    // invisible and sent half of all presses to the toolless Ask
+                    // lane. One latch keyed on OPTION_FLAG covers both keys
+                    // (chorded holds collapse into a single gesture).
+                    //
+                    // Gestures (ORDER of branches is load-bearing, mirror of Fn):
+                    //   (a) single tap while long-form is active FINISHES it,
+                    //   (b) two quick brushes START long-form (double-tap → open
+                    //       mic for a long question, Escape cancels),
+                    //   (c) otherwise hold-to-talk: release ≥120ms runs the
+                    //       command through the agent loop; a shorter brush is
+                    //       discarded and stamped for double-tap detection.
                     {
                         let keycode =
                             event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-                        if keycode == RIGHT_OPTION_KEYCODE {
+                        if keycode == LEFT_OPTION_KEYCODE || keycode == RIGHT_OPTION_KEYCODE {
                             let option_down = (flags & OPTION_FLAG) != 0;
                             let opt_down_edge = option_down
                                 && OPTION_HELD
@@ -929,55 +996,41 @@ pub fn start(app: tauri::AppHandle) {
                                     .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
                                     .is_ok();
                             if opt_down_edge {
-                                if let Ok(mut t) = ask_press_time_cb.lock() {
-                                    *t = std::time::Instant::now();
-                                }
-                                std::thread::spawn(begin_ask_dictation);
-                            } else if opt_up_edge {
-                                let press = ask_press_time_cb
-                                    .lock()
-                                    .map(|t| *t)
-                                    .unwrap_or_else(|_| std::time::Instant::now());
-                                let hold = std::time::Instant::now().duration_since(press);
-                                if hold < std::time::Duration::from_millis(ASK_BRUSH_MS) {
-                                    std::thread::spawn(discard_ask_dictation);
+                                if AGENT_LONG_FORM_ACTIVE.load(Ordering::SeqCst)
+                                    && AGENT_SESSION_ID.load(Ordering::SeqCst) != 0
+                                {
+                                    // Single tap finishes long-form. Clear the toggle
+                                    // + edge latch synchronously so this press's
+                                    // Option-up CAS fails (no brush/end double-fire).
+                                    AGENT_LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
+                                    OPTION_HELD.store(false, Ordering::SeqCst);
+                                    std::thread::spawn(end_agent_dictation);
+                                } else if consume_option_double_tap_brush() {
+                                    // Promote to long-form agent. Set the toggle +
+                                    // clear the edge latch so THIS tap's up no-ops.
+                                    AGENT_LONG_FORM_ACTIVE.store(true, Ordering::SeqCst);
+                                    OPTION_HELD.store(false, Ordering::SeqCst);
+                                    std::thread::spawn(begin_agent_dictation);
                                 } else {
-                                    std::thread::spawn(end_ask_dictation);
+                                    if let Ok(mut t) = agent_press_time_cb.lock() {
+                                        *t = std::time::Instant::now();
+                                    }
+                                    std::thread::spawn(begin_agent_dictation);
                                 }
-                            }
-                        }
-                    }
-
-                    // ── Left-Option → Symon voice AGENT (voice command) ──
-                    // keycode 58 = Left-Option. Independent of the Right-Option
-                    // block above (own keycode + own LEFT_OPTION_HELD latch +
-                    // own press-time). Hold to record a command, release (≥120ms)
-                    // to run it through the agent loop + speak the result.
-                    {
-                        let keycode =
-                            event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
-                        if keycode == LEFT_OPTION_KEYCODE {
-                            let option_down = (flags & OPTION_FLAG) != 0;
-                            let opt_down_edge = option_down
-                                && LEFT_OPTION_HELD
-                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
-                                    .is_ok();
-                            let opt_up_edge = !option_down
-                                && LEFT_OPTION_HELD
-                                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
-                                    .is_ok();
-                            if opt_down_edge {
-                                if let Ok(mut t) = agent_press_time_cb.lock() {
-                                    *t = std::time::Instant::now();
-                                }
-                                std::thread::spawn(begin_agent_dictation);
                             } else if opt_up_edge {
+                                // Option release during long-form never fires here —
+                                // the promotion cleared OPTION_HELD, so the CAS fails.
                                 let press = agent_press_time_cb
                                     .lock()
                                     .map(|t| *t)
                                     .unwrap_or_else(|_| std::time::Instant::now());
                                 let hold = std::time::Instant::now().duration_since(press);
                                 if hold < std::time::Duration::from_millis(ASK_BRUSH_MS) {
+                                    // Sub-threshold brush — discard, and STAMP it so a
+                                    // quick second tap reads as a double-tap.
+                                    if let Ok(mut g) = LAST_OPTION_BRUSH.lock() {
+                                        *g = Some(std::time::Instant::now());
+                                    }
                                     std::thread::spawn(discard_agent_dictation);
                                 } else {
                                     std::thread::spawn(end_agent_dictation);
