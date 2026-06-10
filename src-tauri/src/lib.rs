@@ -4,6 +4,7 @@ mod dev_frontend;
 mod dictation_history;
 mod dock_window;
 mod fn_hotkey;
+mod point_overlay;
 mod launch_updater;
 mod mac_perms;
 mod paste;
@@ -808,6 +809,9 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         let _ = app.run_on_main_thread(move || {
             dock_window::create(&app_main, api_port);
         });
+        // Stash the resolved port for the lazily-created Symon Points overlay
+        // (point_overlay builds its window on first [POINT:...] tag, not here).
+        point_overlay::init(api_port);
     });
 }
 

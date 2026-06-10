@@ -18,6 +18,7 @@ pub mod o8_http;
 pub mod openrouter;
 pub mod router;
 pub mod safety;
+pub mod screen;
 pub mod store;
 pub mod tools;
 
@@ -35,6 +36,10 @@ const CONFIRM_TIMEOUT_SECS: u64 = 120;
 pub struct TaskCtx {
     pub task_id: String,
     pub app: tauri::AppHandle,
+    /// Intent-gated screenshot of the cursor's monitor (dossier #2) — attached
+    /// to the model request and used to map `[POINT:...]` tags back to screen
+    /// coordinates. None unless the prompt referenced the screen.
+    pub screen: Option<std::sync::Arc<screen::ScreenContext>>,
 }
 
 /// Result of one agent reasoning loop (shared by both providers).
@@ -64,6 +69,24 @@ pub(crate) fn system_prompt() -> String {
          (e.g. 2026-06-09T15:00:00). Your reply is spoken aloud, so keep it to one \
          or two short, conversational sentences with no markdown. The current local \
          time is {when}."
+    )
+}
+
+/// Appended to the system prompt when a screenshot rides the request — teaches
+/// the model the screenshot's pixel space and the `[POINT:x,y:label]` tag
+/// protocol (parsed + stripped by `point_overlay::parse_point_tags`; the tags
+/// animate the Symon Points overlay, never reach TTS).
+pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
+    format!(
+        "A screenshot of the user's current screen is attached ({img_w}x{img_h} \
+         pixels). Use it to answer questions about what is on screen. You can \
+         also POINT at the screen: include a tag like [POINT:x,y:label] inline \
+         in your reply — x,y in screenshot pixels, label 1-3 words naming the \
+         target. Use ONE tag to answer a single \"where is it\" question; for a \
+         walkthrough use up to 5 tags in the order the user should follow. The \
+         tags are stripped before your reply is spoken and animate a pointer on \
+         the user's screen, so phrase the sentence naturally (\"it's right here, \
+         in the top right\")."
     )
 }
 
@@ -235,7 +258,10 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
     }
 
     let task_id = next_task_id();
-    let ctx = TaskCtx { task_id: task_id.clone(), app: app.clone() };
+
+    // A new task retires any pointers still on screen — they describe a
+    // moment that has passed.
+    crate::point_overlay::hide_now(&app);
 
     store::insert_task(&task_id, &prompt);
     emit_agent_event(
@@ -243,6 +269,16 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
         json!({ "taskId": task_id, "kind": "status", "status": "running", "intent": prompt }),
     );
     crate::sound::play_sound("Pop");
+
+    // Intent-gated screen context (dossier #2): only prompts that talk ABOUT
+    // the screen pay the ~0.5s capture + image tokens. Runs after the
+    // "running" emit so the dock's working capsule covers the capture beat.
+    let screen_ctx = if screen::wants_screen(&prompt) {
+        screen::capture(&app).map(std::sync::Arc::new)
+    } else {
+        None
+    };
+    let ctx = TaskCtx { task_id: task_id.clone(), app: app.clone(), screen: screen_ctx };
 
     // Route by model id: `/` → OpenRouter (e.g. openai/gpt-4o-mini), else direct
     // Gemini (e.g. gemini-3-flash-preview). A one-flip change in agent_models.json.
@@ -255,22 +291,37 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
 
     match loop_result {
         Ok(result) => {
+            // Strip [POINT:...] tags BEFORE anything user-facing — the clean
+            // text is what gets stored, displayed, and spoken; the tags drive
+            // the Symon Points overlay (dossier #1).
+            let (clean_text, point_tags) = crate::point_overlay::parse_point_tags(&result.result_text);
+            #[cfg(target_os = "macos")]
+            if !point_tags.is_empty() {
+                if let Some(screen) = &ctx.screen {
+                    crate::point_overlay::show_points(&app, screen, &point_tags);
+                } else {
+                    log::warn!("[symon-agent] model emitted POINT tags without screen context — ignored");
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = point_tags;
+
             store::finish_task(
                 &task_id,
                 "done",
-                &result.result_text,
+                &clean_text,
                 &result.model_used,
                 &result.tool_calls_json,
             );
             emit_agent_event(
                 &app,
-                json!({ "taskId": task_id, "kind": "status", "status": "done", "result": result.result_text }),
+                json!({ "taskId": task_id, "kind": "status", "status": "done", "result": clean_text }),
             );
-            if !result.result_text.trim().is_empty() {
-                crate::tts::playback::play_thread(result.result_text.clone(), crate::tts::load_config());
+            if !clean_text.trim().is_empty() {
+                crate::tts::playback::play_thread(clean_text.clone(), crate::tts::load_config());
             }
-            notify_done(&app, &result.result_text);
-            Ok(result.result_text)
+            notify_done(&app, &clean_text);
+            Ok(clean_text)
         }
         Err(e) => {
             store::finish_task(&task_id, "failed", &e, &model, "[]");
