@@ -50,7 +50,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
         />
         <NavigationBridge />
         {/* UpdateBanner removed — the inline UpdateCard renders inside
-            AgentPanel above the chrome icons (cortex-ide/AgentPanel.tsx).
+            AgentPanel above the chrome icons (o8/AgentPanel.tsx).
             That stops it from covering the workspace tab strip + reconnect
             banner when an update lands. */}
         {children}

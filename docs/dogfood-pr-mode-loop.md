@@ -7,7 +7,7 @@
 
 ## 1. Goal
 
-Run the existing human-style dogfood loop **unattended** — driving the real `o8_view_*` type/click path, finding friction, reproducing reported bugs — but bound its write surface so it can only ever **open PRs against `hurttlocker/cortex-ide`**, never touch `main`, never ship, never bump a version, never merge or close/edit a PR. Discord feedback reports are folded in as **gated leads** that point the loop at where to look, never as patch orders. The human stays the only path to `main` and `/Applications/o8.app`: they review the stack of typecheck-clean PRs the loop produced and merge the good ones on their own cadence. When the human is present at all, the loop stands down completely.
+Run the existing human-style dogfood loop **unattended** — driving the real `o8_view_*` type/click path, finding friction, reproducing reported bugs — but bound its write surface so it can only ever **open PRs against `hurttlocker/o8`**, never touch `main`, never ship, never bump a version, never merge or close/edit a PR. Discord feedback reports are folded in as **gated leads** that point the loop at where to look, never as patch orders. The human stays the only path to `main` and `/Applications/o8.app`: they review the stack of typecheck-clean PRs the loop produced and merge the good ones on their own cadence. When the human is present at all, the loop stands down completely.
 
 ---
 

@@ -5,7 +5,7 @@
  * the matching p256dh/auth pair) can decrypt it. Browsers reject pushes that
  * aren't encrypted with this exact scheme.
  *
- * Issue: https://github.com/hurttlocker/cortex-ide/issues/639
+ * Issue: https://github.com/hurttlocker/o8/issues/639
  */
 
 import 'server-only';

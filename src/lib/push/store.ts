@@ -5,7 +5,7 @@
  * Storing the p256dh + auth keys lets the server encrypt payloads that only
  * that browser can decrypt.
  *
- * Issue: https://github.com/hurttlocker/cortex-ide/issues/639
+ * Issue: https://github.com/hurttlocker/o8/issues/639
  */
 
 import 'server-only';

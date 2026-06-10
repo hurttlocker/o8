@@ -435,7 +435,7 @@ function GroupHeader({
           <ChevronDown size={11} strokeWidth={2} style={{ color: 'var(--t-text-faint)' }} />
         )
       ) : (
-        // Folder glyph for repo sub-headers (cortex-ide, o8-site under
+        // Folder glyph for repo sub-headers (o8, o8-site under
         // Spawned agents). Matches the main repo header's folder icon
         // so all repo names carry the same prefix vocabulary.
         <span

@@ -16,7 +16,7 @@ export const SEGMENT_LABELS: Record<SegmentKind, string> = {
   idle: 'IDLE',
 };
 
-export const DEFAULT_TIMELINE_REPO = 'hurttlocker/cortex-ide';
+export const DEFAULT_TIMELINE_REPO = 'hurttlocker/o8';
 export const TIMELINE_BAR_HEIGHT = 20;
 export const TIMELINE_ACTIVE_SEGMENT_MIN_PX = 20;
 export const TIMELINE_THINKING_MIN_PX = 20;

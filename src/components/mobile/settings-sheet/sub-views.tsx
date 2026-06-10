@@ -60,7 +60,7 @@ export function ProfileSubView({
   const versionLabel = formatAboutVersion(appVersion);
   const openRepo = useCallback(() => {
     try {
-      window.open('https://github.com/hurttlocker/cortex-ide', '_blank', 'noopener,noreferrer');
+      window.open('https://github.com/hurttlocker/o8', '_blank', 'noopener,noreferrer');
     } catch {
       // ignore — desktop blockers
     }
@@ -92,7 +92,7 @@ export function ProfileSubView({
         <Row
           iconPath={ICON_GITHUB}
           label="GitHub repository"
-          rightValue="hurttlocker/cortex-ide"
+          rightValue="hurttlocker/o8"
           onClick={openRepo}
           palette={palette}
           showDivider={false}

@@ -42,7 +42,7 @@ interface PanelRepo {
 
 function repoSlugFromRemoteUrl(url: string | undefined): string | null {
   if (!url) return null;
-  // https://github.com/hurttlocker/cortex-ide.git → hurttlocker/cortex-ide
+  // https://github.com/hurttlocker/o8.git → hurttlocker/o8
   const match = url.match(/[:/]([^/]+\/[^/]+?)(?:\.git)?$/);
   return match ? match[1] : null;
 }

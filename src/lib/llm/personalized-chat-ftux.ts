@@ -299,7 +299,7 @@ function buildPromptSet(profile: PersonalizedChatFtuxProfile) {
   const repoLabel = repoName || 'this codebase';
   const architectureText = repoName ? `Map the ${repoName} architecture` : 'Explain this codebase architecture';
   const reviewText = repoName ? `Review the latest changes in ${repoName}` : 'Review the latest changes in the codebase';
-  const issueRepo = profile.repoNames.find((name) => name.toLowerCase() === 'cortex-ide')
+  const issueRepo = profile.repoNames.find((name) => name.toLowerCase() === 'o8' || name.toLowerCase() === 'cortex-ide')
     ?? repoName
     ?? profile.repoNames[0]
     ?? 'this repo';

@@ -12,9 +12,9 @@ import {
 
 describe('repoSlugFromOrigin', () => {
   it('parses https and ssh GitHub remotes', () => {
-    expect(repoSlugFromOrigin('https://github.com/hurttlocker/cortex-ide.git')).toBe('hurttlocker/cortex-ide');
-    expect(repoSlugFromOrigin('https://github.com/hurttlocker/cortex-ide')).toBe('hurttlocker/cortex-ide');
-    expect(repoSlugFromOrigin('git@github.com:hurttlocker/cortex-ide.git')).toBe('hurttlocker/cortex-ide');
+    expect(repoSlugFromOrigin('https://github.com/hurttlocker/o8.git')).toBe('hurttlocker/o8');
+    expect(repoSlugFromOrigin('https://github.com/hurttlocker/o8')).toBe('hurttlocker/o8');
+    expect(repoSlugFromOrigin('git@github.com:hurttlocker/o8.git')).toBe('hurttlocker/o8');
   });
 
   it('returns undefined for non-GitHub or empty origins', () => {

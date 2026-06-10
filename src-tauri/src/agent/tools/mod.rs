@@ -297,7 +297,7 @@ pub fn all_tools() -> Vec<Value> {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "repo": { "type": "string", "description": "Filter to one repo by folder name, e.g. 'cortex-ide'. Omit for the whole fleet." }
+                    "repo": { "type": "string", "description": "Filter to one repo by folder name, e.g. 'o8'. Omit for the whole fleet." }
                 },
                 "required": []
             }
@@ -316,11 +316,11 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "o8_dispatch",
-            "description": "Hand a CODING task to o8's orchestrator — it dispatches an autonomous worker in an isolated worktree, reviews the diff, and surfaces a packet for the user's approval. Use when the user wants code written, changed, fixed, or investigated in a repo ('have the orchestrator fix the auth bug', 'kick off the tooltip work in cortex-ide'). You do NOT write code yourself — this delegates it. Always include the repo so the user can confirm by ear.",
+            "description": "Hand a CODING task to o8's orchestrator — it dispatches an autonomous worker in an isolated worktree, reviews the diff, and surfaces a packet for the user's approval. Use when the user wants code written, changed, fixed, or investigated in a repo ('have the orchestrator fix the auth bug', 'kick off the tooltip work in o8'). You do NOT write code yourself — this delegates it. Always include the repo so the user can confirm by ear.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "repo": { "type": "string", "description": "Repo folder name to work in, e.g. 'cortex-ide'." },
+                    "repo": { "type": "string", "description": "Repo folder name to work in, e.g. 'o8'." },
                     "task": { "type": "string", "description": "A clear one-or-two-sentence description of what the orchestrator should do." },
                     "base_branch": { "type": "string", "description": "Optional branch to fork from. Default 'main'." }
                 },
@@ -330,18 +330,18 @@ pub fn all_tools() -> Vec<Value> {
         // ── GitHub + local git (Tier-3, read-only) ────────────────────────────
         json!({
             "name": "git_status",
-            "description": "Show the local git status (branch + changed files) of a repo. Use for 'what's the git status of cortex-ide?', 'is my working tree clean?'.",
+            "description": "Show the local git status (branch + changed files) of a repo. Use for 'what's the git status of o8?', 'is my working tree clean?'.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "repo": { "type": "string", "description": "Repo folder name, e.g. 'cortex-ide'." }
+                    "repo": { "type": "string", "description": "Repo folder name, e.g. 'o8'." }
                 },
                 "required": ["repo"]
             }
         }),
         json!({
             "name": "git_log",
-            "description": "Show recent commits (one line each) for a repo. Use for 'what are the recent commits on cortex-ide?'.",
+            "description": "Show recent commits (one line each) for a repo. Use for 'what are the recent commits on o8?'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -353,7 +353,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "gh_pr_list",
-            "description": "List open pull requests for a repo (number, title, state, author) via the GitHub CLI. Use for 'any open PRs on cortex-ide?'.",
+            "description": "List open pull requests for a repo (number, title, state, author) via the GitHub CLI. Use for 'any open PRs on o8?'.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -364,7 +364,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "gh_issue_list",
-            "description": "List open issues for a repo (number, title, state) via the GitHub CLI. Use for 'what issues are open on cortex-ide?'.",
+            "description": "List open issues for a repo (number, title, state) via the GitHub CLI. Use for 'what issues are open on o8?'.",
             "parameters": {
                 "type": "object",
                 "properties": {

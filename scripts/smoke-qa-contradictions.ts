@@ -56,7 +56,7 @@ const outcomeRow: TypedRow = {
     completedAt: '2026-04-28T10:00:00.000Z',
     prNumber: 901,
     prTitle: 'fix(sessions): add session tracking to AgentPanel',
-    prUrl: 'https://github.com/hurttlocker/cortex-ide/pull/901',
+    prUrl: 'https://github.com/hurttlocker/o8/pull/901',
   },
   score: 1,
 };

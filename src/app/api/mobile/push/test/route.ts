@@ -5,7 +5,7 @@
  * the mobile Settings sheet "Send test" button so the user can verify the
  * end-to-end flow before relying on it.
  *
- * Issue: https://github.com/hurttlocker/cortex-ide/issues/639
+ * Issue: https://github.com/hurttlocker/o8/issues/639
  */
 
 import { NextResponse } from 'next/server';

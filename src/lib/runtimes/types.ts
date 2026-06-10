@@ -52,7 +52,7 @@ export interface RuntimeSession {
   sessionKey: string;
   /** Runtime that owns this session */
   runtimeId: RuntimeId;
-  /** Human-readable name (e.g., "cortex-ide • main") */
+  /** Human-readable name (e.g., "o8 • main") */
   displayName: string;
   /** Working directory */
   cwd: string;

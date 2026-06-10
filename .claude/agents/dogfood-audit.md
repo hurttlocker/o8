@@ -154,7 +154,7 @@ After all agents complete, create a prioritized issue list:
 - [x] Feature that works correctly
 ```
 
-File the synthesis as a GitHub issue on `hurttlocker/cortex-ide` titled "Dogfood Audit — [date]" with the full findings.
+File the synthesis as a GitHub issue on `hurttlocker/o8` titled "Dogfood Audit — [date]" with the full findings.
 
 ## Important Notes
 

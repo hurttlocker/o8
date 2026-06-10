@@ -3,7 +3,7 @@
  *
  * POST /api/worktrees/merge — Create PR, merge to main, or discard a worktree
  *
- * @see https://github.com/hurttlocker/cortex-ide/issues/70
+ * @see https://github.com/hurttlocker/o8/issues/70
  */
 
 export const dynamic = 'force-dynamic';

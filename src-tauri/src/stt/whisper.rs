@@ -145,7 +145,7 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
         .post(DIRECT_OPENROUTER_ENDPOINT)
         .header("Content-Type", "application/json")
         .header("Authorization", format!("Bearer {api_key}"))
-        .header("HTTP-Referer", "https://github.com/hurttlocker/cortex-ide")
+        .header("HTTP-Referer", "https://github.com/hurttlocker/o8")
         .header("X-Title", "o8")
         .json(&body);
 

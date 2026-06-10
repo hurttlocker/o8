@@ -852,7 +852,7 @@ mod tests {
 
     #[test]
     fn speech_text_shortens_file_paths_to_file_names() {
-        let input = "Patch /Users/me/cortex-ide/src-tauri/src/playback.rs:812 now.";
+        let input = "Patch /Users/me/o8/src-tauri/src/playback.rs:812 now.";
         assert_eq!(
             prepare_text_for_speech(input),
             "Patch playback.rs line 812 now."

@@ -111,9 +111,9 @@ export function AboutTab() {
           gap: 12,
         }}>
           {[
-            { label: 'github', href: 'https://github.com/hurttlocker/cortex-ide' },
-            { label: 'docs', href: 'https://github.com/hurttlocker/cortex-ide/tree/main/docs' },
-            { label: 'releases', href: 'https://github.com/hurttlocker/cortex-ide/releases/latest' },
+            { label: 'github', href: 'https://github.com/hurttlocker/o8' },
+            { label: 'docs', href: 'https://github.com/hurttlocker/o8/tree/main/docs' },
+            { label: 'releases', href: 'https://github.com/hurttlocker/o8/releases/latest' },
           ].map((link) => (
             <a
               key={link.label}

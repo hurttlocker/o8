@@ -52,7 +52,7 @@ const FIELD_SEP = '';
 interface RepoTarget {
   /** Absolute repo root. */
   localPath: string;
-  /** Short repo name, e.g. "cortex-ide". */
+  /** Short repo name, e.g. "o8". */
   name: string;
 }
 
@@ -75,7 +75,7 @@ function previewContextFromRequest(request: Request): PreviewContext {
 }
 
 function previewUrlForRepo(repoName: string, context: PreviewContext): string | undefined {
-  if (repoName === 'cortex-ide') {
+  if (repoName === 'o8' || repoName === 'cortex-ide') {
     return `${context.protocol}//${context.apiHost}/dashboard`;
   }
   if (repoName === 'o8-mobile') {

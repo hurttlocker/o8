@@ -191,7 +191,7 @@ export async function apiFetch(path: string, init?: ApiFetchOptions): Promise<un
   throw new Error(
     `o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. ` +
     `Expected the o8 backend at ${resolveApiBaseLive()}. ` +
-    `Open the o8 desktop app (it launches the backend automatically) or run \`npm run desktop:dev\` from the cortex-ide repo.`,
+    `Open the o8 desktop app (it launches the backend automatically) or run \`npm run desktop:dev\` from the o8 repo.`,
   );
 }
 

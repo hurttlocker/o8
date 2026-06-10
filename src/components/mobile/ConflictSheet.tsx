@@ -4,7 +4,7 @@
  * Shows: file overlaps, severity, line ranges, merge order recommendation.
  * Triggered by tapping conflict badge in WorktreeBadge or WorktreeSummary.
  *
- * @see https://github.com/hurttlocker/cortex-ide/issues/69
+ * @see https://github.com/hurttlocker/o8/issues/69
  */
 
 import { memo, useCallback, useState } from 'react';

@@ -26,7 +26,7 @@ export const demoApprovals: ApprovalRequest[] = [
     id: 'demo-deploy-001',
     agent: 'Niot',
     severity: 'warning',
-    title: 'Deploy cortex-ide to production?',
+    title: 'Deploy o8 to production?',
     description: 'Branch batch/2-command-surface has 44 commits and all checks pass. Ready to deploy to Vercel production.',
     metadata: {
       Branch: 'batch/2-command-surface',
@@ -45,7 +45,7 @@ export const demoApprovals: ApprovalRequest[] = [
     agent: 'Codex',
     severity: 'critical',
     title: 'Delete 23 stale branches?',
-    description: 'Codex wants to run git branch cleanup on cortex-ide. This will permanently delete 23 remote branches older than 30 days.',
+    description: 'Codex wants to run git branch cleanup on o8. This will permanently delete 23 remote branches older than 30 days.',
     metadata: {
       Repository: '',
       Branches: '23',

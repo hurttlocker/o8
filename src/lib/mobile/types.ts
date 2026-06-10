@@ -350,7 +350,7 @@ export interface MobileActivityEvent {
   previewUrl?: string;
   /** Optional review/operator comments displayed in mobile activity details. */
   comments?: string[];
-  /** Short repo name, e.g. `"cortex-ide"`. */
+  /** Short repo name, e.g. `"o8"`. */
   repo?: string;
   /** Event time as epoch milliseconds. */
   timestamp: number;

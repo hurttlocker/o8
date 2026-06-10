@@ -491,7 +491,7 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
           label="Documentation"
           action={() =>
             window.open(
-              process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/cortex-ide',
+              process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/o8',
               '_blank'
             )
           }
@@ -500,7 +500,7 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
           label="GitHub"
           action={() =>
             window.open(
-              process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/cortex-ide',
+              process.env.NEXT_PUBLIC_REPO_URL || 'https://github.com/hurttlocker/o8',
               '_blank'
             )
           }
