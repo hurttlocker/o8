@@ -3709,11 +3709,20 @@ pub fn run() {
                                 let _ = h_speak.emit_to("main", "o8:speak-selection", ());
                                 return;
                             }
-                            std::thread::spawn(|| match crate::paste::grab_selection() {
-                                Some(text) => {
-                                    crate::tts::playback::play_thread(text, crate::tts::load_config());
+                            std::thread::spawn(|| {
+                                // The user's finger is usually still on Option when S
+                                // lands (agent-key muscle memory). grab_selection's
+                                // Cmd+C fallback posted under a held Option merges to
+                                // ⌥C — no copy, "no selection to speak". Wait for the
+                                // physical release first (AX path is immune, but the
+                                // fallback is what fires in browsers/Electron).
+                                crate::fn_hotkey::wait_for_option_release(1_200);
+                                match crate::paste::grab_selection() {
+                                    Some(text) => {
+                                        crate::tts::playback::play_thread(text, crate::tts::load_config());
+                                    }
+                                    None => log::info!("[tts] AltS: no selection to speak"),
                                 }
-                                None => log::info!("[tts] AltS: no selection to speak"),
                             });
                         }) {
                             log::warn!("[hotkey] failed to register AltS (speak-selection): {e}");
