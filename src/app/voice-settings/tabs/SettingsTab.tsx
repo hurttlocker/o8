@@ -11,6 +11,7 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   sttSetLocale, ttsSpeak, ttsStop, sttListInputDevices, sttSetInputDevice,
   accessibilityPermissionGranted, inputMonitoringGranted, fnKeyUsageType, openSystemSettings,
+  screenCaptureGranted, micPermissionGranted,
   type InputDevice,
 } from '@/lib/tauri/bridge';
 import {
@@ -28,17 +29,24 @@ import {
 const URL_ACCESSIBILITY = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility';
 const URL_INPUT_MONITORING = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ListenEvent';
 const URL_KEYBOARD = 'x-apple.systempreferences:com.apple.preference.keyboard';
+const URL_MICROPHONE = 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone';
+const URL_SCREEN_RECORDING = 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture';
 
 export default function SettingsTab({ prefs, setPref }: TabProps) {
   const [devices, setDevices] = useState<InputDevice[] | null>(null);
   const [acc, setAcc] = useState<boolean | null>(null);
   const [input, setInput] = useState<boolean | null>(null);
   const [fn, setFn] = useState<number | null | undefined>(undefined);
+  const [mic, setMic] = useState<boolean | null>(null);
+  const [screen, setScreen] = useState<boolean | null>(null);
   const [previewing, setPreviewing] = useState(false);
 
   const loadPerms = useCallback(async () => {
-    const [a, i, f] = await Promise.all([accessibilityPermissionGranted(), inputMonitoringGranted(), fnKeyUsageType()]);
-    setAcc(a); setInput(i); setFn(f);
+    const [a, i, f, m, s] = await Promise.all([
+      accessibilityPermissionGranted(), inputMonitoringGranted(), fnKeyUsageType(),
+      micPermissionGranted(), screenCaptureGranted(),
+    ]);
+    setAcc(a); setInput(i); setFn(f); setMic(m); setScreen(s);
   }, []);
 
   useEffect(() => {
@@ -146,12 +154,14 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
       <SectionCard>
         <SectionTitle
           icon={ICONS.eye}
-          status={acc && input && fnGranted ? 'All granted' : undefined}
+          status={acc && input && fnGranted && mic !== false && screen ? 'All granted' : undefined}
           right={<GhostButton label="Re-check" onClick={() => { void loadPerms(); }} />}
         >Permissions</SectionTitle>
-        <SectionHint>The global Fn hotkey needs these macOS grants. Without Input Monitoring the key does nothing — silently.</SectionHint>
+        <SectionHint>Voice and Symon&rsquo;s screen sight need these macOS grants. If a row shows granted but the feature still fails, toggle the grant off and on in System Settings, then relaunch o8.</SectionHint>
+        <PermRow label="Microphone" granted={mic} onOpen={() => { void openSystemSettings(URL_MICROPHONE); }} />
         <PermRow label="Accessibility" granted={acc} onOpen={() => { void openSystemSettings(URL_ACCESSIBILITY); }} />
         <PermRow label="Input Monitoring" granted={input} onOpen={() => { void openSystemSettings(URL_INPUT_MONITORING); }} />
+        <PermRow label="Screen Recording" granted={screen} onOpen={() => { void openSystemSettings(URL_SCREEN_RECORDING); }} />
         <PermRow label="Fn key binding" granted={fn === undefined ? null : fnGranted} onOpen={() => { void openSystemSettings(URL_KEYBOARD); }} />
         {fnHijacked ? (
           <div style={{

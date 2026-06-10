@@ -212,6 +212,24 @@ export async function fnKeyUsageType(): Promise<number | null> {
 }
 
 /**
+ * Whether o8 has macOS Screen Recording permission — powers Symon's screen
+ * sight (Points / Guide). Per CGPreflight, which can report stale truth after
+ * an app rebind; the hint copy covers the re-grant recipe. Non-prompting.
+ */
+export async function screenCaptureGranted(): Promise<boolean> {
+  const result = await invoke<boolean>('screen_capture_granted_cmd');
+  return result ?? false;
+}
+
+/**
+ * Microphone TCC status: true authorized, false denied/restricted, null when
+ * macOS has never asked (the first dictation will prompt). Non-prompting.
+ */
+export async function micPermissionGranted(): Promise<boolean | null> {
+  return invoke<boolean | null>('mic_permission_granted_cmd');
+}
+
+/**
  * Open a macOS System Settings pane by its URL / bundle target. Used to jump
  * the user to Accessibility / Input-Monitoring / Keyboard for granting.
  */
