@@ -29,6 +29,11 @@ pub struct EditContext {
     pub field_settable: bool,
     /// Frontmost bundle id at capture time.
     pub app: String,
+    /// True when the noun lives inside o8's OWN webview: a WKWebView exposes
+    /// neither `AXSelectedText` nor a reliable synthetic Cmd+C (same wall the
+    /// ⌥S speak-selection path hit), so capture/apply/revert round-trip
+    /// through the main webview's DOM instead of the AX/paste path.
+    pub via_webview: bool,
 }
 
 /// Conservative cue list — every entry implies "transform the text I'm
@@ -88,7 +93,13 @@ pub fn wants_edit(prompt: &str) -> bool {
 /// Capture the editable noun: selection first (the pointed case), else the
 /// focused text field (the open-email case). None when nothing editable is
 /// under the user — the prompt then carries an honesty note instead.
-pub fn capture() -> Option<EditContext> {
+///
+/// When o8 itself is frontmost the AX path is blind (WKWebView), so the
+/// capture round-trips through the main webview's DOM instead.
+pub fn capture(app_handle: &tauri::AppHandle) -> Option<EditContext> {
+    if crate::paste::frontmost_is_o8() {
+        return capture_from_webview(app_handle);
+    }
     let app = crate::paste::current_frontmost_bundle_id().unwrap_or_default();
     let selection = crate::paste::read_selected_text_via_accessibility();
     let field = crate::paste::read_focused_field();
@@ -99,6 +110,7 @@ pub fn capture() -> Option<EditContext> {
             field_value: field.as_ref().map(|f| f.value.clone()),
             field_settable: field.as_ref().map(|f| f.settable).unwrap_or(false),
             app,
+            via_webview: false,
         }),
         _ => field.map(|f| EditContext {
             mode: EditMode::Field,
@@ -106,7 +118,149 @@ pub fn capture() -> Option<EditContext> {
             field_value: Some(f.value),
             field_settable: f.settable,
             app,
+            via_webview: false,
         }),
+    }
+}
+
+// ── o8-webview round-trip ────────────────────────────────────────────────────
+// Request/response over Tauri events: Rust emits `o8:edit-capture` /
+// `o8:edit-apply` to the MAIN webview; the DictationHost listener does the DOM
+// work (window.getSelection, React-safe value setters, execCommand insertText
+// for contenteditable/CodeMirror) and answers via the `agent_edit_capture_result`
+// / `agent_edit_apply_result` commands. Same blocking-channel shape as the
+// confirm gate; ~700ms timeout means a busy/hydrating webview degrades to the
+// honesty note, never a hang.
+
+/// Webview's answer to a capture request.
+#[derive(serde::Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct WebviewEditState {
+    pub selection: Option<String>,
+    pub field_value: Option<String>,
+    #[serde(default)]
+    pub field_editable: bool,
+}
+
+/// Webview's answer to an apply request.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WebviewApplyResult {
+    #[serde(default)]
+    pub ok: bool,
+    pub error: Option<String>,
+}
+
+enum WebviewReply {
+    Capture(WebviewEditState),
+    Apply(WebviewApplyResult),
+}
+
+static WEBVIEW_CHANNELS: Mutex<Vec<(String, std::sync::mpsc::Sender<WebviewReply>)>> =
+    Mutex::new(Vec::new());
+
+fn webview_request(
+    app_handle: &tauri::AppHandle,
+    event: &str,
+    payload: serde_json::Value,
+) -> Option<WebviewReply> {
+    let request_id = format!(
+        "ed-{}",
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0)
+    );
+    let (tx, rx) = std::sync::mpsc::channel();
+    {
+        let mut chans = WEBVIEW_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+        chans.push((request_id.clone(), tx));
+    }
+    let mut payload = payload;
+    payload["requestId"] = json!(request_id);
+    let _ = app_handle.emit_to("main", event, payload);
+    let reply = rx.recv_timeout(std::time::Duration::from_millis(700)).ok();
+    {
+        let mut chans = WEBVIEW_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+        chans.retain(|(id, _)| id != &request_id);
+    }
+    reply
+}
+
+/// Resolve a pending webview request — called by the `agent_edit_*_result`
+/// commands (sync senders, no async context needed).
+fn resolve_webview(request_id: &str, reply: WebviewReply) {
+    let sender = {
+        let mut chans = WEBVIEW_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+        chans
+            .iter()
+            .position(|(id, _)| id == request_id)
+            .map(|pos| chans.remove(pos).1)
+    };
+    if let Some(tx) = sender {
+        let _ = tx.send(reply);
+    }
+}
+
+pub fn resolve_webview_capture(request_id: &str, state: WebviewEditState) {
+    resolve_webview(request_id, WebviewReply::Capture(state));
+}
+
+pub fn resolve_webview_apply(request_id: &str, result: WebviewApplyResult) {
+    resolve_webview(request_id, WebviewReply::Apply(result));
+}
+
+fn capture_from_webview(app_handle: &tauri::AppHandle) -> Option<EditContext> {
+    let reply = webview_request(app_handle, "o8:edit-capture", json!({}))?;
+    let WebviewReply::Capture(state) = reply else {
+        return None;
+    };
+    let app = crate::paste::current_frontmost_bundle_id().unwrap_or_default();
+    let field_value = state
+        .field_value
+        .filter(|v| !v.is_empty() && v.len() <= 24 * 1024);
+    match state.selection {
+        Some(sel) if !sel.trim().is_empty() => Some(EditContext {
+            mode: EditMode::Selection,
+            original: crate::utf8_head(&sel, 12 * 1024).to_string(),
+            field_settable: state.field_editable && field_value.is_some(),
+            field_value,
+            app,
+            via_webview: true,
+        }),
+        _ => {
+            let value = field_value.filter(|_| state.field_editable)?;
+            Some(EditContext {
+                mode: EditMode::Field,
+                original: crate::utf8_head(&value, 12 * 1024).to_string(),
+                field_value: Some(value),
+                field_settable: true,
+                app,
+                via_webview: true,
+            })
+        }
+    }
+}
+
+/// Apply (or revert) text inside o8's webview. `mode` is "selection" or
+/// "field" — the listener replaces the live selection or the whole focused
+/// editable respectively.
+fn apply_via_webview(
+    app_handle: &tauri::AppHandle,
+    mode: &str,
+    text: &str,
+) -> Result<(), String> {
+    let reply = webview_request(
+        app_handle,
+        "o8:edit-apply",
+        json!({ "mode": mode, "text": text }),
+    );
+    match reply {
+        Some(WebviewReply::Apply(r)) if r.ok => Ok(()),
+        Some(WebviewReply::Apply(r)) => Err(r
+            .error
+            .unwrap_or_else(|| "the o8 window couldn't apply the edit".to_string())),
+        _ => Err("the o8 window didn't answer the edit request".to_string()),
     }
 }
 
@@ -115,6 +269,8 @@ pub fn capture() -> Option<EditContext> {
 enum Restore {
     /// Whole-field restore — clean and exact while the user hasn't typed.
     FieldValue { value: String, settable: bool },
+    /// Whole-field restore through the o8 webview (the WKWebView lane).
+    WebviewField { value: String },
     /// Last resort: put the original on the clipboard for a manual paste.
     Clipboard { original: String },
 }
@@ -128,6 +284,9 @@ static LAST_EDIT: Mutex<Option<AppliedEdit>> = Mutex::new(None);
 
 /// Friendly app name from a bundle id ("com.apple.mail" → "Mail").
 fn friendly_app(bundle_id: &str) -> String {
+    if bundle_id.contains("o8") {
+        return "o8".to_string();
+    }
     let last = bundle_id.rsplit('.').next().unwrap_or(bundle_id);
     let mut chars = last.chars();
     match chars.next() {
@@ -164,22 +323,31 @@ pub fn apply(
         }
     }
 
-    match ctx.mode {
-        EditMode::Selection => {
-            // paste_text replaces the live selection at the caret (and handles
-            // clipboard save/restore + focus settle internally).
-            crate::paste::paste_text(new_text);
-        }
-        EditMode::Field => {
-            if !(ctx.field_settable && crate::paste::write_focused_field_value(new_text)) {
-                crate::paste::select_all_in_focused();
-                std::thread::sleep(std::time::Duration::from_millis(120));
+    if ctx.via_webview {
+        let mode = match ctx.mode {
+            EditMode::Selection => "selection",
+            EditMode::Field => "field",
+        };
+        apply_via_webview(app_handle, mode, new_text)?;
+    } else {
+        match ctx.mode {
+            EditMode::Selection => {
+                // paste_text replaces the live selection at the caret (and handles
+                // clipboard save/restore + focus settle internally).
                 crate::paste::paste_text(new_text);
+            }
+            EditMode::Field => {
+                if !(ctx.field_settable && crate::paste::write_focused_field_value(new_text)) {
+                    crate::paste::select_all_in_focused();
+                    std::thread::sleep(std::time::Duration::from_millis(120));
+                    crate::paste::paste_text(new_text);
+                }
             }
         }
     }
 
     let restore = match &ctx.field_value {
+        Some(v) if ctx.via_webview => Restore::WebviewField { value: v.clone() },
         Some(v) => Restore::FieldValue { value: v.clone(), settable: ctx.field_settable },
         None => Restore::Clipboard { original: ctx.original.clone() },
     };
@@ -218,6 +386,18 @@ pub fn revert(app_handle: &tauri::AppHandle) -> Result<(), String> {
             }
             log::info!("[symon-edit] reverted in {}", friendly_app(&edit.app));
         }
+        Restore::WebviewField { value } => {
+            if let Err(e) = apply_via_webview(app_handle, "field", &value) {
+                let _ = crate::paste::copy_to_clipboard(&value);
+                crate::tts::playback::play_thread(
+                    "I couldn't restore it in place — the original is on your clipboard.".to_string(),
+                    crate::tts::load_config(),
+                );
+                log::warn!("[symon-edit] webview revert failed ({e}); fell back to clipboard");
+            } else {
+                log::info!("[symon-edit] reverted in o8");
+            }
+        }
         Restore::Clipboard { original } => {
             let _ = crate::paste::copy_to_clipboard(&original);
             crate::tts::playback::play_thread(
@@ -227,7 +407,6 @@ pub fn revert(app_handle: &tauri::AppHandle) -> Result<(), String> {
             log::info!("[symon-edit] revert fell back to clipboard");
         }
     }
-    let _ = app_handle;
     Ok(())
 }
 

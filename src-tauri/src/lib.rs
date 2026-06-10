@@ -3171,6 +3171,22 @@ fn agent_edit_revert(app: tauri::AppHandle) -> Result<(), String> {
     agent::edit_ctx::revert(&app)
 }
 
+/// Answer a pending `o8:edit-capture` request — the main webview reports its
+/// live selection / focused-editable state back to the edit lane (the
+/// WKWebView path; see agent/edit_ctx.rs).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_edit_capture_result(request_id: String, state: agent::edit_ctx::WebviewEditState) {
+    agent::edit_ctx::resolve_webview_capture(&request_id, state);
+}
+
+/// Answer a pending `o8:edit-apply` request (ok / error) from the main webview.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_edit_apply_result(request_id: String, result: agent::edit_ctx::WebviewApplyResult) {
+    agent::edit_ctx::resolve_webview_apply(&request_id, result);
+}
+
 /// Stage files dropped onto the dock as context for the NEXT agent run
 /// (Clicky-parity dossier #3). The dock webview reads content via the HTML5
 /// File API (WKWebView exposes no absolute paths) and sends bounded text
@@ -3446,6 +3462,10 @@ pub fn run() {
             agent_confirm,
             #[cfg(target_os = "macos")]
             agent_edit_revert,
+            #[cfg(target_os = "macos")]
+            agent_edit_capture_result,
+            #[cfg(target_os = "macos")]
+            agent_edit_apply_result,
             #[cfg(target_os = "macos")]
             agent_files_stage,
             #[cfg(target_os = "macos")]
