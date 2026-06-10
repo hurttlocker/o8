@@ -391,6 +391,87 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
     }))
 }
 
+/// `o8_panel_read` — what's CONFIGURED inside o8: automations, projects, or
+/// connected repos. Read-through loopback projections, spoken-friendly. (PRs,
+/// issues, and commits stay with the per-repo git/gh tools — no overlap.)
+pub async fn panel_read(args: Value) -> Result<Value, String> {
+    let kind = args
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    match kind.as_str() {
+        "automations" => {
+            let resp = o8_http::get_json("/api/automations").await?;
+            let autos = resp
+                .get("automations")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let items: Vec<Value> = autos
+                .iter()
+                .map(|a| {
+                    let repo = a
+                        .get("repoPath")
+                        .and_then(|v| v.as_str())
+                        .unwrap_or("")
+                        .trim_end_matches('/')
+                        .rsplit('/')
+                        .next()
+                        .unwrap_or("")
+                        .to_string();
+                    json!({
+                        "name": a.get("name").and_then(|v| v.as_str()).unwrap_or("Untitled"),
+                        "enabled": a.get("enabled").and_then(|v| v.as_bool()).unwrap_or(false),
+                        "trigger": a.get("cronExpr").and_then(|v| v.as_str())
+                            .or_else(|| a.get("triggerKind").and_then(|v| v.as_str()))
+                            .unwrap_or(""),
+                        "last_run_status": a.get("lastRunStatus").and_then(|v| v.as_str()).unwrap_or(""),
+                        "repo": repo,
+                    })
+                })
+                .collect();
+            Ok(json!({ "count": items.len(), "automations": items }))
+        }
+        "projects" => {
+            let resp = o8_http::get_json("/api/projects").await?;
+            let projects = resp
+                .get("projects")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let items: Vec<Value> = projects
+                .iter()
+                .map(|p| {
+                    json!({
+                        "name": p.get("name").and_then(|v| v.as_str()).unwrap_or("Untitled"),
+                        "repo_count": p.get("repos").and_then(|v| v.as_array()).map(|r| r.len()).unwrap_or(0),
+                    })
+                })
+                .collect();
+            Ok(json!({ "count": items.len(), "projects": items }))
+        }
+        "repos" => {
+            let resp = o8_http::get_json("/api/panel/repos").await?;
+            let repos = resp
+                .get("repos")
+                .and_then(|v| v.as_array())
+                .cloned()
+                .unwrap_or_default();
+            let items: Vec<Value> = repos
+                .iter()
+                .filter_map(|r| r.get("name").and_then(|v| v.as_str()))
+                .map(|n| json!(n))
+                .collect();
+            Ok(json!({ "count": items.len(), "repos": items }))
+        }
+        other => Err(format!(
+            "o8_panel_read kind must be 'automations', 'projects', or 'repos' — got '{other}'."
+        )),
+    }
+}
+
 /// Resolve a repo folder name (or an absolute path) to a registered absolute
 /// path via `/api/panel/repos`. Exact name match wins; otherwise a substring
 /// match. Returns a spoken-friendly error when nothing matches. Shared with the

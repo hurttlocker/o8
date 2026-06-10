@@ -18,6 +18,7 @@ pub mod mac_notes;
 pub mod mac_reminders;
 pub mod mac_shortcuts;
 pub mod o8_bridge;
+pub mod o8_ui;
 
 use super::{safety, TaskCtx};
 use chrono::{Datelike, Timelike};
@@ -382,6 +383,30 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["repo", "task"]
             }
         }),
+        // ── o8 UI control (the o8-control frontier v1) ────────────────────────
+        json!({
+            "name": "o8_ui_open",
+            "description": "Open a surface of the o8 window itself by voice — 'open my settings', 'show the mobile QR code', 'open my automations', 'show the inbox / PRs / activity / review panel', 'open the o8.md page', 'open the browser to anthropic.com'. Brings the o8 window forward and opens the named surface.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "surface": { "type": "string", "enum": ["settings", "voice_settings", "mobile_qr", "automations", "browser", "inbox", "prs", "activity", "review", "o8md", "workspace", "files", "terminal"], "description": "Which o8 surface to open. mobile_qr = the phone pairing QR code; o8md = the repo's o8.md spec page; voice_settings = the Symon voice settings window." },
+                    "url": { "type": "string", "description": "For surface 'browser' only: the URL to open, e.g. 'anthropic.com' or 'http://localhost:3000'." }
+                },
+                "required": ["surface"]
+            }
+        }),
+        json!({
+            "name": "o8_panel_read",
+            "description": "List what's configured inside o8: 'automations' (scheduled/triggered jobs and their last run), 'projects' (project groupings), or 'repos' (connected repositories). Use for 'what automations do I have?', 'what projects are in o8?', 'which repos are connected?'. For PRs, issues, or commits use the git/gh tools instead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "kind": { "type": "string", "enum": ["automations", "projects", "repos"], "description": "Which list to read." }
+                },
+                "required": ["kind"]
+            }
+        }),
         // ── GitHub + local git (Tier-3, read-only) ────────────────────────────
         json!({
             "name": "git_status",
@@ -497,6 +522,8 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_reject_item" => o8_bridge::reject_item(args).await,
         "o8_ask" => o8_bridge::ask(args).await,
         "o8_dispatch" => o8_bridge::dispatch(args).await,
+        "o8_ui_open" => o8_ui::open(&ctx.app, args),
+        "o8_panel_read" => o8_bridge::panel_read(args).await,
         "git_status" => git_github::git_status(args).await,
         "git_log" => git_github::git_log(args).await,
         "gh_pr_list" => git_github::pr_list(args).await,

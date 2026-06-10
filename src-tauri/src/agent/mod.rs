@@ -71,7 +71,13 @@ pub(crate) fn system_prompt() -> String {
          and stuck agents (\"what needs me?\", \"anything waiting on me?\"). To \
          approve or reject one by voice, call o8_needs_me FIRST, read the queue \
          to the user, then pass that EXACT title to o8_approve_item or \
-         o8_reject_item — never guess a title. You \
+         o8_reject_item — never guess a title. You can also drive the o8 \
+         window itself: `o8_ui_open` opens its surfaces by name — settings, \
+         voice settings, the mobile pairing QR code, automations, the inbox / \
+         PRs / activity / review panels, the o8.md page, or the built-in \
+         browser at a URL (\"open my settings\", \"show the QR code\", \"open \
+         the browser to anthropic dot com\"). `o8_panel_read` lists what's \
+         configured inside o8 — automations, projects, or connected repos. You \
          are NOT the coder — when the user wants code written or changed, that is \
          the orchestrator's job, not yours. Routing ladder, in order: a structured \
          native tool first (never guess what a tool can tell you); o8_ask for \
@@ -439,7 +445,7 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
     // anything could disturb it.
     let edit_wanted = edit_ctx::wants_edit(&prompt);
     let edit = if edit_wanted {
-        edit_ctx::capture().map(std::sync::Arc::new)
+        edit_ctx::capture(&app).map(std::sync::Arc::new)
     } else {
         None
     };
