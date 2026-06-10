@@ -71,17 +71,11 @@ const SYMON_CAPSULE_BG =
 // ── Glass dock theme (Theme tab → Dock = Glass) — clear/frosted instead of the
 // Symon multicolor. The capsule/panel rely on backdrop blur for the frost.
 const GLASS_IDLE = 'linear-gradient(rgba(255,255,255,0.20), rgba(232,238,250,0.10))';
-// Near-opaque so the working / listening capsules keep full saturation even
-// when o8 isn't the focused app — translucent glass + backdrop saturate()
-// desaturates on an inactive window (the dock never becomes key).
-const GLASS_CAPSULE_BG = 'linear-gradient(rgba(22,26,36,0.96), rgba(14,18,28,0.94))';
-// Solid "always-regular" surface for the read panels (answer + confirm card).
-// The dock window is nonactivating (never key) + transparent, so a translucent
-// glass panel reads dim / "backgrounded" when another app is focused — which is
-// always. Opaque keeps these surfaces looking like a regular, always-on panel
-// regardless of focus (the settings-window goal, achieved without native
-// HudWindow vibrancy, which would gray the light idle pill).
-const SOLID_PANEL_BG = 'linear-gradient(180deg, #1b1f2a 0%, #12151e 100%)';
+const GLASS_CAPSULE_BG = 'linear-gradient(rgba(20,24,34,0.52), rgba(14,18,28,0.46))';
+// Translucent glass for the read panels (answer + confirm card) — transparent
+// like every other dock mode (the closed/idle sliver, the capsules). The dock
+// stays glass in ALL modes; backdrop blur + saturate carry the frost.
+const GLASS_PANEL_BG = 'linear-gradient(rgba(16,20,30,0.52), rgba(12,16,26,0.46))';
 const GLASS_BLUR: React.CSSProperties = {
   backdropFilter: 'blur(26px) saturate(150%)', WebkitBackdropFilter: 'blur(26px) saturate(150%)',
 };
@@ -469,7 +463,7 @@ export function DockNotchSurface({
         width: 420,
         height: 96,
         borderRadius: '0 0 24px 24px',
-        background: SOLID_PANEL_BG,
+        background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 14px 32px rgba(40, 40, 80, 0.36)',
       } as React.CSSProperties;
@@ -496,17 +490,21 @@ export function DockNotchSurface({
           boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
         } as React.CSSProperties;
       }
-      // Answer panel — a SOLID surface so it reads as a regular, always-on
-      // panel (never the dim "backgrounded" translucent look on this never-key
-      // window). The root width/height/radius transition animates the 248→420
-      // grow for free.
+      // Answer panel — translucent glass like the rest of the dock (transparent
+      // in every mode). The root width/height/radius transition animates the
+      // 248→420 grow for free.
       return {
         width: 420,
         height: 380,
         borderRadius: '0 0 26px 26px',
-        background: SOLID_PANEL_BG,
+        background: glassDock
+          ? GLASS_PANEL_BG
+          : 'linear-gradient(rgba(13, 11, 26, 0.62), rgba(13, 11, 26, 0.62)),'
+            + ' linear-gradient(100deg, #aecdff 0%, #d7c2f1 46%, #f7d9bf 100%)',
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 16px 34px rgba(0, 0, 0, 0.34)',
+        backdropFilter: 'blur(34px) saturate(140%)',
+        WebkitBackdropFilter: 'blur(34px) saturate(140%)',
       } as React.CSSProperties;
     }
     if (isSpeaking) {
