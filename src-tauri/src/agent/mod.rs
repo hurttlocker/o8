@@ -105,7 +105,12 @@ pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
          walkthrough use up to 5 tags in the order the user should follow. The \
          tags are stripped before your reply is spoken and animate a pointer on \
          the user's screen, so phrase the sentence naturally (\"it's right here, \
-         in the top right\")."
+         in the top right\"). When the user sounds LOST or is asking where to \
+         click to do something (\"where do I click to reply?\", \"I can't find \
+         the save button\"), use [GUIDE:x,y:label] instead, with exactly ONE \
+         target — that pointer lands and stays pulsing until they move to it. \
+         One short, plain sentence naming the target; never narrate the whole \
+         screen."
     )
 }
 

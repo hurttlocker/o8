@@ -21,7 +21,7 @@ preset list) is what keeps it safe.
 
 ## Build next, in order
 
-### 1. Selection-as-object transform — the Worker wedge (days)
+### 1. Selection-as-object transform — the Worker wedge (days) — **BUILT 0.1.319**
 
 Hold Option with text selected anywhere on the Mac → the spoken sentence is
 the verb, the selection is the noun → the text rewrites **in place**, with a
@@ -42,7 +42,13 @@ open Mail thread (AX context), drafts in the user's register, stages a draft —
   for tomorrow 9am" sends the selection into the native tool instead of a
   rewrite. The confirm card doubles as disambiguation.
 
-### 2. "What needs me?" — voice approval triage, the moat spoken (days–week)
+### 2. "What needs me?" — voice approval triage, the moat spoken (days–week) — **BUILT 0.1.320**
+
+*Shipped as `o8_needs_me` (pending approval cards + attention-state lanes,
+ReadOnly) plus `o8_approve_item` / `o8_reject_item` (title-resolved against the
+live queue, Reversible → always carded). The model is taught needs_me-first so
+the spoken proposal + card always name the real pending item. E2E verified:
+list, approve-through-card, and all-clear paths.*
 
 One phrase surfaces ONLY the fleet items blocked on the operator's decision
 ("two merges waiting; one touches a DB migration"), then walks approve/deny by

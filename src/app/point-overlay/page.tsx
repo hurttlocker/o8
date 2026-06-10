@@ -29,7 +29,7 @@ export const dynamic = 'force-dynamic';
 
 const ORANGE = '#FF5A1F';
 
-type OverlayPoint = { x: number; y: number; label: string };
+type OverlayPoint = { x: number; y: number; label: string; dwell?: boolean };
 type ShowPayload = { gen: number; points: OverlayPoint[]; tour: boolean; durationMs: number };
 
 /** Travel time scales with distance so short hops feel quick and a cross-screen
@@ -136,7 +136,8 @@ function Marker({
           : 'none',
       }}
     >
-      {/* ring ripple — one pulse outward on arrival */}
+      {/* ring ripple — one pulse outward on arrival; a GUIDE keeps pinging
+          softly until the user reaches it (Rust owns the hide) */}
       <div
         style={{
           position: 'absolute',
@@ -147,7 +148,9 @@ function Marker({
           borderRadius: '50%',
           border: `2px solid ${ORANGE}`,
           opacity: 0,
-          animation: `o8PointRipple 0.9s ease-out ${delayMs + 120}ms both`,
+          animation: point.dwell
+            ? `o8GuidePing 2.2s ease-out ${delayMs + 120}ms infinite`
+            : `o8PointRipple 0.9s ease-out ${delayMs + 120}ms both`,
         }}
       />
       {/* the steady orange ring, breathing (fades in around a landed flight) */}
@@ -349,6 +352,11 @@ export default function PointOverlayPage() {
         @keyframes o8PointRipple {
           0% { opacity: 0.85; transform: scale(1); }
           100% { opacity: 0; transform: scale(1.9); }
+        }
+        @keyframes o8GuidePing {
+          0% { opacity: 0.55; transform: scale(1); }
+          70% { opacity: 0; transform: scale(2.1); }
+          100% { opacity: 0; transform: scale(2.1); }
         }
         @keyframes o8PointBreathe {
           from { transform: scale(1); }
