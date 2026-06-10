@@ -1,160 +1,130 @@
 # o8
 
-Private working repository for **o8**, an AI-native desktop app product.
+**The governance layer for autonomous engineering teams.** A Rainwater product.
+
+> **Rainwater** is the company. It builds two things:
+> - **o8** — the IDE / control plane. Where AI agents do engineering work under human oversight.
+> - **Symon** — the voice agent. The operator's chief-of-staff: it directs o8 by voice and lives across your Mac.
+>
+> Company : products :: Anthropic : Claude.
+
+o8 is a **Next.js 16 + Tauri v2 desktop app** (with a mobile remote-control surface). It is *not* a code editor — it's the **control plane** for autonomous engineering: approvals, audit, organizational memory, and operator control across any AI provider.
+
+**Shipping runtime pattern (v1):** Claude Code orchestrates, Codex works. A Claude Code REPL (subscription-billed) is the orchestrator; Codex GPT-5.5 xhigh is the worker, running in isolated git worktrees. Gemini and opencode adapters are wired for future expansion. All four route through one universal CLI adapter interface (`src/lib/runtimes/`), with separate desktop and mobile surfaces.
+
+The moat is **governance, organizational memory, and the operator approval surface** — not the things models will commoditize (cost dashboards, prompt tools, orchestration quality).
+
+---
+
+## What's real today vs. what's coming
+
+This README is honest about state. Everything under **Real** ships in the current release and is verified; everything under **Coming** is designed/in-progress.
+
+### ✅ Real / shipped
+- **Runtime adapter system** — Codex, Claude Code, Gemini, opencode behind one `AgentRuntime` interface; capability-gated discovery, parallel session discovery, unified dispatch.
+- **Mission dispatch + governance** — `create_mission` → `dispatch_mission` → review the diff → `approve_and_merge`. Every worker runs in an isolated worktree; nothing merges without an operator review. A 5-layer merge-failure escalation chain.
+- **Cortex v2 organizational memory** — operator directives + a session-outcome ledger (SQLite), auto-directive proposals, and the **Engineering Brain** Q&A surface ("what did Codex do today?", "how does dispatch work?").
+- **The MCP surface** — two stdio servers (operator + cortex) exposing o8 to Claude, plus 12 `o8_view_*` webview-control tools that let an external Claude drive the running app.
+- **The `o8` CLI** — agents inside packet worktrees get `packet info/scope/heartbeat/report`, `lane touches`, `cortex observe`, `o8 run`, `o8 spec …`, `o8 doctor`.
+- **Symon, the voice agent** — native macOS tools (Reminders, Calendar, Notes, Mail, Contacts, Shortcuts, open-app, filesystem) **plus** a Tier-2/3 bridge into o8 itself (read fleet state, ask the Brain, delegate coding work) — every mutation behind a spoken confirm card. Push-to-talk via Left-Option; the morphing notch dock; a "Synthesizing…" + timer card with the o8 orbit motion while it works.
+- **Mobile remote-control surface** — `src/components/mobile/`, paired to the local backend, for kicking off and reviewing work away from the keyboard.
+- **Two-axis theming** (palette × surface), the dock, the review surface, the right-side O8Panel.
+
+### 🚧 Coming / in design
+- **Symon's "beat-Siri" tool set** — `apple_music_play`, `spotify_control`, `read_screen`, `app_intent` (control any scriptable Mac app). Roadmap: `~/o8-symon-tools-roadmap.md`.
+- **Real-time speech-to-speech** for Symon (currently push-to-talk + cascaded). gpt-realtime-2 / Gemini Live under evaluation.
+- **A reasoning-grade brain for Symon** — today Symon's loop is **100% Gemini Flash direct** (it nails tool-selection); a Claude-REPL-subscription path for heavy reasoning is designed, not yet wired.
+
+---
+
+## The pieces
+
+### o8 — the IDE / control plane
+Desktop layout: a resizable AgentPanel (left), a TileContainer of workspace terminals (center), and a 440px O8Panel (right) with Pulse / Browser / PRs / Inbox / Activity / o8.md tabs. The **Orchestrator** is a tab inside the workspace, not a floating tile. A WebSocket server (port 3002) multiplexes real-time data to mobile. SQLite (better-sqlite3 + Drizzle) in `~/.o8/`. Full architecture in [`CLAUDE.md`](./CLAUDE.md) and [`docs/`](./docs/).
+
+### Symon — the voice agent
+Symon is the **life-layer**: voice-first, tool-heavy, and ingrained in your whole Mac — not just code. The boundary with the orchestrator is one rule:
+
+> **If the action mutates a git repo → it routes to the orchestrator (the coder). Everything else → Symon does directly.**
+
+So *"remind me to call Q at 3"* → Symon does it; *"what's shipping?"* → Symon reads o8 state aloud; *"have the orchestrator fix the auth bug in cortex-ide"* → Symon delegates a **gated** mission (it speaks the repo back + shows a confirm card before any worker spawns). Symon talks to o8 as a third client of o8's own loopback API — no orchestration logic is duplicated. Code lives in `src-tauri/src/agent/`.
+
+### The MCP servers (`src/lib/mcp/`)
+- **`operator-mcp-server.ts`** — the operator's interface: `o8_status`, `o8_send`, `create_mission`, `dispatch_mission`, `get_mission_status`, `submit_review`, `approve_and_merge`, `cortex_ask`, the `o8_view_*` webview-control tools, and the `o8_spec_*` o8.md review tools.
+- **`cortex-mcp-server.ts`** — internal tools spawned by orchestrator sessions (fleet / issues / PRs / approvals).
+
+Install from **Settings → MCP** (writes Claude Desktop / Claude Code config with merge-preserving backups).
+
+### The `o8` CLI
+Symlinked to `/usr/local/bin/o8` after first launch. Dispatched agents use it inside worktrees; operators use it directly. See [`AGENTS.md`](./AGENTS.md) for the full command list (`packet *`, `lane touches`, `cortex observe`, `run`, `spec *`, `doctor`).
+
+### The mobile app
+A remote-control surface (`src/components/mobile/`) — a separate codebase from desktop by design, paired to the local backend. Approve, dispatch, and watch the fleet from your phone.
+
+---
+
+## How Symon was acquired
+
+Symon's voice stack was **acquired as `aqua-color`** — a macOS voice app built around a notch-dock HUD: push-to-talk dictation, on-device polish, TTS, a global Fn hotkey, and paste-into-the-frontmost-app. Rainwater folded that stack into o8 as **Symon**, the agent:
+
+- The dictation engine, the morphing **notch dock**, the polish/TTS pipeline, and the global hotkey were ported wholesale (`src-tauri/src/{fn_hotkey,paste}.rs`, the dock window, the STT engine).
+- The tool-calling loop (`agent/{gemini,openrouter}.rs`) was lifted and **de-coupled** from the standalone app — re-pointed to o8's `~/.o8` data dir, the license proxy dropped, errors simplified.
+- Then it was **extended past anything the original app did**: the o8 control-plane bridge (read fleet state, ask the Engineering Brain, delegate gated coding work) and the SafetyClass confirm gate.
+
+The parity audit (`docs/symon-parity-checklist.md`) tracked "o8 does everything aqua-color did"; the system-wide fold spec is `docs/symon-systemwide-fold.md`.
+
+---
+
+## Voice + control planes, together
+
+This is the thesis Rainwater is building toward: **the orchestrator replaces you in the codebase; Symon replaces you everywhere else — and is the one who talks to the orchestrator on your behalf.**
+
+- The orchestrator is the **specialist coder** — it dispatches Codex in worktrees, reviews diffs, and ships behind your approval.
+- Symon is the **voice operator** — it knows your context (it hears your dictation, will see your screen), answers about the fleet, runs your non-coding life, and *directs* the coder by voice.
+- The seam between them is **governed**: every mutation — a dispatch, a reminder, a file write — passes a spoken confirm card. That governance is the moat new-Siri doesn't have.
+
+---
 
 ## Quickstart
 
-Prerequisites:
-- **Node.js 22+** — `node --version` (install from [nodejs.org](https://nodejs.org))
-- **Rust stable** — for the Tauri build (`rustup install stable`)
-- **Xcode Command Line Tools** (macOS) or **build-essential + python3** (Linux) — needed by `better-sqlite3` / `node-pty` during `npm install`
-- **Codex CLI** (optional, required for mission dispatch) — `npm i -g @openai/codex-cli`
-- **`gh` CLI** (optional, required for `create_mission` from GitHub issues)
-
-Clone and run:
+Prerequisites: **Node.js 22+** (ABI-pinned for `better-sqlite3`), **Rust stable**, **Xcode CLT** (macOS) / build-essential (Linux). Optional: **Codex CLI** (mission dispatch), **`gh` CLI** (`create_mission` from issues).
 
 ```bash
 git clone https://github.com/hurttlocker/cortex-ide.git
 cd cortex-ide
-cp .env.example .env.local   # fill in optional API keys
+cp .env.example .env.local      # optional API keys
 npm install
-npm run desktop:dev          # starts Next.js on 3001 + WS server on 3002
+npm run desktop:dev             # Next.js :3001 + WS server :3002
 ```
 
-Open `http://localhost:3001/dashboard` in a browser, or run `cargo tauri dev` from `src-tauri/` for the native shell.
+Open `http://localhost:3001/dashboard`, or run `cargo tauri dev` from `src-tauri/` for the native shell.
 
-### Native build
+### Native build & ship
 
 ```bash
-npm run build                # Next.js production build + bundled server export
-cargo tauri build            # native installer (dmg/msi/deb)
+npm run build                   # Next.js prod build + bundled server export
+cargo tauri build               # native installer (dmg/msi/deb)
+# release loop (signed + auto-update):
+npm version patch && git push --follow-tags && npm run ship
 ```
 
-If you're forking and plan to ship your own releases, replace the `plugins.updater.endpoints` and `pubkey` in `src-tauri/tauri.conf.json` with your own release channel and minisign public key. Otherwise the packaged app will check for updates against the upstream o8 release feed.
+If you fork and ship your own releases, replace `plugins.updater.endpoints` + `pubkey` in `src-tauri/tauri.conf.json` with your own channel and minisign key.
 
 ### Connect Claude to o8
+1. **Settings → MCP** in the desktop app.
+2. **Install** next to "Claude Desktop" (or "Claude Code").
+3. Restart Claude Desktop (or `/mcp reload` in Claude Code).
+4. Claude now has o8's tools: `o8_status`, `create_mission`, `dispatch_mission`, `approve_and_merge`, `cortex_ask`, the `o8_view_*` controls, and more.
 
-1. Open the desktop app and go to **Settings → MCP**.
-2. Click **Install** next to "Claude Desktop" (or "Claude Code").
-3. Restart Claude Desktop (or run `/mcp reload` in Claude Code).
-4. Claude now has access to o8 tools: `o8_status`, `o8_send`, `create_mission`, `dispatch_mission`, `approve_and_merge`, etc.
+See [`.env.example`](./.env.example) for the full environment-variable reference and which feature each unlocks.
 
-See `.env.example` for the complete list of environment variables and which features each one unlocks.
+---
 
-## What this is
+## More
 
-o8 is a thesis for an **agent-native development environment**:
+- [`CLAUDE.md`](./CLAUDE.md) — architecture, conventions, critical rules (also the canonical agent brief).
+- [`AGENTS.md`](./AGENTS.md) — the `o8` CLI reference.
+- [`DESIGN.md`](./DESIGN.md) / [`hurttlocker.md`](./hurttlocker.md) — design language + locked typography/icon/layout spec.
+- [`docs/`](./docs/) — product brief, company thesis, runtime adapter contract, vocabulary glossary.
 
-- the unit of work is not just a file, but an **agent**
-- the product is not just an editor, but an **agent command center**
-- memory is not an afterthought, but a first-class **operating system primitive**
-- mobile is not a bolt-on viewer, but a **remote control surface** for approval, monitoring, and steering
-
-This repo captures the initial company thesis, v0 product spec, system architecture, mobile strategy, research notes, and the first live shell prototype.
-
-## Current position
-
-### Core belief
-The next big developer product may not be another autocomplete-heavy editor.
-It may be the best place to **run, supervise, steer, and scale teams of coding agents**.
-
-### Initial wedge
-Start as a **multi-agent control plane** that works across existing runtimes.
-Do **not** begin as a full VS Code fork.
-
-### Working product framing
-- **Cortex** = memory and continuity substrate
-- **OpenClaw / ACP runtimes** = execution substrate
-- **Git / GitHub / worktrees / terminals** = software delivery substrate
-- **Autonomous Tools** = native file, terminal, and github integration
-- **o8** = operator surface that makes all of it legible and steerable
-
-### Front-door rule
-The product should feel like a **beautiful, fluent AI chat surface on first contact**, then progressively reveal deeper review, runtime, and org-control layers.
-
-That means:
-- protect the chat page as the onboarding/front-door surface
-- let deeper control open contextually from within the same product language
-- do not let runtime/operator depth bulldoze the familiar chat experience
-
-### Mobile view
-Mobile support should likely exist from day one, but as a **remote operator surface**, not a full mobile IDE.
-The right model is:
-
-- desktop does the heavy lifting
-- phone handles approvals, status, notifications, quick steering, Cortex recall, and diff review
-
-## Repo map
-
-- `docs/company-thesis.md` — why this company should exist
-- `docs/chat-front-door-doctrine.md` — product memo + implementation doctrine for preserving chat as the front door while layering runtime depth underneath
-- `docs/v0-product-spec.md` — first shipping surface and user flows
-- `docs/v1-build-plan.md` — v1 plan grounded in Karpathy’s command-center requirements
-- `docs/system-architecture.md` — system map and where Cortex / OpenClaw / Paperclip fit
-- `docs/mobile-strategy.md` — day-one mobile thesis and architecture
-- `docs/roadmap.md` — phased build sequence
-- `docs/issue-map.md` — epic lanes and issue structure
-- `docs/remodex-integration-plan.md` — how to use the Remodex/Phodex lane without letting it define the whole product
-- `docs/research/x-thread-notes.md` — notes from the Karpathy + Remodex threads
-- `docs/fleet-state-model.md` — first state taxonomy for agents and squads
-- `docs/runtime-adapter-contract.md` — first runtime abstraction contract
-- `docs/desktop-app-strategy.md` — Option B + touch of A desktop packaging path
-- `docs/live-openclaw-bridge.md` — why the first live mode mirrors this session instead of auto-spawning a new one
-- `assets/mockups/` — early visual directions
-- `src/app/` — initial Next.js desktop + mobile remote shell prototype
-- `electron/` — native desktop shell wrapper for the control plane
-
-## Initial product stance
-
-### What it is not
-- not just a prettier tmux grid
-- not just another chat pane inside VS Code
-- not just a memory plugin
-- not just Paperclip renamed
-
-### What it could become
-- the **Cursor for agent organizations**
-- the **control tower for 5–50 agents**
-- the place where memory, execution, review, and approvals become one system
-
-## Near-term recommendation
-
-1. Prove the wedge as a **standalone command center** first
-2. Add desktop + mobile operator surfaces
-3. Integrate Cortex deeply as the memory and audit substrate
-4. Consider VS Code distribution later only if the control plane is already clearly valuable
-
-## Local preview
-
-Optional `.env.local` values:
-- `GEMINI_API_KEY` — enables Gemini-backed features
-- `GITHUB_OAUTH_CLIENT_ID` — enables in-app GitHub device login in Settings
-- `GITHUB_OAUTH_SCOPES` — optional override for requested GitHub OAuth scopes
-- `WS_TOKEN` — required for authenticated worktree/WebSocket routes when used
-
-```bash
-cd cortex-ide
-npm install
-npm run dev
-```
-
-Routes:
-- Desktop shell: `http://localhost:3001/`
-- Mobile remote preview: `http://localhost:3001/mobile`
-- Live OpenClaw fleet JSON: `http://localhost:3001/api/openclaw/fleet`
-
-## Native desktop shell (current dev path)
-
-```bash
-cd cortex-ide
-npm install
-npm run desktop:dev
-```
-
-This keeps the current control-plane architecture intact while giving the product a real desktop-app shell early.
-
-## Status
-
-Drafted on 2026-03-11.
-Execution started on 2026-03-11 with a real desktop shell, mobile remote preview, fleet state model, runtime adapter contract, and an Electron desktop wrapper for the control plane.
-Private repo only for now.
+_Private working repository. © Rainwater._
