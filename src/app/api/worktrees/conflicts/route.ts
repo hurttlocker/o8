@@ -6,7 +6,7 @@
  * Fast mode (default): file-level overlap scan, <100ms
  * Deep mode (?deep=true): line-level analysis on all overlaps, 500ms-2s
  *
- * @see https://github.com/hurttlocker/cortex-ide/issues/69
+ * @see https://github.com/hurttlocker/o8/issues/69
  */
 
 export const dynamic = 'force-dynamic';

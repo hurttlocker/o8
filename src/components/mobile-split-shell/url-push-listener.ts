@@ -7,7 +7,7 @@
  * CustomEvent so the DevHostFrame (#781) and MobileSplitShell (#779) can
  * react without coupling to the WS plumbing.
  *
- * Issue: https://github.com/hurttlocker/cortex-ide/issues/782
+ * Issue: https://github.com/hurttlocker/o8/issues/782
  *
  * Why a self-contained WS connection?
  *   The mobile split-shell shares its primary WebSocket via the existing

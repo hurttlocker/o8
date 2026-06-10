@@ -623,7 +623,7 @@ export function OrchestratorLanding({
   const [draft, setDraft] = useState('');
   const [detailRow, setDetailRow] = useState<AttentionRow | null>(null);
   const modelLabel = modelShortLabel(orchestratorModelLabel);
-  const repoLabel = defaultRepoLabel || threads[0]?.repoName || 'cortex-ide';
+  const repoLabel = defaultRepoLabel || threads[0]?.repoName || 'o8';
   const branchLabel = defaultBranchLabel || threads[0]?.repoBranch || 'main';
   const trimmedDraft = draft.trim();
 

@@ -392,6 +392,7 @@ pub(crate) fn cwd_looks_o8_owned(cwd: &str) -> bool {
     cwd.contains("cortex-ide")
         || cwd.contains(".app/Contents/Resources/server")
         || cwd.contains("/.o8")
+        || cwd.contains("/o8/")
         || cwd.contains("/o8.app/")
 }
 

@@ -336,7 +336,7 @@
       "category": "processes",
       "repoPath": "/Users/marquisehurtt/cortex-ide",
       "question": "How do we ship a new release of the o8 desktop app — what command sequence does the daily-driver loop use?",
-      "expectedAnswer": "npm version patch (sync-version.mjs hook updates package.json + src-tauri/tauri.conf.json + src-tauri/Cargo.toml in one commit, then npm tags v0.1.X+1), then git push --follow-tags, then npm run ship (cargo tauri build with signing key + dev-mcp-plugin feature, then scripts/release.mjs uploads the signed assets to GitHub Releases). The installed app picks up the update via the UpdateBanner polling hurttlocker/cortex-ide releases.",
+      "expectedAnswer": "npm version patch (sync-version.mjs hook updates package.json + src-tauri/tauri.conf.json + src-tauri/Cargo.toml in one commit, then npm tags v0.1.X+1), then git push --follow-tags, then npm run ship (cargo tauri build with signing key + dev-mcp-plugin feature, then scripts/release.mjs uploads the signed assets to GitHub Releases). The installed app picks up the update via the UpdateBanner polling hurttlocker/o8 releases.",
       "expectedFacts": [
         "Names npm version patch as the version bump",
         "Names git push --follow-tags",

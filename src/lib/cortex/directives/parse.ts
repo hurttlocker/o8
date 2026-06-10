@@ -16,7 +16,7 @@
  *   id: example
  *   title: Example
  *   scope: project        # or `global` / `repo` / `<repoName>`
- *   repoName: cortex-ide  # optional
+ *   repoName: o8  # optional
  *   priority: 10          # optional
  *   projects: [o8, atlas] # optional — only meaningful when scope: project
  *   projectIds: [default] # optional — active project ids from ~/.o8/projects.json

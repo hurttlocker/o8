@@ -1426,7 +1426,7 @@ async function handleMessage(msg: JsonRpcRequest): Promise<void> {
         result: {
           protocolVersion: '2024-11-05',
           capabilities: { tools: {} },
-          serverInfo: { name: 'cortex-ide', version: '1.0.0' },
+          serverInfo: { name: 'o8', version: '1.0.0' },
         },
       });
       break;

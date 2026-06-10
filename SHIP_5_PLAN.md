@@ -173,7 +173,7 @@ Tasks #90-#95 created. Mark them as work lands. This file is the source of truth
 
 ## ✅ Shipped — `v0.1.155` (2026-05-23)
 
-Release: https://github.com/hurttlocker/cortex-ide/releases/tag/v0.1.155 · mirrored to `hurttlocker/o8`.
+Release: https://github.com/hurttlocker/o8/releases/tag/v0.1.155 · mirrored to `hurttlocker/o8`.
 
 Commits in order:
 

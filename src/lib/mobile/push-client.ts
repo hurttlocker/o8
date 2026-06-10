@@ -10,7 +10,7 @@
  * All gated fetches include the `meta[name="ws-token"]` Bearer header so
  * mobile-over-LAN/Tailscale works.
  *
- * Issue: https://github.com/hurttlocker/cortex-ide/issues/639
+ * Issue: https://github.com/hurttlocker/o8/issues/639
  */
 
 const SW_PATH = '/sw-push.js';

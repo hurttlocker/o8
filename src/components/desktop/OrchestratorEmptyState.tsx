@@ -6,7 +6,7 @@
  *
  * Codex / Antigravity / Cortex pattern: instead of a generic "Good
  * morning" greeting, show the operator a dynamic question title
- * ("What should we build in cortex-ide?") + the contextual chip row
+ * ("What should we build in o8?") + the contextual chip row
  * (Project · Worktree · Branch · Kind) above the existing composer.
  * The chips are editable until the first message lands; after that the
  * tab "promotes" and the regular transcript view takes over.

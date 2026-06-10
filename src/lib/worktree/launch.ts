@@ -14,8 +14,8 @@
  * Auto-toggle: worktree isolation defaults ON when repo has active agents,
  * OFF when it's the first/only agent.
  *
- * @see https://github.com/hurttlocker/cortex-ide/issues/65
- * @see https://github.com/hurttlocker/cortex-ide/issues/608
+ * @see https://github.com/hurttlocker/o8/issues/65
+ * @see https://github.com/hurttlocker/o8/issues/608
  */
 
 import { WorktreeManager } from './manager';

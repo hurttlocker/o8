@@ -15,7 +15,7 @@
  *   - O8_PUSH_NOTIFICATIONS_ENABLED — set to "0" to disable all outbound
  *       pushes even if subscriptions are registered. Default: enabled.
  *
- * Issue: https://github.com/hurttlocker/cortex-ide/issues/639
+ * Issue: https://github.com/hurttlocker/o8/issues/639
  */
 
 export {

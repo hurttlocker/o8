@@ -8,7 +8,7 @@
  *   - prune dead subscriptions on 404/410
  *   - silently no-op when no subscriptions are registered
  *
- * Issue: https://github.com/hurttlocker/cortex-ide/issues/639
+ * Issue: https://github.com/hurttlocker/o8/issues/639
  */
 
 import 'server-only';

@@ -1,5 +1,5 @@
 /**
- * Resolve a GitHub repo full name (e.g., "hurttlocker/cortex-ide") to a local
+ * Resolve a GitHub repo full name (e.g., "hurttlocker/o8") to a local
  * filesystem path using the repo registry at ~/.o8/repos.json.
  */
 

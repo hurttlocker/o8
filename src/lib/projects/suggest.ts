@@ -201,7 +201,7 @@ Rules:
 2. A grouping with fewer than 2 supporting evidence items is NOT valid — drop it.
 3. Each repo can appear in at most one grouping.
 4. For each grouped repo, assign a role from this exact set: frontend, backend, fullstack, mobile, library, service, infra, docs, site, shared.
-5. For each grouping, cite 2–6 evidence items. Each evidence item picks ONE repoId in the grouping and one kind from: shared-org, cross-link, shared-dep, deploy-pair, topic-overlap, language-overlap, naming-pattern. The "snippet" is a SHORT human-readable phrase (≤80 chars) like "shared org: hurttlocker" or "o8-site README links to cortex-ide".
+5. For each grouping, cite 2–6 evidence items. Each evidence item picks ONE repoId in the grouping and one kind from: shared-org, cross-link, shared-dep, deploy-pair, topic-overlap, language-overlap, naming-pattern. The "snippet" is a SHORT human-readable phrase (≤80 chars) like "shared org: hurttlocker" or "o8-site README links to o8".
 6. Provide a 1–2 sentence rationale for each grouping. The rationale is shown to the operator.
 7. Suggest a Project name. Prefer the dominant brand name (e.g. "o8" if the brand appears across the group) over a generic label.
 8. If a single repo is the obvious primary (the app, not the docs/site), set primaryRepoId to its repoId.

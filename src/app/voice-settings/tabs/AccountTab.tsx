@@ -64,7 +64,7 @@ export default function AccountTab() {
         <ControlRow label="Version" detail="o8 updates install automatically in the background.">
           <span style={{ fontSize: 13, color: TEXT_SECONDARY, fontVariantNumeric: 'tabular-nums' }}>{version ? `v${version}` : '—'}</span>
         </ControlRow>
-        <ControlRow label="Release channel" detail="Signed builds from hurttlocker/cortex-ide.">
+        <ControlRow label="Release channel" detail="Signed builds from hurttlocker/o8.">
           <span style={{ fontSize: 13, color: ACCENT_LIGHT }}>Stable</span>
         </ControlRow>
         <div style={{ marginTop: 14 }}>

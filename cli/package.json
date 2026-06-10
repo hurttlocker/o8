@@ -23,7 +23,7 @@
   "homepage": "https://github.com/hurttlocker/o8#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/hurttlocker/cortex-ide.git",
+    "url": "git+https://github.com/hurttlocker/o8.git",
     "directory": "cli"
   },
   "bugs": {

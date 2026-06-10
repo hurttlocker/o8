@@ -49,7 +49,7 @@ Confirm a clean start: `ls ~/.o8 2>/dev/null` (or the override dir) shows no `se
 
 ## 2. Install the signed DMG
 
-1. Download the latest `o8_*.dmg` from the newest release at `hurttlocker/cortex-ide` (or the mirror `hurttlocker/o8`).
+1. Download the latest `o8_*.dmg` from the newest release at `hurttlocker/o8` (or the mirror `hurttlocker/o8`).
 2. Open the DMG, drag **o8** to `/Applications`.
 3. First launch: Gatekeeper should accept the signed + notarized build (no "unidentified developer" wall). **If Gatekeeper blocks it, that's a ship blocker** — notarization/stapling failed.
 4. The Node pre-flight runs: if Node < 22 or not found, o8 shows a native dialog and exits. Confirm a machine *with* Node 22 launches clean.

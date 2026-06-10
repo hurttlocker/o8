@@ -333,7 +333,7 @@ async function apiRequest<T>(path: string, init?: RequestInit): Promise<T> {
     throw new Error(
       `o8 API unreachable after ${MAX_RETRIES} retries (${path}): ${lastError?.message ?? 'unknown'}. ` +
       `Expected the o8 backend at ${getApiBaseLive()}. ` +
-      `Open the o8 desktop app or run \`npm run desktop:dev\` from the cortex-ide repo.`,
+      `Open the o8 desktop app or run \`npm run desktop:dev\` from the o8 repo.`,
     );
   }
 
