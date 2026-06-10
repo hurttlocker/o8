@@ -17,6 +17,27 @@
 
 use base64::Engine;
 
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGPreflightScreenCaptureAccess() -> bool;
+    fn CGRequestScreenCaptureAccess() -> bool;
+}
+
+/// Screen Recording TCC gate. Preflight first; when missing, fire the one-time
+/// system prompt — which ALSO registers o8 in System Settings → Privacy &
+/// Security → Screen & System Audio Recording (a bare `screencapture` failure
+/// does neither, so the user would have nothing to toggle). Returns whether
+/// capture is permitted right now.
+fn ensure_screen_permission() -> bool {
+    // Safety: both calls are stateless CoreGraphics permission queries.
+    unsafe {
+        if CGPreflightScreenCaptureAccess() {
+            return true;
+        }
+        CGRequestScreenCaptureAccess()
+    }
+}
+
 /// Everything the request builder and the pointer transform need from one
 /// capture: the image itself plus the monitor's logical geometry.
 pub struct ScreenContext {
@@ -84,6 +105,14 @@ pub fn wants_screen(prompt: &str) -> bool {
 /// (~300-600ms of subprocess) — call it from the agent worker thread before
 /// the loop starts, never from the main thread.
 pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
+    if !ensure_screen_permission() {
+        log::warn!(
+            "[symon-screen] Screen Recording permission missing — capture skipped \
+             (grant o8 in System Settings → Privacy & Security → Screen & System \
+             Audio Recording, then relaunch)"
+        );
+        return None;
+    }
     let monitors = app.available_monitors().ok()?;
     if monitors.is_empty() {
         return None;
@@ -122,9 +151,14 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
     for f in &files {
         cmd.arg(f);
     }
-    let status = cmd.status().ok()?;
-    if !status.success() {
-        log::warn!("[symon-screen] screencapture exited with {status}");
+    let output = cmd.output().ok()?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        log::warn!(
+            "[symon-screen] screencapture exited with {}: {}",
+            output.status,
+            stderr.trim()
+        );
         cleanup(&files);
         return None;
     }
