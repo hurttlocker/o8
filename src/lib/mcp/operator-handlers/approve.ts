@@ -51,7 +51,7 @@ export const APPROVE_TOOLS: McpTool[] = [
   {
     name: 'approve_and_merge',
     description:
-      'USE THIS WHEN a packet is awaiting_review (per get_mission_status) and you\'ve already reviewed the diff via o8_merge_preview. This is the final step of the dispatch loop — runs the governance policy engine + merges to main. On failure returns {merged:false, checks[], blockers[]} so you know which gate rejected it (file-size? security pattern?). Pass an optional idempotencyKey to safely retry. Example: approve_and_merge({packetId: "pkt-abc"}) or approve_and_merge({packetId: "pkt-abc", commitMessage: "feat: add login flow (#100)", idempotencyKey: "merge-pkt-abc-2026-04-18"})',
+      'USE THIS WHEN a packet is awaiting_review (per get_mission_status) and you\'ve already reviewed the code via o8_packet_diff and the gates via o8_merge_preview. This is the final step of the dispatch loop — runs the governance policy engine + merges to main. On failure returns {merged:false, checks[], blockers[]} so you know which gate rejected it (file-size? security pattern?). Pass an optional idempotencyKey to safely retry. Example: approve_and_merge({packetId: "pkt-abc"}) or approve_and_merge({packetId: "pkt-abc", commitMessage: "feat: add login flow (#100)", idempotencyKey: "merge-pkt-abc-2026-04-18"})',
     inputSchema: {
       type: 'object',
       properties: {
