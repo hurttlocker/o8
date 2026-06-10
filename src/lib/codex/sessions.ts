@@ -216,7 +216,7 @@ export async function queryCodexThreads(limit = 6) {
   return parsed.filter((row) => row.id && row.rollout_path && row.cwd);
 }
 
-async function queryCodexThreadById(threadId: string) {
+export async function queryCodexThreadById(threadId: string) {
   if (!(await codexStateExists()) || !threadId) {
     return null;
   }
