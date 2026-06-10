@@ -343,16 +343,38 @@ function formatTypecheckFeedback(lane: Lane, output: string): string {
  * Retry attempts are counted per-lane-since-last-launch so a lane that gets
  * reset_packet'd into a fresh dispatch starts the counter from zero.
  */
+/**
+ * Read the packet's spent auto-rerun budget from control-plane state.
+ * Returns null when the packet can't be found (caller falls back to the
+ * per-lane event count, which is the legacy behavior).
+ */
+async function readPacketTypecheckRetries(
+  packetId: string | null | undefined,
+): Promise<number | null> {
+  if (!packetId) return null;
+  try {
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const packet = readOrchestratorControlPlaneState().packets.find((p) => p.id === packetId);
+    return packet ? (packet.typecheckAutoRetries ?? 0) : null;
+  } catch {
+    return null;
+  }
+}
+
 async function handlePostRebaseTypecheckFailure(
   input: WorktreeSideMergeInput,
   output: string,
 ): Promise<LaneCommandResult> {
   const { lane, command, actor } = input;
   const truncatedOutput = truncateForBlocker(output);
-  const priorAutoRetries = countLaneEventsByVerbSinceLastLaunch(
-    command.laneId,
-    'typecheck_auto_retry',
-  );
+  // The retry budget lives ON the packet, not the lane: layer-1 auto-rerun
+  // archives this lane and dispatches a brand-new one, so a per-lane count is
+  // always 0 again on the retry's own merge attempt — which silently defeated
+  // the "1 extra worker turn" cost ceiling and let a persistently type-broken
+  // packet loop full workers. Per-lane count remains the fallback for lanes
+  // whose packet isn't in control-plane state.
+  const priorAutoRetries = (await readPacketTypecheckRetries(lane.packetId))
+    ?? countLaneEventsByVerbSinceLastLaunch(command.laneId, 'typecheck_auto_retry');
 
   // ── Layer 2: escalate to orchestrator ──
   // Reached when layer 1 already fired during this lane lifecycle (or when we
@@ -395,6 +417,21 @@ async function handlePostRebaseTypecheckFailure(
     output: truncatedOutput,
   });
   setLaneStatus(command.laneId, 'reviewing', actor, 'typecheck_auto_retry');
+
+  // Persist the spent retry on the packet BEFORE dispatching — crash-safe in
+  // the same spirit as the event append above: better to escalate next time
+  // than to loop.
+  try {
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+    await withLockedState((current) => {
+      const packet = current.packets.find((p) => p.id === lane.packetId);
+      if (packet) packet.typecheckAutoRetries = (packet.typecheckAutoRetries ?? 0) + 1;
+    });
+  } catch (error) {
+    console.warn(
+      `[lane-merge] Could not persist typecheck retry budget for packet ${lane.packetId}: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   // Fire-and-forget the redispatch. The operator's merge call returns
   // immediately; the new lane spins up async. If the call fails outright
@@ -518,7 +555,27 @@ async function retryBaseAdvancedAfterRebase(
   );
 }
 
+/**
+ * Per-repo merge serialization. The fast-forward + push section mutates the
+ * SHARED operator checkout (`lane.repoPath`) — two concurrent merges in the
+ * same repo race `git merge --ff-only` / `git push` / index locks against
+ * each other. Different repos still merge in parallel. Single-process by
+ * design: every merge flows through this module via dispatchLaneCommand.
+ */
+const repoMergeChains = new Map<string, Promise<unknown>>();
+
+function withRepoMergeLock<T>(repoPath: string, fn: () => Promise<T>): Promise<T> {
+  const prev = repoMergeChains.get(repoPath) ?? Promise.resolve();
+  const run = prev.then(fn, fn);
+  repoMergeChains.set(repoPath, run.then(() => undefined, () => undefined));
+  return run;
+}
+
 export async function performWorktreeSideMerge(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
+  return withRepoMergeLock(input.lane.repoPath, () => performWorktreeSideMergeInner(input));
+}
+
+async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Promise<LaneCommandResult> {
   const { lane, command, actor } = input;
   // #1173 — PR-only wall: refuse merge while the autonomous dogfood loop is driving.
   if (dogfoodPrOnlyActive()) return { ok: false, laneId: command.laneId, note: DOGFOOD_PR_ONLY_NOTE };

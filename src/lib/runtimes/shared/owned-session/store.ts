@@ -60,6 +60,7 @@ import {
   metadataPath,
   nowIso,
   pathExists,
+  pidCommandLine,
   readJsonFile,
   relativeAge,
   resolveRepoContext,
@@ -106,6 +107,26 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     fleetCache = null;
     fleetInflight = null;
   }
+
+  // ── Per-surface serialization ──────────────────────────────────────────────
+  // Mutating ops are read-modify-write of one session.json; two running
+  // concurrently on the same surface lose writes (interrupts that "don't
+  // stick", clobbered threadIds). Chain them per surfaceId. Read paths (fleet
+  // refresh) stay lock-free — their derived state converges on the next tick.
+  const surfaceOpChains = new Map<string, Promise<unknown>>();
+
+  function withSurfaceLock<T>(surfaceId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = surfaceOpChains.get(surfaceId) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    surfaceOpChains.set(surfaceId, run.then(() => undefined, () => undefined));
+    return run;
+  }
+
+  // Surfaces with an auto-retry already scheduled. Synchronous check-and-set:
+  // overlapping refreshSession calls (15s timer, discovery, resume) each hold
+  // their own in-memory copy of the session, so the retryCount guard alone
+  // can't stop two of them from BOTH scheduling a spawn for the same failure.
+  const pendingAutoRetries = new Set<string>();
 
   // ── Root / session-dir helpers ─────────────────────────────────────────────
 
@@ -272,7 +293,10 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
         const failAge = latestFailedRun.finishedAt
           ? Date.now() - new Date(latestFailedRun.finishedAt).getTime()
           : Infinity;
-        if (failAge < AUTO_RETRY_FRESHNESS_MS) {
+        if (failAge < AUTO_RETRY_FRESHNESS_MS && !pendingAutoRetries.has(session.surfaceId)) {
+          // Claim the retry slot BEFORE any await — this is what makes the
+          // double-spawn impossible (two concurrent workers on one worktree).
+          pendingAutoRetries.add(session.surfaceId);
           // Give the adapter a chance to swap the session's model before the
           // retry (Gemini cascade). When a new model is picked, broadcast a
           // `runtime_fallback` notification so the chat pane can render a
@@ -300,10 +324,13 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
           console.log(`[owned-store] Auto-retrying ${runtimeId} session ${session.surfaceId} after failure (attempt ${session.retryCount})`);
           setTimeout(async () => {
             try {
-              await spawnOwnedRun(session, session.latestPrompt, session.threadId ? 'resume' : 'launch');
+              await withSurfaceLock(session.surfaceId, () =>
+                spawnOwnedRun(session, session.latestPrompt, session.threadId ? 'resume' : 'launch'));
               invalidateFleetCache();
             } catch (err) {
               console.error(`[owned-store] Auto-retry failed for ${session.surfaceId}:`, err);
+            } finally {
+              pendingAutoRetries.delete(session.surfaceId);
             }
           }, retryDelayMs);
         }
@@ -627,7 +654,11 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     };
   }
 
-  async function resume(surfaceId: string, prompt: string) {
+  function resume(surfaceId: string, prompt: string) {
+    return withSurfaceLock(surfaceId, () => resumeInner(surfaceId, prompt));
+  }
+
+  async function resumeInner(surfaceId: string, prompt: string) {
     const session = await findSession(surfaceId);
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
@@ -651,7 +682,11 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     };
   }
 
-  async function interrupt(surfaceId: string) {
+  function interrupt(surfaceId: string) {
+    return withSurfaceLock(surfaceId, () => interruptInner(surfaceId));
+  }
+
+  async function interruptInner(surfaceId: string) {
     const session = await findSession(surfaceId);
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
@@ -666,7 +701,18 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       if (session.activeRun.tmuxSession) {
         await signalBridgeTerminalSession(session.activeRun.tmuxSession, 'SIGINT');
       } else {
-        process.kill(-session.activeRun.pid, 'SIGINT');
+        // PID-reuse guard: `kill(-pid)` signals the whole group. If our run
+        // already exited and the OS recycled the id, the group leader is an
+        // innocent process — verify the command line still looks like our
+        // spawned shell (it embeds the runtime binary name) before signaling.
+        const cmd = await pidCommandLine(session.activeRun.pid);
+        if (cmd && cmd.includes(adapter.binaryName)) {
+          process.kill(-session.activeRun.pid, 'SIGINT');
+        } else {
+          console.warn(
+            `[owned-store] Skipping interrupt signal for ${surfaceId}: pid ${session.activeRun.pid} no longer matches an owned ${adapter.binaryName} run (${cmd ?? 'process gone'})`,
+          );
+        }
       }
       session.activeRun = {
         ...session.activeRun,
@@ -690,7 +736,11 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     }
   }
 
-  async function setReviewDisposition(surfaceId: string, disposition: OwnedReviewDisposition) {
+  function setReviewDisposition(surfaceId: string, disposition: OwnedReviewDisposition) {
+    return withSurfaceLock(surfaceId, () => setReviewDispositionInner(surfaceId, disposition));
+  }
+
+  async function setReviewDispositionInner(surfaceId: string, disposition: OwnedReviewDisposition) {
     const session = await findSession(surfaceId);
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} session was not found.`);
