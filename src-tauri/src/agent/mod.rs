@@ -379,7 +379,8 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
     // Intent-gated screen context (dossier #2): only prompts that talk ABOUT
     // the screen pay the ~0.5s capture + image tokens. Runs after the
     // "running" emit so the dock's working capsule covers the capture beat.
-    let screen_ctx = if screen::wants_screen(&prompt) {
+    let screen_wanted = screen::wants_screen(&prompt);
+    let screen_ctx = if screen_wanted {
         screen::capture(&app).map(std::sync::Arc::new)
     } else {
         None
@@ -388,10 +389,21 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
 
     // Dropped-file context rides the LLM prompt only — the task store keeps
     // the user's spoken words.
-    let llm_prompt = match take_staged_block() {
+    let mut llm_prompt = match take_staged_block() {
         Some(block) => format!("{prompt}\n\n{block}"),
         None => prompt.clone(),
     };
+    // Honesty guard: a screen question whose capture FAILED (permission
+    // missing, capture error) must not let the model pretend it looked. Seen
+    // live: "I've pointed to the dock" on a run with no screenshot at all.
+    if screen_wanted && ctx.screen.is_none() {
+        llm_prompt.push_str(
+            "\n\n(NOTE: the user asked about their screen but the screen \
+             capture FAILED — you can NOT see the screen and you can NOT \
+             point. Say so briefly, and suggest checking o8's Screen \
+             Recording permission in System Settings.)",
+        );
+    }
 
     // Route by model id: `/` → OpenRouter (e.g. openai/gpt-4o-mini), else direct
     // Gemini (e.g. gemini-3-flash-preview). A one-flip change in agent_models.json.
