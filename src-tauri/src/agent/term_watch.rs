@@ -7,11 +7,13 @@
 //! stops entirely when no watches remain.
 //!
 //! Two completion signals, because "busy" lies for agent REPLs:
-//!   - shell commands: the tab's `busy` flag goes true → false.
-//!   - Claude Code (and similar TUIs): the foreground process never exits, so
-//!     watch the tail instead — "esc to interrupt" marks WORKING; a composer
-//!     prompt line ("❯") with no working marker means the turn finished.
-//!     A permission menu ("Do you want", numbered ❯ options) fires "needs you".
+//!   - shell commands: `busy` true with no visible prompt marks WORKING;
+//!     busy dropping back to a prompt line means the command finished.
+//!   - Claude Code (and similar TUIs): the foreground process never exits
+//!     (busy stays true), so watch the tail instead — "esc to interrupt"
+//!     marks WORKING; a composer prompt ("❯") with no working marker means
+//!     the turn finished. A permission menu ("Do you want", numbered ❯
+//!     options) fires "needs you".
 
 use serde_json::json;
 use std::sync::Mutex;
@@ -121,11 +123,14 @@ fn probe(ids: &[i64]) -> Option<Vec<ProbeState>> {
             const busy = t.busy();
             const tail = String(t.contents() || "").split("\n").filter(l => l.trim()).slice(-14);
             const tailStr = tail.join("\n");
-            const working = tailStr.includes("esc to interrupt") || tailStr.includes("ctrl+c to interrupt");
+            const tuiWorking = tailStr.includes("esc to interrupt") || tailStr.includes("ctrl+c to interrupt");
             const prompt = tail.length ? tail[tail.length - 1].trim() : "";
-            const composerIdle = !working && (tailStr.includes("❯") || /[%$]\s*$/.test(prompt));
-            const needsInput = !working && (tailStr.includes("Do you want") || /❯\s*1\./.test(tailStr) || /\(y\/n\)/i.test(tailStr));
-            out.push({{ id, gone: false, busy, working, idle: composerIdle && !busy ? true : (!busy || composerIdle), needsInput }});
+            const composerIdle = !tuiWorking && (tailStr.includes("❯") || /[%$]\s*$/.test(prompt));
+            // busy-without-a-prompt = a plain shell command running. TUIs keep
+            // busy=true forever, so composerIdle exempts a visible composer.
+            const working = tuiWorking || (busy && !composerIdle);
+            const needsInput = !tuiWorking && (tailStr.includes("Do you want") || /❯\s*1\./.test(tailStr) || /\(y\/n\)/i.test(tailStr));
+            out.push({{ id, gone: false, busy, working, idle: !busy || composerIdle, needsInput }});
         }}
         JSON.stringify(out);
     "#

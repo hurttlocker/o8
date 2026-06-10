@@ -73,8 +73,20 @@ pub async fn get_json(path: &str) -> Result<Value, String> {
 
 /// POST a JSON body to a loopback path, parsing the JSON response.
 pub async fn post_json(path: &str, body: Value) -> Result<Value, String> {
+    post_json_timeout(path, body, TIMEOUT_SECS).await
+}
+
+/// POST with a custom timeout for slow endpoints — the Brain's
+/// `/api/cortex/ask/answer` synthesizes with an LLM and regularly exceeds the
+/// default 20s (measured 24s on a trivial question; the MCP `cortex_ask`
+/// twin uses a 90s override for the same reason).
+pub async fn post_json_timeout(path: &str, body: Value, timeout_secs: u64) -> Result<Value, String> {
     let url = format!("{}{}", base(), path);
-    let resp = with_auth(client()?.post(&url).json(&body))
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(timeout_secs))
+        .build()
+        .map_err(|e| format!("reqwest build failed: {e}"))?;
+    let resp = with_auth(client.post(&url).json(&body))
         .send()
         .await
         .map_err(|e| format!("o8 POST {path} failed: {e}"))?;
