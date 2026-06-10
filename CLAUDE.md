@@ -23,6 +23,9 @@ cargo tauri dev          # Tauri native shell (from src-tauri/)
 # Verification (run before every commit)
 npx tsc --noEmit         # Quick type check (skips next typegen)
 npm run typecheck        # Full: rm types cache → next typegen → tsc --noEmit
+npm test                 # Vitest unit suite (middleware gate, locks, lane guards)
+npm run test:watch       # Vitest watch mode
+cargo test --lib         # Rust unit tests (from src-tauri/ — utf8_head, Symon fs sandbox, speech_text)
 
 # Build
 npm run build               # Next.js production build (webpack, not turbopack)
@@ -41,11 +44,11 @@ npm run lint             # ESLint (flat config, next core-web-vitals + TS)
 npm run measure:render   # Bootstrap render speed measurement
 ```
 
-**No test runner is configured.** There are no jest/vitest/playwright configs, no `test` script, and no test files in the tree.
+**Test runner: vitest** (`vitest.config.ts`). Tests live colocated as `src/**/*.test.ts` plus cross-cutting suites in `tests/`. The `@` alias resolves; Next's `server-only` poison-pill is stubbed via `tests/stubs/server-only.ts`. Tests import `{ describe, it, expect }` from `'vitest'` explicitly (no globals). Key suites: `tests/middleware-gate.test.ts` (the loopback/token auth gate — add a case for every new GATED_PREFIXES/allowlist entry), `src/lib/util/keyed-promise-chain.test.ts` (merge/surface lock serialization), `src/lib/lane/terminal-states.test.ts`, `tests/retry-budget.test.ts` (#1108 layer-1 budget survives redispatch). Rust unit tests run with `cargo test --lib` from `src-tauri/` (not in CI — the tauri crate needs system webkit deps).
 
 ## CI Pipeline (`.github/workflows/ci.yml`)
 
-Runs on push/PR to `main`: TypeCheck → Lint → Build (Node 22, `npm ci`). Build depends on typecheck passing. No automated tests.
+Runs on push/PR to `main`: TypeCheck → Lint → Unit Tests (`npm test`) → Governance Smoke → Build (Node 22, `npm ci`). Build and governance-smoke depend on typecheck passing.
 
 ## Path Aliases
 
@@ -546,6 +549,7 @@ Using subagents saves main context and runs cheaper models on tasks that don't n
 - `docs/runtime-adapter-contract.md` — AgentRuntime interface evolution
 - `docs/performance-architecture-principles.md` — Render speed, bootstrap, streaming
 - `docs/api.md` — Comprehensive `/api/*` route reference (closes #927)
+- `docs/loopback-api.md` — API auth gate: socket-truth header, loopback tiers, token delivery, rules for new routes
 - `docs/openclaw-integration.md` — openclaw orchestrator backend integration details + v1 streaming limitations
 - `docs/vocabulary.md` — Canonical glossary (`runtime` / `agent` / `session` / `packet` / `lane` / `mission` / `review` / `approval`). MCP tool names + DB columns frozen; UI label divergences documented inline.
 

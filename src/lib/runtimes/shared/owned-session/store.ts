@@ -21,6 +21,7 @@ import { randomUUID } from 'node:crypto';
 
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
+import { chainOnKey } from '@/lib/util/keyed-promise-chain';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import { tmuxSessionName } from '@/lib/terminal/tmux';
 import {
@@ -116,10 +117,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   const surfaceOpChains = new Map<string, Promise<unknown>>();
 
   function withSurfaceLock<T>(surfaceId: string, fn: () => Promise<T>): Promise<T> {
-    const prev = surfaceOpChains.get(surfaceId) ?? Promise.resolve();
-    const run = prev.then(fn, fn);
-    surfaceOpChains.set(surfaceId, run.then(() => undefined, () => undefined));
-    return run;
+    return chainOnKey(surfaceOpChains, surfaceId, fn);
   }
 
   // Surfaces with an auto-retry already scheduled. Synchronous check-and-set:

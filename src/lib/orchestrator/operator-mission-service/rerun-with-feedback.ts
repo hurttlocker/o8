@@ -91,7 +91,8 @@ async function pruneWorktree(repoPath: string | null | undefined, worktreePath: 
   }
 }
 
-function resetPacketFields(packet: OrchestratorPacket) {
+/** Exported for the retry-budget vitest suite — not part of the public API. */
+export function resetPacketFields(packet: OrchestratorPacket) {
   // Mirrors resetPacket's mission-state mutations. Intentional duplication
   // so the reset is part of our locked write rather than a non-atomic
   // in-memory broadcast.

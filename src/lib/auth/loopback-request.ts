@@ -37,6 +37,19 @@ export function isLoopbackHostname(hostname?: string | null): boolean {
 }
 
 /**
+ * Extract the hostname from a Host-header value, handling bracketed IPv6
+ * (`[::1]:3001` → `[::1]`) — a naive split(':') returns `[` for those.
+ */
+export function hostHeaderToHostname(host?: string | null): string | null {
+  if (!host) return null;
+  if (host.startsWith('[')) {
+    const close = host.indexOf(']');
+    return close === -1 ? host : host.slice(0, close + 1);
+  }
+  return host.split(':')[0] ?? null;
+}
+
+/**
  * Decide loopback-ness from request headers. `get` abstracts over
  * NextRequest.headers / next/headers so both middleware and server
  * components can share the logic.
@@ -44,6 +57,5 @@ export function isLoopbackHostname(hostname?: string | null): boolean {
 export function headersIndicateLoopback(get: (name: string) => string | null): boolean {
   const clientAddr = get(O8_CLIENT_ADDR_HEADER);
   if (clientAddr) return isLoopbackAddress(clientAddr);
-  const host = get('host')?.split(':')[0] ?? null;
-  return isLoopbackHostname(host);
+  return isLoopbackHostname(hostHeaderToHostname(get('host')));
 }
