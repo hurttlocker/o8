@@ -87,6 +87,17 @@ extern "C" {
         action: core_foundation::string::CFStringRef,
     ) -> i32;
     fn AXUIElementSetMessagingTimeout(element: AXUIElementRef, timeout_in_seconds: f32) -> i32;
+    fn AXUIElementSetAttributeValue(
+        element: AXUIElementRef,
+        attribute: core_foundation::string::CFStringRef,
+        value: core_foundation::base::CFTypeRef,
+    ) -> i32;
+    // `Boolean` is an unsigned char in MacTypes.
+    fn AXUIElementIsAttributeSettable(
+        element: AXUIElementRef,
+        attribute: core_foundation::string::CFStringRef,
+        settable: *mut u8,
+    ) -> i32;
 }
 
 // ─── Main-thread dispatch for AX / NSRunningApplication calls ────────────────
@@ -343,6 +354,117 @@ pub(crate) fn read_selected_text_via_accessibility() -> Option<String> {
         .downcast::<core_foundation::string::CFString>()
         .map(|value| value.to_string())
         .filter(|text| !text.trim().is_empty())
+}
+
+/// Snapshot of the focused EDITABLE element (the in-place edit lane —
+/// "rewrite this more professionally" with no selection reads the whole
+/// field the user is typing in).
+#[cfg(target_os = "macos")]
+#[derive(Debug, Default, Clone)]
+pub struct FocusedField {
+    pub value: String,
+    pub role: String,
+    /// Whether AXValue is writable — the clean replacement path. When false,
+    /// the fallback is select-all + paste.
+    pub settable: bool,
+}
+
+/// Read the focused element's text value + role + writability. Returns None
+/// unless the element looks editable: a text-ish AX role, or a settable
+/// AXValue (settable implies editable even for exotic roles). Value capped at
+/// 12KB — bigger fields are not voice-rewrite material.
+#[cfg(target_os = "macos")]
+pub(crate) fn read_focused_field() -> Option<FocusedField> {
+    run_on_main_thread(|| {
+        use core_foundation::base::TCFType;
+        use core_foundation::string::CFString;
+
+        let system = OwnedAxElement::new(unsafe { AXUIElementCreateSystemWide() })?;
+        unsafe {
+            let _ = AXUIElementSetMessagingTimeout(system.as_ptr(), 0.2);
+        }
+        let focused_attr = ax_name("AXFocusedUIElement");
+        let focused =
+            ax_copy_attribute_value(system.as_ptr(), focused_attr.as_concrete_TypeRef())?;
+
+        let role_attr = ax_name("AXRole");
+        let role = ax_copy_attribute_value(focused.as_CFTypeRef(), role_attr.as_concrete_TypeRef())
+            .and_then(|r| r.downcast::<CFString>().map(|v| v.to_string()))
+            .unwrap_or_default();
+
+        let value_attr = ax_name("AXValue");
+        let value =
+            ax_copy_attribute_value(focused.as_CFTypeRef(), value_attr.as_concrete_TypeRef())
+                .and_then(|v| v.downcast::<CFString>().map(|s| s.to_string()))?;
+        if value.trim().is_empty() || value.len() > 12 * 1024 {
+            return None;
+        }
+
+        let mut settable_raw: u8 = 0;
+        let settable_err = unsafe {
+            AXUIElementIsAttributeSettable(
+                focused.as_CFTypeRef(),
+                value_attr.as_concrete_TypeRef(),
+                &mut settable_raw,
+            )
+        };
+        let settable = settable_err == AX_ERROR_SUCCESS && settable_raw != 0;
+
+        let texty = role == "AXTextArea" || role == "AXTextField" || role == "AXComboBox";
+        if !texty && !settable {
+            return None;
+        }
+        Some(FocusedField { value, role, settable })
+    })
+}
+
+/// Replace the focused element's AXValue wholesale (the clean in-place write).
+/// Returns false when the element refuses — caller falls back to
+/// select-all + paste.
+#[cfg(target_os = "macos")]
+pub(crate) fn write_focused_field_value(text: &str) -> bool {
+    let text = text.to_string();
+    run_on_main_thread(move || {
+        use core_foundation::base::TCFType;
+        use core_foundation::string::CFString;
+
+        let Some(system) = OwnedAxElement::new(unsafe { AXUIElementCreateSystemWide() }) else {
+            return false;
+        };
+        unsafe {
+            let _ = AXUIElementSetMessagingTimeout(system.as_ptr(), 0.2);
+        }
+        let focused_attr = ax_name("AXFocusedUIElement");
+        let Some(focused) =
+            ax_copy_attribute_value(system.as_ptr(), focused_attr.as_concrete_TypeRef())
+        else {
+            return false;
+        };
+        let value_attr = ax_name("AXValue");
+        let new_value = CFString::new(&text);
+        let set_err = unsafe {
+            AXUIElementSetAttributeValue(
+                focused.as_CFTypeRef(),
+                value_attr.as_concrete_TypeRef(),
+                new_value.as_CFTypeRef(),
+            )
+        };
+        set_err == AX_ERROR_SUCCESS
+    })
+}
+
+/// Select-all inside the focused element (Cmd+A, keycode 0x00 = 'a') — the
+/// write fallback: select-all then paste replaces the field content.
+#[cfg(target_os = "macos")]
+pub(crate) fn select_all_in_focused() {
+    simulate_command_keypress(0x00, "select-all");
+}
+
+/// Current frontmost app bundle id, queried NOW (not the saved paste target).
+/// The edit lane uses this to refuse a write when focus moved mid-task.
+#[cfg(target_os = "macos")]
+pub(crate) fn current_frontmost_bundle_id() -> Option<String> {
+    get_current_frontmost_bundle_id()
 }
 
 /// Text context gathered from the focused app via macOS Accessibility APIs.

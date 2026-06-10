@@ -462,6 +462,35 @@ export default function DictationPillPage() {
     return () => { for (const t of glintTimersRef.current) clearTimeout(t); };
   }, []);
 
+  // In-place edit Revert chip (magic roadmap #1): `o8:edit-applied` surfaces a
+  // one-tap Revert under the dock — the governance surface for apply_text_edit
+  // (undo-after instead of confirm-before). Clickable, so it lives INSIDE the
+  // hit-rect host (unlike the passive glint).
+  const [editApplied, setEditApplied] = useState<{ app: string; reverted: boolean } | null>(null);
+  const editChipTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{ app?: string }>('o8:edit-applied', (e) => {
+        setEditApplied({ app: e.payload?.app ?? '', reverted: false });
+        if (editChipTimerRef.current) clearTimeout(editChipTimerRef.current);
+        editChipTimerRef.current = setTimeout(() => setEditApplied(null), 20000);
+      }))
+      .then((u) => { unlisten = u; })
+      .catch((err) => dockLog(`edit-applied subscribe failed: ${err instanceof Error ? err.message : String(err)}`));
+    return () => {
+      unlisten?.();
+      if (editChipTimerRef.current) clearTimeout(editChipTimerRef.current);
+    };
+  }, []);
+  const handleEditRevert = useCallback(() => {
+    invokeCmd('agent_edit_revert');
+    setEditApplied((c) => (c ? { ...c, reverted: true } : c));
+    if (editChipTimerRef.current) clearTimeout(editChipTimerRef.current);
+    editChipTimerRef.current = setTimeout(() => setEditApplied(null), 1400);
+  }, []);
+
   // Fleet visibility (dossier #8): worker-pulse pushes `o8:worker-status`;
   // the idle sliver carries the orbit + count, tap expands the detail capsule.
   const [workers, setWorkers] = useState<{ count: number; repos: string[] }>({ count: 0, repos: [] });
@@ -694,7 +723,7 @@ export default function DictationPillPage() {
             The hit-rect ref wraps ONLY the pill — the glint chip below is
             visual-only (pointer-events none) and must not extend the
             click-accepting zone over the menu bar. */}
-        <div ref={hitRectHostRef} style={{ display: 'flex' }}>
+        <div ref={hitRectHostRef} style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
           <DockNotchSurface
             snapshot={snapshot}
             ttsState={ttsState}
@@ -716,6 +745,35 @@ export default function DictationPillPage() {
             showWorkers={showWorkers}
             panelPending={panelPending}
           />
+          {editApplied ? (
+            <button
+              type="button"
+              onClick={handleEditRevert}
+              disabled={editApplied.reverted}
+              style={{
+                marginTop: 6,
+                height: 24,
+                paddingLeft: 11,
+                paddingRight: 11,
+                borderRadius: 12,
+                background: 'linear-gradient(rgba(20,24,34,0.66), rgba(14,18,28,0.6))',
+                border: '1px solid rgba(255,255,255,0.2)',
+                fontSize: 10.5,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                color: editApplied.reverted ? 'rgba(255,255,255,0.55)' : '#f4f5f7',
+                textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
+                whiteSpace: 'nowrap',
+                cursor: editApplied.reverted ? 'default' : 'pointer',
+                animation: 'o8GlintIn 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+            >
+              {editApplied.reverted
+                ? 'Reverted'
+                : `Rewrote${editApplied.app ? ` in ${editApplied.app}` : ''} — Revert`}
+              <style>{'@keyframes o8GlintIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }'}</style>
+            </button>
+          ) : null}
         </div>
         {glint ? (
           <div

@@ -31,15 +31,16 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     // task carries screen context (dossier #2), the screenshot rides the same
     // turn as inline_data and the prompt gains the POINT-tag teaching section.
     let mut first_parts: Vec<Value> = Vec::new();
-    let first_text = match &ctx.screen {
-        Some(screen) => format!(
-            "{}\n\n{}\n\nUser request: {}",
-            super::system_prompt(),
-            super::screen_prompt_section(screen.img_w, screen.img_h),
-            intent
-        ),
-        None => format!("{}\n\nUser request: {}", super::system_prompt(), intent),
-    };
+    let mut first_text = super::system_prompt();
+    if let Some(screen) = &ctx.screen {
+        first_text.push_str("\n\n");
+        first_text.push_str(&super::screen_prompt_section(screen.img_w, screen.img_h));
+    }
+    if let Some(edit) = &ctx.edit {
+        first_text.push_str("\n\n");
+        first_text.push_str(&super::edit_prompt_section(edit));
+    }
+    first_text.push_str(&format!("\n\nUser request: {intent}"));
     first_parts.push(json!({ "text": first_text }));
     if let Some(screen) = &ctx.screen {
         first_parts.push(json!({

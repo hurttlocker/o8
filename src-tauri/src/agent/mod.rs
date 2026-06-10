@@ -12,6 +12,7 @@
 //! registry of oneshot senders so the SYNC `agent_confirm` command can resolve
 //! the loop's `await` from a different thread.
 
+pub mod edit_ctx;
 pub mod eval;
 pub mod gemini;
 pub mod o8_http;
@@ -41,6 +42,10 @@ pub struct TaskCtx {
     /// to the model request and used to map `[POINT:...]` tags back to screen
     /// coordinates. None unless the prompt referenced the screen.
     pub screen: Option<std::sync::Arc<screen::ScreenContext>>,
+    /// Intent-gated editable text under the user (selection or focused field)
+    /// — the noun for `apply_text_edit`. None unless the prompt was an edit
+    /// verb (magic roadmap #1).
+    pub edit: Option<std::sync::Arc<edit_ctx::EditContext>>,
 }
 
 /// Result of one agent reasoning loop (shared by both providers).
@@ -96,6 +101,29 @@ pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
          tags are stripped before your reply is spoken and animate a pointer on \
          the user's screen, so phrase the sentence naturally (\"it's right here, \
          in the top right\")."
+    )
+}
+
+/// Appended to the system prompt when editable text rides the request —
+/// teaches the in-place edit contract: produce the FULL replacement, call
+/// `apply_text_edit`, never read the rewrite aloud (a Revert chip is the
+/// governance surface, so apply directly — no permission asking).
+pub(crate) fn edit_prompt_section(edit: &edit_ctx::EditContext) -> String {
+    let noun = match edit.mode {
+        edit_ctx::EditMode::Selection => "the text the user has SELECTED",
+        edit_ctx::EditMode::Field => "the full content of the text field the user is in",
+    };
+    format!(
+        "The user is editing text on screen. Below is {noun}. If the request \
+         asks to rewrite/transform it, produce the COMPLETE replacement text \
+         and call apply_text_edit with it — the replacement happens in place \
+         on their screen and a Revert chip appears, so apply directly without \
+         asking permission. Keep the meaning and the user's voice unless told \
+         otherwise; preserve line breaks and formatting where sensible. After \
+         a successful apply, your spoken reply is a few words (e.g. \"Done — \
+         made it tighter.\"). NEVER read the rewritten text aloud.\n\n\
+         --- text being edited ---\n{}",
+        edit.original
     )
 }
 
@@ -385,7 +413,16 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
     } else {
         None
     };
-    let ctx = TaskCtx { task_id: task_id.clone(), app: app.clone(), screen: screen_ctx };
+    // Editable-noun capture (magic roadmap #1): selection or focused field,
+    // only for edit verbs. Captured EARLY — the selection must be read before
+    // anything could disturb it.
+    let edit_wanted = edit_ctx::wants_edit(&prompt);
+    let edit = if edit_wanted {
+        edit_ctx::capture().map(std::sync::Arc::new)
+    } else {
+        None
+    };
+    let ctx = TaskCtx { task_id: task_id.clone(), app: app.clone(), screen: screen_ctx, edit };
 
     // Dropped-file context rides the LLM prompt only — the task store keeps
     // the user's spoken words.
@@ -402,6 +439,16 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
              capture FAILED — you can NOT see the screen and you can NOT \
              point. Say so briefly, and suggest checking o8's Screen \
              Recording permission in System Settings.)",
+        );
+    }
+    // Honesty guard for the edit lane: an edit verb with nothing editable
+    // under the user must not pretend to rewrite.
+    if edit_wanted && ctx.edit.is_none() {
+        llm_prompt.push_str(
+            "\n\n(NOTE: the user asked to edit text but no selection or \
+             readable text field was found — you can NOT edit anything. Say \
+             so briefly and suggest selecting the text or clicking into the \
+             field first.)",
         );
     }
 

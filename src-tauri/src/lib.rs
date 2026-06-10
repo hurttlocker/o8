@@ -3163,6 +3163,14 @@ fn agent_confirm(task_id: String, allow: bool) {
     agent::resolve_confirm(&task_id, allow);
 }
 
+/// One-tap revert of the last in-place text edit (the dock Revert chip —
+/// the governance surface for `apply_text_edit`, see agent/edit_ctx.rs).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_edit_revert(app: tauri::AppHandle) -> Result<(), String> {
+    agent::edit_ctx::revert(&app)
+}
+
 /// Stage files dropped onto the dock as context for the NEXT agent run
 /// (Clicky-parity dossier #3). The dock webview reads content via the HTML5
 /// File API (WKWebView exposes no absolute paths) and sends bounded text
@@ -3436,6 +3444,8 @@ pub fn run() {
             agent_run,
             #[cfg(target_os = "macos")]
             agent_confirm,
+            #[cfg(target_os = "macos")]
+            agent_edit_revert,
             #[cfg(target_os = "macos")]
             agent_files_stage,
             #[cfg(target_os = "macos")]

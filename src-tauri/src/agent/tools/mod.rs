@@ -301,6 +301,18 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["filename"]
             }
         }),
+        // ── In-place text edit (magic roadmap #1) ──────────────────────────────
+        json!({
+            "name": "apply_text_edit",
+            "description": "Replace the text the user is editing (their selection, or the text field they're in) with new_text — IN PLACE on their screen. Only works when the request included a '--- text being edited ---' block. Make ONE call with the complete replacement; a Revert chip appears for the user, so apply directly without asking permission.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "new_text": { "type": "string", "description": "The complete replacement text (full selection or full field content)." }
+                },
+                "required": ["new_text"]
+            }
+        }),
         // ── o8 bridge (Tier-2) — read what the coding agents are doing ─────────
         json!({
             "name": "o8_status",
@@ -401,7 +413,7 @@ pub fn enabled_tools() -> Vec<Value> {
 }
 
 /// Dispatch a parsed tool call to its handler. `args` is already JSON-decoded.
-pub async fn dispatch_tool_call(name: &str, args: Value, _ctx: &TaskCtx) -> Result<Value, String> {
+pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Result<Value, String> {
     // Hard refuse list (defense in depth — the V1 schema exposes none of these).
     if safety::is_never_do_tool(name) {
         return Err(format!("Tool '{name}' is on the never-do list"));
@@ -436,6 +448,17 @@ pub async fn dispatch_tool_call(name: &str, args: Value, _ctx: &TaskCtx) -> Resu
         "fs_spotlight" => filesystem::spotlight(args).await,
         "csv_read" => csv::read(args).await,
         "csv_write" => csv::write(args).await,
+        "apply_text_edit" => {
+            let Some(edit) = ctx.edit.as_deref() else {
+                return Err(
+                    "No editable text was captured for this request — ask the user to select \
+                     the text or click into the field, then try again."
+                        .into(),
+                );
+            };
+            let new_text = args.get("new_text").and_then(|v| v.as_str()).unwrap_or("");
+            crate::agent::edit_ctx::apply(&ctx.app, edit, new_text)
+        }
         "o8_status" => o8_bridge::status(args).await,
         "o8_ask" => o8_bridge::ask(args).await,
         "o8_dispatch" => o8_bridge::dispatch(args).await,
