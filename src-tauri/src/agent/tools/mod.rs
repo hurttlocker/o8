@@ -572,37 +572,66 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
 }
 
 // ── osascript executors ──────────────────────────────────────────────────────
+// Both run with a hard 30s cap. The killer case: the FIRST Apple Event to a
+// new target app (e.g. Music) parks osascript on the macOS Automation consent
+// dialog — without a timeout that wedged the whole agent task on "Working"
+// forever (live-hit 2026-06-10). 30s gives a present user time to click
+// Allow; an absent/dismissed dialog degrades to a spoken, actionable error.
 
-/// Run a JXA (JavaScript-for-Automation) script, returning stdout.
-pub(crate) fn run_osascript_jxa(script: &str) -> Result<String, String> {
-    let output = std::process::Command::new("osascript")
-        .args(["-l", "JavaScript", "-e", script])
-        .output()
-        .map_err(|e| format!("osascript exec failed: {e}"))?;
+const OSASCRIPT_TIMEOUT_SECS: u64 = 30;
+
+/// Spawn `osascript` with the given args, enforcing the timeout. Output pipes
+/// are tiny for every script we run, so poll-then-read is deadlock-safe.
+fn run_osascript_capped(args: &[&str], label: &str) -> Result<String, String> {
+    let mut child = std::process::Command::new("osascript")
+        .args(args)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|e| format!("{label} exec failed: {e}"))?;
+
+    let deadline =
+        std::time::Instant::now() + std::time::Duration::from_secs(OSASCRIPT_TIMEOUT_SECS);
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) => {
+                if std::time::Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(format!(
+                        "{label} timed out after {OSASCRIPT_TIMEOUT_SECS}s — macOS is likely \
+                         waiting on an Automation permission: System Settings → Privacy & \
+                         Security → Automation → o8 must be allowed to control the target app."
+                    ));
+                }
+                std::thread::sleep(std::time::Duration::from_millis(50));
+            }
+            Err(e) => return Err(format!("{label} wait failed: {e}")),
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|e| format!("{label} output read failed: {e}"))?;
     if output.status.success() {
         Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
     } else {
         Err(format!(
-            "osascript error: {}",
+            "{label} error: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ))
     }
 }
 
+/// Run a JXA (JavaScript-for-Automation) script, returning stdout.
+pub(crate) fn run_osascript_jxa(script: &str) -> Result<String, String> {
+    run_osascript_capped(&["-l", "JavaScript", "-e", script], "osascript")
+}
+
 /// Run an AppleScript, returning stdout.
 pub(crate) fn run_applescript(script: &str) -> Result<String, String> {
-    let output = std::process::Command::new("osascript")
-        .args(["-e", script])
-        .output()
-        .map_err(|e| format!("AppleScript exec failed: {e}"))?;
-    if output.status.success() {
-        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        Err(format!(
-            "AppleScript error: {}",
-            String::from_utf8_lossy(&output.stderr).trim()
-        ))
-    }
+    run_osascript_capped(&["-e", script], "AppleScript")
 }
 
 // ── shared helpers ───────────────────────────────────────────────────────────
