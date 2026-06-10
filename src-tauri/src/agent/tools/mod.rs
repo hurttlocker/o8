@@ -29,13 +29,24 @@ pub fn all_tools() -> Vec<Value> {
     vec![
         json!({
             "name": "open_app",
-            "description": "Open (launch and bring to the front) a macOS application by name — e.g. Reminders, Calendar, Notes, Safari. Use when the user asks to open, show, or pull up an app, including right after creating something in that app.",
+            "description": "Open (launch and bring to the front) any installed macOS application by name — first-party (Reminders, Calendar, Safari) or third-party (Google Chrome, Slack, Figma). Fuzzy-matches the installed apps, so a casual name like 'chrome' works. If the name is ambiguous it returns the candidates. Use when the user asks to open, show, or pull up an app, including right after creating something in that app.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "name": { "type": "string", "description": "Application name, e.g. 'Reminders' or 'Calendar'." }
+                    "name": { "type": "string", "description": "Application name as the user said it, e.g. 'Reminders', 'chrome', 'Figma'." }
                 },
                 "required": ["name"]
+            }
+        }),
+        json!({
+            "name": "list_apps",
+            "description": "List the applications installed on this Mac (names only). Use when the user asks what apps they have, or when open_app could not find a match.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": { "type": "string", "description": "Optional substring filter, e.g. 'adobe'. Omit for all apps." }
+                },
+                "required": []
             }
         }),
         json!({
@@ -403,6 +414,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, _ctx: &TaskCtx) -> Resu
 
     match name {
         "open_app" => apps::open_app(args).await,
+        "list_apps" => apps::list_apps(args).await,
         "mac_reminders_list" => mac_reminders::list(args).await,
         "mac_reminders_create" => mac_reminders::create(args).await,
         "mac_reminders_complete" => mac_reminders::complete(args).await,
