@@ -6,6 +6,19 @@ import { sendScreenshotWithFallback } from '@/lib/mcp/o8-screenshot-fallback';
 
 const DEFAULT_WINDOW_LABEL = 'main';
 const REQUEST_TIMEOUT_MS = 30_000;
+
+/**
+ * Commands safe to re-fire after a reconnect: pure reads with no side
+ * effects. Mutating commands (type_into_focused, execute_js — which carries
+ * clicks — scroll_page) must NOT auto-retry: when the socket drops after the
+ * write, the action usually already fired on the Rust side, so re-running
+ * types text twice or double-fires a click.
+ */
+const RECONNECT_RETRY_SAFE_COMMANDS = new Set([
+  'get_page_map',
+  'get_element_position',
+  'take_screenshot',
+]);
 const UNAVAILABLE_MESSAGE = 'o8 webview tools unavailable — launch o8 with --features dev-mcp-plugin or use the signed build';
 const JPEG_MIME_TYPE = 'image/jpeg';
 
@@ -619,7 +632,10 @@ export class O8WebviewClient {
   }
 
   private async sendCommand(command: string, payload: Record<string, unknown>): Promise<unknown> {
-    return this.withReconnectRetry(() => this.sendCommandOnce(command, payload));
+    return this.withReconnectRetry(
+      () => this.sendCommandOnce(command, payload),
+      RECONNECT_RETRY_SAFE_COMMANDS.has(command),
+    );
   }
 
   private async sendCommandOnce(command: string, payload: Record<string, unknown>): Promise<unknown> {
@@ -669,7 +685,7 @@ export class O8WebviewClient {
     });
   }
 
-  private async withReconnectRetry<T>(operation: () => Promise<T>): Promise<T> {
+  private async withReconnectRetry<T>(operation: () => Promise<T>, retrySafe: boolean): Promise<T> {
     try {
       return await operation();
     } catch (error) {
@@ -679,6 +695,14 @@ export class O8WebviewClient {
       }
 
       this.dispose();
+      if (!retrySafe) {
+        // The socket dropped after the write — on the Rust side the action
+        // usually ALREADY fired. Re-running would type the text twice or
+        // double-fire a click; surface the uncertainty instead.
+        throw new Error(
+          `Webview connection dropped (${code}) while running a mutating command — not retried automatically because the action may have already executed in the app. Take a screenshot to verify before re-issuing.`,
+        );
+      }
       return operation();
     }
   }
@@ -763,9 +787,21 @@ export class O8WebviewClient {
 
       try {
         const response = JSON.parse(jsonLine) as SocketResponse;
-        const requestId = typeof response.id === 'string' && this.pending.has(response.id)
-          ? response.id
-          : this.getOldestPendingRequestId();
+        let requestId: string | undefined;
+        if (typeof response.id === 'string' && this.pending.has(response.id)) {
+          requestId = response.id;
+        } else if (this.pending.size === 1) {
+          // Known plugin seam: some responses come back without the echoed
+          // id. With exactly one request in flight the match is unambiguous.
+          requestId = this.pending.keys().next().value as string | undefined;
+        } else if (this.pending.size > 1) {
+          // NEVER guess across multiple in-flight requests — "oldest pending"
+          // matching cross-wired results (a screenshot resolving a snapshot
+          // call). Drop the frame; the per-request timeout surfaces the loss.
+          console.error(
+            `[o8-webview] Dropping response with ${typeof response.id === 'string' ? `unknown id ${response.id}` : 'no id'} while ${this.pending.size} requests are pending — refusing to guess the match`,
+          );
+        }
 
         if (!requestId) {
           newlineIndex = this.buffer.indexOf('\n');
@@ -790,11 +826,6 @@ export class O8WebviewClient {
 
       newlineIndex = this.buffer.indexOf('\n');
     }
-  }
-
-  private getOldestPendingRequestId(): string | undefined {
-    const pendingIds = Array.from(this.pending.keys()).sort();
-    return pendingIds[0];
   }
 
   private resolveAuthToken(): string | undefined {
