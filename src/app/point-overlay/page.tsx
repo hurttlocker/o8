@@ -110,12 +110,16 @@ function Marker({
   numbered,
   delayMs,
   screenH,
+  springIn = true,
 }: {
   point: OverlayPoint;
   index: number;
   numbered: boolean;
   delayMs: number;
   screenH: number;
+  /** Tours spring whole markers in; a landed flight must NOT re-pop (the dot
+   * already flew here at full scale) — only the ring fades in around it. */
+  springIn?: boolean;
 }) {
   const above = point.y > screenH - 90;
   return (
@@ -127,7 +131,9 @@ function Marker({
         width: 0,
         height: 0,
         pointerEvents: 'none',
-        animation: `o8PointIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${delayMs}ms both`,
+        animation: springIn
+          ? `o8PointIn 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) ${delayMs}ms both`
+          : 'none',
       }}
     >
       {/* ring ripple — one pulse outward on arrival */}
@@ -144,7 +150,7 @@ function Marker({
           animation: `o8PointRipple 0.9s ease-out ${delayMs + 120}ms both`,
         }}
       />
-      {/* the steady orange ring, breathing */}
+      {/* the steady orange ring, breathing (fades in around a landed flight) */}
       <div
         style={{
           position: 'absolute',
@@ -155,7 +161,9 @@ function Marker({
           borderRadius: '50%',
           border: `2px solid ${ORANGE}E6`,
           boxShadow: `0 0 14px ${ORANGE}59, inset 0 0 6px ${ORANGE}26`,
-          animation: 'o8PointBreathe 2.4s ease-in-out infinite alternate',
+          animation: springIn
+            ? 'o8PointBreathe 2.4s ease-in-out infinite alternate'
+            : 'o8PointRingIn 0.28s ease-out both, o8PointBreathe 2.4s ease-in-out 0.3s infinite alternate',
         }}
       />
       <div style={{ position: 'absolute', left: -9, top: -9 }}>
@@ -216,7 +224,7 @@ function Flight({ point, screenW, screenH }: { point: OverlayPoint; screenW: num
   }, [dur]);
 
   if (landed) {
-    return <Marker point={point} index={0} numbered={false} delayMs={0} screenH={screenH} />;
+    return <Marker point={point} index={0} numbered={false} delayMs={0} screenH={screenH} springIn={false} />;
   }
 
   return (
@@ -345,6 +353,10 @@ export default function PointOverlayPage() {
         @keyframes o8PointBreathe {
           from { transform: scale(1); }
           to { transform: scale(1.06); }
+        }
+        @keyframes o8PointRingIn {
+          from { opacity: 0; transform: scale(0.7); }
+          to { opacity: 1; transform: scale(1); }
         }
         @keyframes o8PointChipIn {
           from { opacity: 0; transform: translateX(-50%) translateY(4px); }

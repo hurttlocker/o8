@@ -528,6 +528,34 @@ export default function DictationPillPage() {
     };
   }, []);
 
+  // Hit-rect reporting: the dock WINDOW is a 520-wide strip that would hijack
+  // every click at the top of the screen, so the Rust side keeps it
+  // click-through except while the cursor is over the PAINTED pill. Report the
+  // content wrapper's rect on every morph (ResizeObserver fires through the
+  // 0.5s geometry transition; rAF-throttled so we invoke at most per-frame).
+  const hitRectHostRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!isTauri()) return;
+    const host = hitRectHostRef.current;
+    if (!host) return;
+    let raf = 0;
+    const report = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        const r = host.getBoundingClientRect();
+        invokeCmd('dock_set_hit_rect', { x: r.left, y: r.top, w: r.width, h: r.height });
+      });
+    };
+    const ro = new ResizeObserver(report);
+    ro.observe(host);
+    report();
+    return () => {
+      ro.disconnect();
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, []);
+
   // The dock window is transparent at the OS level (clearColor + setOpaque
   // false). The page's html/body must NOT paint a background or the window
   // shows a solid rectangle instead of just the pill. globals.css / the root
@@ -563,6 +591,7 @@ export default function DictationPillPage() {
       }}
     >
       <div
+        ref={hitRectHostRef}
         style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
         onMouseMove={() => { if (askOpenRef.current) armAskIdleTimer(); }}
         onClick={() => {
