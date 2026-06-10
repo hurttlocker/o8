@@ -385,6 +385,45 @@ export default function DictationPillPage() {
     setAgentConfirm(null);
   }, []);
 
+  // Memory glint (dossier #4): a quiet one-line chip under the dock that fades
+  // in, holds ~4s, fades out. Driven by `kind: glint` agent events.
+  const [glint, setGlint] = useState<string | null>(null);
+  const [glintFading, setGlintFading] = useState(false);
+  const glintTimersRef = useRef<ReturnType<typeof setTimeout>[]>([]);
+  const showGlint = useCallback((text: string) => {
+    for (const t of glintTimersRef.current) clearTimeout(t);
+    glintTimersRef.current = [];
+    setGlint(text);
+    setGlintFading(false);
+    glintTimersRef.current.push(setTimeout(() => setGlintFading(true), 4200));
+    glintTimersRef.current.push(setTimeout(() => { setGlint(null); setGlintFading(false); }, 4800));
+  }, []);
+  useEffect(() => {
+    return () => { for (const t of glintTimersRef.current) clearTimeout(t); };
+  }, []);
+
+  // Fleet visibility (dossier #8): worker-pulse pushes `o8:worker-status`;
+  // the idle sliver carries the orbit + count, tap expands the detail capsule.
+  const [workers, setWorkers] = useState<{ count: number; repos: string[] }>({ count: 0, repos: [] });
+  const [showWorkers, setShowWorkers] = useState(false);
+  const showWorkersTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!isTauri()) return;
+    let unlisten: (() => void) | undefined;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{ count?: number; repos?: string[] }>('o8:worker-status', (e) => {
+        const count = Math.max(0, e.payload?.count ?? 0);
+        setWorkers({ count, repos: e.payload?.repos ?? [] });
+        if (count === 0) setShowWorkers(false);
+      }))
+      .then((u) => { unlisten = u; })
+      .catch((err) => dockLog(`worker-status subscribe failed: ${err instanceof Error ? err.message : String(err)}`));
+    return () => {
+      unlisten?.();
+      if (showWorkersTimerRef.current) clearTimeout(showWorkersTimerRef.current);
+    };
+  }, []);
+
   // ── Symon voice agent events (o8:agent-confirm / o8:agent-task-event) ──
   useEffect(() => {
     if (!isTauri()) return;
@@ -400,12 +439,19 @@ export default function DictationPillPage() {
           dockLog(`agent-confirm ${tool}`);
           if (taskId) setAgentConfirm({ taskId, tool, summary });
         }));
-        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string }>('o8:agent-task-event', (e) => {
+        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string; glint?: string }>('o8:agent-task-event', (e) => {
           const kind = e.payload?.kind;
           if (kind === 'tool_call') {
             // Track the live tool so the working capsule can say "Synthesizing…"
             // for the Brain (o8_ask) vs a generic "Working…".
             if (e.payload?.tool) setAgentTool(e.payload.tool);
+            return;
+          }
+          if (kind === 'glint') {
+            // Memory surfaced (dossier #4): one quiet line under the dock.
+            const g = e.payload?.glint;
+            if (g === 'recovered') showGlint('Recovered — found another way');
+            else if (g === 'remembered') showGlint('Remembered');
             return;
           }
           if (kind !== 'status') return;
@@ -449,7 +495,7 @@ export default function DictationPillPage() {
       disposed = true;
       for (const off of offs) { try { off(); } catch { /* noop */ } }
     };
-  }, [openPanel]);
+  }, [openPanel, showGlint]);
 
   // Escape collapses the open Ask panel.
   useEffect(() => {
@@ -517,8 +563,17 @@ export default function DictationPillPage() {
       }}
     >
       <div
-        style={{ pointerEvents: 'auto' }}
+        style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
         onMouseMove={() => { if (askOpenRef.current) armAskIdleTimer(); }}
+        onClick={() => {
+          // Tap the resting sliver while the worker orbit is up → transient
+          // capsule naming the in-flight packets (dossier #8).
+          if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen && !agentWorking && workers.count > 0) {
+            setShowWorkers(true);
+            if (showWorkersTimerRef.current) clearTimeout(showWorkersTimerRef.current);
+            showWorkersTimerRef.current = setTimeout(() => setShowWorkers(false), 5000);
+          }
+        }}
         onDoubleClick={() => {
           // Double-tap the IDLE dock to open the standalone Voice settings
           // window (Symon parity — works even with the main app closed). Gated
@@ -546,7 +601,38 @@ export default function DictationPillPage() {
           onAgentConfirm={handleAgentConfirm}
           dropActive={dropActive}
           stagedFiles={stagedChips}
+          workerCount={workers.count}
+          workerRepos={workers.repos}
+          showWorkers={showWorkers}
         />
+        {glint ? (
+          <div
+            style={{
+              marginTop: 6,
+              paddingTop: 3,
+              paddingBottom: 3,
+              paddingLeft: 10,
+              paddingRight: 10,
+              borderRadius: 9,
+              background: 'linear-gradient(rgba(20,24,34,0.6), rgba(14,18,28,0.54))',
+              border: '1px solid rgba(255,255,255,0.14)',
+              fontSize: 9.5,
+              fontWeight: 260,
+              letterSpacing: '0.5px',
+              textTransform: 'uppercase',
+              color: 'rgba(255, 255, 255, 0.82)',
+              textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
+              whiteSpace: 'nowrap',
+              opacity: glintFading ? 0 : 1,
+              transition: 'opacity 0.5s ease',
+              animation: 'o8GlintIn 0.3s cubic-bezier(0.22, 1, 0.36, 1)',
+              pointerEvents: 'none',
+            }}
+          >
+            {glint}
+            <style>{'@keyframes o8GlintIn { from { opacity: 0; transform: translateY(-3px); } to { opacity: 1; transform: translateY(0); } }'}</style>
+          </div>
+        ) : null}
       </div>
     </div>
   );

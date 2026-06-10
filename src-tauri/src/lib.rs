@@ -812,6 +812,10 @@ fn prewarm_bundled_next_server(app: AppHandle, api_port: u16) {
         // Stash the resolved port for the lazily-created Symon Points overlay
         // (point_overlay builds its window on first [POINT:...] tag, not here).
         point_overlay::init(api_port);
+        // Fleet visibility in the dock — the worker-pulse poller drives the
+        // idle sliver's orbiting dot + count while packets are in flight.
+        #[cfg(target_os = "macos")]
+        agent::worker_pulse::spawn(app.clone());
     });
 }
 
