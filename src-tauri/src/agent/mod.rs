@@ -102,6 +102,69 @@ pub fn agent_data_dir() -> PathBuf {
     PathBuf::from(home).join(".o8")
 }
 
+// ── dropped-file staging (Clicky-parity dossier #3) ─────────────────────────
+// Files dragged onto the dock are staged HERE (name + a bounded text excerpt)
+// and ride the NEXT agent prompt as context, then drain. The dock webview can
+// read file CONTENT via the HTML5 File API but not absolute paths (WKWebView
+// security), so content travels instead of paths — sandbox rules unchanged.
+
+/// One dropped file as sent by the dock webview (`agent_files_stage`).
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StagedFileIn {
+    pub name: String,
+    pub size: u64,
+    /// Text excerpt for text-like files; None for binary (name+size only).
+    pub content: Option<String>,
+}
+
+/// Staged context lives 5 minutes — long enough to drop then phrase the ask,
+/// short enough that stale files never haunt an unrelated question.
+const STAGED_TTL_SECS: u64 = 300;
+/// Per-file excerpt ceiling (re-clamped server-side; the webview caps too).
+const STAGED_FILE_CAP: usize = 48 * 1024;
+
+static STAGED_FILES: Mutex<Option<(std::time::Instant, Vec<StagedFileIn>)>> = Mutex::new(None);
+
+/// Stage dropped files for the next agent run (replaces any previous stage).
+pub fn stage_files(files: Vec<StagedFileIn>) {
+    let count = files.len();
+    let mut slot = STAGED_FILES.lock().unwrap_or_else(|p| p.into_inner());
+    *slot = Some((std::time::Instant::now(), files));
+    log::info!("[symon-agent] staged {count} dropped file(s) for the next ask");
+}
+
+/// Drain staged files (if fresh) into a prompt context block.
+fn take_staged_block() -> Option<String> {
+    let staged = {
+        let mut slot = STAGED_FILES.lock().unwrap_or_else(|p| p.into_inner());
+        slot.take()
+    };
+    let (at, files) = staged?;
+    if at.elapsed().as_secs() > STAGED_TTL_SECS || files.is_empty() {
+        return None;
+    }
+    let mut block = String::from(
+        "[Files the user just dropped onto the dock as context for this request]",
+    );
+    for f in &files {
+        let kb = (f.size as f64 / 1024.0).max(0.1);
+        match f.content.as_deref().filter(|c| !c.trim().is_empty()) {
+            Some(content) => {
+                let excerpt = crate::utf8_head(content, STAGED_FILE_CAP);
+                block.push_str(&format!("\n\n--- {} ({kb:.0} KB) ---\n{excerpt}", f.name));
+            }
+            None => {
+                block.push_str(&format!(
+                    "\n\n--- {} ({kb:.0} KB) — binary or unreadable, content not attached ---",
+                    f.name
+                ));
+            }
+        }
+    }
+    Some(block)
+}
+
 // ── task ids ─────────────────────────────────────────────────────────────────
 
 static TASK_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -280,13 +343,20 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
     };
     let ctx = TaskCtx { task_id: task_id.clone(), app: app.clone(), screen: screen_ctx };
 
+    // Dropped-file context rides the LLM prompt only — the task store keeps
+    // the user's spoken words.
+    let llm_prompt = match take_staged_block() {
+        Some(block) => format!("{prompt}\n\n{block}"),
+        None => prompt.clone(),
+    };
+
     // Route by model id: `/` → OpenRouter (e.g. openai/gpt-4o-mini), else direct
     // Gemini (e.g. gemini-3-flash-preview). A one-flip change in agent_models.json.
     let model = router::load_config().mac_native_action;
     let loop_result = if model.contains('/') {
-        openrouter::run_loop(&model, &prompt, &ctx).await
+        openrouter::run_loop(&model, &llm_prompt, &ctx).await
     } else {
-        gemini::run_loop(&model, &prompt, &ctx).await
+        gemini::run_loop(&model, &llm_prompt, &ctx).await
     };
 
     match loop_result {

@@ -366,6 +366,12 @@ interface DockNotchSurfaceProps {
   /** Epoch ms when the working task started, for the live elapsed timer. */
   agentStartedAt?: number;
   onAgentConfirm?: (taskId: string, allow: boolean) => void;
+  /** Drag-files-into-Symon (dossier #3): a Finder drag is over the dock window
+   * → the sliver morphs into the glass drop zone. */
+  dropActive?: boolean;
+  /** Files just staged by a drop — shown as chips, then the dock relaxes back
+   * to idle (the staged context lives on the Rust side for the next ask). */
+  stagedFiles?: { name: string; size: number }[] | null;
 }
 
 /**
@@ -388,6 +394,8 @@ export function DockNotchSurface({
   agentTool = '',
   agentStartedAt = 0,
   onAgentConfirm,
+  dropActive = false,
+  stagedFiles = null,
 }: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
@@ -413,6 +421,13 @@ export function DockNotchSurface({
   const isConfirming = !!agentConfirm && dictationMode === 'idle';
   const isAgentWorking =
     agentWorking && !isConfirming && dictationMode === 'idle' && !isAsking && !isSpeaking;
+  // Drop zone wins while a Finder drag is live (the user is mid-gesture) —
+  // but never over an active dictation, the confirm gate, or the ask panel.
+  const isDropTarget = dropActive && dictationMode === 'idle' && !isConfirming && !isAsking;
+  // Chips show right after a drop, when nothing else owns the dock.
+  const isStagedChips =
+    !isDropTarget && !!stagedFiles?.length && dictationMode === 'idle'
+    && !isConfirming && !isAsking && !isSpeaking && !isAgentWorking;
 
   // Live ref for the canvas RAF loop (avoid re-running the effect per frame).
   const levelRef = useRef<number>(audioLevel);
@@ -466,6 +481,29 @@ export function DockNotchSurface({
         background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 14px 32px rgba(40, 40, 80, 0.36)',
+      } as React.CSSProperties;
+    }
+    if (isDropTarget) {
+      // Glass drop zone — the sliver continues into a receiving surface. The
+      // soft inner orange ring (Symon Points vocabulary) says "receivable"
+      // without a Material dashed outline.
+      return {
+        width: 320,
+        height: 64,
+        borderRadius: '0 0 24px 24px',
+        background: capsuleBg, ...capsuleBlur,
+        borderColor: 'rgba(255, 255, 255, 0.45)',
+        boxShadow: '0 10px 26px rgba(40, 40, 80, 0.32), inset 0 0 0 1.5px rgba(255, 90, 31, 0.45)',
+      } as React.CSSProperties;
+    }
+    if (isStagedChips) {
+      return {
+        width: 420,
+        height: 56,
+        borderRadius: '0 0 22px 22px',
+        background: capsuleBg, ...capsuleBlur,
+        borderColor: 'rgba(255, 255, 255, 0.4)',
+        boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
       } as React.CSSProperties;
     }
     if (isAgentWorking) {
@@ -661,6 +699,130 @@ export function DockNotchSurface({
             Allow
           </button>
         </div>
+      </div>
+    );
+  } else if (isDropTarget) {
+    body = (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 3,
+          width: '100%',
+          height: '100%',
+          overflow: 'hidden',
+        }}
+      >
+        <span
+          style={{
+            fontSize: 12.5,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            color: '#fff',
+            textShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Drop files for Symon
+        </span>
+        <span
+          style={{
+            fontSize: 9.5,
+            fontWeight: 260,
+            letterSpacing: '0.5px',
+            textTransform: 'uppercase',
+            color: 'rgba(255, 255, 255, 0.6)',
+            textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          They ride your next question
+        </span>
+      </div>
+    );
+  } else if (isStagedChips && stagedFiles) {
+    const visible = stagedFiles.slice(0, 3);
+    const extra = stagedFiles.length - visible.length;
+    const sizeLabel = (n: number) =>
+      n >= 1024 * 1024 ? `${(n / (1024 * 1024)).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
+    body = (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 4,
+          width: '100%',
+          height: '100%',
+          paddingLeft: 16,
+          paddingRight: 16,
+          overflow: 'hidden',
+        }}
+      >
+        <div style={{ display: 'flex', gap: 6, maxWidth: '100%', overflow: 'hidden' }}>
+          {visible.map((f, i) => (
+            <span
+              key={`${f.name}-${i}`}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                height: 22,
+                paddingLeft: 9,
+                paddingRight: 9,
+                borderRadius: 11,
+                background: 'rgba(255, 255, 255, 0.14)',
+                border: '1px solid rgba(255, 255, 255, 0.25)',
+                fontSize: 10.5,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                color: '#f4f5f7',
+                whiteSpace: 'nowrap',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                maxWidth: 150,
+              }}
+              title={f.name}
+            >
+              {f.name}&nbsp;<span style={{ color: 'rgba(255,255,255,0.55)' }}>{sizeLabel(f.size)}</span>
+            </span>
+          ))}
+          {extra > 0 ? (
+            <span
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                height: 22,
+                paddingLeft: 8,
+                paddingRight: 8,
+                borderRadius: 11,
+                background: 'rgba(255, 255, 255, 0.1)',
+                border: '1px solid rgba(255, 255, 255, 0.2)',
+                fontSize: 10.5,
+                fontWeight: 300,
+                color: 'rgba(255, 255, 255, 0.7)',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              +{extra}
+            </span>
+          ) : null}
+        </div>
+        <span
+          style={{
+            fontSize: 9.5,
+            fontWeight: 260,
+            letterSpacing: '0.5px',
+            textTransform: 'uppercase',
+            color: 'rgba(255, 255, 255, 0.55)',
+            textShadow: '0 1px 4px rgba(0, 0, 0, 0.35)',
+            whiteSpace: 'nowrap',
+          }}
+        >
+          Staged — hold ⌥ and ask
+        </span>
       </div>
     );
   } else if (isAgentWorking) {
