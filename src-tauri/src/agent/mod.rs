@@ -317,17 +317,18 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         "o8_dispatch" => format!("Dispatch the {} orchestrator to: {}", s("repo"), s("task")),
         // The model passes the terminal's title from term_list so the card
         // names the real target window, not a bare id.
-        "term_send" => {
-            let title = s("title");
-            let target = if title.is_empty() {
-                "the terminal".to_string()
-            } else {
-                // Titles carry "cwd — task — proc — 117×56"; the first two
-                // segments identify the window by ear without the noise.
-                let short: String = title.split(" — ").take(2).collect::<Vec<_>>().join(" — ");
-                format!("“{short}”")
-            };
-            format!("Send “{}” to {target}", s("command"))
+        "term_send" => format!("Send “{}” to {}", s("command"), short_term_title(&s("title"))),
+        "term_interrupt" => format!("Interrupt {}", short_term_title(&s("title"))),
+        "term_key" => format!("Press {} in {}", s("key"), short_term_title(&s("title"))),
+        "term_new" => {
+            let dir = s("directory");
+            let cmd = s("command");
+            match (dir.is_empty(), cmd.is_empty()) {
+                (false, false) => format!("Open a terminal in {dir} running “{cmd}”"),
+                (false, true) => format!("Open a terminal in {dir}"),
+                (true, false) => format!("Open a terminal running “{cmd}”"),
+                (true, true) => "Open a new terminal".to_string(),
+            }
         }
         // The model passes the exact title it just read from o8_needs_me, so
         // the card (and the spoken proposal) names the real pending item.
@@ -346,6 +347,16 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         "mac_shortcuts_run" => format!("Run the Shortcut “{}”", s("name")),
         other => format!("Run {other}"),
     }
+}
+
+/// Terminal titles carry "cwd — task — proc — 117×56"; the first two segments
+/// identify the window by ear without the noise.
+fn short_term_title(title: &str) -> String {
+    if title.is_empty() {
+        return "the terminal".to_string();
+    }
+    let short: String = title.split(" — ").take(2).collect::<Vec<_>>().join(" — ");
+    format!("“{short}”")
 }
 
 /// Spoken phrasing for the confirm gate — the proposal Symon says ALOUD just

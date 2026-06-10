@@ -80,6 +80,8 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // destructive side effect (same reasoning as open_app).
         "o8_ui_open" => SafetyClass::ReadOnly,
         "o8_panel_read" => SafetyClass::ReadOnly,
+        "o8_recap" => SafetyClass::ReadOnly,
+        "o8_usage" => SafetyClass::ReadOnly,
         // Terminal control (dev frontier). Surveying is harmless; term_send
         // EXECUTES a line in a live shell → Reversible so it ALWAYS shows the
         // spoken proposal + confirm card in V1. NOTE: if blanket consent ever
@@ -88,6 +90,9 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "term_list" => SafetyClass::ReadOnly,
         "term_read" => SafetyClass::ReadOnly,
         "term_send" => SafetyClass::Reversible,
+        "term_interrupt" => SafetyClass::Reversible,
+        "term_key" => SafetyClass::Reversible,
+        "term_new" => SafetyClass::Reversible,
         // Apple Music — playback control mutates no data and pause undoes it
         // instantly; a confirm card on "play my playlist" kills the magic.
         "mac_music_playlists" => SafetyClass::ReadOnly,
