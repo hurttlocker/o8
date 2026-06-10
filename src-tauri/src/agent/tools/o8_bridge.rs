@@ -307,7 +307,7 @@ pub async fn ask(args: Value) -> Result<Value, String> {
         body["repoPath"] = json!(repo);
     }
 
-    let resp = o8_http::post_json("/api/cortex/ask/answer", body).await?;
+    let resp = o8_http::post_json_timeout("/api/cortex/ask/answer", body, 90).await?;
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
         let err = resp
             .get("error")
