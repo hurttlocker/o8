@@ -219,6 +219,9 @@ export async function resetPacket(input: ResetPacketInput) {
   // #455 — Clear recovery counter so a manual reset gives fresh retry budget
   packet.recoveryCount = 0;
   packet.lastRecoveryAt = null;
+  // Operator reset also refreshes the typecheck auto-rerun budget (#1108) —
+  // this is the ONLY place it resets; rerun_with_feedback preserves it.
+  packet.typecheckAutoRetries = 0;
 
   // Persist
   const { updateOrchestratorMissionState } = await import('@/lib/orchestrator/store');

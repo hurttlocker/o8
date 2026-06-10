@@ -157,6 +157,13 @@ export interface OrchestratorPacket {
   maxAttempts?: number;
   recoveryCount?: number;
   lastRecoveryAt?: string | null;
+  /**
+   * Typecheck auto-rerun budget spent (#1108 layer 1). Lives ON the packet —
+   * a per-lane count resets every redispatch (auto-rerun archives the lane),
+   * which silently defeated the "1 extra worker turn" cost ceiling. Preserved
+   * across rerun_with_feedback; zeroed only by operator reset_packet.
+   */
+  typecheckAutoRetries?: number;
   blockedReason?: string | null;
   lastEventAt?: string | null;
   lastEventLabel?: string | null;
