@@ -23,18 +23,18 @@ extern "C" {
     fn CGRequestScreenCaptureAccess() -> bool;
 }
 
-/// Screen Recording TCC gate. Preflight first; when missing, fire the one-time
-/// system prompt — which ALSO registers o8 in System Settings → Privacy &
-/// Security → Screen & System Audio Recording (a bare `screencapture` failure
-/// does neither, so the user would have nothing to toggle). Returns whether
-/// capture is permitted right now.
-fn ensure_screen_permission() -> bool {
-    // Safety: both calls are stateless CoreGraphics permission queries.
+/// Fire the Screen Recording registration/prompt AFTER a failed capture.
+/// Attempt-first on purpose: `CGPreflightScreenCaptureAccess` is unreliable on
+/// recent macOS (observed returning false after a grant rebind even post-
+/// relaunch), so the capture attempt itself is the truth — this only makes
+/// sure o8 is registered in System Settings → Privacy & Security → Screen &
+/// System Audio Recording so the user has something to toggle.
+fn request_screen_permission() {
+    // Safety: stateless CoreGraphics permission queries.
     unsafe {
-        if CGPreflightScreenCaptureAccess() {
-            return true;
+        if !CGPreflightScreenCaptureAccess() {
+            CGRequestScreenCaptureAccess();
         }
-        CGRequestScreenCaptureAccess()
     }
 }
 
@@ -105,14 +105,6 @@ pub fn wants_screen(prompt: &str) -> bool {
 /// (~300-600ms of subprocess) — call it from the agent worker thread before
 /// the loop starts, never from the main thread.
 pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
-    if !ensure_screen_permission() {
-        log::warn!(
-            "[symon-screen] Screen Recording permission missing — capture skipped \
-             (grant o8 in System Settings → Privacy & Security → Screen & System \
-             Audio Recording, then relaunch)"
-        );
-        return None;
-    }
     let monitors = app.available_monitors().ok()?;
     if monitors.is_empty() {
         return None;
@@ -155,10 +147,13 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         log::warn!(
-            "[symon-screen] screencapture exited with {}: {}",
+            "[symon-screen] screencapture exited with {}: {} — if this is a \
+             permission denial, grant o8 under System Settings → Privacy & \
+             Security → Screen & System Audio Recording and relaunch",
             output.status,
             stderr.trim()
         );
+        request_screen_permission();
         cleanup(&files);
         return None;
     }

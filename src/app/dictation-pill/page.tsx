@@ -591,7 +591,6 @@ export default function DictationPillPage() {
       }}
     >
       <div
-        ref={hitRectHostRef}
         style={{ pointerEvents: 'auto', display: 'flex', flexDirection: 'column', alignItems: 'center' }}
         onMouseMove={() => { if (askOpenRef.current) armAskIdleTimer(); }}
         onClick={() => {
@@ -613,27 +612,32 @@ export default function DictationPillPage() {
         }}
       >
         {/* The ONE morphing notch dock — idle ⇄ listening ⇄ thinking ⇄ done ⇄
-            ask, in place (Symon NotchSurface). Not the in-window floating pill. */}
-        <DockNotchSurface
-          snapshot={snapshot}
-          ttsState={ttsState}
-          onTogglePause={handleTogglePause}
-          onStop={handleStop}
-          askOpen={askOpen}
-          askMode={askMode}
-          askThread={askThread}
-          onCloseAsk={closeAsk}
-          agentConfirm={agentConfirm}
-          agentWorking={agentWorking}
-          agentTool={agentTool}
-          agentStartedAt={agentStartedAt}
-          onAgentConfirm={handleAgentConfirm}
-          dropActive={dropActive}
-          stagedFiles={stagedChips}
-          workerCount={workers.count}
-          workerRepos={workers.repos}
-          showWorkers={showWorkers}
-        />
+            ask, in place (Symon NotchSurface). Not the in-window floating pill.
+            The hit-rect ref wraps ONLY the pill — the glint chip below is
+            visual-only (pointer-events none) and must not extend the
+            click-accepting zone over the menu bar. */}
+        <div ref={hitRectHostRef} style={{ display: 'flex' }}>
+          <DockNotchSurface
+            snapshot={snapshot}
+            ttsState={ttsState}
+            onTogglePause={handleTogglePause}
+            onStop={handleStop}
+            askOpen={askOpen}
+            askMode={askMode}
+            askThread={askThread}
+            onCloseAsk={closeAsk}
+            agentConfirm={agentConfirm}
+            agentWorking={agentWorking}
+            agentTool={agentTool}
+            agentStartedAt={agentStartedAt}
+            onAgentConfirm={handleAgentConfirm}
+            dropActive={dropActive}
+            stagedFiles={stagedChips}
+            workerCount={workers.count}
+            workerRepos={workers.repos}
+            showWorkers={showWorkers}
+          />
+        </div>
         {glint ? (
           <div
             style={{
