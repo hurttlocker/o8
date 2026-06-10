@@ -4,6 +4,11 @@
 farzaa/clicky open-source repo, jasonkneen/openclicky repo + X posts, Isaac Flath's
 "How Clicky Works" deep-dive. Full research citations at the bottom.*
 
+> **Status (2026-06-10): BUILT.** Tier 1 #1–#4 and Tier 2 #5/#6/#8 shipped
+> (#7 tours ride the Points protocol; #6 was already satisfied by the chunked
+> TTS lead-chunk). #9 AirPods gestures + #10 skills stay parked. Architecture
+> notes: [`symon-presence.md`](./symon-presence.md).
+
 **The frame:** HeyClicky (YC S26, closed-source, consumer-polished) and OpenClicky
 (open-source, power-user, architecturally stronger) are the two reference points for
 voice-first Mac agents. Symon already beats both on **governance** (confirm cards,
