@@ -84,7 +84,13 @@ narrate the whole screen.
 
 ## Supporting fix that rides any of these ships
 
-**Permissions health in Voice settings.** Today's Screen Recording TCC saga
+**Permissions health in Voice settings — BUILT 0.1.322.** *Shipped: the
+Permissions card now covers all five grants (Microphone + Screen Recording
+added — mic via AVCaptureDevice runtime lookup, screen via CGPreflight with
+the stale-after-rebind caveat in the hint copy), each with live status and a
+deep-link Open action. Verified live in the glass settings window.*
+
+Today's Screen Recording TCC saga
 (pane said ON, API said denied, fixed only by `tccutil reset`) would hit every
 user silently. Add a permissions row to the Symon settings surface: Mic /
 Accessibility / Screen Recording each with live grant status and a fix action
