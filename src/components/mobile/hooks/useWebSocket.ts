@@ -21,6 +21,7 @@ import type {
 } from '@/lib/mobile/types';
 import { formatStreamingPreview } from '../utils';
 import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import type {
   MobileInboxRealtimeSnapshotPayload,
   RealtimeEventEnvelope,
@@ -66,7 +67,7 @@ function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
   const { hostname, protocol } = window.location;
   // Auth token — prevents random network clients from connecting
-  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
+  const token = getMobileWsToken();
 
   // [mobile-lan] Connect directly to the ws-server port on the same host as
   // the page. We used to try the same-port `/ws` rewrite for LAN/Tailscale

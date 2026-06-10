@@ -24,9 +24,10 @@ export type EnableResult =
   | { ok: true; endpoint: string }
   | { ok: false; reason: 'denied' | 'no-vapid-key' | 'subscribe-failed' | 'server-rejected'; detail?: string };
 
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
+
 function readWsToken(): string | null {
-  if (typeof document === 'undefined') return null;
-  return document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? null;
+  return getMobileWsToken() || null;
 }
 
 function authHeaders(): Record<string, string> {

@@ -14,6 +14,7 @@ import { triggerHaptic } from '@/lib/mobile/haptic';
 import { useTheme } from './ThemeContext';
 import { MobileMarkdown } from '@/app/mobile/mobile-markdown';
 import { mobileScrollFadeStyle } from '@/app/mobile/mobile-approvals-shared';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 
 const MobileDiffViewer = lazy(async () => ({
   default: (await import('./MobileDiffViewer')).MobileDiffViewer,
@@ -41,8 +42,7 @@ interface AgentTranscriptSheetProps {
 }
 
 function getWsToken(): string {
-  if (typeof document === 'undefined') return '';
-  return document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
+  return getMobileWsToken();
 }
 
 export const AgentTranscriptSheet = memo(function AgentTranscriptSheet({

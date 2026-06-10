@@ -4,6 +4,7 @@ import { Suspense, lazy, memo, useCallback, useEffect, useState } from 'react';
 import { useTheme } from './ThemeContext';
 import { MobileIssuesPRCard, repoShortLabel, type IssuesPagePR } from './MobileIssuesPRCard';
 import { PullToRefresh } from './PullToRefresh';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 
 const DeployStatus = lazy(() => import('./DeployStatus'));
 const MobileDiffViewer = lazy(async () => ({
@@ -395,9 +396,7 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
     const cached = loadRegisteredRepos();
     if (cached.length > 0) setRepos(cached.filter((r) => r.length > 0));
 
-    const wsToken = typeof document !== 'undefined'
-      ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
-      : '';
+    const wsToken = getMobileWsToken();
     const headers: Record<string, string> = {};
     if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
     void fetch('/api/panel/repos', { cache: 'no-store', headers })
@@ -424,9 +423,7 @@ export default function IssuesPage({ onBack, onOpenPR, hideHeader = false, refre
       return;
     }
     setLoading(true);
-    const wsToken = typeof document !== 'undefined'
-      ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
-      : '';
+    const wsToken = getMobileWsToken();
     const headers: Record<string, string> = {};
     if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
     const issueResults: { issue: Issue; repo: string }[] = [];

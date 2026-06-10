@@ -1,5 +1,7 @@
 import type { Metadata, Viewport } from 'next';
+import { headers } from 'next/headers';
 import type { ReactNode } from 'react';
+import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
 
 export const runtime = 'nodejs';
@@ -13,10 +15,16 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 };
 
-export function generateMetadata(): Metadata {
+export async function generateMetadata(): Promise<Metadata> {
+  // Only embed the ws-token for loopback page loads (desktop webview, dev).
+  // Serving it in HTML to any LAN browser hands out the master credential —
+  // LAN clients get the token from the pairing QR / #tk= link instead
+  // (see getMobileWsToken in @/lib/mobile/ws-token-client).
+  const h = await headers();
+  const isLocal = headersIndicateLoopback((name) => h.get(name));
   return {
     other: {
-      'ws-token': getOrCreateWsToken(),
+      ...(isLocal ? { 'ws-token': getOrCreateWsToken() } : {}),
       'apple-mobile-web-app-capable': 'yes',
       'apple-mobile-web-app-status-bar-style': 'black-translucent',
     },

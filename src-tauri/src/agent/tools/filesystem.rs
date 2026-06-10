@@ -52,7 +52,17 @@ pub async fn write_text(args: Value) -> Result<Value, String> {
     let path = std::path::PathBuf::from(&path_str);
     // Last line of defense: only the agent-output sandbox is writable. Writes
     // elsewhere are refused even if the loop's confirm gate were bypassed.
-    if !path.starts_with(agent_output_dir()) {
+    // `starts_with` alone is lexical — `..` is a literal component to it, so
+    // `<sandbox>/../../.zshrc` would pass and escape at the OS level. Refuse
+    // any traversal component outright, then verify the resolved (symlink-free)
+    // parent is still inside the sandbox before writing.
+    let has_traversal = path.components().any(|c| {
+        !matches!(
+            c,
+            std::path::Component::Normal(_) | std::path::Component::RootDir
+        )
+    });
+    if has_traversal || !path.starts_with(agent_output_dir()) {
         return Err(format!(
             "Write outside the agent output directory is not permitted: {path_str}. Use ~/.o8/agent-output/."
         ));
@@ -62,6 +72,17 @@ pub async fn write_text(args: Value) -> Result<Value, String> {
         tokio::fs::create_dir_all(parent)
             .await
             .map_err(|e| format!("Failed to create dirs: {e}"))?;
+        let canon_parent = tokio::fs::canonicalize(parent)
+            .await
+            .map_err(|e| format!("Failed to resolve {path_str}: {e}"))?;
+        let canon_sandbox = tokio::fs::canonicalize(agent_output_dir())
+            .await
+            .map_err(|e| format!("Failed to resolve sandbox dir: {e}"))?;
+        if !canon_parent.starts_with(&canon_sandbox) {
+            return Err(format!(
+                "Write outside the agent output directory is not permitted: {path_str}. Use ~/.o8/agent-output/."
+            ));
+        }
     }
     tokio::fs::write(&path, &content)
         .await

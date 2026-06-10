@@ -26,6 +26,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 import type {
   MobileOrchestratorThread,
   MobileOrchestratorTranscriptEntry,
@@ -80,7 +81,7 @@ interface ChatHistoryMessage {
 function getWsUrl(): string {
   if (typeof window === 'undefined') return '';
   const { hostname, protocol } = window.location;
-  const token = document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
+  const token = getMobileWsToken();
   // [mobile-lan] Always hit the ws-server port directly. Next.js's
   // /ws rewrite does not proxy WebSocket upgrades — see useWebSocket.ts
   // for the full explanation.
@@ -190,9 +191,7 @@ export function useOrchestratorMobile({
       const fallbackTitle = firstUserText
         ? firstUserText.slice(0, 60).replace(/\n/g, ' ') + (firstUserText.length > 60 ? '...' : '')
         : undefined;
-      const wsToken = typeof document !== 'undefined'
-        ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
-        : '';
+      const wsToken = getMobileWsToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
       void fetch('/api/v2/chat-history', {
