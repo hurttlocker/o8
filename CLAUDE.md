@@ -351,7 +351,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 - **Don't build what models will commoditize** — Cost dashboards, context optimization, prompt tools, orchestration quality, and briefing features are table-stakes, never differentiators. Our moats are governance, organizational memory, and the operator approval surface.
 - **Console logging prefix**: `[feature-name]` (e.g., `[memory-recall]`, `[compaction]`)
 - **Commit prefix**: `feat:`, `fix:`, `refactor:`, `perf:`, `chore:`
-- **Public changelog safety**: Commit messages are synced (sanitized) to the public repo `hurttlocker/o8` (formerly `Rainwater`). Only `feat:` / `perf:` / `design:` commits survive the filter. When introducing a new internal codename, framework, or tool name, add it to BOTH the sed filter AND the blocklist in `.github/workflows/sync-changelog.yml` (and the local fallback `scripts/sync-public-changelog.sh`). The blocklist fails the workflow if anything leaks.
+- **Public changelog safety**: Commit messages are synced (sanitized) to the public repo `hurttlocker/o8-releases` (formerly `o8`, before that `Rainwater`). Only `feat:` / `perf:` / `design:` commits survive the filter. When introducing a new internal codename, framework, or tool name, add it to BOTH the sed filter AND the blocklist in `.github/workflows/sync-changelog.yml` (and the local fallback `scripts/sync-public-changelog.sh`). The blocklist fails the workflow if anything leaks.
 
 ## Design Constants
 

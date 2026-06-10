@@ -25,7 +25,7 @@ const SUMMARY_MODELS = [
   'nvidia/nemotron-3-super-120b-a12b:free',
 ];
 
-const RELEASE_REPO = 'hurttlocker/o8';
+const RELEASE_REPO = 'hurttlocker/o8-releases';
 const COMMIT_LIMIT = 12;
 
 type GithubRelease = {

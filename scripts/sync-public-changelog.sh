@@ -3,7 +3,7 @@ set -euo pipefail
 
 # Local fallback for .github/workflows/sync-changelog.yml while the CI account
 # is suspended for billing. Generates the sanitized o8 changelog + stats, then
-# pushes to hurttlocker/o8. Logic mirrors the workflow — when updating
+# pushes to hurttlocker/o8-releases. Logic mirrors the workflow — when updating
 # one, update the other.
 
 WORK_DIR="${WORK_DIR:-/tmp/o8-changelog-sync}"
@@ -128,7 +128,7 @@ echo "[sync] Blocklist check passed"
 } > "$OUT_STATS"
 
 # Push to Rainwater
-gh repo clone hurttlocker/o8 "$PUBLIC_CLONE" -- --depth 1
+gh repo clone hurttlocker/o8-releases "$PUBLIC_CLONE" -- --depth 1
 cp "$OUT_CHANGELOG" "$PUBLIC_CLONE/CHANGELOG.md"
 cp "$OUT_STATS" "$PUBLIC_CLONE/STATS.md"
 rm -f "$PUBLIC_CLONE/ROADMAP.md"
@@ -140,5 +140,5 @@ if git diff --cached --quiet; then
 else
   git commit -m "sync: Update changelog $(date -u +%Y-%m-%d)"
   git push
-  echo "[sync] Pushed clean changelog to hurttlocker/o8"
+  echo "[sync] Pushed clean changelog to hurttlocker/o8-releases"
 fi
