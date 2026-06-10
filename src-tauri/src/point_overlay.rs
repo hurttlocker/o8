@@ -23,23 +23,37 @@
 #[cfg(target_os = "macos")]
 pub const POINT_LABEL: &str = "point-overlay";
 
-/// One parsed `[POINT:...]` tag, still in screenshot-pixel space.
+/// One parsed `[POINT:...]` / `[GUIDE:...]` tag, still in screenshot-pixel space.
 pub struct ParsedTag {
     pub x: f64,
     pub y: f64,
     pub label: String,
+    /// GUIDE tags (magic roadmap #3): the marker lands and DWELLS pulsing
+    /// until the user's cursor reaches it (or a long cap) instead of the
+    /// 8s auto-fade — the un-lost button.
+    pub dwell: bool,
 }
 
-/// Parse and STRIP `[POINT:x,y:label]` tags (optionally `[POINT:x,y:label:screenN]`
-/// — the screen suffix is accepted and ignored in v1, single-monitor capture).
-/// Returns the cleaned text (what gets spoken/stored) plus the tags in order.
-/// Malformed tags are stripped but skipped — garbage never reaches TTS.
+/// Parse and STRIP `[POINT:x,y:label]` and `[GUIDE:x,y:label]` tags (optionally
+/// `...:screenN` — the screen suffix is accepted and ignored in v1,
+/// single-monitor capture). Returns the cleaned text (what gets spoken/stored)
+/// plus the tags in order. Malformed tags are stripped but skipped — garbage
+/// never reaches TTS.
 pub fn parse_point_tags(text: &str) -> (String, Vec<ParsedTag>) {
+    const PREFIXES: [(&str, bool); 2] = [("[POINT:", false), ("[GUIDE:", true)];
     let mut clean = String::with_capacity(text.len());
     let mut tags: Vec<ParsedTag> = Vec::new();
     let mut rest = text;
 
-    while let Some(start) = rest.find("[POINT:") {
+    loop {
+        // Earliest occurrence of either prefix wins.
+        let found = PREFIXES
+            .iter()
+            .filter_map(|(p, dwell)| rest.find(p).map(|i| (i, *p, *dwell)))
+            .min_by_key(|(i, _, _)| *i);
+        let Some((start, prefix, dwell)) = found else {
+            break;
+        };
         let (before, tail) = rest.split_at(start);
         clean.push_str(before);
         let Some(end) = tail.find(']') else {
@@ -48,8 +62,9 @@ pub fn parse_point_tags(text: &str) -> (String, Vec<ParsedTag>) {
             rest = "";
             break;
         };
-        let inner = &tail["[POINT:".len()..end];
-        if let Some(tag) = parse_tag_inner(inner) {
+        let inner = &tail[prefix.len()..end];
+        if let Some(mut tag) = parse_tag_inner(inner) {
+            tag.dwell = dwell;
             tags.push(tag);
         }
         rest = &tail[end + 1..];
@@ -85,7 +100,7 @@ fn parse_tag_inner(inner: &str) -> Option<ParsedTag> {
     if !x.is_finite() || !y.is_finite() {
         return None;
     }
-    Some(ParsedTag { x, y, label })
+    Some(ParsedTag { x, y, label, dwell: false })
 }
 
 #[cfg(test)]
@@ -131,6 +146,25 @@ mod parse_tests {
         assert_eq!(clean, "Nothing to point at.");
         assert!(tags.is_empty());
     }
+
+    #[test]
+    fn guide_tag_sets_dwell() {
+        let (clean, tags) = parse_point_tags("Right here. [GUIDE:320,200:Reply button]");
+        assert_eq!(clean, "Right here.");
+        assert_eq!(tags.len(), 1);
+        assert!(tags[0].dwell);
+        assert_eq!(tags[0].label, "Reply button");
+    }
+
+    #[test]
+    fn mixed_point_and_guide_in_order() {
+        let (clean, tags) = parse_point_tags("A [POINT:1,2:a] then [GUIDE:3,4:b] done");
+        assert_eq!(clean, "A then done");
+        assert_eq!(tags.len(), 2);
+        assert!(!tags[0].dwell);
+        assert!(tags[1].dwell);
+        assert_eq!(tags[1].x, 3.0);
+    }
 }
 
 // ── macOS implementation ─────────────────────────────────────────────────────
@@ -171,14 +205,26 @@ mod overlay {
             .map(|t| {
                 let x = (t.x / screen.img_w as f64 * screen.mon_w).clamp(0.0, screen.mon_w);
                 let y = (t.y / screen.img_h as f64 * screen.mon_h).clamp(0.0, screen.mon_h);
-                json!({ "x": x, "y": y, "label": t.label })
+                json!({ "x": x, "y": y, "label": t.label, "dwell": t.dwell })
             })
+            .collect();
+        // GUIDE targets in window-local logical px — the proximity watcher
+        // compares the live cursor against these instead of a fixed timer.
+        let dwell_targets: Vec<(f64, f64)> = points
+            .iter()
+            .filter(|p| p["dwell"].as_bool() == Some(true))
+            .map(|p| (p["x"].as_f64().unwrap_or(0.0), p["y"].as_f64().unwrap_or(0.0)))
             .collect();
 
         let gen = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
         let count = points.len();
         // Singles linger 8s; tours earn 2.5s per extra marker, capped at 20s.
-        let duration_ms: u64 = (8_000 + 2_500 * (count as u64 - 1)).min(20_000);
+        // A GUIDE dwells much longer — it waits for the user, capped at 90s.
+        let duration_ms: u64 = if dwell_targets.is_empty() {
+            (8_000 + 2_500 * (count as u64 - 1)).min(20_000)
+        } else {
+            90_000
+        };
         let payload = json!({
             "gen": gen,
             "points": points,
@@ -200,13 +246,71 @@ mod overlay {
             }
             place_and_show(&app, mon_x, mon_y, mon_w, mon_h);
             let _ = app.emit_to(super::POINT_LABEL, "o8:point-show", payload);
-            log::info!("[point-overlay] gen {gen}: showing {count} point(s) for {duration_ms}ms");
+            log::info!("[point-overlay] gen {gen}: showing {count} point(s) for {duration_ms}ms (dwell: {})", !dwell_targets.is_empty());
 
-            std::thread::sleep(std::time::Duration::from_millis(duration_ms));
+            if dwell_targets.is_empty() {
+                std::thread::sleep(std::time::Duration::from_millis(duration_ms));
+            } else {
+                dwell_until_reached(&app, gen, duration_ms, &dwell_targets);
+            }
             if GENERATION.load(Ordering::SeqCst) == gen {
                 hide_with_fade(&app);
             }
         });
+    }
+
+    /// GUIDE lifecycle: poll the cursor (~150ms, the dock poller's cadence
+    /// class) until it reaches a dwell target — "the user acted" — then grant
+    /// a short grace so the ring is still there as they click, and return.
+    /// Also returns at the cap, or immediately when a newer show supersedes
+    /// this generation. Same physical-px coordinate math as
+    /// `dock_window::cursor_probe` — cursor, window origin, and scale all from
+    /// the same window so mixed-DPI monitors stay consistent.
+    fn dwell_until_reached(app: &tauri::AppHandle, gen: u64, cap_ms: u64, targets: &[(f64, f64)]) {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_millis(cap_ms);
+        let mut grace_until: Option<std::time::Instant> = None;
+        loop {
+            if GENERATION.load(Ordering::SeqCst) != gen {
+                return; // superseded — the newer show owns the window now
+            }
+            let now = std::time::Instant::now();
+            if now >= deadline {
+                return;
+            }
+            if let Some(g) = grace_until {
+                if now >= g {
+                    return;
+                }
+            } else if cursor_near(app, targets) {
+                grace_until = Some(now + std::time::Duration::from_millis(2_500));
+            }
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
+    }
+
+    /// Is the live cursor within ~56 logical px of any target? Targets are
+    /// window-local logical; cursor + window origin are physical.
+    fn cursor_near(app: &tauri::AppHandle, targets: &[(f64, f64)]) -> bool {
+        let Some(window) = app.get_webview_window(super::POINT_LABEL) else {
+            return false;
+        };
+        let Ok(cursor) = app.cursor_position() else {
+            return false;
+        };
+        let Ok(pos) = window.outer_position() else {
+            return false;
+        };
+        let Ok(scale) = window.scale_factor() else {
+            return false;
+        };
+        let radius = 56.0 * scale;
+        targets.iter().any(|(lx, ly)| {
+            let tx = pos.x as f64 + lx * scale;
+            let ty = pos.y as f64 + ly * scale;
+            let dx = cursor.x - tx;
+            let dy = cursor.y - ty;
+            dx * dx + dy * dy <= radius * radius
+        })
     }
 
     /// Immediately retire any visible pointers (called when a new agent task
