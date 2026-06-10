@@ -74,8 +74,18 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // NOTE: if blanket consent ever ships, exclude o8_dispatch from it — a
         // worker spawn must never go silent.
         "o8_status" => SafetyClass::ReadOnly,
+        "o8_needs_me" => SafetyClass::ReadOnly,
         "o8_ask" => SafetyClass::ReadOnly,
         "o8_dispatch" => SafetyClass::Reversible,
+        // Approval triage (magic roadmap #2). Semantically these RELEASE a
+        // gated action (a merge, a plan, a command) — Destructive in spirit,
+        // but Destructive tools are withheld from the model entirely by
+        // enabled_tools(), so they're tagged Reversible: with blanket consent
+        // hardcoded OFF in V1 every call fires the spoken proposal + dock
+        // confirm card. NOTE: if blanket consent ever ships, EXCLUDE these
+        // (like o8_dispatch) — releasing an approval must never go silent.
+        "o8_approve_item" => SafetyClass::Reversible,
+        "o8_reject_item" => SafetyClass::Reversible,
         // GitHub + local git (Tier-3) — all read-only.
         "git_status" => SafetyClass::ReadOnly,
         "git_log" => SafetyClass::ReadOnly,
