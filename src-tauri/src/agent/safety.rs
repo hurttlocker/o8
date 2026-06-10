@@ -61,6 +61,13 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // CSV (writes sandboxed to ~/.o8/agent-output)
         "csv_read" => SafetyClass::ReadOnly,
         "csv_write" => SafetyClass::Reversible,
+        // In-place text edit — classed ReadOnly DELIBERATELY (operator-locked
+        // 2026-06-10): the edit lane holds the pre-state and surfaces a
+        // one-tap Revert chip in the dock, so governance is undo-AFTER
+        // instead of confirm-before (a card on every rewrite kills the
+        // magic). A frontmost-app guard refuses misdirected writes, and the
+        // tool only fires when the prompt carried an explicit edit verb.
+        "apply_text_edit" => SafetyClass::ReadOnly,
         // o8 bridge (Tier-2). Reads are autonomous. o8_dispatch launches an
         // autonomous coding worker (compute + tokens) → Reversible so it ALWAYS
         // shows the spoken-confirm card in V1 (blanket consent is hardcoded OFF).
