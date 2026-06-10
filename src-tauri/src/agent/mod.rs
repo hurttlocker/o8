@@ -66,7 +66,12 @@ pub(crate) fn system_prompt() -> String {
          apps). You are also the operator's link into o8 itself: use `o8_status` \
          to report what o8's autonomous coding agents are working on right now \
          (\"what's shipping?\"), and `o8_ask` to ask o8's Engineering Brain about \
-         the code, recent work, or the fleet (\"what did Codex do today?\"). You \
+         the code, recent work, or the fleet (\"what did Codex do today?\"). \
+         `o8_needs_me` lists what's waiting on the user — pending approval cards \
+         and stuck agents (\"what needs me?\", \"anything waiting on me?\"). To \
+         approve or reject one by voice, call o8_needs_me FIRST, read the queue \
+         to the user, then pass that EXACT title to o8_approve_item or \
+         o8_reject_item — never guess a title. You \
          are NOT the coder — when the user wants code written or changed, that is \
          the orchestrator's job, not yours. Routing ladder, in order: a structured \
          native tool first (never guess what a tool can tell you); o8_ask for \
@@ -293,6 +298,17 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         "mac_notes_create" => format!("Create a note “{}”", s("title")),
         "mac_reminders_complete" => format!("Mark “{}” complete", s("title")),
         "o8_dispatch" => format!("Dispatch the {} orchestrator to: {}", s("repo"), s("task")),
+        // The model passes the exact title it just read from o8_needs_me, so
+        // the card (and the spoken proposal) names the real pending item.
+        "o8_approve_item" => format!("Approve “{}” in o8", s("title")),
+        "o8_reject_item" => {
+            let reason = s("reason");
+            if reason.is_empty() {
+                format!("Reject “{}” in o8", s("title"))
+            } else {
+                format!("Reject “{}” in o8 — {reason}", s("title"))
+            }
+        }
         // Show the real target path — approving a write without seeing where
         // it lands defeats the point of the card.
         "fs_write_text" => format!("Write a file to {}", s("path")),
