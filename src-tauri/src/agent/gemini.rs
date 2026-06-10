@@ -27,11 +27,26 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     let tool_specs = tools::enabled_tools();
 
     // Gemini folds the system prompt into the first user turn (matches
-    // gemini_ask.rs — avoids systemInstruction shape uncertainty).
-    let mut contents: Vec<Value> = vec![json!({
-        "role": "user",
-        "parts": [{ "text": format!("{}\n\nUser request: {}", super::system_prompt(), intent) }]
-    })];
+    // gemini_ask.rs — avoids systemInstruction shape uncertainty). When the
+    // task carries screen context (dossier #2), the screenshot rides the same
+    // turn as inline_data and the prompt gains the POINT-tag teaching section.
+    let mut first_parts: Vec<Value> = Vec::new();
+    let first_text = match &ctx.screen {
+        Some(screen) => format!(
+            "{}\n\n{}\n\nUser request: {}",
+            super::system_prompt(),
+            super::screen_prompt_section(screen.img_w, screen.img_h),
+            intent
+        ),
+        None => format!("{}\n\nUser request: {}", super::system_prompt(), intent),
+    };
+    first_parts.push(json!({ "text": first_text }));
+    if let Some(screen) = &ctx.screen {
+        first_parts.push(json!({
+            "inline_data": { "mime_type": "image/png", "data": screen.png_base64 }
+        }));
+    }
+    let mut contents: Vec<Value> = vec![json!({ "role": "user", "parts": first_parts })];
 
     let mut tool_call_log: Vec<Value> = Vec::new();
     let mut result_text = String::new();
