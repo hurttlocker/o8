@@ -178,18 +178,26 @@ function AskTurnRow({
 interface DockAskPanelProps {
   thread: AskTurn[];
   onClose: () => void;
+  /** Chat continuity (dock in-panel dictation): a pending You turn carrying the
+   * live transcript + a state visual (waveform / polishing orbit). */
+  pendingUser?: { text: string; visual: ReactNode } | null;
+  /** Pending Symon turn while the agent loop runs (orbit + label + timer). */
+  pendingAssistant?: { visual: ReactNode } | null;
 }
 
 /** The 420×380 answer panel body — header + scrollable thread. */
-export function DockAskPanel({ thread, onClose }: DockAskPanelProps) {
+export function DockAskPanel({ thread, onClose, pendingUser = null, pendingAssistant = null }: DockAskPanelProps) {
   const threadRef = useRef<HTMLDivElement | null>(null);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
 
-  // Auto-scroll to the newest turn.
+  // Auto-scroll to the newest turn — including the live pending transcript,
+  // which grows line by line while the user talks.
+  const hasPendingUser = !!pendingUser;
+  const hasPendingAssistant = !!pendingAssistant;
   useEffect(() => {
     const el = threadRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [thread.length]);
+  }, [thread.length, pendingUser?.text, hasPendingUser, hasPendingAssistant]);
 
   const handleCopy = (index: number, text: string) => {
     if (!text.trim()) return;
@@ -275,7 +283,29 @@ export function DockAskPanel({ thread, onClose }: DockAskPanelProps) {
         {thread.map((turn, i) => (
           <AskTurnRow key={i} turn={turn} index={i} copied={copiedIdx === i} onCopy={handleCopy} />
         ))}
-        <style>{'.ndock-ask-thread::-webkit-scrollbar{width:0;height:0}'}</style>
+        {/* Pending You turn — the live dictation, in place in the conversation */}
+        {pendingUser ? (
+          <div style={{ margin: '12px 0', animation: 'o8AskPendIn 0.26s cubic-bezier(0.22, 1, 0.36, 1)' }}>
+            <div style={LABEL_STYLE}>You</div>
+            {pendingUser.text ? (
+              <p style={PROMPT_STYLE}>{pendingUser.text}</p>
+            ) : (
+              <p style={{ ...PROMPT_STYLE, color: 'rgba(255, 255, 255, 0.4)' }}>Listening…</p>
+            )}
+            {pendingUser.visual ? <div style={{ marginTop: 6 }}>{pendingUser.visual}</div> : null}
+          </div>
+        ) : null}
+        {/* Pending Symon turn — the working orbit + timer, inline */}
+        {pendingAssistant ? (
+          <div style={{ margin: '12px 0', animation: 'o8AskPendIn 0.26s cubic-bezier(0.22, 1, 0.36, 1)' }}>
+            <div style={LABEL_STYLE}>Symon</div>
+            {pendingAssistant.visual}
+          </div>
+        ) : null}
+        <style>{
+          '.ndock-ask-thread::-webkit-scrollbar{width:0;height:0}'
+          + '@keyframes o8AskPendIn { from { opacity: 0; transform: translateY(4px); } to { opacity: 1; transform: translateY(0); } }'
+        }</style>
       </div>
     </div>
   );
