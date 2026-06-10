@@ -42,8 +42,8 @@
  *   pong              — LOSSY: keepalive response, loss is harmless.
  */
 
-import { readFileSync, watch, existsSync } from 'node:fs';
-import { basename, join, resolve } from 'node:path';
+import { readFileSync, statSync, watch, existsSync } from 'node:fs';
+import { basename, extname, join, resolve } from 'node:path';
 import { execSync, execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
@@ -2988,13 +2988,31 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   } catch { /* resize may fail if PTY exited */ }
 }
 
+const TERMINAL_IMAGE_EXTENSIONS = new Set([
+  '.png', '.jpg', '.jpeg', '.gif', '.webp', '.bmp', '.tiff', '.heic',
+]);
+const TERMINAL_IMAGE_MAX_BYTES = 10 * 1024 * 1024;
+
 function handleTerminalImage(_client: ClientState, msg: Record<string, unknown>) {
-  const sessionName = msg.sessionName as string;
-  const filePath = msg.filePath as string;
+  const sessionName = typeof msg.sessionName === 'string' ? msg.sessionName : '';
+  const filePath = typeof msg.filePath === 'string' ? msg.filePath : '';
   if (!sessionName || !filePath) return;
 
   try {
-    const resolved = filePath.replace(/^~/, process.env.HOME ?? '/tmp');
+    const resolved = resolve(filePath.replace(/^~/, process.env.HOME ?? '/tmp'));
+    // Token-authenticated channel, but it must not double as a generic
+    // file-read primitive (a ws-token holder could otherwise lift the signing
+    // key or any dotfile). Images only, regular files only, capped size.
+    const ext = extname(resolved).toLowerCase();
+    if (!TERMINAL_IMAGE_EXTENSIONS.has(ext)) {
+      console.log(`[ws-server] terminal-image: refused non-image path ${resolved}`);
+      return;
+    }
+    const stat = statSync(resolved);
+    if (!stat.isFile() || stat.size > TERMINAL_IMAGE_MAX_BYTES) {
+      console.log(`[ws-server] terminal-image: refused ${resolved} (not a regular file or too large)`);
+      return;
+    }
     const data = readFileSync(resolved);
     const b64 = data.toString('base64');
     const filename = basename(resolved);

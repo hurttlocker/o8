@@ -10,6 +10,12 @@
  *
  * Opened by the phone-icon button in DesktopStatusBar. The token is encoded in
  * the QR (that's the point of pairing) but never printed on screen.
+ *
+ * Browser pairing: the mobile PWA no longer receives the ws-token in its HTML
+ * for LAN page loads (that handed the master credential to any LAN browser).
+ * Instead this view offers a copyable `http://host:port/mobile#tk=<token>`
+ * link — the fragment never hits the wire; the PWA captures it into
+ * localStorage on first load (see @/lib/mobile/ws-token-client).
  */
 
 import { useCallback, useEffect, useState } from 'react';
@@ -30,12 +36,13 @@ interface PairingPayload {
 
 type ViewState =
   | { status: 'loading' }
-  | { status: 'ready'; host: string; apiPort: number; wsPort: number; qrDataUrl: string }
+  | { status: 'ready'; host: string; apiPort: number; wsPort: number; token: string; qrDataUrl: string }
   | { status: 'error'; message: string };
 
 export function MobilePairingView() {
   const [state, setState] = useState<ViewState>({ status: 'loading' });
   const [reloadKey, setReloadKey] = useState(0);
+  const [linkCopied, setLinkCopied] = useState(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -75,6 +82,7 @@ export function MobilePairingView() {
             host: data.host,
             apiPort: data.apiPort,
             wsPort: data.wsPort,
+            token: data.token,
             qrDataUrl,
           });
         }
@@ -94,6 +102,17 @@ export function MobilePairingView() {
     setState({ status: 'loading' });
     setReloadKey((k) => k + 1);
   }, []);
+
+  const copyBrowserLink = useCallback(() => {
+    if (state.status !== 'ready') return;
+    // The token rides in the URL fragment — never sent to the server, captured
+    // into localStorage by the PWA on first load, then scrubbed from the URL.
+    const link = `http://${state.host}:${state.apiPort}/mobile#tk=${encodeURIComponent(state.token)}`;
+    void navigator.clipboard?.writeText(link).then(() => {
+      setLinkCopied(true);
+      setTimeout(() => setLinkCopied(false), 2200);
+    });
+  }, [state]);
 
   const openConnections = useCallback(() => {
     window.dispatchEvent(
@@ -276,6 +295,41 @@ export function MobilePairingView() {
               <span style={{ opacity: 0.5 }}>·</span>
               <span>WS {state.wsPort}</span>
             </div>
+
+            <button
+              type="button"
+              onClick={copyBrowserLink}
+              style={{
+                marginTop: 14,
+                minHeight: 36,
+                paddingLeft: 18,
+                paddingRight: 18,
+                borderRadius: 10,
+                border: '1px solid var(--t-panel-border)',
+                background: 'var(--t-bg-card)',
+                color: 'var(--t-text)',
+                fontFamily: APP_FONT,
+                fontSize: 12.5,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              {linkCopied ? 'Link copied' : 'Copy browser pairing link'}
+            </button>
+            <p
+              style={{
+                margin: 0,
+                marginTop: 4,
+                fontSize: 11.5,
+                fontWeight: 300,
+                lineHeight: 1.5,
+                color: 'var(--t-text-muted)',
+                maxWidth: 320,
+              }}
+            >
+              Using the web app instead? Send this link to your phone and open
+              it once — it pairs the browser the same way the QR pairs the app.
+            </p>
           </>
         ) : null}
 

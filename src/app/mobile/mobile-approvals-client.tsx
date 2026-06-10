@@ -43,6 +43,7 @@ import {
 } from './mobile-chat-repos';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { triggerHaptic } from '@/lib/mobile/haptic';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 
 const FleetView = lazy(async () => ({
   default: (await import('@/components/mobile/FleetView')).FleetView,
@@ -76,8 +77,7 @@ function MobileViewShell({ children, themeId }: { children: ReactNode; themeId: 
 }
 
 function getWsToken() {
-  if (typeof document === 'undefined') return null;
-  return document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? null;
+  return getMobileWsToken() || null;
 }
 
 function getWsBridgeUrl(token: string) {

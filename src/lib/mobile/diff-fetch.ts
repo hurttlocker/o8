@@ -22,9 +22,10 @@ export interface MobileDiffPayload {
   error?: string;
 }
 
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
+
 function getWsToken(): string {
-  if (typeof document === 'undefined') return '';
-  return document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? '';
+  return getMobileWsToken();
 }
 
 function authHeaders(): Record<string, string> {

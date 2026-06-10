@@ -45,6 +45,7 @@ import {
 import { IconCaretUp, IconPlus } from '@/app/mobile/mobile-approvals-shared';
 import { usePressToDictate } from '@/lib/mobile/use-press-to-dictate';
 import { PullToRefresh } from './PullToRefresh';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 
 interface OrchestratorViewProps {
   onBack: () => void;
@@ -219,9 +220,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
   const [defaultDispatchRuntime, setDefaultDispatchRuntime] = useState<string | null>(null);
   useEffect(() => {
     let cancelled = false;
-    const wsToken = typeof document !== 'undefined'
-      ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
-      : '';
+    const wsToken = getMobileWsToken();
     const headers: Record<string, string> = {};
     if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
     fetch('/api/panel/operator-defaults', { headers, cache: 'no-store' })
@@ -292,9 +291,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
     const runtime = activeThread?.runtime ?? 'claude-code';
     console.log('[mobile-orchestrator] new conversation requested', { repoPath });
     try {
-      const wsToken = typeof document !== 'undefined'
-        ? document.querySelector('meta[name="ws-token"]')?.getAttribute('content') ?? ''
-        : '';
+      const wsToken = getMobileWsToken();
       const headers: Record<string, string> = { 'Content-Type': 'application/json' };
       if (wsToken) headers.Authorization = `Bearer ${wsToken}`;
       const response = await fetch('/api/orchestrator/reset-session', {

@@ -39,6 +39,7 @@
 import { useEffect } from 'react';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { triggerHaptic } from '@/lib/mobile/haptic';
+import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
 
 export const MOBILE_URL_PUSH_EVENT = 'o8:mobile-url-push' as const;
 
@@ -66,9 +67,7 @@ const INITIAL_BACKOFF_MS = 1_000;
 const MAX_BACKOFF_MS = 30_000;
 
 function readWsToken(): string {
-  if (typeof document === 'undefined') return '';
-  const meta = document.querySelector('meta[name="ws-token"]');
-  return meta?.getAttribute('content') ?? '';
+  return getMobileWsToken();
 }
 
 function buildWsUrl(): string | null {
