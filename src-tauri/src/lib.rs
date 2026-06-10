@@ -2952,6 +2952,14 @@ fn dock_set_expanded(app: tauri::AppHandle, expanded: bool) {
     dock_window::set_expanded(&app, expanded);
 }
 
+/// Report the painted pill's window-local logical rect (from the dock React
+/// layer, on every morph). Drives the hit-test poller's click-through toggle —
+/// see `dock_window::spawn_hit_test_poller`.
+#[tauri::command]
+fn dock_set_hit_rect(x: f64, y: f64, w: f64, h: f64) {
+    dock_window::set_hit_rect(x, y, w, h);
+}
+
 /// Open the standalone Voice settings window (Symon parity). Double-tapping the
 /// dock pill invokes this — it works even when the main o8 window is closed,
 /// since the dock is always-on. Creates the window on first call, then just
@@ -3415,6 +3423,7 @@ pub fn run() {
             tts_toggle_pause,
             tts_is_active,
             dock_set_expanded,
+            dock_set_hit_rect,
             open_voice_settings,
             voice_prefs_get,
             voice_prefs_set,

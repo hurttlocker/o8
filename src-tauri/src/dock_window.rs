@@ -30,6 +30,13 @@
 #[cfg(target_os = "macos")]
 pub const DOCK_LABEL: &str = "dock";
 
+/// Window-local logical rect of the PAINTED pill content, reported by the
+/// React layer (`dock_set_hit_rect`) on every morph. None until the page
+/// hydrates — and None means CLICK-THROUGH, so a dead webview never blocks
+/// clicks at the top of the screen.
+#[cfg(target_os = "macos")]
+static HIT_RECT: std::sync::Mutex<Option<(f64, f64, f64, f64)>> = std::sync::Mutex::new(None);
+
 /// Logical size of the dock window. The pill content centers inside this; the
 /// React layer keeps the dead-zone tight (pointer-events: none on the wrapper).
 #[cfg(target_os = "macos")]
@@ -124,9 +131,15 @@ pub fn create(app: &tauri::AppHandle, api_port: u16) {
 
     apply_macos_recipe(&window);
     reposition(&window);
-    // Keep the cursor dead-zone tight in the React layer, not by globally
-    // ignoring cursor events on the Rust side (matches Symon's pill).
-    let _ = window.set_ignore_cursor_events(false);
+    // CLICK-THROUGH by default. The window frame is a 520-wide strip at the
+    // top of the screen — far larger than the painted pill — and macOS routes
+    // every click in a window's frame to that window regardless of pixel
+    // alpha, so a non-ignoring dock hijacks clicks meant for whatever sits
+    // under the transparent area (menu bar, a terminal title bar). The
+    // hit-test poller below flips events ON only while the cursor is over the
+    // pill rect that React reports via `dock_set_hit_rect`.
+    let _ = window.set_ignore_cursor_events(true);
+    spawn_hit_test_poller(app.clone());
     // ALWAYS-ON: order it front WITHOUT making it key so the idle capsule is on
     // screen from boot. The window was built `.visible(true)`, but on some Tauri
     // versions a borderless transparent window built shown still needs an
@@ -184,6 +197,75 @@ pub fn hide(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window(DOCK_LABEL) {
         let _ = window.hide();
     }
+}
+
+/// Record the painted pill's window-local logical rect (from the React layer,
+/// via the `dock_set_hit_rect` command). The poller compares the cursor
+/// against THIS, not the window frame.
+#[cfg(target_os = "macos")]
+pub fn set_hit_rect(x: f64, y: f64, w: f64, h: f64) {
+    let mut slot = HIT_RECT.lock().unwrap_or_else(|p| p.into_inner());
+    *slot = Some((x, y, w, h));
+}
+
+/// Cursor-driven click-through toggle (the overlay-app pattern). While the
+/// global cursor sits over the reported pill rect, the window accepts events
+/// (buttons, taps, file drags); everywhere else in the frame it is
+/// click-through. Ignored windows receive NO input — including drag events —
+/// so the poller is the only thing that can let a Finder drag reach the drop
+/// zone: dragging across the pill rect flips events on, the dragenter fires,
+/// the zone morphs wider, React reports the bigger rect, and the poller keeps
+/// events on over it. Adaptive cadence: 40ms while the cursor is inside the
+/// window frame, 200ms otherwise — one cursor read per tick, negligible.
+#[cfg(target_os = "macos")]
+fn spawn_hit_test_poller(app: tauri::AppHandle) {
+    use tauri::Manager;
+    std::thread::spawn(move || {
+        let mut ignoring = true;
+        loop {
+            let Some(window) = app.get_webview_window(DOCK_LABEL) else {
+                std::thread::sleep(std::time::Duration::from_millis(500));
+                continue;
+            };
+            let (over_pill, in_frame) = cursor_probe(&app, &window).unwrap_or((false, false));
+            if over_pill == ignoring {
+                ignoring = !over_pill;
+                let _ = window.set_ignore_cursor_events(ignoring);
+            }
+            let tick = if in_frame { 40 } else { 200 };
+            std::thread::sleep(std::time::Duration::from_millis(tick));
+        }
+    });
+}
+
+/// (cursor over the pill rect, cursor inside the window frame) — both in
+/// physical px. The hit rect is padded 4 logical px so edges stay forgiving.
+#[cfg(target_os = "macos")]
+fn cursor_probe(app: &tauri::AppHandle, window: &tauri::WebviewWindow) -> Option<(bool, bool)> {
+    let cursor = app.cursor_position().ok()?;
+    let win_pos = window.outer_position().ok()?;
+    let win_size = window.outer_size().ok()?;
+    let scale = window.scale_factor().ok()?;
+
+    let in_frame = cursor.x >= win_pos.x as f64
+        && cursor.x < (win_pos.x + win_size.width as i32) as f64
+        && cursor.y >= win_pos.y as f64
+        && cursor.y < (win_pos.y + win_size.height as i32) as f64;
+    if !in_frame {
+        return Some((false, false));
+    }
+
+    let rect = { *HIT_RECT.lock().unwrap_or_else(|p| p.into_inner()) };
+    let Some((x, y, w, h)) = rect else {
+        return Some((false, true));
+    };
+    let pad = 4.0 * scale;
+    let rx = win_pos.x as f64 + x * scale - pad;
+    let ry = win_pos.y as f64 + y * scale - pad;
+    let rw = w * scale + pad * 2.0;
+    let rh = h * scale + pad * 2.0;
+    let over = cursor.x >= rx && cursor.x < rx + rw && cursor.y >= ry && cursor.y < ry + rh;
+    Some((over, true))
 }
 
 /// Apply the transparent + level-25 + nonactivating NSWindow recipe. Runs on
@@ -275,6 +357,8 @@ fn reposition(window: &tauri::WebviewWindow) {
 // ── Non-macOS no-ops ──
 #[cfg(not(target_os = "macos"))]
 pub fn create(_app: &tauri::AppHandle, _api_port: u16) {}
+#[cfg(not(target_os = "macos"))]
+pub fn set_hit_rect(_x: f64, _y: f64, _w: f64, _h: f64) {}
 #[cfg(not(target_os = "macos"))]
 pub fn show(_app: &tauri::AppHandle) {}
 #[cfg(not(target_os = "macos"))]
