@@ -5,8 +5,8 @@
  *
  * Two side-by-side mode cards (#888/#892):
  *   - LEFT  — "Fleet orchestration" — Claude orchestrates Codex +
- *             Gemini + opencode in parallel waves. Tagged "using Claude
- *             Opus 4.8".
+ *             Gemini + opencode in parallel waves. Tagged with the
+ *             resolved orchestrator model (operator default).
  *   - RIGHT — "Single runtime" — collapsible runtime sub-picker
  *             (Codex / Gemini / opencode / Claude Code). Dispatches one
  *             agent without orchestration overhead.
@@ -24,6 +24,8 @@ import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
 import { useExperimentalGeminiFlag } from '@/lib/operator/use-experimental-gemini';
 import { useExperimentalChatFlag } from '@/lib/operator/use-experimental-chat';
+import { useOrchestratorModel } from '@/lib/operator/use-orchestrator-model';
+import { formatModelLabel } from '@/lib/format';
 import type { ChatModelId } from './chat-models';
 
 export type { ChatModelId, OrchestrationMode };
@@ -65,6 +67,7 @@ function ModePickerBase({
   const opencodeEnabled = useExperimentalOpencodeFlag();
   const geminiEnabled = useExperimentalGeminiFlag();
   const chatEnabled = useExperimentalChatFlag();
+  const orchestratorModel = useOrchestratorModel();
   const visibleRuntimes = useMemo(
     () => SINGLE_RUNTIMES.filter((r) =>
       (r.id !== 'opencode' || opencodeEnabled) && (r.id !== 'gemini' || geminiEnabled),
@@ -120,7 +123,7 @@ function ModePickerBase({
         active={selectedMode === 'fleet'}
         title="Fleet orchestration"
         copy="Claude orchestrates Codex + Gemini + opencode in parallel waves."
-        tag="using Claude Opus 4.8"
+        tag={`using Claude ${formatModelLabel(orchestratorModel)}`}
         onClick={handleClickFleet}
         glyph={<FleetGlyph />}
       />

@@ -63,12 +63,14 @@ function connectionLabel(state: MobileOrchestratorConnectionState): string {
 }
 
 function compactModelLabel(model: string): string {
-  // claude-opus-4-7 → Opus 4.7, claude-sonnet-4-6 → Sonnet 4.6
+  // claude-opus-4-7 → Opus 4.7, claude-sonnet-4-6 → Sonnet 4.6,
+  // claude-fable-5 → Fable 5 (single-part versions have no minor)
   const stripped = model.replace(/^claude-/, '');
-  const match = stripped.match(/^(opus|sonnet|haiku)-(\d+)-(\d+)/i);
+  const match = stripped.match(/^(opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/i);
   if (match) {
     const [, family, major, minor] = match;
-    return `${family.charAt(0).toUpperCase() + family.slice(1)} ${major}.${minor}`;
+    const version = minor !== undefined ? `${major}.${minor}` : major;
+    return `${family.charAt(0).toUpperCase() + family.slice(1)} ${version}`;
   }
   return model;
 }
