@@ -4,14 +4,30 @@ import type { ResetPacketInput } from './types';
 
 async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
-  const bound = listLanes().filter(
-    (lane) => lane.packetId === input.packetId
-      && lane.status !== 'archived'
-      && lane.status !== 'completed',
-  );
+  const allBound = listLanes().filter((lane) => lane.packetId === input.packetId);
 
-  if (bound.length === 0) {
+  if (allBound.length === 0) {
     throw new Error(`Packet ${input.packetId} not found — no mission packet and no lane.`);
+  }
+
+  // #1215 — same sweep as archiveLanesForPacket (#1214): terminal lanes must
+  // be UNBOUND, not skipped, or a dead archived lane keeps its packetId
+  // through the reset and poisons every packet-keyed read afterwards. Only
+  // active lanes go through the archive + branch-cleanup path below.
+  const bound: typeof allBound = [];
+  for (const lane of allBound) {
+    if (lane.status !== 'archived' && lane.status !== 'completed') {
+      bound.push(lane);
+      continue;
+    }
+    try {
+      updateLane(lane.id, { packetId: '', worktreePath: null, sessionKey: null });
+      console.log(`[reset-packet] Unbound ${lane.status} lane ${lane.id} from evicted packet ${input.packetId}`);
+    } catch (error) {
+      console.warn(
+        `[reset-packet] Could not unbind terminal lane ${lane.id}: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
   }
 
   const cleanupTargets = new Map<string, { repoPath: string; branch: string; worktreePath: string | null }>();
@@ -60,7 +76,10 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
     try {
       const { readdir, rm } = await import('node:fs/promises');
       const path = await import('node:path');
-      const repoPaths = new Set([...cleanupTargets.values()].map((target) => target.repoPath));
+      // #1215 — derive repos from ALL bound lanes (terminal included) so a
+      // packet stranded on only-terminal lanes still gets its worktree dirs
+      // swept.
+      const repoPaths = new Set(allBound.map((lane) => lane.repoPath));
       for (const repoPath of repoPaths) {
         const baseDir = path.join(repoPath, '.cortex-worktrees');
         const dirs = await readdir(baseDir).catch(() => [] as string[]);
@@ -112,18 +131,18 @@ export async function resetPacket(input: ResetPacketInput) {
   const branchCleanupExpected = input.clearWorktree && Boolean(packet.branchTarget && state.repoPath);
   try {
     const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
-    const bound = listLanes().filter(
-      (lane) => lane.packetId === packet.id
-        && lane.status !== 'archived'
-        && lane.status !== 'completed',
-    );
+    const bound = listLanes().filter((lane) => lane.packetId === packet.id);
     if (bound.length === 0) {
-      console.log(`[reset-packet] No active lane bound to packet ${packet.referenceLabel} (${packet.id})`);
+      console.log(`[reset-packet] No lane bound to packet ${packet.referenceLabel} (${packet.id})`);
     }
     for (const lane of bound) {
+      // #1215 — terminal lanes get unbound below like the rest but are never
+      // re-archived and never donate a worktreePath (mirrors
+      // archiveLanesForPacket, #1214).
+      const terminal = lane.status === 'archived' || lane.status === 'completed';
       // First seen worktree wins for the pruning path below — matches the
       // previous single-lane behavior.
-      if (!worktreePath && lane.worktreePath) {
+      if (!terminal && !worktreePath && lane.worktreePath) {
         worktreePath = lane.worktreePath;
       }
       try {
@@ -137,6 +156,10 @@ export async function resetPacket(input: ResetPacketInput) {
         // main repo instead of a fresh worktree.
         updateLane(lane.id, { packetId: '', worktreePath: null, sessionKey: null });
         console.log(`[reset-packet] cleared stale lane fields for ${lane.id}`);
+        if (terminal) {
+          console.log(`[reset-packet] Unbound ${lane.status} lane ${lane.id} from packet ${packet.referenceLabel}`);
+          continue;
+        }
         if (branchCleanupExpected) {
           console.log(`[reset-packet] Deferred lane ${lane.id} cleanup to branch cleanup for packet ${packet.referenceLabel}`);
           continue;
