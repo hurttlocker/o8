@@ -619,6 +619,14 @@ async function persistSessionOutcome(
       // when the packet's branch actually lands on main. Without that hop the
       // routing recommender (#747) never sees a scoreable signal.
     }).onConflictDoNothing();
+    // New ledger row — cached "what shipped"-style Q&A answers are now stale.
+    // Lazy import keeps the qa module out of this file's cold-start graph.
+    try {
+      const { invalidateAnswerCache } = await import('@/lib/cortex/qa/ask');
+      invalidateAnswerCache();
+    } catch {
+      // Best-effort — never let cache invalidation break the capture flow.
+    }
   } catch (err) {
     // Swallow — never let a ledger write break the capture flow.
     console.warn('[session-outcome-write] insert failed:', err);

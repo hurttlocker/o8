@@ -93,11 +93,13 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
     const result = await apiFetch('/api/cortex/ask/answer', {
       method: 'POST',
       body: JSON.stringify(body),
-      // 30s ceiling — classifier+retrieval+composer typically resolve in <5s
-      // after the #1115 fast-path (OpenRouter tier 1 + 60s cache). The 30s
-      // floor covers cold OpenRouter timeouts → Codex CLI fallback (~15s)
-      // + composer streaming on long answers.
-      timeoutMs: 30_000,
+      // 90s ceiling. The composer's own tier ceilings stack well past 30s
+      // (Class B Sonnet CLI alone is allowed 300s; a measured heavy Class B
+      // ran 26.9s end-to-end on the WARM path, 2026-06-11). At 30s an agent
+      // got a timeout error while the server kept composing — and the natural
+      // retry doubled the spend before single-flight coalescing existed. 90s
+      // covers every realistic chain; truly wedged calls still fail.
+      timeoutMs: 90_000,
     }) as {
       ok?: boolean;
       answer?: string;

@@ -4,10 +4,11 @@
  * fast-path + cache shipped in #1115).
  *
  * Five-tier provider chain — all return the same { class, bm25Variants } shape:
- *   1. OpenRouter (grok-4.1-fast + flash-lite + gpt-5.4-nano fallback) — paid HTTP, ~500ms
- *   2. Claude Haiku CLI       (free for Claude Max users — skipped unless in-app orchestrator ON)
- *   3. Codex CLI (gpt-5.5)    (free for ChatGPT Plus / Codex sub users)
- *   4. Gemini Flash JSON-mode (last LLM tier; demoted because of recent 503s)
+ *   1. OpenRouter (flash-lite + gpt-5.4-nano + grok-4.3 fallback) — paid HTTP, ~500ms
+ *   2. Gemini Flash JSON-mode (free-tier HTTP, ~0.5-1.5s — promoted above the
+ *      CLI tiers 2026-06-11: HTTP beats a 6-8s process bootstrap)
+ *   3. Claude Haiku CLI       (free for Claude Max users — skipped unless in-app orchestrator ON)
+ *   4. Codex CLI (gpt-5.5)    (free for ChatGPT Plus / Codex sub users)
  *   5. Heuristic fallback     (lexical "why/how/explain" → Class B)
  *
  * Why OpenRouter is tier 1 now (changed in #1115): the CLI tiers spend 15-30s
@@ -104,10 +105,10 @@ bm25_variants: 3-5 alternate phrasings using synonyms and rephrasings of the que
 
 /**
  * Classify the question with a 5-tier provider chain:
- *   1. OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5.4-nano fallback) — paid HTTP, ~500ms
- *   2. Claude Haiku CLI (Claude Max sub — free, ~6-12s, only when in-app orchestrator toggle ON)
- *   3. Codex CLI gpt-5.5 (ChatGPT Plus sub — free, ~15-30s, fallback when OpenRouter unreachable)
- *   4. Gemini Flash (JSON-mode; demoted because of recent 503s)
+ *   1. OpenRouter (flash-lite w/ gpt-5.4-nano + grok-4.3 fallback) — paid HTTP, ~500ms
+ *   2. Gemini Flash (JSON-mode, free-tier HTTP ~0.5-1.5s — ahead of CLI bootstraps)
+ *   3. Claude Haiku CLI (Claude Max sub — free, ~6-12s, only when in-app orchestrator toggle ON)
+ *   4. Codex CLI gpt-5.5 (ChatGPT Plus sub — free, ~15-30s, fallback when HTTP tiers unreachable)
  *   5. Heuristic fallback (lexical "why/how/explain" → Class B)
  *
  * Cache: 60s in-process by sha256(question). Sub-ms hit path.
@@ -159,6 +160,23 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
     return openrouterResult;
   }
 
+  // Tier 2: Gemini Flash direct (when a Google AI key is present). Promoted
+  // ABOVE the CLI tiers (2026-06-11 brain perf pass): when OpenRouter is
+  // unreachable, Flash answers in ~0.5-1.5s over HTTP while a CLI tier pays
+  // 6-8s of `claude`/`codex` process bootstrap before the model even runs —
+  // the exact disease #1115 cured for OpenRouter. The 503-churn worry that
+  // originally demoted Flash is handled by falling through to the CLI tiers
+  // below on any failure.
+  const apiKey = process.env.GOOGLE_AI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
+  if (apiKey) {
+    const flashResult = await tryFlash(question, apiKey);
+    if (flashResult) {
+      console.info('[qa][classifier] resolved via flash (tier 2)');
+      setCachedClassification(question, flashResult);
+      return flashResult;
+    }
+  }
+
   // CLI tier ordering depends on the in-app orchestrator toggle (epic #1044):
   //   - toggle OFF (default) → Codex is the only CLI tier (Haiku would throw —
   //     no Claude Max sub assumed by default).
@@ -173,37 +191,26 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
     }
   }
 
-  // Tier 2 (only when toggle ON): Haiku CLI — free for Claude Max users.
+  // Tier 3 (only when toggle ON): Haiku CLI — free for Claude Max users.
   if (!evalMode && inAppOrchestratorOn) {
     const haikuResult = await tryHaiku(prompt, question);
     if (haikuResult) {
-      console.info('[qa][classifier] resolved via haiku-cli (tier 2 fallback)');
+      console.info('[qa][classifier] resolved via haiku-cli (tier 3 fallback)');
       setCachedClassification(question, haikuResult);
       return haikuResult;
     }
   }
 
-  // Tier 3: Codex CLI — free for ChatGPT Plus / Codex sub users. Always tried
-  // when not eval-mode and OpenRouter failed.
+  // Tier 4: Codex CLI — free for ChatGPT Plus / Codex sub users. Always tried
+  // when not eval-mode and the HTTP tiers failed.
   if (!evalMode) {
     const codexResult = await tryCodex(prompt, question);
     if (codexResult) {
       console.info(
-        `[qa][classifier] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (tier 3 fallback)`,
+        `[qa][classifier] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (tier 4 fallback)`,
       );
       setCachedClassification(question, codexResult);
       return codexResult;
-    }
-  }
-
-  // Tier 4: Flash (when a Google AI key is present).
-  const apiKey = process.env.GOOGLE_AI_API_KEY ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY ?? process.env.GEMINI_API_KEY;
-  if (apiKey) {
-    const flashResult = await tryFlash(question, apiKey);
-    if (flashResult) {
-      console.info('[qa][classifier] resolved via flash');
-      setCachedClassification(question, flashResult);
-      return flashResult;
     }
   }
 

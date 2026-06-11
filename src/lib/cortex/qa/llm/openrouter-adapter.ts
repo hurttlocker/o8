@@ -63,34 +63,82 @@ export interface CallOpenRouterOptions {
 }
 
 /**
- * Primary OpenRouter model — empirically held from the 2026-04-30 phase 1.7.1
- * rerun (credited account, all 6 candidates measured): 148 ms p50 1-fact,
- * 124 ms p50 5-fact, 6/6 quality, 0 errors across 10 calls. Lowest p95-sum
- * (496 ms) of all 5 quality-tied models. $0.20/$0.50 per M tokens.
+ * Primary OpenRouter model. grok-4.1-fast (the 2026-04-30 bake-off winner)
+ * was DEPRECATED by xAI (404 on every call, verified live 2026-06-11) and
+ * its successor grok-4.3 costs 6x ($1.25/$2.50). flash-lite was the bake-off
+ * runner-up — 505 ms p50, 6/6 quality, and the cheapest of the field at
+ * $0.10/$0.40 per M tokens (verified live 2026-06-11: "OK" in 0.89s).
  */
-export const OPENROUTER_PRIMARY_MODEL = 'x-ai/grok-4.1-fast';
+export const OPENROUTER_PRIMARY_MODEL = 'google/gemini-2.5-flash-lite';
 
 /**
  * In-call fallback chain. OpenRouter's `models[]` parameter auto-fails over
  * to the next entry on provider error, so our adapter doesn't pay for the
- * extra round-trip.
+ * extra round-trip. (Verified live: a deprecated primary fails over to
+ * models[0] inside one request.)
  *
- * Order picked from the phase 1.7.1 rerun (all 6/6 quality, ranked by p95-sum):
- *   1. google/gemini-2.5-flash-lite — p95 sum 1072 ms, $0.10/$0.40 (cheapest)
- *   2. openai/gpt-5.4-nano          — p95 sum 1088 ms, $0.20/$1.25
- *
- * Dropped from the prior chain: openai/gpt-5-nano returned empty content on
- * 8 of 10 calls in the rerun (provider-side issue), so promoting it as a
- * fallback hurts more than it helps. gpt-5.4-nano was previously unreachable
- * (402'd) and now earns its slot.
+ *   1. openai/gpt-5.4-nano — bake-off p95 sum 1088 ms, $0.20/$1.25
+ *   2. x-ai/grok-4.3       — grok-4.1-fast's successor; pricier ($1.25/$2.50)
+ *                            but classifier/composer calls are small enough
+ *                            that a last-resort fallback at 6x is still <1¢.
  */
-export const OPENROUTER_FALLBACK_MODELS = ['google/gemini-2.5-flash-lite', 'openai/gpt-5.4-nano'];
+export const OPENROUTER_FALLBACK_MODELS = ['openai/gpt-5.4-nano', 'x-ai/grok-4.3'];
+
+// ── Circuit breaker ──────────────────────────────────────────────────────────
+//
+// Deterministic hard failures (401 bad key, 402 insufficient credits) don't
+// fix themselves between questions — before this breaker existed, a drained
+// credit balance meant EVERY ask paid a doomed HTTP round-trip and silently
+// demoted the whole pipeline to the slow CLI tiers (live-observed 2026-06-11:
+// a 402 was burning ~0.5s per question for weeks). After
+// CIRCUIT_TRIP_THRESHOLD consecutive hard failures the tier is skipped
+// outright for CIRCUIT_OPEN_MS; any success closes it again.
+
+const CIRCUIT_TRIP_THRESHOLD = 2;
+const CIRCUIT_OPEN_MS = 10 * 60_000;
+
+let consecutiveHardFailures = 0;
+let circuitOpenUntil = 0;
+
+function isHardFailureStatus(status: number): boolean {
+  return status === 401 || status === 402;
+}
+
+function recordHardFailure(status: number, detail: string): void {
+  consecutiveHardFailures += 1;
+  if (consecutiveHardFailures >= CIRCUIT_TRIP_THRESHOLD && Date.now() >= circuitOpenUntil) {
+    circuitOpenUntil = Date.now() + CIRCUIT_OPEN_MS;
+    console.warn(
+      `[qa][openrouter] circuit OPEN for ${CIRCUIT_OPEN_MS / 60_000}min after ${consecutiveHardFailures} consecutive HTTP ${status} failures: ${detail.slice(0, 160)}`,
+    );
+  }
+}
+
+function recordSuccess(): void {
+  if (circuitOpenUntil > 0) {
+    console.info('[qa][openrouter] circuit CLOSED (call succeeded)');
+  }
+  consecutiveHardFailures = 0;
+  circuitOpenUntil = 0;
+}
+
+/** Test-only: reset breaker state. */
+export function resetOpenRouterCircuit(): void {
+  consecutiveHardFailures = 0;
+  circuitOpenUntil = 0;
+}
+
+/** True while the breaker is open (tier should be skipped). */
+export function isOpenRouterCircuitOpen(): boolean {
+  return Date.now() < circuitOpenUntil;
+}
 
 /**
  * Call OpenRouter chat completions with `prompt` as a single user message.
  *
  * Throws on:
  *   - OPENROUTER_API_KEY missing (caller should fall through to next tier)
+ *   - Circuit breaker open (repeated 401/402 — caller falls through)
  *   - HTTP timeout
  *   - Non-2xx response
  *   - Empty content
@@ -102,6 +150,12 @@ export async function callOpenRouter(
   prompt: string,
   opts: CallOpenRouterOptions = {},
 ): Promise<string> {
+  if (isOpenRouterCircuitOpen()) {
+    throw new Error(
+      `[qa][openrouter] circuit open (repeated auth/credit failures) — skipping tier until ${new Date(circuitOpenUntil).toISOString()}`,
+    );
+  }
+
   // BYOK (#960): resolve from stored user key first, then process.env.
   // Smoke path always has process.env.OPENROUTER_API_KEY set, so it
   // resolves immediately without hitting the file.
@@ -146,6 +200,9 @@ export async function callOpenRouter(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
+    if (isHardFailureStatus(res.status)) {
+      recordHardFailure(res.status, errText);
+    }
     throw new Error(`[qa][openrouter] HTTP ${res.status}: ${errText.slice(0, 200)}`);
   }
 
@@ -159,6 +216,7 @@ export async function callOpenRouter(
     throw new Error('[qa][openrouter] empty response content');
   }
 
+  recordSuccess();
   return text;
 }
 
