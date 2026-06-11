@@ -75,9 +75,9 @@ Runs on push/PR to `main`: TypeCheck → Lint → Unit Tests (`npm test`) → Go
 ├──────────────────────┬──────────────────────────┬──────────────────┤
 │   AgentPanel (left)   │  TileContainer (center)  │  O8Panel (right) │
 │   resizable column    │  WorkspaceTerminal tiles │  440px default   │
-│   project drawer +    │  with per-column strips  │  Pulse / Browser │
-│   LeftPanelProject…   │  (tab pills, no global   │  PRs / Inbox /   │
-│                       │   titlebar inside tiles) │  Activity / o8.md│
+│   project drawer +    │  with per-column strips  │  workspace · prs │
+│   LeftPanelProject…   │  (tab pills, no global   │  activity· inbox │
+│                       │   titlebar inside tiles) │  spec · browser… │
 ├──────────────────────┴──────────────────────────┴──────────────────┤
 │ DesktopStatusBar  (Settings · Ports · Add-repo · Terminal · Theme)   │
 └────────────────────────────────────────────────────────────────────┘
@@ -247,15 +247,15 @@ The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a single chat
 └───────────────────────────────────┘
 ```
 
-- **Body**: `ThoughtsChatPanel` with `emptyStateOverride={<OrchestratorEmptyState/>}` — the empty state shows the greeting + 6 quick-action cards (review-pending, ship-status, token-spend, dispatch, recent-changes, attention). When agent sessions exist, `SessionVisualizer` renders a horizontal strip above the chat.
+- **Body**: `ThoughtsChatPanel` with `emptyStateOverride={<OrchestratorEmptyState/>}` — the empty state is a centered hero ("What should we build in <repo>?") over the composer plus a context-chip row (repo · worktree · branch · agent). The old 6 quick-action cards moved into the ⌘K `QuickActionPalette` (DISPATCH / DECOMPOSE / FIX / REVIEW / STATUS / CLEAR verb rows). When agent sessions exist, `SessionVisualizer` renders a horizontal strip above the chat.
 - **Inline transcript blocks (Codex-borrow)**: orchestrator turns get rolled-up `TurnSummaryCard` ("Worked for X min", #1096) and `ChatActionCard` ("Edited N files" + Undo/Review, #1095) inline blocks. Tool-call pill clusters auto-collapse after 3+ calls (`fix(chat): collapse tool-call pill cluster by default after 3+ calls`).
 - **Thread restore**: `orchestrator-thread-restore.ts` persists the last-active thread id + title under `o8:last-orchestrator-thread-id` / `o8:last-orchestrator-thread-title` localStorage keys so the tab spawns with the right label on first paint (no flash from "Orchestrator" to "o8.v1").
 - **Permission chip** (Full access / Read-only) persists per-tab to localStorage `cortex-ide:orchestrator-permission:tab:<tabId>`.
 - **Past threads** live on the mobile API surface (`/api/mobile/orchestrator/threads`) — desktop reaches the history list through there too. No dedicated desktop sidebar component anymore.
 
 **Mission Control / Packets / Issues** no longer render as a right-side panel inside the Orchestrator tab. They live distributed across:
-- **O8Panel right side** (`O8Panel.tsx`) — Activity tab shows recent commits / PRs / deployments. Inbox tab. PRs tab routes to `PrPanel`. Pulse / Browser / o8.md / Workspace round out the 7 right-panel tabs.
-- **Left sidebar — `LeftPanelProjectFocus`** — AgentsTab inside the project-focus drawer surfaces live + archived packets per repo. Click a project name OR a repo name to open this drawer.
+- **O8Panel right side** (`O8Panel.tsx`) — tab union (`o8-panel/types.ts`): main `workspace · browser · prs · activity · inbox · spec · launcher` + utility (right-rail, launcher-managed) `files · side-chat · review · terminal`. Workspace = working-tree diff with commit cluster; Activity = commits / CI / changelog / packet feed; Inbox = governance Incident Queue; spec = the o8.md surface; PRs routes to `PrPanel`. Tabs render as icon pills in the window top strip (active pill carries its label); some (e.g. PRs) only appear in context.
+- **Left sidebar — `LeftPanelProjectFocus`** — AgentsTab inside the project-focus drawer ("control room") surfaces live + archived packets per repo. Clicking a project/repo row only SELECTS it; the drawer opens from the row's hover-revealed chevron (`handleMiniOpenControlRoom` in `AgentPanel.tsx`).
 - **Mission state itself** lives in `OrchestratorDataProvider` (data flow below) — the right-side ThoughtsMissionPanel that used to render it is **deleted**. Don't reintroduce.
 
 **Retired surfaces** (do not reintroduce):
@@ -280,11 +280,11 @@ The Orchestrator tab (`workspace-terminal/OrchestratorTab.tsx`) is a single chat
 | `src/components/desktop/AgentPanel.tsx` | Agent fleet view: repo-grouped cards, status groups, activity feed, issues, PRs, CI, deploys. |
 | `src/components/desktop/LLMChat.tsx` | Chat panel with LLM conversation (the **Assistant** tab). |
 | `src/components/desktop/workspace-terminal/OrchestratorTab.tsx` | The **Orchestrator** tab — single chat surface (ThoughtsChatPanel + SessionVisualizer when active). Thread state persisted via `orchestrator-thread-restore.ts`. |
-| `src/components/desktop/OrchestratorEmptyState.tsx` | Empty-state greeting + 6 quick-action cards for the Orchestrator. |
+| `src/components/desktop/OrchestratorEmptyState.tsx` | Orchestrator empty state — centered "What should we build in <repo>?" hero above the composer + context chips. |
 | `src/components/desktop/SessionVisualizer.tsx` | Horizontal strip of active agent sessions, shown inside the Orchestrator tab when agents exist. |
 | `src/components/desktop/workspace-terminal/orchestrator-thread-restore.ts` | localStorage helpers — restore last-active orchestrator thread id/title across reloads. |
 | `src/components/desktop/thoughts/ThoughtsChatPanel.tsx` | Chat transcript + composer for the orchestrator and CLI lanes. Supports `emptyStateOverride` + `fillInput`/`sendNow` imperative methods. |
-| `src/components/desktop/O8Panel.tsx` | Right-side wide panel — 7 tabs (Pulse / Workspace / Browser / PRs / Inbox / Activity / o8.md). Default width 440px, resizable. |
+| `src/components/desktop/O8Panel.tsx` | Right-side wide panel — main tabs workspace / browser / prs / activity / inbox / spec / launcher + utility rail (see `o8-panel/types.ts`). Default width 440px, resizable. |
 | `src/components/desktop/pr-panel/PrPanel.tsx` | Cursor-style PR review surface — header + tabs (Changes / Checks / Commits / Reviews). Mounted inside O8Panel's PRs tab. |
 | `src/components/desktop/review/ReviewPanel.tsx` | Dedicated Review surface (epic #1085) — Codex-style, one continuous diff, no file-list rail. Mounted in O8Panel's `review` mode. Hosts `O8ScratchChat` (Engineering Brain composer) in its rail. |
 | `src/components/desktop/o8-panel/workspace-rail/O8ScratchChat.tsx` | "Ask the Brain" composer — Engineering Brain Q&A surface with structured citations, premium dot + cost-hint legend. |

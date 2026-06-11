@@ -14,7 +14,7 @@ Sister docs: [`canvas-mode-vision.md`](./canvas-mode-vision.md) (where this UI i
 ### B. Left panel
 
 - **AgentPanel** (`src/components/desktop/AgentPanel.tsx`) — resizable left column: repo-grouped agent/chat rows, status groups, issues/PRs/CI/deploys. Text-first rows (leading icons stripped 2026-05-25, per hurttlocker "Iconography rule"). The three locked alignment columns live here: icon x≈12, section labels x=29, text x=37, right-edge icons x=235 (optically corrected).
-- **LeftPanelProjectFocus** (`src/components/desktop/repo-focus/LeftPanelProjectFocus.tsx`) — drawer that replaces the panel content when the user clicks a project or repo name. Tabs: **Agents** (live + archived packets — where PacketCards live day-to-day), Context, Spec, Files.
+- **LeftPanelProjectFocus** (`src/components/desktop/repo-focus/LeftPanelProjectFocus.tsx`) — the "control room" drawer that replaces the panel content. Verified 2026-06-11: clicking a project/repo row only SELECTS it (`handleMiniProjectSelect` / `handleMiniRepoSelect`); the drawer opens from the row's hover-revealed chevron (`handleMiniOpenControlRoom`). Tabs: **Agents** (live + archived packets — where PacketCards live day-to-day), Context, Spec, Files.
 - **AddRepoDialog** — from the status-bar Add-repo affordance.
 
 ### C. Center workspace — tiles + tab kinds
@@ -22,7 +22,7 @@ Sister docs: [`canvas-mode-vision.md`](./canvas-mode-vision.md) (where this UI i
 **TileContainer** (binary-tree tile layout, `src/lib/tiles/`) hosts **WorkspaceTerminal** tiles; each tile owns its own column strip (tab pills via `WorkspaceHeaderStrip.HeaderPill` — divs, not TabBar.tsx). `TILE_LAYOUT_VERSION = 4`.
 
 Tab kinds a human can actually create (`workspace-terminal/types.ts`):
-- **`orchestrator`** — THE primary surface. `OrchestratorTab.tsx`: ThoughtsChatPanel + OrchestratorEmptyState (6 quick-action cards) + SessionVisualizer strip when agents run. Inline TurnSummaryCard / ChatActionCard / tool-chip clusters (incl. the Brain chip).
+- **`orchestrator`** — THE primary surface. `OrchestratorTab.tsx`: ThoughtsChatPanel + OrchestratorEmptyState (centered "What should we build in <repo>?" hero + composer + context chips; the old 6 quick-action cards now live in the ⌘K QuickActionPalette) + SessionVisualizer strip when agents run. Inline TurnSummaryCard / ChatActionCard / tool-chip clusters (incl. the Brain chip). ⚠️ Verified 2026-06-11: OrchestratorTab and dashboard/page.tsx BOTH bind window-level ⌘K — two palettes open stacked (see polish list).
 - **`terminal`** — always available.
 - **`chat`** — single-runtime CLI session (Codex by default); only offered when the runtime binary is detected. ⚠️ Naming gotcha: this is NOT the casual chat.
 - **`llm-chat`** — the casual Assistant chat. **GATED OFF by default** (`experimentalChat=false`): a fresh user NEVER sees it. Don't design around it as if it's core.
@@ -38,7 +38,7 @@ Tab kinds a human can actually create (`workspace-terminal/types.ts`):
 
 ### E. Settings
 
-Full-screen overlay from the status-bar gear. Rams-language components (`settings/shared.tsx`: RamsButton, CornerBrackets, SectionLabel, BracketLabel source badges). Tabs (~14): Connectors (GitHub), API Keys, MCP, Connections, **Operator Defaults** (numbered sections 01–09 incl. 08 WORKER BRAIN, the experimental flags, orchestrator model/backend), Projects, Workers, Cloud Workers, Analytics, **Appearance** (palette × surface two-axis theme), **Voice** (dictation/Symon), Billing/Plan, Diagnostics, About.
+The status-bar gear opens an account mini-menu (profile · Settings · Usage remaining) — "Settings" in it opens the full-screen overlay. Rams-language components (`settings/shared.tsx`: RamsButton, CornerBrackets, SectionLabel, BracketLabel source badges). Sidebar verified 2026-06-11, grouped: CONNECTIONS (Connectors, API Keys, MCP, Mobile) · WORK (Dispatch — the operator-defaults surface, Projects, Workers `(soon)`, Cloud Workers `(soon)`) · PRESENTATION (**Appearance** — palette cards labeled light/"dark" + session-timeline + reduce-transparency, **Voice**) · SYSTEM (Plan & Billing, …below fold). Note: Appearance's second palette is LABELED "dark" while code/docs call it midnight.
 
 ### F. Overlays, modals, popovers, toasts
 
