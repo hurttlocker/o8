@@ -59,9 +59,12 @@ function toolArgument(tool: MobileTranscriptToolCall) {
   if (name.includes('fetch') || name.includes('browser')) {
     return compact(firstDetail(args, ['url', 'href', 'action']) ?? 'browser action');
   }
+  if (name.endsWith('cortex_ask')) {
+    return compact(firstDetail(args, ['question']) ?? 'brain question');
+  }
 
   return compact(
-    firstDetail(args, ['path', 'file_path', 'url', 'query', 'command', 'cmd', 'prompt'])
+    firstDetail(args, ['path', 'file_path', 'url', 'query', 'command', 'cmd', 'prompt', 'question'])
     ?? tool.preview
     ?? tool.result
     ?? 'tool activity',

@@ -65,8 +65,18 @@ interface ScratchCitation {
   kind: string;
   rowId: string;
   table?: string;
+  /** Human-readable source title (directive title, PR title, …) — the
+   *  2026-06-11 parity contract. Pills render this over kind:rowId. */
+  title?: string;
   excerpt?: string;
   url?: string;
+}
+
+/** Early retrieval summary from the SSE `sources` event — what the Brain is
+ *  reading, surfaced live while the model is still composing. */
+interface ScratchSources {
+  count: number;
+  top: Array<{ kind: string; title: string }>;
 }
 
 interface ScratchMessage {
@@ -75,6 +85,9 @@ interface ScratchMessage {
   content: string;
   /** Engineering Brain citations rendered as small pills below the answer. */
   citations?: ScratchCitation[];
+  /** Retrieval summary — drives the live "Reading N sources…" phase line and
+   *  the "cited X of N" caption after the answer lands. */
+  sources?: ScratchSources;
 }
 
 interface ScratchContext {
@@ -356,6 +369,8 @@ export function O8ScratchChat({
   const [sending, setSending] = useState(false);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [askLoading, setAskLoading] = useState(false);
+  /** `${messageId}-${idx}` of the source pill expanded into its detail view. */
+  const [expandedCite, setExpandedCite] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [handoffNote, setHandoffNote] = useState<string | null>(null);
   const [selectionSnapshot, setSelectionSnapshot] = useState('');
@@ -644,6 +659,16 @@ export function O8ScratchChat({
           setMessages((current) => current.map((message) => (
             message.id === assistantId ? { ...message, content: answer } : message
           )));
+        } else if (eventName === 'sources') {
+          // Retrieval finished — show what the Brain is reading while the
+          // model composes.
+          const sources: ScratchSources = {
+            count: typeof payload.count === 'number' ? payload.count : 0,
+            top: Array.isArray(payload.top) ? (payload.top as ScratchSources['top']) : [],
+          };
+          setMessages((current) => current.map((message) => (
+            message.id === assistantId ? { ...message, sources } : message
+          )));
         } else if (eventName === 'citation') {
           citations.push(payload as unknown as ScratchCitation);
         } else if (eventName === 'error' && typeof payload.message === 'string') {
@@ -798,39 +823,117 @@ export function O8ScratchChat({
                         <>
                           <MarkdownRender content={message.content} />
                           {message.citations && message.citations.length > 0 ? (
-                            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: 8 }}>
-                              {message.citations.map((citation, idx) => (
-                                <span
-                                  key={`${message.id}-cite-${idx}`}
-                                  title={citation.excerpt || `${citation.kind}:${citation.rowId}`}
-                                  style={{
-                                    display: 'inline-flex',
-                                    alignItems: 'center',
-                                    height: 18,
-                                    borderRadius: 6,
-                                    paddingTop: 0,
-                                    paddingRight: 6,
-                                    paddingBottom: 0,
-                                    paddingLeft: 6,
-                                    background: 'var(--t-divider-subtle)',
-                                    color: 'var(--t-text-muted)',
-                                    fontFamily: MONO_FONT,
-                                    fontSize: 9.5,
-                                    fontWeight: 300,
-                                    letterSpacing: '-0.2px',
-                                    cursor: citation.url ? 'pointer' : 'default',
-                                  }}
-                                  onClick={() => {
-                                    if (citation.url) window.open(citation.url, '_blank', 'noopener,noreferrer');
-                                  }}
-                                >
-                                  {citation.kind}:{citation.rowId}
-                                </span>
-                              ))}
-                            </div>
+                            <>
+                              {message.sources ? (
+                                <div style={{ marginTop: 8, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)' }}>
+                                  {message.citations.length} cited · {message.sources.count} sources considered
+                                </div>
+                              ) : null}
+                              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, marginTop: message.sources ? 4 : 8 }}>
+                                {message.citations.map((citation, idx) => {
+                                  const citeKey = `${message.id}-${idx}`;
+                                  const label = citation.title || `${citation.kind}:${citation.rowId}`;
+                                  return (
+                                    <span
+                                      key={`${message.id}-cite-${idx}`}
+                                      title={label}
+                                      style={{
+                                        display: 'inline-flex',
+                                        alignItems: 'center',
+                                        gap: 4,
+                                        height: 18,
+                                        maxWidth: 220,
+                                        borderRadius: 6,
+                                        paddingTop: 0,
+                                        paddingRight: 6,
+                                        paddingBottom: 0,
+                                        paddingLeft: 6,
+                                        background: expandedCite === citeKey ? 'var(--t-hover)' : 'var(--t-divider-subtle)',
+                                        color: 'var(--t-text-muted)',
+                                        fontSize: 10,
+                                        fontWeight: 300,
+                                        letterSpacing: '-0.1px',
+                                        cursor: 'pointer',
+                                      }}
+                                      onClick={() => {
+                                        setExpandedCite((current) => (current === citeKey ? null : citeKey));
+                                      }}
+                                    >
+                                      <span style={{ fontFamily: MONO_FONT, fontSize: 8.5, textTransform: 'uppercase', color: 'var(--t-text-faint)', flexShrink: 0 }}>
+                                        {citation.kind}
+                                      </span>
+                                      <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{label}</span>
+                                    </span>
+                                  );
+                                })}
+                              </div>
+                              {message.citations.map((citation, idx) => {
+                                const citeKey = `${message.id}-${idx}`;
+                                if (expandedCite !== citeKey) return null;
+                                const cleanExcerpt = (citation.excerpt ?? '').replace(/[«»]/g, '');
+                                return (
+                                  <div
+                                    key={`${message.id}-cite-detail-${idx}`}
+                                    style={{
+                                      marginTop: 6,
+                                      borderRadius: 10,
+                                      border: '1px solid var(--t-divider-subtle)',
+                                      background: 'var(--t-bg-card)',
+                                      paddingTop: 8,
+                                      paddingRight: 10,
+                                      paddingBottom: 8,
+                                      paddingLeft: 10,
+                                    }}
+                                  >
+                                    <div style={{ fontSize: 11.5, fontWeight: 420, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>
+                                      {citation.title || `${citation.kind}:${citation.rowId}`}
+                                    </div>
+                                    <div style={{ marginTop: 2, fontFamily: MONO_FONT, fontSize: 9, color: 'var(--t-text-faint)', overflowWrap: 'anywhere' }}>
+                                      {citation.kind} · {citation.rowId}
+                                    </div>
+                                    {cleanExcerpt ? (
+                                      <div style={{ marginTop: 5, fontSize: 11.5, fontWeight: 300, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
+                                        {cleanExcerpt}
+                                      </div>
+                                    ) : null}
+                                    {citation.url ? (
+                                      <button
+                                        type="button"
+                                        onClick={() => { window.open(citation.url, '_blank', 'noopener,noreferrer'); }}
+                                        style={{
+                                          marginTop: 6,
+                                          border: 'none',
+                                          background: 'transparent',
+                                          color: 'var(--t-accent)',
+                                          fontFamily: UI_FONT,
+                                          fontSize: 10.5,
+                                          fontWeight: 350,
+                                          letterSpacing: '-0.1px',
+                                          cursor: 'pointer',
+                                          paddingTop: 0,
+                                          paddingRight: 0,
+                                          paddingBottom: 0,
+                                          paddingLeft: 0,
+                                        }}
+                                      >
+                                        Open source ↗
+                                      </button>
+                                    ) : null}
+                                  </div>
+                                );
+                              })}
+                            </>
                           ) : null}
                         </>
-                      ) : <span style={{ color: 'var(--t-text-muted)' }}>Thinking...</span>
+                      ) : (
+                        <span style={{ color: 'var(--t-text-muted)' }}>
+                          {message.sources
+                            ? `Reading ${message.sources.count} sources…${message.sources.top.length > 0 ? ` ${message.sources.top.slice(0, 2).map((s) => s.title).join(' · ')}` : ''}`
+                            : message.id.startsWith('o8-ask-brain-assistant')
+                              ? 'Searching the brain…'
+                              : 'Thinking...'}
+                        </span>
+                      )
                     ) : (
                       message.content
                     )}

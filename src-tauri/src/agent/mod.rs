@@ -56,6 +56,10 @@ pub struct LoopResult {
     pub model_used: String,
     /// JSON array of `{tool, args}` — persisted for the task ledger.
     pub tool_calls_json: String,
+    /// Titled Brain sources collected from any `o8_ask` tool results during
+    /// the run (`{kind, title, url?}`); forwarded to the dock answer panel
+    /// with the done event (sources-parity pass 2026-06-11).
+    pub brain_sources: Vec<serde_json::Value>,
 }
 
 /// Shared system prompt: the agent persona + current-time grounding. Spoken
@@ -71,6 +75,9 @@ pub(crate) fn system_prompt() -> String {
          to report what o8's autonomous coding agents are working on right now \
          (\"what's shipping?\"), and `o8_ask` to ask o8's Engineering Brain about \
          the code, recent work, or the fleet (\"what did Codex do today?\"). \
+         o8_ask returns titled `sources` — when one clearly backs your answer, \
+         name it naturally in ONE short phrase (\"per the CLAUDE.md rules\"); \
+         never read IDs or list every source aloud. \
          `o8_needs_me` lists what's waiting on the user — pending approval cards \
          and stuck agents (\"what needs me?\", \"anything waiting on me?\"). To \
          approve or reject one by voice, call o8_needs_me FIRST, read the queue \
@@ -648,10 +655,15 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
                 &result.model_used,
                 &result.tool_calls_json,
             );
-            emit_agent_event(
-                &app,
-                json!({ "taskId": task_id, "kind": "status", "status": "done", "result": clean_text }),
-            );
+            // Titled Brain sources ride along when the run consulted o8_ask —
+            // the dock answer panel renders them as a meta line under the
+            // answer (sources-parity pass 2026-06-11).
+            let mut done_payload =
+                json!({ "taskId": task_id, "kind": "status", "status": "done", "result": clean_text });
+            if !result.brain_sources.is_empty() {
+                done_payload["sources"] = json!(result.brain_sources);
+            }
+            emit_agent_event(&app, done_payload);
             if let Some(glint) = glint_for(&result.tool_calls_json) {
                 emit_agent_event(
                     &app,

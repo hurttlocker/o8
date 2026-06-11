@@ -322,13 +322,42 @@ pub async fn ask(args: Value) -> Result<Value, String> {
         .unwrap_or("")
         .trim()
         .to_string();
-    let citation_count = resp
+    // Sources-parity pass (2026-06-11): keep the titled citations instead of
+    // collapsing them to a count. The model can name its sources naturally
+    // ("per the CLAUDE.md critical-rules directive…"), and the agent loop
+    // forwards them to the dock answer panel.
+    let sources: Vec<Value> = resp
         .get("citations")
         .and_then(|v| v.as_array())
-        .map(|a| a.len())
+        .map(|arr| {
+            arr.iter()
+                .take(5)
+                .map(|c| {
+                    let mut s = json!({
+                        "kind": c.get("kind").and_then(|v| v.as_str()).unwrap_or("source"),
+                        "title": c
+                            .get("title")
+                            .and_then(|v| v.as_str())
+                            .unwrap_or_else(|| c.get("rowId").and_then(|v| v.as_str()).unwrap_or("")),
+                    });
+                    if let Some(url) = c.get("url").and_then(|v| v.as_str()) {
+                        s["url"] = json!(url);
+                    }
+                    s
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    let sources_considered = resp
+        .get("sourcesConsidered")
+        .and_then(|v| v.as_i64())
         .unwrap_or(0);
 
-    Ok(json!({ "answer": answer, "citations": citation_count }))
+    Ok(json!({
+        "answer": answer,
+        "sources": sources,
+        "sources_considered": sources_considered,
+    }))
 }
 
 /// `o8_dispatch` — delegate a CODING task to o8's orchestrator (Tier-2 WRITE).

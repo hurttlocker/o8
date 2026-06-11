@@ -147,6 +147,68 @@ function rowFullText(row: TypedRow): string {
 }
 
 /**
+ * Derive a human-readable display title for a row (2026-06-11 parity pass).
+ *
+ * Every kind already carries a title-ish field in `fields` at retrieval time
+ * — directives have frontmatter titles, PRs/issues have GitHub titles,
+ * outcomes have summaries — but the citation payload historically dropped
+ * them, leaving every surface to render the opaque kind:rowId handle. This
+ * is THE single derivation point: composer emits, the SSE `sources` event,
+ * and Symon's o8_ask all read the result.
+ */
+export function rowDisplayTitle(row: TypedRow): string {
+  const fields = row.fields as Record<string, unknown>;
+  const pick = (...keys: string[]): string => {
+    for (const k of keys) {
+      const v = fields?.[k];
+      if (typeof v === 'string' && v.trim().length > 0) return v.trim();
+    }
+    return '';
+  };
+  let title = '';
+  switch (row.citation.kind) {
+    case 'directive':
+      title = pick('title');
+      break;
+    case 'outcome':
+      title = pick('summary').split('\n')[0] ?? '';
+      break;
+    case 'pr':
+    case 'issue':
+      title = pick('title');
+      break;
+    case 'comment': {
+      const parent = pick('parentKind') || 'thread';
+      const num = fields?.parentNumber;
+      const author = pick('author');
+      title = `${parent}${typeof num === 'number' || typeof num === 'string' ? ` #${num}` : ''}${author ? ` — ${author}` : ''}`;
+      break;
+    }
+    case 'doc':
+      title = pick('title', 'relPath');
+      break;
+    case 'fact':
+      title = pick('content').split('\n')[0] ?? '';
+      break;
+    case 'symbol':
+      title = [pick('kind'), pick('symbol')].filter(Boolean).join(' ');
+      break;
+    case 'project':
+      title = pick('name');
+      break;
+    case 'project_repo':
+      title = [pick('repoName'), pick('projectName')].filter(Boolean).join(' → ');
+      break;
+    default:
+      title = pick('title', 'name', 'content');
+  }
+  if (!title) title = row.citation.excerpt?.replace(/[«»]/g, '') ?? row.citation.rowId;
+  title = title.replace(/\s+/g, ' ').trim();
+  if (title.length > 120) title = `${title.slice(0, 119)}…`;
+  return title;
+}
+
+/**
  * Resolve the source-of-truth authority for a row (#915 follow-up).
  *
  * Fact rows carry the explicit `source_authority` field populated by the
@@ -783,6 +845,7 @@ function emitClassAAnswer(rawAnswer: string, lookup: CitationLookup, emit: SseEm
       kind: row.citation.kind,
       rowId: `${row.citation.kind}-${row.citation.rowId}`,
       table: row.citation.table,
+      title: rowDisplayTitle(row),
       excerpt: row.citation.excerpt,
       url: row.citation.url,
     });
@@ -846,6 +909,7 @@ export async function composeClassB(
           kind: row.citation.kind,
           rowId: `${row.citation.kind}-${row.citation.rowId}`,
           table: row.citation.table,
+          title: rowDisplayTitle(row),
           excerpt: row.citation.excerpt,
           url: row.citation.url,
         });
@@ -918,6 +982,7 @@ async function composeClassBViaOpenRouter(
           kind: row.citation.kind,
           rowId: `${row.citation.kind}-${row.citation.rowId}`,
           table: row.citation.table,
+          title: rowDisplayTitle(row),
           excerpt: row.citation.excerpt,
           url: row.citation.url,
         });

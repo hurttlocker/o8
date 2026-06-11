@@ -64,6 +64,11 @@ export interface Citation {
   url?: string;
   /** Short snippet rendered in citation pills. Caller-controlled length. */
   excerpt?: string;
+  /** Human-readable display title derived per kind at emit time (directive
+   *  title, PR title, outcome summary head, …). Every surface — ScratchChat
+   *  pills, orchestrator tool results, Symon's dock, MCP consumers — renders
+   *  this instead of the opaque kind:rowId handle (2026-06-11 parity pass). */
+  title?: string;
 }
 
 /**
