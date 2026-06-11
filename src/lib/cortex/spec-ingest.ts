@@ -42,6 +42,7 @@ import { getDataDir } from '@/lib/data-dir-migration';
 import { getSqlite } from '@/lib/db';
 import { refreshDirectiveFts } from '@/lib/db/v14-fts5-migration';
 import { captionImagesInSpec } from '@/lib/cortex/spec-image-captions';
+import { invalidateAnswerCache } from '@/lib/cortex/qa/ask';
 
 const ROOT_SPEC_FILES = ['README.md', 'CLAUDE.md', 'AGENTS.md', 'DESIGN.md', 'THEME.md'] as const;
 const SPEC_SUBDIRS = ['docs'] as const;
@@ -451,6 +452,12 @@ _Source: ${slug}/${relPath} — auto-ingested from repo specs (spec-ingest)._
         // skip — don't fail the whole ingest on one file
       }
     }
+  }
+
+  // Directives changed — cached Q&A answers may now cite stale content.
+  // Eager invalidation is what lets the answer cache run a long (30min) TTL.
+  if (writtenDirectives > 0 || deletedStaleDirectives > 0) {
+    invalidateAnswerCache();
   }
 
   return {

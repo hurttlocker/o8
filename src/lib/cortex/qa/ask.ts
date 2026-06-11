@@ -9,10 +9,12 @@
  * src/app/api/cortex/ask/route.ts which calls `runAskPipeline()` directly.
  *
  * Cache:
- *   30-second in-process TTL keyed by sha256(question + repoPath).
- *   `?force=1` query param on the HTTP route bypasses it.
- *   Invalidation: not done in this module (the route handles it via maxAge
- *   headers; the in-process cache auto-expires after 30s).
+ *   30-minute in-process TTL keyed by sha256(normalized question + repoPath
+ *   + projectId). `?force=1` query param on the HTTP route bypasses it.
+ *   Invalidation: knowledge writes call `invalidateAnswerCache()` —
+ *   spec ingest (directives changed) and the session-outcome ledger write
+ *   (new "what shipped" rows). The long TTL is safe because both write
+ *   paths invalidate eagerly; the clock is only a backstop.
  */
 
 import 'server-only';
@@ -29,7 +31,7 @@ import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 // ── In-process cache ──────────────────────────────────────────────────────────
 
-const CACHE_TTL_MS = 30_000;
+const CACHE_TTL_MS = 30 * 60_000;
 
 interface CacheEntry {
   answer: string;
@@ -39,9 +41,28 @@ interface CacheEntry {
 
 const answerCache = new Map<string, CacheEntry>();
 
+/**
+ * Normalize a question for cache keying: trim, lowercase, collapse runs of
+ * whitespace. "What's the line ceiling?" and "what's  the line ceiling?"
+ * are the same question — the classifier cache already normalizes this way,
+ * the answer cache historically didn't.
+ */
+export function normalizeQuestionForCache(question: string): string {
+  return question.trim().toLowerCase().replace(/\s+/g, ' ');
+}
+
+/**
+ * Drop every cached answer. Called by the knowledge write paths (spec ingest,
+ * session-outcome ledger) so a freshly-ingested directive is reflected in the
+ * very next ask instead of after TTL expiry.
+ */
+export function invalidateAnswerCache(): void {
+  answerCache.clear();
+}
+
 function cacheKey(question: string, repoPath: string | undefined, projectId: string | undefined): string {
   return createHash('sha256')
-    .update(`${question}\x00${repoPath ?? ''}\x00${projectId ?? ''}`)
+    .update(`${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}`)
     .digest('hex');
 }
 
@@ -120,8 +141,30 @@ export async function askCortex(
         classifyMs: 0,
       };
     }
+    // Single-flight: concurrent identical questions share one pipeline run
+    // instead of each spawning their own classifier + composer. This is the
+    // path an MCP-timeout retry takes — without coalescing, the retry doubles
+    // the CLI spawns while the first run is still composing.
+    const pending = inFlight.get(key);
+    if (pending) return pending;
+    const run = runAskCortexUncached(question, repoPath, projectId, key, bypassCache)
+      .finally(() => { inFlight.delete(key); });
+    inFlight.set(key, run);
+    return run;
   }
 
+  return runAskCortexUncached(question, repoPath, projectId, key, bypassCache);
+}
+
+const inFlight = new Map<string, Promise<AskCortexResult>>();
+
+async function runAskCortexUncached(
+  question: string,
+  repoPath: string | undefined,
+  projectId: string | undefined,
+  key: string,
+  bypassCache: boolean,
+): Promise<AskCortexResult> {
   const grepStart = Date.now();
   const grepRows = await routeGrepArm(question, repoPath);
   // 1. Classify
