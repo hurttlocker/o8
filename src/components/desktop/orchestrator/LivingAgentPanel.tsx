@@ -32,7 +32,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { ToolCallChip, classifyToolCall, type ToolCallChipStatus } from './ToolCallChip';
+import { ToolCallChip, classifyToolCall, extractO8AskQuestion, type ToolCallChipStatus } from './ToolCallChip';
 
 const RENDER_THROTTLE_MS = 100;
 const MAX_TOOL_CALLS_VISIBLE = 8;
@@ -169,13 +169,14 @@ function LivingAgentPanelBase({ packet, toolCalls = [] }: LivingAgentPanelProps)
             }}
           >
             {visibleToolCalls.map((tc) => {
-              const cls = classifyToolCall(tc.name);
+              const cls = classifyToolCall(tc.name, tc.argument);
+              const brainQuestion = tc.argument ? extractO8AskQuestion(tc.argument) : null;
               return (
                 <ToolCallChip
                   key={tc.id}
                   verb={cls.verb}
                   kind={cls.kind}
-                  argument={tc.argument ?? undefined}
+                  argument={brainQuestion ?? tc.argument ?? undefined}
                   status={tc.status}
                 />
               );

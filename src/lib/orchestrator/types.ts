@@ -195,6 +195,13 @@ export interface OrchestratorPacket {
   /** Routing scaffold: what kind of worker this task wants before runtime selection. */
   workerIntent?: WorkerIntent;
   /**
+   * Per-packet Engineering Brain override (2026-06-11). When set, wins over
+   * the operator-level `workersUseBrain` setting: true injects `o8 ask`
+   * instructions into the worker prompt, false suppresses them. Undefined
+   * inherits the setting ('auto' = on for non-frontier runtime tiers).
+   */
+  useBrain?: boolean;
+  /**
    * Provider/runtime routing decision. Production currently enforces Codex as
    * the selected runtime while preserving requested future providers.
    */

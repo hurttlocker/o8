@@ -186,7 +186,10 @@ export type LaneEventVerb =
   // typecheck_auto_retry — layer 1 fired a programmatic rerun_with_feedback
   // typecheck_escalation — layer 2 promoted the lane to awaiting_orchestrator
   | 'typecheck_auto_retry'
-  | 'typecheck_escalation';
+  | 'typecheck_escalation'
+  // Worker consulted the Engineering Brain via `o8 ask` (2026-06-11).
+  // Payload: { question, class, cacheHit, sourcesConsidered, citedCount, topTitles }
+  | 'brain_consulted';
 
 export type AgentReportReason =
   | 'needs_clarification'

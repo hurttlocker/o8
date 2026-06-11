@@ -98,6 +98,7 @@ export async function POST(request: NextRequest) {
       constraints: typeof record.constraints === 'string' ? record.constraints : '',
       sequential: record.sequential === true,
       existingBranchPolicy,
+      ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
     });
     return operatorSuccess(result, 201);
   } catch (error) {

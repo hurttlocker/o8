@@ -168,6 +168,7 @@ export async function createMission(input: CreateMissionInput) {
       prompt: [issue.title, packetSummary].map((part) => part.trim()).filter(Boolean).join('\n\n'),
       ...(learnedRules.length > 0 ? { learnedRules } : {}),
       ...(issueMeta ? { issue: issueMeta } : {}),
+      ...(typeof input.useBrain === 'boolean' ? { useBrain: input.useBrain } : {}),
     } satisfies OrchestratorPacket;
   });
 

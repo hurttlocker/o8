@@ -126,6 +126,14 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.inAppOrchestratorEnabled = body.inAppOrchestratorEnabled;
   }
 
+  if (body.workersUseBrain !== undefined) {
+    const raw = body.workersUseBrain;
+    if (raw !== 'off' && raw !== 'auto' && raw !== 'all') {
+      throw new Error('workersUseBrain must be one of "off", "auto", "all".');
+    }
+    update.workersUseBrain = raw;
+  }
+
   return update;
 }
 

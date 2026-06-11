@@ -34,7 +34,25 @@ export type SettingSource = 'env' | 'file' | 'default';
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 
 function isClassAComposer(value: unknown): value is ClassAComposer {
-  return value === 'auto' || value === 'haiku-cli' || value === 'sonnet-cli';
+  // 'fastest' was missing here after #1124 added it to the type — Settings
+  // could offer it but updateOperatorDefaults rejected the write.
+  return value === 'auto' || value === 'haiku-cli' || value === 'sonnet-cli' || value === 'fastest';
+}
+
+/**
+ * "Workers use the Brain" (2026-06-11). Whether dispatched worker agents get
+ * Engineering Brain access (`o8 ask`) injected into their packet prompt.
+ *   - `off`  — workers never told about the Brain.
+ *   - `auto` — Brain on for NON-frontier runtimes only (tier !== 'frontier'
+ *     in runtime-capabilities). Codex GPT-5.5 stays lean; weaker + future
+ *     local models get repo knowledge without burning context on searches.
+ *   - `all`  — every worker gets it (the dogfood / A-B setting).
+ * Per-packet `useBrain` overrides this either way.
+ */
+export type WorkersUseBrain = 'off' | 'auto' | 'all';
+
+function isWorkersUseBrain(value: unknown): value is WorkersUseBrain {
+  return value === 'off' || value === 'auto' || value === 'all';
 }
 
 export interface OperatorDefaults {
@@ -84,6 +102,8 @@ export interface OperatorDefaults {
    * orchestrator brain (free for ChatGPT Plus / Codex subscribers).
    */
   inAppOrchestratorEnabled: boolean;
+  /** See {@link WorkersUseBrain}. Default 'auto'. */
+  workersUseBrain: WorkersUseBrain;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -112,6 +132,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // ON by default post-#1097. Subscription pool, not Agent SDK pool. See the
   // docstring above on the field for the rationale.
   inAppOrchestratorEnabled: true,
+  workersUseBrain: 'auto',
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -243,6 +264,12 @@ function envInAppOrchestratorEnabled(): boolean | null {
   return null;
 }
 
+function envWorkersUseBrain(): WorkersUseBrain | null {
+  const raw = process.env.O8_WORKERS_USE_BRAIN?.trim();
+  if (raw && isWorkersUseBrain(raw)) return raw;
+  return null;
+}
+
 // ── File helpers ──
 
 interface StoredOperatorDefaults {
@@ -259,6 +286,7 @@ interface StoredOperatorDefaults {
   experimentalChat?: boolean;
   classAComposer?: ClassAComposer;
   inAppOrchestratorEnabled?: boolean;
+  workersUseBrain?: WorkersUseBrain;
 }
 
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
@@ -318,6 +346,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (typeof stored.inAppOrchestratorEnabled === 'boolean') {
     result.inAppOrchestratorEnabled = stored.inAppOrchestratorEnabled;
   }
+  if (isWorkersUseBrain(stored.workersUseBrain)) {
+    result.workersUseBrain = stored.workersUseBrain;
+  }
   return result;
 }
 
@@ -337,6 +368,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envChat = envExperimentalChat();
   const envComposer = envClassAComposer();
   const envInApp = envInAppOrchestratorEnabled();
+  const envBrain = envWorkersUseBrain();
 
   const resolved: OperatorDefaults = {
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
@@ -355,6 +387,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled:
       envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled,
+    workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -374,6 +407,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
       envInApp !== null ? 'env' : fileValues.inAppOrchestratorEnabled !== undefined ? 'file' : 'default',
+    workersUseBrain: envBrain !== null ? 'env' : fileValues.workersUseBrain !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -469,12 +503,18 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.classAComposer !== undefined) {
     if (!isClassAComposer(update.classAComposer)) {
-      throw new Error('classAComposer must be one of "auto", "haiku-cli", "sonnet-cli".');
+      throw new Error('classAComposer must be one of "auto", "haiku-cli", "sonnet-cli", "fastest".');
     }
     stored.classAComposer = update.classAComposer;
   }
   if (update.inAppOrchestratorEnabled !== undefined) {
     stored.inAppOrchestratorEnabled = Boolean(update.inAppOrchestratorEnabled);
+  }
+  if (update.workersUseBrain !== undefined) {
+    if (!isWorkersUseBrain(update.workersUseBrain)) {
+      throw new Error('workersUseBrain must be one of "off", "auto", "all".');
+    }
+    stored.workersUseBrain = update.workersUseBrain;
   }
 
   await mkdir(path.dirname(filePath), { recursive: true });
@@ -517,4 +557,8 @@ export function resolveExperimentalOpencodeSync(): boolean {
 
 export function resolveInAppOrchestratorEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.inAppOrchestratorEnabled;
+}
+
+export function resolveWorkersUseBrainSync(): WorkersUseBrain {
+  return getOperatorDefaultsSync().values.workersUseBrain;
 }
