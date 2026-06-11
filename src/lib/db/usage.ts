@@ -11,10 +11,12 @@ import { randomUUID } from 'node:crypto';
 
 // ── Types ──
 
-export type Provider = 'anthropic' | 'openai' | 'google';
+export type Provider = 'anthropic' | 'openai' | 'google' | 'openrouter';
 
 export interface LogUsageInput {
-  userId: string;
+  /** Null for operator-level local spend (house convention: such rows are
+   *  attributed via agentName — matches the Codex/Gemini writers). */
+  userId: string | null;
   model: string;
   provider: Provider;
   inputTokens: number;

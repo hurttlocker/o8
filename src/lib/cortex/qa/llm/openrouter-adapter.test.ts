@@ -6,7 +6,15 @@
  * the slow CLI tiers.
  */
 
+import { mkdtempSync } from 'node:fs';
+import os from 'node:os';
+import { join } from 'node:path';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+// The adapter's daily-cap check + spend ledger open the app SQLite DB on
+// first use — point it at a throwaway dir so tests never touch ~/.o8.
+process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'o8-qa-test-'));
 
 import {
   callOpenRouter,

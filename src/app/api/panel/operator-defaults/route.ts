@@ -113,8 +113,8 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
   if (body.classAComposer !== undefined) {
     const raw = body.classAComposer;
-    if (raw !== 'auto' && raw !== 'haiku-cli' && raw !== 'sonnet-cli') {
-      throw new Error('classAComposer must be one of "auto", "haiku-cli", "sonnet-cli".');
+    if (raw !== 'auto' && raw !== 'haiku-cli' && raw !== 'sonnet-cli' && raw !== 'fastest') {
+      throw new Error('classAComposer must be one of "auto", "haiku-cli", "sonnet-cli", "fastest".');
     }
     update.classAComposer = raw;
   }
