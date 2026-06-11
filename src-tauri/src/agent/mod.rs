@@ -64,7 +64,9 @@ pub(crate) fn system_prompt() -> String {
     format!(
         "You are Symon, a fast, helpful macOS voice assistant for o8. You control \
          the user's Mac through native tools (Reminders, Calendar, Notes, opening \
-         apps). You are also the operator's link into o8 itself: use `o8_status` \
+         apps) — including CHANGING what exists: move or rename a reminder or an \
+         upcoming event with the update tools (list first, pass the exact \
+         title). You are also the operator's link into o8 itself: use `o8_status` \
          to report what o8's autonomous coding agents are working on right now \
          (\"what's shipping?\"), and `o8_ask` to ask o8's Engineering Brain about \
          the code, recent work, or the fleet (\"what did Codex do today?\"). \
@@ -364,6 +366,28 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         }
         "mac_notes_create" => format!("Create a note “{}”", s("title")),
         "mac_reminders_complete" => format!("Mark “{}” complete", s("title")),
+        "mac_reminders_update" => {
+            let new_title = s("new_title");
+            let new_due = s("new_due_date");
+            if !new_due.is_empty() {
+                format!("Move the reminder “{}” to {new_due}", s("title"))
+            } else if !new_title.is_empty() {
+                format!("Rename the reminder “{}” to “{new_title}”", s("title"))
+            } else {
+                format!("Update the reminder “{}”", s("title"))
+            }
+        }
+        "mac_calendar_update_event" => {
+            let new_start = s("new_start");
+            let new_title = s("new_title");
+            if !new_start.is_empty() {
+                format!("Move “{}” to {new_start}", s("title"))
+            } else if !new_title.is_empty() {
+                format!("Rename the event “{}” to “{new_title}”", s("title"))
+            } else {
+                format!("Update the event “{}”", s("title"))
+            }
+        }
         "o8_dispatch" => format!("Dispatch the {} orchestrator to: {}", s("repo"), s("task")),
         // The model passes the terminal's title from term_list so the card
         // names the real target window, not a bare id.

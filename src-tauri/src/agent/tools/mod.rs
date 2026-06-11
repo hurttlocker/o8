@@ -121,6 +121,36 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "mac_reminders_update",
+            "description": "Change an EXISTING reminder — rename it, move its due date, or rewrite its notes ('move my dentist reminder to Friday', 'rename that to X'). List the reminders first and pass the EXACT current title. The user confirms first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "EXACT current reminder title (from mac_reminders_list)." },
+                    "new_title": { "type": "string", "description": "Optional new title." },
+                    "new_due_date": { "type": "string", "description": "Optional new due date, ISO 8601." },
+                    "new_notes": { "type": "string", "description": "Optional replacement notes." },
+                    "list_name": { "type": "string", "description": "Optional list to search in." }
+                },
+                "required": ["title"]
+            }
+        }),
+        json!({
+            "name": "mac_calendar_update_event",
+            "description": "Move or rename an UPCOMING calendar event — 'push my 2pm to 3', 'move standup to Friday at 10', 'rename tomorrow's sync'. List events first and pass the EXACT title. Giving only new_start keeps the event the same length. The user confirms first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": { "type": "string", "description": "EXACT current event title (from mac_calendar_list_events)." },
+                    "new_start": { "type": "string", "description": "Optional new start, ISO 8601. Alone, it preserves the event's duration." },
+                    "new_end": { "type": "string", "description": "Optional new end, ISO 8601." },
+                    "new_title": { "type": "string", "description": "Optional new title." },
+                    "calendar_name": { "type": "string", "description": "Optional calendar to search in." }
+                },
+                "required": ["title"]
+            }
+        }),
+        json!({
             "name": "mac_notes_search",
             "description": "Search Apple Notes by title or body text.",
             "parameters": {
@@ -417,6 +447,11 @@ pub fn all_tools() -> Vec<Value> {
             "parameters": { "type": "object", "properties": {}, "required": [] }
         }),
         json!({
+            "name": "mac_music_previous",
+            "description": "Go back a track in Apple Music ('previous song', 'go back', 'play that again').",
+            "parameters": { "type": "object", "properties": {}, "required": [] }
+        }),
+        json!({
             "name": "mac_music_now_playing",
             "description": "What's currently playing in Apple Music (track, artist, player state). Use for 'what song is this?'.",
             "parameters": { "type": "object", "properties": {}, "required": [] }
@@ -710,8 +745,10 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "mac_reminders_list" => mac_reminders::list(args).await,
         "mac_reminders_create" => mac_reminders::create(args).await,
         "mac_reminders_complete" => mac_reminders::complete(args).await,
+        "mac_reminders_update" => mac_reminders::update(args).await,
         "mac_calendar_list_events" => mac_calendar::list_events(args).await,
         "mac_calendar_create_event" => mac_calendar::create_event(args).await,
+        "mac_calendar_update_event" => mac_calendar::update_event(args).await,
         "mac_notes_search" => mac_notes::search(args).await,
         "mac_notes_create" => mac_notes::create(args).await,
         "mac_notes_append" => mac_notes::append(args).await,
@@ -767,6 +804,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "mac_music_play" => mac_music::play(args).await,
         "mac_music_pause" => mac_music::pause(args).await,
         "mac_music_next" => mac_music::next(args).await,
+        "mac_music_previous" => mac_music::previous(args).await,
         "mac_music_now_playing" => mac_music::now_playing(args).await,
         "git_status" => git_github::git_status(args).await,
         "git_log" => git_github::git_log(args).await,
