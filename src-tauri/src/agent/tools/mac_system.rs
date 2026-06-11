@@ -22,8 +22,16 @@ return (output volume of s as string) & "," & (output muted of s as string)"#,
     Ok((volume, muted))
 }
 
-/// `mac_volume` — get / set / nudge / mute the system output volume.
+/// `mac_volume` — get / set / nudge / mute the system output volume. The
+/// AppleScript calls are synchronous (`osascript` subprocess), so the whole
+/// body runs on a blocking thread to keep them off the async executor.
 pub async fn volume(args: Value) -> Result<Value, String> {
+    tokio::task::spawn_blocking(move || volume_sync(args))
+        .await
+        .map_err(|e| format!("spawn_blocking error: {e}"))?
+}
+
+fn volume_sync(args: Value) -> Result<Value, String> {
     let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("get");
     let step = args.get("amount").and_then(|v| v.as_i64()).unwrap_or(15).clamp(1, 100);
     let (current, muted) = read_state()?;
