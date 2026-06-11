@@ -125,3 +125,8 @@ objc2-foundation = "0.3"
 core-graphics = "0.24"
 core-foundation = "0.10"
 objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSPasteboard", "NSWindow", "NSScreen", "NSColor", "NSResponder", "NSView", "NSGraphics", "NSUserInterfaceItemIdentification"] }
+# EventKit — Symon's calendar list. The JXA whose-clause scan took 27s on a
+# real 14-calendar set (the 30s osascript cap made "what's on my calendar"
+# effectively dead); the indexed EventKit store answers in milliseconds.
+objc2-event-kit = { version = "0.3", features = ["EKEventStore", "EKEvent", "EKCalendarItem", "EKCalendar", "EKObject", "EKTypes", "block2"] }
+block2 = "0.6"

@@ -1,63 +1,40 @@
-//! Calendar tools — list_events (ReadOnly, JXA) / create_event (Reversible,
-//! AppleScript). Listing + querying use JXA; creation uses AppleScript because
-//! JXA event creation silently fails to persist. delete_event (Destructive) is
-//! withheld from the model by `enabled_tools()` until the confirm gate is trusted.
+//! Calendar tools — list_events (ReadOnly, native EventKit) / create_event +
+//! update_event (Reversible, AppleScript). Listing uses the indexed EventKit
+//! store (`agent::event_kit`) — the old JXA whose-clause scan took 27s on a
+//! real calendar set and the 30s osascript cap killed it. Creation/mutation
+//! stay AppleScript because JXA event creation silently fails to persist.
+//! delete_event (Destructive) is withheld from the model by `enabled_tools()`
+//! until the confirm gate is trusted.
 
-use super::{as_escape, date_setter_block, parse_due_components, run_applescript, run_osascript_jxa};
+use super::{as_escape, date_setter_block, parse_due_components, run_applescript};
 use serde_json::{json, Value};
 
-/// Escape a string for a JS double-quoted literal.
-fn js_escape(s: &str) -> String {
-    s.replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "")
-}
-
 pub async fn list_events(args: Value) -> Result<Value, String> {
-    // NOTE: aqua multiplied `days_ahead` by 1000 here AND the JXA multiplies by
-    // 86400000 — a 1000× window bug. Fixed: use days_ahead directly.
-    let days = args.get("days_ahead").and_then(|v| v.as_i64()).unwrap_or(7).max(1);
-    let calendar_filter = js_escape(
-        args.get("calendar_name").and_then(|v| v.as_str()).unwrap_or(""),
-    );
+    let days = args.get("days_ahead").and_then(|v| v.as_i64()).unwrap_or(7).clamp(1, 90);
+    let calendar_filter = args
+        .get("calendar_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    let script = format!(
-        "\nObjC.import('Foundation');\n\
-         var cal = Application('Calendar');\n\
-         cal.includeStandardAdditions = true;\n\
-         var now = new Date();\n\
-         var end = new Date(now.getTime() + {days} * 86400000);\n\
-         var results = [];\n\
-         var calendars = cal.calendars();\n\
-         for (var i = 0; i < calendars.length; i++) {{\n\
-         \tvar c = calendars[i];\n\
-         \tif (\"{calendar_filter}\" !== \"\" && c.name() !== \"{calendar_filter}\") continue;\n\
-         \ttry {{\n\
-         \t\tvar events = c.events.whose({{_and: [\n\
-         \t\t\t{{startDate: {{_greaterThanEquals: now}}}},\n\
-         \t\t\t{{startDate: {{_lessThan: end}}}}\n\
-         \t\t]}})();\n\
-         \t\tfor (var j = 0; j < events.length && results.length < 20; j++) {{\n\
-         \t\t\tvar e = events[j];\n\
-         \t\t\tresults.push({{\n\
-         \t\t\t\ttitle: e.summary(),\n\
-         \t\t\t\tstart: e.startDate().toISOString(),\n\
-         \t\t\t\tend: e.endDate().toISOString(),\n\
-         \t\t\t\tcalendar: c.name(),\n\
-         \t\t\t\tnotes: e.description() || \"\"\n\
-         \t\t\t}});\n\
-         \t\t}}\n\
-         \t}} catch(err) {{}}\n\
-         }}\n\
-         JSON.stringify(results);"
-    );
+    let rows = tokio::task::spawn_blocking(move || {
+        crate::agent::event_kit::list_events(days, &calendar_filter)
+    })
+    .await
+    .map_err(|e| format!("spawn_blocking error: {e}"))??;
 
-    let raw = tokio::task::spawn_blocking(move || run_osascript_jxa(&script))
-        .await
-        .map_err(|e| format!("spawn_blocking error: {e}"))??;
-
-    let events: Value = serde_json::from_str(&raw).unwrap_or_else(|_| json!([]));
+    let events: Vec<Value> = rows
+        .iter()
+        .map(|r| {
+            json!({
+                "title": r.title,
+                "start": r.start_local,
+                "end": r.end_local,
+                "calendar": r.calendar,
+                "all_day": r.all_day,
+            })
+        })
+        .collect();
     Ok(json!({ "events": events }))
 }
 
