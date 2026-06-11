@@ -588,8 +588,9 @@ export function O8ScratchChat({
 
   const askBrain = useCallback(async () => {
     // #1117 — third composer path: send the current input to the Engineering
-    // Brain via the non-streaming /api/cortex/ask/answer endpoint, render the
-    // JSON answer in an assistant bubble with citation pills underneath.
+    // Brain. Streams the SSE /api/cortex/ask route (2026-06-11 brain perf
+    // pass) so Class B answers paint as Sonnet generates instead of arriving
+    // as one blob after the full pipeline; citation pills land underneath.
     const question = input.trim();
     if (!question || askLoading) return;
 
@@ -611,32 +612,72 @@ export function O8ScratchChat({
     setHandoffNote(null);
     setAskLoading(true);
 
-    // Classifier currently runs 11-43s end-to-end; cap at 90s so a hung
-    // backend doesn't leave the bubble in a silent Thinking… state.
+    // Whole-ask ceiling so a hung backend doesn't leave the bubble in a
+    // silent Thinking… state. Streaming usually paints well before this.
     const controller = new AbortController();
     const timeoutId = setTimeout(() => controller.abort(), 90_000);
 
     try {
-      const response = await fetch('/api/cortex/ask/answer', {
+      const response = await fetch('/api/cortex/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, repoPath: repoPath ?? undefined }),
         signal: controller.signal,
       });
-      const payload = await response.json().catch(() => ({})) as {
-        ok?: boolean;
-        answer?: string;
-        citations?: ScratchCitation[];
-        error?: string;
-      };
-      if (!response.ok || payload.ok === false) {
-        throw new Error(payload.error || `Ask Brain failed (${response.status}).`);
+      if (!response.ok || !response.body) {
+        throw new Error(`Ask Brain failed (${response.status}).`);
       }
-      const answer = payload.answer?.trim() || 'The Engineering Brain returned no answer.';
-      const citations = Array.isArray(payload.citations) ? payload.citations : [];
+
+      let answer = '';
+      const citations: ScratchCitation[] = [];
+      let streamError: string | null = null;
+
+      const applyFrame = (eventName: string, dataLine: string) => {
+        let payload: Record<string, unknown> = {};
+        try {
+          payload = JSON.parse(dataLine) as Record<string, unknown>;
+        } catch {
+          return;
+        }
+        if (eventName === 'token' && typeof payload.text === 'string') {
+          answer += payload.text;
+          setMessages((current) => current.map((message) => (
+            message.id === assistantId ? { ...message, content: answer } : message
+          )));
+        } else if (eventName === 'citation') {
+          citations.push(payload as unknown as ScratchCitation);
+        } else if (eventName === 'error' && typeof payload.message === 'string') {
+          streamError = payload.message;
+        }
+      };
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (value) buffer += decoder.decode(value, { stream: true });
+        let sep = buffer.indexOf('\n\n');
+        while (sep !== -1) {
+          const frame = buffer.slice(0, sep);
+          buffer = buffer.slice(sep + 2);
+          let eventName = 'message';
+          let dataLine = '';
+          for (const line of frame.split('\n')) {
+            if (line.startsWith('event: ')) eventName = line.slice(7).trim();
+            else if (line.startsWith('data: ')) dataLine += line.slice(6);
+          }
+          if (dataLine) applyFrame(eventName, dataLine);
+          sep = buffer.indexOf('\n\n');
+        }
+        if (done) break;
+      }
+
+      if (streamError) throw new Error(streamError);
+      const finalAnswer = answer.trim() || 'The Engineering Brain returned no answer.';
       setMessages((current) => current.map((message) => (
         message.id === assistantId
-          ? { ...message, content: answer, citations }
+          ? { ...message, content: finalAnswer, citations }
           : message
       )));
     } catch (err) {
