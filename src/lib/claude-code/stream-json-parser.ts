@@ -302,6 +302,19 @@ export function createClaudeCodeStreamJsonParser(
       return events;
     }
 
+    // `--include-partial-messages` wraps the Anthropic SSE events in a
+    // `stream_event` envelope: { type: 'stream_event', event: { type:
+    // 'content_block_delta', ... } }. Unwrap and re-process — this is what
+    // makes mid-turn token deltas real (verified against the live CLI
+    // 2026-06-11; without the unwrap, text only landed via the complete
+    // `assistant` message, one blob per turn). The streamedTextIndices
+    // machinery below already dedupes the final assistant replay.
+    if (type === 'stream_event') {
+      const inner = asRecord(event.event);
+      if (inner) return processEvent(inner);
+      return events;
+    }
+
     if (type === 'content_block_delta') {
       const delta = asRecord(event.delta);
       const blockIndex = asNumber(event.index);
