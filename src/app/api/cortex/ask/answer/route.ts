@@ -6,7 +6,9 @@
  * the Engineering Brain and get a single JSON answer back (no SSE parsing).
  *
  * Accepts: { question: string, repoPath?: string, projectId?: string, bypassCache?: boolean }
- * Returns: { ok: true, answer, citations, class, retrievalMs, classifyMs } | { ok: false, error }
+ * Returns: { ok: true, answer, citations, class, retrievalMs, classifyMs,
+ *            sourcesConsidered } | { ok: false, error }
+ * Citations carry a human-readable `title` per source (2026-06-11 parity pass).
  */
 
 export const runtime = 'nodejs';
@@ -50,6 +52,7 @@ export async function POST(request: NextRequest) {
       class: result.class,
       retrievalMs: result.retrievalMs,
       classifyMs: result.classifyMs,
+      sourcesConsidered: result.sourcesConsidered,
     }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch (err) {
     return NextResponse.json(

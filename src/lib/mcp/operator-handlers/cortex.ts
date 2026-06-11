@@ -43,7 +43,7 @@ export const CORTEX_TOOLS: McpTool[] = [
   {
     name: 'cortex_ask',
     description:
-      'Ask the Engineering Brain a natural-language question. Joins session_outcomes + directives + symbol_graph + GitHub PRs across the operator\'s projects, classifies the question (Class A factual / Class B narrative), retrieves via SQL + FTS5 + graph, and composes an answer with citations back to source rows. Non-streaming JSON result. Use for: "who owns X", "how does Y get reviewed", "what changed in Z this week", "have we tried this before".',
+      'Ask the Engineering Brain a natural-language question. Joins session_outcomes + directives + symbol_graph + GitHub PRs across the operator\'s projects, classifies the question (Class A factual / Class B narrative), retrieves via SQL + FTS5 + graph, and composes an answer with citations back to source rows. Non-streaming JSON result. Each citation carries a human-readable `title` (directive title, PR title, outcome summary) — name your sources when relaying the answer (e.g. "per the CLAUDE.md critical-rules directive"). `sourcesConsidered` is how many rows retrieval examined; citations are the subset the answer actually used. Use for: "who owns X", "how does Y get reviewed", "what changed in Z this week", "have we tried this before".',
     inputSchema: {
       type: 'object',
       properties: {
@@ -107,6 +107,7 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
       class?: string;
       retrievalMs?: number;
       classifyMs?: number;
+      sourcesConsidered?: number;
       error?: string;
     };
 
@@ -121,6 +122,7 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
       class: result.class ?? null,
       retrievalMs: result.retrievalMs ?? null,
       classifyMs: result.classifyMs ?? null,
+      sourcesConsidered: result.sourcesConsidered ?? null,
     });
   } catch (error) {
     return jsonResult({ ok: false, error: errorText(error) });

@@ -555,7 +555,7 @@ export default function DictationPillPage() {
           dockLog(`agent-confirm ${tool}`);
           if (taskId) setAgentConfirm({ taskId, tool, summary });
         }));
-        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string; glint?: string; text?: string }>('o8:agent-task-event', (e) => {
+        add(await listen<{ kind?: string; status?: string; taskId?: string; result?: string; intent?: string; tool?: string; glint?: string; text?: string; sources?: Array<{ kind?: string; title?: string; url?: string }> }>('o8:agent-task-event', (e) => {
           const kind = e.payload?.kind;
           if (kind === 'tool_call') {
             // Track the live tool so the working capsule can say "Synthesizing…"
@@ -613,11 +613,18 @@ export default function DictationPillPage() {
             const intent = agentIntentRef.current.trim();
             const answer = (e.payload?.result ?? '').trim()
               || (status === 'failed' ? 'Symon hit an error.' : 'Done.');
+            // Titled Brain sources (when the run consulted o8_ask) render as
+            // a quiet meta line under the answer — sources-parity 2026-06-11.
+            const sources = Array.isArray(e.payload?.sources)
+              ? e.payload.sources
+                  .filter((s) => typeof s?.title === 'string' && s.title)
+                  .map((s) => ({ kind: s.kind ?? 'source', title: s.title as string, url: s.url }))
+              : undefined;
             agentIntentRef.current = '';
             setAskThread((prev) => {
               const turns: AskTurn[] = [];
               if (intent) turns.push({ role: 'user', text: intent });
-              turns.push({ role: 'assistant', text: answer });
+              turns.push({ role: 'assistant', text: answer, sources: sources && sources.length > 0 ? sources : undefined });
               const next = [...prev, ...turns];
               return next.length > ASK_MAX_TURNS ? next.slice(next.length - ASK_MAX_TURNS) : next;
             });
