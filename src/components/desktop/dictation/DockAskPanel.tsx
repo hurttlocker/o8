@@ -14,7 +14,13 @@
 
 import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 
-export type AskTurn = { role: 'user' | 'assistant'; text: string };
+export type AskTurn = {
+  role: 'user' | 'assistant';
+  text: string;
+  /** Titled Brain sources when the turn consulted o8_ask — rendered as a
+   *  quiet meta line under the answer (sources-parity pass 2026-06-11). */
+  sources?: Array<{ kind: string; title: string; url?: string }>;
+};
 
 // ── Symon palette (literal) ──
 const LABEL_STYLE: CSSProperties = {
@@ -171,6 +177,25 @@ function AskTurnRow({
         {copied ? 'Copied' : 'Copy'}
       </button>
       <AskMarkdown text={turn.text} />
+      {turn.sources && turn.sources.length > 0 ? (
+        <div
+          style={{
+            marginTop: 4,
+            fontSize: 10,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            lineHeight: 1.4,
+            color: 'rgba(255, 255, 255, 0.45)',
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            display: '-webkit-box',
+            WebkitLineClamp: 2,
+            WebkitBoxOrient: 'vertical',
+          } as React.CSSProperties}
+        >
+          {turn.sources.length} {turn.sources.length === 1 ? 'source' : 'sources'} · {turn.sources.map((s) => s.title).join(' · ')}
+        </div>
+      ) : null}
     </div>
   );
 }

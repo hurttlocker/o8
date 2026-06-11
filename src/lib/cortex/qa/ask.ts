@@ -22,7 +22,7 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 
 import { classifyQuestion } from '@/lib/cortex/qa/classifier';
-import { composeClassA, composeClassB, type SseEmit } from '@/lib/cortex/qa/composer';
+import { composeClassA, composeClassB, rowDisplayTitle, type SseEmit } from '@/lib/cortex/qa/composer';
 import { buildGrepArmTopRows } from '@/lib/cortex/qa/grep-arm';
 import { prewarmHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { prewarmSonnetCli } from '@/lib/cortex/qa/llm/sonnet-adapter';
@@ -113,6 +113,30 @@ export interface AskCortexResult {
   class: 'A' | 'B';
   retrievalMs: number;
   classifyMs: number;
+  /** How many rows retrieval put in front of the composer (cited ⊆ considered).
+   *  Lets consumers say "consulted 30 sources, cited 3". 0 on cache hits. */
+  sourcesConsidered: number;
+}
+
+/**
+ * Build the early `sources` payload emitted the moment retrieval lands —
+ * BEFORE composition starts. This is what lets a surface show "found N
+ * sources" live while the model is still writing, with the top titles as
+ * the minimal preview ("what is he looking at").
+ */
+function buildSourcesPayload(topRows: TypedRow[], retrievalMs: number): {
+  count: number;
+  retrievalMs: number;
+  top: Array<{ kind: string; title: string }>;
+} {
+  return {
+    count: topRows.length,
+    retrievalMs,
+    top: topRows.slice(0, 5).map((row) => ({
+      kind: row.citation.kind,
+      title: rowDisplayTitle(row),
+    })),
+  };
 }
 
 /**
@@ -141,6 +165,7 @@ export async function askCortex(
         class: 'A', // cached result — class doesn't matter
         retrievalMs: 0,
         classifyMs: 0,
+        sourcesConsidered: 0,
       };
     }
     // Single-flight: concurrent identical questions share one pipeline run
@@ -221,6 +246,7 @@ async function runAskCortexUncached(
         kind: Citation['kind'];
         rowId: string;
         table: string;
+        title?: string;
         excerpt?: string;
         url?: string;
       };
@@ -228,6 +254,7 @@ async function runAskCortexUncached(
         kind: p.kind,
         rowId: p.rowId,
         table: p.table,
+        title: p.title,
         excerpt: p.excerpt,
         url: p.url,
       });
@@ -246,6 +273,7 @@ async function runAskCortexUncached(
     class: classification.class,
     retrievalMs,
     classifyMs,
+    sourcesConsidered: topRows.length,
   };
 
   if (!bypassCache) {
@@ -308,6 +336,7 @@ export async function runAskPipeline(
     if (classification.class === 'B') void prewarmSonnetCli();
 
     // 2. Retrieve — run all three retrievers in parallel, RRF-merge.
+    const retrievalStart = Date.now();
     try {
       const results = await retrieveAll({
         question,
@@ -321,6 +350,11 @@ export async function runAskPipeline(
       console.warn('[qa][ask] retrieval error:', err);
       topRows = [];
     }
+    // Surface what retrieval found BEFORE composition starts — the live
+    // "found N sources" signal every UI renders while the model writes.
+    emit('sources', buildSourcesPayload(topRows, Date.now() - retrievalStart));
+  } else {
+    emit('sources', buildSourcesPayload(topRows, 0));
   }
 
   // 3. Compose — stream answer tokens + citations.
@@ -336,6 +370,7 @@ export async function runAskPipeline(
         kind: Citation['kind'];
         rowId: string;
         table: string;
+        title?: string;
         excerpt?: string;
         url?: string;
       };
@@ -343,6 +378,7 @@ export async function runAskPipeline(
         kind: p.kind,
         rowId: p.rowId,
         table: p.table,
+        title: p.title,
         excerpt: p.excerpt,
         url: p.url,
       });

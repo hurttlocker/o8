@@ -54,6 +54,7 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     let mut contents: Vec<Value> = vec![json!({ "role": "user", "parts": first_parts })];
 
     let mut tool_call_log: Vec<Value> = Vec::new();
+    let mut brain_sources: Vec<Value> = Vec::new();
     let mut result_text = String::new();
     // Spoken-filler latch — "Let me check." before the first read tool runs.
     let mut spoke_filler = false;
@@ -129,6 +130,14 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
                     "ok": tool_result.get("error").is_none(),
                 }));
 
+                // Collect titled Brain sources for the dock answer panel.
+                if tool_name == "o8_ask" {
+                    if let Some(srcs) = tool_result.get("sources").and_then(|v| v.as_array()) {
+                        brain_sources.extend(srcs.iter().take(5).cloned());
+                        brain_sources.truncate(8);
+                    }
+                }
+
                 super::emit_agent_event(
                     &ctx.app,
                     json!({ "taskId": ctx.task_id, "kind": "tool_result", "tool": tool_name, "result": tool_result }),
@@ -179,5 +188,6 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         result_text,
         model_used: model.to_string(),
         tool_calls_json: Value::Array(tool_call_log).to_string(),
+        brain_sources,
     })
 }

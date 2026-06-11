@@ -191,6 +191,12 @@ export function classifyToolCall(toolName: string): { verb: string; kind: ToolCa
   if (lc.includes('dispatch') || lc.includes('delegate') || lc.includes('spawn') || lc === 'task') {
     return { verb: 'Delegate', kind: 'delegate' };
   }
+  // Engineering Brain Q&A (cortex_ask, incl. mcp__o8__-prefixed names) — a
+  // read against organizational memory. Chip reads "Brain: <question>"
+  // (2026-06-11 sources-parity pass) instead of the generic tool-name verb.
+  if (lc.endsWith('cortex_ask')) {
+    return { verb: 'Brain', kind: 'read' };
+  }
   if (lc.includes('spec')) {
     return { verb: 'Spec', kind: 'spec' };
   }
