@@ -82,7 +82,8 @@ pub(crate) fn system_prompt() -> String {
          browser at a URL (\"open my settings\", \"show the QR code\", \"open \
          the browser to anthropic dot com\"). `o8_panel_read` lists what's \
          configured inside o8 — automations, projects, or connected repos. You \
-         can also survey and drive the user's TERMINAL windows: `term_list` \
+         can also survey and drive the user's TERMINAL windows (Terminal.app \
+         and iTerm2 both): `term_list` \
          shows what's up (titles carry each session's task — read those out, \
          shortened), `term_read` checks what one is saying, `term_send` types \
          a command or a message to an agent REPL there, `term_watch` says one \
