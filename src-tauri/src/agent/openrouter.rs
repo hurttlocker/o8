@@ -33,8 +33,13 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         .map(|spec| json!({ "type": "function", "function": spec }))
         .collect();
 
+    let mut system_text = super::system_prompt();
+    if let Some(convo) = super::conversation_context() {
+        system_text.push_str("\n\n");
+        system_text.push_str(&convo);
+    }
     let mut messages: Vec<Value> = vec![
-        json!({ "role": "system", "content": super::system_prompt() }),
+        json!({ "role": "system", "content": system_text }),
         json!({ "role": "user", "content": intent }),
     ];
 

@@ -72,6 +72,22 @@ pub async fn create_event(args: Value) -> Result<Value, String> {
     let end_comps = parse_due_components(end).ok_or("end_date must be ISO 8601")?;
     let notes = args.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let calendar_name = args.get("calendar_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    // Recurrence — Calendar.app takes a raw RRULE string. Reminders.app's
+    // dictionary has no recurrence at all, so repeating asks land HERE (the
+    // system prompt routes them).
+    let repeat = args.get("repeat").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+    let rrule = match repeat.as_str() {
+        "" | "none" => None,
+        "daily" => Some("FREQ=DAILY;INTERVAL=1"),
+        "weekdays" => Some("FREQ=WEEKLY;INTERVAL=1;BYDAY=MO,TU,WE,TH,FR"),
+        "weekly" => Some("FREQ=WEEKLY;INTERVAL=1"),
+        "biweekly" => Some("FREQ=WEEKLY;INTERVAL=2"),
+        "monthly" => Some("FREQ=MONTHLY;INTERVAL=1"),
+        "yearly" => Some("FREQ=YEARLY;INTERVAL=1"),
+        other => return Err(format!(
+            "unknown repeat '{other}' — use daily, weekdays, weekly, biweekly, monthly, or yearly"
+        )),
+    };
 
     let start_block = date_setter_block("startDate", start_comps);
     let end_block = date_setter_block("endDate", end_comps);
@@ -91,13 +107,16 @@ pub async fn create_event(args: Value) -> Result<Value, String> {
 
     let title_esc = as_escape(&title);
     let notes_esc = as_escape(&notes);
+    let recurrence_prop = rrule
+        .map(|r| format!(", recurrence:\"{r}\""))
+        .unwrap_or_default();
     let script = format!(
         "\ntell application \"Calendar\"\n\
          \t{start_block}\
          \t{end_block}\
          \t{cal_selection}\
          \ttell targetCal\n\
-         \t\tmake new event with properties {{summary:\"{title_esc}\", start date:startDate, end date:endDate, description:\"{notes_esc}\"}}\n\
+         \t\tmake new event with properties {{summary:\"{title_esc}\", start date:startDate, end date:endDate, description:\"{notes_esc}\"{recurrence_prop}}}\n\
          \tend tell\n\
          \t\"ok\"\n\
          end tell"
@@ -107,7 +126,8 @@ pub async fn create_event(args: Value) -> Result<Value, String> {
         .await
         .map_err(|e| format!("spawn_blocking error: {e}"))??;
 
-    Ok(json!({ "success": true, "title": title }))
+    let repeats = if repeat.is_empty() { "no".to_string() } else { repeat };
+    Ok(json!({ "success": true, "title": title, "repeats": repeats }))
 }
 
 /// Delete events by exact title (Destructive — withheld from the model by

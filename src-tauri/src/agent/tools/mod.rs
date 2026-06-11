@@ -106,7 +106,7 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "mac_calendar_create_event",
-            "description": "Create a calendar event. start_date and end_date are ISO 8601 (e.g. 2026-06-09T15:00:00).",
+            "description": "Create a calendar event, optionally REPEATING. start_date and end_date are ISO 8601 (e.g. 2026-06-09T15:00:00). For 'every Monday at 9' use repeat:'weekly' with start_date on the next Monday 9am. Recurring REMINDERS aren't possible on macOS — route 'remind me every X' here as a repeating event and tell the user it went on the calendar.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -114,7 +114,8 @@ pub fn all_tools() -> Vec<Value> {
                     "start_date": { "type": "string", "description": "ISO 8601 start." },
                     "end_date": { "type": "string", "description": "ISO 8601 end." },
                     "notes": { "type": "string", "description": "Optional notes." },
-                    "calendar_name": { "type": "string", "description": "Target calendar. Omit for the first writable one." }
+                    "calendar_name": { "type": "string", "description": "Target calendar. Omit for the first writable one." },
+                    "repeat": { "type": "string", "enum": ["daily", "weekdays", "weekly", "biweekly", "monthly", "yearly"], "description": "Optional recurrence. The event repeats from start_date." }
                 },
                 "required": ["title", "start_date", "end_date"]
             }
