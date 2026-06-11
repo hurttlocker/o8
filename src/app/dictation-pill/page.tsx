@@ -365,6 +365,26 @@ export default function DictationPillPage() {
   const handleTogglePause = useCallback(() => { invokeCmd('tts_toggle_pause'); }, []);
   const handleStop = useCallback(() => { invokeCmd('tts_stop'); }, []);
 
+  // Symon speaking speed (dock slider + durable). Seed from the persisted
+  // reading_speed pref so the slider shows the real default on first paint;
+  // a change applies live AND persists via tts_set_speed.
+  const [speechSpeed, setSpeechSpeed] = useState(1);
+  useEffect(() => {
+    if (!isTauri()) return;
+    import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke<Record<string, unknown>>('voice_prefs_get'))
+      .then((prefs) => {
+        const raw = prefs?.reading_speed;
+        const n = typeof raw === 'number' ? raw : Number(raw);
+        if (Number.isFinite(n) && n > 0) setSpeechSpeed(Math.min(3, Math.max(1, n)));
+      })
+      .catch(() => { /* default 1× */ });
+  }, []);
+  const handleSpeechSpeed = useCallback((rate: number) => {
+    setSpeechSpeed(rate);
+    invokeCmd('tts_set_speed', { rate });
+  }, []);
+
   // Keep a ref of the live thread for the open-time resume decision.
   useEffect(() => { askThreadRef.current = askThread; }, [askThread]);
 
@@ -738,6 +758,8 @@ export default function DictationPillPage() {
             ttsState={ttsState}
             onTogglePause={handleTogglePause}
             onStop={handleStop}
+            speechSpeed={speechSpeed}
+            onSpeechSpeed={handleSpeechSpeed}
             askOpen={askOpen}
             askMode={askMode}
             askThread={askThread}

@@ -2942,6 +2942,18 @@ fn tts_is_active() -> bool {
     tts::playback::is_active()
 }
 
+/// Set Symon's speaking speed. Applies LIVE to the current utterance (the dock
+/// slider's instant feedback) AND persists `reading_speed` so every later
+/// utterance speaks at this rate (the "set 2x, always 2x" durable setting).
+/// `rate` is the absolute multiplier 0.5–3.0. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn tts_set_speed(rate: f32) -> Result<(), String> {
+    let clamped = rate.clamp(0.5, 3.0);
+    tts::playback::set_live_speed(clamped);
+    crate::stt::keys::set_pref("reading_speed", serde_json::json!(clamped))
+}
+
 /// Grow / shrink the screen dock window for the Ask answer panel (voice P4
 /// phase C). Called from the `/dictation-pill` webview when it opens/collapses
 /// the Ask thread. The resize runs Rust-side so the dock webview needs no
@@ -3445,6 +3457,7 @@ pub fn run() {
             tts_speak,
             tts_stop,
             tts_toggle_pause,
+            tts_set_speed,
             tts_is_active,
             dock_set_expanded,
             dock_set_hit_rect,
