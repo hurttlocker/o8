@@ -29,6 +29,7 @@ process.env.O8_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-lane-rebind-'));
 const { createLane, getLane, listLanes, setLaneStatus } = await import('@/lib/lane/registry');
 const { archiveLanesForPacket } = await import('@/lib/orchestrator/operator-mission-service/rerun-with-feedback');
 const { isTerminalReleaseLane } = await import('@/lib/orchestrator/operator-mission-service/merge');
+const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
 
 function laneFixture(packetId: string, branch: string) {
   return createLane({
@@ -95,5 +96,44 @@ describe('isTerminalReleaseLane (#1214)', () => {
     setLaneStatus(merged.id, 'archived', 'system');
 
     expect(await isTerminalReleaseLane(packetId)).toBe(true);
+  });
+});
+
+describe('reset_packet lane sweep (#1215)', () => {
+  // The mission store is empty under the temp O8_DATA_DIR, so resetPacket
+  // routes through resetPacketViaLaneFallback — the lane-only sweep.
+
+  it('unbinds a dead archived lane during reset instead of skipping it', async () => {
+    const packetId = 'pkt-1215-dead-and-active';
+    const dead = laneFixture(packetId, 'inline/reset-dead');
+    setLaneStatus(dead.id, 'archived', 'system');
+    const active = laneFixture(packetId, 'inline/reset-active');
+    setLaneStatus(active.id, 'running', 'system');
+
+    const result = await resetPacket({ packetId, clearWorktree: false });
+    expect(result.reset).toBe(true);
+
+    const sweptDead = getLane(dead.id);
+    expect(sweptDead?.packetId ?? '').toBe('');
+    expect(sweptDead?.status).toBe('archived');
+
+    const sweptActive = getLane(active.id);
+    expect(sweptActive?.packetId ?? '').toBe('');
+    expect(sweptActive?.status).toBe('archived');
+
+    expect(listLanes().filter((lane) => lane.packetId === packetId)).toEqual([]);
+  });
+
+  it('resets a packet stranded on ONLY terminal lanes (pre-#1215: threw not-found)', async () => {
+    const packetId = 'pkt-1215-only-terminal';
+    const dead = laneFixture(packetId, 'inline/reset-only-terminal');
+    setLaneStatus(dead.id, 'archived', 'system');
+
+    const result = await resetPacket({ packetId, clearWorktree: false });
+    expect(result.reset).toBe(true);
+
+    const swept = getLane(dead.id);
+    expect(swept?.packetId ?? '').toBe('');
+    expect(swept?.status).toBe('archived');
   });
 });
