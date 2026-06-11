@@ -51,8 +51,11 @@ export interface AskClaudeOneShotOptions {
  * Build the exact REPL spawn args used by `interactive-session.ts`. Stays in
  * lockstep with `buildClaudeArgs()` there — if that ever changes, mirror here.
  * NO `-p` / `--print` (those flip billing to the SDK pool).
+ *
+ * Exported for `warm-repl-pool.ts` so the pre-warmed spawn path shares the
+ * exact same flag set (and the same #1066 no-print billing guard).
  */
-function buildOneShotArgs(model: string): string[] {
+export function buildOneShotArgs(model: string): string[] {
   const args = [
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
