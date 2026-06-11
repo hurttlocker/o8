@@ -706,15 +706,21 @@ pub async fn packet_steer(args: Value) -> Result<Value, String> {
     let (packet_id, session_key, label) = resolve_lane(which).await?;
 
     if let Some(session_key) = session_key.filter(|s| !s.is_empty()) {
-        let resp = o8_http::post_json(
+        // Steer the warm session. Do NOT `?` here: a failed steer (session
+        // gone → non-2xx → Err, OR a 2xx with ok:false) must fall through to
+        // the reliable rerun path, not abort the tool. Only an explicit
+        // ok:true counts as a warm-session success.
+        let steer = o8_http::post_json(
             "/api/runtime/action",
             json!({ "action": "steer", "surfaceId": session_key, "message": message }),
         )
-        .await?;
-        if resp.get("ok").and_then(|v| v.as_bool()) != Some(false) {
-            return Ok(json!({ "steered": true, "packet": label, "how": "warm session" }));
+        .await;
+        if let Ok(resp) = &steer {
+            if resp.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+                return Ok(json!({ "steered": true, "packet": label, "how": "warm session" }));
+            }
         }
-        // Steer refused (session gone) — fall through to a fresh rerun.
+        // Steer refused or errored — fall through to a fresh rerun.
     }
     let resp = o8_http::post_json(
         "/api/orchestrator/rerun-with-feedback",

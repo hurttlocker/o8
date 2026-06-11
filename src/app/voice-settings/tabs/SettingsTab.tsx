@@ -165,12 +165,14 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
         <PermRow label="Fn key binding" granted={fn === undefined ? null : fnGranted} onOpen={() => { void openSystemSettings(URL_KEYBOARD); }} />
         {fnHijacked ? (
           <div style={{
-            marginTop: 12, padding: 12, borderRadius: 12,
+            marginTop: 12,
+            paddingTop: 12, paddingRight: 12, paddingBottom: 12, paddingLeft: 12,
+            borderRadius: 12,
             border: `1px solid rgba(248,113,113,0.3)`, background: 'rgba(248,113,113,0.08)',
             fontSize: 12, lineHeight: 1.5, color: TEXT_SECONDARY,
           }}>
             <strong style={{ color: DANGER_RED, fontWeight: 500 }}>The Fn key is hijacked.</strong>{' '}
-            macOS starts Apple Dictation on Fn. Open Keyboard Settings → set &ldquo;Press 🌐 key to&rdquo; → &ldquo;Do Nothing&rdquo;.
+            macOS starts Apple Dictation on Fn. Open Keyboard Settings → set the Globe-key action (&ldquo;Press Globe key to&rdquo;) → &ldquo;Do Nothing&rdquo;.
           </div>
         ) : null}
       </SectionCard>

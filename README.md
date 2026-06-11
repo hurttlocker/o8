@@ -26,14 +26,20 @@ This README is honest about state. Everything under **Real** ships in the curren
 - **Cortex v2 organizational memory** — operator directives + a session-outcome ledger (SQLite), auto-directive proposals, and the **Engineering Brain** Q&A surface ("what did Codex do today?", "how does dispatch work?").
 - **The MCP surface** — two stdio servers (operator + cortex) exposing o8 to Claude, plus 12 `o8_view_*` webview-control tools that let an external Claude drive the running app.
 - **The `o8` CLI** — agents inside packet worktrees get `packet info/scope/heartbeat/report`, `lane touches`, `cortex observe`, `o8 run`, `o8 spec …`, `o8 doctor`.
-- **Symon, the voice agent** — native macOS tools (Reminders, Calendar, Notes, Mail, Contacts, Shortcuts, open-app, filesystem) **plus** a Tier-2/3 bridge into o8 itself (read fleet state, ask the Brain, delegate coding work) — every mutation behind a spoken confirm card. Push-to-talk via Left-Option; the morphing notch dock; a "Synthesizing…" + timer card with the o8 orbit motion while it works.
+- **Symon, the voice agent** — a full macOS chief-of-staff by voice, every consequential action behind a spoken confirm card:
+  - **Your Mac:** Reminders + Calendar (create *and* move/rename, recurring events), Notes, Mail, Contacts, Shortcuts, Apple Music (play/pause/next/previous/playlists), weather (keyless), system volume, open/list apps, in-place text rewrite with a one-tap dock Revert chip.
+  - **o8 itself:** open any surface (settings, mobile QR, automations, browser, panels), read panels (automations/projects/repos), add a repo, **"what needs me?"** approval triage (approve/reject by name through a card), recap ("what happened while I was gone"), CLI quota, steer/rerun a packet, file a GitHub issue, draft a message to the orchestrator, ask the Engineering Brain.
+  - **Terminals:** survey and drive **Terminal.app and iTerm2** by voice — list/read/send/interrupt/answer-a-prompt/open-new, plus a one-shot watcher ("tell me when that terminal finishes or needs me").
+  - **Presence + trust:** the morphing notch dock (listening/thinking/speaking), on-screen pointer ("where do I click?"), screen-reading ("what's on my screen?"), rolling conversation memory (follow-ups resolve), pitch-preserving speaking-speed control (dock slider + setting), and a three-tier safety model — ReadOnly runs free, Reversible always cards, Destructive is withheld from the model entirely.
+  - Push-to-talk via Left-Option / ⌥S "say". Code lives in `src-tauri/src/agent/`.
 - **Mobile remote-control surface** — `src/components/mobile/`, paired to the local backend, for kicking off and reviewing work away from the keyboard.
 - **Two-axis theming** (palette × surface), the dock, the review surface, the right-side O8Panel.
 
 ### 🚧 Coming / in design
-- **Symon's "beat-Siri" tool set** — `apple_music_play`, `spotify_control`, `read_screen`, `app_intent` (control any scriptable Mac app). Roadmap: `~/o8-symon-tools-roadmap.md`.
-- **Real-time speech-to-speech** for Symon (currently push-to-talk + cascaded). gpt-realtime-2 / Gemini Live under evaluation.
-- **A reasoning-grade brain for Symon** — today Symon's loop is **100% Gemini Flash direct** (it nails tool-selection); a Claude-REPL-subscription path for heavy reasoning is designed, not yet wired.
+- **Real-time speech-to-speech** for Symon (currently push-to-talk + cascaded) — a button to drop into a hands-free conversation. gpt-realtime-2 vs. Gemini Live under head-to-head evaluation, with voice-continuity matching.
+- **Engineering Brain speed** — the Q&A surface is correct but latent; a profiling + caching pass to bring it under conversational latency.
+- **Deeper app control + browser-use** — Spotify, richer Notes/Reminders ops, and a forked browser-automation path for the web outside o8.
+- **A reasoning-grade brain for Symon** — today Symon's loop is **Gemini Flash direct** (it nails tool-selection); a Claude-REPL-subscription path for heavy reasoning is designed, not yet wired.
 
 ---
 
@@ -47,7 +53,7 @@ Symon is the **life-layer**: voice-first, tool-heavy, and ingrained in your whol
 
 > **If the action mutates a git repo → it routes to the orchestrator (the coder). Everything else → Symon does directly.**
 
-So *"remind me to call Q at 3"* → Symon does it; *"what's shipping?"* → Symon reads o8 state aloud; *"have the orchestrator fix the auth bug in cortex-ide"* → Symon delegates a **gated** mission (it speaks the repo back + shows a confirm card before any worker spawns). Symon talks to o8 as a third client of o8's own loopback API — no orchestration logic is duplicated. Code lives in `src-tauri/src/agent/`.
+So *"remind me to call Q at 3"* → Symon does it; *"what's on my calendar?"* → Symon reads it (native EventKit); *"what's shipping / what needs me?"* → Symon reads o8 state aloud and lets you approve by voice; *"tell me when the audit terminal finishes"* → it watches and speaks up once; *"have the orchestrator fix the auth bug in o8"* → Symon delegates a **gated** mission (it speaks the repo back + shows a confirm card before any worker spawns). Symon talks to o8 as a third client of o8's own loopback API — no orchestration logic is duplicated. Code lives in `src-tauri/src/agent/`.
 
 ### The MCP servers (`src/lib/mcp/`)
 - **`operator-mcp-server.ts`** — the operator's interface: `o8_status`, `o8_send`, `create_mission`, `dispatch_mission`, `get_mission_status`, `submit_review`, `approve_and_merge`, `cortex_ask`, the `o8_view_*` webview-control tools, and the `o8_spec_*` o8.md review tools.
