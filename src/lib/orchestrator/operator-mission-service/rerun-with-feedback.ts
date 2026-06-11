@@ -43,22 +43,33 @@ function appendFeedback(base: string, feedback: string) {
 /**
  * Mirrors the resetPacket lane-archival path. Returns the first worktree
  * path encountered so the caller can prune it.
+ *
+ * Exported for the lane-rebind vitest suite (#1214) — not part of the public API.
  */
-function archiveLanesForPacket(packetId: string, referenceLabel: string): string | null {
+export function archiveLanesForPacket(packetId: string, referenceLabel: string): string | null {
   let worktreePath: string | null = null;
   try {
-    const bound = listLanes().filter(
-      (lane) => lane.packetId === packetId
-        && lane.status !== 'archived'
-        && lane.status !== 'completed',
-    );
+    const bound = listLanes().filter((lane) => lane.packetId === packetId);
     for (const lane of bound) {
-      if (!worktreePath && lane.worktreePath) {
+      // #1214 — terminal lanes must be UNBOUND too (not just skipped). A dead
+      // archived lane that keeps its packetId poisons every packet-keyed read
+      // after recovery: the reconciler derives packet status 'archived' from
+      // it (blocking redispatch), findLatestLaneByPacket resolves governance
+      // reads to it, and the already-released merge check sees a terminal
+      // lane and short-circuits the recovery lane's merge as "Already
+      // released". The new lane created by the dispatch below is the sole
+      // binding going forward.
+      const terminal = lane.status === 'archived' || lane.status === 'completed';
+      if (!terminal && !worktreePath && lane.worktreePath) {
         worktreePath = lane.worktreePath;
       }
       try {
         // Clear packetId first so reconciler can't re-bind this lane.
         updateLane(lane.id, { packetId: '' });
+        if (terminal) {
+          console.log(`[rerun-with-feedback] Unbound ${lane.status} lane ${lane.id} from packet ${referenceLabel}`);
+          continue;
+        }
         archiveLane(lane.id, 'user');
         console.log(`[rerun-with-feedback] Archived stale lane ${lane.id} for packet ${referenceLabel}`);
       } catch (error) {
