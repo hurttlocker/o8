@@ -157,6 +157,10 @@ interface ComposerAreaProps {
   onStop?: () => void;
   onSlashCommand: (cmd: string) => void;
   modelLabel: string;
+  /** Raw orchestrator model id — only meaningful in orchestrator mode. */
+  modelId?: string;
+  /** Orchestrator-mode model switching from the composer chip. */
+  onModelChange?: (model: string) => void;
   effort: ThinkingEffort;
   onEffortChange: (next: ThinkingEffort) => void;
   adaptiveEnabled: boolean;
@@ -214,6 +218,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onStop,
   onSlashCommand,
   modelLabel,
+  modelId,
+  onModelChange,
   effort,
   onEffortChange,
   adaptiveEnabled,
@@ -731,6 +737,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onUndoEnhance={onUndoEnhance}
             onSubmit={onSubmit}
             modelLabel={modelLabel}
+            modelId={isOrchestratorMode ? modelId : undefined}
+            onModelChange={isOrchestratorMode ? onModelChange : undefined}
             effort={effort}
             onEffortChange={onEffortChange}
             adaptiveEnabled={adaptiveEnabled}

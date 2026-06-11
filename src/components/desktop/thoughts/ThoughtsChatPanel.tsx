@@ -2013,6 +2013,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onEditingSteerChange={setEditingSteerId}
         onSlashCommand={handleSlashCommand}
         modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? formatModelLabel(orchestratorModel) : activeTargetLabel}
+        modelId={orchestratorModel}
+        onModelChange={(model) => {
+          setOrchestratorModel(model);
+          writeStoredOrchestratorModel(resolvedRepoPath, model);
+        }}
         effort={thinkingEffort}
         onEffortChange={handleEffortChange}
         adaptiveEnabled={adaptiveThinkingEnabled}
