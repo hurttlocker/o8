@@ -349,13 +349,22 @@ export function createClaudeCodeStreamJsonParser(
       const message = asRecord(event.message);
       const content = message?.content;
       if (Array.isArray(content)) {
-        content.forEach((rawBlock, index) => {
+        content.forEach((rawBlock) => {
           const block = asRecord(rawBlock);
           if (!block) return;
           if (block.type === 'text') {
             const text = asString(block.text);
             if (!text) return;
-            if (streamedTextWithoutIndex || streamedTextIndices.has(index)) return;
+            // With --include-partial-messages, every text block already
+            // streamed as content_block_delta frames — the assistant message
+            // is a REPLAY. Index matching (`has(index)`) is positionally
+            // fragile: the replayed content array compacts/shifts when
+            // thinking blocks are present, so a block streamed at index 1
+            // replays at position 0 and re-emits — doubling fullResponse and
+            // every non-SSE answer built from it (found live 2026-06-11 via
+            // doubled `o8 ask` answers). If ANY text streamed this turn, the
+            // replay is redundant — skip it entirely.
+            if (streamedTextWithoutIndex || streamedTextIndices.size > 0) return;
             emitText(text, events);
           } else if (block.type === 'thinking') {
             const thinking = asString(block.thinking) ?? asString(block.text);
