@@ -1,4 +1,5 @@
 import { buildContextBlock } from '@/lib/codebase-memory/build-context';
+import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestrator/brain-access';
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
 import { renderReadBudgetSections } from '@/lib/dispatch/read-budget';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
@@ -299,6 +300,10 @@ export async function buildPacketPrompt(
   // block so weaker models see adjacent risk surfaces up-front.
   const edgeCaseSections = renderEdgeCaseSections(packet.edgeCaseSites);
   const sandboxVerificationSections = buildSandboxVerificationSections(packet);
+  // 2026-06-11 — "Workers use the Brain". Per-packet override > operator
+  // setting ('auto' = non-frontier runtimes only). Tells the worker about
+  // `o8 ask` so it queries org memory instead of re-deriving it via search.
+  const brainSection = resolvePacketBrainEnabled(packet) ? BRAIN_PROMPT_SECTION : null;
   // #1147 — visual proof. Only nudge UI-shaped packets, and only when they
   // legitimately run their own app (NOT o8's dev servers — the sandbox block
   // above forbids that). Pure-logic packets get nothing (no visual to show).
@@ -354,6 +359,9 @@ export async function buildPacketPrompt(
   if (sandboxVerificationSections.length > 0) {
     console.log(`[dispatch] Injected sandbox-aware UI verification guidance for packet ${packet.id}`);
   }
+  if (brainSection) {
+    console.log(`[brain-access] Injected Engineering Brain instructions for packet ${packet.id} (runtime=${packet.runtime})`);
+  }
 
   return [
     contextBlock || null,
@@ -374,6 +382,7 @@ export async function buildPacketPrompt(
     'Files in this repository follow an 800-line maximum. If your implementation would push a file past this threshold, extract code into focused modules first, then implement your changes. Files with explicit waivers are exempt from this rule.',
     'If a task step needs a long-running or long-output process — a test suite, build, backtest, data job, or a server the task itself requires — start it with `o8 run -- <cmd>` (e.g. `o8 run -- pytest -q`) rather than a bare shell exec, so the operator can watch its live output. This is about genuinely long jobs; still follow any sandbox UI-verification guidance above (do not start dev servers just to smoke-test).',
     captureProofSection,
+    brainSection,
     learnedRuleSection,
     ...buildPacketSelfReviewInstructions(baseBranch),
     'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',

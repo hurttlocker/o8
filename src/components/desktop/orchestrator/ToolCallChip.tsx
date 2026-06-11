@@ -179,8 +179,35 @@ function ToolCallGlyph({ kind, accent }: { kind: ToolCallChipProps['kind']; acce
 
 export const ToolCallChip = memo(ToolCallChipBase);
 
-/** Heuristic mapping from raw tool name → visible verb + glyph kind. */
-export function classifyToolCall(toolName: string): { verb: string; kind: ToolCallChipProps['kind'] } {
+/**
+ * Pull the question out of an `o8 ask "<question>"` shell command. Workers
+ * reach the Engineering Brain through the CLI (not the cortex_ask MCP tool),
+ * so their transcript shows a shell exec — this lets the chip layer render it
+ * as the same "Brain" chip the orchestrator gets. Handles quoted and
+ * unquoted questions plus `--repo` style flags; null when the command isn't
+ * an o8 ask.
+ */
+export function extractO8AskQuestion(command: string): string | null {
+  const match = command.match(/(?:^|[;&|]\s*)\s*o8\s+ask\s+(.+)/);
+  if (!match) return null;
+  const rest = match[1].trim();
+  const quoted = rest.match(/["']([^"']+)["']/);
+  if (quoted) return quoted[1].trim() || null;
+  const tokens: string[] = [];
+  for (const tok of rest.split(/\s+/)) {
+    if (tok.startsWith('--')) break;
+    tokens.push(tok);
+  }
+  const question = tokens.join(' ').trim();
+  return question || null;
+}
+
+/**
+ * Heuristic mapping from raw tool name → visible verb + glyph kind.
+ * Pass the shell `command` arg when available so worker `o8 ask` execs
+ * classify as Brain instead of Run.
+ */
+export function classifyToolCall(toolName: string, command?: string | null): { verb: string; kind: ToolCallChipProps['kind'] } {
   const lc = toolName.toLowerCase();
   if (lc.includes('read') || lc === 'read' || lc.includes('cat') || lc === 'view') {
     return { verb: 'Read', kind: 'read' };
@@ -201,6 +228,9 @@ export function classifyToolCall(toolName: string): { verb: string; kind: ToolCa
     return { verb: 'Spec', kind: 'spec' };
   }
   if (lc.includes('bash') || lc.includes('shell') || lc.includes('exec') || lc.includes('run')) {
+    if (command && extractO8AskQuestion(command) !== null) {
+      return { verb: 'Brain', kind: 'read' };
+    }
     return { verb: 'Run', kind: 'shell' };
   }
   return { verb: toolName.length > 12 ? `${toolName.slice(0, 12)}…` : toolName, kind: 'generic' };

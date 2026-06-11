@@ -18,6 +18,15 @@ export interface OrchestratorRuntimeCapability {
   binaryName: string;
   /** Human-readable description for the launch picker tooltip */
   description: string;
+  /**
+   * Model capability tier, used by the "Workers use the Brain" auto mode:
+   * `auto` turns the Engineering Brain on for every NON-frontier worker so a
+   * weaker model gets repo knowledge without burning context on searches.
+   * `frontier` — top-tier coding models (Codex GPT-5.5 xhigh, Claude).
+   * `standard` — capable but benefits from injected knowledge (Gemini, opencode).
+   * `local` — future on-device models (M5 era); always Brain-assisted in auto.
+   */
+  tier: 'frontier' | 'standard' | 'local';
 }
 
 export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRuntimeCapability> = {
@@ -33,6 +42,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: 'gpt-5.5',
     accentColor: '#2563eb', // blue — matches existing codex tone in display.ts
     binaryName: 'codex',
+    tier: 'frontier',
     description: 'GPT-5.5 coding agent via `codex exec --json`. Full-access sandbox, thread resume.',
   },
   'claude-code': {
@@ -47,6 +57,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: 'claude-sonnet-4-5',
     accentColor: '#e07a3a', // orange — matches existing claude-code tone in display.ts
     binaryName: 'claude',
+    tier: 'frontier',
     description: 'Anthropic Claude Code CLI — read-only inventory only. Use Codex / Gemini / opencode for dispatch.',
   },
   gemini: {
@@ -67,6 +78,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: 'gemini-3-pro-preview',
     accentColor: '#4285f4', // Google blue
     binaryName: 'gemini',
+    tier: 'standard',
     description: 'Google Gemini CLI with --yolo autonomous dispatch and JSONL streaming.',
   },
   opencode: {
@@ -88,6 +100,7 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
     defaultModel: 'google/gemini-2.5-flash',
     accentColor: '#a855f7', // purple — distinct from the other three
     binaryName: 'opencode',
+    tier: 'standard',
     description: 'Multi-provider coding CLI — disabled by default. Use Codex / Gemini for dispatch.',
   },
 };
