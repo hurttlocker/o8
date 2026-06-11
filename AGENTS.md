@@ -68,6 +68,10 @@ o8 task prune <id>                     # permanently remove a done/archived task
 
 o8 lane touches --path <file>          # other lanes touching the same file (or --packet <id>)
 
+# Engineering Brain — ASK it instead of grepping for conventions, history, or ownership.
+# Returns an answer + titled citations in seconds; auto-scopes to your packet's repo from cwd.
+o8 ask "<question>" [--repo <path>]    # e.g. o8 ask "What is the theming rule for surface colors?"
+
 # Brain feedback — workers contribute observations the orchestrator promotes to directives.
 # See "Contributing to the brain" below; this is the only way a worker writes to memory.
 o8 cortex observe --kind <regression|pattern|gotcha|preference> --text "..." [--scope packet|repo|global]
@@ -113,6 +117,15 @@ If your change is **visual** (a UI bug or fix the operator could *see*), capture
   - If the change is an **interaction state** (`:hover`, `:focus`, an open menu, a clicked tab), a static shot shows nothing — pass `--hover "<selector>"` or `--click "<selector>"` to trigger the state before the shot (combine with `--clip` to frame it).
 - **Skip it** for pure-logic/backend changes — there's nothing to show, and that's fine (a "no visual proof — backend change" note is the honest default).
 - **Mirror it onto the PR (`o8 packet mirror-proof`):** if the packet's work lands as a GitHub PR, run `o8 packet mirror-proof --pr <n>` to surface the same before/after stills as an inline-image comment on the PR, where human reviewers see them. The bytes are hosted on a hidden per-PR prerelease so nothing bloats git history; re-running edits the comment in place. Invoke it once a PR exists (o8 packets usually side-merge, so there's no automatic PR moment).
+
+## Asking the brain (`o8 ask`)
+
+The Engineering Brain answers plain-English questions about the repo from organizational memory — directives, session outcomes, PRs, the symbol graph — with cited, titled sources. One ask costs seconds and saves you a context-burning search. Whether your dispatch *teaches* you about it is governed by the operator's "Workers use the Brain" setting (auto = on for non-frontier models), but the command works in any worktree regardless.
+
+- Good asks: conventions (*"Which middleware gate covers new API routes?"*), history (*"Have we fixed a flaky lane reconciliation before?"*), ownership (*"Who owns the review surface?"*).
+- Output: JSON `{ answer, citations: [{kind, title}], sourcesConsidered, cacheHit }`. Name the source when you act on an answer (e.g. "per the CLAUDE.md critical-rules directive").
+- Your ask is recorded as a `brain_consulted` lane event — the operator sees what you looked up, with the same titled sources.
+- The Brain answers questions; it does not write code. Verify load-bearing answers against the actual file before depending on them.
 
 ## Contributing to the brain (`o8 cortex observe`)
 

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ToolCallChip,
   classifyToolCall as classifyToolCallChip,
+  extractO8AskQuestion,
   type ToolCallChipStatus,
 } from '@/components/desktop/orchestrator/ToolCallChip';
 import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
@@ -37,12 +38,27 @@ function compact(text: string, max = 84) {
   return `${singleLine.slice(0, max - 1)}…`;
 }
 
+function shellCommandOf(tool: MobileTranscriptToolCall): string | null {
+  const name = tool.name.toLowerCase();
+  if (name !== 'exec' && name !== 'exec_command' && name !== 'bash' && name !== 'shell') return null;
+  return firstDetail(tool.args ?? {}, ['command', 'cmd', 'shell']);
+}
+
+/** classifyToolCall with the shell command threaded through, so worker
+ *  `o8 ask` execs render as the same Brain chip the orchestrator gets. */
+function classifyTool(tool: MobileTranscriptToolCall) {
+  return classifyToolCallChip(tool.name, shellCommandOf(tool));
+}
+
 function toolArgument(tool: MobileTranscriptToolCall) {
   const args = tool.args ?? {};
   const name = tool.name.toLowerCase();
 
   if (name === 'exec' || name === 'exec_command' || name === 'bash' || name === 'shell') {
-    return compact(firstDetail(args, ['command', 'cmd', 'shell']) ?? 'terminal command');
+    const command = firstDetail(args, ['command', 'cmd', 'shell']);
+    const brainQuestion = command ? extractO8AskQuestion(command) : null;
+    if (brainQuestion) return compact(brainQuestion);
+    return compact(command ?? 'terminal command');
   }
   if (name === 'write_stdin') {
     return compact(firstDetail(args, ['chars']) ?? firstDetail(args, ['session_id', 'sessionId']) ?? 'terminal input');
@@ -170,7 +186,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
         <>
           {(() => {
             const key = toolKey(summaryTool, toolCalls.indexOf(summaryTool));
-            const classified = classifyToolCallChip(summaryTool.name);
+            const classified = classifyTool(summaryTool);
             return (
               <ToolCallChip
                 key={key}
@@ -215,7 +231,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
         <>
           {toolCalls.map((tool, index) => {
             const key = toolKey(tool, index);
-            const classified = classifyToolCallChip(tool.name);
+            const classified = classifyTool(tool);
             return (
               <ToolCallChip
                 key={key}

@@ -109,6 +109,7 @@ interface CreateMissionInput {
   constraints: string;
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
+  useBrain?: boolean;
 }
 
 interface InlineIssue {
@@ -128,6 +129,7 @@ interface CreateMissionInlineInput {
   constraints: string;
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
+  useBrain?: boolean;
 }
 
 interface ApiSuccessResponse<T> {
@@ -380,6 +382,7 @@ export async function createMission(input: CreateMissionInput) {
           constraints: input.constraints,
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
+          useBrain: input.useBrain,
         } satisfies CreateMissionRequest),
       },
     );
@@ -420,6 +423,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           constraints: input.constraints,
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
+          useBrain: input.useBrain,
         } satisfies CreateMissionRequest),
       },
     );

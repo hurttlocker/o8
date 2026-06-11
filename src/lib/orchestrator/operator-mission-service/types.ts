@@ -30,6 +30,11 @@ export interface CreateMissionInput {
   sequential?: boolean;
   /** How create_mission handles an existing issue/inline dispatch branch. Default: auto. */
   existingBranchPolicy?: ExistingBranchPolicy;
+  /**
+   * Per-mission Engineering Brain override (2026-06-11) — stamps every packet's
+   * `useBrain`. Omit to inherit the operator `workersUseBrain` setting.
+   */
+  useBrain?: boolean;
 }
 
 export interface DispatchMissionInput {

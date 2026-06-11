@@ -27,6 +27,7 @@ type SettingSource = 'env' | 'file' | 'default';
 
 type DispatchRuntime = 'codex' | 'gemini' | 'opencode';
 type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
+type WorkersUseBrain = 'off' | 'auto' | 'all';
 
 interface OperatorDefaults {
   parallelCap: number;
@@ -42,6 +43,7 @@ interface OperatorDefaults {
   experimentalChat: boolean;
   classAComposer: ClassAComposer;
   inAppOrchestratorEnabled: boolean;
+  workersUseBrain: WorkersUseBrain;
 }
 
 interface OperatorDefaultsResponse {
@@ -385,6 +387,7 @@ export function OperatorDefaultsTab() {
   const modelEnv = sources?.orchestratorModel === 'env';
   const runtimeEnv = sources?.defaultDispatchRuntime === 'env';
   const classAComposerEnv = sources?.classAComposer === 'env';
+  const workersUseBrainEnv = sources?.workersUseBrain === 'env';
 
   const envDisabledReason = 'Controlled by environment variable. Unset to manage from Settings.';
 
@@ -829,9 +832,50 @@ export function OperatorDefaultsTab() {
         />
       </section>
 
-      {/* 08 — SAFETY */}
+      {/* 08 — WORKER BRAIN */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="08">WORKER BRAIN</SectionLabel>
+        <p style={{
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          maxWidth: 580,
+          margin: 0,
+          marginBottom: 4,
+        }}>
+          Give dispatched workers the Engineering Brain (<span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>o8 ask</span>) — instant repo answers with cited sources instead of context-burning searches. Auto enables it for non-frontier models only (and future local models); frontier workers like Codex GPT-5.5 stay lean. Per-packet override wins either way. Env{' '}
+          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>O8_WORKERS_USE_BRAIN</span>{' '}
+          overrides.
+        </p>
+        <Row
+          label="Workers use the Brain"
+          description={
+            values.workersUseBrain === 'all'
+              ? 'All: every dispatched worker gets Brain instructions — the dogfood / A-B setting.'
+              : values.workersUseBrain === 'off'
+                ? 'Off: workers are never told about the Brain.'
+                : 'Auto (default): Brain on for non-frontier worker models only. Codex stays lean; weaker and local models get the oracle.'
+          }
+          source={sources.workersUseBrain}
+          disabledReason={workersUseBrainEnv ? envDisabledReason : undefined}
+          right={
+            <SegmentedControl<WorkersUseBrain>
+              value={values.workersUseBrain}
+              options={[
+                { value: 'off', label: 'Off' },
+                { value: 'auto', label: 'Auto' },
+                { value: 'all', label: 'All' },
+              ]}
+              onChange={(next) => { void updateField('workersUseBrain', next); }}
+              disabled={workersUseBrainEnv || busyField === 'workersUseBrain'}
+            />
+          }
+        />
+      </section>
+
+      {/* 09 — SAFETY */}
       <section>
-        <SectionLabel number="08">SAFETY</SectionLabel>
+        <SectionLabel number="09">SAFETY</SectionLabel>
         <p style={{
           fontSize: 13,
           color: 'var(--t-text-secondary)',

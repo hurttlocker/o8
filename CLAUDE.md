@@ -329,7 +329,7 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 - **Never hardcode port 3001 or 3002** — use `getApiBase()` from `@/lib/panel/api-port` (server-side TS) or `resolveApiBase()` helper (standalone MCP node processes). The Tauri sidecar picks ports dynamically and writes them to `~/.o8/{api-port,ws-port}`.
 - **Never hardcode `/Users/marquisehurtt/*` paths** — use `process.cwd()`, `os.homedir()`, `process.env.HOME`, or an explicit env var. The clone-readiness audit found 15+ leaks; they've been fixed but don't reintroduce.
 - **Never bypass the middleware in `src/middleware.ts`** — it gates all dangerous API routes on loopback + ws-token. If you add a new route prefix that touches state, add it to `GATED_PREFIXES`. If you need public GET access, add it to `ALLOWLIST_READ_ONLY`.
-- **Never use emoji** — Phosphor icons (raw SVG) across all surfaces
+- **Never use emoji** — icon libraries only, as raw SVG. **Both Phosphor and Lucide are in active use across the app** (Lucide via the raw-SVG shim system), with Tabler/Iconoir swaps where eye ergonomics demand (per hurttlocker.md). No standardization on a single library is planned — don't migrate icons between libraries; match whichever the surrounding surface already uses.
 - **Never use Material Design patterns** — no borderLeft accents, no MD elevation
 - **Never use React icon components in Tauri webview** — neither `@phosphor-icons/react` nor `lucide-react` render correctly. Extract SVG path data from `@phosphor-icons/react/dist/defs/` and use raw `<svg>` elements. For simple actions (plus/minus), prefer HTML entities.
 - **Never use dropdown overflow menus ("...")** — use inline actions with confirmation strips instead
