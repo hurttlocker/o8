@@ -16,7 +16,8 @@
  *        event: done       {}
  *        event: error      { message: string }
  *
- * Cache: 30s in-process TTL, keyed on sha256(question + repoPath).
+ * Cache: 30min in-process TTL (normalized key, eagerly invalidated on
+ * spec-ingest + ledger writes — see ask.ts).
  * Bypass: ?force=1 query param re-runs the full pipeline unconditionally.
  */
 
