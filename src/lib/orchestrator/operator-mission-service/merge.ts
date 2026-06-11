@@ -83,11 +83,22 @@ function isPacketAwaitingMerge(packet: OrchestratorPacket) {
     && packet.review?.approved !== false;
 }
 
-async function isTerminalReleaseLane(packetId: string) {
-  const { listLanes } = await loadLaneRegistry();
-  return listLanes().some((lane) =>
-    lane.packetId === packetId && (lane.status === 'completed' || lane.status === 'archived')
-  );
+/** Exported for the lane-rebind vitest suite (#1214) — not part of the public API. */
+export async function isTerminalReleaseLane(packetId: string) {
+  const { getLaneEvents, listLanes } = await loadLaneRegistry();
+  return listLanes().some((lane) => {
+    if (lane.packetId !== packetId) return false;
+    if (lane.status === 'completed') return true;
+    if (lane.status !== 'archived') return false;
+    // #1214 — archived alone is NOT release evidence: lanes archive after
+    // worker death too (e.g. silent_exit_no_work), and a dead lane that kept
+    // its packet binding must not short-circuit the recovery lane's merge.
+    // Require the lane to have actually passed through 'completed' (only set
+    // once a merge landed) before claiming the packet was released.
+    return getLaneEvents(lane.id).some((event) =>
+      event.verb === 'status_change' && event.payload.status === 'completed'
+    );
+  });
 }
 
 function buildAlreadyReleasedResult(): MergePacketResult {
