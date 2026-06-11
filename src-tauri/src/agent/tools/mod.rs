@@ -533,69 +533,65 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["kind"]
             }
         }),
-        // ── Terminal control (the dev frontier) ───────────────────────────────
+        // ── Terminal control (the dev frontier) — Terminal.app AND iTerm2 ─────
         json!({
             "name": "term_list",
-            "description": "List the user's open Terminal windows — each with a stable id, its title (titles carry the working directory and the live session/task name, e.g. a Claude Code session's current task), and whether it's busy. Use for 'what terminals are up?', 'what are my terminals doing?'. ALWAYS call this before term_read or term_send to get the id.",
+            "description": "List the user's open terminals across Terminal.app AND iTerm2 — each with a stable string id, its title (titles carry the working directory and the live session/task name, e.g. a Claude Code session's current task), and whether it's busy. Use for 'what terminals are up?', 'what are my terminals doing?'. ALWAYS call this before term_read / term_send / etc. to get the id. Pass the id back EXACTLY as given.",
             "parameters": { "type": "object", "properties": {}, "required": [] }
         }),
         json!({
             "name": "term_read",
-            "description": "Read the last lines visible in one Terminal window — 'what is the o8 terminal saying?', 'did the tests finish in that terminal?'. Pass the id from term_list.",
+            "description": "Read the last lines visible in one terminal — 'what is the o8 terminal saying?', 'did the tests finish in that terminal?'. Pass the exact id string from term_list.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
-                    "lines": { "type": "integer", "description": "How many trailing lines (default 25, max 80)." },
-                    "tab": { "type": "integer", "description": "Tab number within the window (default 1)." }
+                    "id": { "type": "string", "description": "The exact terminal id string from term_list (e.g. 't:12345:1' or 'i:GUID')." },
+                    "lines": { "type": "integer", "description": "How many trailing lines (default 25, max 80)." }
                 },
                 "required": ["id"]
             }
         }),
         json!({
             "name": "term_send",
-            "description": "Type and submit ONE line in a Terminal window — a shell command, or a message to an agent REPL (like Claude Code) running there. Pass the id from term_list, and include 'title' (the terminal's title from term_list) so the user hears which terminal on the confirm card. The user confirms before it runs.",
+            "description": "Type and submit ONE line in a terminal — a shell command, or a message to an agent REPL (like Claude Code) running there. Pass the exact id from term_list, and include 'title' (the terminal's title from term_list) so the user hears which terminal on the confirm card. The user confirms before it runs.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
+                    "id": { "type": "string", "description": "The exact terminal id string from term_list." },
                     "command": { "type": "string", "description": "The single line to type and submit." },
-                    "title": { "type": "string", "description": "The target terminal's title from term_list — spoken on the confirm card." },
-                    "tab": { "type": "integer", "description": "Tab number within the window (default 1)." }
+                    "title": { "type": "string", "description": "The target terminal's title from term_list — spoken on the confirm card." }
                 },
                 "required": ["id", "command", "title"]
             }
         }),
         json!({
             "name": "term_interrupt",
-            "description": "Send Ctrl+C to a Terminal window — stop whatever is running there ('stop that terminal', 'interrupt the audit'). Pass id and title from term_list. The user confirms first.",
+            "description": "Send Ctrl+C to a terminal — stop whatever is running there ('stop that terminal', 'interrupt the audit'). Pass the exact id and title from term_list. The user confirms first.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
-                    "title": { "type": "string", "description": "The target terminal's title from term_list — spoken on the confirm card." },
-                    "tab": { "type": "integer", "description": "Tab number (default 1)." }
+                    "id": { "type": "string", "description": "The exact terminal id string from term_list." },
+                    "title": { "type": "string", "description": "The target terminal's title from term_list — spoken on the confirm card." }
                 },
                 "required": ["id", "title"]
             }
         }),
         json!({
             "name": "term_key",
-            "description": "Press ONE key in a Terminal window — answer an agent's permission prompt or menu there: 'enter', 'escape', 'up', 'down', 'y', 'n', or a digit ('approve what that terminal is asking' → read it with term_read first, then press the right key). Pass id and title from term_list. The user confirms first.",
+            "description": "Press ONE key in a terminal — answer an agent's permission prompt or menu there: 'enter', 'escape', 'up', 'down', 'y', 'n', or a digit ('approve what that terminal is asking' → read it with term_read first, then press the right key). Pass the exact id and title from term_list. The user confirms first.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
+                    "id": { "type": "string", "description": "The exact terminal id string from term_list." },
                     "key": { "type": "string", "description": "enter, escape, ctrl_c, up, down, or a single letter/digit." },
-                    "title": { "type": "string", "description": "The target terminal's title from term_list — spoken on the confirm card." },
-                    "tab": { "type": "integer", "description": "Tab number (default 1)." }
+                    "title": { "type": "string", "description": "The target terminal's title from term_list — spoken on the confirm card." }
                 },
                 "required": ["id", "key", "title"]
             }
         }),
         json!({
             "name": "term_new",
-            "description": "Open a NEW Terminal window, optionally in a directory and running a command — 'open a terminal in the o8 repo', 'start a claude session in the rainwater repo' (command: 'claude'). Resolve a spoken repo name to its path with o8_panel_read repos + the known registry first when unsure. The user confirms first.",
+            "description": "Open a NEW terminal window, optionally in a directory and running a command — 'open a terminal in the o8 repo', 'start a claude session in the rainwater repo' (command: 'claude'). Opens in iTerm2 if it's running, otherwise Terminal.app. Resolve a spoken repo name to its path with o8_panel_read repos + the known registry first when unsure. The user confirms first.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -607,11 +603,11 @@ pub fn all_tools() -> Vec<Value> {
         }),
         json!({
             "name": "term_watch",
-            "description": "Watch a Terminal window and SAY one line when it finishes, asks for input, or closes — 'tell me when that terminal is done', 'let me know when the audit needs me'. One-shot: speaks once then stops watching (45-minute cap). Pass id and title from term_list.",
+            "description": "Watch a terminal and SAY one line when it finishes, asks for input, or closes — 'tell me when that terminal is done', 'let me know when the audit needs me'. One-shot: speaks once then stops watching (45-minute cap). Pass the exact id and title from term_list.",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "id": { "type": "integer", "description": "Terminal window id from term_list." },
+                    "id": { "type": "string", "description": "The exact terminal id string from term_list." },
                     "title": { "type": "string", "description": "The terminal's title from term_list." }
                 },
                 "required": ["id", "title"]

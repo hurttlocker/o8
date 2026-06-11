@@ -19,7 +19,8 @@ use serde_json::json;
 use std::sync::Mutex;
 
 struct Watch {
-    window_id: i64,
+    /// Backend-tagged token (`t:<winid>:<tab>` or `i:<guid>`) from term_list.
+    token: String,
     /// Shortened title, spoken in the announcement.
     title: String,
     registered_at: std::time::Instant,
@@ -34,14 +35,14 @@ static POLLER_UP: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool:
 
 const EXPIRY: std::time::Duration = std::time::Duration::from_secs(45 * 60);
 
-/// Register a watch (replaces an existing watch on the same window). Returns
+/// Register a watch (replaces an existing watch on the same terminal). Returns
 /// the count of active watches.
-pub fn add(app: &tauri::AppHandle, window_id: i64, title: String) -> usize {
+pub fn add(app: &tauri::AppHandle, token: String, title: String) -> usize {
     let count = {
         let mut watches = WATCHES.lock().unwrap_or_else(|p| p.into_inner());
-        watches.retain(|w| w.window_id != window_id);
+        watches.retain(|w| w.token != token);
         watches.push(Watch {
-            window_id,
+            token,
             title,
             registered_at: std::time::Instant::now(),
             saw_working: false,
@@ -59,19 +60,19 @@ fn ensure_poller(app: &tauri::AppHandle) {
     let app = app.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_secs(5));
-        let ids: Vec<i64> = {
+        let tokens: Vec<String> = {
             let mut watches = WATCHES.lock().unwrap_or_else(|p| p.into_inner());
             watches.retain(|w| w.registered_at.elapsed() < EXPIRY);
-            watches.iter().map(|w| w.window_id).collect()
+            watches.iter().map(|w| w.token.clone()).collect()
         };
-        if ids.is_empty() {
+        if tokens.is_empty() {
             continue;
         }
-        let Some(states) = probe(&ids) else { continue };
+        let Some(states) = probe(&tokens) else { continue };
         for state in states {
             let fired = {
                 let mut watches = WATCHES.lock().unwrap_or_else(|p| p.into_inner());
-                let Some(pos) = watches.iter().position(|w| w.window_id == state.id) else {
+                let Some(pos) = watches.iter().position(|w| w.token == state.id) else {
                     continue;
                 };
                 if state.gone {
@@ -96,41 +97,72 @@ fn ensure_poller(app: &tauri::AppHandle) {
 }
 
 struct ProbeState {
-    id: i64,
+    id: String,
     gone: bool,
     working: bool,
     idle: bool,
     needs_input: bool,
 }
 
-/// One JXA round-trip for all watched windows: busy flag + tail heuristics.
-fn probe(ids: &[i64]) -> Option<Vec<ProbeState>> {
-    let id_list = ids
-        .iter()
-        .map(|i| i.to_string())
-        .collect::<Vec<_>>()
-        .join(",");
+/// One JXA round-trip for all watched terminals, across Terminal.app + iTerm2.
+/// The completion HEURISTICS are identical (tail text); only how we fetch
+/// `busy` + the tail differs per backend. Each watched token keeps its exact
+/// string id so the poller matches it back.
+fn probe(tokens: &[String]) -> Option<Vec<ProbeState>> {
+    // JS array of the raw tokens; the script parses the prefix itself.
+    let want = serde_json::to_string(tokens).ok()?;
     let script = format!(
         r#"
-        const term = Application("Terminal");
-        const want = [{id_list}];
-        const out = [];
-        const wins = term.running() ? term.windows() : [];
-        for (const id of want) {{
-            const w = wins.find(w => {{ try {{ return w.id() === id; }} catch (e) {{ return false; }} }});
-            if (!w) {{ out.push({{ id, gone: true }}); continue; }}
-            const t = w.tabs()[0];
-            const busy = t.busy();
-            const tail = String(t.contents() || "").split("\n").filter(l => l.trim()).slice(-14);
+        function appRunning(name){{ try {{ return Application(name).running(); }} catch(e){{ return false; }} }}
+        function tryStr(obj, keys){{ for (const k of keys){{ try {{ if (typeof obj[k] === "function"){{ const v = String(obj[k]() ?? ""); if (v) return v; }} }} catch(e){{}} }} return ""; }}
+        function tryBool(obj, keys){{ for (const k of keys){{ try {{ if (typeof obj[k] === "function"){{ return !!obj[k](); }} }} catch(e){{}} }} return false; }}
+        function sid(s){{ return tryStr(s, ["uniqueId","uniqueID","id"]); }}
+        function sbusy(s){{ return tryBool(s, ["isProcessing"]); }}
+        function stext(s){{ return tryStr(s, ["contents","text"]); }}
+        // Classify a terminal from its busy flag + last lines.
+        function classify(busy, contents){{
+            const tail = String(contents || "").split("\n").filter(l => l.trim()).slice(-14);
             const tailStr = tail.join("\n");
             const tuiWorking = tailStr.includes("esc to interrupt") || tailStr.includes("ctrl+c to interrupt");
             const prompt = tail.length ? tail[tail.length - 1].trim() : "";
             const composerIdle = !tuiWorking && (tailStr.includes("❯") || /[%$]\s*$/.test(prompt));
-            // busy-without-a-prompt = a plain shell command running. TUIs keep
-            // busy=true forever, so composerIdle exempts a visible composer.
             const working = tuiWorking || (busy && !composerIdle);
             const needsInput = !tuiWorking && (tailStr.includes("Do you want") || /❯\s*1\./.test(tailStr) || /\(y\/n\)/i.test(tailStr));
-            out.push({{ id, gone: false, busy, working, idle: !busy || composerIdle, needsInput }});
+            return {{ working, idle: !busy || composerIdle, needsInput }};
+        }}
+        const want = {want};
+        const out = [];
+        const hasTerm = appRunning("Terminal");
+        const hasITerm = appRunning("iTerm");
+        const termWins = hasTerm ? Application("Terminal").windows() : [];
+        for (const id of want) {{
+            try {{
+                if (id.indexOf("t:") === 0) {{
+                    const parts = id.slice(2).split(":");
+                    const winId = parseInt(parts[0], 10);
+                    const tabIx = (parseInt(parts[1], 10) || 1) - 1;
+                    const w = termWins.find(w => {{ try {{ return w.id() === winId; }} catch(e){{ return false; }} }});
+                    if (!w) {{ out.push({{ id, gone: true }}); continue; }}
+                    const t = w.tabs()[tabIx] || w.tabs()[0];
+                    const c = classify(t.busy(), t.contents());
+                    out.push({{ id, gone: false, working: c.working, idle: c.idle, needsInput: c.needsInput }});
+                }} else if (id.indexOf("i:") === 0) {{
+                    if (!hasITerm) {{ out.push({{ id, gone: true }}); continue; }}
+                    const guid = id.slice(2);
+                    let found = null;
+                    const wins = Application("iTerm").windows();
+                    for (let wi=0; wi<wins.length && !found; wi++){{
+                        const tabs = wins[wi].tabs();
+                        for (let ti=0; ti<tabs.length && !found; ti++){{
+                            const sess = tabs[ti].sessions();
+                            for (let si=0; si<sess.length; si++){{ if (sid(sess[si]) === guid){{ found = sess[si]; break; }} }}
+                        }}
+                    }}
+                    if (!found) {{ out.push({{ id, gone: true }}); continue; }}
+                    const c = classify(sbusy(found), stext(found));
+                    out.push({{ id, gone: false, working: c.working, idle: c.idle, needsInput: c.needsInput }});
+                }}
+            }} catch(e){{ /* skip a flaky probe this tick */ }}
         }}
         JSON.stringify(out);
     "#
@@ -141,7 +173,7 @@ fn probe(ids: &[i64]) -> Option<Vec<ProbeState>> {
         parsed
             .iter()
             .map(|v| ProbeState {
-                id: v.get("id").and_then(|x| x.as_i64()).unwrap_or(0),
+                id: v.get("id").and_then(|x| x.as_str()).unwrap_or("").to_string(),
                 gone: v.get("gone").and_then(|x| x.as_bool()).unwrap_or(false),
                 working: v.get("working").and_then(|x| x.as_bool()).unwrap_or(false),
                 idle: v.get("idle").and_then(|x| x.as_bool()).unwrap_or(false),
