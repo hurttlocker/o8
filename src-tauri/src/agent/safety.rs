@@ -103,6 +103,13 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "o8_orchestrator_draft" => SafetyClass::ReadOnly,
         // Writes to the public tracker → carded.
         "gh_issue_create" => SafetyClass::Reversible,
+        // Day-one assistant basics. Weather only reads public APIs; volume
+        // mutates no data and the opposite nudge undoes it instantly (same
+        // reasoning as Music playback below).
+        "mac_weather" => SafetyClass::ReadOnly,
+        "mac_volume" => SafetyClass::ReadOnly,
+        // Registers a repo in o8's config → carded like the other o8 writes.
+        "o8_add_repo" => SafetyClass::Reversible,
         // Apple Music — playback control mutates no data and pause undoes it
         // instantly; a confirm card on "play my playlist" kills the magic.
         "mac_music_playlists" => SafetyClass::ReadOnly,

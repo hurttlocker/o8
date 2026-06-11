@@ -18,6 +18,8 @@ pub mod mac_notes;
 pub mod mac_reminders;
 pub mod mac_music;
 pub mod mac_shortcuts;
+pub mod mac_system;
+pub mod mac_weather;
 pub mod o8_bridge;
 pub mod o8_ui;
 pub mod terminal_ctl;
@@ -418,6 +420,43 @@ pub fn all_tools() -> Vec<Value> {
             "description": "What's currently playing in Apple Music (track, artist, player state). Use for 'what song is this?'.",
             "parameters": { "type": "object", "properties": {}, "required": [] }
         }),
+        // ── Day-one assistant basics ──────────────────────────────────────────
+        json!({
+            "name": "mac_weather",
+            "description": "Current weather + today's outlook, spoken-ready. Use for 'what's the weather?', 'is it going to rain?', 'how hot is it in Tokyo?'. No 'place' = the user's current location. SPEAK the answer — only open the Weather app if the user asks for the app itself.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "place": { "type": "string", "description": "Optional city or place name ('Tokyo', 'Paris'). Omit for the user's current location." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "mac_volume",
+            "description": "Control the Mac's output volume — 'turn it down a little', 'set the volume to 50', 'mute', 'unmute'. 'up'/'down' nudge by 15 unless an amount is given.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": { "type": "string", "enum": ["get", "set", "up", "down", "mute", "unmute"], "description": "What to do." },
+                    "level": { "type": "integer", "description": "For 'set': target volume 0-100." },
+                    "amount": { "type": "integer", "description": "For 'up'/'down': nudge size (default 15)." }
+                },
+                "required": ["action"]
+            }
+        }),
+        json!({
+            "name": "o8_add_repo",
+            "description": "Register an existing local git repo in o8 so agents can work in it — 'add my hurttlocker folder as a repo', 'connect ~/Projects/site to o8'. Needs the ABSOLUTE folder path: if the user spoke a folder name, find it with fs_spotlight (kind:folder) first. Optionally assigns it to a named o8 project. The user confirms first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute path (or ~/ path) to the local git repo folder." },
+                    "project": { "type": "string", "description": "Optional o8 project name to assign the repo to." }
+                },
+                "required": ["path"]
+            }
+        }),
         // ── o8 UI control (the o8-control frontier v1) ────────────────────────
         json!({
             "name": "o8_ui_open",
@@ -720,6 +759,9 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_packet_rerun" => o8_bridge::packet_rerun(args).await,
         "o8_orchestrator_draft" => o8_ui::orchestrator_draft(&ctx.app, args),
         "gh_issue_create" => git_github::issue_create(args).await,
+        "mac_weather" => mac_weather::current(args).await,
+        "mac_volume" => mac_system::volume(args).await,
+        "o8_add_repo" => o8_bridge::add_repo(args).await,
         "mac_music_playlists" => mac_music::playlists(args).await,
         "mac_music_play" => mac_music::play(args).await,
         "mac_music_pause" => mac_music::pause(args).await,

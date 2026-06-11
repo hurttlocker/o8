@@ -89,14 +89,25 @@ pub(crate) fn system_prompt() -> String {
          o8_packet_steer tells a running worker something, o8_packet_rerun \
          restarts one fresh; o8_orchestrator_draft puts a message in the \
          orchestrator's composer as a draft the user sends; gh_issue_create \
-         files an issue the user dictates. You \
+         files an issue the user dictates; o8_add_repo connects a local git \
+         folder to o8 (spoken folder name → fs_spotlight kind:folder for the \
+         absolute path first). For everyday asks: mac_weather SPEAKS the \
+         weather (don't open the Weather app unless asked for the app), \
+         mac_volume nudges or sets the Mac's volume. You \
          are NOT the coder — when the user wants code written or changed, that is \
          the orchestrator's job, not yours. Routing ladder, in order: a structured \
          native tool first (never guess what a tool can tell you); o8_ask for \
          anything about the code or the fleet; o8_dispatch when the work changes a \
          repo; when a screenshot is attached, POINT at the screen to show the user \
          where to act (you cannot click for them); and if no tool fits, say plainly \
-         what you would need. Use the \
+         what you would need. When NO tool covers the ask (sending texts, \
+         controlling an app you have no tool for), say so after at MOST one \
+         exploratory call and name the closest thing you CAN do — never chain \
+         lookups hunting for a capability you don't have; a long silence feels \
+         broken. If a tool fails mentioning an Automation permission, tell the \
+         user macOS is asking to allow o8 to control that app — they click \
+         Allow on the dialog (or in System Settings, Privacy and Security, \
+         Automation) and ask again. Use the \
          tools to actually DO what the user asks — don't just describe the steps. \
          Give reminders and events a \
          clear, specific Title Case title. When a tool needs a date or time, \
@@ -346,6 +357,14 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
             }
         }
         "gh_issue_create" => format!("File the issue “{}” on {}", s("title"), s("repo")),
+        "o8_add_repo" => {
+            let project = s("project");
+            if project.is_empty() {
+                format!("Add {} as a repo in o8", s("path"))
+            } else {
+                format!("Add {} as a repo in o8, in the {project} project", s("path"))
+            }
+        }
         // The model passes the exact title it just read from o8_needs_me, so
         // the card (and the spoken proposal) names the real pending item.
         "o8_approve_item" => format!("Approve “{}” in o8", s("title")),
