@@ -188,8 +188,20 @@ function SwarmGlyph({ size = 12, color = SWARM_ACCENT }: { size?: number; color?
 
 const MODEL_THINKING_MENU_WIDTH = 162;
 
+// Orchestrator brains switchable from the composer chip. The full list
+// (older Opus/Sonnet generations) lives in Settings → Operator defaults;
+// the chip keeps the three working tiers. `lib/operator/defaults.ts` is
+// server-only, hence the local copy (same pattern as OperatorDefaultsTab).
+const COMPOSER_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'claude-fable-5', label: 'Fable 5' },
+  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+];
+
 function ModelThinkingChip({
   modelLabel,
+  modelId,
+  onModelChange,
   effort,
   adaptiveEnabled,
   onEffortChange,
@@ -197,6 +209,8 @@ function ModelThinkingChip({
   onSetSwarm,
 }: {
   modelLabel: string;
+  modelId?: string;
+  onModelChange?: (model: string) => void;
   effort: ThinkingEffort;
   adaptiveEnabled: boolean;
   onEffortChange?: (effort: ThinkingEffort) => void;
@@ -212,7 +226,8 @@ function ModelThinkingChip({
   const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
   const selectedLabel = EFFORT_LABELS[effort];
   const ultraActive = Boolean(swarmEnabled);
-  const canOpen = Boolean(onEffortChange || onSetSwarm);
+  const modelSwitchable = Boolean(onModelChange);
+  const canOpen = Boolean(onEffortChange || onSetSwarm || onModelChange);
   const showingAffordance = canOpen && (hovered || focused || open);
 
   useEffect(() => {
@@ -222,7 +237,7 @@ function ModelThinkingChip({
       if (!rect) return;
       const viewportWidth = window.innerWidth;
       const viewportHeight = window.innerHeight;
-      const estimatedHeight = 190;
+      const estimatedHeight = modelSwitchable ? 300 : 190;
       setMenuPosition({
         left: Math.min(Math.max(8, rect.left - 10), Math.max(8, viewportWidth - MODEL_THINKING_MENU_WIDTH - 8)),
         top: Math.max(8, Math.min(rect.top - estimatedHeight - 8, viewportHeight - estimatedHeight - 8)),
@@ -261,7 +276,7 @@ function ModelThinkingChip({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         disabled={!canOpen}
-        title={ultraActive ? `${modelLabel} · UltraCode (swarm) · thinking ${selectedLabel}` : `${modelLabel} · thinking ${selectedLabel}`}
+        title={ultraActive ? `${modelLabel} · Ultracode (swarm) · thinking ${selectedLabel}` : `${modelLabel} · thinking ${selectedLabel}`}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{
@@ -325,10 +340,67 @@ function ModelThinkingChip({
             fontFamily: 'var(--font-sans-system)',
           }}
         >
-          <div style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 6, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-            <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</div>
-            <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Thinking</div>
-          </div>
+          {modelSwitchable ? (
+            <>
+              <div style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 2 }}>
+                <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Model</div>
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                {COMPOSER_MODEL_OPTIONS.map((option) => {
+                  // Tolerate context-window suffixes (claude-fable-5[1m]).
+                  const normalizedModelId = modelId?.replace(/\[[^\]]*\]$/, '');
+                  const active = normalizedModelId === option.value;
+                  return (
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="menuitemradio"
+                      aria-checked={active}
+                      onClick={() => {
+                        if (!active) onModelChange?.(option.value);
+                        setOpen(false);
+                      }}
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'minmax(0, 1fr) auto',
+                        alignItems: 'center',
+                        gap: 6,
+                        minHeight: 23,
+                        paddingTop: 2,
+                        paddingRight: 6,
+                        paddingBottom: 2,
+                        paddingLeft: 7,
+                        borderWidth: 0,
+                        borderRadius: 8,
+                        background: active ? 'var(--t-accent-soft)' : 'transparent',
+                        color: active ? 'var(--t-accent)' : 'var(--t-text)',
+                        cursor: 'pointer',
+                        textAlign: 'left',
+                        fontFamily: 'var(--font-sans-system)',
+                      }}
+                      onMouseEnter={(event) => {
+                        if (!active) event.currentTarget.style.background = 'var(--t-hover)';
+                      }}
+                      onMouseLeave={(event) => {
+                        if (!active) event.currentTarget.style.background = 'transparent';
+                      }}
+                    >
+                      <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{option.label}</span>
+                      <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? 'var(--t-accent)' : 'transparent', flexShrink: 0 }} />
+                    </button>
+                  );
+                })}
+              </div>
+              <div style={{ marginTop: 4, paddingLeft: 7, paddingRight: 7, paddingTop: 6, paddingBottom: 2, borderTop: '1px solid var(--t-divider-subtle)' }}>
+                <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Thinking</div>
+              </div>
+            </>
+          ) : (
+            <div style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 6, borderBottom: '1px solid var(--t-divider-subtle)' }}>
+              <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</div>
+              <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Thinking</div>
+            </div>
+          )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             {options.map((option) => {
               const active = option === effort;
@@ -422,8 +494,8 @@ function ModelThinkingChip({
               >
                 <SwarmGlyph size={13} color={ultraActive ? SWARM_ACCENT : 'var(--t-text-muted)'} />
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>UltraCode</span>
-                  <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '-0.2px', lineHeight: 1.2, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Claude + Codex swarm</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>Ultracode</span>
+                  <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Claude + Codex swarm</span>
                 </span>
                 <span style={{ width: 6, height: 6, borderRadius: 999, background: ultraActive ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
               </button>
@@ -751,6 +823,8 @@ export function InputButtons({
   onUndoEnhance,
   onSubmit,
   modelLabel,
+  modelId,
+  onModelChange,
   effort = 'adaptive',
   onEffortChange,
   adaptiveEnabled = true,
@@ -780,6 +854,10 @@ export function InputButtons({
   onSubmit: () => void;
   small?: boolean;
   modelLabel?: string;
+  /** Raw orchestrator model id — drives the active row in the chip's model section. */
+  modelId?: string;
+  /** When set, the chip menu grows a Model section (Fable/Opus/Sonnet). */
+  onModelChange?: (model: string) => void;
   effort?: ThinkingEffort;
   onEffortChange?: (effort: ThinkingEffort) => void;
   adaptiveEnabled?: boolean;
@@ -822,6 +900,8 @@ export function InputButtons({
       {modelLabel ? (
         <ModelThinkingChip
           modelLabel={modelLabel}
+          modelId={modelId}
+          onModelChange={onModelChange}
           effort={effort}
           adaptiveEnabled={adaptiveEnabled}
           onEffortChange={onEffortChange}
