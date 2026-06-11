@@ -439,6 +439,17 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
         // it lands defeats the point of the card.
         "fs_write_text" => format!("Write a file to {}", s("path")),
         "mac_shortcuts_run" => format!("Run the Shortcut “{}”", s("name")),
+        "mac_notes_append" => format!("Add to the note “{}”", s("title")),
+        "mac_mail_draft" => {
+            let subject = s("subject");
+            if subject.is_empty() {
+                format!("Draft an email to {}", s("to"))
+            } else {
+                format!("Draft an email to {} — “{subject}”", s("to"))
+            }
+        }
+        "mac_mail_send_draft" => format!("Send the draft email “{}”", s("subject")),
+        "csv_write" => format!("Write the CSV “{}”", s("filename")),
         other => format!("Run {other}"),
     }
 }

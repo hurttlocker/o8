@@ -376,7 +376,7 @@ export default function DictationPillPage() {
       .then((prefs) => {
         const raw = prefs?.reading_speed;
         const n = typeof raw === 'number' ? raw : Number(raw);
-        if (Number.isFinite(n) && n > 0) setSpeechSpeed(Math.min(1.2, Math.max(0.8, n)));
+        if (Number.isFinite(n) && n > 0) setSpeechSpeed(Math.min(1.2, Math.max(0.7, n)));
       })
       .catch(() => { /* default 1× */ });
   }, []);

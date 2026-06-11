@@ -314,7 +314,10 @@ function NotchControlButton({ label, onClick, children }: {
         color: '#fff',
         cursor: 'pointer',
         flexShrink: 0,
-        padding: 0,
+        paddingTop: 0,
+        paddingRight: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
         WebkitBackdropFilter: 'blur(4px)',
         backdropFilter: 'blur(4px)',
         transition: 'background 140ms ease, transform 120ms ease',
@@ -349,12 +352,13 @@ function StopGlyph() {
   );
 }
 
-/** Minimal speed slider for the speaking capsule — 0.8×–1.2×, snaps in 0.05
- * steps. Pitch-PRESERVING (ElevenLabs `speed` server-side), so the band is the
- * gentle range it supports — no chipmunk. Pointer-driven (no native <input> —
- * unreliable in the Tauri WKWebview). `onCommit` persists the rate; it applies
- * to Symon's NEXT utterance. */
-const SPEED_MIN = 0.8;
+/** Minimal speed slider for the speaking capsule — 0.7×–1.2×, snaps in 0.05
+ * steps (same band as Voice settings, so a value set there shows here without
+ * rounding). Pitch-PRESERVING (ElevenLabs `speed` server-side), so the band is
+ * the gentle range it supports — no chipmunk. Pointer-driven (no native
+ * <input> — unreliable in the Tauri WKWebview). `onCommit` persists the rate;
+ * it applies to Symon's NEXT utterance. */
+const SPEED_MIN = 0.7;
 const SPEED_MAX = 1.2;
 const SPEED_TRACK = 58;
 function NotchSpeedSlider({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
@@ -390,6 +394,7 @@ function NotchSpeedSlider({ value, onCommit }: { value: number; onCommit: (v: nu
         }}
         onPointerMove={(e) => { if (draggingRef.current) apply(e.clientX); }}
         onPointerUp={() => { draggingRef.current = false; }}
+        onPointerCancel={() => { draggingRef.current = false; }}
         style={{
           position: 'relative',
           width: SPEED_TRACK,
@@ -1196,7 +1201,10 @@ export function DockNotchSurface({
     body = (
       <p
         style={{
-          margin: 0,
+          marginTop: 0,
+          marginRight: 0,
+          marginBottom: 0,
+          marginLeft: 0,
           paddingLeft: 18,
           paddingRight: 18,
           fontSize: 13,
