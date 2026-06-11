@@ -70,11 +70,12 @@ const SYMON_CAPSULE_BG =
 
 // ── Glass dock theme (Theme tab → Dock = Glass) — clear/frosted instead of the
 // Symon multicolor. The capsule/panel rely on backdrop blur for the frost.
-// The idle sliver uses the SAME dark tint family as the open capsule —
-// operator-locked 2026-06-11: the old white tint (rgba(255,255,255,0.20)) read
-// milky/washed next to the open dock's saturated glass; the dock keeps one
-// clarity in every mode.
-const GLASS_IDLE = 'linear-gradient(rgba(20,24,34,0.52), rgba(14,18,28,0.46))';
+// The idle sliver keeps the WHITE/clear tint — operator-locked 2026-06-11:
+// white reads "the most glass," and the fix for the milky look was never the
+// dark tint, it was giving the sliver the same strong backdrop blur+saturate
+// the Option-held capsule has (see `idleBlur` below). So: white tint + open
+// capsule's saturation = the clear glass the operator wants.
+const GLASS_IDLE = 'linear-gradient(rgba(255,255,255,0.20), rgba(232,238,250,0.10))';
 const GLASS_CAPSULE_BG = 'linear-gradient(rgba(20,24,34,0.52), rgba(14,18,28,0.46))';
 // Translucent glass for the read panels (answer + confirm card) — transparent
 // like every other dock mode (the closed/idle sliver, the capsules). The dock
@@ -348,6 +349,86 @@ function StopGlyph() {
   );
 }
 
+/** Minimal speed slider for the speaking capsule — 1×–3×, snaps in 0.5 steps.
+ * Pointer-driven (no native <input> — unreliable in the Tauri WKWebview). The
+ * thumb position maps the 58px track to [1,3]; the live label sits to the right.
+ * `onCommit` fires on every snap change so playback re-rates instantly. */
+const SPEED_MIN = 1;
+const SPEED_MAX = 3;
+const SPEED_TRACK = 58;
+function NotchSpeedSlider({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
+  const trackRef = useRef<HTMLDivElement | null>(null);
+  const draggingRef = useRef(false);
+  const clamp = (v: number) => Math.min(SPEED_MAX, Math.max(SPEED_MIN, v));
+  const snap = (v: number) => clamp(Math.round(v * 2) / 2);
+  const fromClientX = (clientX: number) => {
+    const el = trackRef.current;
+    if (!el) return value;
+    const r = el.getBoundingClientRect();
+    const t = r.width > 0 ? (clientX - r.left) / r.width : 0;
+    return snap(SPEED_MIN + t * (SPEED_MAX - SPEED_MIN));
+  };
+  const apply = (clientX: number) => {
+    const v = fromClientX(clientX);
+    if (v !== value) onCommit(v);
+  };
+  const pct = ((clamp(value) - SPEED_MIN) / (SPEED_MAX - SPEED_MIN)) * 100;
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+      <div
+        ref={trackRef}
+        role="slider"
+        aria-label="Speaking speed"
+        aria-valuemin={SPEED_MIN}
+        aria-valuemax={SPEED_MAX}
+        aria-valuenow={value}
+        onPointerDown={(e) => {
+          draggingRef.current = true;
+          (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
+          apply(e.clientX);
+        }}
+        onPointerMove={(e) => { if (draggingRef.current) apply(e.clientX); }}
+        onPointerUp={() => { draggingRef.current = false; }}
+        style={{
+          position: 'relative',
+          width: SPEED_TRACK,
+          height: 14,
+          display: 'flex',
+          alignItems: 'center',
+          cursor: 'pointer',
+          touchAction: 'none',
+        }}
+      >
+        <div style={{ position: 'absolute', left: 0, right: 0, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.22)' }} />
+        <div style={{ position: 'absolute', left: 0, width: `${pct}%`, height: 3, borderRadius: 2, background: 'rgba(255,255,255,0.6)' }} />
+        <div
+          style={{
+            position: 'absolute',
+            left: `calc(${pct}% - 6px)`,
+            width: 12,
+            height: 12,
+            borderRadius: '50%',
+            background: '#fff',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+          }}
+        />
+      </div>
+      <span
+        style={{
+          fontSize: 10,
+          fontWeight: 500,
+          color: 'rgba(255,255,255,0.82)',
+          fontVariantNumeric: 'tabular-nums',
+          minWidth: 22,
+          textShadow: '0 1px 4px rgba(0,0,0,0.35)',
+        }}
+      >
+        {Number.isInteger(value) ? `${value}×` : `${value}×`}
+      </span>
+    </div>
+  );
+}
+
 interface DockNotchSurfaceProps {
   snapshot: DictationSnapshot;
   /** TTS playback state — when playing/paused (and not dictating), the dock
@@ -391,6 +472,9 @@ interface DockNotchSurfaceProps {
    * While set, the panel keeps the dock (no capsule collapse) and renders the
    * live transcript as a pending You turn. */
   panelPending?: { phase: 'listening' | 'polishing' | 'handoff'; text: string } | null;
+  /** Symon's speaking speed (1×–3×) — the speaking capsule's live slider. */
+  speechSpeed?: number;
+  onSpeechSpeed?: (rate: number) => void;
 }
 
 /**
@@ -421,6 +505,8 @@ export function DockNotchSurface({
   workerRepos = [],
   showWorkers = false,
   panelPending = null,
+  speechSpeed = 1,
+  onSpeechSpeed,
 }: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
@@ -587,9 +673,10 @@ export function DockNotchSurface({
       } as React.CSSProperties;
     }
     if (isSpeaking) {
-      // Speaking capsule — the darkened brand surface with the controls.
+      // Speaking capsule — the darkened brand surface with the controls +
+      // the speed slider (1×–3×). Wider than the bare play/stop capsule.
       return {
-        width: 196,
+        width: 280,
         height: 40,
         borderRadius: '0 0 20px 20px',
         background: capsuleBg, ...capsuleBlur,
@@ -1048,6 +1135,7 @@ export function DockNotchSurface({
         >
           {playing ? 'Speaking' : 'Paused'}
         </span>
+        <NotchSpeedSlider value={speechSpeed} onCommit={(v) => onSpeechSpeed?.(v)} />
         <NotchControlButton label={playing ? 'Pause' : 'Resume'} onClick={() => onTogglePause?.()}>
           {playing ? <PauseGlyph /> : <PlayGlyph />}
         </NotchControlButton>
@@ -1130,13 +1218,14 @@ export function DockNotchSurface({
   } else if (mode === 'idle' && workerCount > 0) {
     // Fleet visibility in the resting sliver. The spinning orbit means lanes
     // are genuinely WORKING; lanes parked on the operator show a static amber
-    // dot instead — a paused packet must not read as active work. Ink flips
-    // light on the dark glass sliver, dark on the Symon pastel.
-    const sliverInk = glassDock ? 'rgba(255, 255, 255, 0.85)' : 'rgba(28, 28, 46, 0.8)';
+    // dot instead — a paused packet must not read as active work. Dark ink —
+    // the sliver surface is light in both dock themes (brand pastel / white
+    // glass).
+    const sliverInk = 'rgba(28, 28, 46, 0.8)';
     body = (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, width: '100%', height: '100%' }}>
         {workerWorking > 0 ? (
-          <NotchOrbit size={9} color={glassDock ? 'rgba(255, 255, 255, 0.78)' : 'rgba(28, 28, 46, 0.78)'} />
+          <NotchOrbit size={9} color="rgba(28, 28, 46, 0.78)" />
         ) : (
           <span
             aria-hidden

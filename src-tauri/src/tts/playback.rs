@@ -33,10 +33,41 @@
 //! audio plays falls back to the macOS `say` binary so the user always hears
 //! SOMETHING; a failure MID-read stops cleanly to keep the voice consistent.
 
-use super::TtsConfig;
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use super::{TtsConfig, TtsProvider};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
 use tokio::time::{sleep, timeout, Duration};
+
+/// The rate baked into the CURRENT utterance's synthesis: Google does its rate
+/// pitch-preserving server-side (`speakingRate`), so its audio is already at
+/// `config.speed` and rodio must NOT re-apply it (factor 1.0). ElevenLabs has
+/// no synth-side rate, so rodio owns the whole speed via `set_speed` (pitch
+/// shifts — the documented V1 tradeoff). The live dock slider computes its
+/// rodio factor as `target / synth_rate`, so dragging works on both providers.
+/// f32 bits; 1.0 until the first utterance.
+static CURRENT_SYNTH_RATE: AtomicU32 = AtomicU32::new(0x3f80_0000); // 1.0_f32
+
+/// Clamp every speed to a sane spoken range (matches the dock + settings UI).
+fn clamp_speed(rate: f32) -> f32 {
+    rate.clamp(0.5, 3.0)
+}
+
+/// Apply a live playback-speed change to the in-flight utterance — the dock
+/// slider's immediate feedback. `target` is the absolute multiplier the user
+/// picked (1.0–3.0); the rodio factor is relative to whatever rate the current
+/// audio was synthesized at, so Google (already sped server-side) and
+/// ElevenLabs (sped here) both land on `target`. Persisting the preference for
+/// the NEXT utterance is the caller's job. No-op when nothing is playing.
+pub fn set_live_speed(target: f32) {
+    let synth_rate = f32::from_bits(CURRENT_SYNTH_RATE.load(Ordering::SeqCst));
+    let synth_rate = if synth_rate > 0.0 { synth_rate } else { 1.0 };
+    let factor = clamp_speed(clamp_speed(target) / synth_rate);
+    let ctl = controls();
+    let guard = lock_recover(&ctl.sink);
+    if let Some(sink) = guard.as_ref() {
+        sink.set_speed(factor);
+    }
+}
 
 /// Maximum characters per chunk before sentence-boundary splitting.
 const MAX_CHUNK_CHARS: usize = 800;
@@ -262,6 +293,18 @@ pub fn play_thread(text: String, config: TtsConfig) {
                     return;
                 }
             };
+
+            // Playback-speed factor. Google bakes its rate server-side
+            // (pitch-preserving), so rodio applies 1.0; ElevenLabs has no
+            // synth rate, so rodio applies the whole `speed`. Record the
+            // synth-side rate so a live slider drag computes the right factor.
+            let synth_rate = match config.provider {
+                TtsProvider::Google => speed,
+                TtsProvider::ElevenLabs => 1.0,
+            };
+            CURRENT_SYNTH_RATE.store(synth_rate.to_bits(), Ordering::SeqCst);
+            let rodio_factor = clamp_speed(speed / if synth_rate > 0.0 { synth_rate } else { 1.0 });
+            sink.set_speed(rodio_factor);
 
             // Publish OUR sink + raise is_active ATOMICALLY with the gen check,
             // under the lock — so a `stop`/new-speak that already bumped the

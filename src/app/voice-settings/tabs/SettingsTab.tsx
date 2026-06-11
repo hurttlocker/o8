@@ -130,8 +130,8 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
             ? <GhostButton label="Stop" tone="danger" onClick={() => { void ttsStop(); setPreviewing(false); }} />
             : <AccentButton label="Preview" onClick={() => { void onPreview(); }} />}
         </ControlRow>
-        <ControlRow label="Reading speed" detail="0.5× to 2.0×.">
-          <Slider value={readingSpeed} min={0.5} max={2.0} step={0.25} suffix="×" onChange={(v) => setPref('reading_speed', v)} />
+        <ControlRow label="Speaking speed" detail="How fast Symon talks — 0.5× to 3×. Also adjustable live from the dock while he speaks.">
+          <Slider value={readingSpeed} min={0.5} max={3.0} step={0.25} suffix="×" onChange={(v) => setPref('reading_speed', v)} />
         </ControlRow>
       </SectionCard>
 
