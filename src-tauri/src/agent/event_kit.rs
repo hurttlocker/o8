@@ -40,7 +40,12 @@ fn local_iso(ts: f64) -> String {
 /// background-queue block can never re-enter osascript's JS thread.
 fn request_full_access(store: &EKEventStore) -> Result<bool, String> {
     let (tx, rx) = mpsc::channel::<bool>();
-    let block = RcBlock::new(move |granted: Bool, _err: *mut NSError| {
+    let block = RcBlock::new(move |granted: Bool, err: *mut NSError| {
+        if !err.is_null() {
+            let desc = unsafe { (*err).localizedDescription() };
+            log::warn!("[event-kit] access request error: {desc}");
+        }
+        log::info!("[event-kit] access request answered: granted={}", granted.as_bool());
         let _ = tx.send(granted.as_bool());
     });
     let block_ptr = (&*block as *const block2::Block<dyn Fn(Bool, *mut NSError)>).cast_mut();
@@ -55,6 +60,7 @@ pub fn list_events(days: i64, calendar_filter: &str) -> Result<Vec<EventRow>, St
     unsafe {
         let store = EKEventStore::new();
         let status = EKEventStore::authorizationStatusForEntityType(EKEntityType::Event);
+        log::info!("[event-kit] authorization status: {}", status.0);
         let authorized = match status {
             EKAuthorizationStatus::FullAccess => true,
             EKAuthorizationStatus::NotDetermined | EKAuthorizationStatus::WriteOnly => {

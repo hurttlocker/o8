@@ -38,27 +38,35 @@ pub fn spawn(app: tauri::AppHandle) {
 }
 
 async fn run(app: tauri::AppHandle) {
-    let mut last: Option<(usize, Vec<String>)> = None;
+    let mut last: Option<(usize, usize, Vec<String>)> = None;
     loop {
         let snapshot = poll().await;
-        if let Some((count, repos)) = snapshot {
+        if let Some((count, waiting, repos)) = snapshot {
             // Emit on change, and keep re-asserting while work is in flight so
             // a dock webview that loaded late still syncs.
-            let changed = last.as_ref() != Some(&(count, repos.clone()));
+            let changed = last.as_ref() != Some(&(count, waiting, repos.clone()));
             if changed || count > 0 {
-                let payload = json!({ "count": count, "repos": repos });
+                let payload = json!({
+                    "count": count,
+                    "working": count.saturating_sub(waiting),
+                    "waiting": waiting,
+                    "repos": repos,
+                });
                 let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:worker-status", payload.clone());
                 let _ = app.emit("o8:worker-status", payload);
             }
             if changed {
-                log::info!("[worker-pulse] {count} packet(s) in flight");
+                log::info!(
+                    "[worker-pulse] {} working, {waiting} waiting on the operator",
+                    count.saturating_sub(waiting)
+                );
             }
-            last = Some((count, repos));
+            last = Some((count, waiting, repos));
         }
 
         // Sleep in 2s ticks so a nudge cuts the wait short.
         let interval_secs: u64 = match &last {
-            Some((count, _)) if *count > 0 => 30,
+            Some((count, _, _)) if *count > 0 => 30,
             _ => 90,
         };
         for _ in 0..(interval_secs / 2) {
@@ -70,14 +78,31 @@ async fn run(app: tauri::AppHandle) {
     }
 }
 
-/// One `/api/lanes?active=true` read → (count, deduped repo names, max 3).
-/// None on transport failure (server restarting, port moved) — keep the last
-/// known state rather than flickering the orbit off.
-async fn poll() -> Option<(usize, Vec<String>)> {
+/// Lane statuses that are parked on a HUMAN (or a review), not working — the
+/// dock must not present these as "in flight" (live-hit: two lanes sat in
+/// reviewing/awaiting_input for half an hour while the sliver implied active
+/// work). `recovering` stays "working": the system is auto-retrying.
+const WAITING_STATUSES: &[&str] = &[
+    "awaiting_input",
+    "awaiting_orchestrator",
+    "awaiting_human",
+    "reviewing",
+    "failed",
+];
+
+/// One `/api/lanes?active=true` read → (total, waiting-on-operator, deduped
+/// repo names, max 3). None on transport failure (server restarting, port
+/// moved) — keep the last known state rather than flickering the orbit off.
+async fn poll() -> Option<(usize, usize, Vec<String>)> {
     let resp = super::o8_http::get_json("/api/lanes?active=true").await.ok()?;
     let lanes = resp.get("lanes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let mut repos: Vec<String> = Vec::new();
+    let mut waiting = 0usize;
     for lane in &lanes {
+        let status = lane.get("status").and_then(|v| v.as_str()).unwrap_or("");
+        if WAITING_STATUSES.contains(&status) {
+            waiting += 1;
+        }
         let repo = lane
             .get("repoPath")
             .and_then(|v| v.as_str())
@@ -91,5 +116,5 @@ async fn poll() -> Option<(usize, Vec<String>)> {
             repos.push(repo);
         }
     }
-    Some((lanes.len(), repos))
+    Some((lanes.len(), waiting, repos))
 }
