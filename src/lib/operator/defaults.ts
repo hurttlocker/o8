@@ -133,6 +133,9 @@ export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'p
 ];
 
 export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+  // Subscription-billed via the claude CLI like every other entry. Fable is
+  // included in Claude Code MAX subscriptions through 2026-06-22.
+  { value: 'claude-fable-5', label: 'Fable 5' },
   { value: 'claude-opus-4-8', label: 'Opus 4.8' },
   { value: 'claude-opus-4-7', label: 'Opus 4.7' },
   { value: 'claude-opus-4-6', label: 'Opus 4.6' },
