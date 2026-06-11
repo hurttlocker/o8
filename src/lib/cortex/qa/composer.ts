@@ -511,6 +511,27 @@ export async function composeClassA(
     }
   }
 
+  // 'fastest' mode (2026-06-11): lead with the HTTP tiers — OpenRouter
+  // flash-lite answers a Class A compose in ~1-3s for fractions of a cent
+  // (daily-capped in brain-spend.ts) where the CLI tiers pay a process
+  // bootstrap. On failure fall through into the normal subscription chain
+  // below, so the knob never reduces availability.
+  if (classAMode === 'fastest') {
+    const fastAnswer = await tryComposeOpenRouter(composePrompt);
+    if (fastAnswer) {
+      console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL} (mode=fastest)`);
+      emitClassAAnswer(fastAnswer, lookup, emit);
+      return;
+    }
+    const fastFlash = await tryComposeFlash(composePrompt);
+    if (fastFlash) {
+      console.info('[qa][composer-A] resolved via flash (mode=fastest)');
+      emitClassAAnswer(fastFlash, lookup, emit);
+      return;
+    }
+    // Fall through to the standard chain (Haiku/Codex/Sonnet/heuristic).
+  }
+
   // #971 sonnet-cli mode: lead with Sonnet CLI before Haiku/Codex tiers.
   // Falls through to OpenRouter/Flash/heuristic on failure (Haiku + Codex
   // stay skipped because the user explicitly opted in to Sonnet quality).

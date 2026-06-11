@@ -69,7 +69,7 @@ export const usageLogs = sqliteTable('usage_logs', {
   /** Model used (e.g. claude-opus-4-6, gpt-5.5) */
   model: text('model').notNull(),
   /** LLM provider */
-  provider: text('provider', { enum: ['anthropic', 'openai', 'google'] }).notNull(),
+  provider: text('provider', { enum: ['anthropic', 'openai', 'google', 'openrouter'] }).notNull(),
   /** Input tokens consumed */
   inputTokens: integer('input_tokens').notNull().default(0),
   /** Output tokens consumed */

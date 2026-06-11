@@ -31,7 +31,7 @@ export type SettingSource = 'env' | 'file' | 'default';
  *   - `sonnet-cli` — lead with Sonnet CLI for higher quality. Skips Haiku + Codex tiers.
  * Eval-mode (smoke gate) is unaffected — always routes through OpenRouter Sonnet 4.6.
  */
-export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli';
+export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 
 function isClassAComposer(value: unknown): value is ClassAComposer {
   return value === 'auto' || value === 'haiku-cli' || value === 'sonnet-cli';
@@ -115,8 +115,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
-  { value: 'haiku-cli', label: 'Haiku', detail: 'Fastest, free for Claude Max users.' },
+  { value: 'haiku-cli', label: 'Haiku', detail: 'Free for Claude Max users via the warm REPL pool.' },
   { value: 'sonnet-cli', label: 'Sonnet', detail: 'Best quality, free, slower bootstrap.' },
+  { value: 'fastest', label: 'Fastest', detail: 'OpenRouter flash-lite first (~1-3s, pennies per question, daily-capped). Free tiers as fallback.' },
 ];
 
 export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label: string; detail: string }> = [
