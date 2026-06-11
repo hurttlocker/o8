@@ -120,6 +120,32 @@ pub(crate) fn system_prompt() -> String {
     )
 }
 
+/// Rolling conversation context — the last few voice exchanges, so "remind me
+/// about that" or "add it to the same list" two asks later resolves. A gap
+/// longer than the window is a NEW conversation (matches how people talk to a
+/// voice assistant), so stale context never bleeds in.
+const CONVO_WINDOW_SECS: i64 = 15 * 60;
+const CONVO_MAX_EXCHANGES: usize = 5;
+
+pub(crate) fn conversation_context() -> Option<String> {
+    let exchanges = store::recent_exchanges(CONVO_WINDOW_SECS, CONVO_MAX_EXCHANGES);
+    if exchanges.is_empty() {
+        return None;
+    }
+    let mut out = String::from(
+        "Recent conversation with this user (oldest first) — resolve pronouns \
+         and follow-ups (\"that\", \"the same one\", \"do it again\") against it:",
+    );
+    for (intent, reply) in &exchanges {
+        out.push_str(&format!(
+            "\nUser: {}\nYou: {}",
+            crate::utf8_head(intent, 200),
+            crate::utf8_head(reply, 200)
+        ));
+    }
+    Some(out)
+}
+
 /// Appended to the system prompt when a screenshot rides the request — teaches
 /// the model the screenshot's pixel space and the `[POINT:x,y:label]` tag
 /// protocol (parsed + stripped by `point_overlay::parse_point_tags`; the tags
@@ -328,7 +354,14 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
                 format!("Create a reminder “{title}” for {due}")
             }
         }
-        "mac_calendar_create_event" => format!("Add “{}” to your calendar", s("title")),
+        "mac_calendar_create_event" => {
+            let repeat = s("repeat");
+            if repeat.is_empty() {
+                format!("Add “{}” to your calendar", s("title"))
+            } else {
+                format!("Add “{}” to your calendar, repeating {repeat}", s("title"))
+            }
+        }
         "mac_notes_create" => format!("Create a note “{}”", s("title")),
         "mac_reminders_complete" => format!("Mark “{}” complete", s("title")),
         "o8_dispatch" => format!("Dispatch the {} orchestrator to: {}", s("repo"), s("task")),
