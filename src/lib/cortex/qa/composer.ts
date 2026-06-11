@@ -497,8 +497,9 @@ export type SseEmit = (name: string, payload: unknown) => void;
  *   1. Haiku CLI   — Claude Max subscription, no per-token cost. Primary.
  *   2. Codex CLI   — ChatGPT Plus / Codex subscription, also free. Two CLIs
  *                     beat one for users with either sub. ~15s vs ~14s Haiku.
- *   3. OpenRouter  — grok-4.1-fast (held in 2026-04-30 phase 1.7.1 rerun)
- *                     w/ flash-lite + gpt-5.4-nano in-call fallback. Paid HTTP, ~1-6s.
+ *   3. OpenRouter  — gemini-2.5-flash-lite primary (grok-4.1-fast DEPRECATED
+ *                     by xAI 2026-06-11) w/ gpt-5.4-nano + grok-4.3 in-call
+ *                     fallback. Paid HTTP, ~1-3s, daily-capped in brain-spend.ts.
  *   4. Flash       — Google AI key. Demoted because of recent 503 churn.
  *   5. Sonnet CLI  — slow (5-12s) but reliable when everything else 503s.
  *   6. Heuristic   — final fallback when every LLM is unavailable.
@@ -644,7 +645,7 @@ export async function composeClassA(
     }
   }
 
-  // Tier 3: OpenRouter (grok-4.1-fast w/ flash-lite + gpt-5.4-nano fallback).
+  // Tier 3: OpenRouter (flash-lite primary w/ gpt-5.4-nano + grok-4.3 fallback).
   const openrouterAnswer = await tryComposeOpenRouter(composePrompt);
   if (openrouterAnswer) {
     console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL}`);
@@ -721,7 +722,7 @@ async function tryComposeCodex(prompt: string): Promise<string | null> {
   }
 }
 
-/** Tier 3: OpenRouter — grok-4.1-fast with flash-lite + gpt-5.4-nano in-call fallback.
+/** Tier 3: OpenRouter — flash-lite primary with gpt-5.4-nano + grok-4.3 in-call fallback.
  * Optional `model` override routes to a specific model instead of the primary
  * (used by the eval-mode Haiku-4.5 tier).
  *
@@ -869,7 +870,7 @@ export async function composeClassB(
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
   if (evalMode) {
-    return composeClassBViaOpenRouter(question, repoPath, topRows, emit, lookup);
+    return composeClassBViaSonnetAdapter(question, repoPath, topRows, emit, lookup);
   }
 
   try {
@@ -941,10 +942,11 @@ export async function composeClassB(
  * adapter the production Class B path uses (`callSonnet`) — just non-streaming
  * because eval cares about final answer correctness, not TTFT.
  *
- * Function name kept (`composeClassBViaOpenRouter`) to minimise the diff;
- * the implementation no longer touches OpenRouter for the Anthropic models.
+ * (Renamed from `composeClassBViaOpenRouter` 2026-06-11 — the implementation
+ * stopped touching OpenRouter for the Anthropic models long ago and the old
+ * name actively misled the tier-chain audit.)
  */
-async function composeClassBViaOpenRouter(
+async function composeClassBViaSonnetAdapter(
   question: string,
   repoPath: string | undefined,
   topRows: TypedRow[],

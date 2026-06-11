@@ -73,6 +73,7 @@ export interface LivingAgentPanelProps {
 function LivingAgentPanelBase({ packet, toolCalls = [] }: LivingAgentPanelProps) {
   const [, setRenderTick] = useState(0);
   const lastRenderRef = useRef<number>(0);
+  const throttleTimerRef = useRef<number | null>(null);
   const [subAgents, setSubAgents] = useState<SubAgentRow[]>([]);
   // The motion of this panel is delegated to its children (ToolCallChip).
   // The chips handle prefers-reduced-motion themselves.
@@ -120,7 +121,9 @@ function LivingAgentPanelBase({ packet, toolCalls = [] }: LivingAgentPanelProps)
         setRenderTick((t) => t + 1);
       } else {
         const delay = RENDER_THROTTLE_MS - sinceLast;
-        window.setTimeout(() => {
+        if (throttleTimerRef.current !== null) window.clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = window.setTimeout(() => {
+          throttleTimerRef.current = null;
           lastRenderRef.current = Date.now();
           setRenderTick((t) => t + 1);
         }, delay);
@@ -128,7 +131,13 @@ function LivingAgentPanelBase({ packet, toolCalls = [] }: LivingAgentPanelProps)
     };
 
     window.addEventListener('cortex:agent-supervisor-update', handler);
-    return () => window.removeEventListener('cortex:agent-supervisor-update', handler);
+    return () => {
+      window.removeEventListener('cortex:agent-supervisor-update', handler);
+      if (throttleTimerRef.current !== null) {
+        window.clearTimeout(throttleTimerRef.current);
+        throttleTimerRef.current = null;
+      }
+    };
   }, [packet.workspaceTargetPath]);
 
   const visibleToolCalls = useMemo(
@@ -227,8 +236,8 @@ function LivingAgentPanelBase({ packet, toolCalls = [] }: LivingAgentPanelProps)
               borderLeftWidth: 0,
               borderWidth: 1,
               borderStyle: 'solid',
-              borderColor: 'rgba(245, 158, 11, 0.32)',
-              background: 'rgba(245, 158, 11, 0.08)',
+              borderColor: 'var(--t-warning-border, rgba(245, 158, 11, 0.32))',
+              background: 'var(--t-warning-bg, rgba(245, 158, 11, 0.08))',
               color: 'var(--t-text)',
               fontSize: 11,
               fontWeight: 500,

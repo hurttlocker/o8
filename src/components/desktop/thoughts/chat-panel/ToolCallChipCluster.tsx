@@ -297,7 +297,7 @@ export function ToolCallChipCluster({ toolCalls }: { toolCalls: MobileTranscript
             borderColor: 'var(--t-divider-subtle)',
             borderRadius: 18,
             background: 'color-mix(in srgb, var(--t-bg-card) 92%, transparent)',
-            boxShadow: '0 18px 45px rgba(15, 23, 42, 0.08)',
+            boxShadow: 'var(--t-shadow-card, 0 18px 45px rgba(15, 23, 42, 0.08))',
             color: 'var(--t-text)',
             fontFamily: 'var(--font-sans-system)',
           }}

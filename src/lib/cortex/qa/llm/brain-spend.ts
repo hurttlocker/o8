@@ -58,6 +58,12 @@ export function estimateCostUsd(model: string, usage: OpenRouterUsage): number {
  * throws — a ledger failure must not fail the answer that already succeeded.
  */
 export function recordBrainOpenRouterSpend(model: string, usage: OpenRouterUsage): void {
+  // Invalidate the cap memo SYNCHRONOUSLY, before the async ledger write —
+  // resetting it inside the async block left a window where every concurrent
+  // ask kept reading the stale (lower) memo and sailed past the cap check
+  // (review 2026-06-11). Nulling first forces the next check to re-sum from
+  // the DB, which is the conservative direction for a spend guardrail.
+  spendTodayCache = null;
   void (async () => {
     try {
       const { logUsage } = await import('@/lib/db/usage');
@@ -70,7 +76,6 @@ export function recordBrainOpenRouterSpend(model: string, usage: OpenRouterUsage
         costUsd: estimateCostUsd(model, usage),
         agentName: BRAIN_AGENT_NAME,
       });
-      spendTodayCache = null; // next cap check sees the new row
     } catch (err) {
       console.warn('[qa][brain-spend] ledger write failed:', err instanceof Error ? err.message : err);
     }
