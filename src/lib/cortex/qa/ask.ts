@@ -36,9 +36,12 @@ import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 const CACHE_TTL_MS = 30 * 60_000;
 
-/** Cosine floor for a semantic cache hit (#1226). Conservative on purpose —
- *  a wrong reuse is worse than a 7s re-ask. */
-const SEMANTIC_HIT_THRESHOLD = 0.95;
+/** Cosine floor for a semantic cache hit (#1226). Calibrated live against
+ *  gemini-embedding-001 (2026-06-11): a true rephrase measures ~0.905,
+ *  unrelated questions ~0.51-0.55. 0.86 sits well below real rephrasings
+ *  and far above the unrelated band — a wrong reuse is worse than a re-ask,
+ *  so the margin leans conservative. */
+const SEMANTIC_HIT_THRESHOLD = 0.86;
 
 interface CacheEntry {
   answer: string;

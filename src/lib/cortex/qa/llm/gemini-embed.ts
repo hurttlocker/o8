@@ -14,7 +14,13 @@
 
 import 'server-only';
 
-const EMBED_MODEL = 'text-embedding-004';
+// text-embedding-004 was RETIRED (404, verified live 2026-06-11) — same
+// model-rot failure mode as grok-4.1-fast. gemini-embedding-001 is the GA
+// replacement; 768-dim truncation (re-normalized below) keeps entries at
+// 1/4 memory with an identical rephrase-vs-unrelated cosine gap (measured
+// 0.905 vs 0.505 at both 3072 and 768 dims).
+const EMBED_MODEL = 'gemini-embedding-001';
+const EMBED_DIMS = 768;
 const EMBED_TIMEOUT_MS = 5_000;
 
 function resolveGeminiKey(): string | undefined {
@@ -49,7 +55,7 @@ export async function embedQuestion(text: string): Promise<number[] | null> {
       {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: { parts: [{ text }] } }),
+        body: JSON.stringify({ content: { parts: [{ text }] }, outputDimensionality: EMBED_DIMS }),
         signal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
       },
     );
