@@ -781,3 +781,104 @@ pub async fn resolve_repo_path(repo: &str) -> Result<String, String> {
     }
     fallback.ok_or_else(|| format!("I couldn't find a repo named '{repo}' in o8."))
 }
+
+/// `o8_add_repo` — register an existing local git repo in o8 (and optionally
+/// drop it into a named project). Same route the sidebar + button and the
+/// operator MCP's `o8_register_repo` use: POST `/api/panel/repos`
+/// `{action:'add'}` — o8's DB stays the single source of truth and the
+/// sidebar picks it up live. Project assignment patches the project ledger's
+/// `repoPaths` exactly like the desktop project drawer.
+pub async fn add_repo(args: Value) -> Result<Value, String> {
+    let raw = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    if raw.is_empty() {
+        return Err("o8_add_repo needs the folder 'path' — find it with fs_spotlight first.".into());
+    }
+    let path = if raw == "~" || raw.starts_with("~/") {
+        let home = std::env::var("HOME").unwrap_or_default();
+        raw.replacen('~', &home, 1)
+    } else {
+        raw
+    };
+
+    let resp = o8_http::post_json("/api/panel/repos", json!({ "action": "add", "localPath": path })).await?;
+    if let Some(err) = resp.get("error").and_then(|v| v.as_str()) {
+        return Err(format!("o8 couldn't add that repo: {err}"));
+    }
+    let repo_path = resp
+        .get("repo")
+        .and_then(|r| r.get("localPath"))
+        .and_then(|v| v.as_str())
+        .unwrap_or(&path)
+        .to_string();
+
+    let project = args
+        .get("project")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty());
+    let Some(project) = project else {
+        return Ok(json!({ "added": true, "path": repo_path }));
+    };
+
+    // Assign to a project by spoken name — exact match first, then substring.
+    let ledger = o8_http::get_json("/api/panel/projects").await?;
+    let projects = ledger
+        .get("projects")
+        .and_then(|v| v.as_array())
+        .cloned()
+        .unwrap_or_default();
+    let needle = project.to_lowercase();
+    let name_of = |p: &Value| p.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
+    let hit = projects
+        .iter()
+        .find(|p| name_of(p).to_lowercase() == needle)
+        .or_else(|| projects.iter().find(|p| name_of(p).to_lowercase().contains(&needle)));
+    let Some(hit) = hit else {
+        let names: Vec<String> = projects.iter().map(|p| name_of(p)).filter(|n| !n.is_empty()).collect();
+        return Ok(json!({
+            "added": true,
+            "path": repo_path,
+            "project_assigned": false,
+            "note": format!(
+                "The repo is added, but no project matched '{project}'. Projects: {}.",
+                if names.is_empty() { "none yet".to_string() } else { names.join(", ") }
+            ),
+        }));
+    };
+
+    let project_id = hit.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
+    let project_name = name_of(hit);
+    let mut paths: Vec<String> = hit
+        .get("repoPaths")
+        .and_then(|v| v.as_array())
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
+        .unwrap_or_default();
+    let target = repo_path.trim_end_matches('/');
+    if !paths.iter().any(|x| x.trim_end_matches('/') == target) {
+        paths.push(repo_path.clone());
+    }
+    let patched = o8_http::patch_json(
+        &format!("/api/panel/projects/{project_id}"),
+        json!({ "repoPaths": paths }),
+    )
+    .await;
+    match patched {
+        Ok(_) => Ok(json!({
+            "added": true,
+            "path": repo_path,
+            "project_assigned": true,
+            "project": project_name,
+        })),
+        Err(e) => Ok(json!({
+            "added": true,
+            "path": repo_path,
+            "project_assigned": false,
+            "note": format!("The repo is added, but assigning it to '{project_name}' failed: {e}"),
+        })),
+    }
+}
