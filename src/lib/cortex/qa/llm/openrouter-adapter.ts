@@ -48,6 +48,11 @@
 
 import 'server-only';
 
+import {
+  assertUnderBrainDailyCap,
+  recordBrainOpenRouterSpend,
+  type OpenRouterUsage,
+} from '@/lib/cortex/qa/llm/brain-spend';
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 
 // ── Public API ───────────────────────────────────────────────────────────────
@@ -156,6 +161,10 @@ export async function callOpenRouter(
     );
   }
 
+  // Daily spend cap (Tier-1 guardrail) — throws when today's brain OpenRouter
+  // spend hits O8_QA_OPENROUTER_DAILY_CAP_USD; cascade falls to free tiers.
+  await assertUnderBrainDailyCap();
+
   // BYOK (#960): resolve from stored user key first, then process.env.
   // Smoke path always has process.env.OPENROUTER_API_KEY set, so it
   // resolves immediately without hitting the file.
@@ -177,6 +186,9 @@ export async function callOpenRouter(
     messages: [{ role: 'user', content: prompt }],
     temperature: 0,
     max_tokens: 512,
+    // Ask OpenRouter to return the call's cost in the response so the spend
+    // ledger records exact figures instead of pricing-table estimates.
+    usage: { include: true },
   };
 
   let res: Response;
@@ -209,6 +221,7 @@ export async function callOpenRouter(
   const json = await res.json() as {
     choices?: Array<{ message?: { content?: string } }>;
     model?: string;
+    usage?: OpenRouterUsage;
   };
 
   const text = json.choices?.[0]?.message?.content ?? '';
@@ -217,6 +230,7 @@ export async function callOpenRouter(
   }
 
   recordSuccess();
+  recordBrainOpenRouterSpend(json.model ?? primary, json.usage ?? {});
   return text;
 }
 

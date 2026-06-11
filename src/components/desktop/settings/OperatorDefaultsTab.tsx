@@ -26,7 +26,7 @@ type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 type SettingSource = 'env' | 'file' | 'default';
 
 type DispatchRuntime = 'codex' | 'gemini' | 'opencode';
-type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli';
+type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 
 interface OperatorDefaults {
   parallelCap: number;
@@ -772,13 +772,23 @@ export function OperatorDefaultsTab() {
         </p>
         <Row
           label="Class A composer"
-          description={values.classAComposer === 'sonnet-cli' ? 'Sonnet CLI: best quality, slower bootstrap. Skips Haiku and Codex tiers.' : 'Haiku CLI: fastest free path. Falls back through Codex / OpenRouter / Flash / Sonnet CLI.'}
+          description={
+            values.classAComposer === 'sonnet-cli'
+              ? 'Sonnet CLI: best quality, slower bootstrap. Skips Haiku and Codex tiers.'
+              : values.classAComposer === 'fastest'
+                ? 'Fastest: OpenRouter flash-lite first (~1-3s, pennies per question, daily spend cap). Free tiers as fallback.'
+                : 'Haiku CLI: free via the warm REPL pool. Falls back through Codex / OpenRouter / Flash / Sonnet CLI.'
+          }
           source={sources.classAComposer}
           disabledReason={classAComposerEnv ? envDisabledReason : undefined}
           right={
             <PickerMenu<ClassAComposer>
-              value={values.classAComposer === 'sonnet-cli' ? 'sonnet-cli' : 'haiku-cli'}
-              options={[{ value: 'haiku-cli', label: 'Haiku', detail: 'Fastest, free for Claude Max users.' }, { value: 'sonnet-cli', label: 'Sonnet', detail: 'Best quality, free, slower bootstrap.' }]}
+              value={values.classAComposer === 'sonnet-cli' ? 'sonnet-cli' : values.classAComposer === 'fastest' ? 'fastest' : 'haiku-cli'}
+              options={[
+                { value: 'haiku-cli', label: 'Haiku', detail: 'Free for Claude Max users via the warm REPL pool.' },
+                { value: 'sonnet-cli', label: 'Sonnet', detail: 'Best quality, free, slower bootstrap.' },
+                { value: 'fastest', label: 'Fastest', detail: 'OpenRouter flash-lite first. Pennies per question, daily-capped.' },
+              ]}
               onChange={(next) => { void updateField('classAComposer', next); }}
               disabled={classAComposerEnv || busyField === 'classAComposer'}
               minWidth={180}
