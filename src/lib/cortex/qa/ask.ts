@@ -24,6 +24,8 @@ import { createHash } from 'node:crypto';
 import { classifyQuestion } from '@/lib/cortex/qa/classifier';
 import { composeClassA, composeClassB, type SseEmit } from '@/lib/cortex/qa/composer';
 import { buildGrepArmTopRows } from '@/lib/cortex/qa/grep-arm';
+import { prewarmHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
+import { prewarmSonnetCli } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { detectLiteralLookup } from '@/lib/cortex/qa/literal-lookup';
 import { retrieveAll, unionMerge } from '@/lib/cortex/qa/retrieve';
 import type { Citation, TypedRow } from '@/lib/cortex/qa/types';
@@ -165,6 +167,10 @@ async function runAskCortexUncached(
   key: string,
   bypassCache: boolean,
 ): Promise<AskCortexResult> {
+  // Pre-warm the Haiku REPL while classify + retrieve run — the composer's
+  // CLI tier then finds a proc with its bootstrap already under way.
+  void prewarmHaiku();
+
   const grepStart = Date.now();
   const grepRows = await routeGrepArm(question, repoPath);
   // 1. Classify
@@ -173,6 +179,8 @@ async function runAskCortexUncached(
     ? { class: 'A' as const, bm25Variants: [question] }
     : await classifyQuestion(question);
   const classifyMs = grepRows ? 0 : Date.now() - classifyStart;
+  // Class B composes via Sonnet CLI — start its bootstrap before retrieval.
+  if (classification.class === 'B') void prewarmSonnetCli();
 
   // 2. Retrieve
   const retrievalStart = Date.now();
@@ -278,6 +286,9 @@ export async function runAskPipeline(
     }
   }
 
+  // Pre-warm the Haiku REPL while classify + retrieve run (see askCortex).
+  void prewarmHaiku();
+
   const grepRows = await routeGrepArm(question, repoPath);
   let classification: Awaited<ReturnType<typeof classifyQuestion>> = {
     class: 'A',
@@ -293,6 +304,8 @@ export async function runAskPipeline(
       console.warn('[qa][ask] classifier error:', err);
       classification = { class: 'B', bm25Variants: [question] };
     }
+    // Class B composes via Sonnet CLI — start its bootstrap before retrieval.
+    if (classification.class === 'B') void prewarmSonnetCli();
 
     // 2. Retrieve — run all three retrievers in parallel, RRF-merge.
     try {

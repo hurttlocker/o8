@@ -9,9 +9,10 @@
  * CLI path uses the `claude --input-format stream-json` REPL spawn (no `-p` /
  * `--print`) — the same shape the in-app chat tab uses — so calls bill against
  * the user's Claude Code MAX subscription pool, NOT the gated Agent SDK pool
- * that `--print` taps. Shared spawn helper lives in
- * `src/lib/claude-code/one-shot-repl.ts`. See #1124 for the SDK-billing trap
- * and #1066 for the original REPL migration.
+ * that `--print` taps. Spawns go through the warm pool in
+ * `src/lib/claude-code/warm-repl-pool.ts` (pre-paid bootstrap, real streaming,
+ * bounded concurrency). See #1124 for the SDK-billing trap and #1066 for the
+ * original REPL migration.
  *
  * Working directory is os.tmpdir() so the invocation doesn't pick up any
  * project-level .claude/ config.
@@ -22,9 +23,11 @@ import 'server-only';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import { askClaudeOneShot } from '@/lib/claude-code/one-shot-repl';
+import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
 
 const execFileAsync = promisify(execFile);
+
+const SONNET_CLI_MODEL = 'claude-sonnet-4-6';
 
 // ── Provider tier ─────────────────────────────────────────────────────────────
 
@@ -179,14 +182,14 @@ function buildCliPrompt(system: string, messages: SonnetMessages['messages']): s
 }
 
 /**
- * Invoke Sonnet via the REPL one-shot helper. Subscription-billed (no `-p` /
+ * Invoke Sonnet via the warm REPL pool. Subscription-billed (no `-p` /
  * `--print`) — see #1124 for the trap the old `--print` path fell into.
+ * The pool pre-spawns the next proc in the background, so steady-state
+ * calls skip the 6-9s CLI bootstrap.
  *
- * Streaming mode is preserved at the public API level (callers in composer.ts
- * still `for await` the token stream) but the REPL one-shot doesn't expose a
- * mid-turn token stream the way the API does; we resolve the full text and
- * yield it once. Callers don't care: they accumulate into `fullText` anyway
- * before doing citation post-processing.
+ * Streaming mode is REAL as of the 2026-06-11 brain perf pass: the pool
+ * surfaces the parser's `delta` events as they arrive, so `for await`
+ * consumers see tokens mid-generation instead of one yield-at-the-end blob.
  */
 async function callSonnetCli(
   opts: SonnetMessages & { stream?: boolean },
@@ -195,19 +198,79 @@ async function callSonnetCli(
   const prompt = buildCliPrompt(opts.system, opts.messages);
   const timeoutMs = opts.timeoutMs ?? 300_000;
 
-  const text = await askClaudeOneShot(prompt, {
+  if (!opts.stream) {
+    const text = await askClaudeWarm(prompt, {
+      binary: claudeBin,
+      model: SONNET_CLI_MODEL,
+      timeoutMs,
+    });
+    return { text, tier: 'cli' };
+  }
+
+  // Bridge the pool's onDelta callback into an AsyncIterable. Deltas are
+  // pushed into a queue; the generator drains it, waiting on a signal when
+  // it runs dry. The turn promise settles the stream (flushing any final
+  // text the `done` event carried beyond the deltas).
+  const queue: string[] = [];
+  let notify: (() => void) | null = null;
+  let finished = false;
+  let failure: Error | null = null;
+  let deltaLen = 0;
+
+  const turn = askClaudeWarm(prompt, {
     binary: claudeBin,
-    model: 'claude-sonnet-4-6',
+    model: SONNET_CLI_MODEL,
     timeoutMs,
+    onDelta: (text) => {
+      deltaLen += text.length;
+      queue.push(text);
+      notify?.();
+    },
   });
 
-  if (opts.stream) {
-    const tokens = (async function* (): AsyncIterable<string> {
-      if (text) yield text;
-    })();
-    return { tokens, tier: 'cli' };
+  turn
+    .then((fullText) => {
+      // Some CLI builds only carry the full text on the final `result` frame.
+      // Emit whatever the deltas didn't already cover.
+      if (fullText.length > deltaLen) queue.push(fullText.slice(deltaLen));
+      finished = true;
+      notify?.();
+    })
+    .catch((err: unknown) => {
+      failure = err instanceof Error ? err : new Error(String(err));
+      finished = true;
+      notify?.();
+    });
+
+  const tokens = (async function* (): AsyncIterable<string> {
+    for (;;) {
+      while (queue.length > 0) yield queue.shift()!;
+      if (finished) {
+        if (failure) throw failure;
+        return;
+      }
+      await new Promise<void>((resolve) => { notify = resolve; });
+      notify = null;
+    }
+  })();
+
+  return { tokens, tier: 'cli' };
+}
+
+/**
+ * Fire-and-forget: pre-spawn a warm Sonnet REPL so an imminent Class B
+ * composition skips the CLI bootstrap. Called as soon as the classifier
+ * returns 'B' (ask.ts). No-ops unless the resolved tier is the CLI.
+ */
+export async function prewarmSonnetCli(): Promise<void> {
+  try {
+    const tier = await detectTier();
+    if (tier.tier === 'cli' && tier.claudeBin) {
+      prewarmClaudeRepl(tier.claudeBin, SONNET_CLI_MODEL);
+    }
+  } catch {
+    // Pre-warm is best-effort — never let it surface into the pipeline.
   }
-  return { text, tier: 'cli' };
 }
 
 // ── API provider ──────────────────────────────────────────────────────────────
