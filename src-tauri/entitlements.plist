@@ -20,5 +20,9 @@
     <true/>
     <key>com.apple.security.device.input-monitoring</key>
     <true/>
+    <key>com.apple.security.personal-information.calendars</key>
+    <true/>
+    <key>com.apple.security.personal-information.reminders</key>
+    <true/>
 </dict>
 </plist>
