@@ -32,6 +32,10 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     // turn as inline_data and the prompt gains the POINT-tag teaching section.
     let mut first_parts: Vec<Value> = Vec::new();
     let mut first_text = super::system_prompt();
+    if let Some(convo) = super::conversation_context() {
+        first_text.push_str("\n\n");
+        first_text.push_str(&convo);
+    }
     if let Some(screen) = &ctx.screen {
         first_text.push_str("\n\n");
         first_text.push_str(&super::screen_prompt_section(screen.img_w, screen.img_h));

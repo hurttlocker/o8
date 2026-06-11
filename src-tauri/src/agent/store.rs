@@ -80,6 +80,29 @@ pub fn finish_task(
     }
 }
 
+/// Recent finished exchanges (intent, spoken reply), OLDEST FIRST, for the
+/// rolling conversation context. Only `done` tasks with a non-empty reply
+/// inside the age window count — a denied card or a crash is not conversation.
+pub fn recent_exchanges(max_age_secs: i64, limit: usize) -> Vec<(String, String)> {
+    let Ok(conn) = open_db() else { return Vec::new() };
+    let cutoff = now_ts() - max_age_secs;
+    let Ok(mut stmt) = conn.prepare(
+        "SELECT intent_text, result_text FROM agent_tasks
+         WHERE status = 'done' AND finished_at >= ?1
+           AND result_text IS NOT NULL AND result_text != ''
+         ORDER BY created_at DESC LIMIT ?2",
+    ) else {
+        return Vec::new();
+    };
+    let rows = stmt
+        .query_map(params![cutoff, limit as i64], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .map(|r| r.flatten().collect::<Vec<_>>())
+        .unwrap_or_default();
+    rows.into_iter().rev().collect()
+}
+
 /// The most recent task as a small JSON object (drives `agent_task_status`).
 pub fn latest_task() -> Option<serde_json::Value> {
     let conn = open_db().ok()?;
