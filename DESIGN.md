@@ -36,7 +36,7 @@ If you are building or touching any surface in this app, read this first. If a c
 |---|---|---|
 | Medium | Static web | Native macOS app |
 | Backdrop | Paper (`#F4F2ED`) full bleed | macOS vibrancy passthrough |
-| Type | Inter, 400/500 only | Plus Jakarta Sans, 300–800 |
+| Type | Inter, 400/500 only | System stack (SF Pro), 260–500 per hurttlocker |
 | Chrome | Hairlines + whitespace | Glass over vibrancy |
 | Content surfaces | Paper | Paper (light) / ink (midnight) |
 | Layout | Single-column scroll | Panels + tiles |
@@ -107,22 +107,24 @@ Matches the landing's structural blue. Already in light use on empty states; for
 
 ## 02 — Typography
 
-### Font — LOCKED
+### Font — LOCKED (system stack; supersedes the old Plus Jakarta Sans lock)
 
-**Plus Jakarta Sans** stays as the primary. Do not swap for Inter, Neue Haas Grotesk, or anything else. The font has three years of product equity and the weight stack (300–800) is already load-bearing for hierarchy contrast.
+**System stack via `var(--font-sans-system)`** — `-apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", …`. The Plus Jakarta Sans pass was rolled back (2026-05): SF Pro's hinting at the light weights we run beats any webfont we tested. Never hard-code `'Inter'` or any webfont on chrome.
 
 Mono remains SF Mono / Menlo / Consolas fallback chain.
+
+**[`hurttlocker.md`](./hurttlocker.md) is the typography authority** — operator-locked sizes/weights/tracking for every chrome role (row title 13.5/300, row meta 9.5/260, section labels 10/300, etc.). The summary below only sketches the shape; when they disagree, hurttlocker wins.
 
 ### Weight scale
 
 | Weight | Use |
 |---|---|
-| 300 | Tiny metadata — timestamps, build stamps |
-| 400 | Body copy, transcript messages, terminal output |
-| 500 | UI labels, tab titles, section heads |
-| 600 | Action buttons, bold transcript names |
-| 700 | Display headlines, app title |
-| 800 | Rare — hero display only (dashboard first-load state) |
+| 260 | Row meta lines (timestamps, path sublines) — see hurttlocker |
+| 300 | Default chrome weight: row titles, labels, tab pills, section labels |
+| 400 | Markdown headings, body emphasis ceiling for content surfaces |
+| 500 | Inline `<strong>` only — the hard cap on chrome. Active state NEVER bumps weight. |
+
+Weights 600+ do not appear on chrome. (Display/hero surfaces like onboarding may go heavier deliberately — those are content, not chrome.)
 
 ### Size scale
 
@@ -178,16 +180,20 @@ Apple HIG-aligned:
 The dashboard composition, from top to bottom:
 
 ```
-┌─────────────────────────────────────────────────┐
-│ TitleBar (44px, drag region, traffic lights)    │
-├─────────────────────────────────────────────────┤
-│ SessionTimeline (36px, day-level activity)       │
-├──────┬──────────────────────┬───────────────────┤
-│ Nav  │    AgentPanel (left)  │  Center Workspace │
-│ Rail │    or IntentCanvas    │  (Canvas/Settings)│
-│ 56px │    or SettingsPage    │                    │
-└──────┴──────────────────────┴───────────────────┘
+┌─────────────────────────────────────────────────────┐
+│ TitleBar (44px, drag region, traffic lights)        │
+├─────────────────────────────────────────────────────┤
+│ SessionTimeline (36px — OFF by default, epic #1089)  │
+├───────────────┬───────────────────┬─────────────────┤
+│ AgentPanel    │  TileContainer    │  O8Panel        │
+│ (left card,   │  (WorkspaceTermi- │  (right, 440px  │
+│  resizable)   │   nal tiles)      │   default)      │
+├───────────────┴───────────────────┴─────────────────┤
+│ DesktopStatusBar (settings · ports · branch · term) │
+└─────────────────────────────────────────────────────┘
 ```
+
+NavRail was retired in epic #1089 — do not reference or reintroduce it.
 
 ### Key containers
 
@@ -201,7 +207,7 @@ The dashboard composition, from top to bottom:
 
 ### Asymmetry
 
-The desktop layout is not centered. Content lives against a firm left edge (NavRail). Panels on the right (Changes) float over vibrancy. No surface is horizontally centered.
+The desktop layout is not centered. Content lives against a firm left edge (the AgentPanel card). Panels on the right (Changes) float over vibrancy. No surface is horizontally centered.
 
 ---
 
@@ -311,13 +317,10 @@ See `HeaderIconPill.tsx` for the canonical implementation.
 ## 07 — Components
 
 ### TitleBar
-44px tall. Drag region for the Tauri window. Traffic lights left. Command palette search center. Notification bell right.
-
-### NavRail
-56px wide. Vertical stack of Phosphor raw-SVG icons. Active icon gets a hairline accent stripe on the left edge. Hover reveals a portal-positioned label (see `feedback_portal_hovers` — framer-motion transforms break fixed positioning, so labels must `createPortal`).
+44px tall. Drag region for the Tauri window. Traffic lights left. Agents / Alerts buttons (the NavRail survivors).
 
 ### Workspace terminal
-Tabs across the top. Each tab has a `kind` field (orchestrator / assistant / terminal / chat). The Orchestrator tab is a three-pane layout (History / Chat / Mission).
+Tab pills across each tile's own column strip (`WorkspaceHeaderStrip.HeaderPill` divs). Tab kinds: `orchestrator / terminal / chat / llm-chat / canvas` (`workspace-terminal/types.ts`). The Orchestrator tab is a single chat surface (`ThoughtsChatPanel` + `SessionVisualizer` strip when agents run) — the old three-pane layout is gone.
 
 ### RepoCard
 The primary branch / agent grouping in the AgentPanel. 14px rounded, paper/ink surface, hairline border. Expanded state shows branch rows + commit history.
@@ -422,7 +425,7 @@ Rules that are permanent. No exceptions, no grandfather clauses.
 - **Never bypass the middleware in `src/middleware.ts`** — gates all dangerous API routes on loopback + ws-token.
 - **Never use Material Design patterns** — no borderLeft accents as emphasis, no MD elevation tiers.
 - **Never reintroduce retired orchestrator tile kinds** — `thoughts`, `mission-control`, `orchestrator-history` are deleted. The Orchestrator is a tab inside `WorkspaceTerminal`.
-- **Never add NavRail launchers for orchestrator/mission/history** — nav rail bottom is reserved for ports, alerts, settings.
+- **Never add chrome launchers for orchestrator/mission/history** — the NavRail is retired; the status bar bottom is reserved for ports, alerts, settings.
 - **Never use native `<select>` or `<input>` inside packet cards** — custom popover rows only.
 
 ### ALWAYS
@@ -485,7 +488,7 @@ When a surface in the app wants to reference the marketing site's aesthetic, fol
 - Copy voice
 
 ### Translate (different context)
-- Font: site uses Inter 400/500, app uses Plus Jakarta Sans 300–800
+- Font: site uses Inter 400/500, app uses the system stack (SF Pro) at hurttlocker weights (260–500)
 - Backdrop: site is full-paper, app is glass-over-vibrancy
 - Layout: site is single-column scroll, app is panel+tile composition
 - Motifs: site has 7 editorial figures, app has cards + pill labels + timeline
@@ -517,7 +520,7 @@ If you're ever unsure whether a treatment is shared or diverges, ask. Don't gues
 </div>
 ```
 
-### Chrome surface (NavRail)
+### Chrome surface (panel chrome)
 
 ```tsx
 <nav style={{
@@ -575,7 +578,7 @@ If you're ever unsure whether a treatment is shared or diverges, ask. Don't gues
 
 - **v1** locked 2026-04-17 — alongside the landing site's THEME.md v1 Light lock.
 - Palette update: content surfaces in light mode switched from `#ffffff` to `#F4F2ED` (paper). Chrome unchanged.
-- Typography locked — Plus Jakarta Sans stays. No Inter swap.
+- Typography re-locked 2026-06-11 — system stack per hurttlocker.md (Plus Jakarta Sans rolled back 2026-05).
 - Sister spec: `o8-site/THEME.md` — marketing side.
 - Authoritative implementation: `src/lib/theme/` — token definitions live there.
 
