@@ -85,6 +85,13 @@ pub async fn next(_args: Value) -> Result<Value, String> {
     now_playing(json!({})).await.or(Ok(json!({ "skipped": true })))
 }
 
+/// `mac_music_previous` — go back a track (restarts the current one if
+/// it's mid-song, matching the Music app's own button) and report it.
+pub async fn previous(_args: Value) -> Result<Value, String> {
+    run_applescript(r#"tell application "Music" to previous track"#)?;
+    now_playing(json!({})).await.or(Ok(json!({ "went_back": true })))
+}
+
 /// `mac_music_now_playing` — current track name/artist/playlist state.
 pub async fn now_playing(_args: Value) -> Result<Value, String> {
     let script = r#"

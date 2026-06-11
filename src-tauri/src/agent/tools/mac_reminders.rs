@@ -107,6 +107,70 @@ pub async fn create(args: Value) -> Result<Value, String> {
     Ok(json!({ "success": true, "title": title, "list": list_name, "due_date": due_date }))
 }
 
+/// Update an existing (incomplete) reminder in place — rename, move the due
+/// date, or rewrite the notes. Matches by EXACT name (the prompt teaches the
+/// model to list first); duplicates update the first match only.
+pub async fn update(args: Value) -> Result<Value, String> {
+    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if title.is_empty() {
+        return Err("title is required — list the reminders first to get the exact name".into());
+    }
+    let new_title = args.get("new_title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let new_due = args.get("new_due_date").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let new_notes = args.get("new_notes").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    if new_title.is_empty() && new_due.is_empty() && new_notes.is_empty() {
+        return Err("nothing to change — give new_title, new_due_date, or new_notes".into());
+    }
+    let list_name = args.get("list_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let list_clause = if list_name.is_empty() {
+        String::new()
+    } else {
+        format!("of list \"{}\"", as_escape(&list_name))
+    };
+
+    let due_block = match (!new_due.is_empty()).then(|| parse_due_components(&new_due)).flatten() {
+        Some(comps) => format!(
+            "{}set due date of r to newDue\n",
+            date_setter_block("newDue", comps)
+        ),
+        None if !new_due.is_empty() => return Err("new_due_date must be ISO 8601".into()),
+        None => String::new(),
+    };
+    let rename_line = if new_title.is_empty() {
+        String::new()
+    } else {
+        format!("set name of r to \"{}\"\n", as_escape(&new_title))
+    };
+    let notes_line = if new_notes.is_empty() {
+        String::new()
+    } else {
+        format!("set body of r to \"{}\"\n", as_escape(&new_notes))
+    };
+
+    let title_esc = as_escape(&title);
+    let script = format!(
+        "\ntell application \"Reminders\"\n\
+         \tset rs to reminders {list_clause} whose name is \"{title_esc}\" and completed is false\n\
+         \tif (count of rs) is 0 then error \"no open reminder named {title_esc}\"\n\
+         \tset r to item 1 of rs\n\
+         \t{due_block}\
+         \t{rename_line}\
+         \t{notes_line}\
+         \t\"ok\"\n\
+         end tell"
+    );
+
+    tokio::task::spawn_blocking(move || run_applescript(&script))
+        .await
+        .map_err(|e| format!("spawn_blocking error: {e}"))??;
+
+    Ok(json!({
+        "success": true,
+        "title": if new_title.is_empty() { title } else { new_title },
+        "due_date": new_due,
+    }))
+}
+
 pub async fn complete(args: Value) -> Result<Value, String> {
     let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if title.is_empty() {
