@@ -2942,15 +2942,15 @@ fn tts_is_active() -> bool {
     tts::playback::is_active()
 }
 
-/// Set Symon's speaking speed. Applies LIVE to the current utterance (the dock
-/// slider's instant feedback) AND persists `reading_speed` so every later
-/// utterance speaks at this rate (the "set 2x, always 2x" durable setting).
-/// `rate` is the absolute multiplier 0.5–3.0. macOS only.
+/// Set Symon's speaking speed — persists `reading_speed` so every later
+/// utterance speaks at this rate (pitch-preserving, server-side). Takes effect
+/// on Symon's NEXT utterance, not the one mid-playback (no chipmunk resample).
+/// `rate` clamps to 0.7–1.2, the range ElevenLabs preserves pitch across.
+/// macOS only.
 #[cfg(target_os = "macos")]
 #[tauri::command]
 fn tts_set_speed(rate: f32) -> Result<(), String> {
-    let clamped = rate.clamp(0.5, 3.0);
-    tts::playback::set_live_speed(clamped);
+    let clamped = rate.clamp(0.7, 1.2);
     crate::stt::keys::set_pref("reading_speed", serde_json::json!(clamped))
 }
 
