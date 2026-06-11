@@ -33,11 +33,12 @@ If a gate blocks: `o8_merge_preview` names the check; `o8_packet_diff` shows the
 ## Packet states & failure triage
 
 - **Terminal-good:** `awaiting_review` (your cue to diff + gate-check) · `released` (merged).
-- **Terminal-bad:** `failed` · `archived`.
+- **Terminal-bad:** `failed` · `archived` — but `archived` after a worker failure is often **recoverable**: if the transcript shows an external cause (quota, auth), `rerun_with_feedback` can revive the packet on a fresh lane.
 - **Stuck — needs YOUR intervention; more waiting will not help:** `blocked` / `awaiting_input`, and last-events like `silent_exit_no_work` or `agent_failed`. `wait_for_mission_ready` does **not** treat these as terminal — inspect `get_mission_status` on every wake; a timeout does NOT mean still-running.
 - **First move on any failure or empty diff: read `o8_packet_transcript`.** The worker's real error (quota exhaustion, auth, build break) lives in the transcript, not in the status label.
 - **Recovery selection:** warm parked session → `steer_packet` · dead/no-work session → `rerun_with_feedback` (fresh worker, same packet) · start truly clean → `reset_packet` then `dispatch_mission`. One rework round, then stop and report to the operator.
-- **Worker quota exhaustion** (e.g. Codex usage limits) presents as `silent_exit_no_work` or `agent_failed` with an **empty diff** — confirm in the transcript, then wait for the reset or switch runtime. Do not redispatch into the same wall.
+- **Worker quota exhaustion** (e.g. Codex usage limits) presents as `silent_exit_no_work` or `agent_failed` — the diff may be empty OR partially complete (work committed before the wall). **Always confirm in the transcript**; don't infer from the diff alone. Then wait for the reset or switch runtime — do not redispatch into the same wall.
+- **After any merge, verify with git** (`git -C <repo> log --oneline -1` via the operator or `o8 packet info`): a `merged:true` / `alreadyReleased` response is bookkeeping, not proof a commit landed (see hurttlocker/o8 lane-drift issue).
 
 ## Tool inventory (by job)
 
