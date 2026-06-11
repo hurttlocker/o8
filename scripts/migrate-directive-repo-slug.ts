@@ -11,6 +11,12 @@
  * Usage: NODE_OPTIONS='--conditions=react-server' npx tsx scripts/migrate-directive-repo-slug.ts <oldSlug> <repoPath>
  *   e.g. ... migrate-directive-repo-slug.ts cortex-ide /Users/me/o8
  *
+ * CAVEAT — out-of-process cache staleness: this script runs in its own
+ * process, so the RUNNING app's in-memory answer caches (exact + semantic,
+ * 30-min TTL) are NOT invalidated. Questions asked before the re-ingest can
+ * keep replaying their stale answers until the TTL expires or the app
+ * restarts. Re-verify with `bypassCache` (answer route body / SSE ?force=1).
+ *
  * Does three things:
  *   1. seed-* directives with repoName: <oldSlug> → restamped to the new slug
  *      (frontmatter rewrite + FTS row refresh).
