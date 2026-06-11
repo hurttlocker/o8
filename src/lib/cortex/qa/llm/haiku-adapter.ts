@@ -30,7 +30,7 @@ import 'server-only';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
-import { askClaudeOneShot } from '@/lib/claude-code/one-shot-repl';
+import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
 
 const execFileAsync = promisify(execFile);
 
@@ -137,13 +137,32 @@ export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Pr
     throw new Error('[qa][haiku] claude CLI not found on PATH or login shell');
   }
 
-  const text = await askClaudeOneShot(prompt, {
+  const text = await askClaudeWarm(prompt, {
     binary: claudeBin,
-    model: 'claude-haiku-4-5-20251001',
+    model: HAIKU_MODEL,
     timeoutMs,
   });
   if (!text.trim()) {
     throw new Error('[qa][haiku] REPL returned empty result');
   }
   return text;
+}
+
+const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
+
+/**
+ * Fire-and-forget: pre-spawn a warm Haiku REPL so the next `callHaiku` skips
+ * the 6-9s CLI bootstrap. Called at brain-pipeline start (ask.ts). No-ops
+ * when the in-app orchestrator toggle is off (the tier would throw anyway)
+ * or the binary can't be resolved.
+ */
+export async function prewarmHaiku(): Promise<void> {
+  try {
+    const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
+    if (!resolveInAppOrchestratorEnabledSync()) return;
+    const claudeBin = await resolveClaudeBin();
+    if (claudeBin) prewarmClaudeRepl(claudeBin, HAIKU_MODEL);
+  } catch {
+    // Pre-warm is best-effort — never let it surface into the pipeline.
+  }
 }
