@@ -18,7 +18,9 @@
  *
  * Cache: 30min in-process TTL (normalized key, eagerly invalidated on
  * spec-ingest + ledger writes — see ask.ts).
- * Bypass: ?force=1 query param re-runs the full pipeline unconditionally.
+ * Bypass: ?force=1 query param OR body { bypassCache: true } — aligned with
+ * the JSON sibling /api/cortex/ask/answer so callers don't have to know
+ * which route takes which shape (cost a live debugging session 2026-06-11).
  */
 
 export const runtime = 'nodejs';
@@ -33,6 +35,7 @@ interface AskBody {
   repoPath?: unknown;
   projectId?: unknown;
   mode?: unknown;
+  bypassCache?: unknown;
 }
 
 function sseEvent(name: string, payload: unknown): string {
@@ -54,7 +57,7 @@ export async function POST(request: NextRequest) {
   const projectId =
     typeof body?.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : undefined;
 
-  const force = request.nextUrl.searchParams.get('force') === '1';
+  const force = request.nextUrl.searchParams.get('force') === '1' || body?.bypassCache === true;
 
   const encoder = new TextEncoder();
 
