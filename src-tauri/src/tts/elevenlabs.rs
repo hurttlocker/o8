@@ -30,6 +30,11 @@ struct VoiceSettings {
     similarity_boost: f32,
     style: f32,
     use_speaker_boost: bool,
+    /// Native, PITCH-PRESERVING speed. ElevenLabs supports 0.7–1.2 (1.0 =
+    /// normal); outside that it 422s. We clamp before sending. This replaces
+    /// the old rodio `set_speed` hack, which resampled and shifted pitch
+    /// (2× = chipmunk) — operator-rejected 2026-06-11.
+    speed: f32,
 }
 
 /// A tuning value resolved env-first (matching o8's key convention), then the
@@ -93,8 +98,9 @@ fn error_message(status: reqwest::StatusCode, body: &str) -> String {
     format!("ElevenLabs TTS API error ({status}): {message}")
 }
 
-/// Synthesize `text` → MP3 bytes via ElevenLabs (direct). Speed is intentionally
-/// IGNORED — `voice_settings` has no rate field in v2.
+/// Synthesize `text` → MP3 bytes via ElevenLabs (direct). `config.speed` is sent
+/// as the native, pitch-preserving `voice_settings.speed` (clamped to the
+/// 0.7–1.2 range ElevenLabs accepts).
 pub async fn synthesize(text: &str, config: &TtsConfig) -> Result<Vec<u8>, String> {
     let api_key = crate::stt::keys::get_elevenlabs_key()
         .ok_or_else(|| "Missing ELEVENLABS_API_KEY for ElevenLabs read-aloud".to_string())?;
@@ -124,6 +130,7 @@ pub async fn synthesize(text: &str, config: &TtsConfig) -> Result<Vec<u8>, Strin
                 "ELEVENLABS_USE_SPEAKER_BOOST",
                 true,
             ),
+            speed: config.speed.clamp(0.7, 1.2),
         },
     };
 
