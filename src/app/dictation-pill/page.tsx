@@ -496,16 +496,20 @@ export default function DictationPillPage() {
 
   // Fleet visibility (dossier #8): worker-pulse pushes `o8:worker-status`;
   // the idle sliver carries the orbit + count, tap expands the detail capsule.
-  const [workers, setWorkers] = useState<{ count: number; repos: string[] }>({ count: 0, repos: [] });
+  const [workers, setWorkers] = useState<{ count: number; working: number; waiting: number; repos: string[] }>(
+    { count: 0, working: 0, waiting: 0, repos: [] },
+  );
   const [showWorkers, setShowWorkers] = useState(false);
   const showWorkersTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isTauri()) return;
     let unlisten: (() => void) | undefined;
     import('@tauri-apps/api/event')
-      .then(({ listen }) => listen<{ count?: number; repos?: string[] }>('o8:worker-status', (e) => {
+      .then(({ listen }) => listen<{ count?: number; working?: number; waiting?: number; repos?: string[] }>('o8:worker-status', (e) => {
         const count = Math.max(0, e.payload?.count ?? 0);
-        setWorkers({ count, repos: e.payload?.repos ?? [] });
+        const waiting = Math.max(0, e.payload?.waiting ?? 0);
+        const working = Math.max(0, e.payload?.working ?? (count - waiting));
+        setWorkers({ count, working, waiting, repos: e.payload?.repos ?? [] });
         if (count === 0) setShowWorkers(false);
       }))
       .then((u) => { unlisten = u; })
@@ -746,6 +750,8 @@ export default function DictationPillPage() {
             dropActive={dropActive}
             stagedFiles={stagedChips}
             workerCount={workers.count}
+            workerWorking={workers.working}
+            workerWaiting={workers.waiting}
             workerRepos={workers.repos}
             showWorkers={showWorkers}
             panelPending={panelPending}

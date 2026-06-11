@@ -70,7 +70,11 @@ const SYMON_CAPSULE_BG =
 
 // ── Glass dock theme (Theme tab → Dock = Glass) — clear/frosted instead of the
 // Symon multicolor. The capsule/panel rely on backdrop blur for the frost.
-const GLASS_IDLE = 'linear-gradient(rgba(255,255,255,0.20), rgba(232,238,250,0.10))';
+// The idle sliver uses the SAME dark tint family as the open capsule —
+// operator-locked 2026-06-11: the old white tint (rgba(255,255,255,0.20)) read
+// milky/washed next to the open dock's saturated glass; the dock keeps one
+// clarity in every mode.
+const GLASS_IDLE = 'linear-gradient(rgba(20,24,34,0.52), rgba(14,18,28,0.46))';
 const GLASS_CAPSULE_BG = 'linear-gradient(rgba(20,24,34,0.52), rgba(14,18,28,0.46))';
 // Translucent glass for the read panels (answer + confirm card) — transparent
 // like every other dock mode (the closed/idle sliver, the capsules). The dock
@@ -375,6 +379,11 @@ interface DockNotchSurfaceProps {
   /** Fleet visibility (dossier #8) — packets in flight from `o8:worker-status`.
    * count > 0 puts the slow orbit + count in the idle sliver. */
   workerCount?: number;
+  /** Lanes genuinely WORKING (running/dispatching) — drives the spinning orbit. */
+  workerWorking?: number;
+  /** Lanes parked on the operator (review / awaiting input) — static amber dot,
+   * "waiting on you" copy. A paused packet must not read as active work. */
+  workerWaiting?: number;
   workerRepos?: string[];
   /** Tap-the-sliver expansion: a transient capsule naming the in-flight work. */
   showWorkers?: boolean;
@@ -407,6 +416,8 @@ export function DockNotchSurface({
   dropActive = false,
   stagedFiles = null,
   workerCount = 0,
+  workerWorking = 0,
+  workerWaiting = 0,
   workerRepos = [],
   showWorkers = false,
   panelPending = null,
@@ -587,6 +598,14 @@ export function DockNotchSurface({
       } as React.CSSProperties;
     }
     if (mode === 'idle') {
+      // Glass sliver carries the SAME blur/saturate as the open capsule (incl.
+      // the operator's tuned sliders) so closed and open read as one surface.
+      const idleBlur: React.CSSProperties = glassDock
+        ? capsuleBlur
+        : {
+            backdropFilter: 'blur(10px) saturate(160%)',
+            WebkitBackdropFilter: 'blur(10px) saturate(160%)',
+          };
       return {
         width: 128,
         height: 16,
@@ -594,8 +613,7 @@ export function DockNotchSurface({
         background: idleBg,
         borderColor: 'rgba(255, 255, 255, 0.45)',
         boxShadow: '0 6px 20px rgba(0, 0, 0, 0.28), inset 0 -2px 6px rgba(120, 110, 160, 0.22)',
-        backdropFilter: 'blur(10px) saturate(160%)',
-        WebkitBackdropFilter: 'blur(10px) saturate(160%)',
+        ...idleBlur,
       } as React.CSSProperties;
     }
     if (mode === 'done') {
@@ -902,7 +920,14 @@ export function DockNotchSurface({
           overflow: 'hidden',
         }}
       >
-        <NotchOrbit size={13} />
+        {workerWorking > 0 ? (
+          <NotchOrbit size={13} />
+        ) : (
+          <span
+            aria-hidden
+            style={{ width: 6, height: 6, borderRadius: '50%', background: 'rgba(255, 159, 67, 0.95)', flexShrink: 0 }}
+          />
+        )}
         <span
           style={{
             fontSize: 11.5,
@@ -915,7 +940,11 @@ export function DockNotchSurface({
             textOverflow: 'ellipsis',
           }}
         >
-          {workerCount} packet{workerCount === 1 ? '' : 's'} in flight
+          {workerWorking > 0 && workerWaiting > 0
+            ? `${workerWorking} in flight · ${workerWaiting} waiting on you`
+            : workerWorking > 0
+              ? `${workerWorking} packet${workerWorking === 1 ? '' : 's'} in flight`
+              : `${workerWaiting} waiting on you`}
           {workerRepos.length ? (
             <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
               {' '}· {workerRepos.join(', ')}
@@ -1099,18 +1128,33 @@ export function DockNotchSurface({
       </p>
     );
   } else if (mode === 'idle' && workerCount > 0) {
-    // Fleet visibility in the resting sliver: the slow orbit + count while
-    // packets are in flight. Dark ink — the sliver surface is light in both
-    // dock themes (brand pastel / light glass).
+    // Fleet visibility in the resting sliver. The spinning orbit means lanes
+    // are genuinely WORKING; lanes parked on the operator show a static amber
+    // dot instead — a paused packet must not read as active work. Ink flips
+    // light on the dark glass sliver, dark on the Symon pastel.
+    const sliverInk = glassDock ? 'rgba(255, 255, 255, 0.85)' : 'rgba(28, 28, 46, 0.8)';
     body = (
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, width: '100%', height: '100%' }}>
-        <NotchOrbit size={9} color="rgba(28, 28, 46, 0.78)" />
+        {workerWorking > 0 ? (
+          <NotchOrbit size={9} color={glassDock ? 'rgba(255, 255, 255, 0.78)' : 'rgba(28, 28, 46, 0.78)'} />
+        ) : (
+          <span
+            aria-hidden
+            style={{
+              width: 5,
+              height: 5,
+              borderRadius: '50%',
+              background: 'rgba(255, 159, 67, 0.95)',
+              flexShrink: 0,
+            }}
+          />
+        )}
         <span
           style={{
             fontSize: 9.5,
             fontWeight: 500,
             letterSpacing: '0.2px',
-            color: 'rgba(28, 28, 46, 0.8)',
+            color: sliverInk,
             fontVariantNumeric: 'tabular-nums',
           }}
         >
