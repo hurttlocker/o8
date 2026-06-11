@@ -39,6 +39,8 @@ interface TierResult {
 }
 
 let cachedTier: TierResult | null = null;
+/** Toggle value the cached tier was probed under — a flip = one re-probe. */
+let cachedTierCliAllowed: boolean | null = null;
 
 /**
  * Resolve the claude binary via which + login-shell, mirroring the pattern
@@ -80,18 +82,23 @@ async function resolveClaudeBinForQa(): Promise<string | null> {
 }
 
 /**
- * Detect and cache the active Sonnet provider tier. Called once per process.
+ * Detect and cache the active Sonnet provider tier. The expensive probe
+ * (login-shell binary resolution + --version) runs once per process PER
+ * TOGGLE STATE — the cache is keyed by the live `inAppOrchestratorEnabled`
+ * value, so an operator flipping the toggle in Settings re-probes exactly
+ * once instead of keeping the old billing tier until restart (review
+ * 2026-06-11; resetSonnetProviderCache existed but nothing called it).
  */
 async function detectTier(): Promise<TierResult> {
-  if (cachedTier) return cachedTier;
-
   // June 15 2026 — `claude --print` bills against the user's Agent SDK credit
   // pool. Gated behind the same toggle as the in-app orchestrator chat. When
   // off, skip the CLI tier and fall through to API key (their own pay-per-
   // token, unaffected) or Flash. Dynamic import keeps the dependency graph
-  // one-way at compile time.
+  // one-way at compile time. Re-read on EVERY call (cheap sync file read).
   const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
   const cliAllowed = resolveInAppOrchestratorEnabledSync();
+  if (cachedTier && cachedTierCliAllowed === cliAllowed) return cachedTier;
+  cachedTierCliAllowed = cliAllowed;
 
   // Test 1: Claude Code CLI available?
   if (cliAllowed) {
@@ -129,6 +136,7 @@ async function detectTier(): Promise<TierResult> {
 /** Force re-detection on next call (useful for testing). */
 export function resetSonnetProviderCache(): void {
   cachedTier = null;
+  cachedTierCliAllowed = null;
 }
 
 // ── callSonnet public API ─────────────────────────────────────────────────────
@@ -296,7 +304,9 @@ async function callSonnetApi(
       'anthropic-version': '2023-06-01',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(60_000),
+    // Honor the caller's ceiling — Class B passes 300s; the old hardcoded
+    // 60s silently killed long compositions on the API tier (review 2026-06-11).
+    signal: AbortSignal.timeout(opts.timeoutMs ?? 60_000),
   });
 
   if (!res.ok || !res.body) {
