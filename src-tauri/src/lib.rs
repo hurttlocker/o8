@@ -1485,6 +1485,14 @@ fn record_console_error(message: String, source: String, lineno: u32) {
         source,
         lineno
     );
+    // The MCP eval bridge fires three '[mcp-*]' lifecycle beacons per call
+    // (#932 parallel-channel diagnostic). They stay visible in the sidecar
+    // log line above, but must not enter the ring: at cap 100 a busy MCP
+    // session evicts every real error and o8_view_console_errors reads as
+    // pure beacon spam (2026-06-11 surface walk).
+    if source == "tauri-plugin-mcp" {
+        return;
+    }
     let Ok(mut buffer) = console_errors().lock() else {
         return;
     };
