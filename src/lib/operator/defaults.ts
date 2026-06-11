@@ -14,7 +14,9 @@ function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
 }
 
 /**
- * Operator defaults — the 7 dispatch/supervision knobs exposed in Settings.
+ * Operator defaults — the dispatch/supervision knobs exposed in Settings
+ * (one field per knob in {@link OperatorDefaults}; the count grows, don't
+ * hardcode it in docs).
  *
  * Resolution order (every knob): env var > persisted file > hardcoded fallback.
  *
@@ -26,9 +28,10 @@ export type OverlapGateMode = 'advisory' | 'strict';
 export type SettingSource = 'env' | 'file' | 'default';
 
 /**
- * Q&A Class A composer routing (#971).
+ * Q&A Class A composer routing (#971, 'fastest' added #1124-era perf pass).
  *   - `auto` / `haiku-cli` — current chain: Haiku CLI tier 1, then Codex/OpenRouter/Flash/Sonnet CLI fallbacks.
  *   - `sonnet-cli` — lead with Sonnet CLI for higher quality. Skips Haiku + Codex tiers.
+ *   - `fastest` — lead with OpenRouter flash-lite (~1-3s, pennies, daily-capped), free tiers as fallback.
  * Eval-mode (smoke gate) is unaffected — always routes through OpenRouter Sonnet 4.6.
  */
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';

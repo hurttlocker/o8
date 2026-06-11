@@ -415,7 +415,7 @@ export function OperatorDefaultsTab() {
     return (
       <div style={{
         paddingTop: 40,
-        color: '#b91c1c',
+        color: 'var(--t-brand-red, #b91c1c)',
         fontSize: 13,
         fontFamily: APP_FONT_STACK,
       }}>

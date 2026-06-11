@@ -13,8 +13,9 @@
  *
  * Why OpenRouter is tier 1 now (changed in #1115): the CLI tiers spend 15-30s
  * on bootstrap alone, making the classifier the dominant cost in the Q&A
- * pipeline (43s classify vs 500ms retrieve). OpenRouter's grok-4.1-fast is
- * empirically <500ms p50 and matches CLI quality on the 6-question bake-off.
+ * pipeline (43s classify vs 500ms retrieve). OpenRouter (flash-lite primary
+ * since grok-4.1-fast was deprecated 2026-06-11) is empirically <500ms p50
+ * and matches CLI quality on the 6-question bake-off.
  * The CLI tiers remain available as fallbacks when OpenRouter is unreachable
  * (no key, HTTP error, timeout).
  *
