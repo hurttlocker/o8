@@ -20,13 +20,15 @@ How any external agent (Claude Opus/Sonnet via MCP, or anything that can run a C
 o8_operator_defaults({})                          # read current brains/gates
 o8_operator_defaults({orchestratorModel: "...",   # optionally pick the brain for this work
                       thinkingEffort: "high"})    # (GLOBAL + persistent — restore after!)
-create_mission({issues: [495] | issues_inline: [{title}], repoPath, runtime})
+create_mission({issues: [495] | issues_inline: [{title, body}], repoPath, runtime})
 get_mission_status() / mission_tail({packetId})   # watch
 o8_packet_diff({packetId})                        # read the actual code (byte-bounded)
 o8_merge_preview({packetId})                      # dry-run the governance gates
-submit_review({packetId, approved, findings})     # feedback loop if not clean
-approve_and_merge({packetId})                     # ship
+submit_review({packetId, approved, findings})     # ALWAYS record this first (audit trail);
+approve_and_merge({packetId})                     # then ship. In that order.
 ```
+
+Small Codex tasks typically complete in 2–5 minutes — `wait_for_mission_ready` with the default 10-min timeout is usually one call.
 
 If a gate blocks: `o8_merge_preview` names the check; `o8_packet_diff` shows the offending lines; `rerun_with_feedback` or `submit_review({approved:false, findings})` sends it back with instructions. Never bypass a gate.
 
@@ -63,7 +65,8 @@ If a gate blocks: `o8_merge_preview` names the check; `o8_packet_diff` shows the
 ## Governance posture (read before you automate)
 
 - `overlapGate`: `strict` blocks parallel packets touching the same files; `advisory` warns. Tune per sprint via `o8_operator_defaults`, restore after.
-- Merge gates (security patterns, diff budget, untracked imports, self-review integrity) are the product. An external agent's job is to **satisfy** them — read the diff, fix the violation, re-run — never to route around them.
+- Merge gates are the product. An external agent's job is to **satisfy** them — read the diff, fix the violation, re-run — never to route around them. The four: **security-patterns** (regex scan for dangerous calls/secrets), **diff-budget** (size limit on the change), **untracked-imports** (no imports of files outside the packet's scope), **self-review-integrity** (the worker's self-review must match the actual diff).
+- **PR-only dogfood mode:** a repo may be configured so merge-to-main is blocked — `approve_and_merge` returns an honest `merged:false` naming PR-only mode, with gates listed as passing. That IS the governed success state for an agent: stop there and report; a human opens/merges the PR. Do not hand-merge with git and do not treat it as a failure.
 - `cortex_propose_observation` is a proposal queue by design; directives are operator-approved.
 
 ## CLI quick reference
