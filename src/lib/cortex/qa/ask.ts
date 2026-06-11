@@ -24,6 +24,7 @@ import { createHash } from 'node:crypto';
 import { classifyQuestion } from '@/lib/cortex/qa/classifier';
 import { composeClassA, composeClassB, rowDisplayTitle, type SseEmit } from '@/lib/cortex/qa/composer';
 import { buildGrepArmTopRows } from '@/lib/cortex/qa/grep-arm';
+import { dot, embedQuestion } from '@/lib/cortex/qa/llm/gemini-embed';
 import { prewarmHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
 import { prewarmSonnetCli } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { detectLiteralLookup } from '@/lib/cortex/qa/literal-lookup';
@@ -35,13 +36,86 @@ import { getActiveProjectScopeForRepo } from '@/lib/repos/projects';
 
 const CACHE_TTL_MS = 30 * 60_000;
 
+/** Cosine floor for a semantic cache hit (#1226). Conservative on purpose —
+ *  a wrong reuse is worse than a 7s re-ask. */
+const SEMANTIC_HIT_THRESHOLD = 0.95;
+
 interface CacheEntry {
   answer: string;
   citations: Citation[];
   expiresAt: number;
+  /** Scope fingerprint (repoPath + projectId) — semantic matches must never
+   *  cross repo/project boundaries. */
+  scope: string;
+  /** Unit-normalized question embedding, attached fire-and-forget after the
+   *  entry is stored (#1226). Entries without one are exact-match only. */
+  vector?: number[];
 }
 
 const answerCache = new Map<string, CacheEntry>();
+
+function scopeKey(repoPath: string | undefined, projectId: string | undefined): string {
+  return `${repoPath ?? ''}\x00${projectId ?? ''}`;
+}
+
+/**
+ * Scan same-scope vectored entries for a cosine-near duplicate (#1226).
+ * Pure given the candidates — exported for tests.
+ */
+export function findSemanticMatch(
+  vector: number[],
+  candidates: Array<{ key: string; vector: number[] }>,
+  threshold = SEMANTIC_HIT_THRESHOLD,
+): { key: string; score: number } | null {
+  let best: { key: string; score: number } | null = null;
+  for (const candidate of candidates) {
+    const score = dot(vector, candidate.vector);
+    if (score >= threshold && (best === null || score > best.score)) {
+      best = { key: candidate.key, score };
+    }
+  }
+  return best;
+}
+
+/**
+ * Semantic lookup: agent fleets ask the same thing ten structurally-different
+ * ways; key normalization only catches the trivial ones. Costs one embedding
+ * call (~150-400ms) — but ONLY when the cache actually holds same-scope
+ * vectored entries, so a cold cache adds zero latency. Returns null on any
+ * embedding failure (silent miss, never an error).
+ */
+async function getSemanticCached(question: string, scope: string): Promise<CacheEntry | null> {
+  const now = Date.now();
+  const candidates: Array<{ key: string; vector: number[] }> = [];
+  for (const [key, entry] of answerCache) {
+    if (entry.scope === scope && entry.vector && now <= entry.expiresAt) {
+      candidates.push({ key, vector: entry.vector });
+    }
+  }
+  if (candidates.length === 0) return null;
+
+  const vector = await embedQuestion(normalizeQuestionForCache(question));
+  if (!vector) return null;
+
+  const match = findSemanticMatch(vector, candidates);
+  if (!match) return null;
+  const entry = answerCache.get(match.key);
+  if (!entry || now > entry.expiresAt) return null;
+  console.info(`[qa][semantic-cache] hit (cos=${match.score.toFixed(3)}) for "${question.slice(0, 80)}"`);
+  return entry;
+}
+
+/** Fire-and-forget: attach the question embedding to a stored entry so future
+ *  near-duplicates can hit it semantically. */
+function attachVector(key: string, question: string): void {
+  void embedQuestion(normalizeQuestionForCache(question))
+    .then((vector) => {
+      if (!vector) return;
+      const entry = answerCache.get(key);
+      if (entry) entry.vector = vector;
+    })
+    .catch(() => undefined);
+}
 
 /**
  * Normalize a question for cache keying: trim, lowercase, collapse runs of
@@ -78,7 +152,7 @@ function getCached(key: string): CacheEntry | null {
   return entry;
 }
 
-function setCache(key: string, entry: Omit<CacheEntry, 'expiresAt'>): void {
+function setCache(key: string, entry: Omit<CacheEntry, 'expiresAt' | 'vector'>): void {
   answerCache.set(key, { ...entry, expiresAt: Date.now() + CACHE_TTL_MS });
   // Evict stale entries lazily.
   if (answerCache.size > 500) {
@@ -116,6 +190,10 @@ export interface AskCortexResult {
   /** How many rows retrieval put in front of the composer (cited ⊆ considered).
    *  Lets consumers say "consulted 30 sources, cited 3". 0 on cache hits. */
   sourcesConsidered: number;
+  /** Set when the answer was served from cache — 'semantic' means a
+   *  cosine-near duplicate question's answer was reused (#1226). Callers can
+   *  re-ask with bypassCache when freshness matters more than speed. */
+  cacheHit?: 'exact' | 'semantic';
 }
 
 /**
@@ -166,6 +244,7 @@ export async function askCortex(
         retrievalMs: 0,
         classifyMs: 0,
         sourcesConsidered: 0,
+        cacheHit: 'exact',
       };
     }
     // Single-flight: concurrent identical questions share one pipeline run
@@ -192,14 +271,39 @@ async function runAskCortexUncached(
   key: string,
   bypassCache: boolean,
 ): Promise<AskCortexResult> {
+  // Semantic cache (#1226) — a cosine-near duplicate of an already-answered
+  // question replays its answer instead of re-running the pipeline.
+  if (!bypassCache) {
+    const semantic = await getSemanticCached(question, scopeKey(repoPath, projectId));
+    if (semantic) {
+      return {
+        answer: semantic.answer,
+        citations: semantic.citations,
+        class: 'A',
+        retrievalMs: 0,
+        classifyMs: 0,
+        sourcesConsidered: 0,
+        cacheHit: 'semantic',
+      };
+    }
+  }
+
   // Pre-warm the Haiku REPL while classify + retrieve run — the composer's
   // CLI tier then finds a proc with its bootstrap already under way.
   void prewarmHaiku();
 
   const grepStart = Date.now();
   const grepRows = await routeGrepArm(question, repoPath);
-  // 1. Classify
+  // 1+2. Classify and retrieve OVERLAPPED (#1227). The speculative retrieval
+  // uses the raw question only — for Class A that is byte-identical to the
+  // classified retrieval (#1122 made Class A FTS ignore variants), so the
+  // result is simply reused. Class B discards it and re-runs with the
+  // classifier's variants: correct ranking, and the ~0.3s re-run is noise
+  // next to Class B's Sonnet composition.
   const classifyStart = Date.now();
+  const speculativeRetrieval = grepRows
+    ? null
+    : retrieveAll({ question, repoPath, projectId, bm25Variants: [question] }).catch(() => null);
   const classification = grepRows
     ? { class: 'A' as const, bm25Variants: [question] }
     : await classifyQuestion(question);
@@ -207,15 +311,18 @@ async function runAskCortexUncached(
   // Class B composes via Sonnet CLI — start its bootstrap before retrieval.
   if (classification.class === 'B') void prewarmSonnetCli();
 
-  // 2. Retrieve
   const retrievalStart = Date.now();
-  const results = grepRows ? [] : await retrieveAll({
-    question,
-    repoPath,
-    projectId,
-    bm25Variants: classification.bm25Variants,
-    questionClass: classification.class,
-  });
+  let results: Awaited<ReturnType<typeof retrieveAll>> = [];
+  if (!grepRows) {
+    const speculative = classification.class === 'A' ? await speculativeRetrieval : null;
+    results = speculative ?? await retrieveAll({
+      question,
+      repoPath,
+      projectId,
+      bm25Variants: classification.bm25Variants,
+      questionClass: classification.class,
+    });
+  }
   const topRows = grepRows ?? unionMerge(results, { questionClass: classification.class });
   const retrievalMs = grepRows ? Date.now() - grepStart : Date.now() - retrievalStart;
 
@@ -277,7 +384,8 @@ async function runAskCortexUncached(
   };
 
   if (!bypassCache) {
-    setCache(key, { answer: result.answer, citations });
+    setCache(key, { answer: result.answer, citations, scope: scopeKey(repoPath, projectId) });
+    attachVector(key, question);
   }
   return result;
 }
@@ -312,6 +420,16 @@ export async function runAskPipeline(
       emit('done', {});
       return;
     }
+    // Semantic cache (#1226) — replay a cosine-near duplicate's answer.
+    const semantic = await getSemanticCached(question, scopeKey(repoPath, projectId));
+    if (semantic) {
+      emit('token', { text: semantic.answer });
+      for (const c of semantic.citations) {
+        emit('citation', c);
+      }
+      emit('done', {});
+      return;
+    }
   }
 
   // Pre-warm the Haiku REPL while classify + retrieve run (see askCortex).
@@ -325,7 +443,14 @@ export async function runAskPipeline(
   let topRows: TypedRow[] = grepRows ?? [];
 
   if (!grepRows) {
-    // 1. Classify — determines which composer + BM25 variants to use.
+    // 1+2. Classify and retrieve OVERLAPPED (#1227) — see askCortex for the
+    // Class A reuse / Class B re-run rationale.
+    const speculativeRetrieval = retrieveAll({
+      question,
+      repoPath,
+      projectId,
+      bm25Variants: [question],
+    }).catch(() => null);
     try {
       classification = await classifyQuestion(question);
     } catch (err) {
@@ -335,10 +460,10 @@ export async function runAskPipeline(
     // Class B composes via Sonnet CLI — start its bootstrap before retrieval.
     if (classification.class === 'B') void prewarmSonnetCli();
 
-    // 2. Retrieve — run all three retrievers in parallel, RRF-merge.
     const retrievalStart = Date.now();
     try {
-      const results = await retrieveAll({
+      const speculative = classification.class === 'A' ? await speculativeRetrieval : null;
+      const results = speculative ?? await retrieveAll({
         question,
         repoPath,
         projectId,
@@ -394,6 +519,11 @@ export async function runAskPipeline(
 
   // Store in cache for follow-up identical questions.
   if (cachedAnswer.trim()) {
-    setCache(key, { answer: cachedAnswer.trim(), citations: cachedCitations });
+    setCache(key, {
+      answer: cachedAnswer.trim(),
+      citations: cachedCitations,
+      scope: scopeKey(repoPath, projectId),
+    });
+    attachVector(key, question);
   }
 }
