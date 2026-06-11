@@ -14,6 +14,7 @@
 
 pub mod edit_ctx;
 pub mod eval;
+pub mod event_kit;
 pub mod gemini;
 pub mod o8_http;
 pub mod openrouter;
