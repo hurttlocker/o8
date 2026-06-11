@@ -80,7 +80,9 @@ pub async fn synthesize(text: &str, config: &TtsConfig) -> Result<Vec<u8>, Strin
         },
         audio_config: AudioConfig {
             audio_encoding: "MP3".into(),
-            speaking_rate: config.speed,
+            // Pitch-preserving server-side rate (Google supports 0.25–4.0; the
+            // UI band is 0.7–1.2 to match ElevenLabs' pitch-preserving range).
+            speaking_rate: config.speed.clamp(0.7, 1.2),
             pitch: effective_pitch,
         },
     };

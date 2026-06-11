@@ -349,18 +349,19 @@ function StopGlyph() {
   );
 }
 
-/** Minimal speed slider for the speaking capsule — 1×–3×, snaps in 0.5 steps.
- * Pointer-driven (no native <input> — unreliable in the Tauri WKWebview). The
- * thumb position maps the 58px track to [1,3]; the live label sits to the right.
- * `onCommit` fires on every snap change so playback re-rates instantly. */
-const SPEED_MIN = 1;
-const SPEED_MAX = 3;
+/** Minimal speed slider for the speaking capsule — 0.8×–1.2×, snaps in 0.05
+ * steps. Pitch-PRESERVING (ElevenLabs `speed` server-side), so the band is the
+ * gentle range it supports — no chipmunk. Pointer-driven (no native <input> —
+ * unreliable in the Tauri WKWebview). `onCommit` persists the rate; it applies
+ * to Symon's NEXT utterance. */
+const SPEED_MIN = 0.8;
+const SPEED_MAX = 1.2;
 const SPEED_TRACK = 58;
 function NotchSpeedSlider({ value, onCommit }: { value: number; onCommit: (v: number) => void }) {
   const trackRef = useRef<HTMLDivElement | null>(null);
   const draggingRef = useRef(false);
   const clamp = (v: number) => Math.min(SPEED_MAX, Math.max(SPEED_MIN, v));
-  const snap = (v: number) => clamp(Math.round(v * 2) / 2);
+  const snap = (v: number) => clamp(Math.round(v * 20) / 20);
   const fromClientX = (clientX: number) => {
     const el = trackRef.current;
     if (!el) return value;
@@ -423,7 +424,7 @@ function NotchSpeedSlider({ value, onCommit }: { value: number; onCommit: (v: nu
           textShadow: '0 1px 4px rgba(0,0,0,0.35)',
         }}
       >
-        {Number.isInteger(value) ? `${value}×` : `${value}×`}
+        {Number.isInteger(value) ? `${value}×` : `${value.toFixed(2).replace(/0$/, '')}×`}
       </span>
     </div>
   );
