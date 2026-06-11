@@ -35,6 +35,8 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "mac_reminders_list" => SafetyClass::ReadOnly,
         "mac_reminders_create" => SafetyClass::Reversible,
         "mac_reminders_complete" => SafetyClass::Reversible,
+    "mac_reminders_update" => SafetyClass::Reversible,
+    "mac_calendar_update_event" => SafetyClass::Reversible,
         // Apps — launching/listing apps has no destructive side effect.
         "open_app" => SafetyClass::ReadOnly,
         "list_apps" => SafetyClass::ReadOnly,
@@ -116,6 +118,7 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "mac_music_play" => SafetyClass::ReadOnly,
         "mac_music_pause" => SafetyClass::ReadOnly,
         "mac_music_next" => SafetyClass::ReadOnly,
+        "mac_music_previous" => SafetyClass::ReadOnly,
         "mac_music_now_playing" => SafetyClass::ReadOnly,
         "o8_dispatch" => SafetyClass::Reversible,
         // Approval triage (magic roadmap #2). Semantically these RELEASE a
