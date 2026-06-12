@@ -100,6 +100,7 @@ export default function CanvasGlassPreviewPage() {
   // Real terminals ride the production WebSocket — same transport, tmux
   // sessions and XtermPanel as the dashboard tabs.
   const {
+    connectionState,
     sendTerminalCreate,
     sendTerminalAttach,
     sendTerminalInput,
@@ -147,6 +148,14 @@ export default function CanvasGlassPreviewPage() {
     setPersonalDefault(readPersonalDefault());
     setTermVeil(readTermVeil());
   }, []);
+
+  // Terminal sends drop silently while the socket is down and the server
+  // never re-attaches a client — each connect bumps the epoch so every
+  // mounted XtermPanel resets + re-attaches (scrollback replays).
+  const [wsEpoch, setWsEpoch] = useState(0);
+  useEffect(() => {
+    if (connectionState === 'connected') setWsEpoch((epoch) => epoch + 1);
+  }, [connectionState]);
 
   // Background material + backdrop blur: apply the stored choices while
   // this page is up, restore the chrome on the way out. No-op in a browser.
@@ -467,6 +476,7 @@ export default function CanvasGlassPreviewPage() {
             key={card.id}
             card={card}
             termVeil={termVeil}
+            connectionEpoch={wsEpoch}
             onMove={moveTermCard}
             onResize={resizeTermCard}
             onFocus={focusTermCard}

@@ -16,17 +16,12 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
-import { FONT, TONE_DOT, glass } from './ui';
+import { DEV_TERM_GLASS_TUNER, FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
 
-/**
- * DEV ONLY — operator dial for the terminal glass veil. Q tunes the value
- * live, then we freeze it into TERM_VEIL_DEFAULT and flip this off before
- * this surface graduates. Not a user-facing control.
- */
-export const DEV_TERM_GLASS_TUNER = true;
-
-export const TERM_MIN_W = 340;
-export const TERM_MIN_H = 190;
+// NOTE: this module must export ONLY the component (+ types) — runtime
+// const exports here would break the Fast Refresh boundary and remount
+// live terminals on every edit. Constants belong in ui.ts. (Verified by
+// editing this very comment with a live shell mounted.)
 
 export interface TermCard {
   id: number;
@@ -48,6 +43,7 @@ export interface TermCard {
 export function TerminalGlassCard({
   card,
   termVeil,
+  connectionEpoch,
   onMove,
   onResize,
   onFocus,
@@ -62,6 +58,8 @@ export function TerminalGlassCard({
   card: TermCard;
   /** Dark wash painted behind the transparent xterm (legibility dial). */
   termVeil: number;
+  /** WS connect counter — XtermPanel re-attaches on each bump (self-heal). */
+  connectionEpoch: number;
   onMove: (id: number, x: number, y: number) => void;
   onResize: (id: number, w: number, h: number) => void;
   onFocus: (id: number) => void;
@@ -190,8 +188,11 @@ export function TerminalGlassCard({
       </div>
 
       {/* The shell — the real XtermPanel, same one the dashboard mounts.
-          Transparent over the card glass; the veil restores legibility. */}
-      <div style={{ height: card.h, position: 'relative' }}>
+          Transparent over the card glass; the veil restores legibility.
+          --t-terminal-bg: our xterm.css paints .xterm/.xterm-screen/viewport
+          with this var (fallback #16191e) — undefined on the canvas route,
+          so without this override the fallback renders an opaque slab. */}
+      <div style={{ height: card.h, position: 'relative', ...({ '--t-terminal-bg': 'transparent' } as React.CSSProperties) }}>
         <div aria-hidden style={{ position: 'absolute', inset: 0, background: `rgba(7, 9, 13, ${termVeil.toFixed(2)})` }} />
         {card.sessionName ? (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', paddingTop: 6, paddingLeft: 10, paddingRight: 4, paddingBottom: 4 }}>
@@ -206,6 +207,7 @@ export function TerminalGlassCard({
               visible
               transparent
               fontSize={11.5}
+              connectionEpoch={connectionEpoch}
             />
           </div>
         ) : (

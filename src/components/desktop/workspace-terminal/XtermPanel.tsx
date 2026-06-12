@@ -23,6 +23,12 @@ export interface XtermPanelProps {
   transparent?: boolean;
   /** Override the terminal font size (default 12). */
   fontSize?: number;
+  /** Bump on every WebSocket (re)connect. Terminal sends drop silently on a
+   *  closed socket and the server never re-attaches us — without this, any
+   *  transport bounce leaves the view permanently deaf while the pty lives
+   *  on. Each bump resets the buffer and re-attaches; the server replays
+   *  scrollback, so the repaint is idempotent. */
+  connectionEpoch?: number;
 }
 
 export interface XtermPanelHandle {
@@ -34,7 +40,7 @@ export interface XtermPanelHandle {
 }
 
 export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermPanel(
-  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize },
+  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize, connectionEpoch },
   ref,
 ) {
   const { themeId } = useTheme();
@@ -212,6 +218,23 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       fitAddonRef.current = null;
     };
   }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize, transparent, fontSize]);
+
+  // Re-attach after a transport (re)connect. The init effect's attach is
+  // dropped silently if the socket isn't open yet, and the server never
+  // pushes attachments — so each connect epoch resets the buffer and
+  // attaches again. The server replays scrollback into the clean buffer,
+  // which makes a duplicate attach visually idempotent.
+  useEffect(() => {
+    if (connectionEpoch === undefined || connectionEpoch < 1) return;
+    const term = termRef.current;
+    if (!term) return;
+    try {
+      term.reset();
+      sendTerminalAttach(tmuxSession, term.cols, term.rows);
+    } catch {
+      // disposed mid-update; the next mount attaches fresh
+    }
+  }, [connectionEpoch, tmuxSession, sendTerminalAttach]);
 
   // Live-update xterm theme on theme switch without recreating the terminal.
   // The canvas repaints next frame with the new palette, PTY state is preserved.
