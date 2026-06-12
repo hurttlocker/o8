@@ -474,20 +474,28 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
-  /** Reasoning deltas — the model thinking out loud, visible on the canvas
-   *  as a muted clamped stream (Q: history should show reasoning). */
+  /** Reasoning deltas — the model thinking out loud, rendered as a staged
+   *  timeline (Q's reference). Paragraph boundaries stamp REAL elapsed
+   *  marks so each stage carries its own time chip. */
   const appendThinkingDelta = useCallback((lane: string, delta: string) => {
     setConvos((previous) => {
       const entries = previous[lane] ?? [];
       const last = entries[entries.length - 1];
       if (last && last.role === 'thinking' && last.live) {
+        const text = last.text + delta;
+        const previousStages = last.text.split(/\n\s*\n/).length;
+        const stages = text.split(/\n\s*\n/).length;
+        const startedAt = last.startedAt ?? Date.now();
+        const marks = stages > previousStages
+          ? [...(last.marks ?? []), Math.round((Date.now() - startedAt) / 1000)]
+          : last.marks;
         const updated = [...entries];
-        updated[updated.length - 1] = { ...last, text: last.text + delta };
+        updated[updated.length - 1] = { ...last, text, marks };
         return { ...previous, [lane]: updated };
       }
       const id = entryIdRef.current;
       entryIdRef.current += 1;
-      return { ...previous, [lane]: [...entries, { role: 'thinking', text: delta, live: true, id }] };
+      return { ...previous, [lane]: [...entries, { role: 'thinking', text: delta, live: true, startedAt: Date.now(), marks: [], id }] };
     });
   }, []);
 
