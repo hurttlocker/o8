@@ -103,6 +103,15 @@ export async function setCanvasMaterial(material: string): Promise<void> {
   await invoke<void>('set_canvas_material', { material });
 }
 
+/**
+ * Continuous desktop blur behind the window's transparent regions (#1232) —
+ * the Liquid-mode frost dial. 0 restores raw clarity. No-op outside
+ * Tauri/macOS.
+ */
+export async function setCanvasBackdropBlur(radius: number): Promise<void> {
+  await invoke<void>('set_canvas_backdrop_blur', { radius: Math.max(0, Math.round(radius)) });
+}
+
 // ── Notifications ──
 
 /**

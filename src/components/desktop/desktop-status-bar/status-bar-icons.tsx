@@ -102,6 +102,40 @@ export function DeviceMobileIcon({ size = 15, color = 'currentColor', style }: S
   );
 }
 
+export function CanvasModeIcon({ size = 15, color = 'currentColor', style }: StatusBarIconProps) {
+  // Signature motion: a gentle scale pop — entering a mode, not pressing a tool.
+  return (
+    <motion.div
+      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 0, ...style }}
+      variants={{
+        rest: { scale: 1 },
+        hover: { scale: 1.12 },
+        tap: { scale: 0.94 },
+      }}
+      transition={ICON_SPRING}
+    >
+      <svg
+        width={size}
+        height={size}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        aria-hidden="true"
+        focusable="false"
+      >
+        <rect x="3" y="3" width="18" height="18" rx="5" />
+        <circle cx="9" cy="9" r="0.5" />
+        <circle cx="15" cy="9" r="0.5" />
+        <circle cx="9" cy="15" r="0.5" />
+        <circle cx="15" cy="15" r="0.5" />
+      </svg>
+    </motion.div>
+  );
+}
+
 export function WarningCircleIcon({ filled = false, ...props }: StatusBarIconProps & { filled?: boolean }) {
   return (
     <PhosphorSvg {...props}>
