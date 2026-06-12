@@ -9,11 +9,21 @@
  * status line, result card, explanation text, numbered follow-ups.
  */
 
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { SmoothCorners } from '@lisse/react';
 import { FONT, TONE_DOT, glass, type DockEntry, type OrchestratorLane } from './ui';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
+
+/** The reference's spark — marks a settled turn-status line. */
+function SparkGlyph({ size = 11 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="currentColor" aria-hidden style={{ flexShrink: 0 }}>
+      <path d="M12 3l1.9 6.4a1 1 0 0 0 .7.7L21 12l-6.4 1.9a1 1 0 0 0-.7.7L12 21l-1.9-6.4a1 1 0 0 0-.7-.7L3 12l6.4-1.9a1 1 0 0 0 .7-.7z" />
+    </svg>
+  );
+}
 
 const FOLLOW_UPS = [
   'Review the pending diff',
@@ -26,21 +36,29 @@ export function OrchestratorDock({
   lanes,
   entries,
   activeLane,
+  activeLabel,
+  activeTone,
   onSelectLane,
   onClose,
 }: {
+  /** Lanes with a running conversation — the dropdown's contents. */
   lanes: OrchestratorLane[];
   entries: DockEntry[];
   activeLane: string;
+  activeLabel: string;
+  activeTone: OrchestratorLane['tone'];
   onSelectLane: (id: string) => void;
   onClose: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [laneMenuOpen, setLaneMenuOpen] = useState(false);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries]);
+
+  const otherLanes = lanes.filter((lane) => lane.id !== activeLane);
 
   return (
     <motion.div
@@ -53,23 +71,61 @@ export function OrchestratorDock({
         top: 74,
         right: 24,
         bottom: 96,
-        width: 304,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
+        width: 400,
         zIndex: 43,
         fontFamily: FONT,
-        // No panel — the dock fades into the canvas; a soft gradient only.
-        background: 'linear-gradient(270deg, var(--cnv-bg-veil) 0%, transparent 100%)',
-        paddingLeft: 10,
+        // Lisse's effects wrapper is an unstyled block div — grid stretches
+        // it to fill so the panel runs top-to-bottom (height 100% chain).
+        display: 'grid',
       }}
     >
-      {/* Switcher — every running orchestrator, click to switch. */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-          <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
-            Orchestrators
-          </span>
+      {/* A real panel now — Apple-smooth squircle corners (Lisse), glass. */}
+      <SmoothCorners
+        corners={{ radius: 18 }}
+        shadowStrategy="box-shadow"
+        style={{
+          width: '100%',
+          height: '100%',
+          display: 'flex',
+          flexDirection: 'column',
+          ...glass(true),
+        }}
+      >
+        {/* Header — the active orchestrator + a dropdown of what's running. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 12, paddingBottom: 10, paddingLeft: 14, paddingRight: 12, position: 'relative' }}>
+          <button
+            type="button"
+            aria-label="Switch orchestrator"
+            onClick={() => setLaneMenuOpen((value) => !value)}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              borderWidth: 0,
+              background: 'transparent',
+              padding: 2,
+              cursor: 'pointer',
+              fontFamily: FONT,
+            }}
+          >
+            <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT[activeTone], flexShrink: 0 }} />
+            <span style={{ fontSize: 12.5, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>{activeLabel}</span>
+            <svg
+              width={10}
+              height={10}
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--cnv-ink-muted)"
+              strokeWidth="2.4"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              aria-hidden
+              style={{ transform: laneMenuOpen ? 'rotate(180deg)' : 'none', transition: 'transform 160ms ease' }}
+            >
+              <path d="m6 9 6 6 6-6" />
+            </svg>
+          </button>
+          <span style={{ flex: 1 }} />
           <button
             type="button"
             aria-label="Undock orchestrator"
@@ -80,56 +136,91 @@ export function OrchestratorDock({
           >
             ✕
           </button>
-        </div>
-        {lanes.map((lane) => {
-          const active = lane.id === activeLane;
-          return (
-            <button
-              key={lane.id}
-              type="button"
-              onClick={() => onSelectLane(lane.id)}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                paddingTop: 6,
-                paddingBottom: 6,
-                paddingLeft: 10,
-                paddingRight: 10,
-                borderRadius: 9,
-                borderWidth: 1,
-                borderStyle: 'solid',
-                borderColor: active ? 'var(--cnv-edge)' : 'transparent',
-                ...(active ? { background: 'var(--cnv-tint)' } : { background: 'transparent' }),
-                cursor: 'pointer',
-                fontFamily: FONT,
-              }}
-            >
-              <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT[lane.tone], flexShrink: 0 }} />
-              <span style={{ fontSize: 11.5, fontWeight: active ? 400 : 300, color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)', letterSpacing: '-0.1px' }}>
-                {lane.label}
-              </span>
-            </button>
-          );
-        })}
-      </div>
 
-      {/* Conversation — streams in, no container chrome. */}
-      <div
-        ref={scrollRef}
-        style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingRight: 2, scrollbarWidth: 'none' } as React.CSSProperties}
-      >
-        <AnimatePresence initial={false}>
-          {entries.map((entry) => (
-            <DockEntryView key={entry.id} entry={entry} />
-          ))}
-        </AnimatePresence>
-        {entries.length === 0 ? (
-          <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.6 }}>
-            No conversation on this lane yet — message the orchestrator below.
-          </span>
-        ) : null}
-      </div>
+          {/* Dropdown — only orchestrators that are actually running. */}
+          <AnimatePresence>
+            {laneMenuOpen ? (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                style={{
+                  position: 'absolute',
+                  top: 40,
+                  left: 12,
+                  width: 224,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 6,
+                  paddingRight: 6,
+                  borderRadius: 13,
+                  zIndex: 5,
+                  ...glass(true),
+                }}
+              >
+                {otherLanes.length === 0 ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', paddingTop: 4, paddingBottom: 4, paddingLeft: 8, paddingRight: 8 }}>
+                    Nothing else running — scope a repo from the composer.
+                  </span>
+                ) : (
+                  otherLanes.map((lane) => (
+                    <button
+                      key={lane.id}
+                      type="button"
+                      onClick={() => {
+                        onSelectLane(lane.id);
+                        setLaneMenuOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 8,
+                        paddingTop: 6,
+                        paddingBottom: 6,
+                        paddingLeft: 8,
+                        paddingRight: 8,
+                        borderRadius: 9,
+                        borderWidth: 0,
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        fontFamily: FONT,
+                        textAlign: 'left',
+                      }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT[lane.tone], flexShrink: 0 }} />
+                      <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px' }}>{lane.label}</span>
+                    </button>
+                  ))
+                )}
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
+        </div>
+
+        {/* Conversation — roomier now; the panel owns the chrome. */}
+        <div
+          ref={scrollRef}
+          style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, scrollbarWidth: 'none' } as React.CSSProperties}
+          onClick={() => { if (laneMenuOpen) setLaneMenuOpen(false); }}
+        >
+          <AnimatePresence initial={false}>
+            {entries.map((entry) => (
+              <DockEntryView key={entry.id} entry={entry} />
+            ))}
+          </AnimatePresence>
+          {entries.length === 0 ? (
+            <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.6 }}>
+              No conversation on this lane yet — message the orchestrator below.
+            </span>
+          ) : null}
+        </div>
+      </SmoothCorners>
     </motion.div>
   );
 }
@@ -146,7 +237,7 @@ function DockEntryView({ entry }: { entry: DockEntry }) {
         <div
           style={{
             alignSelf: 'flex-end',
-            maxWidth: 250,
+            maxWidth: 300,
             paddingTop: 8,
             paddingBottom: 8,
             paddingLeft: 12,
@@ -172,31 +263,59 @@ function DockEntryView({ entry }: { entry: DockEntry }) {
               transition={{ duration: 1.4, repeat: Infinity, ease: 'linear' }}
               style={{ width: 9, height: 9, borderRadius: '50%', border: '1px solid transparent', borderTopColor: 'var(--cnv-ink)', borderRightColor: 'var(--cnv-edge)', flexShrink: 0 }}
             />
-          ) : (
+          ) : entry.kind === 'tool' ? (
             <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT.working, flexShrink: 0 }} />
+          ) : (
+            // Settled turn status gets the reference's spark, not a dot.
+            <span style={{ color: 'var(--cnv-ink)', display: 'inline-flex' }}><SparkGlyph /></span>
           )}
-          <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)' }}>{entry.text}</span>
+          <span style={{ fontSize: 10.5, fontWeight: 300, color: entry.pending || entry.kind === 'tool' ? 'var(--cnv-ink-muted)' : 'var(--cnv-ink)' }}>{entry.text}</span>
         </div>
       ) : null}
       {entry.role === 'result' ? (
+        // The reference's response card: leading tile, title + meta, open arrow.
         <div
           style={{
             display: 'flex',
-            flexDirection: 'column',
-            gap: 3,
-            paddingTop: 9,
-            paddingBottom: 9,
-            paddingLeft: 12,
-            paddingRight: 12,
+            alignItems: 'center',
+            gap: 10,
+            paddingTop: 8,
+            paddingBottom: 8,
+            paddingLeft: 9,
+            paddingRight: 10,
             borderRadius: 12,
             ...glass(),
             boxShadow: 'none',
           }}
         >
-          <span style={{ fontSize: 11.5, fontWeight: 400, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {entry.title}
+          <span
+            aria-hidden
+            style={{
+              width: 30,
+              height: 30,
+              borderRadius: 8,
+              background: 'var(--cnv-tint)',
+              border: '1px solid var(--cnv-edge)',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              flexShrink: 0,
+              color: 'var(--cnv-ink-muted)',
+            }}
+          >
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" />
+            </svg>
           </span>
-          <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>{entry.meta}</span>
+          <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+            <span style={{ fontSize: 11.5, fontWeight: 400, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--cnv-ink)' }}>
+              {entry.title}
+            </span>
+            <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.meta}</span>
+          </span>
+          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+            <path d="M7 17 17 7" /><path d="M7 7h10v10" />
+          </svg>
         </div>
       ) : null}
       {entry.role === 'text' ? <CanvasMarkdown text={entry.text} /> : null}

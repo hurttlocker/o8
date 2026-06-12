@@ -327,7 +327,7 @@ export default function CanvasGlassPreviewPage() {
         resolveStatus(repo, 'Working');
         setDockOpen(true);
       }
-      appendEntries(repo, [{ role: 'status', text: name, pending: false }]);
+      appendEntries(repo, [{ role: 'status', text: name, pending: false, kind: 'tool' }]);
     },
     onStatus: (repo, status) => {
       setOrcaBusy(status === 'busy');
@@ -593,12 +593,16 @@ export default function CanvasGlassPreviewPage() {
   }
 
   const summoning = stage.kind === 'summoning';
-  const lanes: OrchestratorLane[] = (repos ?? []).map((repo) => ({
-    id: repo.path,
-    label: repo.name,
-    repo: repo.name,
-    tone: repo.path === activeRepoPath && orcaBusy ? 'working' : 'idle',
-  }));
+  // The dock's switcher only lists lanes that are actually running (have a
+  // conversation) — scoping a NEW repo happens from the composer chip.
+  const runningLanes: OrchestratorLane[] = (repos ?? [])
+    .filter((repo) => (convos[repo.path]?.length ?? 0) > 0)
+    .map((repo) => ({
+      id: repo.path,
+      label: repo.name,
+      repo: repo.name,
+      tone: repo.path === activeRepoPath && orcaBusy ? 'working' : 'idle',
+    }));
   const activeRepoName = repos?.find((repo) => repo.path === activeRepoPath)?.name ?? null;
   const activeConvo = convos[activeRepoPath ?? ''] ?? [];
   const hasTalked = Object.values(convos).some((entries) => entries.length > 0);
@@ -885,9 +889,11 @@ export default function CanvasGlassPreviewPage() {
       <AnimatePresence>
         {dockOpen ? (
           <OrchestratorDock
-            lanes={lanes}
+            lanes={runningLanes}
             entries={activeConvo}
             activeLane={activeRepoPath ?? ''}
+            activeLabel={activeRepoName ?? '…'}
+            activeTone={orcaBusy ? 'working' : 'idle'}
             onSelectLane={setActiveRepoPath}
             onClose={() => setDockOpen(false)}
           />

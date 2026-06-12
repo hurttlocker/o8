@@ -15,6 +15,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { SmoothCorners } from '@lisse/react';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { DEV_TERM_GLASS_TUNER, FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
 
@@ -138,14 +139,16 @@ export function TerminalGlassCard({
         left: card.x,
         top: card.y,
         width: card.w,
-        display: 'flex',
-        flexDirection: 'column',
-        borderRadius: 14,
-        overflow: 'hidden',
         zIndex: card.z,
-        ...glass(true),
       }}
     >
+      {/* Visual shell — Apple-smooth squircle corners (Lisse). The motion
+          div above owns geometry + springs; this owns glass + clip. */}
+      <SmoothCorners
+        corners={{ radius: 14 }}
+        shadowStrategy="box-shadow"
+        style={{ display: 'flex', flexDirection: 'column', ...glass(true) }}
+      >
       {/* Title bar — the drag handle. The body belongs to the shell. */}
       <div
         onPointerDown={(event) => {
@@ -316,6 +319,7 @@ export function TerminalGlassCard({
           </svg>
         </div>
       </div>
+      </SmoothCorners>
     </motion.div>
   );
 }
