@@ -118,6 +118,9 @@ const WORKER_PREFIXES = ['/api/worker/', '/api/cloud/'];
 const GATED_PREFIXES = [
   '/api/panel/',
   '/api/orchestrator/',
+  // Browser-agent verb bridge (drives the embedded browser) — exact subpath
+  // only: /api/browser/proxy must stay open, iframes can't send a bearer.
+  '/api/browser/agent',
   '/api/runtime/',
   '/api/lanes',
   '/api/worktrees',

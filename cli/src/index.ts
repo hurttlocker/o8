@@ -17,6 +17,7 @@
  */
 
 import { runAsk } from './commands/ask.js';
+import { runBrowser } from './commands/browser.js';
 import { runDoctor } from './commands/doctor.js';
 import { runCortexObserve } from './commands/cortex.js';
 import { runLaneTouches } from './commands/lane.js';
@@ -105,6 +106,11 @@ commands:
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
   ask "<question>"     ask the Engineering Brain about this repo (answer + cited sources)
+  browser open [url]   reveal o8's embedded browser, optionally at a URL
+  browser read         embedded-browser page text + interactive elements (selectors)
+  browser click <sel>  click an element (ghost cursor paints in the o8 UI)
+  browser type <sel> <text…>  type into an input (--submit presses Enter)
+  browser wait <sel>   poll until a selector resolves (--text, --timeout)
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   task list            current task pool grouped by ready/running/review/etc.
@@ -170,6 +176,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       // The question lands in `secondary` (first positional) when quoted, or
       // spreads across secondary + rest when unquoted — hand both to the parser.
       return runAsk(args.mode, secondary ? [secondary, ...args.rest] : args.rest);
+    case 'browser':
+      return runBrowser(args.mode, secondary, args.rest);
     case 'cortex': {
       if (secondary === 'observe') return runCortexObserve(args.mode, args.rest);
       throw unknownSubcommandError('cortex', secondary);
