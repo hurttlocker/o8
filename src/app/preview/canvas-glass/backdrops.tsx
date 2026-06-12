@@ -262,10 +262,11 @@ function WindDots() {
 }
 
 /**
- * The o8 orbit pulse — the brand's dual-orbit mark, way small, drawn in
- * faded dither (airy stipple, not cloud), breathing a slow zoom. A fixed
- * "sun" sits upper-right of the mark; as stipple drifts along the orbit
- * paths and passes that spot it glows amber, like the canvas is sunlit.
+ * The o8 orbit pulse — the agents-working mark (the `.o8-orbit` binary:
+ * two dots orbiting a shared center, the trailing one at 0.55), way
+ * small, drawn in faded dither and breathing a slow zoom. A fixed "sun"
+ * sits upper-right; a dot passing it glows amber, like the canvas is
+ * sunlit. The icon spins in 1.6s — this revolves in 18, a backdrop.
  */
 function OrbitPulse() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -276,14 +277,12 @@ function OrbitPulse() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    const DOTS_PER_RING = 150;
-    const DENSITY = 0.6;        // share of stipple actually drawn — airy
-    const FLOW = 0.07;          // rad/s drift along the orbit
+    const REV_S = 18;           // one revolution
     const BREATH_S = 13;        // one zoom in+out
     const SUN_ANGLE = -0.9;     // screen-space, upper right
-    const SUN_WIDTH = 0.62;     // gaussian sigma (rad) — a graceful arc, not a hotspot
-    const TILT = 0.42;          // ellipse minor/major ratio
-    const LEAN = 0.49;          // ring inclination (rad) — crossed = the 8
+    const SUN_WIDTH = 0.7;      // gaussian sigma (rad)
+    const RING_DOTS = 110;      // whisper-faint path stipple
+    const CLUSTER = 42;         // stipple per orbiting dot
 
     let width = 0;
     let height = 0;
@@ -320,50 +319,54 @@ function OrbitPulse() {
       const t = performance.now() / 1000;
       const cx = width / 2;
       const cy = height * 0.44;
-      const radius = Math.min(width, height) * 0.13;
+      const radius = Math.min(width, height) * 0.11;
       const breath = 1 + 0.08 * Math.sin((t * Math.PI * 2) / BREATH_S);
+      const spin = (t * Math.PI * 2) / REV_S;
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      for (let ring = 0; ring < 2; ring++) {
-        const lean = ring === 0 ? LEAN : -LEAN;
-        const cosL = Math.cos(lean);
-        const sinL = Math.sin(lean);
-        for (let i = 0; i < DOTS_PER_RING; i++) {
-          const seed = ring * 1000 + i;
-          if (hash(seed + 0.31) > DENSITY) continue;
-          const u = (i / DOTS_PER_RING) * Math.PI * 2 + t * FLOW * (ring === 0 ? 1 : -1);
-          // Ellipse point, leaned, breathed.
-          const ex = Math.cos(u) * radius;
-          const ey = Math.sin(u) * radius * TILT;
-          const x = (ex * cosL - ey * sinL) * breath;
-          const y = (ex * sinL + ey * cosL) * breath;
-          // Sunlit pass — screen angle vs the fixed sun spot.
-          let delta = Math.atan2(y, x) - SUN_ANGLE;
-          delta = Math.atan2(Math.sin(delta), Math.cos(delta));
-          const glow = Math.exp(-((delta / SUN_WIDTH) ** 2));
-          // Faded dither: jittered position, hashed alpha, gentle flicker.
-          const jx = (hash(seed + 1.7) - 0.5) * 2.6;
-          const jy = (hash(seed + 2.9) - 0.5) * 2.6;
-          const flicker = 0.04 * Math.sin(t * 1.3 + i * 0.7);
-          const alpha = 0.11 + 0.08 * hash(seed + 4.2) + glow * 0.32 + flicker;
+      // The path — barely-there dither ring the pair travels on.
+      for (let i = 0; i < RING_DOTS; i++) {
+        if (hash(i + 7.13) > 0.55) continue;
+        const u = (i / RING_DOTS) * Math.PI * 2;
+        const x = cx + Math.cos(u) * radius * breath + (hash(i + 1.7) - 0.5) * 2.2;
+        const y = cy + Math.sin(u) * radius * breath + (hash(i + 2.9) - 0.5) * 2.2;
+        ctx.fillStyle = `rgba(168,184,202,${(0.05 + 0.04 * hash(i + 4.2)).toFixed(3)})`;
+        ctx.beginPath();
+        ctx.arc(x, y, 0.6 + 0.3 * hash(i + 5.5), 0, Math.PI * 2);
+        ctx.fill();
+      }
+
+      // The binary — bright lead, 0.55 partner opposite, like the icon.
+      for (let body = 0; body < 2; body++) {
+        const angle = spin + body * Math.PI;
+        const fade = body === 0 ? 1 : 0.55;
+        const bx = cx + Math.cos(angle) * radius * breath;
+        const by = cy + Math.sin(angle) * radius * breath;
+        // Sunlit pass — this body's angle vs the fixed sun spot.
+        let delta = Math.atan2(Math.sin(angle - SUN_ANGLE), Math.cos(angle - SUN_ANGLE));
+        const glow = Math.exp(-((delta / SUN_WIDTH) ** 2));
+        // Each body reads as a dot but is built from dither — a bright
+        // stippled core inside an airy halo.
+        const cr = Math.round(170 + (245 - 170) * glow);
+        const cg = Math.round(184 + (158 - 184) * glow);
+        const cb = Math.round(202 + (11 - 202) * glow);
+        for (let i = 0; i < CLUSTER; i++) {
+          const seed = body * 500 + i;
+          const core = i < 14; // first portion clusters tight — the dot itself
+          const ca = hash(seed + 0.31) * Math.PI * 2;
+          const spread = core ? 1.6 : (4 + glow * 2.5);
+          const cd = (hash(seed + 1.7) + hash(seed + 2.9)) * 0.5 * spread;
+          const flicker = 0.05 * Math.sin(t * 1.4 + i * 0.9);
+          const alpha = fade * ((core ? 0.4 : 0.12) + 0.12 * hash(seed + 4.2) + glow * 0.42 + flicker);
           if (alpha < 0.02) continue;
-          const r = 0.6 + 0.4 * hash(seed + 5.5) + glow * 0.5;
-          const cr = Math.round(160 + (245 - 160) * glow);
-          const cg = Math.round(176 + (158 - 176) * glow);
-          const cb = Math.round(196 + (11 - 196) * glow);
-          ctx.fillStyle = `rgba(${cr},${cg},${cb},${Math.min(0.85, alpha).toFixed(3)})`;
+          const r = (core ? 0.9 : 0.6) + 0.5 * hash(seed + 5.5) + glow * 0.5;
+          ctx.fillStyle = `rgba(${cr},${cg},${cb},${Math.min(0.92, alpha).toFixed(3)})`;
           ctx.beginPath();
-          ctx.arc(cx + x + jx, cy + y + jy, r, 0, Math.PI * 2);
+          ctx.arc(bx + Math.cos(ca) * cd, by + Math.sin(ca) * cd, r, 0, Math.PI * 2);
           ctx.fill();
         }
       }
-
-      // The nucleus — one quiet dot breathing with the rings.
-      ctx.fillStyle = `rgba(190,202,218,${(0.18 + 0.08 * Math.sin((t * Math.PI * 2) / BREATH_S)).toFixed(3)})`;
-      ctx.beginPath();
-      ctx.arc(cx, cy, 1.8 * breath, 0, Math.PI * 2);
-      ctx.fill();
     };
 
     resize();
