@@ -470,26 +470,32 @@ export default function CanvasGlassPreviewPage() {
     },
   });
 
-  const submit = useCallback(() => {
-    const prompt = composerValue.trim();
-    if (!prompt || !activeRepoPath || orchBusy) return;
+  /** One send path for every composer — the bottom pill AND the dock's
+   *  own reply input. Returns true when the message went out. */
+  const sendPrompt = useCallback((prompt: string): boolean => {
+    if (!prompt || !activeRepoPath || orchBusy) return false;
     firstOutputRef.current.delete(activeRepoPath);
     const threadId = orch.send(prompt, { model: orchModel, thinkingEffort: orchEffort });
     if (!threadId) {
-      // Socket not up yet — keep the draft in the composer for the retry.
       appendEntries(activeRepoPath, [
         { role: 'user', text: prompt },
         { role: 'status', text: 'Not connected yet — try again in a second', pending: false },
       ]);
       setDockOpen(true);
-      return;
+      return false;
     }
     appendEntries(activeRepoPath, [
       { role: 'user', text: prompt },
       { role: 'status', text: 'Thinking', pending: true },
     ]);
-    setComposerValue('');
-  }, [activeRepoPath, appendEntries, composerValue, orch, orchBusy, orchEffort, orchModel]);
+    return true;
+  }, [activeRepoPath, appendEntries, orch, orchBusy, orchEffort, orchModel]);
+
+  const submit = useCallback(() => {
+    const prompt = composerValue.trim();
+    if (!prompt) return;
+    if (sendPrompt(prompt)) setComposerValue('');
+  }, [composerValue, sendPrompt]);
 
   const chooseModel = useCallback((value: string) => {
     setOrchModel(value);
@@ -1493,61 +1499,78 @@ export default function CanvasGlassPreviewPage() {
         </SpawnGlyphButton>
       </div>
 
-      {/* ── Terminal cwd picker — where should the shell open? ───── */}
+      {/* ── Terminal cwd drawer — same system as the Sessions drawer:
+            tuner-matched glass, hard edges, the list dissolves at both
+            ends as you scroll. ───── */}
       <AnimatePresence>
         {termPickerOpen ? (
           <>
             <div role="presentation" onClick={() => setTermPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
             <motion.div
-              initial={{ opacity: 0, x: -8, scale: 0.98 }}
-              animate={{ opacity: 1, x: 0, scale: 1 }}
-              exit={{ opacity: 0, x: -8, scale: 0.98 }}
-              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+              initial={{ opacity: 0, x: -16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -16 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 32 }}
               style={{
                 position: 'absolute',
                 left: 64,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                width: 232,
+                top: 74,
+                bottom: 96,
+                width: 272,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 2,
-                paddingTop: 10,
-                paddingBottom: 10,
+                paddingTop: 12,
+                paddingBottom: 4,
                 paddingLeft: 8,
                 paddingRight: 8,
-                borderRadius: 14,
+                borderRadius: 6,
                 zIndex: 46,
-                ...glassPop(),
+                ...glass(true),
               }}
             >
-              <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 5 }}>
+              <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 7 }}>
                 Open terminal in
               </span>
-              <PickerRow
-                name="Home"
-                path="~"
-                onClick={() => {
-                  spawnTerminal(null, null);
-                  setTermPickerOpen(false);
-                }}
-              />
-              {(repos ?? []).map((repo) => (
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  paddingTop: 14,
+                  paddingBottom: 18,
+                  scrollbarWidth: 'none',
+                  maskImage: 'linear-gradient(to bottom, transparent 0, black 26px, black calc(100% - 30px), transparent 100%)',
+                  WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 26px, black calc(100% - 30px), transparent 100%)',
+                } as React.CSSProperties}
+              >
                 <PickerRow
-                  key={repo.path}
-                  name={repo.name}
-                  path={repo.path.replace(/^\/Users\/[^/]+/, '~')}
+                  name="Home"
+                  path="~"
                   onClick={() => {
-                    spawnTerminal(repo.path, repo.name);
+                    spawnTerminal(null, null);
                     setTermPickerOpen(false);
                   }}
                 />
-              ))}
-              {repos === null ? (
-                <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingTop: 4 }}>
-                  Loading repos…
-                </span>
-              ) : null}
+                {(repos ?? []).map((repo) => (
+                  <PickerRow
+                    key={repo.path}
+                    name={repo.name}
+                    path={repo.path.replace(/^\/Users\/[^/]+/, '~')}
+                    onClick={() => {
+                      spawnTerminal(repo.path, repo.name);
+                      setTermPickerOpen(false);
+                    }}
+                  />
+                ))}
+                {repos === null ? (
+                  <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingTop: 4 }}>
+                    Loading repos…
+                  </span>
+                ) : null}
+              </div>
             </motion.div>
           </>
         ) : null}
@@ -1680,6 +1703,8 @@ export default function CanvasGlassPreviewPage() {
             activeLabel={activeRepoName ?? '…'}
             activeTone={orchBusy ? 'working' : 'idle'}
             onSelectLane={setActiveRepoPath}
+            onSend={sendPrompt}
+            busy={orchBusy}
             onClose={() => setDockOpen(false)}
           />
         ) : null}
