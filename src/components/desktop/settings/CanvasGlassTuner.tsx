@@ -16,17 +16,21 @@ import {
   CANVAS_GLASS_RANGES,
   applyCanvasGlassSettings,
   readCanvasGlassSettings,
+  readPersonalDefault,
+  savePersonalDefault,
   writeCanvasGlassSettings,
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 
 export function CanvasGlassTuner() {
   const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
+  const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
 
   useEffect(() => {
     const stored = readCanvasGlassSettings();
     setSettings(stored);
     applyCanvasGlassSettings(stored);
+    setPersonalDefault(readPersonalDefault());
   }, []);
 
   const update = useCallback((patch: Partial<CanvasGlassSettings>) => {
@@ -62,7 +66,7 @@ export function CanvasGlassTuner() {
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        {CANVAS_GLASS_PRESETS.map((preset) => {
+        {(personalDefault ? [{ id: 'mine', label: 'Mine', values: personalDefault }] : []).concat([...CANVAS_GLASS_PRESETS]).map((preset) => {
           const active = settings.frost === preset.values.frost
             && settings.tint === preset.values.tint
             && settings.ink === preset.values.ink
@@ -198,7 +202,34 @@ export function CanvasGlassTuner() {
         step={CANVAS_GLASS_RANGES.vibrance.step}
         onChange={(vibrance) => update({ vibrance })}
       />
-      <div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 14 }}>
+        <button
+          type="button"
+          onClick={() => {
+            savePersonalDefault(settings);
+            setPersonalDefault({ ...settings });
+          }}
+          style={{
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider)',
+            background: 'transparent',
+            borderRadius: 999,
+            paddingTop: 4,
+            paddingBottom: 4,
+            paddingLeft: 12,
+            paddingRight: 12,
+            fontSize: 11,
+            fontWeight: 400,
+            color: 'var(--t-text)',
+            cursor: 'pointer',
+            fontFamily: 'var(--font-sans-system)',
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-bg-hover)'; }}
+          onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+        >
+          Save as my default
+        </button>
         <button
           type="button"
           onClick={() => update({ ...CANVAS_GLASS_DEFAULTS })}

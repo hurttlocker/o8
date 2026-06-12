@@ -34,6 +34,8 @@ import {
   CANVAS_GLASS_DEFAULTS,
   applyCanvasGlassSettings,
   readCanvasGlassSettings,
+  readPersonalDefault,
+  savePersonalDefault,
   writeCanvasGlassSettings,
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
@@ -57,6 +59,8 @@ export default function CanvasGlassPreviewPage() {
   const [inTauri, setInTauri] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
   const [dockOpen, setDockOpen] = useState(false);
+  const [tunerOpen, setTunerOpen] = useState(false);
+  const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeLane, setActiveLane] = useState(MOCK_LANES[0].id);
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
   const nextIdRef = useRef(1);
@@ -68,6 +72,7 @@ export default function CanvasGlassPreviewPage() {
     setSettings(stored);
     applyCanvasGlassSettings(stored);
     setInTauri(isTauri());
+    setPersonalDefault(readPersonalDefault());
   }, []);
 
   // Background material + backdrop blur: apply the stored choices while
@@ -293,7 +298,25 @@ export default function CanvasGlassPreviewPage() {
       >
         <span style={{ fontSize: 12.5, fontWeight: 500, letterSpacing: '0.02em' }}>o8</span>
         <span style={{ width: 1, height: 16, background: 'var(--cnv-edge)' }} />
-        <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink-muted)' }}>Canvas</span>
+        <button
+          type="button"
+          aria-label="Glass tuner"
+          onClick={() => setTunerOpen((value) => !value)}
+          style={{
+            borderWidth: 0,
+            background: 'transparent',
+            padding: 0,
+            fontSize: 11.5,
+            fontWeight: tunerOpen ? 400 : 300,
+            color: tunerOpen ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+            cursor: 'pointer',
+            fontFamily: FONT,
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+          onMouseLeave={(event) => { if (!tunerOpen) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+        >
+          Canvas
+        </button>
         <span style={{ width: 1, height: 16, background: 'var(--cnv-edge)' }} />
         <DockGlyphButton label="Agents" path="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" extra={<circle cx="9" cy="7" r="4" />} />
         <DockGlyphButton label="Alerts" path="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" />
@@ -496,7 +519,21 @@ export default function CanvasGlassPreviewPage() {
         </svg>
       </div>
 
-      <TunerPanel settings={settings} onChange={updateSettings} inTauri={inTauri} right={dockOpen ? 348 : 16} />
+      {/* Glass tuner — drops down under the "Canvas" word in the top dock. */}
+      <AnimatePresence>
+        {tunerOpen ? (
+          <TunerPanel
+            settings={settings}
+            onChange={updateSettings}
+            inTauri={inTauri}
+            personalDefault={personalDefault}
+            onSaveDefault={() => {
+              savePersonalDefault(settings);
+              setPersonalDefault({ ...settings });
+            }}
+          />
+        ) : null}
+      </AnimatePresence>
     </div>
   );
 }
