@@ -325,7 +325,9 @@ export function GitHubTab({
             lineHeight: 1.55,
             maxWidth: 580,
           }}>
-            No tracked repositories yet. Connect the GitHub App below to pull in issues and open PRs from your repos.
+            {appConnected
+              ? 'The GitHub App is connected but repo sync hasn\u2019t populated this list yet \u2014 it fills in shortly after install. If it stays empty, check which repos the App can access in GitHub settings.'
+              : 'No tracked repositories yet. Connect the GitHub App below to pull in issues and open PRs from your repos.'}
           </div>
         ) : (
           <div>

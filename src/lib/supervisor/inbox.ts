@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { getSqlite } from '@/lib/db';
 import { listLanes } from '@/lib/lane/registry';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
@@ -447,6 +448,8 @@ export function selfHealActiveByKindAndRepo(kind: SupervisorInboxKind, repoPath:
   return result.changes;
 }
 
+const ORPHANED_WORKTREE_GRACE_MS = 48 * HOUR_MS;
+
 export function runRetentionSweep(nowMs = Date.now()): number {
   ensureSupervisorInboxTable();
   const rows = getSqlite().prepare(`
@@ -456,14 +459,35 @@ export function runRetentionSweep(nowMs = Date.now()): number {
   `).all() as SupervisorInboxRow[];
   let dismissed = 0;
   for (const row of rows) {
-    const ttl = RETENTION_POLICY[row.kind]?.autoDismissAfterMs;
-    if (!ttl) continue;
     const createdMs = Date.parse(row.created_at);
-    if (!Number.isFinite(createdMs) || nowMs - createdMs < ttl) continue;
+    if (!Number.isFinite(createdMs)) continue;
+    const ttl = RETENTION_POLICY[row.kind]?.autoDismissAfterMs;
+    if (ttl && nowMs - createdMs >= ttl) {
+      dismissInboxItem(row.id);
+      dismissed += 1;
+      continue;
+    }
+    // human_required incidents have no TTL by design — but once the worktree
+    // they point at is gone from disk, "retry in the existing worktree" is
+    // impossible and the card can only rot (the Jun 2026 queue carried 9-day-
+    // old failures from pre-rename paths). 48h grace avoids racing a cleanup
+    // that a redispatch is about to recreate.
+    if (nowMs - createdMs < ORPHANED_WORKTREE_GRACE_MS) continue;
+    const worktreePath = payloadStringFromRaw(row.payload, 'worktreePath');
+    if (!worktreePath || existsSync(worktreePath)) continue;
     dismissInboxItem(row.id);
     dismissed += 1;
   }
   return dismissed;
+}
+
+function payloadStringFromRaw(rawPayload: string, key: string): string | null {
+  try {
+    const parsed = JSON.parse(rawPayload) as Record<string, unknown>;
+    return stringValue(parsed[key]);
+  } catch {
+    return null;
+  }
 }
 
 export function listInboxItems(options: {

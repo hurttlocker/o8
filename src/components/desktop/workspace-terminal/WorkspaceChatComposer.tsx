@@ -332,7 +332,9 @@ function WorkspaceChatComposerBase({
                 void chat.handleSend();
               }
             }}
-            placeholder={chat.isAgentTab ? `Steer this ${chat.runtimeLabel} agent...` : `Message ${chat.runtimeLabel}...`}
+            placeholder={isLaneArchived
+              ? 'Lane archived — transcript is read-only'
+              : chat.isAgentTab ? `Steer this ${chat.runtimeLabel} agent...` : `Message ${chat.runtimeLabel}...`}
             rows={2}
             style={{
               width: '100%',
