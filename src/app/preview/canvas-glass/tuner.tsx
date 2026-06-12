@@ -10,13 +10,13 @@
 import { motion } from 'framer-motion';
 import {
   CANVAS_BACKDROPS,
-  CANVAS_CHAT_INKS,
   CANVAS_CHAT_TONES,
   CANVAS_GLASS_DEFAULTS,
   CANVAS_GLASS_MATERIALS,
   CANVAS_GLASS_PRESETS,
   CANVAS_GLASS_RANGES,
   CANVAS_GLASS_TONES,
+  defaultTextShadeForTone,
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 import { FONT, glass } from './ui';
@@ -34,7 +34,14 @@ function settingsMatch(a: CanvasGlassSettings, b: CanvasGlassSettings): boolean 
     && a.chatTint === b.chatTint
     && a.tone === b.tone
     && a.chatTone === b.chatTone
-    && a.chatInk === b.chatInk;
+    && a.textShade === b.textShade;
+}
+
+/** The Text slider's zone label — operator reads words, not decimals. */
+function textShadeLabel(shade: number): string {
+  if (shade <= 0.12) return 'White';
+  if (shade >= 0.88) return 'Black';
+  return 'Ink';
 }
 
 export function TunerPanel({
@@ -176,10 +183,17 @@ export function TunerPanel({
             key={tone.id}
             label={tone.label}
             active={settings.tone === tone.id}
-            onClick={() => onChange({ tone: tone.id })}
+            onClick={() => onChange({ tone: tone.id, textShade: defaultTextShadeForTone(tone.id) })}
           />
         ))}
       </div>
+      <TunerSlider
+        label="Text"
+        display={`${textShadeLabel(settings.textShade)} · ${Math.round(settings.textShade * 100)}`}
+        value={settings.textShade}
+        range={CANVAS_GLASS_RANGES.textShade}
+        onChange={(textShade) => onChange({ textShade })}
+      />
       <TunerSlider label="Frost" display={`${Math.round(settings.frost)}px`} value={settings.frost} range={CANVAS_GLASS_RANGES.frost} onChange={(frost) => onChange({ frost })} />
       <TunerSlider label="Tint" display={`${Math.round(settings.tint * 100)}%`} value={settings.tint} range={CANVAS_GLASS_RANGES.tint} onChange={(tint) => onChange({ tint })} />
       <TunerSlider label="Ink" display={`${Math.round(settings.ink * 100)}%`} value={settings.ink} range={CANVAS_GLASS_RANGES.ink} onChange={(ink) => onChange({ ink })} />
@@ -194,17 +208,6 @@ export function TunerPanel({
             label={tone.label}
             active={settings.chatTone === tone.id}
             onClick={() => onChange({ chatTone: tone.id })}
-          />
-        ))}
-      </div>
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-        <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingRight: 2 }}>Ink</span>
-        {CANVAS_CHAT_INKS.map((ink) => (
-          <PresetPill
-            key={ink.id}
-            label={ink.label}
-            active={settings.chatInk === ink.id}
-            onClick={() => onChange({ chatInk: ink.id })}
           />
         ))}
       </div>
