@@ -41,6 +41,7 @@ interface OperatorDefaults {
   experimentalOpencode: boolean;
   experimentalGemini: boolean;
   experimentalChat: boolean;
+  experimentalCanvas: boolean;
   classAComposer: ClassAComposer;
   inAppOrchestratorEnabled: boolean;
   workersUseBrain: WorkersUseBrain;
@@ -759,6 +760,21 @@ export function OperatorDefaultsTab() {
               disabled={sources?.experimentalChat === 'env' || busyField === 'experimentalChat'}
               onChange={(next) => {
                 void updateField('experimentalChat', next);
+              }}
+            />
+          }
+        />
+        <Row
+          label="Experimental: Canvas"
+          description="Show the fleet Canvas tab in the new-tab drawer — your packets as live cards on a spatial canvas. Off by default; the slice is additive and dismissible (docs/canvas-mode-plan.md)."
+          source={sources.experimentalCanvas}
+          disabledReason={sources?.experimentalCanvas === 'env' ? envDisabledReason : undefined}
+          right={
+            <SettingsToggleButton
+              checked={values.experimentalCanvas}
+              disabled={sources?.experimentalCanvas === 'env' || busyField === 'experimentalCanvas'}
+              onChange={(next) => {
+                void updateField('experimentalCanvas', next);
               }}
             />
           }

@@ -111,6 +111,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.experimentalChat = body.experimentalChat;
   }
 
+  if (body.experimentalCanvas !== undefined) {
+    if (typeof body.experimentalCanvas !== 'boolean') {
+      throw new Error('experimentalCanvas must be boolean.');
+    }
+    update.experimentalCanvas = body.experimentalCanvas;
+  }
+
   if (body.classAComposer !== undefined) {
     const raw = body.classAComposer;
     if (raw !== 'auto' && raw !== 'haiku-cli' && raw !== 'sonnet-cli' && raw !== 'fastest') {

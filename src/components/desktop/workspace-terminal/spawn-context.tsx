@@ -19,6 +19,7 @@ export interface WorkspaceSpawnHandlers {
   spawnSingleRuntimeTab: (runtime: OrchestratorRuntime) => string;
   spawnChatTab: () => string;
   spawnOrchestratorTab: () => string;
+  spawnFleetCanvasTab?: () => string;
   updateTabMode: (
     tabId: string,
     patch: {
