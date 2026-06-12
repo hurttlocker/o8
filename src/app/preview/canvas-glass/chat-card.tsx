@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { DockEntryView } from './dock';
-import { FONT, TONE_DOT, glass, type DockEntry } from './ui';
+import { FONT, TONE_DOT, chatVocabularyRebind, glassChat, type DockEntry } from './ui';
 import { useThreadOrchestrator, type OrcaThreadEvent } from './use-canvas-orchestrator';
 
 export interface ChatCard {
@@ -106,7 +106,7 @@ export function ChatGlassCard({
       <SmoothCorners
         corners={{ radius: 14 }}
         shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', ...glass(true) }}
+        style={{ display: 'flex', flexDirection: 'column', ...glassChat(), ...chatVocabularyRebind() }}
       >
         {/* Title bar — drag handle, dock-it, close. */}
         <div

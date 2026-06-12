@@ -10,10 +10,12 @@
 import { motion } from 'framer-motion';
 import {
   CANVAS_BACKDROPS,
+  CANVAS_CHAT_TONES,
   CANVAS_GLASS_DEFAULTS,
   CANVAS_GLASS_MATERIALS,
   CANVAS_GLASS_PRESETS,
   CANVAS_GLASS_RANGES,
+  CANVAS_GLASS_TONES,
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 import { FONT, glass } from './ui';
@@ -26,7 +28,11 @@ function settingsMatch(a: CanvasGlassSettings, b: CanvasGlassSettings): boolean 
     && a.vibrance === b.vibrance
     && a.material === b.material
     && a.backdropFrost === b.backdropFrost
-    && a.backdrop === b.backdrop;
+    && a.backdrop === b.backdrop
+    && a.chatFrost === b.chatFrost
+    && a.chatTint === b.chatTint
+    && a.tone === b.tone
+    && a.chatTone === b.chatTone;
 }
 
 export function TunerPanel({
@@ -162,10 +168,35 @@ export function TunerPanel({
       <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
         Glass panes
       </span>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {CANVAS_GLASS_TONES.map((tone) => (
+          <PresetPill
+            key={tone.id}
+            label={tone.label}
+            active={settings.tone === tone.id}
+            onClick={() => onChange({ tone: tone.id })}
+          />
+        ))}
+      </div>
       <TunerSlider label="Frost" display={`${Math.round(settings.frost)}px`} value={settings.frost} range={CANVAS_GLASS_RANGES.frost} onChange={(frost) => onChange({ frost })} />
       <TunerSlider label="Tint" display={`${Math.round(settings.tint * 100)}%`} value={settings.tint} range={CANVAS_GLASS_RANGES.tint} onChange={(tint) => onChange({ tint })} />
       <TunerSlider label="Ink" display={`${Math.round(settings.ink * 100)}%`} value={settings.ink} range={CANVAS_GLASS_RANGES.ink} onChange={(ink) => onChange({ ink })} />
       <TunerSlider label="Vibrance" display={`${Math.round(settings.vibrance * 100)}%`} value={settings.vibrance} range={CANVAS_GLASS_RANGES.vibrance} onChange={(vibrance) => onChange({ vibrance })} />
+      <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
+        Floating chats
+      </span>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {CANVAS_CHAT_TONES.map((tone) => (
+          <PresetPill
+            key={tone.id}
+            label={tone.label}
+            active={settings.chatTone === tone.id}
+            onClick={() => onChange({ chatTone: tone.id })}
+          />
+        ))}
+      </div>
+      <TunerSlider label="Frost" display={`${Math.round(settings.chatFrost)}px`} value={settings.chatFrost} range={CANVAS_GLASS_RANGES.chatFrost} onChange={(chatFrost) => onChange({ chatFrost })} />
+      <TunerSlider label="Tint" display={`${Math.round(settings.chatTint * 100)}%`} value={settings.chatTint} range={CANVAS_GLASS_RANGES.chatTint} onChange={(chatTint) => onChange({ chatTint })} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <button
           type="button"
