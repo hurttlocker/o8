@@ -19,6 +19,11 @@ import { FONT, TERM_MIN_H, TERM_MIN_W, glass } from './ui';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
+export interface BrowserTab {
+  id: number;
+  url: string;
+}
+
 export interface BrowserCard {
   id: number;
   x: number;
@@ -26,7 +31,8 @@ export interface BrowserCard {
   z: number;
   w: number;
   h: number;
-  url: string;
+  tabs: BrowserTab[];
+  activeTabId: number;
 }
 
 function normalizeUrl(raw: string): string {
@@ -35,6 +41,10 @@ function normalizeUrl(raw: string): string {
   if (/^https?:\/\//i.test(value)) return value;
   if (/^localhost[:/]/.test(value) || /^127\.0\.0\.1[:/]/.test(value)) return `http://${value}`;
   return `https://${value}`;
+}
+
+function tabLabel(url: string): string {
+  return url.replace(/^https?:\/\//i, '').replace(/\/$/, '') || 'New tab';
 }
 
 /** Shortest selector that still uniquely hits the element in its doc. */
@@ -69,25 +79,46 @@ export function BrowserGlassCard({
   onMove,
   onResize,
   onFocus,
-  onNavigate,
+  onTabsChange,
   onClose,
 }: {
   card: BrowserCard;
   onMove: (id: number, x: number, y: number) => void;
   onResize: (id: number, w: number, h: number) => void;
   onFocus: (id: number) => void;
-  onNavigate: (id: number, url: string) => void;
+  onTabsChange: (id: number, tabs: BrowserTab[], activeTabId: number) => void;
   onClose: (id: number) => void;
 }) {
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
   const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
-  const [urlDraft, setUrlDraft] = useState(card.url);
-  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const activeTab = card.tabs.find((tab) => tab.id === card.activeTabId) ?? card.tabs[0];
+  const activeUrl = activeTab?.url ?? '';
+  const [urlDraft, setUrlDraft] = useState(activeUrl);
+  const iframeRefs = useRef(new Map<number, HTMLIFrameElement>());
   const [picking, setPicking] = useState(false);
   const [readout, setReadout] = useState<string | null>(null);
   const pickerCleanupRef = useRef<(() => void) | null>(null);
+
+  // Switching tabs (or a navigate landing) re-seeds the URL bar.
+  useEffect(() => { setUrlDraft(activeUrl); }, [activeUrl]);
+
+  const navigate = (url: string) => {
+    onTabsChange(card.id, card.tabs.map((tab) => (tab.id === card.activeTabId ? { ...tab, url } : tab)), card.activeTabId);
+  };
+  const addTab = () => {
+    const nextId = card.tabs.reduce((max, tab) => Math.max(max, tab.id), 0) + 1;
+    onTabsChange(card.id, [...card.tabs, { id: nextId, url: `${window.location.origin}/dashboard` }], nextId);
+  };
+  const closeTab = (tabId: number) => {
+    const remaining = card.tabs.filter((tab) => tab.id !== tabId);
+    if (remaining.length === 0) {
+      onClose(card.id);
+      return;
+    }
+    onTabsChange(card.id, remaining, tabId === card.activeTabId ? remaining[remaining.length - 1].id : card.activeTabId);
+  };
 
   const disarmPicker = () => {
     pickerCleanupRef.current?.();
@@ -100,7 +131,7 @@ export function BrowserGlassCard({
       disarmPicker();
       return;
     }
-    const frame = iframeRef.current;
+    const frame = iframeRefs.current.get(card.activeTabId) ?? null;
     let doc: Document | null = null;
     try {
       doc = frame?.contentDocument ?? null;
@@ -162,12 +193,12 @@ export function BrowserGlassCard({
     setReadout('Hover the page, click to copy the selector. Esc cancels.');
   };
 
-  // Navigating away or unmounting tears the picker down with the page.
+  // Navigating away, switching tabs, or unmounting tears the picker down.
   useEffect(() => () => { pickerCleanupRef.current?.(); }, []);
   useEffect(() => {
     pickerCleanupRef.current?.();
     setPicking(false);
-  }, [card.url]);
+  }, [activeUrl, card.activeTabId]);
 
   return (
     <motion.div
@@ -228,7 +259,7 @@ export function BrowserGlassCard({
               const next = normalizeUrl(urlDraft);
               if (next) {
                 setUrlDraft(next);
-                onNavigate(card.id, next);
+                navigate(next);
               }
             }}
             onPointerDown={(event) => event.stopPropagation()}
@@ -297,6 +328,74 @@ export function BrowserGlassCard({
           </button>
         </div>
 
+        {/* Tab strip — pills, like the default-side browser. Always present so
+            the + is one click away; slim enough to cost nothing. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingTop: 4, paddingBottom: 4, paddingLeft: 8, paddingRight: 8, borderBottom: '1px solid var(--cnv-edge)', overflowX: 'auto', scrollbarWidth: 'none' } as React.CSSProperties}>
+          {card.tabs.map((tab) => {
+            const active = tab.id === card.activeTabId;
+            return (
+              <div
+                key={tab.id}
+                role="button"
+                tabIndex={0}
+                aria-label={`Tab — ${tabLabel(tab.url)}`}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => { if (!active) onTabsChange(card.id, card.tabs, tab.id); }}
+                onKeyDown={(event) => { if (event.key === 'Enter' && !active) onTabsChange(card.id, card.tabs, tab.id); }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 5,
+                  paddingTop: 2,
+                  paddingBottom: 2,
+                  paddingLeft: 8,
+                  paddingRight: card.tabs.length > 1 ? 5 : 8,
+                  borderRadius: 7,
+                  background: active ? 'var(--cnv-tint)' : 'transparent',
+                  color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+                  fontSize: 9.5,
+                  fontWeight: 300,
+                  fontFamily: FONT,
+                  letterSpacing: '-0.05px',
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                  maxWidth: 168,
+                  flexShrink: 0,
+                  userSelect: 'none',
+                }}
+                onMouseEnter={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+                onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+              >
+                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', maxWidth: 132 }}>{tabLabel(tab.url)}</span>
+                {card.tabs.length > 1 ? (
+                  <span
+                    role="button"
+                    aria-label="Close tab"
+                    onClick={(event) => { event.stopPropagation(); closeTab(tab.id); }}
+                    style={{ fontSize: 9, lineHeight: 1, paddingLeft: 2, paddingRight: 2, opacity: 0.7, cursor: 'pointer' }}
+                    onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.opacity = '0.7'; }}
+                  >
+                    ✕
+                  </span>
+                ) : null}
+              </div>
+            );
+          })}
+          <button
+            type="button"
+            aria-label="New tab"
+            title="New tab"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={addTab}
+            style={{ borderWidth: 0, background: 'transparent', color: 'var(--cnv-ink-muted)', fontSize: 12, lineHeight: 1, paddingTop: 1, paddingBottom: 1, paddingLeft: 6, paddingRight: 6, cursor: 'pointer', fontFamily: FONT, flexShrink: 0 }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+          >
+            +
+          </button>
+        </div>
+
         {/* Selector readout — appears while picking / after a pick. */}
         {readout ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, paddingBottom: 4, paddingLeft: 12, paddingRight: 8, borderBottom: '1px solid var(--cnv-edge)' }}>
@@ -315,16 +414,23 @@ export function BrowserGlassCard({
           </div>
         ) : null}
 
-        {/* The page — solid paper behind the iframe, never glass-through. */}
+        {/* The page — solid paper behind the iframes, never glass-through.
+            Every tab stays mounted (display toggles) so scroll/form state
+            survives switching, like a real browser. */}
         <div style={{ height: card.h, position: 'relative', background: '#fff' }}>
-          <iframe
-            key={card.url}
-            ref={iframeRef}
-            src={card.url}
-            title={`Browser — ${card.url}`}
-            style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}
-            sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-          />
+          {card.tabs.map((tab) => (
+            <iframe
+              key={tab.id}
+              ref={(node) => {
+                if (node) iframeRefs.current.set(tab.id, node);
+                else iframeRefs.current.delete(tab.id);
+              }}
+              src={tab.url}
+              title={`Browser — ${tabLabel(tab.url)}`}
+              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, display: tab.id === card.activeTabId ? 'block' : 'none', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+            />
+          ))}
 
           {/* Corner resize grip. */}
           <div
