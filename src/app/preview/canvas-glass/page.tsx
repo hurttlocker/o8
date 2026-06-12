@@ -1,43 +1,37 @@
 'use client';
 
 /**
- * /preview/canvas-glass — the Canvas-mode material test page (#1232).
+ * /preview/canvas-glass — the Canvas-mode material + motion test page (#1232).
  *
- * Purpose: nail the glass BEFORE the real shell revamp. The full canvas
- * anatomy renders here, tunable live via the frost/tint/ink sliders +
- * material presets (top-right, same values as Settings → Operator
- * Defaults → Canvas mode):
+ * Purpose: nail the glass and the design language BEFORE the real shell
+ * revamp. Anatomy (all mock — no backend, no dispatch):
  *
  *   - top dock        → the important header controls (NOT Symon — Symon
- *                       lives in the macOS dock above everything)
- *   - left spawn dock → spawn objects onto the canvas (orchestrator,
- *                       browser, o8.md, terminal)
- *   - left/right edge → hover-reveal rails (sessions / activity feedback)
- *   - bottom input    → the orchestrator composer for the scoped repo
- *   - glass cards     → packet-objects; drag them, Enter in the composer
- *                       summons them
+ *                       lives in the macOS dock above everything) + the
+ *                       orchestrator-dock toggle
+ *   - left spawn dock → spawn component cards: orchestrator packet,
+ *                       browser, terminal, review/diff, o8.md notes
+ *   - left/right edge → hover-reveal rails (sessions / activity)
+ *   - bottom input    → the orchestrator composer for the scoped repo;
+ *                       first contact ALWAYS happens here
+ *   - right dock      → OPT-IN (a creator borrow): dock the
+ *                       conversation after you've talked, or open it to
+ *                       see every running orchestrator and switch lanes.
+ *                       Fades into the canvas — no hard panel.
+ *   - glass cards     → draggable component cards; drop an image anywhere
+ *                       and it piles "in the back" (desktop-on-desktop)
  *
- * In the o8 app the window swaps to the Popover vibrancy material
+ * In the o8 app the window swaps to the operator's chosen native material
  * (set_canvas_material) and the page paints NOTHING behind the glass —
- * the real desktop reads through, the Symon-settings clarity. In a plain
- * browser the diffusion backdrop stands in for the desktop.
- *
- * Empty canvas = the the reference-style stage (a creator reference): a pulsing
- * idle element with cycling hints; Enter in the composer runs the
- * summon transition and fans agent cards out in an arc. This is the
- * "orchestrator/Symon uses the canvas when nothing is there" motion.
- *
- * Everything here is a mock — no backend, no dispatch. Gated on the
- * experimentalCanvas operator flag like every canvas surface.
+ * the real desktop reads through ("Liquid" = raw transparent, sharpest).
+ * In a plain browser the diffusion backdrop stands in for the desktop.
+ * Gated on the experimentalCanvas operator flag like every canvas surface.
  */
 
-import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   CANVAS_GLASS_DEFAULTS,
-  CANVAS_GLASS_MATERIALS,
-  CANVAS_GLASS_PRESETS,
-  CANVAS_GLASS_RANGES,
   applyCanvasGlassSettings,
   readCanvasGlassSettings,
   writeCanvasGlassSettings,
@@ -45,58 +39,29 @@ import {
 } from '@/lib/canvas-mode/glass-settings';
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { isTauri, setCanvasMaterial } from '@/lib/tauri/bridge';
-
-const FONT = 'var(--font-sans-system)';
-
-/** The one glass recipe — every surface consumes the tunable vars. */
-function glass(deep = false): CSSProperties {
-  return {
-    background: deep ? 'var(--cnv-tint-deep)' : 'var(--cnv-tint)',
-    backdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
-    WebkitBackdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
-    border: '1px solid var(--cnv-edge)',
-    color: 'var(--cnv-ink)',
-    boxShadow: '0 12px 40px rgba(0, 0, 0, 0.35)',
-  } as CSSProperties;
-}
-
-interface MockCard {
-  id: number;
-  title: string;
-  meta: string;
-  tone: 'working' | 'waiting' | 'idle';
-  x: number;
-  y: number;
-  /** Entry-animation stagger (s) — set for arc fan-outs. */
-  entryDelay?: number;
-}
-
-const TONE_DOT: Record<MockCard['tone'], string> = {
-  working: '#22c55e',
-  waiting: '#f59e0b',
-  idle: 'rgba(255,255,255,0.4)',
-};
-
-const IDLE_HINTS = [
-  'The canvas is listening',
-  'Type below — Enter builds onto the canvas',
-  'Spawn from the left dock',
-  'Symon can drive this surface by voice',
-];
-
-type Stage = { kind: 'idle' } | { kind: 'summoning'; prompt: string };
+import { CanvasCard } from './cards';
+import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
+import { MOCK_LANES, OrchestratorDock } from './dock';
+import { CenterStage, type Stage } from './stage';
+import { TunerPanel } from './tuner';
+import { FONT, glass, type CardKind, type DockEntry, type MockCard, type NewDockEntry } from './ui';
 
 export default function CanvasGlassPreviewPage() {
   const canvasEnabled = useExperimentalCanvasFlag();
   const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
   const [cards, setCards] = useState<MockCard[]>([]);
+  const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
   const [leftRailOpen, setLeftRailOpen] = useState(false);
   const [rightRailOpen, setRightRailOpen] = useState(false);
   const [composerValue, setComposerValue] = useState('');
   const [inTauri, setInTauri] = useState(false);
   const [stage, setStage] = useState<Stage>({ kind: 'idle' });
+  const [dockOpen, setDockOpen] = useState(false);
+  const [activeLane, setActiveLane] = useState(MOCK_LANES[0].id);
+  const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
   const nextIdRef = useRef(1);
-  const summonTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const entryIdRef = useRef(1);
+  const timersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
 
   useEffect(() => {
     const stored = readCanvasGlassSettings();
@@ -110,9 +75,10 @@ export default function CanvasGlassPreviewPage() {
   useEffect(() => {
     if (!canvasEnabled) return;
     void setCanvasMaterial(readCanvasGlassSettings().material);
+    const timers = timersRef.current;
     return () => {
       void setCanvasMaterial('default');
-      if (summonTimerRef.current) clearTimeout(summonTimerRef.current);
+      for (const timer of timers) clearTimeout(timer);
     };
   }, [canvasEnabled]);
 
@@ -126,7 +92,11 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
-  const spawnCard = useCallback((title: string, meta: string, tone: MockCard['tone']) => {
+  const schedule = useCallback((fn: () => void, ms: number) => {
+    timersRef.current.push(setTimeout(fn, ms));
+  }, []);
+
+  const spawnCard = useCallback((kind: CardKind, title: string, meta: string, tone: MockCard['tone'], at?: { x: number; y: number }, src?: string) => {
     setCards((previous) => {
       const id = nextIdRef.current;
       nextIdRef.current += 1;
@@ -134,11 +104,13 @@ export default function CanvasGlassPreviewPage() {
       const row = Math.floor(previous.length / 3) % 3;
       return [...previous, {
         id,
+        kind,
         title,
         meta,
         tone,
-        x: 300 + column * 240 + (id % 5) * 8,
-        y: 160 + row * 120 + (id % 7) * 6,
+        x: at ? at.x : 300 + column * 250 + (id % 5) * 8,
+        y: at ? at.y : 150 + row * 130 + (id % 7) * 6,
+        src,
       }];
     });
   }, []);
@@ -146,7 +118,7 @@ export default function CanvasGlassPreviewPage() {
   /** The the reference transition — summon state, then agents fan out in an arc. */
   const summonArc = useCallback((prompt: string) => {
     setStage({ kind: 'summoning', prompt });
-    summonTimerRef.current = setTimeout(() => {
+    schedule(() => {
       setCards((previous) => {
         const width = typeof window !== 'undefined' ? window.innerWidth : 1280;
         const height = typeof window !== 'undefined' ? window.innerHeight : 800;
@@ -162,6 +134,7 @@ export default function CanvasGlassPreviewPage() {
           nextIdRef.current += 1;
           return {
             id,
+            kind: 'packet' as const,
             title: slot.title.slice(0, 46),
             meta: slot.meta,
             tone: slot.tone,
@@ -174,11 +147,74 @@ export default function CanvasGlassPreviewPage() {
       });
       setStage({ kind: 'idle' });
     }, 1300);
+  }, [schedule]);
+
+  const appendEntries = useCallback((lane: string, entries: NewDockEntry[]) => {
+    setConvos((previous) => {
+      const next: DockEntry[] = entries.map((entry) => {
+        const id = entryIdRef.current;
+        entryIdRef.current += 1;
+        return { ...entry, id };
+      });
+      return { ...previous, [lane]: [...(previous[lane] ?? []).filter((e) => e.role !== 'followups'), ...next] };
+    });
   }, []);
+
+  const resolveStatus = useCallback((lane: string, text: string) => {
+    setConvos((previous) => ({
+      ...previous,
+      [lane]: (previous[lane] ?? []).map((entry) => (
+        entry.role === 'status' && entry.pending ? { ...entry, pending: false, text } : entry
+      )),
+    }));
+  }, []);
+
+  const submit = useCallback(() => {
+    const prompt = composerValue.trim().slice(0, 42);
+    if (!prompt || stage.kind === 'summoning') return;
+    const lane = activeLane;
+    appendEntries(lane, [
+      { role: 'user', text: prompt },
+      { role: 'status', text: 'Summoning the fleet', pending: true },
+    ]);
+    const empty = cards.length === 0;
+    if (empty) {
+      summonArc(prompt);
+    } else {
+      spawnCard('packet', prompt, 'o8 · codex · dispatched', 'working');
+    }
+    const explanation = `Dispatched a Plan / Build / Review lane for “${prompt}”. The builder runs in an isolated worktree; the review gate holds before anything touches main.`;
+    schedule(() => {
+      resolveStatus(lane, 'Fleet dispatched');
+      appendEntries(lane, [
+        { role: 'result', title: prompt, meta: 'o8 · codex · dispatched' },
+        { role: 'text', text: explanation },
+      ]);
+      schedule(() => {
+        appendEntries(lane, [{ role: 'followups' }]);
+      }, explanation.split(' ').length * 38 + 350);
+    }, empty ? 1350 : 700);
+    setComposerValue('');
+  }, [activeLane, appendEntries, cards.length, composerValue, resolveStatus, schedule, spawnCard, stage.kind, summonArc]);
 
   const moveCard = useCallback((id: number, x: number, y: number) => {
     setCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
+
+  const dropImages = useCallback((event: React.DragEvent) => {
+    event.preventDefault();
+    const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => file.type.startsWith('image/'));
+    files.forEach((file, index) => {
+      spawnCard(
+        'image',
+        file.name,
+        `${Math.round(file.size / 1024)} KB`,
+        'idle',
+        { x: Math.max(8, event.clientX - 100 + index * 26), y: Math.max(64, event.clientY - 60 + index * 26) },
+        URL.createObjectURL(file),
+      );
+    });
+  }, [spawnCard]);
 
   if (!canvasEnabled) {
     return (
@@ -193,16 +229,33 @@ export default function CanvasGlassPreviewPage() {
   }
 
   const summoning = stage.kind === 'summoning';
+  const activeConvo = convos[activeLane] ?? [];
+  const hasTalked = Object.values(convos).some((entries) => entries.length > 0);
 
   return (
-    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: FONT, background: inTauri ? 'transparent' : '#07090d', userSelect: 'none' }}>
+    <div
+      onDragOver={(event) => { event.preventDefault(); }}
+      onDrop={dropImages}
+      style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: FONT, background: inTauri ? 'transparent' : '#07090d', userSelect: 'none' }}
+    >
       {/* In the app the desktop IS the backdrop (native material). The
           diffusion only stands in where there is no desktop to show. */}
       {inTauri ? null : <DiffusionBackdrop />}
 
-      {/* Window-wide veil — the continuous darkness control for the
-          background itself, painted over the native material. */}
-      <div aria-hidden style={{ position: 'absolute', inset: 0, background: 'var(--cnv-bg-veil)', pointerEvents: 'none', zIndex: 1 }} />
+      {/* Window-wide veil + the canvas dot grid — the continuous darkness
+          control for the background itself, painted over the material. */}
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          inset: 0,
+          background: 'var(--cnv-bg-veil)',
+          backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.055) 1px, transparent 1.4px)',
+          backgroundSize: '26px 26px',
+          pointerEvents: 'none',
+          zIndex: 1,
+        }}
+      />
 
       {/* ── the reference stage — owns the canvas while it is empty ───────── */}
       <AnimatePresence mode="wait">
@@ -211,9 +264,9 @@ export default function CanvasGlassPreviewPage() {
         ) : null}
       </AnimatePresence>
 
-      {/* ── Glass cards (packet-objects) ─────────────────────────── */}
+      {/* ── Component cards ──────────────────────────────────────── */}
       {cards.map((card) => (
-        <PacketGlassCard key={card.id} card={card} onMove={moveCard} />
+        <CanvasCard key={card.id} card={card} selected={selectedCardId === card.id} onMove={moveCard} onSelect={setSelectedCardId} />
       ))}
 
       {/* ── Top dock — the important header controls ─────────────── */}
@@ -230,6 +283,7 @@ export default function CanvasGlassPreviewPage() {
           paddingLeft: 16,
           paddingRight: 10,
           borderRadius: 20,
+          zIndex: 4,
           ...glass(true),
         }}
       >
@@ -239,7 +293,13 @@ export default function CanvasGlassPreviewPage() {
         <span style={{ width: 1, height: 16, background: 'var(--cnv-edge)' }} />
         <DockGlyphButton label="Agents" path="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" extra={<circle cx="9" cy="7" r="4" />} />
         <DockGlyphButton label="Alerts" path="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" />
-        <DockGlyphButton label="Settings" path="M12 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6z" extra={<path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />} />
+        <DockGlyphButton
+          label="Orchestrators"
+          active={dockOpen}
+          onClick={() => setDockOpen((value) => !value)}
+          path="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
+          extra={<path d="M15 3v18" />}
+        />
         <span style={{ width: 1, height: 16, background: 'var(--cnv-edge)' }} />
         <button
           type="button"
@@ -269,7 +329,7 @@ export default function CanvasGlassPreviewPage() {
         </button>
       </div>
 
-      {/* ── Left spawn dock ──────────────────────────────────────── */}
+      {/* ── Left spawn dock — the component vocabulary ───────────── */}
       <div
         style={{
           position: 'absolute',
@@ -285,20 +345,24 @@ export default function CanvasGlassPreviewPage() {
           paddingLeft: 6,
           paddingRight: 6,
           borderRadius: 16,
+          zIndex: 4,
           ...glass(true),
         }}
       >
-        <SpawnGlyphButton label="Spawn orchestrator" onClick={() => spawnCard('Orchestrator · o8', 'fleet · ready', 'idle')}>
+        <SpawnGlyphButton label="Spawn orchestrator" onClick={() => spawnCard('packet', 'Orchestrator · o8', 'fleet · ready', 'idle')}>
           <circle cx="12" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M12 8v4M12 12l-6 4M12 12l6 4" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton label="Spawn browser" onClick={() => spawnCard('Browser', 'localhost:3001', 'idle')}>
+        <SpawnGlyphButton label="Spawn browser" onClick={() => spawnCard('browser', 'Browser', 'localhost:3001', 'idle')}>
           <circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton label="Spawn o8.md notes" onClick={() => spawnCard('o8.md · o8', 'workspace notes', 'idle')}>
-          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
-        </SpawnGlyphButton>
-        <SpawnGlyphButton label="Spawn terminal" onClick={() => spawnCard('Terminal', 'zsh · ~/o8', 'idle')}>
+        <SpawnGlyphButton label="Spawn terminal" onClick={() => spawnCard('terminal', 'zsh · ~/o8', 'agent terminal', 'working')}>
           <path d="m4 17 6-6-6-6" /><line x1="12" x2="20" y1="19" y2="19" />
+        </SpawnGlyphButton>
+        <SpawnGlyphButton label="Spawn review" onClick={() => spawnCard('review', 'Review — pending diff', '2 files · +14 −3', 'waiting')}>
+          <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect width="8" height="4" x="8" y="2" rx="1" /><path d="m9 14 2 2 4-4" />
+        </SpawnGlyphButton>
+        <SpawnGlyphButton label="Spawn o8.md notes" onClick={() => spawnCard('packet', 'o8.md · o8', 'workspace notes', 'idle')}>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
         </SpawnGlyphButton>
       </div>
 
@@ -314,19 +378,74 @@ export default function CanvasGlassPreviewPage() {
           ['Fleet canvas v1', 'merged · 1h ago'],
         ]}
       />
-      <EdgeRail
-        side="right"
-        open={rightRailOpen}
-        onOpenChange={setRightRailOpen}
-        title="Activity"
-        rows={[
-          ['0.1.354 shipped', 'release · just now'],
-          ['feat(canvas): v2 glass slice', 'main · 10m ago'],
-          ['fix(workspace): tab persistence', 'main · 1h ago'],
-        ]}
-      />
+      {dockOpen ? null : (
+        <EdgeRail
+          side="right"
+          open={rightRailOpen}
+          onOpenChange={setRightRailOpen}
+          title="Activity"
+          rows={[
+            ['0.1.356 shipped', 'release · just now'],
+            ['feat(canvas): background controls', 'main · 10m ago'],
+            ['feat(canvas): v2 glass slice', 'main · 1h ago'],
+          ]}
+        />
+      )}
 
-      {/* ── Bottom orchestrator input ────────────────────────────── */}
+      {/* ── The docked orchestrator (opt-in, a creator borrow) ── */}
+      <AnimatePresence>
+        {dockOpen ? (
+          <OrchestratorDock
+            entries={activeConvo}
+            activeLane={activeLane}
+            onSelectLane={setActiveLane}
+            onClose={() => setDockOpen(false)}
+          />
+        ) : null}
+      </AnimatePresence>
+
+      {/* Dock affordance — appears once you have talked, until docked. */}
+      <AnimatePresence>
+        {hasTalked && !dockOpen ? (
+          <motion.button
+            type="button"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.35, ease: 'easeOut' }}
+            onClick={() => setDockOpen(true)}
+            style={{
+              position: 'absolute',
+              bottom: 86,
+              right: 24,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7,
+              paddingTop: 6,
+              paddingBottom: 6,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 999,
+              cursor: 'pointer',
+              zIndex: 4,
+              fontSize: 10.5,
+              fontWeight: 300,
+              color: 'var(--cnv-ink-muted)',
+              fontFamily: FONT,
+              ...glass(true),
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+          >
+            Dock orchestrator
+            <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M15 3v18" />
+            </svg>
+          </motion.button>
+        ) : null}
+      </AnimatePresence>
+
+      {/* ── Bottom orchestrator input — first contact lives here ─── */}
       <div
         style={{
           position: 'absolute',
@@ -341,6 +460,7 @@ export default function CanvasGlassPreviewPage() {
           paddingLeft: 18,
           paddingRight: 12,
           borderRadius: 24,
+          zIndex: 4,
           ...glass(true),
         }}
       >
@@ -348,17 +468,9 @@ export default function CanvasGlassPreviewPage() {
           value={composerValue}
           onChange={(event) => setComposerValue(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && composerValue.trim() && !summoning) {
-              const prompt = composerValue.trim().slice(0, 42);
-              if (cards.length === 0) {
-                summonArc(prompt);
-              } else {
-                spawnCard(prompt, 'o8 · codex · dispatched', 'working');
-              }
-              setComposerValue('');
-            }
+            if (event.key === 'Enter') submit();
           }}
-          placeholder="Message the orchestrator · o8"
+          placeholder={`Message the orchestrator · ${activeLane}`}
           aria-label="Orchestrator composer (mock)"
           style={{
             flex: 1,
@@ -380,534 +492,7 @@ export default function CanvasGlassPreviewPage() {
         </svg>
       </div>
 
-      <TunerPanel settings={settings} onChange={updateSettings} inTauri={inTauri} />
-    </div>
-  );
-}
-
-/** The the reference-borrow center stage: a pulsing idle element with cycling hints,
- *  morphing into an orbiting summon spinner while the fleet materialises. */
-function CenterStage({ stage }: { stage: Stage }) {
-  return (
-    <motion.div
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 1.06 }}
-      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
-      style={{
-        position: 'absolute',
-        left: '50%',
-        top: '38%',
-        transform: 'translate(-50%, -50%)',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 22,
-        pointerEvents: 'none',
-        zIndex: 2,
-      }}
-    >
-      {stage.kind === 'summoning' ? <SummonRings /> : <IdlePulse />}
-      {stage.kind === 'summoning' ? (
-        <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
-          Summoning — {stage.prompt}
-        </span>
-      ) : (
-        <CyclingHint />
-      )}
-    </motion.div>
-  );
-}
-
-function IdlePulse() {
-  return (
-    <div style={{ position: 'relative', width: 84, height: 84, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <motion.span
-        aria-hidden
-        animate={{ scale: [1, 1.16, 1], opacity: [0.4, 0.75, 0.4] }}
-        transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
-        style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '1px solid var(--cnv-edge)', background: 'var(--cnv-tint)' }}
-      />
-      <motion.span
-        aria-hidden
-        animate={{ scale: [1, 1.08, 1], opacity: [0.7, 1, 0.7] }}
-        transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut', delay: 0.35 }}
-        style={{ position: 'absolute', inset: 18, borderRadius: '50%', border: '1px solid var(--cnv-edge)' }}
-      />
-      <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--cnv-ink)' }} />
-    </div>
-  );
-}
-
-function SummonRings() {
-  return (
-    <div style={{ position: 'relative', width: 84, height: 84, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <motion.span
-        aria-hidden
-        animate={{ rotate: 360 }}
-        transition={{ duration: 2.2, repeat: Infinity, ease: 'linear' }}
-        style={{ position: 'absolute', inset: 6, borderRadius: '50%', border: '1px solid transparent', borderTopColor: 'var(--cnv-ink)', borderRightColor: 'var(--cnv-edge)' }}
-      />
-      <motion.span
-        aria-hidden
-        animate={{ rotate: -360 }}
-        transition={{ duration: 3.4, repeat: Infinity, ease: 'linear' }}
-        style={{ position: 'absolute', inset: 20, borderRadius: '50%', border: '1px solid transparent', borderBottomColor: 'var(--cnv-ink-muted)', borderLeftColor: 'var(--cnv-edge)' }}
-      />
-      <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--cnv-ink)' }} />
-    </div>
-  );
-}
-
-function CyclingHint() {
-  const [index, setIndex] = useState(0);
-  useEffect(() => {
-    const timer = setInterval(() => {
-      setIndex((value) => (value + 1) % IDLE_HINTS.length);
-    }, 4000);
-    return () => clearInterval(timer);
-  }, []);
-  return (
-    <div style={{ height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-      <AnimatePresence mode="wait">
-        <motion.span
-          key={index}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.45, ease: 'easeOut' }}
-          style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', fontFamily: FONT, whiteSpace: 'nowrap' }}
-        >
-          {IDLE_HINTS[index]}
-        </motion.span>
-      </AnimatePresence>
-    </div>
-  );
-}
-
-/** Slow drifting colour fields — the diffusion behind the glass. Browser-only
- *  stand-in for the real desktop that the app's Popover material shows. */
-function DiffusionBackdrop() {
-  const blobs: Array<{ size: number; color: string; from: { x: string; y: string }; to: { x: string; y: string }; duration: number }> = [
-    { size: 560, color: 'rgba(58, 96, 255, 0.32)', from: { x: '-6%', y: '8%' }, to: { x: '14%', y: '26%' }, duration: 46 },
-    { size: 640, color: 'rgba(255, 122, 60, 0.20)', from: { x: '68%', y: '58%' }, to: { x: '52%', y: '40%' }, duration: 58 },
-    { size: 480, color: 'rgba(160, 84, 255, 0.22)', from: { x: '38%', y: '-12%' }, to: { x: '54%', y: '4%' }, duration: 52 },
-    { size: 520, color: 'rgba(34, 197, 94, 0.12)', from: { x: '10%', y: '70%' }, to: { x: '26%', y: '56%' }, duration: 64 },
-  ];
-  return (
-    <div aria-hidden style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}>
-      {blobs.map((blob, index) => (
-        <motion.div
-          key={index}
-          animate={{ left: [blob.from.x, blob.to.x, blob.from.x], top: [blob.from.y, blob.to.y, blob.from.y] }}
-          transition={{ duration: blob.duration, repeat: Infinity, ease: 'easeInOut' }}
-          style={{
-            position: 'absolute',
-            width: blob.size,
-            height: blob.size,
-            borderRadius: '50%',
-            background: `radial-gradient(circle, ${blob.color} 0%, transparent 70%)`,
-            filter: 'blur(40px)',
-          }}
-        />
-      ))}
-    </div>
-  );
-}
-
-function PacketGlassCard({ card, onMove }: { card: MockCard; onMove: (id: number, x: number, y: number) => void }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const working = card.tone === 'working';
-  return (
-    <motion.div
-      initial={{ scale: 0.62, opacity: 0, y: 26 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      transition={{ type: 'spring', stiffness: 380, damping: 28, delay: card.entryDelay ?? 0 }}
-      onPointerDown={(event) => {
-        if (event.button !== 0) return;
-        event.currentTarget.setPointerCapture(event.pointerId);
-        dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y };
-      }}
-      onPointerMove={(event) => {
-        const drag = dragRef.current;
-        if (!drag || drag.pointerId !== event.pointerId) return;
-        onMove(card.id, Math.max(4, drag.originX + event.clientX - drag.startX), Math.max(4, drag.originY + event.clientY - drag.startY));
-      }}
-      onPointerUp={() => { dragRef.current = null; }}
-      style={{
-        position: 'absolute',
-        left: card.x,
-        top: card.y,
-        width: 210,
-        borderRadius: 14,
-        cursor: 'grab',
-        touchAction: 'none',
-        zIndex: 3,
-      }}
-    >
-      <motion.div
-        animate={working ? { scale: [1, 1.015, 1], opacity: [1, 0.93, 1] } : { scale: 1, opacity: 1 }}
-        transition={working ? { duration: 3.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 5,
-          paddingTop: 11,
-          paddingRight: 13,
-          paddingBottom: 11,
-          paddingLeft: 13,
-          borderRadius: 14,
-          ...glass(),
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-          <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: TONE_DOT[card.tone] }} />
-          <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {card.title}
-          </span>
-        </div>
-        <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', letterSpacing: '0.01em' }}>
-          {card.meta}
-        </span>
-      </motion.div>
-    </motion.div>
-  );
-}
-
-function EdgeRail({
-  side,
-  open,
-  onOpenChange,
-  title,
-  rows,
-}: {
-  side: 'left' | 'right';
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  title: string;
-  rows: Array<[string, string]>;
-}) {
-  const zoneRef = useRef<HTMLDivElement | null>(null);
-  const railRef = useRef<HTMLDivElement | null>(null);
-  // Close only when the pointer truly leaves the zone+rail union — the rail
-  // sits flush against the strip so travel between them never drops out.
-  const closeUnlessWithin = (event: ReactMouseEvent) => {
-    const next = event.relatedTarget;
-    if (next instanceof Node && (zoneRef.current?.contains(next) || railRef.current?.contains(next))) return;
-    onOpenChange(false);
-  };
-  return (
-    <>
-      {/* Hot zone — an 18px strip on the screen edge reveals the rail. */}
-      <div
-        ref={zoneRef}
-        onMouseEnter={() => onOpenChange(true)}
-        onMouseLeave={closeUnlessWithin}
-        style={{
-          position: 'absolute',
-          top: 80,
-          bottom: 96,
-          width: 18,
-          ...(side === 'left' ? { left: 0 } : { right: 0 }),
-          zIndex: 5,
-        }}
-      />
-      <motion.div
-        ref={railRef}
-        onMouseLeave={closeUnlessWithin}
-        initial={false}
-        animate={{
-          x: open ? 0 : side === 'left' ? -252 : 252,
-          opacity: open ? 1 : 0,
-        }}
-        transition={{ type: 'spring', stiffness: 400, damping: 34 }}
-        style={{
-          position: 'absolute',
-          top: 96,
-          ...(side === 'left' ? { left: 18 } : { right: 18 }),
-          width: 236,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 2,
-          paddingTop: 12,
-          paddingRight: 12,
-          paddingBottom: 12,
-          paddingLeft: 12,
-          borderRadius: 14,
-          zIndex: 6,
-          pointerEvents: open ? 'auto' : 'none',
-          ...glass(true),
-        }}
-      >
-        <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', marginBottom: 6 }}>
-          {title}
-        </span>
-        {rows.map(([primary, secondary]) => (
-          <div key={primary} style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingTop: 5, paddingBottom: 5 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {primary}
-            </span>
-            <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>{secondary}</span>
-          </div>
-        ))}
-      </motion.div>
-    </>
-  );
-}
-
-function DockGlyphButton({ label, path, extra }: { label: string; path: string; extra?: ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 26,
-        height: 26,
-        borderWidth: 0,
-        borderRadius: 13,
-        background: 'transparent',
-        color: 'var(--cnv-ink-muted)',
-        cursor: 'pointer',
-        padding: 0,
-      }}
-      onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-      onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-    >
-      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <path d={path} />
-        {extra}
-      </svg>
-    </button>
-  );
-}
-
-function SpawnGlyphButton({ label, onClick, children }: { label: string; onClick: () => void; children: ReactNode }) {
-  return (
-    <button
-      type="button"
-      aria-label={label}
-      title={label}
-      onClick={onClick}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        width: 34,
-        height: 34,
-        borderWidth: 0,
-        borderRadius: 11,
-        background: 'transparent',
-        color: 'var(--cnv-ink-muted)',
-        cursor: 'pointer',
-        padding: 0,
-        transition: 'background 120ms',
-      }}
-      onMouseEnter={(event) => {
-        event.currentTarget.style.color = 'var(--cnv-ink)';
-        event.currentTarget.style.background = 'rgba(255,255,255,0.08)';
-      }}
-      onMouseLeave={(event) => {
-        event.currentTarget.style.color = 'var(--cnv-ink-muted)';
-        event.currentTarget.style.background = 'transparent';
-      }}
-    >
-      <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        {children}
-      </svg>
-    </button>
-  );
-}
-
-function TunerPanel({ settings, onChange, inTauri }: { settings: CanvasGlassSettings; onChange: (patch: Partial<CanvasGlassSettings>) => void; inTauri: boolean }) {
-  const [collapsed, setCollapsed] = useState(false);
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        top: 18,
-        right: 16,
-        width: collapsed ? undefined : 224,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-        paddingTop: 10,
-        paddingRight: 12,
-        paddingBottom: 12,
-        paddingLeft: 12,
-        borderRadius: 14,
-        zIndex: 8,
-        ...glass(true),
-      }}
-    >
-      <button
-        type="button"
-        onClick={() => setCollapsed((value) => !value)}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: 12,
-          borderWidth: 0,
-          background: 'transparent',
-          padding: 0,
-          color: 'var(--cnv-ink)',
-          fontSize: 11,
-          fontWeight: 500,
-          letterSpacing: '0.06em',
-          textTransform: 'uppercase',
-          cursor: 'pointer',
-          fontFamily: FONT,
-        }}
-      >
-        Glass tuner
-        <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--cnv-ink-muted)' }}>{collapsed ? 'show' : 'hide'}</span>
-      </button>
-      {collapsed ? null : (
-        <>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
-            {CANVAS_GLASS_PRESETS.map((preset) => {
-              const active = settings.frost === preset.values.frost
-                && settings.tint === preset.values.tint
-                && settings.ink === preset.values.ink
-                && settings.veil === preset.values.veil
-                && settings.material === preset.values.material;
-              return (
-                <button
-                  key={preset.id}
-                  type="button"
-                  onClick={() => onChange({ ...preset.values })}
-                  style={{
-                    flex: 1,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: active ? 'var(--cnv-ink-muted)' : 'var(--cnv-edge)',
-                    background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
-                    borderRadius: 999,
-                    paddingTop: 3,
-                    paddingBottom: 3,
-                    fontSize: 10.5,
-                    fontWeight: active ? 500 : 300,
-                    color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
-                    cursor: 'pointer',
-                    fontFamily: FONT,
-                  }}
-                >
-                  {preset.label}
-                </button>
-              );
-            })}
-          </div>
-          <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
-            Background
-          </span>
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4 }}>
-            {CANVAS_GLASS_MATERIALS.map((material) => {
-              const active = settings.material === material.id;
-              return (
-                <button
-                  key={material.id}
-                  type="button"
-                  onClick={() => onChange({ material: material.id })}
-                  title={material.label}
-                  style={{
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: active ? 'var(--cnv-ink-muted)' : 'var(--cnv-edge)',
-                    background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
-                    borderRadius: 7,
-                    paddingTop: 4,
-                    paddingBottom: 4,
-                    paddingLeft: 2,
-                    paddingRight: 2,
-                    fontSize: 9,
-                    fontWeight: active ? 500 : 300,
-                    color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
-                    cursor: 'pointer',
-                    fontFamily: FONT,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  {material.label}
-                </button>
-              );
-            })}
-          </div>
-          <TunerSlider label="Veil" display={`${Math.round(settings.veil * 100)}%`} value={settings.veil} range={CANVAS_GLASS_RANGES.veil} onChange={(veil) => onChange({ veil })} />
-          <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
-            Glass panes
-          </span>
-          <TunerSlider label="Frost" display={`${Math.round(settings.frost)}px`} value={settings.frost} range={CANVAS_GLASS_RANGES.frost} onChange={(frost) => onChange({ frost })} />
-          <TunerSlider label="Tint" display={`${Math.round(settings.tint * 100)}%`} value={settings.tint} range={CANVAS_GLASS_RANGES.tint} onChange={(tint) => onChange({ tint })} />
-          <TunerSlider label="Ink" display={`${Math.round(settings.ink * 100)}%`} value={settings.ink} range={CANVAS_GLASS_RANGES.ink} onChange={(ink) => onChange({ ink })} />
-          <TunerSlider label="Vibrance" display={`${Math.round(settings.vibrance * 100)}%`} value={settings.vibrance} range={CANVAS_GLASS_RANGES.vibrance} onChange={(vibrance) => onChange({ vibrance })} />
-          <button
-            type="button"
-            onClick={() => onChange({ ...CANVAS_GLASS_DEFAULTS })}
-            style={{
-              alignSelf: 'flex-start',
-              borderWidth: 0,
-              background: 'transparent',
-              padding: 0,
-              fontSize: 10.5,
-              fontWeight: 300,
-              color: 'var(--cnv-ink-muted)',
-              cursor: 'pointer',
-              fontFamily: FONT,
-            }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            Reset defaults
-          </button>
-          {inTauri ? null : (
-            <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.5 }}>
-              Open in the o8 app to see your desktop through the glass.
-            </span>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-function TunerSlider({
-  label,
-  display,
-  value,
-  range,
-  onChange,
-}: {
-  label: string;
-  display: string;
-  value: number;
-  range: { min: number; max: number; step: number };
-  onChange: (value: number) => void;
-}) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 3 }}>
-      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
-        <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink)' }}>{label}</span>
-        <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontVariantNumeric: 'tabular-nums' }}>{display}</span>
-      </div>
-      <input
-        type="range"
-        aria-label={`Canvas glass ${label.toLowerCase()}`}
-        min={range.min}
-        max={range.max}
-        step={range.step}
-        value={value}
-        onChange={(event) => {
-          const next = Number.parseFloat(event.target.value);
-          if (Number.isFinite(next)) onChange(next);
-        }}
-        style={{ width: '100%', accentColor: '#f59e0b', cursor: 'pointer' }}
-      />
+      <TunerPanel settings={settings} onChange={updateSettings} inTauri={inTauri} right={dockOpen ? 348 : 16} />
     </div>
   );
 }

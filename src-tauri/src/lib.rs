@@ -3321,6 +3321,15 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
         let target = window.clone();
         window
             .run_on_main_thread(move || {
+                // apply_vibrancy stacks a new effect view per call — always clear first.
+                let _ = window_vibrancy::clear_vibrancy(&target);
+                // "none" = NO effect view at all: the window is raw transparent and
+                // the desktop reads through perfectly sharp — the liquid-clear look.
+                // macOS material blur amounts are fixed recipes, so true clarity
+                // tuning is material choice; this is the clear extreme.
+                if material == "none" {
+                    return;
+                }
                 let resolved = match material.as_str() {
                     "popover" => M::Popover,
                     "sidebar" => M::Sidebar,
@@ -3339,8 +3348,6 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
                 } else {
                     Some(window_vibrancy::NSVisualEffectState::Active)
                 };
-                // apply_vibrancy stacks a new effect view per call — always clear first.
-                let _ = window_vibrancy::clear_vibrancy(&target);
                 if let Err(e) = window_vibrancy::apply_vibrancy(&target, resolved, state, None) {
                     log::warn!("[canvas-material] apply_vibrancy failed: {e}");
                 }
