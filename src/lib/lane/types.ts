@@ -189,7 +189,10 @@ export type LaneEventVerb =
   | 'typecheck_escalation'
   // Worker consulted the Engineering Brain via `o8 ask` (2026-06-11).
   // Payload: { question, class, cacheHit, sourcesConsidered, citedCount, topTitles }
-  | 'brain_consulted';
+  | 'brain_consulted'
+  // Agent drove o8's embedded browser via `o8 browser` / o8_browser_* (#1232 phase 1).
+  // Payload: { verb, selector?, surface?, ok, url? }
+  | 'browser_acted';
 
 export type AgentReportReason =
   | 'needs_clarification'

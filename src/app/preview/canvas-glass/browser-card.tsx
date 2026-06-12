@@ -15,6 +15,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
+import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
 import { canvasZoom, FONT, TERM_MIN_H, TERM_MIN_W, glass } from './ui';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -122,9 +123,29 @@ export function BrowserGlassCard({
   const pickerCleanupRef = useRef<(() => void) | null>(null);
   /** Set when arming required a proxy reload — re-arms once the load lands. */
   const pendingArmRef = useRef(false);
+  /** Agent-driving glow — pulses when an agent verb lands on this surface. */
+  const [agentGlow, setAgentGlow] = useState(false);
 
   // Switching tabs (or a navigate landing) re-seeds the URL bar.
   useEffect(() => { setUrlDraft(fromProxyUrl(activeUrl)); }, [activeUrl]);
+
+  // The agent verbs (o8_browser_* / `o8 browser`) drive these iframes.
+  useEffect(() => {
+    installBrowserAgent();
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onPulse = (event: Event) => {
+      const surface = (event as CustomEvent<{ surface?: string | null }>).detail?.surface;
+      if (surface && surface !== 'canvas') return;
+      setAgentGlow(true);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setAgentGlow(false), 1300);
+    };
+    window.addEventListener('o8:browser-agent-pulse', onPulse);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('o8:browser-agent-pulse', onPulse);
+    };
+  }, []);
 
   const navigate = (url: string) => {
     onTabsChange(card.id, card.tabs.map((tab) => (tab.id === card.activeTabId ? { ...tab, url } : tab)), card.activeTabId);
@@ -249,7 +270,12 @@ export function BrowserGlassCard({
       <SmoothCorners
         corners={{ radius: 14 }}
         shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', ...glass(true) }}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          ...glass(true),
+          ...(agentGlow ? { boxShadow: '0 0 0 1.5px rgba(245,158,11,0.75), 0 12px 40px rgba(0, 0, 0, 0.35)' } : {}),
+        }}
       >
         {/* Title bar — drag handle + URL bar. */}
         <div
@@ -463,6 +489,8 @@ export function BrowserGlassCard({
                 pendingArmRef.current = false;
                 armPicker();
               }}
+              data-o8-browser="canvas"
+              data-o8-active={tab.id === card.activeTabId ? 'true' : 'false'}
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, display: tab.id === card.activeTabId ? 'block' : 'none', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />

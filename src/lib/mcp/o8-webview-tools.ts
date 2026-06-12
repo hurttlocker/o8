@@ -496,7 +496,82 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
       required: ['selector'],
     },
   },
+  // ── o8_browser_* — drive the page INSIDE o8's embedded browser ──
+  // (canvas browser cards / the Browser tab), not the o8 UI itself.
+  // Same-origin pages only, which with the picker proxies means any
+  // localhost page. Actions paint a ghost cursor so the operator sees
+  // the agent working.
+  {
+    name: 'o8_browser_read',
+    description: "Read the page INSIDE o8's embedded browser (canvas browser card or Browser tab): returns { url, title, text, interactive } where interactive lists clickable/typable elements with CSS selectors — the vocabulary for o8_browser_click / o8_browser_type. Use this FIRST to see the page before acting. Localhost pages only (cross-origin pages return an error envelope).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        surface: { type: 'string', enum: ['canvas', 'panel'], description: "Which browser surface — 'canvas' (browser cards) or 'panel' (Browser tab). Omit to use the most recently active." },
+        selector: { type: 'string', description: 'Optional CSS selector — read only this subtree.' },
+        maxChars: { type: 'number', description: 'Text cap (default 6000, max 14000).' },
+      },
+    },
+  },
+  {
+    name: 'o8_browser_click',
+    description: "Click an element INSIDE o8's embedded browser by CSS selector (from o8_browser_read's interactive list or the element picker). Fires the full pointer/mouse sequence so React apps respond, and paints a ghost cursor + ripple the operator can see.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector of the element to click.' },
+        surface: { type: 'string', enum: ['canvas', 'panel'], description: 'Which browser surface. Omit for the most recently active.' },
+      },
+      required: ['selector'],
+    },
+  },
+  {
+    name: 'o8_browser_type',
+    description: "Type into an input/textarea INSIDE o8's embedded browser by CSS selector. Uses the native value setter + input/change events so controlled (React) inputs accept it. Set submit:true to press Enter / submit the form after.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector of the input or textarea.' },
+        text: { type: 'string', description: 'Text to type.' },
+        submit: { type: 'boolean', description: 'Press Enter / requestSubmit after typing.' },
+        surface: { type: 'string', enum: ['canvas', 'panel'], description: 'Which browser surface. Omit for the most recently active.' },
+      },
+      required: ['selector', 'text'],
+    },
+  },
+  {
+    name: 'o8_browser_wait',
+    description: "Poll the page INSIDE o8's embedded browser until a CSS selector resolves (optionally with a text substring) — the settle gate between o8_browser_click and o8_browser_read.",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector to wait for inside the framed page.' },
+        text: { type: 'string', description: 'Optional substring the element must contain.' },
+        timeoutMs: { type: 'number', description: 'Max wait in milliseconds (default 10000, capped at 25000).' },
+        surface: { type: 'string', enum: ['canvas', 'panel'], description: 'Which browser surface. Omit for the most recently active.' },
+      },
+      required: ['selector'],
+    },
+  },
 ];
+
+/** Eval snippet calling one in-page browser-agent verb; returns a JSON string. */
+export function browserAgentEval(verb: 'read' | 'click' | 'type' | 'probe', args: Record<string, unknown>): string {
+  return `(() => {
+    const agent = window.__o8BrowserAgent;
+    if (!agent) return JSON.stringify({ ok: false, error: 'browser agent not installed — open a browser card (canvas) or the Browser tab first' });
+    try { return JSON.stringify(agent.${verb}(${JSON.stringify(args)})); }
+    catch (err) { return JSON.stringify({ ok: false, error: String((err && err.message) || err) }); }
+  })()`;
+}
+
+function parseAgentResult(raw: string): McpToolResult {
+  try {
+    return jsonResult(JSON.parse(raw));
+  } catch {
+    return textResult(raw);
+  }
+}
 
 export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): Record<string, ToolHandler> {
   return {
@@ -589,6 +664,57 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
       const timeoutMs = parseOptionalNumber(args.timeoutMs);
       const result = await getClient().waitFor({ selector, text, timeoutMs });
       return jsonResult(result);
+    }),
+
+    o8_browser_read: async (args) => withStructuredErrors(async () => {
+      const agentArgs: Record<string, unknown> = {};
+      if (args.surface === 'canvas' || args.surface === 'panel') agentArgs.surface = args.surface;
+      if (typeof args.selector === 'string' && args.selector) agentArgs.selector = args.selector;
+      const maxChars = parseOptionalNumber(args.maxChars);
+      if (maxChars) agentArgs.maxChars = maxChars;
+      const result = await getClient().evalJs(browserAgentEval('read', agentArgs));
+      return capText(result.result, READ_RESULT_BYTE_CAP);
+    }),
+
+    o8_browser_click: async (args) => withStructuredErrors(async () => {
+      const agentArgs: Record<string, unknown> = { selector: requiredString(args, 'selector') };
+      if (args.surface === 'canvas' || args.surface === 'panel') agentArgs.surface = args.surface;
+      const result = await getClient().evalJs(browserAgentEval('click', agentArgs));
+      return parseAgentResult(result.result);
+    }),
+
+    o8_browser_type: async (args) => withStructuredErrors(async () => {
+      const agentArgs: Record<string, unknown> = {
+        selector: requiredString(args, 'selector'),
+        text: requiredString(args, 'text'),
+      };
+      if (args.submit === true) agentArgs.submit = true;
+      if (args.surface === 'canvas' || args.surface === 'panel') agentArgs.surface = args.surface;
+      const result = await getClient().evalJs(browserAgentEval('type', agentArgs));
+      return parseAgentResult(result.result);
+    }),
+
+    o8_browser_wait: async (args) => withStructuredErrors(async () => {
+      const agentArgs: Record<string, unknown> = { selector: requiredString(args, 'selector') };
+      if (typeof args.text === 'string' && args.text) agentArgs.text = args.text;
+      if (args.surface === 'canvas' || args.surface === 'panel') agentArgs.surface = args.surface;
+      const timeoutMs = Math.min(25_000, Math.max(500, parseOptionalNumber(args.timeoutMs) ?? 10_000));
+      const deadline = Date.now() + timeoutMs;
+      // The page probe is synchronous — poll node-side until found/timeout.
+      let last: string = '{"ok":false,"error":"never probed"}';
+      while (Date.now() < deadline) {
+        const result = await getClient().evalJs(browserAgentEval('probe', agentArgs));
+        last = result.result;
+        try {
+          const parsed = JSON.parse(last) as { ok?: boolean; pending?: boolean };
+          if (parsed.ok) return jsonResult(parsed);
+          if (!parsed.pending) return jsonResult(parsed); // hard error — stop polling
+        } catch {
+          // unparseable — keep polling
+        }
+        await new Promise((resolve) => setTimeout(resolve, 300));
+      }
+      return jsonResult({ ok: false, timedOut: true, timeoutMs, last });
     }),
   };
 }
