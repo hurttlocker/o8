@@ -125,7 +125,10 @@ export function buildWorkspaceGroups(agents: AgentDetail[]): WorkspaceGroup[] {
 }
 
 export function relativeAge(dateStr: string): string {
-  const diff = Date.now() - new Date(dateStr).getTime();
+  const then = new Date(dateStr).getTime();
+  // Invalid/missing dates otherwise cascade to "NaNd ago" in feed rows.
+  if (!Number.isFinite(then)) return '';
+  const diff = Date.now() - then;
   const mins = Math.floor(diff / 60000);
   if (mins < 1) return 'just now';
   if (mins < 60) return `${mins}m ago`;

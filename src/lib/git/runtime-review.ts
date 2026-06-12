@@ -5,6 +5,8 @@ import { parseRecentCommits } from '@/lib/git/recent-commits';
 
 const execFileAsync = promisify(execFile);
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
+// o8's own machinery living inside the repo — never part of "your changes".
+const REVIEW_NOISE_PREFIXES = ['.cortex-worktrees/'];
 
 async function tryGit(repoPath: string, args: string[]) {
   try {
@@ -18,7 +20,9 @@ async function tryGit(repoPath: string, args: string[]) {
 }
 
 function isReviewNoisePath(reviewPath: string) {
-  return REVIEW_NOISE_PATHS.has(reviewPath.trim());
+  const trimmed = reviewPath.trim();
+  if (REVIEW_NOISE_PATHS.has(trimmed)) return true;
+  return REVIEW_NOISE_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
 }
 
 function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string) {

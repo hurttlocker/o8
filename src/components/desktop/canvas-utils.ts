@@ -46,6 +46,8 @@ export function readinessTone(readiness?: RepoReadiness | null) {
 export function formatAge(dateStr: string): string {
   const now = Date.now();
   const then = new Date(dateStr).getTime();
+  // Same NaN guard as relativeAge — bad dates must not render "NaNmo ago".
+  if (!Number.isFinite(then)) return '';
   const diffMs = now - then;
   const hours = Math.floor(diffMs / 3_600_000);
   if (hours < 1) return 'just now';

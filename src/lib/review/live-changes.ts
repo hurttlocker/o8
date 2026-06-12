@@ -4,6 +4,8 @@ import type { ReviewChangedFile } from '@/lib/fleet/types';
 
 const execFileAsync = promisify(execFile);
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
+// o8's own machinery living inside the repo — never part of "your changes".
+const REVIEW_NOISE_PREFIXES = ['.cortex-worktrees/'];
 
 export interface LiveReviewChangeSet {
   repoPath: string;
@@ -16,7 +18,9 @@ export interface LiveReviewChangeSet {
 }
 
 function isReviewNoisePath(filePath: string) {
-  return REVIEW_NOISE_PATHS.has(filePath.trim());
+  const trimmed = filePath.trim();
+  if (REVIEW_NOISE_PATHS.has(trimmed)) return true;
+  return REVIEW_NOISE_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
 }
 
 function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string) {

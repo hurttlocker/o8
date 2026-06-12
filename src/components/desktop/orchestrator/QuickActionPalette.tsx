@@ -1,7 +1,8 @@
 'use client';
 
 /**
- * QuickActionPalette — Cmd+K palette mounted in the Orchestrator tab.
+ * QuickActionPalette — Cmd+Shift+K palette mounted in the Orchestrator tab.
+ * (Plain Cmd+K is the global CommandPalette; see OrchestratorTab keydown.)
  *
  * Paper surface, hairline border, 480px wide, portal-mounted over a
  * 50% tint backdrop. Typing filters by verb + label. Up/Down move
