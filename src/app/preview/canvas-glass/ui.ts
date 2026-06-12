@@ -48,9 +48,10 @@ export function chatVocabularyRebind(): CSSProperties {
 export function glassPop(): CSSProperties {
   return {
     ...glass(true),
-    // Layered: a near-opaque tone base under the tunable tint. Popovers
-    // stay in the glass family but never let text read through them.
-    background: 'linear-gradient(var(--cnv-tint-deep), var(--cnv-tint-deep)), var(--cnv-pop-base, rgba(13, 16, 21, 0.88))',
+    // Layered: a near-opaque base under a pop-scoped tint. The pop
+    // vocabulary contrasts with the UNIVERSAL text shade (set in
+    // glass-settings) so menus never go same-on-same with the ink.
+    background: 'linear-gradient(var(--cnv-pop-tint, var(--cnv-tint-deep)), var(--cnv-pop-tint, var(--cnv-tint-deep))), var(--cnv-pop-base, rgba(13, 16, 21, 0.88))',
   } as CSSProperties;
 }
 

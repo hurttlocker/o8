@@ -346,7 +346,14 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   root.style.setProperty('--cnv-ink', text.ink);
   root.style.setProperty('--cnv-ink-muted', text.inkMuted);
   root.style.setProperty('--cnv-edge', base.edge);
-  root.style.setProperty('--cnv-pop-base', base.popBase);
+  // Popovers must CONTRAST with the universal text, not follow the pane
+  // tone — light text gets the dark near-solid base (the composer-pill
+  // family), dark text gets the white one. Menus stay readable at any
+  // slider position.
+  const popTone = value.textShade < 0.5 ? 'dark' : 'light';
+  const pop = toneVocabulary(popTone, Math.min(0.92, value.tint + 0.16));
+  root.style.setProperty('--cnv-pop-tint', pop.tintDeep);
+  root.style.setProperty('--cnv-pop-base', pop.popBase);
   root.style.setProperty('--cnv-sat', `${value.vibrance.toFixed(2)}`);
   root.style.setProperty('--cnv-bg-veil', `rgba(7, 9, 13, ${value.veil.toFixed(2)})`);
   // Chat cards: their own frost + tint amounts, optionally their own pane
