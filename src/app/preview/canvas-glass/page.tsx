@@ -51,6 +51,26 @@ import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { FONT, glass, type CardKind, type DockEntry, type MockCard, type NewDockEntry } from './ui';
 
+/** Terminal glass veil — persisted while Q dials it in (dev tuner). */
+const TERM_VEIL_KEY = 'o8:canvas-term-veil';
+const TERM_VEIL_DEFAULT = 0.35;
+
+function readTermVeil(): number {
+  if (typeof window === 'undefined') return TERM_VEIL_DEFAULT;
+  try {
+    const raw = window.localStorage.getItem(TERM_VEIL_KEY);
+    const parsed = raw === null ? Number.NaN : Number.parseFloat(raw);
+    return Number.isFinite(parsed) ? Math.min(0.85, Math.max(0, parsed)) : TERM_VEIL_DEFAULT;
+  } catch {
+    return TERM_VEIL_DEFAULT;
+  }
+}
+
+interface RepoPickerRowData {
+  name: string;
+  path: string;
+}
+
 export default function CanvasGlassPreviewPage() {
   const canvasEnabled = useExperimentalCanvasFlag();
   const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
@@ -67,11 +87,15 @@ export default function CanvasGlassPreviewPage() {
   const [activeLane, setActiveLane] = useState(MOCK_LANES[0].id);
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
   const [termCards, setTermCards] = useState<TermCard[]>([]);
+  const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
+  const [termPickerOpen, setTermPickerOpen] = useState(false);
+  const [repos, setRepos] = useState<RepoPickerRowData[] | null>(null);
   const nextIdRef = useRef(1);
   const entryIdRef = useRef(1);
   const timersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const xtermHandlesRef = useRef(new Map<string, XtermPanelHandle>());
   const liveSessionsRef = useRef(new Set<string>());
+  const cdSentRef = useRef(new Set<string>());
 
   // Real terminals ride the production WebSocket — same transport, tmux
   // sessions and XtermPanel as the dashboard tabs.
@@ -92,6 +116,17 @@ export default function CanvasGlassPreviewPage() {
     onTerminalData: (sessionName, data) => {
       xtermHandlesRef.current.get(sessionName)?.writeData(data);
     },
+    onTerminalAttached: (sessionName) => {
+      // cwd fallback: today's bundled ws-server ignores the create-payload
+      // cwd, so steer the fresh shell on first attach. Once the server-side
+      // cwd ships, the pty already starts there and this cd is a no-op.
+      if (cdSentRef.current.has(sessionName)) return;
+      const card = termCards.find((existing) => existing.sessionName === sessionName);
+      if (!card?.cwd) return;
+      cdSentRef.current.add(sessionName);
+      const escaped = card.cwd.replace(/'/g, `'\\''`);
+      sendTerminalInput(sessionName, `cd '${escaped}' && clear\n`);
+    },
     onTerminalExited: (sessionName) => {
       liveSessionsRef.current.delete(sessionName);
       xtermHandlesRef.current.get(sessionName)?.setExited();
@@ -110,6 +145,7 @@ export default function CanvasGlassPreviewPage() {
     applyCanvasGlassSettings(stored);
     setInTauri(isTauri());
     setPersonalDefault(readPersonalDefault());
+    setTermVeil(readTermVeil());
   }, []);
 
   // Background material + backdrop blur: apply the stored choices while
@@ -248,24 +284,83 @@ export default function CanvasGlassPreviewPage() {
   }, []);
 
   /** Spawn a REAL shell — production transport, canvas treatment. */
-  const spawnTerminal = useCallback(() => {
+  const spawnTerminal = useCallback((cwd: string | null, cwdLabel: string | null) => {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     const requestId = `cnv-term-${id}-${Math.random().toString(36).slice(2, 8)}`;
-    setTermCards((previous) => [...previous, {
-      id,
-      requestId,
-      sessionName: null,
-      exited: false,
-      x: 240 + (previous.length % 3) * 120 + (id % 5) * 10,
-      y: 120 + (previous.length % 3) * 90,
-    }]);
-    sendTerminalCreate(120, 30, requestId);
+    setTermCards((previous) => {
+      const maxZ = previous.length > 0 ? Math.max(...previous.map((card) => card.z)) : 9;
+      return [...previous, {
+        id,
+        requestId,
+        sessionName: null,
+        exited: false,
+        x: 240 + (previous.length % 3) * 120 + (id % 5) * 10,
+        y: 110 + (previous.length % 3) * 80,
+        w: 560,
+        h: 300,
+        z: Math.min(maxZ + 1, 39),
+        cwd,
+        cwdLabel,
+      }];
+    });
+    sendTerminalCreate(120, 30, requestId, cwd ?? undefined);
   }, [sendTerminalCreate]);
 
   const moveTermCard = useCallback((id: number, x: number, y: number) => {
     setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
+
+  const resizeTermCard = useCallback((id: number, w: number, h: number) => {
+    setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
+  }, []);
+
+  /** Clicked terminal comes forward. Terminals own the 10–39 z band —
+   *  always above the mock cards (3), always below the chrome (40+). */
+  const focusTermCard = useCallback((id: number) => {
+    setTermCards((previous) => {
+      const target = previous.find((card) => card.id === id);
+      if (!target) return previous;
+      const maxZ = Math.max(...previous.map((card) => card.z));
+      if (target.z === maxZ) return previous;
+      if (maxZ + 1 > 38) {
+        // Renormalize the band, keeping order, with the target on top.
+        const ordered = [...previous].sort((a, b) => a.z - b.z);
+        const remap = new Map(ordered.map((card, index) => [card.id, 10 + index]));
+        return previous.map((card) => ({ ...card, z: card.id === id ? 10 + ordered.length : remap.get(card.id)! }));
+      }
+      return previous.map((card) => (card.id === id ? { ...card, z: maxZ + 1 } : card));
+    });
+  }, []);
+
+  const changeTermVeil = useCallback((value: number) => {
+    setTermVeil(value);
+    try {
+      window.localStorage.setItem(TERM_VEIL_KEY, String(value));
+    } catch {
+      // non-critical — the dialed value just won't survive reload
+    }
+  }, []);
+
+  /** The spawn-dock terminal button opens the cwd picker; rows spawn. */
+  const toggleTermPicker = useCallback(() => {
+    setTermPickerOpen((value) => !value);
+    if (repos !== null) return;
+    fetch('/api/panel/repos')
+      .then((response) => (response.ok ? response.json() : { repos: [] }))
+      .then((data: { repos?: Array<{ name?: string | null; localPath?: string | null }> }) => {
+        const rows = Array.isArray(data?.repos)
+          ? data.repos
+            .filter((repo) => typeof repo?.localPath === 'string' && repo.localPath.length > 0)
+            .map((repo) => ({
+              name: repo.name && repo.name.length > 0 ? repo.name : (repo.localPath!.split('/').pop() ?? repo.localPath!),
+              path: repo.localPath!,
+            }))
+          : [];
+        setRepos(rows);
+      })
+      .catch(() => setRepos([]));
+  }, [repos]);
 
   /** Close = exit the shell (kills the tmux session) + detach + drop the card. */
   const closeTerminal = useCallback((card: TermCard) => {
@@ -371,8 +466,12 @@ export default function CanvasGlassPreviewPage() {
           <TerminalGlassCard
             key={card.id}
             card={card}
+            termVeil={termVeil}
             onMove={moveTermCard}
+            onResize={resizeTermCard}
+            onFocus={focusTermCard}
             onClose={closeTerminal}
+            onTermVeilChange={changeTermVeil}
             registerHandle={registerXtermHandle}
             sendTerminalAttach={sendTerminalAttach}
             sendTerminalInput={sendTerminalInput}
@@ -396,7 +495,7 @@ export default function CanvasGlassPreviewPage() {
           paddingLeft: 16,
           paddingRight: 10,
           borderRadius: 20,
-          zIndex: 4,
+          zIndex: 40,
           ...glass(true),
         }}
       >
@@ -476,7 +575,7 @@ export default function CanvasGlassPreviewPage() {
           paddingLeft: 6,
           paddingRight: 6,
           borderRadius: 16,
-          zIndex: 4,
+          zIndex: 40,
           ...glass(true),
         }}
       >
@@ -486,7 +585,7 @@ export default function CanvasGlassPreviewPage() {
         <SpawnGlyphButton label="Spawn browser" onClick={() => spawnCard('browser', 'Browser', 'localhost:3001', 'idle')}>
           <circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton label="Spawn terminal" onClick={spawnTerminal}>
+        <SpawnGlyphButton label="Spawn terminal" onClick={toggleTermPicker}>
           <path d="m4 17 6-6-6-6" /><line x1="12" x2="20" y1="19" y2="19" />
         </SpawnGlyphButton>
         <SpawnGlyphButton label="Spawn review" onClick={() => spawnCard('review', 'Review — pending diff', '2 files · +14 −3', 'waiting')}>
@@ -496,6 +595,66 @@ export default function CanvasGlassPreviewPage() {
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
         </SpawnGlyphButton>
       </div>
+
+      {/* ── Terminal cwd picker — where should the shell open? ───── */}
+      <AnimatePresence>
+        {termPickerOpen ? (
+          <>
+            <div role="presentation" onClick={() => setTermPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
+            <motion.div
+              initial={{ opacity: 0, x: -8, scale: 0.98 }}
+              animate={{ opacity: 1, x: 0, scale: 1 }}
+              exit={{ opacity: 0, x: -8, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+              style={{
+                position: 'absolute',
+                left: 64,
+                top: '50%',
+                transform: 'translateY(-50%)',
+                width: 232,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                paddingTop: 10,
+                paddingBottom: 10,
+                paddingLeft: 8,
+                paddingRight: 8,
+                borderRadius: 14,
+                zIndex: 46,
+                ...glass(true),
+              }}
+            >
+              <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 5 }}>
+                Open terminal in
+              </span>
+              <PickerRow
+                name="Home"
+                path="~"
+                onClick={() => {
+                  spawnTerminal(null, null);
+                  setTermPickerOpen(false);
+                }}
+              />
+              {(repos ?? []).map((repo) => (
+                <PickerRow
+                  key={repo.path}
+                  name={repo.name}
+                  path={repo.path.replace(/^\/Users\/[^/]+/, '~')}
+                  onClick={() => {
+                    spawnTerminal(repo.path, repo.name);
+                    setTermPickerOpen(false);
+                  }}
+                />
+              ))}
+              {repos === null ? (
+                <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingTop: 4 }}>
+                  Loading repos…
+                </span>
+              ) : null}
+            </motion.div>
+          </>
+        ) : null}
+      </AnimatePresence>
 
       {/* ── Edge hover rails ─────────────────────────────────────── */}
       <EdgeRail
@@ -558,7 +717,7 @@ export default function CanvasGlassPreviewPage() {
               paddingRight: 12,
               borderRadius: 999,
               cursor: 'pointer',
-              zIndex: 4,
+              zIndex: 40,
               fontSize: 10.5,
               fontWeight: 300,
               color: 'var(--cnv-ink-muted)',
@@ -591,7 +750,7 @@ export default function CanvasGlassPreviewPage() {
           paddingLeft: 18,
           paddingRight: 12,
           borderRadius: 24,
-          zIndex: 4,
+          zIndex: 40,
           ...glass(true),
         }}
       >
@@ -639,5 +798,36 @@ export default function CanvasGlassPreviewPage() {
         ) : null}
       </AnimatePresence>
     </div>
+  );
+}
+
+function PickerRow({ name, path, onClick }: { name: string; path: string; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        gap: 1,
+        borderWidth: 0,
+        background: 'transparent',
+        borderRadius: 9,
+        paddingTop: 6,
+        paddingBottom: 6,
+        paddingLeft: 8,
+        paddingRight: 8,
+        cursor: 'pointer',
+        textAlign: 'left',
+        fontFamily: FONT,
+        width: '100%',
+      }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+    >
+      <span style={{ fontSize: 11.5, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>{name}</span>
+      <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{path}</span>
+    </button>
   );
 }

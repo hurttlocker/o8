@@ -59,7 +59,7 @@ export function OrchestratorDock({
         display: 'flex',
         flexDirection: 'column',
         gap: 10,
-        zIndex: 7,
+        zIndex: 43,
         fontFamily: FONT,
         // No panel — the dock fades into the canvas; a soft gradient only.
         background: 'linear-gradient(270deg, var(--cnv-bg-veil) 0%, transparent 100%)',
