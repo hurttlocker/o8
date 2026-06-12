@@ -473,13 +473,18 @@ export async function saveTabState(state: PersistedTabState, scope = 'tile-root'
     const persisted: PersistedTabState = dropped > 0
       ? { ...sanitized, tabs: prunedTabs }
       : sanitized;
-    await fetch(buildStatePath(scope), {
+    const res = await fetch(buildStatePath(scope), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(persisted),
     });
-  } catch {
-    // Non-critical — silent fail
+    if (!res.ok) {
+      console.warn(`[tab-state] save failed: HTTP ${res.status} (scope ${scope})`);
+    }
+  } catch (error) {
+    // Non-critical for the UI, but never silent — a save that fails here is
+    // invisible data loss on next relaunch (#1234).
+    console.warn(`[tab-state] save failed (scope ${scope}):`, error);
   }
 }
 
