@@ -48,6 +48,7 @@ import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-or
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { CanvasBackdropLayer } from './backdrops';
 import { BrowserGlassCard, type BrowserCard, type BrowserTab } from './browser-card';
+import { SpecGlassCard, type SpecCard } from './spec-card';
 import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
@@ -136,6 +137,7 @@ export default function CanvasGlassPreviewPage() {
   const [sessionsRepoFilter, setSessionsRepoFilter] = useState<string | null>(null);
   const [composerImages, setComposerImages] = useState<Array<{ name: string; dataUri: string }>>([]);
   const [diffCards, setDiffCards] = useState<DiffCard[]>([]);
+  const [specCards, setSpecCards] = useState<SpecCard[]>([]);
   const [reviewPickerOpen, setReviewPickerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -661,7 +663,7 @@ export default function CanvasGlassPreviewPage() {
 
   /** Clicked card comes forward. Terminals + files + images + browsers +
    *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser' | 'chat' | 'diff', id: number) => {
+  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser' | 'chat' | 'diff' | 'spec', id: number) => {
     const current = kind === 'term'
       ? termCards.find((card) => card.id === id)
       : kind === 'file'
@@ -672,7 +674,9 @@ export default function CanvasGlassPreviewPage() {
             ? browserCards.find((card) => card.id === id)
             : kind === 'chat'
               ? chatCards.find((card) => card.id === id)
-              : diffCards.find((card) => card.id === id);
+              : kind === 'diff'
+                ? diffCards.find((card) => card.id === id)
+                : specCards.find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
@@ -683,6 +687,7 @@ export default function CanvasGlassPreviewPage() {
         ...browserCards.map((card) => ({ kind: 'browser' as const, id: card.id, z: card.z })),
         ...chatCards.map((card) => ({ kind: 'chat' as const, id: card.id, z: card.z })),
         ...diffCards.map((card) => ({ kind: 'diff' as const, id: card.id, z: card.z })),
+        ...specCards.map((card) => ({ kind: 'spec' as const, id: card.id, z: card.z })),
       ].sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
       const top = 10 + combined.length;
@@ -692,6 +697,7 @@ export default function CanvasGlassPreviewPage() {
       setBrowserCards((previous) => previous.map((card) => ({ ...card, z: kind === 'browser' && card.id === id ? top : remap.get(`browser:${card.id}`) ?? card.z })));
       setChatCards((previous) => previous.map((card) => ({ ...card, z: kind === 'chat' && card.id === id ? top : remap.get(`chat:${card.id}`) ?? card.z })));
       setDiffCards((previous) => previous.map((card) => ({ ...card, z: kind === 'diff' && card.id === id ? top : remap.get(`diff:${card.id}`) ?? card.z })));
+      setSpecCards((previous) => previous.map((card) => ({ ...card, z: kind === 'spec' && card.id === id ? top : remap.get(`spec:${card.id}`) ?? card.z })));
       zPeakRef.current = top;
       return;
     }
@@ -707,10 +713,12 @@ export default function CanvasGlassPreviewPage() {
       setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'chat') {
       setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else {
+    } else if (kind === 'diff') {
       setDiffCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else {
+      setSpecCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [browserCards, chatCards, diffCards, fileCards, imageCards, termCards]);
+  }, [browserCards, chatCards, diffCards, fileCards, imageCards, specCards, termCards]);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
@@ -718,6 +726,7 @@ export default function CanvasGlassPreviewPage() {
   const focusBrowserCard = useCallback((id: number) => focusCard('browser', id), [focusCard]);
   const focusChatCard = useCallback((id: number) => focusCard('chat', id), [focusCard]);
   const focusDiffCard = useCallback((id: number) => focusCard('diff', id), [focusCard]);
+  const focusSpecCard = useCallback((id: number) => focusCard('spec', id), [focusCard]);
 
   /** A lane's review diff lands as a glass card — the governance moat
    *  as a canvas object. */
@@ -747,6 +756,30 @@ export default function CanvasGlassPreviewPage() {
       })
       .catch(() => {});
   }, []);
+
+  /** The operator's o8.md notes — the REAL spec pane in a glass card.
+   *  One card per repo: a second click focuses the open one instead of
+   *  spawning a duplicate editor against the same file. */
+  const spawnSpecCard = useCallback(() => {
+    const repoPath = activeRepoPath ?? null;
+    const open = specCards.find((card) => card.repoPath === repoPath);
+    if (open) {
+      focusSpecCard(open.id);
+      return;
+    }
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    setSpecCards((previous) => [...previous, {
+      id,
+      x: 200 + (previous.length % 3) * 100 + (id % 5) * 8,
+      y: 84 + (previous.length % 3) * 60,
+      z: zPeakRef.current,
+      w: 760,
+      h: 540,
+      repoPath,
+    }]);
+  }, [activeRepoPath, focusSpecCard, specCards]);
 
   /** A REAL browser pane — defaults to the app's own dashboard. */
   const spawnBrowserCard = useCallback(() => {
@@ -1192,6 +1225,20 @@ export default function CanvasGlassPreviewPage() {
         ))}
       </AnimatePresence>
 
+      {/* ── o8.md cards — the operator's notes, full spec-pane parity ── */}
+      <AnimatePresence>
+        {specCards.map((card) => (
+          <SpecGlassCard
+            key={card.id}
+            card={card}
+            onMove={(id, x, y) => setSpecCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
+            onResize={(id, w, h) => setSpecCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+            onFocus={focusSpecCard}
+            onClose={(id) => setSpecCards((previous) => previous.filter((c) => c.id !== id))}
+          />
+        ))}
+      </AnimatePresence>
+
       {/* ── Chat cards — past sessions as their own glass boxes ───── */}
       <AnimatePresence>
         {chatCards.map((card) => (
@@ -1608,12 +1655,7 @@ export default function CanvasGlassPreviewPage() {
         <SpawnGlyphButton label="Review diffs" onClick={() => setReviewPickerOpen((value) => !value)}>
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect width="8" height="4" x="8" y="2" rx="1" /><path d="m9 14 2 2 4-4" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton
-          label="Open o8.md"
-          onClick={() => {
-            if (activeRepoPath) spawnFileCard(`${activeRepoPath}/o8.md`);
-          }}
-        >
+        <SpawnGlyphButton label="Open o8.md" onClick={spawnSpecCard}>
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
         </SpawnGlyphButton>
       </div>
