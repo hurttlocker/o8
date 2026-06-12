@@ -5,12 +5,19 @@
  * iframe in the same squircle glass shell the terminals use. Defaults to
  * the app's own dashboard (always frameable); external sites work when
  * they allow framing, and the hint line says so when they don't.
+ *
+ * Element picker: the crosshair arms an inspector for SAME-ORIGIN pages
+ * (your localhost apps) — hover highlights the element + live selector,
+ * click copies the selector. Cross-origin iframes can't be instrumented;
+ * the readout says so instead of failing silently.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { FONT, TERM_MIN_H, TERM_MIN_W, glass } from './ui';
+
+const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
 export interface BrowserCard {
   id: number;
@@ -28,6 +35,33 @@ function normalizeUrl(raw: string): string {
   if (/^https?:\/\//i.test(value)) return value;
   if (/^localhost[:/]/.test(value) || /^127\.0\.0\.1[:/]/.test(value)) return `http://${value}`;
   return `https://${value}`;
+}
+
+/** Shortest selector that still uniquely hits the element in its doc. */
+function cssSelectorFor(el: Element): string {
+  const doc = el.ownerDocument;
+  if (el.id) return `#${CSS.escape(el.id)}`;
+  const parts: string[] = [];
+  let node: Element | null = el;
+  for (let depth = 0; node && node !== doc.documentElement && depth < 5; depth++) {
+    let part = node.tagName.toLowerCase();
+    const classes = [...node.classList].slice(0, 2).map((c) => `.${CSS.escape(c)}`).join('');
+    if (classes) part += classes;
+    const parent: Element | null = node.parentElement;
+    if (parent) {
+      const sameTag = [...parent.children].filter((child) => child.tagName === node!.tagName);
+      if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
+    }
+    parts.unshift(part);
+    const candidate = parts.join(' > ');
+    try {
+      if (doc.querySelectorAll(candidate).length === 1) return candidate;
+    } catch {
+      // bad escape — keep walking
+    }
+    node = parent;
+  }
+  return parts.join(' > ');
 }
 
 export function BrowserGlassCard({
@@ -50,6 +84,90 @@ export function BrowserGlassCard({
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
   const [urlDraft, setUrlDraft] = useState(card.url);
+  const iframeRef = useRef<HTMLIFrameElement | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [readout, setReadout] = useState<string | null>(null);
+  const pickerCleanupRef = useRef<(() => void) | null>(null);
+
+  const disarmPicker = () => {
+    pickerCleanupRef.current?.();
+    pickerCleanupRef.current = null;
+    setPicking(false);
+  };
+
+  const armPicker = () => {
+    if (picking) {
+      disarmPicker();
+      return;
+    }
+    const frame = iframeRef.current;
+    let doc: Document | null = null;
+    try {
+      doc = frame?.contentDocument ?? null;
+    } catch {
+      doc = null;
+    }
+    if (!doc || !doc.body) {
+      setReadout('Picker needs a same-origin page — works on your localhost apps.');
+      return;
+    }
+    const highlight = doc.createElement('div');
+    highlight.setAttribute('style', 'position:absolute;pointer-events:none;z-index:2147483600;border:1px solid #f59e0b;background:rgba(245,158,11,0.12);border-radius:2px;display:none;');
+    doc.body.appendChild(highlight);
+
+    const onMoveOver = (event: MouseEvent) => {
+      const target = event.target as Element | null;
+      if (!target || target === highlight) return;
+      const rect = target.getBoundingClientRect();
+      const win = doc!.defaultView;
+      highlight.style.display = 'block';
+      highlight.style.left = `${rect.left + (win?.scrollX ?? 0)}px`;
+      highlight.style.top = `${rect.top + (win?.scrollY ?? 0)}px`;
+      highlight.style.width = `${rect.width}px`;
+      highlight.style.height = `${rect.height}px`;
+      setReadout(`${cssSelectorFor(target)}  ·  ${Math.round(rect.width)}×${Math.round(rect.height)}`);
+    };
+    const onPick = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      const target = event.target as Element | null;
+      if (!target) return;
+      const selector = cssSelectorFor(target);
+      try {
+        void navigator.clipboard.writeText(selector);
+        setReadout(`${selector}  ·  copied`);
+      } catch {
+        setReadout(selector);
+      }
+      disarm();
+    };
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') disarm();
+    };
+    const disarm = () => {
+      doc!.removeEventListener('mousemove', onMoveOver, true);
+      doc!.removeEventListener('click', onPick, true);
+      doc!.removeEventListener('keydown', onKey, true);
+      window.removeEventListener('keydown', onKey, true);
+      highlight.remove();
+      pickerCleanupRef.current = null;
+      setPicking(false);
+    };
+    doc.addEventListener('mousemove', onMoveOver, true);
+    doc.addEventListener('click', onPick, true);
+    doc.addEventListener('keydown', onKey, true);
+    window.addEventListener('keydown', onKey, true);
+    pickerCleanupRef.current = disarm;
+    setPicking(true);
+    setReadout('Hover the page, click to copy the selector. Esc cancels.');
+  };
+
+  // Navigating away or unmounting tears the picker down with the page.
+  useEffect(() => () => { pickerCleanupRef.current?.(); }, []);
+  useEffect(() => {
+    pickerCleanupRef.current?.();
+    setPicking(false);
+  }, [card.url]);
 
   return (
     <motion.div
@@ -135,6 +253,29 @@ export function BrowserGlassCard({
           />
           <button
             type="button"
+            aria-label={picking ? 'Stop picking elements' : 'Pick an element'}
+            title={picking ? 'Stop picking' : 'Pick an element — hover highlights, click copies the selector'}
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={armPicker}
+            style={{
+              borderWidth: 0,
+              background: 'transparent',
+              padding: 2,
+              paddingLeft: 4,
+              paddingRight: 4,
+              color: picking ? '#f59e0b' : 'var(--cnv-ink-muted)',
+              cursor: 'pointer',
+              display: 'inline-flex',
+            }}
+            onMouseEnter={(event) => { if (!picking) event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+            onMouseLeave={(event) => { if (!picking) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+          >
+            <svg style={{ width: 12, height: 12, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
+            </svg>
+          </button>
+          <button
+            type="button"
             aria-label="Close browser"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => onClose(card.id)}
@@ -156,10 +297,29 @@ export function BrowserGlassCard({
           </button>
         </div>
 
+        {/* Selector readout — appears while picking / after a pick. */}
+        {readout ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, paddingBottom: 4, paddingLeft: 12, paddingRight: 8, borderBottom: '1px solid var(--cnv-edge)' }}>
+            <span style={{ flex: 1, fontFamily: MONO, fontSize: 9.5, fontWeight: 300, color: picking ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {readout}
+            </span>
+            <button
+              type="button"
+              aria-label="Dismiss selector readout"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => setReadout(null)}
+              style={{ borderWidth: 0, background: 'transparent', padding: 0, fontSize: 9.5, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
+            >
+              ✕
+            </button>
+          </div>
+        ) : null}
+
         {/* The page — solid paper behind the iframe, never glass-through. */}
         <div style={{ height: card.h, position: 'relative', background: '#fff' }}>
           <iframe
             key={card.url}
+            ref={iframeRef}
             src={card.url}
             title={`Browser — ${card.url}`}
             style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}
