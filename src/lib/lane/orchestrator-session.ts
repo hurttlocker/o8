@@ -487,6 +487,19 @@ export interface SendToOrchestratorOptions {
    * is preserved — only NEW output is stopped.
    */
   signal?: AbortSignal;
+  /**
+   * Image attachments from the composer's picture pills. Converted into
+   * base64 image content blocks on the stream-json stdin turn so the
+   * model actually SEES them (the wire used to drop these silently).
+   */
+  attachments?: Array<{ dataUri: string; name?: string }>;
+}
+
+/** data:image/png;base64,xxxx → an Anthropic image content block. */
+function attachmentToImageBlock(att: { dataUri: string }): { type: 'image'; source: { type: 'base64'; media_type: string; data: string } } | null {
+  const match = /^data:([^;,]+);base64,(.+)$/.exec(att.dataUri);
+  if (!match) return null;
+  return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } };
 }
 
 /**
@@ -595,12 +608,19 @@ export async function sendToOrchestrator(
 
     // Write the message as a single JSON event then close stdin. Format
     // matches what interactive-session.ts uses for the chat tab — same CLI
-    // contract.
+    // contract. With attachments the content becomes a block array so the
+    // images reach the model alongside the text.
+    const imageBlocks = (options.attachments ?? [])
+      .map(attachmentToImageBlock)
+      .filter((block): block is NonNullable<typeof block> => block !== null);
+    const content: string | Array<Record<string, unknown>> = imageBlocks.length > 0
+      ? [{ type: 'text', text: message }, ...imageBlocks]
+      : message;
     const payload = `${JSON.stringify({
       type: 'user',
       message: {
         role: 'user',
-        content: message,
+        content,
       },
     })}\n`;
     try {

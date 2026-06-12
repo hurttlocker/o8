@@ -36,6 +36,12 @@ export interface OrchestratorTurnOptions {
   agent?: string;
   /** Aborts the in-flight turn — the backend SIGTERMs its subprocess. */
   signal?: AbortSignal;
+  /**
+   * Composer image attachments (data URIs). The Claude backend converts
+   * them to base64 image content blocks on stdin; other backends ignore
+   * them for now.
+   */
+  attachments?: Array<{ dataUri: string; name?: string }>;
 }
 
 /** Lightweight view of a backend's per-repo session. */

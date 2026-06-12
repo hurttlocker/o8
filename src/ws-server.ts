@@ -2344,6 +2344,17 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const model = typeof msg.model === 'string' && msg.model.trim()
     ? msg.model.trim()
     : undefined;
+  // Composer picture pills — validated data URIs only, capped so one send
+  // can't balloon the stdin payload (8 images, ~5MB base64 each).
+  const attachments = Array.isArray(msg.attachments)
+    ? (msg.attachments as Array<{ dataUri?: unknown; name?: unknown }>)
+        .filter((att): att is { dataUri: string; name?: string } =>
+          typeof att?.dataUri === 'string'
+          && /^data:image\/[a-z+.-]+;base64,/i.test(att.dataUri)
+          && att.dataUri.length < 5_000_000)
+        .slice(0, 8)
+        .map((att) => ({ dataUri: att.dataUri, ...(typeof att.name === 'string' ? { name: att.name } : {}) }))
+    : undefined;
 
   const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
   const agentId = resolveMsgAgentId(msg, backend.id);
@@ -2420,7 +2431,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     const sendTurn = (
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
-    ): Promise<void> => backend.sendTurn(repoPath, message, onEvent, { permissionMode, thinkingEffort, model, agent: agentTag, threadId, signal });
+    ): Promise<void> => backend.sendTurn(repoPath, message, onEvent, { permissionMode, thinkingEffort, model, agent: agentTag, threadId, signal, ...(attachments?.length ? { attachments } : {}) });
 
     // Ensure a subscription exists for the selected backend + agent.
     orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
