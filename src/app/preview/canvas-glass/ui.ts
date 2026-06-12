@@ -54,6 +54,9 @@ export const CARD_WIDTH: Record<CardKind, number> = {
  */
 export const TERM_MIN_W = 340;
 export const TERM_MIN_H = 190;
+/** Image cards resize aspect-locked from the corner grip. */
+export const IMG_MIN_W = 120;
+export const IMG_MAX_SPAWN_EDGE = 340;
 /** DEV ONLY — title-bar veil slider for dialing the terminal glass; freeze
  *  the chosen value into the default and flip this off before graduating. */
 export const DEV_TERM_GLASS_TUNER = true;
