@@ -4,6 +4,7 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildXtermTheme } from '@/components/desktop/workspace-terminal/constants';
+import { startSpawnReveal } from '@/components/desktop/workspace-terminal/spawn-reveal';
 
 export interface InlineImage {
   id: string;
@@ -29,6 +30,15 @@ export interface XtermPanelProps {
    *  on. Each bump resets the buffer and re-attaches; the server replays
    *  scrollback, so the repaint is idempotent. */
   connectionEpoch?: number;
+  /** One-shot "o8" materialization in the dead air between attach and the
+   *  first prompt byte — written into the view only (never the PTY), and
+   *  cancelled the instant real data arrives. */
+  spawnReveal?: boolean;
+  /** Guarantee the sweep + shimmer play even when the shell beats them:
+   *  PTY data is buffered (~800ms worst case) and flushed at the hold
+   *  point. For the occasional "show it anyway" spawn — never the default,
+   *  because it trades real latency for the moment. */
+  revealMinPlay?: boolean;
 }
 
 export interface XtermPanelHandle {
@@ -40,7 +50,7 @@ export interface XtermPanelHandle {
 }
 
 export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermPanel(
-  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize, connectionEpoch },
+  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize, connectionEpoch, spawnReveal, revealMinPlay },
   ref,
 ) {
   const { themeId } = useTheme();
@@ -50,6 +60,20 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const fitAddonRef = useRef<any>(null);
   const observerRef = useRef<ResizeObserver | null>(null);
+  const revealCancelRef = useRef<((resetTerm: boolean) => void) | null>(null);
+  /** While true, incoming PTY chunks queue instead of painting (min-play). */
+  const revealHoldRef = useRef(false);
+  const pendingChunksRef = useRef<string[]>([]);
+
+  /** Real output is about to paint — kill the reveal, clean slate.
+   *  Ref nulls BEFORE invoking so re-entrant calls (the cancel fires the
+   *  reveal's hold-point, whose handler may cancel again) are no-ops. */
+  const cancelReveal = (resetTerm: boolean) => {
+    const cancel = revealCancelRef.current;
+    if (!cancel) return;
+    revealCancelRef.current = null;
+    cancel(resetTerm);
+  };
   const [error, setError] = useState<string | null>(null);
   const [exited, setExited] = useState(false);
   const [inlineImages, setInlineImages] = useState<InlineImage[]>([]);
@@ -58,6 +82,12 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
   useImperativeHandle(ref, () => ({
     writeData: (data: string) => {
       if (!termRef.current) return;
+      if (revealHoldRef.current) {
+        // Min-play hold: queue the chunk; the reveal's hold-point flushes.
+        pendingChunksRef.current.push(data);
+        return;
+      }
+      cancelReveal(true);
       try {
         const bytes = Uint8Array.from(atob(data), (char) => char.charCodeAt(0));
         termRef.current.write(bytes);
@@ -83,6 +113,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     },
     writeRaw: (data: string) => {
       if (!termRef.current) return;
+      cancelReveal(true);
       try {
         const encoder = new TextEncoder();
         termRef.current.write(encoder.encode(data));
@@ -176,6 +207,30 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         fitAddon.fit();
         termRef.current = term;
         fitAddonRef.current = fitAddon;
+        // The reveal owns the screen until the first PTY byte (writeData
+        // cancels it) — start before attach so no replayed data races it.
+        // With min-play, data queues until the hold point instead.
+        if (spawnReveal) {
+          revealHoldRef.current = revealMinPlay === true;
+          revealCancelRef.current = startSpawnReveal(term, {
+            onHoldPoint: () => {
+              revealHoldRef.current = false;
+              if (pendingChunksRef.current.length === 0) return;
+              const chunks = pendingChunksRef.current;
+              pendingChunksRef.current = [];
+              cancelReveal(true);
+              if (!termRef.current) return;
+              for (const chunk of chunks) {
+                try {
+                  const bytes = Uint8Array.from(atob(chunk), (char) => char.charCodeAt(0));
+                  termRef.current.write(bytes);
+                } catch {
+                  // skip malformed chunk
+                }
+              }
+            },
+          });
+        }
         sendTerminalAttach(tmuxSession, term.cols, term.rows);
         term.onData((data) => {
           sendTerminalInput(tmuxSession, data);
@@ -207,6 +262,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
 
     return () => {
       disposed = true;
+      cancelReveal(false);
       sendTerminalDetach(tmuxSession);
       observerRef.current?.disconnect();
       observerRef.current = null;
@@ -217,7 +273,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       }
       fitAddonRef.current = null;
     };
-  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize, transparent, fontSize]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelReveal only touches refs
+  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize, transparent, fontSize, spawnReveal, revealMinPlay]);
 
   // Re-attach after a transport (re)connect. The init effect's attach is
   // dropped silently if the socket isn't open yet, and the server never
@@ -228,12 +285,14 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
     if (connectionEpoch === undefined || connectionEpoch < 1) return;
     const term = termRef.current;
     if (!term) return;
+    cancelReveal(false);
     try {
       term.reset();
       sendTerminalAttach(tmuxSession, term.cols, term.rows);
     } catch {
       // disposed mid-update; the next mount attaches fresh
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelReveal only touches refs
   }, [connectionEpoch, tmuxSession, sendTerminalAttach]);
 
   // Live-update xterm theme on theme switch without recreating the terminal.

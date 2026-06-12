@@ -46,7 +46,29 @@ export function EdgeRail({
           ...(side === 'left' ? { left: 0 } : { right: 0 }),
           zIndex: 41,
         }}
-      />
+      >
+        {/* The Apple-style edge handle — the always-visible hint that a
+            rail lives here (the hot zone itself is invisible). Fades out
+            while the rail is showing. */}
+        <motion.div
+          aria-hidden
+          initial={false}
+          animate={{ opacity: open ? 0 : 1 }}
+          transition={{ duration: 0.18 }}
+          style={{
+            position: 'absolute',
+            top: '50%',
+            transform: 'translateY(-50%)',
+            ...(side === 'left' ? { left: 5 } : { right: 5 }),
+            width: 4,
+            height: 56,
+            borderRadius: 999,
+            background: 'rgba(255,255,255,0.38)',
+            boxShadow: '0 1px 6px rgba(0,0,0,0.28)',
+            pointerEvents: 'none',
+          }}
+        />
+      </div>
       <motion.div
         ref={railRef}
         onMouseLeave={closeUnlessWithin}

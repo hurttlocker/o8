@@ -13,7 +13,7 @@
  * session dies instead of leaking into the dashboard's session list).
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { DEV_TERM_GLASS_TUNER, FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
@@ -28,6 +28,11 @@ export interface TermCard {
   requestId: string;
   sessionName: string | null;
   exited: boolean;
+  /** First PTY byte seen — flips the title from summoning verb to name. */
+  live: boolean;
+  /** First spawn of the visit: let the reveal's sweep + shimmer finish
+   *  before the prompt paints (data held ~800ms max). */
+  revealHold: boolean;
   x: number;
   y: number;
   /** Body (xterm area) size — the title bar adds its own height. */
@@ -38,6 +43,51 @@ export interface TermCard {
   /** Working directory the shell opens in (null = shell default, HOME). */
   cwd: string | null;
   cwdLabel: string | null;
+}
+
+// The Claude Code borrow — rotating verbs in o8's own vocabulary while the
+// shell spawns, with one shimmer band sweeping the text (gradient-clip).
+const SPAWN_VERBS = [
+  'Summoning shell',
+  'Warming the worktree',
+  'Linking the lane',
+  'Waking the fleet',
+  'Polishing the glass',
+  'Tracing packets',
+  'Opening the dock',
+  'Counting branches',
+];
+
+function ConnectingVerb() {
+  const [index, setIndex] = useState(() => Math.floor(Math.random() * SPAWN_VERBS.length));
+  useEffect(() => {
+    const timer = setInterval(() => setIndex((value) => (value + 1) % SPAWN_VERBS.length), 1100);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <motion.span
+      key={index}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1, backgroundPosition: ['140% 0%', '-60% 0%'] }}
+      transition={{
+        opacity: { duration: 0.25 },
+        backgroundPosition: { duration: 1.25, repeat: Infinity, ease: 'linear' },
+      }}
+      style={{
+        backgroundImage: 'linear-gradient(90deg, rgba(255,255,255,0.38) 40%, rgba(255,255,255,0.98) 50%, rgba(255,255,255,0.38) 60%)',
+        backgroundSize: '220% 100%',
+        WebkitBackgroundClip: 'text',
+        backgroundClip: 'text',
+        color: 'transparent',
+        fontSize: 11.5,
+        fontWeight: 300,
+        letterSpacing: '-0.1px',
+        fontFamily: FONT,
+      } as React.CSSProperties}
+    >
+      {SPAWN_VERBS[index]}…
+    </motion.span>
+  );
 }
 
 export function TerminalGlassCard({
@@ -131,15 +181,15 @@ export function TerminalGlassCard({
             height: 6,
             borderRadius: '50%',
             flexShrink: 0,
-            background: card.exited ? '#ef4444' : card.sessionName ? TONE_DOT.working : TONE_DOT.waiting,
+            background: card.exited ? '#ef4444' : card.sessionName && card.live ? TONE_DOT.working : TONE_DOT.waiting,
           }}
         />
         <span style={{ flex: 1, fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {card.exited
             ? 'Terminal — exited'
-            : card.sessionName
+            : card.sessionName && card.live
               ? `Terminal — ${card.cwdLabel ?? card.sessionName.replace(/^cortex-dash-/, '').slice(0, 8)}`
-              : 'Terminal — connecting…'}
+              : <ConnectingVerb />}
         </span>
         {DEV_TERM_GLASS_TUNER ? (
           <span
@@ -208,6 +258,8 @@ export function TerminalGlassCard({
               transparent
               fontSize={11.5}
               connectionEpoch={connectionEpoch}
+              spawnReveal
+              revealMinPlay={card.revealHold}
             />
           </div>
         ) : (
