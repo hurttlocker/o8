@@ -15,7 +15,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { FONT, TERM_MIN_H, TERM_MIN_W, glass } from './ui';
+import { canvasZoom, FONT, TERM_MIN_H, TERM_MIN_W, glass } from './ui';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
@@ -43,8 +43,28 @@ function normalizeUrl(raw: string): string {
   return `https://${value}`;
 }
 
+/** The picker proxy re-serves LOCAL pages from our origin so their DOM
+ *  becomes inspectable (other localhost ports are cross-origin by port).
+ *  Tabs may carry proxied URLs; the bar and labels always show the real one. */
+const PROXY_PATH = '/api/browser/proxy?url=';
+const LOCAL_PAGE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i;
+
+function toProxyUrl(url: string): string {
+  return `${PROXY_PATH}${encodeURIComponent(url)}`;
+}
+
+function fromProxyUrl(url: string): string {
+  const index = url.indexOf(PROXY_PATH);
+  if (index === -1) return url;
+  try {
+    return decodeURIComponent(url.slice(index + PROXY_PATH.length));
+  } catch {
+    return url;
+  }
+}
+
 function tabLabel(url: string): string {
-  return url.replace(/^https?:\/\//i, '').replace(/\/$/, '') || 'New tab';
+  return fromProxyUrl(url).replace(/^https?:\/\//i, '').replace(/\/$/, '') || 'New tab';
 }
 
 /** Shortest selector that still uniquely hits the element in its doc. */
@@ -95,14 +115,16 @@ export function BrowserGlassCard({
   const [resizing, setResizing] = useState(false);
   const activeTab = card.tabs.find((tab) => tab.id === card.activeTabId) ?? card.tabs[0];
   const activeUrl = activeTab?.url ?? '';
-  const [urlDraft, setUrlDraft] = useState(activeUrl);
+  const [urlDraft, setUrlDraft] = useState(fromProxyUrl(activeUrl));
   const iframeRefs = useRef(new Map<number, HTMLIFrameElement>());
   const [picking, setPicking] = useState(false);
   const [readout, setReadout] = useState<string | null>(null);
   const pickerCleanupRef = useRef<(() => void) | null>(null);
+  /** Set when arming required a proxy reload — re-arms once the load lands. */
+  const pendingArmRef = useRef(false);
 
   // Switching tabs (or a navigate landing) re-seeds the URL bar.
-  useEffect(() => { setUrlDraft(activeUrl); }, [activeUrl]);
+  useEffect(() => { setUrlDraft(fromProxyUrl(activeUrl)); }, [activeUrl]);
 
   const navigate = (url: string) => {
     onTabsChange(card.id, card.tabs.map((tab) => (tab.id === card.activeTabId ? { ...tab, url } : tab)), card.activeTabId);
@@ -139,7 +161,16 @@ export function BrowserGlassCard({
       doc = null;
     }
     if (!doc || !doc.body) {
-      setReadout('Picker needs a same-origin page — works on your localhost apps.');
+      // Cross-origin-by-port localhost page — reload it through the
+      // same-origin picker proxy, then arm once the load lands.
+      const realUrl = fromProxyUrl(activeUrl);
+      if (LOCAL_PAGE.test(realUrl) && activeUrl === realUrl) {
+        pendingArmRef.current = true;
+        navigate(toProxyUrl(realUrl));
+        setReadout('Reloading through the picker proxy…');
+        return;
+      }
+      setReadout('Picker needs a local page — external sites can’t be instrumented.');
       return;
     }
     const highlight = doc.createElement('div');
@@ -231,7 +262,7 @@ export function BrowserGlassCard({
           onPointerMove={(event) => {
             const drag = dragRef.current;
             if (!drag || drag.pointerId !== event.pointerId) return;
-            onMove(card.id, Math.max(4, drag.originX + event.clientX - drag.startX), Math.max(40, drag.originY + event.clientY - drag.startY));
+            onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
           }}
           onPointerUp={() => { dragRef.current = null; setDragging(false); }}
           style={{
@@ -427,6 +458,11 @@ export function BrowserGlassCard({
               }}
               src={tab.url}
               title={`Browser — ${tabLabel(tab.url)}`}
+              onLoad={() => {
+                if (!pendingArmRef.current || tab.id !== card.activeTabId) return;
+                pendingArmRef.current = false;
+                armPicker();
+              }}
               style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, display: tab.id === card.activeTabId ? 'block' : 'none', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}
               sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
             />
@@ -447,8 +483,8 @@ export function BrowserGlassCard({
               if (!resize || resize.pointerId !== event.pointerId) return;
               onResize(
                 card.id,
-                Math.max(TERM_MIN_W, resize.originW + event.clientX - resize.startX),
-                Math.max(TERM_MIN_H, resize.originH + event.clientY - resize.startY),
+                Math.max(TERM_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
+                Math.max(TERM_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
               );
             }}
             onPointerUp={() => { resizeRef.current = null; setResizing(false); }}

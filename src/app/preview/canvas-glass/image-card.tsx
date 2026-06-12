@@ -15,7 +15,7 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { FONT, IMG_MIN_W, glass } from './ui';
+import { canvasZoom, FONT, IMG_MIN_W, glass } from './ui';
 
 export interface ImageItem {
   src: string;
@@ -252,7 +252,7 @@ export function ImageGlassCard({
         onPointerMove={(event) => {
           const resize = resizeRef.current;
           if (!resize || resize.pointerId !== event.pointerId) return;
-          onResize(card.id, Math.max(IMG_MIN_W, resize.originW + event.clientX - resize.startX));
+          onResize(card.id, Math.max(IMG_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()));
         }}
         onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
         style={{
