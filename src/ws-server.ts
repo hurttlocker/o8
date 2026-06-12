@@ -730,7 +730,7 @@ const terminalAttachments = new Map<string, TerminalAttachment>();
 const TERMINAL_BATCH_MS = 16; // batch PTY output every 16ms (60fps)
 const DASH_SESSION_ORPHAN_TTL_MS = 30 * 60 * 1000;
 const TERMINAL_SCROLLBACK_MAX_BYTES = 512 * 1024;
-const pendingDashSessions = new Map<string, { cols: number; rows: number }>();
+const pendingDashSessions = new Map<string, { cols: number; rows: number; cwd?: string }>();
 
 // ── Orchestrator channel state ──
 
@@ -992,6 +992,7 @@ function spawnDashShellPty(
   sessionName: string,
   cols: number,
   rows: number,
+  requestedCwd?: string,
 ) {
   if (!pty) {
     throw new Error('node-pty not available');
@@ -1000,7 +1001,8 @@ function spawnDashShellPty(
   const shell = resolvePreferredShell();
   const env = sanitizePtyEnv();
   env.CORTEX_TERMINAL_SESSION_NAME = sessionName;
-  const cwd = process.env.HOME ?? homedir() ?? '/tmp';
+  const cwd = (requestedCwd && existsSync(requestedCwd) ? requestedCwd : undefined)
+    ?? process.env.HOME ?? homedir() ?? '/tmp';
 
   console.log(`[ws-server] Spawning dashboard PTY shell: ${shell} -l (${sessionName})`);
   return pty.spawn(shell, ['-l'], {
@@ -2806,7 +2808,7 @@ function materializePendingDashSession(
 
   const nextCols = typeof cols === 'number' ? cols : pending.cols;
   const nextRows = typeof rows === 'number' ? rows : pending.rows;
-  const ptyProcess = spawnDashShellPty(sessionName, nextCols, nextRows);
+  const ptyProcess = spawnDashShellPty(sessionName, nextCols, nextRows, pending.cwd);
   const now = Date.now();
   const attachment: TerminalAttachment = {
     id: randomUUID(),
@@ -2841,6 +2843,10 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
   const cols = typeof msg.cols === 'number' ? msg.cols : 120;
   const rows = typeof msg.rows === 'number' ? msg.rows : 30;
   const requestId = typeof msg.requestId === 'string' ? msg.requestId : undefined;
+  // Optional working directory (canvas terminals spawn per-repo). Validated
+  // here so a bad path falls back to the default HOME spawn instead of erroring.
+  const requestedCwd = typeof msg.cwd === 'string' ? msg.cwd.trim() : '';
+  const cwd = requestedCwd && existsSync(requestedCwd) ? requestedCwd : undefined;
 
   // Only opportunistically reuse orphaned dashboard shells for non-targeted creates.
   // Explicit request IDs should always receive a fresh tmux session so ownership is deterministic.
@@ -2854,8 +2860,8 @@ function handleTerminalCreate(client: ClientState, msg: Record<string, unknown>)
 
   const shortId = randomUUID().slice(0, 8);
   const sessionName = `cortex-dash-${shortId}`;
-  pendingDashSessions.set(sessionName, { cols, rows });
-  console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}`);
+  pendingDashSessions.set(sessionName, { cols, rows, cwd });
+  console.log(`[ws-server] Reserved dashboard PTY session: ${sessionName}${cwd ? ` (cwd ${cwd})` : ''}`);
   sendTerminal(client, 'created', { sessionName, requestId });
 }
 
@@ -2985,7 +2991,8 @@ function handleTerminalResize(client: ClientState, msg: Record<string, unknown>)
   const attachment = terminalAttachments.get(sessionName);
   if (!attachment) {
     if (isDashTerminalSession(sessionName) && pendingDashSessions.has(sessionName)) {
-      pendingDashSessions.set(sessionName, { cols, rows });
+      const pending = pendingDashSessions.get(sessionName);
+      pendingDashSessions.set(sessionName, { cols, rows, cwd: pending?.cwd });
     }
     return;
   }
