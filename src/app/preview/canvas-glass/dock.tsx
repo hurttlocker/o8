@@ -79,16 +79,18 @@ export function OrchestratorDock({
         display: 'grid',
       }}
     >
-      {/* A real panel now — Apple-smooth squircle corners (Lisse), glass. */}
+      {/* No hard panel — the dock FADES into the canvas on its left side
+          (the original feel; the solid right side gets the Apple-smooth
+          corner treatment via Lisse per-corner clipping). */}
       <SmoothCorners
-        corners={{ radius: 18 }}
-        shadowStrategy="box-shadow"
+        corners={{ topLeft: 0, bottomLeft: 0, topRight: 18, bottomRight: 18 }}
+        autoEffects={false}
         style={{
           width: '100%',
           height: '100%',
           display: 'flex',
           flexDirection: 'column',
-          ...glass(true),
+          background: 'linear-gradient(270deg, var(--cnv-bg-veil) 0%, transparent 100%)',
         }}
       >
         {/* Header — the active orchestrator + a dropdown of what's running. */}

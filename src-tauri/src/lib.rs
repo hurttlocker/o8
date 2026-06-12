@@ -3348,7 +3348,11 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
                 } else {
                     Some(window_vibrancy::NSVisualEffectState::Active)
                 };
-                if let Err(e) = window_vibrancy::apply_vibrancy(&target, resolved, state, None) {
+                // Transparent windows lose macOS's corner mask — round the
+                // effect view to the window radius so canvas materials don't
+                // paint square corners (web content clips itself to match).
+                let radius = if material == "default" { None } else { Some(12.0) };
+                if let Err(e) = window_vibrancy::apply_vibrancy(&target, resolved, state, radius) {
                     log::warn!("[canvas-material] apply_vibrancy failed: {e}");
                 }
             })
