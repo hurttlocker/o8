@@ -47,7 +47,7 @@ import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/X
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { CanvasBackdropLayer } from './backdrops';
-import { BrowserGlassCard, type BrowserCard } from './browser-card';
+import { BrowserGlassCard, type BrowserCard, type BrowserTab } from './browser-card';
 import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
@@ -760,7 +760,8 @@ export default function CanvasGlassPreviewPage() {
       z: zPeakRef.current,
       w: 640,
       h: 400,
-      url: `${window.location.origin}/dashboard`,
+      tabs: [{ id: 1, url: `${window.location.origin}/dashboard` }],
+      activeTabId: 1,
     }]);
   }, []);
 
@@ -772,8 +773,8 @@ export default function CanvasGlassPreviewPage() {
     setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
   }, []);
 
-  const navigateBrowserCard = useCallback((id: number, url: string) => {
-    setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, url } : card)));
+  const changeBrowserTabs = useCallback((id: number, tabs: BrowserTab[], activeTabId: number) => {
+    setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, tabs, activeTabId } : card)));
   }, []);
 
   const closeBrowserCard = useCallback((id: number) => {
@@ -1140,7 +1141,7 @@ export default function CanvasGlassPreviewPage() {
             onMove={moveBrowserCard}
             onResize={resizeBrowserCard}
             onFocus={focusBrowserCard}
-            onNavigate={navigateBrowserCard}
+            onTabsChange={changeBrowserTabs}
             onClose={closeBrowserCard}
           />
         ))}
