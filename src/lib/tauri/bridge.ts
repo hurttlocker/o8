@@ -112,6 +112,32 @@ export async function setCanvasBackdropBlur(radius: number): Promise<void> {
   await invoke<void>('set_canvas_backdrop_blur', { radius: Math.max(0, Math.round(radius)) });
 }
 
+// ── OS file opens (Finder "Open With → o8", dock drop) ──
+
+/** Drain the paths the OS handed us — the canvas turns them into file cards. */
+export async function takePendingFileOpens(): Promise<string[]> {
+  return (await invoke<string[]>('take_pending_file_opens')) ?? [];
+}
+
+/** Read without consuming — the dashboard peeks to decide whether to route
+ *  to the canvas; the canvas itself does the take. */
+export async function peekPendingFileOpens(): Promise<string[]> {
+  return (await invoke<string[]>('peek_pending_file_opens')) ?? [];
+}
+
+/** Subscribe to warm file-open requests. Resolves to an unlisten fn (null
+ *  outside Tauri). */
+export async function onFileOpenRequest(handler: (paths: string[]) => void): Promise<(() => void) | null> {
+  if (!isTauri()) return null;
+  try {
+    const { listen } = await import('@tauri-apps/api/event');
+    return await listen<string[]>('file-open-request', (event) => handler(event.payload ?? []));
+  } catch (err) {
+    console.error('[tauri-bridge] listen file-open-request failed:', err);
+    return null;
+  }
+}
+
 // ── Notifications ──
 
 /**

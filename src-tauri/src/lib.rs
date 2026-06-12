@@ -3418,6 +3418,31 @@ fn set_canvas_backdrop_blur(app: tauri::AppHandle, radius: u32) -> Result<(), St
     Ok(())
 }
 
+/// Files handed to o8 by the OS (Finder "Open With", dock drop) before the
+/// frontend was ready to receive them. RunEvent::Opened buffers here; the
+/// canvas drains via take_pending_file_opens, the dashboard peeks to decide
+/// whether to route to the canvas without consuming the paths.
+fn pending_file_opens() -> &'static Mutex<Vec<String>> {
+    static PENDING: OnceLock<Mutex<Vec<String>>> = OnceLock::new();
+    PENDING.get_or_init(|| Mutex::new(Vec::new()))
+}
+
+#[tauri::command]
+fn take_pending_file_opens() -> Vec<String> {
+    pending_file_opens()
+        .lock()
+        .map(|mut pending| std::mem::take(&mut *pending))
+        .unwrap_or_default()
+}
+
+#[tauri::command]
+fn peek_pending_file_opens() -> Vec<String> {
+    pending_file_opens()
+        .lock()
+        .map(|pending| pending.clone())
+        .unwrap_or_default()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
@@ -3558,6 +3583,8 @@ pub fn run() {
             set_tray_badge,
             set_canvas_material,
             set_canvas_backdrop_blur,
+            take_pending_file_opens,
+            peek_pending_file_opens,
             notify_review_ready,
             record_console_error,
             read_dropped_file,
@@ -4249,6 +4276,26 @@ pub fn run() {
         .build(context)
         .expect("error while building Cortex IDE")
         .run(|_app_handle, event| match event {
+            // Finder "Open With → o8" / dock drop. Buffer the paths (the
+            // frontend may not be listening yet — cold launch) and nudge any
+            // live webview; the canvas drains the buffer via command.
+            #[cfg(target_os = "macos")]
+            RunEvent::Opened { urls } => {
+                let paths: Vec<String> = urls
+                    .iter()
+                    .filter_map(|url| url.to_file_path().ok())
+                    .map(|path| path.to_string_lossy().to_string())
+                    .collect();
+                if !paths.is_empty() {
+                    if let Ok(mut pending) = pending_file_opens().lock() {
+                        pending.extend(paths.clone());
+                    }
+                    if let Some(window) = _app_handle.get_webview_window("main") {
+                        let _ = window.emit("file-open-request", &paths);
+                        let _ = window.set_focus();
+                    }
+                }
+            }
             // ExitRequested fires on Cmd-Q, app.exit(), tray Quit menu, etc.
             // We tear down children here so they don't outlive the parent.
             // Children also see a TERM via the OS process group on graceful

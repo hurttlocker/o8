@@ -12,5 +12,24 @@
     <string>Symon reads your calendar to answer "what's on my calendar" by voice.</string>
     <key>NSRemindersFullAccessUsageDescription</key>
     <string>Symon reads your reminders to answer "what's on my list" by voice.</string>
+    <!-- Register o8 in Finder's "Open With" for any file (rank Alternate —
+         listed, never stealing the default). Opens land on the canvas as
+         file cards via RunEvent::Opened in lib.rs. -->
+    <key>CFBundleDocumentTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleTypeName</key>
+            <string>Any document</string>
+            <key>CFBundleTypeRole</key>
+            <string>Editor</string>
+            <key>LSHandlerRank</key>
+            <string>Alternate</string>
+            <key>LSItemContentTypes</key>
+            <array>
+                <string>public.data</string>
+                <string>public.text</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>
