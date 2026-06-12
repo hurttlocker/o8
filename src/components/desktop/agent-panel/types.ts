@@ -176,7 +176,7 @@ export interface AgentPanelProps {
   selectedRepoBranch?: string | null;
   selectedRepoLocalPath?: string | null;
   activeWorkspacePath?: string | null;
-  activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | null;
+  activeWorkspaceTabKind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas' | null;
   onFocusOrchestratorTab?: () => void;
   onFocusAssistantTab?: () => void;
   onCreateWorkspaceOrchestrator?: () => void;

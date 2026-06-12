@@ -60,6 +60,7 @@ import { __iconNode as HexagonNode } from 'lucide-react/dist/esm/icons/hexagon.j
 import { __iconNode as ImageNode } from 'lucide-react/dist/esm/icons/image.js';
 import { __iconNode as KeyNode } from 'lucide-react/dist/esm/icons/key.js';
 import { __iconNode as LayersNode } from 'lucide-react/dist/esm/icons/layers.js';
+import { __iconNode as LayoutGridNode } from 'lucide-react/dist/esm/icons/layout-grid.js';
 import { __iconNode as LightbulbNode } from 'lucide-react/dist/esm/icons/lightbulb.js';
 import { __iconNode as Loader2Node } from 'lucide-react/dist/esm/icons/loader-circle.js';
 import { __iconNode as MenuNode } from 'lucide-react/dist/esm/icons/menu.js';
@@ -188,6 +189,7 @@ export const Hexagon: LucideIcon = makeIcon(HexagonNode as IconNode, 'Hexagon');
 export const Image: LucideIcon = makeIcon(ImageNode as IconNode, 'Image');
 export const Key: LucideIcon = makeIcon(KeyNode as IconNode, 'Key');
 export const Layers: LucideIcon = makeIcon(LayersNode as IconNode, 'Layers');
+export const LayoutGrid: LucideIcon = makeIcon(LayoutGridNode as IconNode, 'LayoutGrid');
 export const Lightbulb: LucideIcon = makeIcon(LightbulbNode as IconNode, 'Lightbulb');
 export const Loader2: LucideIcon = makeIcon(Loader2Node as IconNode, 'Loader2');
 export const Menu: LucideIcon = makeIcon(MenuNode as IconNode, 'Menu');
