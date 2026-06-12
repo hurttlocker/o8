@@ -15,6 +15,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
+import { SmoothCorners } from '@lisse/react';
 import { FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
 
 // NOTE: component (+ types) exports only — runtime const exports here would
@@ -152,14 +153,15 @@ export function FileGlassCard({
         left: card.x,
         top: card.y,
         width: card.w,
-        display: 'flex',
-        flexDirection: 'column',
-        borderRadius: 14,
-        overflow: 'hidden',
         zIndex: card.z,
-        ...glass(true),
       }}
     >
+      {/* Visual shell — Apple-smooth squircle corners (Lisse). */}
+      <SmoothCorners
+        corners={{ radius: 14 }}
+        shadowStrategy="box-shadow"
+        style={{ display: 'flex', flexDirection: 'column', ...glass(true) }}
+      >
       {/* Title bar — drag handle, dirty dot, save, close. */}
       <div
         onPointerDown={(event) => {
@@ -364,6 +366,7 @@ export function FileGlassCard({
           </svg>
         </div>
       </div>
+      </SmoothCorners>
     </motion.div>
   );
 }
