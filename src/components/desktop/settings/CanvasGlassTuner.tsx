@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   CANVAS_GLASS_DEFAULTS,
+  CANVAS_GLASS_MATERIALS,
   CANVAS_GLASS_PRESETS,
   CANVAS_GLASS_RANGES,
   applyCanvasGlassSettings,
@@ -64,7 +65,9 @@ export function CanvasGlassTuner() {
         {CANVAS_GLASS_PRESETS.map((preset) => {
           const active = settings.frost === preset.values.frost
             && settings.tint === preset.values.tint
-            && settings.ink === preset.values.ink;
+            && settings.ink === preset.values.ink
+            && settings.veil === preset.values.veil
+            && settings.material === preset.values.material;
           return (
             <button
               key={preset.id}
@@ -92,9 +95,61 @@ export function CanvasGlassTuner() {
           );
         })}
       </div>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+        <span style={{ fontSize: 10.5, fontWeight: 400, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--t-text-muted)' }}>
+          Background material
+        </span>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4 }}>
+          {CANVAS_GLASS_MATERIALS.map((material) => {
+            const active = settings.material === material.id;
+            return (
+              <button
+                key={material.id}
+                type="button"
+                onClick={() => update({ material: material.id })}
+                title={material.label}
+                style={{
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: active ? 'var(--t-accent)' : 'var(--t-divider)',
+                  background: active ? 'var(--t-bg-hover)' : 'transparent',
+                  borderRadius: 7,
+                  paddingTop: 4,
+                  paddingBottom: 4,
+                  paddingLeft: 2,
+                  paddingRight: 2,
+                  fontSize: 10,
+                  fontWeight: active ? 500 : 300,
+                  color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-sans-system)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                {material.label}
+              </button>
+            );
+          })}
+        </div>
+        <span style={{ fontSize: 10.5, color: 'var(--t-text-faint)', fontWeight: 300, lineHeight: 1.4 }}>
+          The native macOS layer the whole canvas runs on — your desktop reads through it. Applies when a canvas surface opens.
+        </span>
+      </div>
+      <GlassSlider
+        label="Veil"
+        hint="Window-wide dark wash over the background — darkness of the world itself"
+        value={settings.veil}
+        display={`${Math.round(settings.veil * 100)}%`}
+        min={CANVAS_GLASS_RANGES.veil.min}
+        max={CANVAS_GLASS_RANGES.veil.max}
+        step={CANVAS_GLASS_RANGES.veil.step}
+        onChange={(veil) => update({ veil })}
+      />
       <GlassSlider
         label="Frost"
-        hint="Backdrop blur — how much the world behind diffuses"
+        hint="Backdrop blur — how much the world behind a pane diffuses"
         value={settings.frost}
         display={`${Math.round(settings.frost)}px`}
         min={CANVAS_GLASS_RANGES.frost.min}
@@ -121,6 +176,16 @@ export function CanvasGlassTuner() {
         max={CANVAS_GLASS_RANGES.ink.max}
         step={CANVAS_GLASS_RANGES.ink.step}
         onChange={(ink) => update({ ink })}
+      />
+      <GlassSlider
+        label="Vibrance"
+        hint="How colourful the bleed-through reads inside the panes"
+        value={settings.vibrance}
+        display={`${Math.round(settings.vibrance * 100)}%`}
+        min={CANVAS_GLASS_RANGES.vibrance.min}
+        max={CANVAS_GLASS_RANGES.vibrance.max}
+        step={CANVAS_GLASS_RANGES.vibrance.step}
+        onChange={(vibrance) => update({ vibrance })}
       />
       <div>
         <button

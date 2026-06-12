@@ -35,6 +35,7 @@ import { useCallback, useEffect, useRef, useState, type CSSProperties, type Mous
 import { AnimatePresence, motion } from 'framer-motion';
 import {
   CANVAS_GLASS_DEFAULTS,
+  CANVAS_GLASS_MATERIALS,
   CANVAS_GLASS_PRESETS,
   CANVAS_GLASS_RANGES,
   applyCanvasGlassSettings,
@@ -51,8 +52,8 @@ const FONT = 'var(--font-sans-system)';
 function glass(deep = false): CSSProperties {
   return {
     background: deep ? 'var(--cnv-tint-deep)' : 'var(--cnv-tint)',
-    backdropFilter: 'blur(var(--cnv-frost)) saturate(160%)',
-    WebkitBackdropFilter: 'blur(var(--cnv-frost)) saturate(160%)',
+    backdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+    WebkitBackdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
     border: '1px solid var(--cnv-edge)',
     color: 'var(--cnv-ink)',
     boxShadow: '0 12px 40px rgba(0, 0, 0, 0.35)',
@@ -104,19 +105,20 @@ export default function CanvasGlassPreviewPage() {
     setInTauri(isTauri());
   }, []);
 
-  // Desktop-clear glass: swap the window to the Popover material while this
-  // page is up, restore the HudWindow chrome on the way out. No-op in a
-  // plain browser.
+  // Background material: apply the stored choice while this page is up,
+  // restore the HudWindow chrome on the way out. No-op in a plain browser.
   useEffect(() => {
     if (!canvasEnabled) return;
-    void setCanvasMaterial(true);
+    void setCanvasMaterial(readCanvasGlassSettings().material);
     return () => {
-      void setCanvasMaterial(false);
+      void setCanvasMaterial('default');
       if (summonTimerRef.current) clearTimeout(summonTimerRef.current);
     };
   }, [canvasEnabled]);
 
   const updateSettings = useCallback((patch: Partial<CanvasGlassSettings>) => {
+    // Material is native, not CSS — swap the window live when it changes.
+    if (patch.material) void setCanvasMaterial(patch.material);
     setSettings((previous) => {
       const next = { ...previous, ...patch };
       writeCanvasGlassSettings(next);
@@ -194,9 +196,13 @@ export default function CanvasGlassPreviewPage() {
 
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: FONT, background: inTauri ? 'transparent' : '#07090d', userSelect: 'none' }}>
-      {/* In the app the desktop IS the backdrop (Popover material). The
+      {/* In the app the desktop IS the backdrop (native material). The
           diffusion only stands in where there is no desktop to show. */}
       {inTauri ? null : <DiffusionBackdrop />}
+
+      {/* Window-wide veil — the continuous darkness control for the
+          background itself, painted over the native material. */}
+      <div aria-hidden style={{ position: 'absolute', inset: 0, background: 'var(--cnv-bg-veil)', pointerEvents: 'none', zIndex: 1 }} />
 
       {/* ── the reference stage — owns the canvas while it is empty ───────── */}
       <AnimatePresence mode="wait">
@@ -240,7 +246,7 @@ export default function CanvasGlassPreviewPage() {
           onClick={() => {
             // Restore the chrome material BEFORE the hard navigation — the
             // unmount cleanup is not guaranteed across location.assign.
-            void setCanvasMaterial(false).finally(() => {
+            void setCanvasMaterial('default').finally(() => {
               window.location.assign('/dashboard');
             });
           }}
@@ -766,7 +772,9 @@ function TunerPanel({ settings, onChange, inTauri }: { settings: CanvasGlassSett
             {CANVAS_GLASS_PRESETS.map((preset) => {
               const active = settings.frost === preset.values.frost
                 && settings.tint === preset.values.tint
-                && settings.ink === preset.values.ink;
+                && settings.ink === preset.values.ink
+                && settings.veil === preset.values.veil
+                && settings.material === preset.values.material;
               return (
                 <button
                   key={preset.id}
@@ -793,9 +801,51 @@ function TunerPanel({ settings, onChange, inTauri }: { settings: CanvasGlassSett
               );
             })}
           </div>
+          <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
+            Background
+          </span>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr', gap: 4 }}>
+            {CANVAS_GLASS_MATERIALS.map((material) => {
+              const active = settings.material === material.id;
+              return (
+                <button
+                  key={material.id}
+                  type="button"
+                  onClick={() => onChange({ material: material.id })}
+                  title={material.label}
+                  style={{
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: active ? 'var(--cnv-ink-muted)' : 'var(--cnv-edge)',
+                    background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                    borderRadius: 7,
+                    paddingTop: 4,
+                    paddingBottom: 4,
+                    paddingLeft: 2,
+                    paddingRight: 2,
+                    fontSize: 9,
+                    fontWeight: active ? 500 : 300,
+                    color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+                    cursor: 'pointer',
+                    fontFamily: FONT,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {material.label}
+                </button>
+              );
+            })}
+          </div>
+          <TunerSlider label="Veil" display={`${Math.round(settings.veil * 100)}%`} value={settings.veil} range={CANVAS_GLASS_RANGES.veil} onChange={(veil) => onChange({ veil })} />
+          <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
+            Glass panes
+          </span>
           <TunerSlider label="Frost" display={`${Math.round(settings.frost)}px`} value={settings.frost} range={CANVAS_GLASS_RANGES.frost} onChange={(frost) => onChange({ frost })} />
           <TunerSlider label="Tint" display={`${Math.round(settings.tint * 100)}%`} value={settings.tint} range={CANVAS_GLASS_RANGES.tint} onChange={(tint) => onChange({ tint })} />
           <TunerSlider label="Ink" display={`${Math.round(settings.ink * 100)}%`} value={settings.ink} range={CANVAS_GLASS_RANGES.ink} onChange={(ink) => onChange({ ink })} />
+          <TunerSlider label="Vibrance" display={`${Math.round(settings.vibrance * 100)}%`} value={settings.vibrance} range={CANVAS_GLASS_RANGES.vibrance} onChange={(vibrance) => onChange({ vibrance })} />
           <button
             type="button"
             onClick={() => onChange({ ...CANVAS_GLASS_DEFAULTS })}
