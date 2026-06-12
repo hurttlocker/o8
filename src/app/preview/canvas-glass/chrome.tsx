@@ -176,8 +176,16 @@ export function DockGlyphButton({ label, path, extra, onClick, active, badge }: 
         cursor: 'pointer',
         padding: 0,
       }}
-      onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-      onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+      onMouseEnter={(event) => {
+        event.currentTarget.style.color = 'var(--cnv-ink)';
+        if (!active) event.currentTarget.style.background = 'rgba(255,255,255,0.08)';
+      }}
+      onMouseLeave={(event) => {
+        if (!active) {
+          event.currentTarget.style.color = 'var(--cnv-ink-muted)';
+          event.currentTarget.style.background = 'transparent';
+        }
+      }}
     >
       <svg style={{ width: 14, height: 14, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d={path} />

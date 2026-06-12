@@ -39,6 +39,8 @@ export function OrchestratorDock({
   activeLabel,
   activeTone,
   onSelectLane,
+  onSend,
+  busy,
   onClose,
 }: {
   /** Lanes with a running conversation — the dropdown's contents. */
@@ -48,10 +50,14 @@ export function OrchestratorDock({
   activeLabel: string;
   activeTone: OrchestratorLane['tone'];
   onSelectLane: (id: string) => void;
+  /** Send a reply from the dock's own composer. */
+  onSend: (message: string) => void;
+  busy: boolean;
   onClose: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [laneMenuOpen, setLaneMenuOpen] = useState(false);
+  const [draft, setDraft] = useState('');
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -90,6 +96,10 @@ export function OrchestratorDock({
           height: '100%',
           display: 'flex',
           flexDirection: 'column',
+          // Content can never push the panel past its pinned bounds — the
+          // transcript scrolls, the panel doesn't grow (Q hit a state where
+          // the dock ran past the screen bottom and the reply was unreachable).
+          overflow: 'hidden',
           background: 'linear-gradient(270deg, var(--cnv-bg-veil) 0%, transparent 100%)',
         }}
       >
@@ -229,6 +239,44 @@ export function OrchestratorDock({
             </span>
           ) : null}
         </div>
+
+        {/* Reply right here — the dock owns its own composer so you never
+            hunt the bottom-center pill mid-conversation. */}
+        <div style={{ paddingLeft: 12, paddingRight: 12, paddingBottom: 12, paddingTop: 4, flexShrink: 0 }}>
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                const prompt = draft.trim();
+                if (!prompt || busy) return;
+                onSend(prompt);
+                setDraft('');
+              }
+            }}
+            placeholder={busy ? 'Working — interrupt from the main composer' : `Reply to ${activeLabel}`}
+            aria-label="Reply to the docked orchestrator"
+            style={{
+              width: '100%',
+              boxSizing: 'border-box',
+              paddingTop: 9,
+              paddingBottom: 9,
+              paddingLeft: 13,
+              paddingRight: 13,
+              borderRadius: 11,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--cnv-edge)',
+              background: 'var(--cnv-tint)',
+              color: 'var(--cnv-ink)',
+              fontSize: 12,
+              fontWeight: 300,
+              fontFamily: FONT,
+              outline: 'none',
+            }}
+          />
+        </div>
       </SmoothCorners>
     </motion.div>
   );
@@ -342,7 +390,26 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
           </svg>
         </div>
       ) : null}
-      {entry.role === 'text' ? <CanvasMarkdown text={entry.text} /> : null}
+      {entry.role === 'text' ? (
+        // Each assistant turn reads as its own quiet card — a hairline
+        // pane instead of a wall of flowing text (Q: "do we have cards
+        // we can use for turns?").
+        <div
+          style={{
+            borderRadius: 12,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--cnv-edge)',
+            background: 'var(--cnv-tint)',
+            paddingTop: 10,
+            paddingBottom: 11,
+            paddingLeft: 13,
+            paddingRight: 13,
+          }}
+        >
+          <CanvasMarkdown text={entry.text} />
+        </div>
+      ) : null}
       {entry.role === 'followups' ? <FollowUps /> : null}
     </motion.div>
   );
@@ -457,17 +524,17 @@ export function CanvasMarkdown({ text }: { text: string }) {
     }
 
     if (line.trim() === '') {
-      blocks.push(<div key={`md-${key++}`} style={{ height: 6 }} />);
+      blocks.push(<div key={`md-${key++}`} style={{ height: 8 }} />);
       i += 1;
       continue;
     }
 
-    blocks.push(<p key={`md-${key++}`} style={{ margin: 0, marginBottom: 5, lineHeight: 1.65 }}>{cnvInline(line, `md-${key}`)}</p>);
+    blocks.push(<p key={`md-${key++}`} style={{ margin: 0, marginBottom: 7, lineHeight: 1.7 }}>{cnvInline(line, `md-${key}`)}</p>);
     i += 1;
   }
 
   return (
-    <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.05px', color: 'var(--cnv-ink)', fontFamily: FONT }}>
+    <div style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.05px', color: 'var(--cnv-ink)', fontFamily: FONT }}>
       {blocks}
     </div>
   );
