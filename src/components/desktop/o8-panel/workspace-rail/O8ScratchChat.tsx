@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
+import { createPortal } from 'react-dom';
 import {
   ArrowBendUpRight,
   ArrowsInSimple,
@@ -726,7 +727,10 @@ export function O8ScratchChat({
       <div ref={buttonRef} style={{ display: 'inline-flex', flexShrink: 0 }}>
         <HeaderButton active={open} disabled={disabled && !open} onOpen={togglePanel} placement={placement} surfaceLabel={surfaceLabel} />
       </div>
-      {open ? (
+      {/* Body portal — position:fixed breaks inside transformed ancestors
+          (framer-motion cards on the canvas), so the panel escapes to body
+          where viewport coords are real. */}
+      {open ? createPortal(
         <div
           role="dialog"
           aria-label={surfaceLabel ? `Ask o8 — ${surfaceLabel}` : 'Ask o8'}
@@ -1166,7 +1170,8 @@ export function O8ScratchChat({
               </span>
             </div>
           </div>
-        </div>
+        </div>,
+        document.body,
       ) : null}
     </>
   );
