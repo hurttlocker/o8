@@ -17,7 +17,6 @@ import { useEffect, useRef, useState } from 'react';
 import {
   GrainGradient,
   MeshGradient,
-  PulsingBorder,
   StaticRadialGradient,
   Warp,
 } from '@paper-design/shaders-react';
@@ -262,6 +261,126 @@ function WindDots() {
   return <canvas ref={canvasRef} style={FILL} />;
 }
 
+/**
+ * The o8 orbit pulse — the brand's dual-orbit mark, way small, drawn in
+ * faded dither (airy stipple, not cloud), breathing a slow zoom. A fixed
+ * "sun" sits upper-right of the mark; as stipple drifts along the orbit
+ * paths and passes that spot it glows amber, like the canvas is sunlit.
+ */
+function OrbitPulse() {
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    const DOTS_PER_RING = 150;
+    const DENSITY = 0.6;        // share of stipple actually drawn — airy
+    const FLOW = 0.07;          // rad/s drift along the orbit
+    const BREATH_S = 13;        // one zoom in+out
+    const SUN_ANGLE = -0.9;     // screen-space, upper right
+    const SUN_WIDTH = 0.62;     // gaussian sigma (rad) — a graceful arc, not a hotspot
+    const TILT = 0.42;          // ellipse minor/major ratio
+    const LEAN = 0.49;          // ring inclination (rad) — crossed = the 8
+
+    let width = 0;
+    let height = 0;
+    let raf = 0;
+    let disposed = false;
+    let skip = false;
+
+    const hash = (n: number) => {
+      const s = Math.sin(n * 12.9898) * 43758.5453;
+      return s - Math.floor(s);
+    };
+
+    const resize = () => {
+      const parent = canvas.parentElement;
+      if (!parent) return;
+      const rect = parent.getBoundingClientRect();
+      const dpr = Math.min(2, window.devicePixelRatio || 1);
+      canvas.width = Math.max(1, Math.round(rect.width * dpr));
+      canvas.height = Math.max(1, Math.round(rect.height * dpr));
+      canvas.style.width = `${rect.width}px`;
+      canvas.style.height = `${rect.height}px`;
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      width = rect.width;
+      height = rect.height;
+    };
+
+    const frame = () => {
+      if (disposed) return;
+      raf = requestAnimationFrame(frame);
+      if (document.hidden) return;
+      skip = !skip;
+      if (skip) return;
+
+      const t = performance.now() / 1000;
+      const cx = width / 2;
+      const cy = height * 0.44;
+      const radius = Math.min(width, height) * 0.13;
+      const breath = 1 + 0.08 * Math.sin((t * Math.PI * 2) / BREATH_S);
+
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      for (let ring = 0; ring < 2; ring++) {
+        const lean = ring === 0 ? LEAN : -LEAN;
+        const cosL = Math.cos(lean);
+        const sinL = Math.sin(lean);
+        for (let i = 0; i < DOTS_PER_RING; i++) {
+          const seed = ring * 1000 + i;
+          if (hash(seed + 0.31) > DENSITY) continue;
+          const u = (i / DOTS_PER_RING) * Math.PI * 2 + t * FLOW * (ring === 0 ? 1 : -1);
+          // Ellipse point, leaned, breathed.
+          const ex = Math.cos(u) * radius;
+          const ey = Math.sin(u) * radius * TILT;
+          const x = (ex * cosL - ey * sinL) * breath;
+          const y = (ex * sinL + ey * cosL) * breath;
+          // Sunlit pass — screen angle vs the fixed sun spot.
+          let delta = Math.atan2(y, x) - SUN_ANGLE;
+          delta = Math.atan2(Math.sin(delta), Math.cos(delta));
+          const glow = Math.exp(-((delta / SUN_WIDTH) ** 2));
+          // Faded dither: jittered position, hashed alpha, gentle flicker.
+          const jx = (hash(seed + 1.7) - 0.5) * 2.6;
+          const jy = (hash(seed + 2.9) - 0.5) * 2.6;
+          const flicker = 0.04 * Math.sin(t * 1.3 + i * 0.7);
+          const alpha = 0.11 + 0.08 * hash(seed + 4.2) + glow * 0.32 + flicker;
+          if (alpha < 0.02) continue;
+          const r = 0.6 + 0.4 * hash(seed + 5.5) + glow * 0.5;
+          const cr = Math.round(160 + (245 - 160) * glow);
+          const cg = Math.round(176 + (158 - 176) * glow);
+          const cb = Math.round(196 + (11 - 196) * glow);
+          ctx.fillStyle = `rgba(${cr},${cg},${cb},${Math.min(0.85, alpha).toFixed(3)})`;
+          ctx.beginPath();
+          ctx.arc(cx + x + jx, cy + y + jy, r, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+
+      // The nucleus — one quiet dot breathing with the rings.
+      ctx.fillStyle = `rgba(190,202,218,${(0.18 + 0.08 * Math.sin((t * Math.PI * 2) / BREATH_S)).toFixed(3)})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy, 1.8 * breath, 0, Math.PI * 2);
+      ctx.fill();
+    };
+
+    resize();
+    const observer = new ResizeObserver(resize);
+    if (canvas.parentElement) observer.observe(canvas.parentElement);
+    raf = requestAnimationFrame(frame);
+
+    return () => {
+      disposed = true;
+      cancelAnimationFrame(raf);
+      observer.disconnect();
+    };
+  }, []);
+
+  return <canvas ref={canvasRef} style={FILL} />;
+}
+
 export function CanvasBackdropLayer({ kind }: { kind: string }) {
   // WebGL2 probe — the shader library throws without it. Trails is 2D
   // canvas and exempt.
@@ -284,6 +403,7 @@ export function CanvasBackdropLayer({ kind }: { kind: string }) {
 
   if (kind === 'trails') return wrap(1, <SnakeTrails />);
   if (kind === 'dots') return wrap(1, <WindDots />);
+  if (kind === 'pulse') return wrap(1, <OrbitPulse />);
   if (!webgl) return null;
 
   switch (kind) {
@@ -327,29 +447,6 @@ export function CanvasBackdropLayer({ kind }: { kind: string }) {
           {...TAME}
           speed={0.06}
           scale={1.2}
-        />
-      ));
-    case 'pulse':
-      // The o8 breath — amber + steel breathing at the window edge. The
-      // one accent piece; everything else stays ink. A natural "Symon is
-      // listening" presence glow later.
-      return wrap(0.45, (
-        <PulsingBorder
-          colorBack="#00000000"
-          colors={['#f59e0b', '#3a4a5f']}
-          thickness={0.08}
-          roundness={0.3}
-          softness={0.8}
-          intensity={0.25}
-          bloom={0.4}
-          spots={3}
-          spotSize={0.4}
-          pulse={0.3}
-          smoke={0.3}
-          smokeSize={0.5}
-          {...TAME}
-          speed={0.3}
-          fit="none"
         />
       ));
     case 'radial':
