@@ -59,11 +59,34 @@ export function OrchestratorDock({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [laneMenuOpen, setLaneMenuOpen] = useState(false);
   const [draft, setDraft] = useState('');
+  const laneMenuRef = useRef<HTMLDivElement | null>(null);
+  const laneButtonRef = useRef<HTMLButtonElement | null>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries]);
+
+  // The dock sits inside a transformed ancestor, so a fixed veil would
+  // anchor to the panel, not the viewport — dismiss via document listeners
+  // instead (outside pointerdown + Escape), like every other popover.
+  useEffect(() => {
+    if (!laneMenuOpen) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+      if (laneMenuRef.current?.contains(target) || laneButtonRef.current?.contains(target)) return;
+      setLaneMenuOpen(false);
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setLaneMenuOpen(false);
+    };
+    document.addEventListener('pointerdown', onPointerDown);
+    document.addEventListener('keydown', onKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', onPointerDown);
+      document.removeEventListener('keydown', onKeyDown);
+    };
+  }, [laneMenuOpen]);
 
   const otherLanes = lanes.filter((lane) => lane.id !== activeLane);
 
@@ -107,6 +130,7 @@ export function OrchestratorDock({
         {/* Header — the active orchestrator + a dropdown of what's running. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 12, paddingBottom: 10, paddingLeft: 14, paddingRight: 12, position: 'relative' }}>
           <button
+            ref={laneButtonRef}
             type="button"
             aria-label="Switch orchestrator"
             onClick={() => setLaneMenuOpen((value) => !value)}
@@ -116,7 +140,10 @@ export function OrchestratorDock({
               gap: 8,
               borderWidth: 0,
               background: 'transparent',
-              padding: 2,
+              paddingTop: 2,
+              paddingBottom: 2,
+              paddingLeft: 2,
+              paddingRight: 2,
               cursor: 'pointer',
               fontFamily: FONT,
             }}
@@ -159,6 +186,7 @@ export function OrchestratorDock({
           <AnimatePresence>
             {laneMenuOpen ? (
               <motion.div
+                ref={laneMenuRef}
                 initial={{ opacity: 0, y: -6, scale: 0.98 }}
                 animate={{ opacity: 1, y: 0, scale: 1 }}
                 exit={{ opacity: 0, y: -6, scale: 0.98 }}
