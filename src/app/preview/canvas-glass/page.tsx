@@ -4,8 +4,8 @@
  * /preview/canvas-glass — the Canvas-mode material test page (#1232).
  *
  * Purpose: nail the glass BEFORE the real shell revamp. The full canvas
- * anatomy renders here in the Siri-reference dark glass, tunable live via
- * the frost/tint/ink sliders (top-right, same values as Settings → Operator
+ * anatomy renders here, tunable live via the frost/tint/ink sliders +
+ * material presets (top-right, same values as Settings → Operator
  * Defaults → Canvas mode):
  *
  *   - top dock        → the important header controls (NOT Symon — Symon
@@ -15,16 +15,27 @@
  *   - left/right edge → hover-reveal rails (sessions / activity feedback)
  *   - bottom input    → the orchestrator composer for the scoped repo
  *   - glass cards     → packet-objects; drag them, Enter in the composer
- *                       spawns a working one
+ *                       summons them
+ *
+ * In the o8 app the window swaps to the Popover vibrancy material
+ * (set_canvas_material) and the page paints NOTHING behind the glass —
+ * the real desktop reads through, the Symon-settings clarity. In a plain
+ * browser the diffusion backdrop stands in for the desktop.
+ *
+ * Empty canvas = the kivo-style stage (blurrhaus reference): a pulsing
+ * idle element with cycling hints; Enter in the composer runs the
+ * summon transition and fans agent cards out in an arc. This is the
+ * "orchestrator/Symon uses the canvas when nothing is there" motion.
  *
  * Everything here is a mock — no backend, no dispatch. Gated on the
  * experimentalCanvas operator flag like every canvas surface.
  */
 
 import { useCallback, useEffect, useRef, useState, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import {
   CANVAS_GLASS_DEFAULTS,
+  CANVAS_GLASS_PRESETS,
   CANVAS_GLASS_RANGES,
   applyCanvasGlassSettings,
   readCanvasGlassSettings,
@@ -32,6 +43,7 @@ import {
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
+import { isTauri, setCanvasMaterial } from '@/lib/tauri/bridge';
 
 const FONT = 'var(--font-sans-system)';
 
@@ -54,12 +66,9 @@ interface MockCard {
   tone: 'working' | 'waiting' | 'idle';
   x: number;
   y: number;
+  /** Entry-animation stagger (s) — set for arc fan-outs. */
+  entryDelay?: number;
 }
-
-const SEED_CARDS: MockCard[] = [
-  { id: 1, title: 'Refactor lane escalation copy', meta: 'o8 · codex · inline-1', tone: 'working', x: 320, y: 180 },
-  { id: 2, title: 'Add aria-labels to homepage SVGs', meta: 'o8-site · codex · inline-2', tone: 'waiting', x: 560, y: 300 },
-];
 
 const TONE_DOT: Record<MockCard['tone'], string> = {
   working: '#22c55e',
@@ -67,20 +76,45 @@ const TONE_DOT: Record<MockCard['tone'], string> = {
   idle: 'rgba(255,255,255,0.4)',
 };
 
+const IDLE_HINTS = [
+  'The canvas is listening',
+  'Type below — Enter builds onto the canvas',
+  'Spawn from the left dock',
+  'Symon can drive this surface by voice',
+];
+
+type Stage = { kind: 'idle' } | { kind: 'summoning'; prompt: string };
+
 export default function CanvasGlassPreviewPage() {
   const canvasEnabled = useExperimentalCanvasFlag();
   const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
-  const [cards, setCards] = useState<MockCard[]>(SEED_CARDS);
+  const [cards, setCards] = useState<MockCard[]>([]);
   const [leftRailOpen, setLeftRailOpen] = useState(false);
   const [rightRailOpen, setRightRailOpen] = useState(false);
   const [composerValue, setComposerValue] = useState('');
-  const nextIdRef = useRef(3);
+  const [inTauri, setInTauri] = useState(false);
+  const [stage, setStage] = useState<Stage>({ kind: 'idle' });
+  const nextIdRef = useRef(1);
+  const summonTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     const stored = readCanvasGlassSettings();
     setSettings(stored);
     applyCanvasGlassSettings(stored);
+    setInTauri(isTauri());
   }, []);
+
+  // Desktop-clear glass: swap the window to the Popover material while this
+  // page is up, restore the HudWindow chrome on the way out. No-op in a
+  // plain browser.
+  useEffect(() => {
+    if (!canvasEnabled) return;
+    void setCanvasMaterial(true);
+    return () => {
+      void setCanvasMaterial(false);
+      if (summonTimerRef.current) clearTimeout(summonTimerRef.current);
+    };
+  }, [canvasEnabled]);
 
   const updateSettings = useCallback((patch: Partial<CanvasGlassSettings>) => {
     setSettings((previous) => {
@@ -107,6 +141,39 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
+  /** The kivo transition — summon state, then agents fan out in an arc. */
+  const summonArc = useCallback((prompt: string) => {
+    setStage({ kind: 'summoning', prompt });
+    summonTimerRef.current = setTimeout(() => {
+      setCards((previous) => {
+        const width = typeof window !== 'undefined' ? window.innerWidth : 1280;
+        const height = typeof window !== 'undefined' ? window.innerHeight : 800;
+        const centerX = width / 2 - 105;
+        const baseY = height * 0.32;
+        const arc = [
+          { dx: -290, dy: 44, title: `Plan — ${prompt}`, meta: 'o8 · orchestrator · scoping', tone: 'idle' as const },
+          { dx: 0, dy: -14, title: prompt, meta: 'o8 · codex · dispatched', tone: 'working' as const },
+          { dx: 290, dy: 44, title: `Review — ${prompt}`, meta: 'o8 · gate · queued', tone: 'waiting' as const },
+        ];
+        const spawned = arc.map((slot, index) => {
+          const id = nextIdRef.current;
+          nextIdRef.current += 1;
+          return {
+            id,
+            title: slot.title.slice(0, 46),
+            meta: slot.meta,
+            tone: slot.tone,
+            x: Math.max(16, centerX + slot.dx),
+            y: Math.max(70, baseY + slot.dy),
+            entryDelay: index * 0.14,
+          };
+        });
+        return [...previous, ...spawned];
+      });
+      setStage({ kind: 'idle' });
+    }, 1300);
+  }, []);
+
   const moveCard = useCallback((id: number, x: number, y: number) => {
     setCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
@@ -123,9 +190,20 @@ export default function CanvasGlassPreviewPage() {
     );
   }
 
+  const summoning = stage.kind === 'summoning';
+
   return (
-    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: FONT, background: '#07090d', userSelect: 'none' }}>
-      <DiffusionBackdrop />
+    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: FONT, background: inTauri ? 'transparent' : '#07090d', userSelect: 'none' }}>
+      {/* In the app the desktop IS the backdrop (Popover material). The
+          diffusion only stands in where there is no desktop to show. */}
+      {inTauri ? null : <DiffusionBackdrop />}
+
+      {/* ── Kivo stage — owns the canvas while it is empty ───────── */}
+      <AnimatePresence mode="wait">
+        {cards.length === 0 || summoning ? (
+          <CenterStage key={stage.kind} stage={stage} />
+        ) : null}
+      </AnimatePresence>
 
       {/* ── Glass cards (packet-objects) ─────────────────────────── */}
       {cards.map((card) => (
@@ -159,7 +237,13 @@ export default function CanvasGlassPreviewPage() {
         <span style={{ width: 1, height: 16, background: 'var(--cnv-edge)' }} />
         <button
           type="button"
-          onClick={() => { window.location.assign('/dashboard'); }}
+          onClick={() => {
+            // Restore the chrome material BEFORE the hard navigation — the
+            // unmount cleanup is not guaranteed across location.assign.
+            void setCanvasMaterial(false).finally(() => {
+              window.location.assign('/dashboard');
+            });
+          }}
           style={{
             borderWidth: 0,
             background: 'transparent',
@@ -230,9 +314,9 @@ export default function CanvasGlassPreviewPage() {
         onOpenChange={setRightRailOpen}
         title="Activity"
         rows={[
-          ['0.1.353 shipped', 'release · just now'],
-          ['fix(workspace): tab persistence', 'main · 10m ago'],
-          ['feat(canvas): fleet-canvas v1', 'main · 1h ago'],
+          ['0.1.354 shipped', 'release · just now'],
+          ['feat(canvas): v2 glass slice', 'main · 10m ago'],
+          ['fix(workspace): tab persistence', 'main · 1h ago'],
         ]}
       />
 
@@ -258,8 +342,13 @@ export default function CanvasGlassPreviewPage() {
           value={composerValue}
           onChange={(event) => setComposerValue(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && composerValue.trim()) {
-              spawnCard(composerValue.trim().slice(0, 42), 'o8 · codex · dispatched', 'working');
+            if (event.key === 'Enter' && composerValue.trim() && !summoning) {
+              const prompt = composerValue.trim().slice(0, 42);
+              if (cards.length === 0) {
+                summonArc(prompt);
+              } else {
+                spawnCard(prompt, 'o8 · codex · dispatched', 'working');
+              }
               setComposerValue('');
             }
           }}
@@ -278,20 +367,120 @@ export default function CanvasGlassPreviewPage() {
           }}
         />
         <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--cnv-ink-muted)', flexShrink: 0 }}>
-          Enter spawns a card
+          {cards.length === 0 ? 'Enter summons the fleet' : 'Enter spawns a card'}
         </span>
         <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
           <path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" />
         </svg>
       </div>
 
-      <TunerPanel settings={settings} onChange={updateSettings} />
+      <TunerPanel settings={settings} onChange={updateSettings} inTauri={inTauri} />
     </div>
   );
 }
 
-/** Slow drifting colour fields — the diffusion behind the glass. Stands in
- *  for the desktop/vibrancy that the real mode will bleed through. */
+/** The kivo-borrow center stage: a pulsing idle element with cycling hints,
+ *  morphing into an orbiting summon spinner while the fleet materialises. */
+function CenterStage({ stage }: { stage: Stage }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, scale: 0.9 }}
+      animate={{ opacity: 1, scale: 1 }}
+      exit={{ opacity: 0, scale: 1.06 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 30 }}
+      style={{
+        position: 'absolute',
+        left: '50%',
+        top: '38%',
+        transform: 'translate(-50%, -50%)',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        gap: 22,
+        pointerEvents: 'none',
+        zIndex: 2,
+      }}
+    >
+      {stage.kind === 'summoning' ? <SummonRings /> : <IdlePulse />}
+      {stage.kind === 'summoning' ? (
+        <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
+          Summoning — {stage.prompt}
+        </span>
+      ) : (
+        <CyclingHint />
+      )}
+    </motion.div>
+  );
+}
+
+function IdlePulse() {
+  return (
+    <div style={{ position: 'relative', width: 84, height: 84, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <motion.span
+        aria-hidden
+        animate={{ scale: [1, 1.16, 1], opacity: [0.4, 0.75, 0.4] }}
+        transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut' }}
+        style={{ position: 'absolute', inset: 0, borderRadius: '50%', border: '1px solid var(--cnv-edge)', background: 'var(--cnv-tint)' }}
+      />
+      <motion.span
+        aria-hidden
+        animate={{ scale: [1, 1.08, 1], opacity: [0.7, 1, 0.7] }}
+        transition={{ duration: 2.8, repeat: Infinity, ease: 'easeInOut', delay: 0.35 }}
+        style={{ position: 'absolute', inset: 18, borderRadius: '50%', border: '1px solid var(--cnv-edge)' }}
+      />
+      <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--cnv-ink)' }} />
+    </div>
+  );
+}
+
+function SummonRings() {
+  return (
+    <div style={{ position: 'relative', width: 84, height: 84, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <motion.span
+        aria-hidden
+        animate={{ rotate: 360 }}
+        transition={{ duration: 2.2, repeat: Infinity, ease: 'linear' }}
+        style={{ position: 'absolute', inset: 6, borderRadius: '50%', border: '1px solid transparent', borderTopColor: 'var(--cnv-ink)', borderRightColor: 'var(--cnv-edge)' }}
+      />
+      <motion.span
+        aria-hidden
+        animate={{ rotate: -360 }}
+        transition={{ duration: 3.4, repeat: Infinity, ease: 'linear' }}
+        style={{ position: 'absolute', inset: 20, borderRadius: '50%', border: '1px solid transparent', borderBottomColor: 'var(--cnv-ink-muted)', borderLeftColor: 'var(--cnv-edge)' }}
+      />
+      <span aria-hidden style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--cnv-ink)' }} />
+    </div>
+  );
+}
+
+function CyclingHint() {
+  const [index, setIndex] = useState(0);
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setIndex((value) => (value + 1) % IDLE_HINTS.length);
+    }, 4000);
+    return () => clearInterval(timer);
+  }, []);
+  return (
+    <div style={{ height: 18, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+      <AnimatePresence mode="wait">
+        <motion.span
+          key={index}
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -6 }}
+          transition={{ duration: 0.45, ease: 'easeOut' }}
+          style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', fontFamily: FONT, whiteSpace: 'nowrap' }}
+        >
+          {IDLE_HINTS[index]}
+        </motion.span>
+      </AnimatePresence>
+    </div>
+  );
+}
+
+/** Slow drifting colour fields — the diffusion behind the glass. Browser-only
+ *  stand-in for the real desktop that the app's Popover material shows. */
 function DiffusionBackdrop() {
   const blobs: Array<{ size: number; color: string; from: { x: string; y: string }; to: { x: string; y: string }; duration: number }> = [
     { size: 560, color: 'rgba(58, 96, 255, 0.32)', from: { x: '-6%', y: '8%' }, to: { x: '14%', y: '26%' }, duration: 46 },
@@ -325,8 +514,9 @@ function PacketGlassCard({ card, onMove }: { card: MockCard; onMove: (id: number
   const working = card.tone === 'working';
   return (
     <motion.div
-      animate={working ? { scale: [1, 1.015, 1], opacity: [1, 0.93, 1] } : { scale: 1, opacity: 1 }}
-      transition={working ? { duration: 3.2, repeat: Infinity, ease: 'easeInOut' } : { type: 'spring', stiffness: 400, damping: 30 }}
+      initial={{ scale: 0.62, opacity: 0, y: 26 }}
+      animate={{ scale: 1, opacity: 1, y: 0 }}
+      transition={{ type: 'spring', stiffness: 380, damping: 28, delay: card.entryDelay ?? 0 }}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -343,28 +533,37 @@ function PacketGlassCard({ card, onMove }: { card: MockCard; onMove: (id: number
         left: card.x,
         top: card.y,
         width: 210,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 5,
-        paddingTop: 11,
-        paddingRight: 13,
-        paddingBottom: 11,
-        paddingLeft: 13,
         borderRadius: 14,
         cursor: 'grab',
         touchAction: 'none',
-        ...glass(),
+        zIndex: 3,
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
-        <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: TONE_DOT[card.tone] }} />
-        <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {card.title}
+      <motion.div
+        animate={working ? { scale: [1, 1.015, 1], opacity: [1, 0.93, 1] } : { scale: 1, opacity: 1 }}
+        transition={working ? { duration: 3.2, repeat: Infinity, ease: 'easeInOut' } : { duration: 0.2 }}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 5,
+          paddingTop: 11,
+          paddingRight: 13,
+          paddingBottom: 11,
+          paddingLeft: 13,
+          borderRadius: 14,
+          ...glass(),
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+          <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', flexShrink: 0, background: TONE_DOT[card.tone] }} />
+          <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {card.title}
+          </span>
+        </div>
+        <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', letterSpacing: '0.01em' }}>
+          {card.meta}
         </span>
-      </div>
-      <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', letterSpacing: '0.01em' }}>
-        {card.meta}
-      </span>
+      </motion.div>
     </motion.div>
   );
 }
@@ -517,7 +716,7 @@ function SpawnGlyphButton({ label, onClick, children }: { label: string; onClick
   );
 }
 
-function TunerPanel({ settings, onChange }: { settings: CanvasGlassSettings; onChange: (patch: Partial<CanvasGlassSettings>) => void }) {
+function TunerPanel({ settings, onChange, inTauri }: { settings: CanvasGlassSettings; onChange: (patch: Partial<CanvasGlassSettings>) => void; inTauri: boolean }) {
   const [collapsed, setCollapsed] = useState(false);
   return (
     <div
@@ -563,6 +762,37 @@ function TunerPanel({ settings, onChange }: { settings: CanvasGlassSettings; onC
       </button>
       {collapsed ? null : (
         <>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+            {CANVAS_GLASS_PRESETS.map((preset) => {
+              const active = settings.frost === preset.values.frost
+                && settings.tint === preset.values.tint
+                && settings.ink === preset.values.ink;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => onChange({ ...preset.values })}
+                  style={{
+                    flex: 1,
+                    borderWidth: 1,
+                    borderStyle: 'solid',
+                    borderColor: active ? 'var(--cnv-ink-muted)' : 'var(--cnv-edge)',
+                    background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                    borderRadius: 999,
+                    paddingTop: 3,
+                    paddingBottom: 3,
+                    fontSize: 10.5,
+                    fontWeight: active ? 500 : 300,
+                    color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+                    cursor: 'pointer',
+                    fontFamily: FONT,
+                  }}
+                >
+                  {preset.label}
+                </button>
+              );
+            })}
+          </div>
           <TunerSlider label="Frost" display={`${Math.round(settings.frost)}px`} value={settings.frost} range={CANVAS_GLASS_RANGES.frost} onChange={(frost) => onChange({ frost })} />
           <TunerSlider label="Tint" display={`${Math.round(settings.tint * 100)}%`} value={settings.tint} range={CANVAS_GLASS_RANGES.tint} onChange={(tint) => onChange({ tint })} />
           <TunerSlider label="Ink" display={`${Math.round(settings.ink * 100)}%`} value={settings.ink} range={CANVAS_GLASS_RANGES.ink} onChange={(ink) => onChange({ ink })} />
@@ -585,6 +815,11 @@ function TunerPanel({ settings, onChange }: { settings: CanvasGlassSettings; onC
           >
             Reset defaults
           </button>
+          {inTauri ? null : (
+            <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.5 }}>
+              Open in the o8 app to see your desktop through the glass.
+            </span>
+          )}
         </>
       )}
     </div>

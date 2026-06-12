@@ -38,6 +38,18 @@ export const CANVAS_GLASS_RANGES = {
   ink: { min: 0.55, max: 1, step: 0.01 },
 } as const;
 
+/**
+ * One-click material presets — the "theme switcher" for the glass. Each is
+ * just a frost/tint/ink combo; the sliders fine-tune from wherever a preset
+ * lands. Clear = the desktop reads through (the Symon-settings look);
+ * Siri = the dark Apple reference; Frost = heavy private glass.
+ */
+export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; values: CanvasGlassSettings }> = [
+  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96 } },
+  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92 } },
+  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96 } },
+];
+
 const STORAGE_KEY = 'o8:canvas-glass';
 export const CANVAS_GLASS_CHANGED_EVENT = 'o8:canvas-glass-changed';
 
