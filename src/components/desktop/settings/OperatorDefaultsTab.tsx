@@ -20,6 +20,7 @@ import {
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { CanvasGlassTuner } from './CanvasGlassTuner';
 
 type OverlapGateMode = 'advisory' | 'strict';
 type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
@@ -765,8 +766,8 @@ export function OperatorDefaultsTab() {
           }
         />
         <Row
-          label="Experimental: Canvas"
-          description="Show the fleet Canvas tab in the new-tab drawer — your packets as live cards on a spatial canvas. Off by default; the slice is additive and dismissible (docs/canvas-mode-plan.md)."
+          label="Experimental: Canvas mode"
+          description="The glass canvas — a voice-first fleet surface (docs/canvas-mode-plan.md). This toggle is the ONLY gate: off means no canvas access anywhere. On unlocks the glass-material sliders below and the /preview/canvas-glass test page."
           source={sources.experimentalCanvas}
           disabledReason={sources?.experimentalCanvas === 'env' ? envDisabledReason : undefined}
           right={
@@ -779,6 +780,7 @@ export function OperatorDefaultsTab() {
             />
           }
         />
+        {values.experimentalCanvas ? <CanvasGlassTuner /> : null}
       </section>
 
       {/* 06 — Q&A COMPOSER */}
