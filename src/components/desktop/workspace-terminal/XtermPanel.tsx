@@ -39,6 +39,10 @@ export interface XtermPanelProps {
    *  point. For the occasional "show it anyway" spawn — never the default,
    *  because it trades real latency for the moment. */
   revealMinPlay?: boolean;
+  /** Surface-scoped xterm theme keys merged OVER the built theme — the
+   *  canvas passes its own ink so terminals follow the glass vocabulary
+   *  instead of whatever --t-terminal-* happens to be stamped globally. */
+  themeOverrides?: Record<string, string>;
 }
 
 export interface XtermPanelHandle {
@@ -50,7 +54,7 @@ export interface XtermPanelHandle {
 }
 
 export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermPanel(
-  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize, connectionEpoch, spawnReveal, revealMinPlay },
+  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize, connectionEpoch, spawnReveal, revealMinPlay, themeOverrides },
   ref,
 ) {
   const { themeId } = useTheme();
@@ -175,7 +179,11 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           allowTransparency: transparent === true,
           allowProposedApi: true,
           scrollback: 10000,
-          theme: transparent ? { ...buildXtermTheme(), background: 'rgba(0,0,0,0)' } : buildXtermTheme(),
+          theme: {
+            ...buildXtermTheme(),
+            ...(transparent ? { background: 'rgba(0,0,0,0)' } : {}),
+            ...(themeOverrides ?? {}),
+          },
         });
 
         const fitAddon = new FitAddon();
@@ -297,16 +305,19 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
 
   // Live-update xterm theme on theme switch without recreating the terminal.
   // The canvas repaints next frame with the new palette, PTY state is preserved.
+  const themeOverridesKey = themeOverrides ? JSON.stringify(themeOverrides) : '';
   useEffect(() => {
     if (!termRef.current) return;
     try {
-      termRef.current.options.theme = transparent
-        ? { ...buildXtermTheme(), background: 'rgba(0,0,0,0)' }
-        : buildXtermTheme();
+      termRef.current.options.theme = {
+        ...buildXtermTheme(),
+        ...(transparent ? { background: 'rgba(0,0,0,0)' } : {}),
+        ...(themeOverridesKey ? JSON.parse(themeOverridesKey) : {}),
+      };
     } catch {
       // xterm may throw if the terminal was disposed mid-update; ignore.
     }
-  }, [themeId, transparent]);
+  }, [themeId, transparent, themeOverridesKey]);
 
   if (error) {
     return (
