@@ -28,7 +28,7 @@
  * Gated on the experimentalCanvas operator flag like every canvas surface.
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import {
@@ -235,6 +235,22 @@ export default function CanvasGlassPreviewPage() {
     } catch {
       // defaults stand
     }
+  }, []);
+
+  // Escape closes every ephemeral layer — popovers, pickers, drawers,
+  // search. They all have outside-click veils; this is the keyboard peer.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      setTopMenu(null);
+      setComposerMenu(null);
+      setTermPickerOpen(false);
+      setReviewPickerOpen(false);
+      setSessionsOpen(false);
+      setSearchOpen(false);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, []);
 
   // Repos load at mount — the composer is scoped to a repo from the first
@@ -627,7 +643,7 @@ export default function CanvasGlassPreviewPage() {
    *  reserved for the docked live orchestrator. The card's dock glyph
    *  promotes it into the dock if wanted. */
   const pickThread = useCallback((threadId: string, repoPath: string | null, meta?: { title?: string | null; repoName?: string | null }, at?: SnapGeometry) => {
-    fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`)
+    return fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`)
       .then((response) => (response.ok ? response.json() : null))
       .then((data: { messages?: Array<{ role?: string; content?: string }>; title?: string | null; repoName?: string | null; repoPath?: string | null } | null) => {
         const messages = Array.isArray(data?.messages) ? data.messages : [];
@@ -806,7 +822,7 @@ export default function CanvasGlassPreviewPage() {
   /** A lane's review diff lands as a glass card — the governance moat
    *  as a canvas object. */
   const spawnDiffCard = useCallback((lane: LaneRow, at?: SnapGeometry) => {
-    fetch(`/api/lanes/${encodeURIComponent(lane.id)}/diff?maxBytes=131072`)
+    return fetch(`/api/lanes/${encodeURIComponent(lane.id)}/diff?maxBytes=131072`)
       .then((response) => (response.ok ? response.json() : null))
       .then((data: { ok?: boolean; packetId?: string | null; branch?: string | null; stat?: string; diff?: string; truncated?: boolean } | null) => {
         if (!data?.ok) return;
@@ -953,9 +969,12 @@ export default function CanvasGlassPreviewPage() {
   useEffect(() => {
     if (restoredRef.current) return;
     restoredRef.current = true;
-    persistArmedAtRef.current = Date.now() + 4000;
     const snap = loadCanvasSnapshot();
     if (!snap) return;
+    // Ceiling, not the arm point — the async restores release it early
+    // below. A dev-server cold compile can hold a thread fetch past any
+    // fixed short window, and a save in that gap loses the unfetched cards.
+    persistArmedAtRef.current = Date.now() + 12000;
     if (snap.activeRepoPath) setActiveRepoPath((current) => current ?? snap.activeRepoPath);
     if (snap.dockOpen) setDockOpen(true);
 
@@ -984,19 +1003,26 @@ export default function CanvasGlassPreviewPage() {
       })]);
     }
     snap.file.forEach((saved) => spawnFileCard(saved.path, saved));
-    snap.chat.forEach((saved) => pickThread(saved.threadId, saved.repoPath, { title: saved.title, repoName: saved.repoName }, saved));
-    snap.diff.forEach((saved) => spawnDiffCard({ id: saved.laneId, label: saved.title }, saved));
+    const settles: Array<Promise<unknown>> = [
+      ...snap.chat.map((saved) => pickThread(saved.threadId, saved.repoPath, { title: saved.title, repoName: saved.repoName }, saved)),
+      ...snap.diff.map((saved) => spawnDiffCard({ id: saved.laneId, label: saved.title }, saved)),
+    ];
     if (snap.term.length) {
       // The terminal ws needs a beat to connect before create requests land.
       setTimeout(() => snap.term.forEach((saved) => spawnTerminal(saved.cwd, saved.cwdLabel, saved)), 1200);
     }
+    void Promise.allSettled(settles).then(() => {
+      // Every fetch-backed card has landed (or dropped) — release the save
+      // guard, padded past the terminal respawn timer.
+      persistArmedAtRef.current = Math.min(persistArmedAtRef.current, Date.now() + 2000);
+    });
   }, [pickThread, spawnDiffCard, spawnFileCard, spawnTerminal]);
 
   // Save: one debounced snapshot whenever anything persistent changes.
   // The signature string IS the snapshot body — transient fields (term
   // liveness, diff text, chat entries) are excluded so churn never
   // thrashes localStorage.
-  const persistSignature = JSON.stringify({
+  const persistSignature = useMemo(() => JSON.stringify({
     activeRepoPath,
     dockOpen,
     term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel })),
@@ -1006,7 +1032,7 @@ export default function CanvasGlassPreviewPage() {
     chat: chatCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, threadId: card.threadId, repoPath: card.repoPath, repoName: card.repoName, title: card.title })),
     diff: diffCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, laneId: card.laneId, title: card.title })),
     spec: specCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-  });
+  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards]);
   useEffect(() => {
     // Hold fire until restore's async spawns settle — an instant save of
     // the half-restored canvas would overwrite the snapshot.
@@ -1061,8 +1087,8 @@ export default function CanvasGlassPreviewPage() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ action: 'pick' }),
     })
-      .then((response) => response.json())
-      .then((data: { path?: string | null }) => {
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { path?: string | null } | null) => {
         if (typeof data?.path === 'string' && data.path) spawnFileCard(data.path);
       })
       .catch(() => {});
@@ -1104,33 +1130,39 @@ export default function CanvasGlassPreviewPage() {
   }, [sendTerminalDetach, sendTerminalInput]);
 
   /** Drop a photo anywhere — it surfaces reference-style: filename pill,
-   *  bottom edge dissolving into the canvas, aspect-locked resize. */
+   *  bottom edge dissolving into the canvas, aspect-locked resize.
+   *  dataURI, not an object URL — the persistence snapshot stores items
+   *  verbatim, and a blob: src is dead on the next reload. */
   const spawnImageCard = useCallback((file: File, at: { x: number; y: number }) => {
-    const src = URL.createObjectURL(file);
-    const probe = new Image();
-    probe.onload = () => {
-      const natW = probe.naturalWidth || 1;
-      const natH = probe.naturalHeight || 1;
-      const aspect = natW / natH;
-      const w = natW >= natH ? IMG_MAX_SPAWN_EDGE : Math.round(IMG_MAX_SPAWN_EDGE * aspect);
-      const h = Math.round(w / aspect);
-      const id = nextIdRef.current;
-      nextIdRef.current += 1;
-      zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-      const z = zPeakRef.current;
-      setImageCards((previous) => [...previous, {
-        id,
-        x: Math.max(8, at.x - w / 2),
-        y: Math.max(48, at.y - h / 2),
-        z,
-        w,
-        h,
-        aspect,
-        items: [{ src, name: file.name }],
-      }]);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const src = typeof reader.result === 'string' ? reader.result : null;
+      if (!src) return;
+      const probe = new Image();
+      probe.onload = () => {
+        const natW = probe.naturalWidth || 1;
+        const natH = probe.naturalHeight || 1;
+        const aspect = natW / natH;
+        const w = natW >= natH ? IMG_MAX_SPAWN_EDGE : Math.round(IMG_MAX_SPAWN_EDGE * aspect);
+        const h = Math.round(w / aspect);
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        const z = zPeakRef.current;
+        setImageCards((previous) => [...previous, {
+          id,
+          x: Math.max(8, at.x - w / 2),
+          y: Math.max(48, at.y - h / 2),
+          z,
+          w,
+          h,
+          aspect,
+          items: [{ src, name: file.name }],
+        }]);
+      };
+      probe.src = src;
     };
-    probe.onerror = () => URL.revokeObjectURL(src);
-    probe.src = src;
+    reader.readAsDataURL(file);
   }, []);
 
   const moveImageCard = useCallback((id: number, x: number, y: number) => {
@@ -1434,7 +1466,10 @@ export default function CanvasGlassPreviewPage() {
           style={{
             borderWidth: 0,
             background: 'transparent',
-            padding: 0,
+            paddingTop: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            paddingRight: 0,
             fontSize: 11.5,
             fontWeight: tunerOpen ? 400 : 300,
             color: tunerOpen ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
@@ -1482,7 +1517,8 @@ export default function CanvasGlassPreviewPage() {
           style={{
             borderWidth: 0,
             background: 'transparent',
-            padding: 0,
+            paddingTop: 0,
+            paddingBottom: 0,
             paddingLeft: 4,
             paddingRight: 6,
             fontSize: 11,
@@ -1667,7 +1703,10 @@ export default function CanvasGlassPreviewPage() {
             color: topMenu === 'profile' ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
             flexShrink: 0,
             cursor: 'pointer',
-            padding: 0,
+            paddingTop: 0,
+            paddingBottom: 0,
+            paddingLeft: 0,
+            paddingRight: 0,
           }}
           onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
           onMouseLeave={(event) => { if (topMenu !== 'profile') event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
