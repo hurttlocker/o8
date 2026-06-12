@@ -130,6 +130,9 @@ const GATED_PREFIXES = [
   // Orchestrator chat backend is local-gated here and Clerk-authenticated in
   // the route handler.
   '/api/v2/chat',
+  // File read/WRITE inside registered repos (LLM chat "Apply to File").
+  // Was ungated — a LAN client could edit repo files without the token.
+  '/api/v2/files',
   // Cortex memory/directive surface — local-only by design. Even read-only
   // endpoints leak operator preferences and repo names; gate them too.
   '/api/cortex/',

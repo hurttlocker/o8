@@ -46,6 +46,7 @@ import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/X
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { MOCK_LANES, OrchestratorDock } from './dock';
+import { FileGlassCard, type FileCard } from './file-card';
 import { CenterStage, type Stage } from './stage';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
@@ -87,6 +88,7 @@ export default function CanvasGlassPreviewPage() {
   const [activeLane, setActiveLane] = useState(MOCK_LANES[0].id);
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
   const [termCards, setTermCards] = useState<TermCard[]>([]);
+  const [fileCards, setFileCards] = useState<FileCard[]>([]);
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
   const [repos, setRepos] = useState<RepoPickerRowData[] | null>(null);
@@ -100,6 +102,9 @@ export default function CanvasGlassPreviewPage() {
   // First spawn of the visit gets the full reveal (min-play); the rest
   // bail the instant the shell answers — speed stays the default.
   const firstSpawnRef = useRef(true);
+  // Terminals + file cards share one z band (10–39, chrome at 40+) so
+  // clicking ANY card brings it above every other card kind.
+  const zPeakRef = useRef(9);
 
   // Real terminals ride the production WebSocket — same transport, tmux
   // sessions and XtermPanel as the dashboard tabs.
@@ -311,24 +316,23 @@ export default function CanvasGlassPreviewPage() {
     const requestId = `cnv-term-${id}-${Math.random().toString(36).slice(2, 8)}`;
     const revealHold = firstSpawnRef.current;
     firstSpawnRef.current = false;
-    setTermCards((previous) => {
-      const maxZ = previous.length > 0 ? Math.max(...previous.map((card) => card.z)) : 9;
-      return [...previous, {
-        id,
-        requestId,
-        sessionName: null,
-        exited: false,
-        live: false,
-        revealHold,
-        x: 240 + (previous.length % 3) * 120 + (id % 5) * 10,
-        y: 110 + (previous.length % 3) * 80,
-        w: 560,
-        h: 300,
-        z: Math.min(maxZ + 1, 39),
-        cwd,
-        cwdLabel,
-      }];
-    });
+    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    const z = zPeakRef.current;
+    setTermCards((previous) => [...previous, {
+      id,
+      requestId,
+      sessionName: null,
+      exited: false,
+      live: false,
+      revealHold,
+      x: 240 + (previous.length % 3) * 120 + (id % 5) * 10,
+      y: 110 + (previous.length % 3) * 80,
+      w: 560,
+      h: 300,
+      z,
+      cwd,
+      cwdLabel,
+    }]);
     sendTerminalCreate(120, 30, requestId, cwd ?? undefined);
   }, [sendTerminalCreate]);
 
@@ -340,23 +344,37 @@ export default function CanvasGlassPreviewPage() {
     setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
   }, []);
 
-  /** Clicked terminal comes forward. Terminals own the 10–39 z band —
+  /** Clicked card comes forward. Terminals + files share the 10–39 band —
    *  always above the mock cards (3), always below the chrome (40+). */
-  const focusTermCard = useCallback((id: number) => {
-    setTermCards((previous) => {
-      const target = previous.find((card) => card.id === id);
-      if (!target) return previous;
-      const maxZ = Math.max(...previous.map((card) => card.z));
-      if (target.z === maxZ) return previous;
-      if (maxZ + 1 > 38) {
-        // Renormalize the band, keeping order, with the target on top.
-        const ordered = [...previous].sort((a, b) => a.z - b.z);
-        const remap = new Map(ordered.map((card, index) => [card.id, 10 + index]));
-        return previous.map((card) => ({ ...card, z: card.id === id ? 10 + ordered.length : remap.get(card.id)! }));
-      }
-      return previous.map((card) => (card.id === id ? { ...card, z: maxZ + 1 } : card));
-    });
-  }, []);
+  const focusCard = useCallback((kind: 'term' | 'file', id: number) => {
+    const current = kind === 'term'
+      ? termCards.find((card) => card.id === id)
+      : fileCards.find((card) => card.id === id);
+    if (!current || current.z === zPeakRef.current) return;
+    if (zPeakRef.current + 1 > 38) {
+      // Renormalize the whole band, keeping order, with the target on top.
+      const combined = [
+        ...termCards.map((card) => ({ kind: 'term' as const, id: card.id, z: card.z })),
+        ...fileCards.map((card) => ({ kind: 'file' as const, id: card.id, z: card.z })),
+      ].sort((a, b) => a.z - b.z);
+      const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
+      const top = 10 + combined.length;
+      setTermCards((previous) => previous.map((card) => ({ ...card, z: kind === 'term' && card.id === id ? top : remap.get(`term:${card.id}`) ?? card.z })));
+      setFileCards((previous) => previous.map((card) => ({ ...card, z: kind === 'file' && card.id === id ? top : remap.get(`file:${card.id}`) ?? card.z })));
+      zPeakRef.current = top;
+      return;
+    }
+    zPeakRef.current += 1;
+    const z = zPeakRef.current;
+    if (kind === 'term') {
+      setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else {
+      setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    }
+  }, [fileCards, termCards]);
+
+  const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
+  const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
 
   const changeTermVeil = useCallback((value: number) => {
     setTermVeil(value);
@@ -366,6 +384,51 @@ export default function CanvasGlassPreviewPage() {
       // non-critical — the dialed value just won't survive reload
     }
   }, []);
+
+  /** Open ANY file on the machine as a glass card — view, edit, ⌘S. */
+  const spawnFileCard = useCallback((path: string) => {
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    const z = zPeakRef.current;
+    setFileCards((previous) => [...previous, {
+      id,
+      path,
+      name: path.split('/').pop() || path,
+      x: 300 + (previous.length % 3) * 90 + (id % 5) * 8,
+      y: 96 + (previous.length % 3) * 64,
+      w: 620,
+      h: 420,
+      z,
+    }]);
+  }, []);
+
+  const moveFileCard = useCallback((id: number, x: number, y: number) => {
+    setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
+  }, []);
+
+  const resizeFileCard = useCallback((id: number, w: number, h: number) => {
+    setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
+  }, []);
+
+  const closeFileCard = useCallback((id: number) => {
+    setFileCards((previous) => previous.filter((card) => card.id !== id));
+  }, []);
+
+  /** Native macOS choose-file (server-side osascript, the browse-folder
+   *  pattern) — no Tauri dialog plugin needed, works in dev-bridge too. */
+  const openFilePicker = useCallback(() => {
+    fetch('/api/panel/file-io', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'pick' }),
+    })
+      .then((response) => response.json())
+      .then((data: { path?: string | null }) => {
+        if (typeof data?.path === 'string' && data.path) spawnFileCard(data.path);
+      })
+      .catch(() => {});
+  }, [spawnFileCard]);
 
   /** The spawn-dock terminal button opens the cwd picker; rows spawn. */
   const toggleTermPicker = useCallback(() => {
@@ -475,7 +538,7 @@ export default function CanvasGlassPreviewPage() {
 
       {/* ── the reference stage — owns the canvas while it is empty ───────── */}
       <AnimatePresence mode="wait">
-        {(cards.length === 0 && termCards.length === 0) || summoning ? (
+        {(cards.length === 0 && termCards.length === 0 && fileCards.length === 0) || summoning ? (
           <CenterStage key={stage.kind} stage={stage} />
         ) : null}
       </AnimatePresence>
@@ -503,6 +566,21 @@ export default function CanvasGlassPreviewPage() {
             sendTerminalInput={sendTerminalInput}
             sendTerminalResize={sendTerminalResize}
             sendTerminalDetach={sendTerminalDetach}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* ── File cards — any file on the machine, view/edit/save ──── */}
+      <AnimatePresence>
+        {fileCards.map((card) => (
+          <FileGlassCard
+            key={card.id}
+            card={card}
+            termVeil={termVeil}
+            onMove={moveFileCard}
+            onResize={resizeFileCard}
+            onFocus={focusFileCard}
+            onClose={closeFileCard}
           />
         ))}
       </AnimatePresence>
@@ -613,6 +691,9 @@ export default function CanvasGlassPreviewPage() {
         </SpawnGlyphButton>
         <SpawnGlyphButton label="Spawn terminal" onClick={toggleTermPicker}>
           <path d="m4 17 6-6-6-6" /><line x1="12" x2="20" y1="19" y2="19" />
+        </SpawnGlyphButton>
+        <SpawnGlyphButton label="Open file" onClick={openFilePicker}>
+          <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
         </SpawnGlyphButton>
         <SpawnGlyphButton label="Spawn review" onClick={() => spawnCard('review', 'Review — pending diff', '2 files · +14 −3', 'waiting')}>
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect width="8" height="4" x="8" y="2" rx="1" /><path d="m9 14 2 2 4-4" />
