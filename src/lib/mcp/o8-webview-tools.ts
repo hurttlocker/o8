@@ -1,3 +1,7 @@
+import { existsSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
+
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 
 type TextContent = { type: 'text'; text: string };
@@ -507,7 +511,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
     inputSchema: {
       type: 'object',
       properties: {
-        surface: { type: 'string', enum: ['canvas', 'panel'], description: "Which browser surface — 'canvas' (browser cards) or 'panel' (Browser tab). Omit to use the most recently active." },
+        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: "Which browser surface — 'canvas' (browser cards), 'panel' (Browser tab), or 'engine' (headless installed-Chrome for external URLs). Omit to auto-route: the engine while its page is open, else the most recently active embedded surface." },
         selector: { type: 'string', description: 'Optional CSS selector — read only this subtree.' },
         maxChars: { type: 'number', description: 'Text cap (default 6000, max 14000).' },
       },
@@ -520,7 +524,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
       type: 'object',
       properties: {
         selector: { type: 'string', description: 'CSS selector of the element to click.' },
-        surface: { type: 'string', enum: ['canvas', 'panel'], description: 'Which browser surface. Omit for the most recently active.' },
+        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
       },
       required: ['selector'],
     },
@@ -534,7 +538,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
         selector: { type: 'string', description: 'CSS selector of the input or textarea.' },
         text: { type: 'string', description: 'Text to type.' },
         submit: { type: 'boolean', description: 'Press Enter / requestSubmit after typing.' },
-        surface: { type: 'string', enum: ['canvas', 'panel'], description: 'Which browser surface. Omit for the most recently active.' },
+        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
       },
       required: ['selector', 'text'],
     },
@@ -548,7 +552,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
         selector: { type: 'string', description: 'CSS selector to wait for inside the framed page.' },
         text: { type: 'string', description: 'Optional substring the element must contain.' },
         timeoutMs: { type: 'number', description: 'Max wait in milliseconds (default 10000, capped at 25000).' },
-        surface: { type: 'string', enum: ['canvas', 'panel'], description: 'Which browser surface. Omit for the most recently active.' },
+        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
       },
       required: ['selector'],
     },
@@ -571,6 +575,54 @@ function parseAgentResult(raw: string): McpToolResult {
   } catch {
     return textResult(raw);
   }
+}
+
+// ── Browser-verb bridge over HTTP ──
+//
+// The o8_browser_* handlers POST /api/browser/agent instead of eval'ing the
+// socket directly: the route owns tier routing (embedded iframe vs the
+// playwright-core engine in the Next server), so MCP, CLI, and Symon all
+// share one brain. Small dupe of resolveApiBase/readToken with
+// operator-mission-tools.ts — this file must stay importable without
+// Next-specific deps.
+function browserApiBase(): string {
+  try {
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const portFile = join(dataDir, 'api-port');
+    if (existsSync(portFile)) {
+      const port = parseInt(readFileSync(portFile, 'utf-8').trim(), 10);
+      if (Number.isInteger(port) && port > 0 && port < 65536) return `http://127.0.0.1:${port}`;
+    }
+  } catch { /* fall through */ }
+  const envBase = process.env.O8_API_BASE?.trim();
+  if (envBase) return envBase;
+  const envPort = process.env.O8_API_PORT?.trim();
+  if (envPort) return `http://127.0.0.1:${envPort}`;
+  return 'http://localhost:3001';
+}
+
+function browserApiToken(): string | null {
+  try {
+    const dataDir = process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+    const tokenPath = join(dataDir, 'ws-token');
+    if (!existsSync(tokenPath)) return null;
+    return readFileSync(tokenPath, 'utf-8').trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function browserAgentPost(verb: string, args: Record<string, unknown>): Promise<McpToolResult> {
+  const token = browserApiToken();
+  const response = await fetch(`${browserApiBase()}/api/browser/agent`, {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({ verb, args }),
+  });
+  return parseAgentResult(await response.text());
 }
 
 export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): Record<string, ToolHandler> {
@@ -666,21 +718,24 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
       return jsonResult(result);
     }),
 
+    // The o8_browser_* family rides the HTTP bridge (/api/browser/agent) so
+    // tier routing — embedded iframe vs headless-Chrome engine — lives in ONE
+    // place, shared with the `o8 browser` CLI and Symon.
     o8_browser_read: async (args) => withStructuredErrors(async () => {
       const agentArgs: Record<string, unknown> = {};
-      if (args.surface === 'canvas' || args.surface === 'panel') agentArgs.surface = args.surface;
+      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
       if (typeof args.selector === 'string' && args.selector) agentArgs.selector = args.selector;
       const maxChars = parseOptionalNumber(args.maxChars);
       if (maxChars) agentArgs.maxChars = maxChars;
-      const result = await getClient().evalJs(browserAgentEval('read', agentArgs));
-      return capText(result.result, READ_RESULT_BYTE_CAP);
+      const result = await browserAgentPost('read', agentArgs);
+      const text = result.content[0];
+      return text?.type === 'text' ? capText(text.text, READ_RESULT_BYTE_CAP) : result;
     }),
 
     o8_browser_click: async (args) => withStructuredErrors(async () => {
       const agentArgs: Record<string, unknown> = { selector: requiredString(args, 'selector') };
-      if (args.surface === 'canvas' || args.surface === 'panel') agentArgs.surface = args.surface;
-      const result = await getClient().evalJs(browserAgentEval('click', agentArgs));
-      return parseAgentResult(result.result);
+      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
+      return browserAgentPost('click', agentArgs);
     }),
 
     o8_browser_type: async (args) => withStructuredErrors(async () => {
@@ -689,24 +744,25 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
         text: requiredString(args, 'text'),
       };
       if (args.submit === true) agentArgs.submit = true;
-      if (args.surface === 'canvas' || args.surface === 'panel') agentArgs.surface = args.surface;
-      const result = await getClient().evalJs(browserAgentEval('type', agentArgs));
-      return parseAgentResult(result.result);
+      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
+      return browserAgentPost('type', agentArgs);
     }),
 
     o8_browser_wait: async (args) => withStructuredErrors(async () => {
       const agentArgs: Record<string, unknown> = { selector: requiredString(args, 'selector') };
       if (typeof args.text === 'string' && args.text) agentArgs.text = args.text;
-      if (args.surface === 'canvas' || args.surface === 'panel') agentArgs.surface = args.surface;
+      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
       const timeoutMs = Math.min(25_000, Math.max(500, parseOptionalNumber(args.timeoutMs) ?? 10_000));
       const deadline = Date.now() + timeoutMs;
-      // The page probe is synchronous — poll node-side until found/timeout.
-      let last: string = '{"ok":false,"error":"never probed"}';
+      // Probes are one-shot — poll here until found/timeout.
+      let last: unknown = { ok: false, error: 'never probed' };
       while (Date.now() < deadline) {
-        const result = await getClient().evalJs(browserAgentEval('probe', agentArgs));
-        last = result.result;
+        const result = await browserAgentPost('probe', agentArgs);
+        const text = result.content[0];
+        if (text?.type !== 'text') return result;
         try {
-          const parsed = JSON.parse(last) as { ok?: boolean; pending?: boolean };
+          const parsed = JSON.parse(text.text) as { ok?: boolean; pending?: boolean };
+          last = parsed;
           if (parsed.ok) return jsonResult(parsed);
           if (!parsed.pending) return jsonResult(parsed); // hard error — stop polling
         } catch {
