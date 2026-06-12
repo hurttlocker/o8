@@ -49,6 +49,10 @@ export interface CanvasOrchCallbacks {
   onToolUse?: (repoPath: string, name: string) => void;
   onStatus?: (repoPath: string, status: CanvasOrchStatus) => void;
   onError?: (repoPath: string, error: string) => void;
+  /** A lane changed state somewhere (agent spawned, review-ready, merged…)
+   *  — the ws-server broadcasts these to every client. The canvas uses it
+   *  to keep the Agents badge + Review drawer live instead of 90s stale. */
+  onLaneLifecycle?: () => void;
 }
 
 /** One streamed orchestrator event, surface-agnostic — chat cards forward
@@ -100,6 +104,10 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
         try {
           msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
         } catch {
+          return;
+        }
+        if (msg.channel === 'lane-lifecycle') {
+          cbRef.current.onLaneLifecycle?.();
           return;
         }
         if (msg.channel !== 'orchestrator' || !msg.data) return;

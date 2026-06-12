@@ -277,6 +277,17 @@ export default function CanvasGlassPreviewPage() {
     };
   }, []);
 
+  /** One lanes refetch used by the poll, the Review drawer, and the live
+   *  lane-lifecycle push — agent spawns/review-ready land in real time. */
+  const refreshLanes = useCallback(() => {
+    fetch('/api/lanes?active=true')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { lanes?: LaneRow[] } | null) => {
+        if (data && Array.isArray(data.lanes)) setActiveLanes(data.lanes);
+      })
+      .catch(() => {});
+  }, []);
+
   // Live chrome data — inbox badge, running agents, past sessions. Light
   // polling: the canvas is ambient, not a realtime surface.
   useEffect(() => {
@@ -288,12 +299,7 @@ export default function CanvasGlassPreviewPage() {
           if (!disposed && data && Array.isArray(data.items)) setInboxItems(data.items);
         })
         .catch(() => {});
-      fetch('/api/lanes?active=true')
-        .then((response) => (response.ok ? response.json() : null))
-        .then((data: { lanes?: LaneRow[] } | null) => {
-          if (!disposed && data && Array.isArray(data.lanes)) setActiveLanes(data.lanes);
-        })
-        .catch(() => {});
+      refreshLanes();
     };
     const refreshThreads = () => {
       fetch('/api/mobile/orchestrator/threads')
@@ -312,7 +318,7 @@ export default function CanvasGlassPreviewPage() {
       clearInterval(badgeTimer);
       clearInterval(threadTimer);
     };
-  }, []);
+  }, [refreshLanes]);
 
   // Opening the Sessions popover refetches so the list is never two
   // minutes stale.
@@ -330,16 +336,8 @@ export default function CanvasGlassPreviewPage() {
 
   // Same for the Review drawer — lanes move fast, the list must be live.
   useEffect(() => {
-    if (!reviewPickerOpen) return;
-    let disposed = false;
-    fetch('/api/lanes?active=true')
-      .then((response) => (response.ok ? response.json() : null))
-      .then((data: { lanes?: LaneRow[] } | null) => {
-        if (!disposed && data && Array.isArray(data.lanes)) setActiveLanes(data.lanes);
-      })
-      .catch(() => {});
-    return () => { disposed = true; };
-  }, [reviewPickerOpen]);
+    if (reviewPickerOpen) refreshLanes();
+  }, [refreshLanes, reviewPickerOpen]);
 
   // Right rail mirrors the active repo's recent commits.
   useEffect(() => {
@@ -515,6 +513,7 @@ export default function CanvasGlassPreviewPage() {
     onError: (repo, error) => {
       handleOrchEvent(repo, { type: 'error', error });
     },
+    onLaneLifecycle: refreshLanes,
   });
 
   /** One send path for every composer — the bottom pill AND the dock's
