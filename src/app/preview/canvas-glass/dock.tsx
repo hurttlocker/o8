@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { FONT, TONE_DOT, glass, type DockEntry, type OrchestratorLane } from './ui';
+import { FONT, TONE_DOT, glass, relAge, type DockEntry, type OrchestratorLane, type CanvasThreadRow } from './ui';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
@@ -39,6 +39,7 @@ export function OrchestratorDock({
   activeLabel,
   activeTone,
   onSelectLane,
+  onPickThread,
   onClose,
 }: {
   /** Lanes with a running conversation — the dropdown's contents. */
@@ -48,15 +49,37 @@ export function OrchestratorDock({
   activeLabel: string;
   activeTone: OrchestratorLane['tone'];
   onSelectLane: (id: string) => void;
+  /** Resume a past thread (history popover pick). */
+  onPickThread: (threadId: string, repoPath: string | null) => void;
   onClose: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [laneMenuOpen, setLaneMenuOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [threads, setThreads] = useState<CanvasThreadRow[] | null>(null);
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [entries]);
+
+  // Past sessions load when the history popover opens — the same
+  // thoughts-* store the dashboard orchestrator writes to.
+  useEffect(() => {
+    if (!historyOpen) return;
+    let disposed = false;
+    fetch('/api/mobile/orchestrator/threads')
+      .then((response) => (response.ok ? response.json() : { threads: [] }))
+      .then((data: { threads?: CanvasThreadRow[] }) => {
+        if (!disposed) setThreads(Array.isArray(data?.threads) ? data.threads : []);
+      })
+      .catch(() => {
+        if (!disposed) setThreads([]);
+      });
+    return () => {
+      disposed = true;
+    };
+  }, [historyOpen]);
 
   const otherLanes = lanes.filter((lane) => lane.id !== activeLane);
 
@@ -130,6 +153,22 @@ export function OrchestratorDock({
           <span style={{ flex: 1 }} />
           <button
             type="button"
+            aria-label="Past sessions"
+            title="Past sessions"
+            onClick={() => {
+              setHistoryOpen((value) => !value);
+              setLaneMenuOpen(false);
+            }}
+            style={{ borderWidth: 0, background: 'transparent', padding: 3, color: historyOpen ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)', cursor: 'pointer', display: 'inline-flex' }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+            onMouseLeave={(event) => { if (!historyOpen) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+          >
+            <svg style={{ width: 12, height: 12, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" />
+            </svg>
+          </button>
+          <button
+            type="button"
             aria-label="Undock orchestrator"
             onClick={onClose}
             style={{ borderWidth: 0, background: 'transparent', padding: 2, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontSize: 11, fontFamily: FONT }}
@@ -138,6 +177,83 @@ export function OrchestratorDock({
           >
             ✕
           </button>
+
+          {/* Past sessions — every thoughts-* thread, dashboard's included. */}
+          <AnimatePresence>
+            {historyOpen ? (
+              <motion.div
+                initial={{ opacity: 0, y: -6, scale: 0.98 }}
+                animate={{ opacity: 1, y: 0, scale: 1 }}
+                exit={{ opacity: 0, y: -6, scale: 0.98 }}
+                transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+                style={{
+                  position: 'absolute',
+                  top: 40,
+                  right: 12,
+                  width: 280,
+                  maxHeight: 340,
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  paddingTop: 8,
+                  paddingBottom: 8,
+                  paddingLeft: 6,
+                  paddingRight: 6,
+                  borderRadius: 13,
+                  zIndex: 5,
+                  scrollbarWidth: 'none',
+                  ...glass(true),
+                } as React.CSSProperties}
+              >
+                <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', paddingLeft: 8, paddingBottom: 4 }}>
+                  Past sessions
+                </span>
+                {threads === null ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', paddingLeft: 8, paddingTop: 2, paddingBottom: 4 }}>Loading…</span>
+                ) : threads.length === 0 ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', paddingLeft: 8, paddingTop: 2, paddingBottom: 4 }}>No past sessions yet.</span>
+                ) : (
+                  threads.map((thread) => (
+                    <button
+                      key={thread.id}
+                      type="button"
+                      onClick={() => {
+                        onPickThread(thread.id, thread.repoPath);
+                        setHistoryOpen(false);
+                      }}
+                      style={{
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'flex-start',
+                        gap: 1,
+                        paddingTop: 6,
+                        paddingBottom: 6,
+                        paddingLeft: 8,
+                        paddingRight: 8,
+                        borderRadius: 9,
+                        borderWidth: 0,
+                        background: 'transparent',
+                        cursor: 'pointer',
+                        fontFamily: FONT,
+                        textAlign: 'left',
+                        width: '100%',
+                      }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+                        {thread.title?.trim() || 'Untitled session'}
+                      </span>
+                      <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>
+                        {[thread.repoName, relAge(thread.lastMessageAt)].filter(Boolean).join(' · ')}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </motion.div>
+            ) : null}
+          </AnimatePresence>
 
           {/* Dropdown — only orchestrators that are actually running. */}
           <AnimatePresence>
@@ -209,7 +325,10 @@ export function OrchestratorDock({
         <div
           ref={scrollRef}
           style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, scrollbarWidth: 'none' } as React.CSSProperties}
-          onClick={() => { if (laneMenuOpen) setLaneMenuOpen(false); }}
+          onClick={() => {
+            if (laneMenuOpen) setLaneMenuOpen(false);
+            if (historyOpen) setHistoryOpen(false);
+          }}
         >
           <AnimatePresence initial={false}>
             {entries.map((entry) => (
