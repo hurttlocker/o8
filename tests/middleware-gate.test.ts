@@ -82,6 +82,16 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
+  it('gates /api/canvas/intent (canvas intent bus) against LAN', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/canvas/intent', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('leaves /api/browser/proxy ungated (iframes cannot send a bearer)', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://localhost:3001/api/browser/proxy?url=http%3A%2F%2Flocalhost%3A3005', {
