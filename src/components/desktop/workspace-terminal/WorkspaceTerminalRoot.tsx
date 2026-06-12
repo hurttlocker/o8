@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/refs -- useWorkspaceTerminalController returns render state and stable refs through one controller object. */
 
-import { forwardRef, useCallback, useEffect, useId, useMemo, useState } from 'react';
+import { forwardRef, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 // RotateCcw shim removed with the in-workspace reconnect banner —
 // recovery now lives in the AgentPanel ConnectionPill.
@@ -127,6 +127,15 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       return () => window.removeEventListener('o8:request-toggle-context-rail', onToggle as EventListener);
     }, [props.canCloseTile, workspaceInstanceId]);
 
+    // Re-broadcast on CONTENT change, not array identity — `tabsForBroadcast`
+    // is a fresh array whenever visibleTabs recomputes, and the dashboard
+    // listener setStates unconditionally, so an identity dep turns
+    // dispatch → setState → render → dispatch into a synchronous cycle
+    // ("Maximum update depth exceeded" on /dashboard, 2026-06-12).
+    const tabsBroadcastSignature = JSON.stringify(tabsForBroadcast);
+    const tabsForBroadcastRef = useRef(tabsForBroadcast);
+    tabsForBroadcastRef.current = tabsForBroadcast;
+
     useEffect(() => {
       if (typeof window === 'undefined') return;
       window.dispatchEvent(new CustomEvent('o8:workspace-active-label', {
@@ -135,7 +144,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           label: conversationHeaderLabel,
           tabId: activeTabId,
           kind: activeTabKind,
-          tabs: tabsForBroadcast,
+          tabs: tabsForBroadcastRef.current,
           finishedTabCount: controller.finishedTabCount,
           contextRailAvailable: projectContextRailAvailable,
           contextRailVisible: projectContextRailVisible,
@@ -156,7 +165,8 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           },
         }));
       };
-    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsForBroadcast, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible]);
+      // eslint-disable-next-line react-hooks/exhaustive-deps -- tabsBroadcastSignature stands in for tabsForBroadcast (content equality)
+    }, [conversationHeaderLabel, activeTabId, activeTabKind, workspaceInstanceId, tabsBroadcastSignature, controller.finishedTabCount, projectContextRailAvailable, projectContextRailVisible]);
 
     // Listen for chat-history rename so the workspace tab's label
     // refreshes in sync with the chat-history PATCH. The header strip
