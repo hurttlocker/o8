@@ -71,29 +71,34 @@ Hover reveals delete / archive / context-menu actions — never default-visible.
 
 ## Section-label alignment
 
-Antigravity-pass column system (locked 2026-05-26):
+Antigravity-pass column system (locked 2026-05-26 · verified panel-relative 2026-06-11):
 
-- **Icon column (x=12, ish):** top-nav row icons (Play / Search / Automations / Delivery), repo folder glyphs, GroupHeader chevrons + folder glyphs. All sit with their left edge at the same paddingLeft (10–12 px depending on row type).
-- **Text column (x=37):** chat-row titles, spawned-agent titles, packet titles, top-nav text. Three different row types (HistoryChatRow, ExtraAgentRowView, the top-nav action) compute different paddingLeft values because their leading icon column widths differ — but they all land at the same text X (37 px). Tweaking any leading geometry means re-doing the paddingLeft math.
+All X values are **panel-relative** — measured from the floating card's left edge, not the window (the card sits at a small window offset that varies). Verified intact 2026-06-11 with computed styles on the live app.
+
+- **Icon column (x=12, ish):** top-nav row icons (Play / Search / Automations / Delivery), repo folder glyphs, GroupHeader chevrons + folder glyphs. All sit with their left edge at the same paddingLeft (10–12 px depending on row type). Project identity rings (6px, `MiniProjectsMenu`) center on this column too.
+- **Text column (x=37):** chat-row titles, spawned-agent titles, packet titles, top-nav text, **project names** (joined 2026-06-11 — they sat at 31 since the projects menu landed). Different row types compute different paddingLeft values because their leading icon column widths differ — but they all land at the same text X (37 px). Tweaking any leading geometry means re-doing the paddingLeft math.
+- **Repo child rows (x=44):** sub-repo rows under an expanded project indent one clear step (+7) in from the parent text column (2026-06-11).
 - **Section labels (x=29):** RepoGroupLabel / GroupHeader headers sit between the icon and text columns — `paddingLeft 12 + 11 px chevron-or-folder slot + 6 px gap = 29`. Less indent than rows, more indent than nothing — the headers visually "own" the rows below.
 
 ---
 
-## Right-rail alignment (locked 2026-05-26)
+## Right-rail alignment (locked 2026-05-26 · re-snapped 2026-06-11)
 
 Operator demands **pixel-perfect alignment** on the right edge of the agent panel. Anything that isn't on the column reads as misaligned to him — there is no "close enough."
 
-The right rail has three locked vertical columns:
+**2026-06-11 re-snap:** the top-nav trailing glyphs changed from chevrons to disclosure glyphs (Lucide `Menu` 13px on New session, Iconoir `MenuScale` 12px on Projects) and had drifted 1–2px left of the optical column. Re-measured from rendered pixels at 4×, corrected with per-glyph `translateX` in `MiniAgentPanelAction` (`menu` → 9px, `filter` → 8px). The absolute X values below are from the spec-era panel; the panel is now a floating card and resizable, so the LOCK is the *relationships*, verified as deltas against the ring.
 
-| X | What sits here | How it gets there |
+The right rail has three locked vertical columns (relationships, ring = reference):
+
+| Column | What sits here | How it gets there |
 |---|---|---|
-| **235** | Top-nav chevrons (New session / Projects), filter-list icon (group picker on RepoGroupLabel) | Top-nav button `paddingRight: 10` + chevron at flex-end. RepoGroupLabel `paddingRight: 10` + ChatGroupPicker button `justifyContent: 'flex-end'` so its 12 px icon's right edge equals its 18 px button's right edge. |
-| **233** | Active chat ring / pulse, spawned-agent ring, timestamps (`10h ago` etc.) | HistoryChatRow + ExtraAgentRowView `paddingRight: 12`. Trailing meta is a flex span with `gap: 6` — the ring sits at the end of that span. |
-| **232** | Archived ring | ArchivedLaneCompactRow `paddingRight: 13` — explicitly 1 px left of the chat ring at 233, so archived reads as quietly "set aside" rather than identical to live chats. |
+| **ring + 2 (optical ink)** | Top-nav trailing glyphs (New session `Menu`, Projects `MenuScale`), filter-list icon (group picker on RepoGroupLabel) | Top-nav button `paddingRight: 10` + per-glyph `translateX(9px/8px)`. RepoGroupLabel `paddingRight: 10` + ChatGroupPicker button `justifyContent: 'flex-end'`. Because each glyph's ink insets differently from its bbox, the BBOX deltas vs ring are: filter +3, Menu +3, MenuScale +2 — which lands all three glyphs' visible ink on one column ~2px right of the ring. |
+| **ring (reference)** | Active chat ring / pulse, spawned-agent ring, timestamps (`10h ago` etc.) | HistoryChatRow + ExtraAgentRowView `paddingRight: 12`. Trailing meta is a flex span with `gap: 6` — the ring sits at the end of that span. |
+| **ring − 1** | Archived ring | ArchivedLaneCompactRow `paddingRight: 13` — explicitly 1 px left of the chat ring, so archived reads as quietly "set aside" rather than identical to live chats. |
 
-### Why x=235 is special
+### Why the optical column beats the math
 
-Chevrons + the FilterList icon have visible glyph centers that sit slightly LEFT of their SVG bounding box's right edge. Putting their bounding box at x=233 makes them *visually* read 1–3 px LEFT of the rings. Bumping to x=235 lands the visible pixels on the same column as the rings. Operator's eye picks up the difference at one glance — don't trust the math, measure the rendered pixel.
+Each glyph's visible ink ends a different distance inside its SVG bounding box (FilterList ~1.5px, Lucide Menu ~1px, MenuScale ~0.5px). Aligning bounding boxes makes the INK read misaligned. Land the ink, not the box. Operator's eye picks up a 1px step at one glance — don't trust the math, screenshot at 4× and measure the rendered pixel.
 
 ### How to verify after any change
 
@@ -101,13 +106,14 @@ Open the agent panel, then in the webview console:
 
 ```js
 const m = (el) => Math.round(el.getBoundingClientRect().right * 10) / 10;
-const r = document.querySelector('.o8-static-ring');
-const f = document.querySelector('button[aria-label="Change chat grouping"] svg');
-const c = Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim()==='New session').querySelectorAll('svg');
-console.table({ ring: m(r), filter: m(f), chevron: m(c[c.length-1]) });
+const r = m(document.querySelector('.o8-static-ring'));
+const f = m(document.querySelector('button[aria-label="Change chat grouping"] svg'));
+const by = (t) => Array.from(document.querySelectorAll('button')).find(b => b.textContent.trim() === t);
+const last = (b) => { const s = b.querySelectorAll('svg'); return m(s[s.length - 1]); };
+console.table({ ring: r, dFilter: f - r, dNewSession: last(by('New session')) - r, dProjects: last(by('Projects')) - r });
 ```
 
-Expected: `ring 233, filter 235, chevron 235`. If any value drifts, find the paddingRight that changed and snap it back.
+Expected deltas (bbox, producing ink alignment): `dFilter 3, dNewSession 3, dProjects 2`. If a delta drifts — or a glyph is swapped — re-measure the ink at 4× zoom before snapping anything back.
 
 ### Files that own the columns
 
