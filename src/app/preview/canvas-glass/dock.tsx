@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { FONT, TONE_DOT, glass, relAge, type DockEntry, type OrchestratorLane, type OrcaThreadRow } from './ui';
+import { FONT, TONE_DOT, glass, glassPop, relAge, type DockEntry, type OrchestratorLane, type OrcaThreadRow } from './ui';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
@@ -188,8 +188,10 @@ export function OrchestratorDock({
                 transition={{ type: 'spring', stiffness: 420, damping: 32 }}
                 style={{
                   position: 'absolute',
-                  top: 40,
-                  right: 12,
+                  top: 36,
+                  // Opens OUTSIDE the panel, over the canvas — never over
+                  // the conversation it would otherwise sit on.
+                  right: 'calc(100% + 10px)',
                   width: 280,
                   maxHeight: 340,
                   overflowY: 'auto',
@@ -203,7 +205,7 @@ export function OrchestratorDock({
                   borderRadius: 13,
                   zIndex: 5,
                   scrollbarWidth: 'none',
-                  ...glass(true),
+                  ...glassPop(),
                 } as React.CSSProperties}
               >
                 <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', paddingLeft: 8, paddingBottom: 4 }}>
@@ -277,7 +279,7 @@ export function OrchestratorDock({
                   paddingRight: 6,
                   borderRadius: 13,
                   zIndex: 5,
-                  ...glass(true),
+                  ...glassPop(),
                 }}
               >
                 {otherLanes.length === 0 ? (
@@ -488,8 +490,9 @@ const OL_RE = /^\s*\d+\.\s+(.+)$/;
 
 /** Block markdown — headings, lists, code fences, blockquotes, paragraphs —
  *  rendered as real elements so the orchestrator's answer reads as prose, not
- *  raw `**` and `#` source. Line-based, like the dashboard's MarkdownRender. */
-function CanvasMarkdown({ text }: { text: string }) {
+ *  raw `**` and `#` source. Line-based, like the dashboard's MarkdownRender.
+ *  Exported: the o8.md / file cards render their preview with it too. */
+export function CanvasMarkdown({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
   const lines = text.split('\n');
   let i = 0;
