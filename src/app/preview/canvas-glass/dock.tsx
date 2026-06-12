@@ -110,7 +110,12 @@ export function OrchestratorDock({
               fontFamily: FONT,
             }}
           >
-            <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT[activeTone], flexShrink: 0 }} />
+            {activeTone === 'working' ? (
+              // The agents-working binary orbit — same mark as the fleet rows.
+              <span aria-hidden className="o8-orbit" style={{ width: 10, height: 10, color: TONE_DOT.working, flexShrink: 0 }} />
+            ) : (
+              <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT[activeTone], flexShrink: 0 }} />
+            )}
             <span style={{ fontSize: 12.5, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>{activeLabel}</span>
             <svg
               width={10}
