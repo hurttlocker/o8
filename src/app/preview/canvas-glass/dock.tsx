@@ -346,7 +346,8 @@ export function OrchestratorDock({
   );
 }
 
-function DockEntryView({ entry }: { entry: DockEntry }) {
+/** Shared by the dock AND the floating chat cards — one entry vocabulary. */
+export function DockEntryView({ entry }: { entry: DockEntry }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}

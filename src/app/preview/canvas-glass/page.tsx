@@ -47,6 +47,7 @@ import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/X
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { BrowserGlassCard, type BrowserCard } from './browser-card';
+import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { OrchestratorDock } from './dock';
@@ -135,6 +136,7 @@ export default function CanvasGlassPreviewPage() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [browserCards, setBrowserCards] = useState<BrowserCard[]>([]);
+  const [chatCards, setChatCards] = useState<ChatCard[]>([]);
   const [topMenu, setTopMenu] = useState<'alerts' | 'agents' | 'profile' | null>(null);
   const [inboxItems, setInboxItems] = useState<InboxRow[]>([]);
   const [activeLanes, setActiveLanes] = useState<LaneRow[]>([]);
@@ -467,17 +469,13 @@ export default function CanvasGlassPreviewPage() {
     }
   }, []);
 
-  /** Resume a PAST orchestrator session — history popover or Sessions rail.
-   *  Loads the stored transcript into the dock and re-points the live
-   *  socket at the old thread; the next send continues that conversation. */
-  const pickThread = useCallback((threadId: string, repoPath: string | null) => {
-    const repo = repoPath ?? activeRepoPath;
-    if (!repo) return;
-    setActiveRepoPath(repo);
-    orca.adoptThread(repo, threadId);
+  /** A PAST session opens as its OWN draggable glass box — the dock stays
+   *  reserved for the docked live orchestrator. The card's dock glyph
+   *  promotes it into the dock if wanted. */
+  const pickThread = useCallback((threadId: string, repoPath: string | null, meta?: { title?: string | null; repoName?: string | null }) => {
     fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`)
       .then((response) => (response.ok ? response.json() : null))
-      .then((data: { messages?: Array<{ role?: string; content?: string }> } | null) => {
+      .then((data: { messages?: Array<{ role?: string; content?: string }>; title?: string | null; repoName?: string | null; repoPath?: string | null } | null) => {
         const messages = Array.isArray(data?.messages) ? data.messages : [];
         const entries: DockEntry[] = [];
         for (const message of messages) {
@@ -487,10 +485,49 @@ export default function CanvasGlassPreviewPage() {
           entryIdRef.current += 1;
           entries.push(message.role === 'user' ? { role: 'user', text, id } : { role: 'text', text, id });
         }
-        setConvos((previous) => ({ ...previous, [repo]: entries }));
-        setDockOpen(true);
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        const firstUser = messages.find((message) => message.role === 'user');
+        setChatCards((previous) => [...previous, {
+          id,
+          threadId,
+          repoPath: repoPath ?? data?.repoPath ?? null,
+          repoName: meta?.repoName ?? data?.repoName ?? null,
+          title: meta?.title?.trim() || data?.title?.trim() || (typeof firstUser?.content === 'string' ? firstUser.content.slice(0, 60) : 'Past session'),
+          x: 200 + (previous.length % 3) * 110 + (id % 5) * 8,
+          y: 90 + (previous.length % 3) * 70,
+          z: zPeakRef.current,
+          w: 380,
+          h: 400,
+          entries,
+        }]);
       })
-      .catch(() => setDockOpen(true));
+      .catch(() => {});
+  }, []);
+
+  const moveChatCard = useCallback((id: number, x: number, y: number) => {
+    setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
+  }, []);
+
+  const resizeChatCard = useCallback((id: number, w: number, h: number) => {
+    setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
+  }, []);
+
+  const closeChatCard = useCallback((id: number) => {
+    setChatCards((previous) => previous.filter((card) => card.id !== id));
+  }, []);
+
+  /** Promote a chat card into the dock — adopt its thread on the live
+   *  socket; the next composer message continues that conversation. */
+  const dockChatCard = useCallback((card: ChatCard) => {
+    const repo = card.repoPath ?? activeRepoPath;
+    if (!repo) return;
+    setActiveRepoPath(repo);
+    orca.adoptThread(repo, card.threadId);
+    setConvos((previous) => ({ ...previous, [repo]: card.entries }));
+    setChatCards((previous) => previous.filter((existing) => existing.id !== card.id));
+    setDockOpen(true);
   }, [activeRepoPath, orca]);
 
   const moveCard = useCallback((id: number, x: number, y: number) => {
@@ -532,16 +569,18 @@ export default function CanvasGlassPreviewPage() {
     setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
   }, []);
 
-  /** Clicked card comes forward. Terminals + files + images + browsers
-   *  share the 10–39 band — above mock cards (3), below chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser', id: number) => {
+  /** Clicked card comes forward. Terminals + files + images + browsers +
+   *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
+  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser' | 'chat', id: number) => {
     const current = kind === 'term'
       ? termCards.find((card) => card.id === id)
       : kind === 'file'
         ? fileCards.find((card) => card.id === id)
         : kind === 'image'
           ? imageCards.find((card) => card.id === id)
-          : browserCards.find((card) => card.id === id);
+          : kind === 'browser'
+            ? browserCards.find((card) => card.id === id)
+            : chatCards.find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
@@ -550,6 +589,7 @@ export default function CanvasGlassPreviewPage() {
         ...fileCards.map((card) => ({ kind: 'file' as const, id: card.id, z: card.z })),
         ...imageCards.map((card) => ({ kind: 'image' as const, id: card.id, z: card.z })),
         ...browserCards.map((card) => ({ kind: 'browser' as const, id: card.id, z: card.z })),
+        ...chatCards.map((card) => ({ kind: 'chat' as const, id: card.id, z: card.z })),
       ].sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
       const top = 10 + combined.length;
@@ -557,6 +597,7 @@ export default function CanvasGlassPreviewPage() {
       setFileCards((previous) => previous.map((card) => ({ ...card, z: kind === 'file' && card.id === id ? top : remap.get(`file:${card.id}`) ?? card.z })));
       setImageCards((previous) => previous.map((card) => ({ ...card, z: kind === 'image' && card.id === id ? top : remap.get(`image:${card.id}`) ?? card.z })));
       setBrowserCards((previous) => previous.map((card) => ({ ...card, z: kind === 'browser' && card.id === id ? top : remap.get(`browser:${card.id}`) ?? card.z })));
+      setChatCards((previous) => previous.map((card) => ({ ...card, z: kind === 'chat' && card.id === id ? top : remap.get(`chat:${card.id}`) ?? card.z })));
       zPeakRef.current = top;
       return;
     }
@@ -568,15 +609,18 @@ export default function CanvasGlassPreviewPage() {
       setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'image') {
       setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else {
+    } else if (kind === 'browser') {
       setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else {
+      setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [browserCards, fileCards, imageCards, termCards]);
+  }, [browserCards, chatCards, fileCards, imageCards, termCards]);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
   const focusImageCard = useCallback((id: number) => focusCard('image', id), [focusCard]);
   const focusBrowserCard = useCallback((id: number) => focusCard('browser', id), [focusCard]);
+  const focusChatCard = useCallback((id: number) => focusCard('chat', id), [focusCard]);
 
   /** A REAL browser pane — defaults to the app's own dashboard. */
   const spawnBrowserCard = useCallback(() => {
@@ -834,9 +878,11 @@ export default function CanvasGlassPreviewPage() {
     if (file) { focusCard('file', file.id); return; }
     const image = imageCards.find((card) => card.items.some((item) => matches(item.name)));
     if (image) { focusCard('image', image.id); return; }
+    const chat = chatCards.find((card) => matches(card.title) || matches(card.repoName));
+    if (chat) { focusCard('chat', chat.id); return; }
     const mock = cards.find((card) => matches(card.title));
     if (mock) setSelectedCardId(mock.id);
-  }, [cards, fileCards, focusCard, imageCards, searchQuery, termCards]);
+  }, [cards, chatCards, fileCards, focusCard, imageCards, searchQuery, termCards]);
 
   if (!canvasEnabled) {
     return (
@@ -897,7 +943,7 @@ export default function CanvasGlassPreviewPage() {
 
       {/* ── Kivo stage — owns the canvas while it is empty ───────── */}
       <AnimatePresence mode="wait">
-        {(cards.length === 0 && termCards.length === 0 && fileCards.length === 0 && imageCards.length === 0 && browserCards.length === 0) || summoning ? (
+        {(cards.length === 0 && termCards.length === 0 && fileCards.length === 0 && imageCards.length === 0 && browserCards.length === 0 && chatCards.length === 0) || summoning ? (
           <CenterStage key={stage.kind} stage={stage} />
         ) : null}
       </AnimatePresence>
@@ -972,6 +1018,21 @@ export default function CanvasGlassPreviewPage() {
             onFocus={focusBrowserCard}
             onNavigate={navigateBrowserCard}
             onClose={closeBrowserCard}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* ── Chat cards — past sessions as their own glass boxes ───── */}
+      <AnimatePresence>
+        {chatCards.map((card) => (
+          <ChatGlassCard
+            key={card.id}
+            card={card}
+            onMove={moveChatCard}
+            onResize={resizeChatCard}
+            onFocus={focusChatCard}
+            onDock={dockChatCard}
+            onClose={closeChatCard}
           />
         ))}
       </AnimatePresence>
@@ -1457,7 +1518,7 @@ export default function CanvasGlassPreviewPage() {
         emptyHint="No orchestrator sessions yet — talk below."
         onRowClick={(index) => {
           const thread = recentThreads[index];
-          if (thread) pickThread(thread.id, thread.repoPath);
+          if (thread) pickThread(thread.id, thread.repoPath, { title: thread.title, repoName: thread.repoName });
         }}
       />
       {dockOpen ? null : (
