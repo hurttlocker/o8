@@ -65,7 +65,57 @@ function fromProxyUrl(url: string): string {
 }
 
 function tabLabel(url: string): string {
+  if (engineScope(url)) return 'Agent Chrome';
   return fromProxyUrl(url).replace(/^https?:\/\//i, '').replace(/\/$/, '') || 'New tab';
+}
+
+/** `o8-engine://<scope>` tabs are live views of the headless engine Chrome
+ *  (#1232 phase 3) — the agent drives, the operator watches. */
+const ENGINE_PREFIX = 'o8-engine://';
+
+function engineScope(url: string): string | null {
+  return url.startsWith(ENGINE_PREFIX) ? url.slice(ENGINE_PREFIX.length) || 'operator' : null;
+}
+
+function EngineLiveView({ scope, active }: { scope: string; active: boolean }) {
+  const [tick, setTick] = useState(0);
+  const [meta, setMeta] = useState<{ active: boolean; url?: string; title?: string } | null>(null);
+  useEffect(() => {
+    if (!active) return;
+    const timer = setInterval(() => setTick((value) => value + 1), 1200);
+    return () => clearInterval(timer);
+  }, [active]);
+  useEffect(() => {
+    if (!active || tick % 3 !== 0) return undefined;
+    let stale = false;
+    fetch(`/api/browser/engine/view?scope=${encodeURIComponent(scope)}&meta=1`)
+      .then((response) => response.json())
+      .then((data: { active: boolean; url?: string; title?: string }) => { if (!stale) setMeta(data); })
+      .catch(() => undefined);
+    return () => { stale = true; };
+  }, [active, scope, tick]);
+  const live = meta?.active !== false;
+  return (
+    <div style={{ position: 'absolute', inset: 0, background: '#fff' }}>
+      {live ? (
+        <img
+          src={`/api/browser/engine/view?scope=${encodeURIComponent(scope)}&t=${tick}`}
+          alt="Agent Chrome live view"
+          draggable={false}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', objectPosition: 'top center' }}
+        />
+      ) : (
+        <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 12, fontWeight: 300, color: 'rgba(0,0,0,0.45)', textAlign: 'center', paddingLeft: 24, paddingRight: 24 }}>
+          Engine idle — agents land here when they open an external URL.
+        </div>
+      )}
+      {live && meta?.url ? (
+        <div style={{ position: 'absolute', left: 8, bottom: 8, maxWidth: 'calc(100% - 16px)', paddingTop: 3, paddingBottom: 3, paddingLeft: 8, paddingRight: 8, borderRadius: 7, background: 'rgba(17,17,17,0.78)', color: 'rgba(255,255,255,0.92)', fontSize: 10.5, fontWeight: 300, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          Agent Chrome · {meta.url}
+        </div>
+      ) : null}
+    </div>
+  );
 }
 
 /** Shortest selector that still uniquely hits the element in its doc. */
@@ -475,26 +525,36 @@ export function BrowserGlassCard({
             Every tab stays mounted (display toggles) so scroll/form state
             survives switching, like a real browser. */}
         <div style={{ height: card.h, position: 'relative', background: '#fff' }}>
-          {card.tabs.map((tab) => (
-            <iframe
-              key={tab.id}
-              ref={(node) => {
-                if (node) iframeRefs.current.set(tab.id, node);
-                else iframeRefs.current.delete(tab.id);
-              }}
-              src={tab.url}
-              title={`Browser — ${tabLabel(tab.url)}`}
-              onLoad={() => {
-                if (!pendingArmRef.current || tab.id !== card.activeTabId) return;
-                pendingArmRef.current = false;
-                armPicker();
-              }}
-              data-o8-browser="canvas"
-              data-o8-active={tab.id === card.activeTabId ? 'true' : 'false'}
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, display: tab.id === card.activeTabId ? 'block' : 'none', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-            />
-          ))}
+          {card.tabs.map((tab) => {
+            const liveScope = engineScope(tab.url);
+            if (liveScope) {
+              return (
+                <div key={tab.id} style={{ position: 'absolute', inset: 0, display: tab.id === card.activeTabId ? 'block' : 'none', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}>
+                  <EngineLiveView scope={liveScope} active={tab.id === card.activeTabId} />
+                </div>
+              );
+            }
+            return (
+              <iframe
+                key={tab.id}
+                ref={(node) => {
+                  if (node) iframeRefs.current.set(tab.id, node);
+                  else iframeRefs.current.delete(tab.id);
+                }}
+                src={tab.url}
+                title={`Browser — ${tabLabel(tab.url)}`}
+                onLoad={() => {
+                  if (!pendingArmRef.current || tab.id !== card.activeTabId) return;
+                  pendingArmRef.current = false;
+                  armPicker();
+                }}
+                data-o8-browser="canvas"
+                data-o8-active={tab.id === card.activeTabId ? 'true' : 'false'}
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, display: tab.id === card.activeTabId ? 'block' : 'none', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}
+                sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              />
+            );
+          })}
 
           {/* Corner resize grip. */}
           <div

@@ -9,10 +9,14 @@
  *   o8 browser type <selector> <text…>         type into an input (--submit presses Enter)
  *   o8 browser wait <selector> [--text s]      poll until the selector (and text) resolves
  *
- * Common flags: --surface canvas|panel (default: most recently active).
- * Localhost pages only — the page must be same-origin or proxied; external
- * sites need the engine tier. Every action from a packet worktree records a
- * `browser_acted` lane event for the operator's audit trail.
+ * Common flags: --surface canvas|panel|engine (default: most recently active).
+ *
+ * Two tiers, one contract (#1232): localhost pages ride o8's EMBEDDED browser
+ * (same-origin/proxied iframes, ghost cursor). `open` with an EXTERNAL url
+ * auto-routes to the ENGINE tier — headless installed-Chrome via the server —
+ * and later verbs stick with the engine while its page is open (`--surface`
+ * overrides). `o8 browser close` ends the engine session. Every action from a
+ * packet worktree records a `browser_acted` lane event for the audit trail.
  */
 
 import { apiFetch, CliError, EXIT } from '../api.js';
@@ -21,7 +25,7 @@ import { printJson, type OutputMode } from '../output.js';
 import { resolveLaneFromCwd } from './packet/worktree-resolve.js';
 
 interface BrowserFlags {
-  surface: 'canvas' | 'panel' | null;
+  surface: 'canvas' | 'panel' | 'engine' | null;
   selector: string | null;
   text: string | null;
   submit: boolean;
@@ -36,10 +40,10 @@ function parseFlags(rest: string[]): BrowserFlags {
     const tok = rest[i];
     if (tok === '--surface') {
       const value = rest[++i];
-      if (value === 'canvas' || value === 'panel') flags.surface = value;
+      if (value === 'canvas' || value === 'panel' || value === 'engine') flags.surface = value;
     } else if (tok.startsWith('--surface=')) {
       const value = tok.slice('--surface='.length);
-      if (value === 'canvas' || value === 'panel') flags.surface = value;
+      if (value === 'canvas' || value === 'panel' || value === 'engine') flags.surface = value;
     } else if (tok === '--selector') {
       flags.selector = rest[++i] ?? null;
     } else if (tok.startsWith('--selector=')) {
@@ -137,10 +141,15 @@ export async function runBrowser(mode: OutputMode, verb: string | undefined, res
       printJson({ schema: 'o8/cli/browser/v1', verb: 'wait', ok: false, timedOut: last.pending === true, timeoutMs, last });
       return EXIT.CONFLICT;
     }
+    case 'close': {
+      const data = await callAgent('close', { ...surface }, packetId);
+      printJson({ schema: 'o8/cli/browser/v1', verb: 'close', ...data });
+      return data.ok === true ? 0 : EXIT.CONFLICT;
+    }
     default:
       throw new CliError(
         'invalid_args',
-        `Unknown browser verb: ${verb ?? '(none)'} — expected open | read | click | type | wait.`,
+        `Unknown browser verb: ${verb ?? '(none)'} — expected open | read | click | type | wait | close.`,
         EXIT.INVALID_ARGS,
       );
   }

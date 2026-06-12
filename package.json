@@ -109,6 +109,7 @@
     "mermaid": "^11.13.0",
     "monaco-editor": "^0.55.1",
     "next": "^16.1.6",
+    "playwright-core": "^1.60.0",
     "qrcode": "^1.5.4",
     "react": "^19.2.4",
     "react-dom": "^19.2.4",
