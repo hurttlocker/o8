@@ -3303,6 +3303,44 @@ fn o8_debug_show_dock(app: tauri::AppHandle) {
     });
 }
 
+/// Swap the main window's vibrancy material for Canvas mode (#1232).
+/// `clear: true` → Popover (the Symon-settings glass — the desktop reads
+/// through nearly unblurred, Active so it stays vivid when unfocused);
+/// `clear: false` → the default HudWindow chrome material.
+#[tauri::command]
+fn set_canvas_material(app: tauri::AppHandle, clear: bool) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::Manager;
+        let Some(window) = app.get_webview_window("main") else {
+            return Err("main window not found".into());
+        };
+        let target = window.clone();
+        window
+            .run_on_main_thread(move || {
+                // apply_vibrancy stacks a new effect view per call — always clear first.
+                let _ = window_vibrancy::clear_vibrancy(&target);
+                let (material, state) = if clear {
+                    (
+                        window_vibrancy::NSVisualEffectMaterial::Popover,
+                        Some(window_vibrancy::NSVisualEffectState::Active),
+                    )
+                } else {
+                    (window_vibrancy::NSVisualEffectMaterial::HudWindow, None)
+                };
+                if let Err(e) = window_vibrancy::apply_vibrancy(&target, material, state, None) {
+                    log::warn!("[canvas-material] apply_vibrancy failed: {e}");
+                }
+            })
+            .map_err(|e| format!("schedule material swap failed: {e}"))?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, clear);
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
@@ -3441,6 +3479,7 @@ pub fn run() {
             read_approvals,
             read_workspaces,
             set_tray_badge,
+            set_canvas_material,
             notify_review_ready,
             record_console_error,
             read_dropped_file,
