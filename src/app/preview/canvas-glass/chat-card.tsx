@@ -8,11 +8,12 @@
  * the thread — the next message continues that conversation).
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { DockEntryView } from './dock';
 import { FONT, TONE_DOT, glass, type DockEntry } from './ui';
+import { useThreadOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
 
 export interface ChatCard {
   id: number;
@@ -33,6 +34,10 @@ const CHAT_MIN_H = 240;
 
 export function ChatGlassCard({
   card,
+  liveEntries,
+  sendDefaults,
+  onLiveEvent,
+  onUserSend,
   onMove,
   onResize,
   onFocus,
@@ -40,6 +45,12 @@ export function ChatGlassCard({
   onClose,
 }: {
   card: ChatCard;
+  /** The card's live convo lane (page state) — falls back to the history
+   *  snapshot the card spawned with. */
+  liveEntries: DockEntry[] | null;
+  sendDefaults: { model?: string; thinkingEffort?: string };
+  onLiveEvent: (lane: string, event: CanvasThreadEvent) => void;
+  onUserSend: (card: ChatCard, text: string, sent: boolean) => void;
   onMove: (id: number, x: number, y: number) => void;
   onResize: (id: number, w: number, h: number) => void;
   onFocus: (id: number) => void;
@@ -51,6 +62,31 @@ export function ChatGlassCard({
   const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const scrollRef = useRef<HTMLDivElement | null>(null);
+
+  // The card IS conversable — its own live line to this exact thread.
+  // Docking stays the durability move; talking works right here.
+  const line = useThreadOrchestrator(card.repoPath, card.threadId, (event) => {
+    onLiveEvent(`thread:${card.threadId}`, event);
+  });
+  const busy = line.status === 'busy';
+
+  const entries = liveEntries ?? card.entries;
+
+  // New entries keep the latest turn in view.
+  useEffect(() => {
+    const node = scrollRef.current;
+    if (node) node.scrollTop = node.scrollHeight;
+  }, [entries.length, busy]);
+
+  const submit = () => {
+    const text = draft.trim();
+    if (!text || busy) return;
+    const sent = line.send(text, sendDefaults);
+    onUserSend(card, text, sent);
+    if (sent) setDraft('');
+  };
 
   return (
     <motion.div
@@ -100,7 +136,11 @@ export function ChatGlassCard({
             userSelect: 'none',
           }}
         >
-          <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT.idle, flexShrink: 0 }} />
+          {busy ? (
+            <span aria-hidden className="o8-orbit" style={{ width: 10, height: 10, color: TONE_DOT.working, flexShrink: 0 }} />
+          ) : (
+            <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: line.status === 'ready' ? TONE_DOT.working : TONE_DOT.idle, flexShrink: 0 }} />
+          )}
           <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 0 }}>
             <span style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {card.title}
@@ -148,6 +188,7 @@ export function ChatGlassCard({
 
         {/* Transcript — same entry vocabulary the dock renders. */}
         <div
+          ref={scrollRef}
           style={{
             height: card.h,
             overflowY: 'auto',
@@ -162,14 +203,50 @@ export function ChatGlassCard({
             position: 'relative',
           } as React.CSSProperties}
         >
-          {card.entries.map((entry) => (
+          {entries.map((entry) => (
             <DockEntryView key={entry.id} entry={entry} />
           ))}
-          {card.entries.length === 0 ? (
+          {entries.length === 0 ? (
             <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.6, fontFamily: FONT }}>
               Nothing in this session yet.
             </span>
           ) : null}
+        </div>
+
+        {/* In-card composer — talk to this orchestrator right here. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 9, paddingLeft: 12, paddingRight: 12, borderTop: '1px solid var(--cnv-edge)' }}>
+          <input
+            value={draft}
+            onChange={(event) => setDraft(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                submit();
+              }
+            }}
+            onPointerDown={(event) => event.stopPropagation()}
+            placeholder={busy ? 'Working — interrupt from the dock' : `Reply to ${card.title.length > 26 ? `${card.title.slice(0, 26)}…` : card.title}`}
+            aria-label={`Message ${card.title}`}
+            spellCheck={false}
+            disabled={busy}
+            style={{
+              flex: 1,
+              borderWidth: 0,
+              outline: 'none',
+              background: 'var(--cnv-tint)',
+              borderRadius: 9,
+              paddingTop: 5,
+              paddingBottom: 5,
+              paddingLeft: 9,
+              paddingRight: 9,
+              color: 'var(--cnv-ink)',
+              fontSize: 11,
+              fontWeight: 300,
+              letterSpacing: '-0.05px',
+              fontFamily: FONT,
+              opacity: busy ? 0.55 : 1,
+            }}
+          />
         </div>
 
         {/* Corner resize grip. */}
