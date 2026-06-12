@@ -667,6 +667,7 @@ export function O8Panel({
             repoPath={repoPath}
             selectedFile={selectedFile ?? null}
             surface="diff"
+            surfaceLabel="panel"
           />
         </div>
       ) : null}
@@ -748,6 +749,7 @@ export function O8Panel({
               repoPath={repoPath}
               selectedFile={selectedFile ?? null}
               surface="diff"
+              surfaceLabel="o8.md"
             />
           )}
         />

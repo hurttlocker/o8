@@ -948,9 +948,17 @@ export function InputButtons({
           borderRadius: 6,
           borderWidth: 0,
           background: 'transparent',
-          color: permissionMode === 'full' ? '#ef4444' : '#9ca3af',
+          // Ink at rest — a red slashed shield on the idle composer reads as
+          // an ERROR, not "full access". Danger red appears on hover only.
+          color: 'var(--t-text-faint)',
           cursor: 'pointer',
           transition: 'color 120ms',
+        }}
+        onMouseEnter={(event) => {
+          event.currentTarget.style.color = permissionMode === 'full' ? 'var(--t-brand-red, #ef4444)' : 'var(--t-text)';
+        }}
+        onMouseLeave={(event) => {
+          event.currentTarget.style.color = 'var(--t-text-faint)';
         }}
       >
         {permissionMode === 'full' ? (

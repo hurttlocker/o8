@@ -447,7 +447,7 @@ Full list lives in `CLAUDE.md`. This doc summarizes; that file is authoritative 
 
 ### Current state
 
-Two themes ship: **light** and **midnight**. The legacy `dark` theme auto-remaps to `midnight` via `LEGACY_THEME_IDS` in `src/lib/theme/context.tsx`.
+Two palettes ship: **light** and **dark** (`PaletteId` in `src/lib/theme/registry.ts`). The legacy `midnight` id auto-remaps to `dark` via `LEGACY_THEME_IDS` in `src/lib/theme/context.tsx`. "Midnight" in older docs means today's `dark`.
 
 ### How tokens are applied
 

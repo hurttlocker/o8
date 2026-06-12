@@ -290,11 +290,13 @@ function HeaderButton({
   active,
   disabled,
   onOpen,
+  surfaceLabel,
 }: {
   active: boolean;
   disabled: boolean;
   onOpen: () => void;
   placement?: ScratchTriggerPlacement;
+  surfaceLabel?: string;
 }) {
   // Flat per DESIGN.md §06.7 — same language as HeaderIconPill regardless of
   // placement. The chunky ring + inset shadow that used to differentiate the
@@ -303,7 +305,7 @@ function HeaderButton({
     <button
       type="button"
       title={disabled ? 'Select a repo to ask o8' : 'Ask o8 (Cmd+E)'}
-      aria-label="Ask o8"
+      aria-label={surfaceLabel ? `Ask o8 — ${surfaceLabel}` : 'Ask o8'}
       aria-disabled={disabled}
       onMouseDown={(event) => event.preventDefault()}
       onClick={onOpen}
@@ -351,11 +353,13 @@ export function O8ScratchChat({
   selectedFile,
   surface,
   placement = 'floating',
+  surfaceLabel,
 }: {
   repoPath?: string | null;
   selectedFile: string | null;
   surface: ScratchSurface;
   placement?: ScratchTriggerPlacement;
+  surfaceLabel?: string;
 }) {
   const data = useOrchestratorData();
   const buttonRef = useRef<HTMLDivElement>(null);
@@ -720,12 +724,12 @@ export function O8ScratchChat({
   return (
     <>
       <div ref={buttonRef} style={{ display: 'inline-flex', flexShrink: 0 }}>
-        <HeaderButton active={open} disabled={disabled && !open} onOpen={togglePanel} placement={placement} />
+        <HeaderButton active={open} disabled={disabled && !open} onOpen={togglePanel} placement={placement} surfaceLabel={surfaceLabel} />
       </div>
       {open ? (
         <div
           role="dialog"
-          aria-label="Ask o8"
+          aria-label={surfaceLabel ? `Ask o8 — ${surfaceLabel}` : 'Ask o8'}
           style={{
             ...SCRATCH_LOCAL_TOKENS,
             position: 'fixed',

@@ -437,6 +437,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             style={{ flex: 1, minWidth: 0 }}
           />
           <O8ScratchChat
+            surfaceLabel="activity"
             repoPath={repoPath ?? null}
             selectedFile={null}
             surface="diff"
@@ -522,7 +523,17 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             Unseen ("new") proposals get accent emphasis + a one-time
             auto-open; once reviewed they stay listed but read calmly. */}
         {proposals.length > 0 ? (
-          <div style={{ paddingTop: 8, paddingRight: 12, paddingLeft: 12 }}>
+          <div style={{
+            paddingTop: 8,
+            paddingRight: 12,
+            paddingLeft: 12,
+            // Hairline under the collapsed drawer: its 9px-uppercase header
+            // shares the day-label voice, so without a boundary it reads as
+            // the section heading for the feed below it.
+            paddingBottom: 8,
+            borderBottom: '1px solid var(--t-divider-subtle, var(--t-divider))',
+            marginBottom: 2,
+          }}>
             <button
               type="button"
               onClick={handleToggleProposals}

@@ -127,7 +127,7 @@ Core tables (current schema): `users`, `api_keys` (AES-256-GCM encrypted), `usag
 
 ### Theming (`src/lib/theme/`)
 
-CSS variable system, **two-axis: palette × surface** — `palette` ∈ {light, midnight, ...} controls the color tokens; `surface` ∈ {glass, solid} controls whether the chrome bleeds the macOS vibrancy backdrop or paints opaque (accessibility / vestibular path). Two shipping palettes (`light`, `midnight`); legacy `dark` auto-remaps via `LEGACY_THEME_IDS`. `ThemeProvider` applies vars to `<html>` root, persists to localStorage; components reference `var(--t-*)` tokens inside inline styles. **Full detail + vibrancy material notes in "Theme System (current state)" below.**
+CSS variable system, **two-axis: palette × surface** — `palette` ∈ {light, dark} controls the color tokens; `surface` ∈ {glass, solid} controls whether the chrome bleeds the macOS vibrancy backdrop or paints opaque (accessibility / vestibular path). Two shipping palettes (`light`, `dark` — `PaletteId` in `src/lib/theme/registry.ts`); the legacy `midnight` id auto-remaps to `dark` via `LEGACY_THEME_IDS`. `ThemeProvider` applies vars to `<html>` root, persists to localStorage; components reference `var(--t-*)` tokens inside inline styles. **Full detail + vibrancy material notes in "Theme System (current state)" below.**
 
 **Never hardcode rgba colors for theme surfaces.** Use `var(--t-bg-card)`, `var(--t-panel)`, `var(--t-input-bg)`, etc. A hardcoded `rgba(255, 255, 255, 0.56)` renders as a huge light-gray blob in midnight — see commit 929ffdf for the repo-registry sweep.
 
@@ -438,7 +438,7 @@ The production build includes the `tauri-plugin-mcp` Rust crate via the `dev-mcp
 
 ## Theme System (current state)
 
-**Two shipping palettes: `light` and `midnight`.** Legacy `dark` is gone (auto-remaps to `midnight` via `LEGACY_THEME_IDS` in `src/lib/theme/context.tsx`). The full architecture is **palette × surface** — see Theming under Architecture above.
+**Two shipping palettes: `light` and `dark`.** The earlier `midnight` id is legacy (auto-remaps to `dark` via `LEGACY_THEME_IDS` in `src/lib/theme/context.tsx`); older docs/memories that say "midnight" mean today's `dark`. The full architecture is **palette × surface** — see Theming under Architecture above.
 
 ### Shape of both themes
 
