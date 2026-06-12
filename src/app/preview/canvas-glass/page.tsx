@@ -49,11 +49,12 @@ import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { OrchestratorDock } from './dock';
 import { FileGlassCard, type FileCard } from './file-card';
+import { ImageGlassCard, type ImageCard } from './image-card';
 import { CenterStage, type Stage } from './stage';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { useCanvasOrchestrator } from './use-canvas-orchestrator';
-import { FONT, glass, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrchestratorLane } from './ui';
+import { FONT, IMG_MAX_SPAWN_EDGE, glass, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrchestratorLane } from './ui';
 
 /** Terminal glass veil — persisted while Q dials it in (dev tuner). */
 const TERM_VEIL_KEY = 'o8:canvas-term-veil';
@@ -105,8 +106,11 @@ export default function CanvasGlassPreviewPage() {
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
   const [termCards, setTermCards] = useState<TermCard[]>([]);
   const [fileCards, setFileCards] = useState<FileCard[]>([]);
+  const [imageCards, setImageCards] = useState<ImageCard[]>([]);
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
+  const [searchOpen, setSearchOpen] = useState(false);
+  const [searchQuery, setSearchQuery] = useState('');
   const [repos, setRepos] = useState<RepoPickerRowData[] | null>(null);
   const nextIdRef = useRef(1);
   const entryIdRef = useRef(1);
@@ -420,23 +424,27 @@ export default function CanvasGlassPreviewPage() {
     setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
   }, []);
 
-  /** Clicked card comes forward. Terminals + files share the 10–39 band —
-   *  always above the mock cards (3), always below the chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file', id: number) => {
+  /** Clicked card comes forward. Terminals + files + images share the
+   *  10–39 band — above the mock cards (3), below the chrome (40+). */
+  const focusCard = useCallback((kind: 'term' | 'file' | 'image', id: number) => {
     const current = kind === 'term'
       ? termCards.find((card) => card.id === id)
-      : fileCards.find((card) => card.id === id);
+      : kind === 'file'
+        ? fileCards.find((card) => card.id === id)
+        : imageCards.find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
       const combined = [
         ...termCards.map((card) => ({ kind: 'term' as const, id: card.id, z: card.z })),
         ...fileCards.map((card) => ({ kind: 'file' as const, id: card.id, z: card.z })),
+        ...imageCards.map((card) => ({ kind: 'image' as const, id: card.id, z: card.z })),
       ].sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
       const top = 10 + combined.length;
       setTermCards((previous) => previous.map((card) => ({ ...card, z: kind === 'term' && card.id === id ? top : remap.get(`term:${card.id}`) ?? card.z })));
       setFileCards((previous) => previous.map((card) => ({ ...card, z: kind === 'file' && card.id === id ? top : remap.get(`file:${card.id}`) ?? card.z })));
+      setImageCards((previous) => previous.map((card) => ({ ...card, z: kind === 'image' && card.id === id ? top : remap.get(`image:${card.id}`) ?? card.z })));
       zPeakRef.current = top;
       return;
     }
@@ -444,13 +452,16 @@ export default function CanvasGlassPreviewPage() {
     const z = zPeakRef.current;
     if (kind === 'term') {
       setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else {
+    } else if (kind === 'file') {
       setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else {
+      setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [fileCards, termCards]);
+  }, [fileCards, imageCards, termCards]);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
+  const focusImageCard = useCallback((id: number) => focusCard('image', id), [focusCard]);
 
   const changeTermVeil = useCallback((value: number) => {
     setTermVeil(value);
@@ -565,20 +576,120 @@ export default function CanvasGlassPreviewPage() {
     };
   }, [sendTerminalDetach, sendTerminalInput]);
 
+  /** Drop a photo anywhere — it surfaces reference-style: filename pill,
+   *  bottom edge dissolving into the canvas, aspect-locked resize. */
+  const spawnImageCard = useCallback((file: File, at: { x: number; y: number }) => {
+    const src = URL.createObjectURL(file);
+    const probe = new Image();
+    probe.onload = () => {
+      const natW = probe.naturalWidth || 1;
+      const natH = probe.naturalHeight || 1;
+      const aspect = natW / natH;
+      const w = natW >= natH ? IMG_MAX_SPAWN_EDGE : Math.round(IMG_MAX_SPAWN_EDGE * aspect);
+      const h = Math.round(w / aspect);
+      const id = nextIdRef.current;
+      nextIdRef.current += 1;
+      zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+      const z = zPeakRef.current;
+      setImageCards((previous) => [...previous, {
+        id,
+        x: Math.max(8, at.x - w / 2),
+        y: Math.max(48, at.y - h / 2),
+        z,
+        w,
+        h,
+        aspect,
+        items: [{ src, name: file.name }],
+      }]);
+    };
+    probe.onerror = () => URL.revokeObjectURL(src);
+    probe.src = src;
+  }, []);
+
+  const moveImageCard = useCallback((id: number, x: number, y: number) => {
+    setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
+  }, []);
+
+  const resizeImageCard = useCallback((id: number, w: number) => {
+    setImageCards((previous) => previous.map((card) => (
+      card.id === id ? { ...card, w, h: Math.round(w / card.aspect) } : card
+    )));
+  }, []);
+
+  const closeImageCard = useCallback((id: number) => {
+    setImageCards((previous) => {
+      const target = previous.find((card) => card.id === id);
+      target?.items.forEach((item) => URL.revokeObjectURL(item.src));
+      return previous.filter((card) => card.id !== id);
+    });
+  }, []);
+
+  /** Dropped onto another photo → the two collapse into a stack (deck). */
+  const dropImageCard = useCallback((id: number, centerX: number, centerY: number) => {
+    setImageCards((previous) => {
+      const dragged = previous.find((card) => card.id === id);
+      if (!dragged) return previous;
+      const target = previous.find((card) => (
+        card.id !== id
+        && centerX >= card.x && centerX <= card.x + card.w
+        && centerY >= card.y && centerY <= card.y + card.h
+      ));
+      if (!target) return previous;
+      return previous
+        .filter((card) => card.id !== id)
+        .map((card) => (card.id === target.id ? { ...card, items: [...card.items, ...dragged.items] } : card));
+    });
+  }, []);
+
+  /** Tap a stack → the deck spreads back out into separate photos. */
+  const unstackImageCard = useCallback((id: number) => {
+    setImageCards((previous) => {
+      const stackCard = previous.find((card) => card.id === id);
+      if (!stackCard || stackCard.items.length < 2) return previous;
+      const spread: ImageCard[] = stackCard.items.slice(1).map((item, index) => {
+        const spreadId = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        return {
+          id: spreadId,
+          x: stackCard.x + 36 * (index + 1),
+          y: stackCard.y + 26 * (index + 1),
+          z: zPeakRef.current,
+          w: stackCard.w,
+          h: stackCard.h,
+          aspect: stackCard.aspect,
+          items: [item],
+        };
+      });
+      return [
+        ...previous.map((card) => (card.id === id ? { ...card, items: [stackCard.items[0]!] } : card)),
+        ...spread,
+      ];
+    });
+  }, []);
+
   const dropImages = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => file.type.startsWith('image/'));
     files.forEach((file, index) => {
-      spawnCard(
-        'image',
-        file.name,
-        `${Math.round(file.size / 1024)} KB`,
-        'idle',
-        { x: Math.max(8, event.clientX - 100 + index * 26), y: Math.max(64, event.clientY - 60 + index * 26) },
-        URL.createObjectURL(file),
-      );
+      spawnImageCard(file, { x: event.clientX + index * 30, y: event.clientY + index * 24 });
     });
-  }, [spawnCard]);
+  }, [spawnImageCard]);
+
+  /** Top-right search — first matching card on the canvas comes forward. */
+  const runCanvasSearch = useCallback(() => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return;
+    const matches = (value: string | null | undefined) => (value ?? '').toLowerCase().includes(query);
+    const term = termCards.find((card) => matches(card.cwdLabel) || matches(card.sessionName));
+    if (term) { focusCard('term', term.id); return; }
+    const file = fileCards.find((card) => matches(card.name) || matches(card.path));
+    if (file) { focusCard('file', file.id); return; }
+    const image = imageCards.find((card) => card.items.some((item) => matches(item.name)));
+    if (image) { focusCard('image', image.id); return; }
+    const mock = cards.find((card) => matches(card.title));
+    if (mock) setSelectedCardId(mock.id);
+  }, [cards, fileCards, focusCard, imageCards, searchQuery, termCards]);
 
   if (!canvasEnabled) {
     return (
@@ -634,7 +745,7 @@ export default function CanvasGlassPreviewPage() {
 
       {/* ── the reference stage — owns the canvas while it is empty ───────── */}
       <AnimatePresence mode="wait">
-        {(cards.length === 0 && termCards.length === 0 && fileCards.length === 0) || summoning ? (
+        {(cards.length === 0 && termCards.length === 0 && fileCards.length === 0 && imageCards.length === 0) || summoning ? (
           <CenterStage key={stage.kind} stage={stage} />
         ) : null}
       </AnimatePresence>
@@ -677,6 +788,23 @@ export default function CanvasGlassPreviewPage() {
             onResize={resizeFileCard}
             onFocus={focusFileCard}
             onClose={closeFileCard}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* ── Image cards — photos dissolve into the canvas; drag together
+            to stack, tap a deck to spread ─────────────────────────── */}
+      <AnimatePresence>
+        {imageCards.map((card) => (
+          <ImageGlassCard
+            key={card.id}
+            card={card}
+            onMove={moveImageCard}
+            onResize={resizeImageCard}
+            onFocus={focusImageCard}
+            onDrop={dropImageCard}
+            onTap={unstackImageCard}
+            onClose={closeImageCard}
           />
         ))}
       </AnimatePresence>
@@ -758,6 +886,117 @@ export default function CanvasGlassPreviewPage() {
           Exit
         </button>
       </div>
+
+      {/* ── Top-right — search + the operator (reference borrow) ──── */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 18,
+          right: 24,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          height: 40,
+          paddingLeft: 6,
+          paddingRight: 6,
+          borderRadius: 20,
+          zIndex: 41,
+          ...glass(true),
+        }}
+      >
+        <button
+          type="button"
+          aria-label="Search the canvas"
+          onClick={() => setSearchOpen((value) => !value)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 28,
+            height: 28,
+            borderWidth: 0,
+            background: 'transparent',
+            borderRadius: 14,
+            color: searchOpen ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+            cursor: 'pointer',
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+          onMouseLeave={(event) => { if (!searchOpen) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+        >
+          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
+          </svg>
+        </button>
+        <span
+          aria-label="Operator"
+          style={{
+            width: 26,
+            height: 26,
+            borderRadius: '50%',
+            border: '1px solid var(--cnv-edge)',
+            background: 'var(--cnv-tint)',
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: 'var(--cnv-ink-muted)',
+            flexShrink: 0,
+          }}
+        >
+          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+          </svg>
+        </span>
+      </div>
+
+      {/* Search popover — Enter brings the first matching card forward. */}
+      <AnimatePresence>
+        {searchOpen ? (
+          <motion.div
+            initial={{ opacity: 0, y: -6, scale: 0.98 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: -6, scale: 0.98 }}
+            transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+            style={{
+              position: 'absolute',
+              top: 64,
+              right: 24,
+              width: 240,
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              height: 36,
+              paddingLeft: 12,
+              paddingRight: 12,
+              borderRadius: 18,
+              zIndex: 41,
+              ...glass(true),
+            }}
+          >
+            <input
+              autoFocus
+              value={searchQuery}
+              onChange={(event) => setSearchQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter') runCanvasSearch();
+                if (event.key === 'Escape') setSearchOpen(false);
+              }}
+              placeholder="Find a card on the canvas"
+              aria-label="Search the canvas"
+              style={{
+                flex: 1,
+                borderWidth: 0,
+                outline: 'none',
+                background: 'transparent',
+                color: 'var(--cnv-ink)',
+                fontSize: 11.5,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                fontFamily: FONT,
+              }}
+            />
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
 
       {/* ── Left spawn dock — the component vocabulary ───────────── */}
       <div
