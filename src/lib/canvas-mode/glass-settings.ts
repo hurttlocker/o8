@@ -58,13 +58,20 @@ export const CANVAS_GLASS_DEFAULTS: CanvasGlassSettings = {
   backdrop: 'none',
 };
 
-/** The see-through depth layers — professional paper/shader moods. */
+/**
+ * The see-through depth layers — the operator-picked set (gallery
+ * browse happened 2026-06-12; these survived). Trails + Dots are
+ * custom 2D-canvas pieces, the rest are hand-tuned Paper Shaders. Ids
+ * match the CanvasBackdropLayer switch in preview/canvas-glass/backdrops.tsx.
+ */
 export const CANVAS_BACKDROPS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'none', label: 'None' },
+  { id: 'trails', label: 'Trails' },
+  { id: 'dots', label: 'Dots' },
   { id: 'paper', label: 'Paper' },
-  { id: 'mesh', label: 'Mesh' },
   { id: 'aurora', label: 'Aurora' },
-  { id: 'grain', label: 'Grain' },
+  { id: 'warp', label: 'Warp' },
+  { id: 'radial', label: 'Radial' },
 ];
 
 export const CANVAS_GLASS_RANGES = {
