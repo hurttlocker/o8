@@ -132,9 +132,33 @@ export function SpecGlassCard({
           </button>
         </div>
 
-        {/* The REAL spec pane — solid themed paper, never glass-through,
-            same as every workspace surface. */}
-        <div style={{ height: card.h, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}>
+        {/* The REAL spec pane — FROSTED on the canvas (operator call,
+            2026-06-12): the card rebinds the pane's --t-* surface tokens to
+            the canvas glass vocabulary, so notes read as frost over the
+            backdrop instead of dashboard paper. Same rebind mechanism the
+            pane itself uses for its solid-surface ink. */}
+        <div
+          style={{
+            height: card.h,
+            position: 'relative',
+            display: 'flex',
+            flexDirection: 'column',
+            overflow: 'hidden',
+            ['--t-canvas-bg' as string]: 'transparent',
+            ['--t-chat-surface-input-bg' as string]: 'rgba(255, 255, 255, 0.05)',
+            ['--t-input-bg' as string]: 'rgba(255, 255, 255, 0.05)',
+            ['--t-bg-subtle' as string]: 'rgba(255, 255, 255, 0.04)',
+            ['--t-divider-subtle' as string]: 'var(--cnv-edge)',
+            ['--t-chat-surface-text' as string]: 'var(--cnv-ink)',
+            ['--t-chat-surface-text-secondary' as string]: 'var(--cnv-ink-muted)',
+            ['--t-chat-surface-text-muted' as string]: 'var(--cnv-ink-muted)',
+            ['--t-text' as string]: 'var(--cnv-ink)',
+            ['--t-text-secondary' as string]: 'var(--cnv-ink-muted)',
+            ['--t-text-muted' as string]: 'var(--cnv-ink-muted)',
+            ['--t-text-faint' as string]: 'var(--cnv-ink-muted)',
+            ...(dragging || resizing ? { pointerEvents: 'none' } : {}),
+          } as React.CSSProperties}
+        >
           <ThemeProvider>
             <O8SpecPane
               repoPath={card.repoPath}
