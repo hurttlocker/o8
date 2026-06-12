@@ -191,7 +191,11 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
     }
   }, [repoPath, threadIds]);
 
-  return { status, send, interrupt, adoptThread };
+  /** The persisted thread for a repo, if any — the dock uses this to
+   *  re-seed its transcript from history after a reload. */
+  const threadIdFor = useCallback((repo: string) => threadIds.get(repo) ?? null, [threadIds]);
+
+  return { status, send, interrupt, adoptThread, threadIdFor };
 }
 
 /** A live line to ONE specific thread — chat cards talk through this, so a

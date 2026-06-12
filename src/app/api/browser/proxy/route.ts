@@ -1,0 +1,51 @@
+import { NextRequest, NextResponse } from 'next/server';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * Same-origin picker proxy for canvas browser cards (#1232).
+ *
+ * The element picker needs contentDocument access, and localhost dev
+ * servers on other ports are cross-origin by port. This route fetches a
+ * LOCAL page server-side and re-serves it from our origin with a <base>
+ * tag pointed at the original server, so assets/links still resolve
+ * there while the document itself becomes inspectable.
+ *
+ * Localhost targets only — this is a dev-inspection tool, not an open
+ * fetch relay.
+ */
+
+const LOCAL_TARGET = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i;
+
+export async function GET(request: NextRequest) {
+  const url = request.nextUrl.searchParams.get('url') ?? '';
+  if (!LOCAL_TARGET.test(url)) {
+    return NextResponse.json({ error: 'localhost targets only' }, { status: 400 });
+  }
+  try {
+    const upstream = await fetch(url, { redirect: 'follow', headers: { accept: 'text/html,*/*' } });
+    const type = upstream.headers.get('content-type') ?? 'text/html';
+    if (!type.toLowerCase().includes('text/html')) {
+      const body = await upstream.arrayBuffer();
+      return new NextResponse(body, { status: upstream.status, headers: { 'content-type': type } });
+    }
+    let html = await upstream.text();
+    const target = new URL(url);
+    const dir = target.pathname.endsWith('/') ? target.pathname : target.pathname.replace(/[^/]*$/, '');
+    const baseTag = `<base href="${target.origin}${dir}">`;
+    // First <head> wins; headless fragments get the tag prepended so
+    // relative URLs still resolve against the original server.
+    html = /<head[^>]*>/i.test(html)
+      ? html.replace(/<head[^>]*>/i, (match) => `${match}${baseTag}`)
+      : `${baseTag}${html}`;
+    return new NextResponse(html, {
+      status: upstream.status,
+      headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
+    });
+  } catch {
+    return new NextResponse(
+      `<!doctype html><body style="font-family:system-ui;padding:24px;font-size:13px;color:#555">Could not reach ${url.replace(/</g, '&lt;')} — is that server running?</body>`,
+      { status: 502, headers: { 'content-type': 'text/html; charset=utf-8' } },
+    );
+  }
+}

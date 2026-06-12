@@ -100,6 +100,15 @@ export const IMG_MAX_SPAWN_EDGE = 340;
  *  the chosen value into the default and flip this off before graduating. */
 export const DEV_TERM_GLASS_TUNER = true;
 
+/** Current canvas zoom (CSS `zoom` on the card layer, stamped as
+ *  --cnv-zoom). Pointer deltas arrive in VISUAL px — drag/resize handlers
+ *  divide by this so cards track the cursor at any zoom step. */
+export function canvasZoom(): number {
+  if (typeof document === 'undefined') return 1;
+  const raw = Number.parseFloat(document.documentElement.style.getPropertyValue('--cnv-zoom'));
+  return Number.isFinite(raw) && raw > 0 ? raw : 1;
+}
+
 /** Compact relative age for rails + history rows ("4m ago"). */
 export function relAge(iso: string | null | undefined): string {
   if (!iso) return '';

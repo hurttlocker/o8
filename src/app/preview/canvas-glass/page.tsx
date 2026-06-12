@@ -49,6 +49,7 @@ import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/o
 import { CanvasBackdropLayer } from './backdrops';
 import { BrowserGlassCard, type BrowserCard, type BrowserTab } from './browser-card';
 import { SpecGlassCard, type SpecCard } from './spec-card';
+import { BrainGlassCard, type BrainCard } from './brain-card';
 import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
 import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
 import { ChatGlassCard, type ChatCard } from './chat-card';
@@ -60,7 +61,7 @@ import { ImageGlassCard, type ImageCard } from './image-card';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { useCanvasOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
-import { FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
+import { FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
 
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -104,6 +105,18 @@ interface RepoPickerRowData {
   project: string | null;
 }
 
+/** Mini zoom — fixed steps, zoom OUT only. Just breathing room around the
+ *  cards, not a camera. Persisted; stamped as --cnv-zoom for the pointer
+ *  math in the card drag handlers. */
+const ZOOM_KEY = 'o8:canvas-zoom';
+const ZOOM_STEPS = [1, 0.85, 0.7] as const;
+
+/** One row in the canvas search dropdown — a card to bring forward, or a
+ *  past session to spawn onto the canvas. */
+type SearchHit =
+  | { kind: 'card'; cardKind: 'term' | 'file' | 'image' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain'; id: number; title: string; meta: string }
+  | { kind: 'thread'; threadId: string; repoPath: string | null; repoName: string | null; title: string; meta: string };
+
 // Mirrors COMPOSER_MODEL_OPTIONS in thoughts/InputButtons.tsx (not exported).
 const CANVAS_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'claude-fable-5', label: 'Fable 5' },
@@ -123,6 +136,7 @@ export default function CanvasGlassPreviewPage() {
   const [inTauri, setInTauri] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
   const [tunerOpen, setTunerOpen] = useState(false);
+  const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(1);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
   const [composerMenu, setComposerMenu] = useState<'repo' | 'model' | 'effort' | null>(null);
@@ -140,6 +154,7 @@ export default function CanvasGlassPreviewPage() {
   const [composerImages, setComposerImages] = useState<Array<{ name: string; dataUri: string }>>([]);
   const [diffCards, setDiffCards] = useState<DiffCard[]>([]);
   const [specCards, setSpecCards] = useState<SpecCard[]>([]);
+  const [brainCards, setBrainCards] = useState<BrainCard[]>([]);
   const [reviewPickerOpen, setReviewPickerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -232,10 +247,23 @@ export default function CanvasGlassPreviewPage() {
       if (storedModel && CANVAS_MODEL_OPTIONS.some((option) => option.value === storedModel)) setOrchModel(storedModel);
       const storedEffort = window.localStorage.getItem(CANVAS_EFFORT_KEY);
       if (isThinkingEffort(storedEffort)) setOrchEffort(storedEffort);
+      const storedZoom = Number.parseFloat(window.localStorage.getItem(ZOOM_KEY) ?? '');
+      if (ZOOM_STEPS.some((step) => step === storedZoom)) setCanvasZoomLevel(storedZoom);
     } catch {
       // defaults stand
     }
   }, []);
+
+  // Stamp + persist the zoom — drag handlers read --cnv-zoom for their
+  // pointer math, so the stamp must land before any drag at this level.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--cnv-zoom', String(canvasZoomLevel));
+    try {
+      window.localStorage.setItem(ZOOM_KEY, String(canvasZoomLevel));
+    } catch {
+      // non-critical
+    }
+  }, [canvasZoomLevel]);
 
   // Escape closes every ephemeral layer — popovers, pickers, drawers,
   // search. They all have outside-click veils; this is the keyboard peer.
@@ -336,10 +364,10 @@ export default function CanvasGlassPreviewPage() {
     };
   }, [refreshLanes]);
 
-  // Opening the Sessions popover refetches so the list is never two
-  // minutes stale.
+  // Opening the Sessions popover (or the search, which lists sessions too)
+  // refetches so the list is never two minutes stale.
   useEffect(() => {
-    if (!sessionsOpen) return;
+    if (!sessionsOpen && !searchOpen) return;
     let disposed = false;
     fetch('/api/mobile/orchestrator/threads')
       .then((response) => (response.ok ? response.json() : null))
@@ -348,7 +376,7 @@ export default function CanvasGlassPreviewPage() {
       })
       .catch(() => {});
     return () => { disposed = true; };
-  }, [sessionsOpen]);
+  }, [searchOpen, sessionsOpen]);
 
   // Same for the Review drawer — lanes move fast, the list must be live.
   useEffect(() => {
@@ -564,6 +592,36 @@ export default function CanvasGlassPreviewPage() {
     onLaneLifecycle: refreshLanes,
   });
 
+  // The dock survives reloads like the cards do — an empty lane whose repo
+  // has a persisted thread re-seeds its transcript from chat history (the
+  // same source pickThread uses for floating cards).
+  const dockSeededRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (!dockOpen || !activeRepoPath) return;
+    const repo = activeRepoPath;
+    if ((convos[repo]?.length ?? 0) > 0) return;
+    const threadId = orch.threadIdFor(repo);
+    if (!threadId || dockSeededRef.current.has(threadId)) return;
+    dockSeededRef.current.add(threadId);
+    void fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { messages?: Array<{ role?: string; content?: string }> } | null) => {
+        const messages = Array.isArray(data?.messages) ? data.messages : [];
+        if (!messages.length) return;
+        const entries: DockEntry[] = [];
+        for (const message of messages) {
+          const text = typeof message.content === 'string' ? message.content.trim() : '';
+          if (!text) continue;
+          const id = entryIdRef.current;
+          entryIdRef.current += 1;
+          entries.push(message.role === 'user' ? { role: 'user', text, id } : { role: 'text', text, id });
+        }
+        // A turn that started while we fetched wins the lane.
+        setConvos((previous) => ((previous[repo]?.length ?? 0) > 0 ? previous : { ...previous, [repo]: entries }));
+      })
+      .catch(() => {});
+  }, [dockOpen, activeRepoPath, convos, orch]);
+
   /** One send path for every composer — the bottom pill AND the dock's
    *  own reply input. Returns true when the message went out. */
   const sendPrompt = useCallback((prompt: string, attachments?: Array<{ dataUri: string; name?: string }>): boolean => {
@@ -642,6 +700,55 @@ export default function CanvasGlassPreviewPage() {
   /** A PAST session opens as its OWN draggable glass box — the dock stays
    *  reserved for the docked live orchestrator. The card's dock glyph
    *  promotes it into the dock if wanted. */
+  // ── Spawn placement — new cards land on open canvas, not on each other.
+  // A ref mirror keeps the finder stable (no per-mutation callback churn).
+  const cardRectsRef = useRef<Array<{ x: number; y: number; w: number; h: number }>>([]);
+  useEffect(() => {
+    cardRectsRef.current = [
+      ...termCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
+      ...fileCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
+      ...imageCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 28 })),
+      ...browserCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 92 })),
+      ...chatCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...diffCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
+      ...specCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...brainCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 92 })),
+    ];
+  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+
+  /** First clear spot scanning reading-order; least-covered cell when the
+   *  canvas is genuinely full. */
+  const findFreeSpot = useCallback((w: number, h: number): { x: number; y: number } => {
+    const taken = cardRectsRef.current;
+    const pad = 18;
+    // Layout-space viewport — zooming out widens the field spawns can use.
+    const z = canvasZoom();
+    const vw = (typeof window !== 'undefined' ? window.innerWidth : 1600) / z;
+    const vh = (typeof window !== 'undefined' ? window.innerHeight : 900) / z;
+    const minX = 96;
+    const minY = 84;
+    const maxX = Math.max(minX, vw - w - 24);
+    const maxY = Math.max(minY, vh - Math.min(h, 360) - 120);
+    let best = { x: minX, y: minY };
+    let bestOverlap = Infinity;
+    for (let y = minY; y <= maxY; y += 56) {
+      for (let x = minX; x <= maxX; x += 64) {
+        let overlap = 0;
+        for (const rect of taken) {
+          const ox = Math.max(0, Math.min(x + w, rect.x + rect.w + pad) - Math.max(x, rect.x - pad));
+          const oy = Math.max(0, Math.min(y + h, rect.y + rect.h + pad) - Math.max(y, rect.y - pad));
+          overlap += ox * oy;
+        }
+        if (overlap === 0) return { x, y };
+        if (overlap < bestOverlap) {
+          bestOverlap = overlap;
+          best = { x, y };
+        }
+      }
+    }
+    return best;
+  }, []);
+
   const pickThread = useCallback((threadId: string, repoPath: string | null, meta?: { title?: string | null; repoName?: string | null }, at?: SnapGeometry) => {
     return fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`)
       .then((response) => (response.ok ? response.json() : null))
@@ -659,6 +766,7 @@ export default function CanvasGlassPreviewPage() {
         nextIdRef.current += 1;
         zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
         const firstUser = messages.find((message) => message.role === 'user');
+        const spot = at ?? findFreeSpot(380, 400);
         // The card's live convo lane starts from the history transcript —
         // its in-card composer streams onto the same lane from there.
         setConvos((previous) => ({ ...previous, [`thread:${threadId}`]: entries }));
@@ -668,8 +776,8 @@ export default function CanvasGlassPreviewPage() {
           repoPath: repoPath ?? data?.repoPath ?? null,
           repoName: meta?.repoName ?? data?.repoName ?? null,
           title: meta?.title?.trim() || data?.title?.trim() || (typeof firstUser?.content === 'string' ? firstUser.content.slice(0, 60) : 'Past session'),
-          x: at?.x ?? 200 + (previous.length % 3) * 110 + (id % 5) * 8,
-          y: at?.y ?? 90 + (previous.length % 3) * 70,
+          x: spot.x,
+          y: spot.y,
           z: zPeakRef.current,
           w: at?.w ?? 380,
           h: at?.h ?? 400,
@@ -677,7 +785,7 @@ export default function CanvasGlassPreviewPage() {
         }]);
       })
       .catch(() => {});
-  }, []);
+  }, [findFreeSpot]);
 
   /** A chat card's own composer went out — append the turn to its lane.
    *  Mirrors sendPrompt's entry shapes; the card already did the ws send. */
@@ -726,6 +834,7 @@ export default function CanvasGlassPreviewPage() {
     firstSpawnRef.current = false;
     zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
     const z = zPeakRef.current;
+    const spot = at ?? findFreeSpot(560, 336);
     setTermCards((previous) => [...previous, {
       id,
       requestId,
@@ -733,8 +842,8 @@ export default function CanvasGlassPreviewPage() {
       exited: false,
       live: false,
       revealHold,
-      x: at?.x ?? 240 + (previous.length % 3) * 120 + (id % 5) * 10,
-      y: at?.y ?? 110 + (previous.length % 3) * 80,
+      x: spot.x,
+      y: spot.y,
       w: at?.w ?? 560,
       h: at?.h ?? 300,
       z,
@@ -742,7 +851,7 @@ export default function CanvasGlassPreviewPage() {
       cwdLabel,
     }]);
     sendTerminalCreate(120, 30, requestId, cwd ?? undefined);
-  }, [sendTerminalCreate]);
+  }, [findFreeSpot, sendTerminalCreate]);
 
   const moveTermCard = useCallback((id: number, x: number, y: number) => {
     setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
@@ -754,7 +863,7 @@ export default function CanvasGlassPreviewPage() {
 
   /** Clicked card comes forward. Terminals + files + images + browsers +
    *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser' | 'chat' | 'diff' | 'spec', id: number) => {
+  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain', id: number) => {
     const current = kind === 'term'
       ? termCards.find((card) => card.id === id)
       : kind === 'file'
@@ -767,7 +876,9 @@ export default function CanvasGlassPreviewPage() {
               ? chatCards.find((card) => card.id === id)
               : kind === 'diff'
                 ? diffCards.find((card) => card.id === id)
-                : specCards.find((card) => card.id === id);
+                : kind === 'spec'
+                  ? specCards.find((card) => card.id === id)
+                  : brainCards.find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
@@ -779,6 +890,7 @@ export default function CanvasGlassPreviewPage() {
         ...chatCards.map((card) => ({ kind: 'chat' as const, id: card.id, z: card.z })),
         ...diffCards.map((card) => ({ kind: 'diff' as const, id: card.id, z: card.z })),
         ...specCards.map((card) => ({ kind: 'spec' as const, id: card.id, z: card.z })),
+        ...brainCards.map((card) => ({ kind: 'brain' as const, id: card.id, z: card.z })),
       ].sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
       const top = 10 + combined.length;
@@ -789,6 +901,7 @@ export default function CanvasGlassPreviewPage() {
       setChatCards((previous) => previous.map((card) => ({ ...card, z: kind === 'chat' && card.id === id ? top : remap.get(`chat:${card.id}`) ?? card.z })));
       setDiffCards((previous) => previous.map((card) => ({ ...card, z: kind === 'diff' && card.id === id ? top : remap.get(`diff:${card.id}`) ?? card.z })));
       setSpecCards((previous) => previous.map((card) => ({ ...card, z: kind === 'spec' && card.id === id ? top : remap.get(`spec:${card.id}`) ?? card.z })));
+      setBrainCards((previous) => previous.map((card) => ({ ...card, z: kind === 'brain' && card.id === id ? top : remap.get(`brain:${card.id}`) ?? card.z })));
       zPeakRef.current = top;
       return;
     }
@@ -806,10 +919,12 @@ export default function CanvasGlassPreviewPage() {
       setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'diff') {
       setDiffCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else {
+    } else if (kind === 'spec') {
       setSpecCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else {
+      setBrainCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [browserCards, chatCards, diffCards, fileCards, imageCards, specCards, termCards]);
+  }, [brainCards, browserCards, chatCards, diffCards, fileCards, imageCards, specCards, termCards]);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
@@ -818,6 +933,7 @@ export default function CanvasGlassPreviewPage() {
   const focusChatCard = useCallback((id: number) => focusCard('chat', id), [focusCard]);
   const focusDiffCard = useCallback((id: number) => focusCard('diff', id), [focusCard]);
   const focusSpecCard = useCallback((id: number) => focusCard('spec', id), [focusCard]);
+  const focusBrainCard = useCallback((id: number) => focusCard('brain', id), [focusCard]);
 
   /** A lane's review diff lands as a glass card — the governance moat
    *  as a canvas object. */
@@ -829,10 +945,11 @@ export default function CanvasGlassPreviewPage() {
         const id = nextIdRef.current;
         nextIdRef.current += 1;
         zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        const spot = at ?? findFreeSpot(560, 356);
         setDiffCards((previous) => [...previous, {
           id,
-          x: at?.x ?? 180 + (previous.length % 3) * 90 + (id % 5) * 8,
-          y: at?.y ?? 88 + (previous.length % 3) * 56,
+          x: spot.x,
+          y: spot.y,
           z: zPeakRef.current,
           w: at?.w ?? 560,
           h: at?.h ?? 320,
@@ -846,7 +963,41 @@ export default function CanvasGlassPreviewPage() {
         }]);
       })
       .catch(() => {});
-  }, []);
+  }, [findFreeSpot]);
+
+  /** "What have I changed" — the active repo's WORKING-TREE diff in the
+   *  same card the lane diffs use. laneId carries a worktree: prefix so
+   *  the restore path knows which fetch to replay. */
+  const spawnWorktreeDiffCard = useCallback((at?: SnapGeometry, repoOverride?: string) => {
+    const repoPath = repoOverride ?? activeRepoPath;
+    if (!repoPath) return Promise.resolve();
+    const repoTail = repoPath.split('/').filter(Boolean).pop() ?? repoPath;
+    return fetch(`/api/panel/worktree-diff?workspace=${encodeURIComponent(repoPath)}&maxBytes=131072`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { ok?: boolean; branch?: string | null; stat?: string; diff?: string; truncated?: boolean } | null) => {
+        if (!data?.ok) return;
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        const spot = at ?? findFreeSpot(560, 356);
+        setDiffCards((previous) => [...previous, {
+          id,
+          x: spot.x,
+          y: spot.y,
+          z: zPeakRef.current,
+          w: at?.w ?? 560,
+          h: at?.h ?? 320,
+          laneId: `worktree:${repoPath}`,
+          packetId: null,
+          title: `Your changes — ${repoTail}`,
+          branch: data.branch ?? null,
+          stat: data.stat ?? '',
+          diff: data.diff?.trim() ? data.diff : 'Working tree clean — nothing uncommitted.',
+          truncated: Boolean(data.truncated),
+        }]);
+      })
+      .catch(() => {});
+  }, [activeRepoPath, findFreeSpot]);
 
   /** The operator's o8.md notes — the REAL spec pane in a glass card.
    *  One card per repo: a second click focuses the open one instead of
@@ -861,33 +1012,59 @@ export default function CanvasGlassPreviewPage() {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    const spot = findFreeSpot(760, 540);
     setSpecCards((previous) => [...previous, {
       id,
-      x: 200 + (previous.length % 3) * 100 + (id % 5) * 8,
-      y: 84 + (previous.length % 3) * 60,
+      x: spot.x,
+      y: spot.y,
       z: zPeakRef.current,
       w: 760,
       h: 540,
       repoPath,
     }]);
-  }, [activeRepoPath, focusSpecCard, specCards]);
+  }, [activeRepoPath, findFreeSpot, focusSpecCard, specCards]);
+
+  /** The Engineering Brain as a card — one per repo, like the o8.md card;
+   *  a second click focuses the open one. */
+  const spawnBrainCard = useCallback(() => {
+    const repoPath = activeRepoPath ?? null;
+    const open = brainCards.find((card) => card.repoPath === repoPath);
+    if (open) {
+      focusBrainCard(open.id);
+      return;
+    }
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    const spot = findFreeSpot(360, 460);
+    setBrainCards((previous) => [...previous, {
+      id,
+      x: spot.x,
+      y: spot.y,
+      z: zPeakRef.current,
+      w: 360,
+      h: 380,
+      repoPath,
+    }]);
+  }, [activeRepoPath, brainCards, findFreeSpot, focusBrainCard]);
 
   /** A REAL browser pane — defaults to the app's own dashboard. */
   const spawnBrowserCard = useCallback(() => {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    const spot = findFreeSpot(640, 492);
     setBrowserCards((previous) => [...previous, {
       id,
-      x: 220 + (previous.length % 3) * 110 + (id % 5) * 8,
-      y: 96 + (previous.length % 3) * 70,
+      x: spot.x,
+      y: spot.y,
       z: zPeakRef.current,
       w: 640,
       h: 400,
       tabs: [{ id: 1, url: `${window.location.origin}/dashboard` }],
       activeTabId: 1,
     }]);
-  }, []);
+  }, [findFreeSpot]);
 
   // Agents reach this browser too — o8_view_open_browser (operator MCP)
   // dispatches this same event for the default side; on canvas it lands as
@@ -900,7 +1077,8 @@ export default function CanvasGlassPreviewPage() {
           const id = nextIdRef.current;
           nextIdRef.current += 1;
           zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-          return [{ id, x: 240, y: 110, z: zPeakRef.current, w: 640, h: 400, tabs: [{ id: 1, url }], activeTabId: 1 }];
+          const spot = findFreeSpot(640, 492);
+          return [{ id, x: spot.x, y: spot.y, z: zPeakRef.current, w: 640, h: 400, tabs: [{ id: 1, url }], activeTabId: 1 }];
         }
         const top = previous.reduce((best, card) => (card.z > best.z ? card : best), previous[0]);
         return previous.map((card) => {
@@ -914,7 +1092,7 @@ export default function CanvasGlassPreviewPage() {
     };
     window.addEventListener('o8:open-browser', onOpenBrowser);
     return () => window.removeEventListener('o8:open-browser', onOpenBrowser);
-  }, []);
+  }, [findFreeSpot]);
 
   const moveBrowserCard = useCallback((id: number, x: number, y: number) => {
     setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
@@ -947,17 +1125,18 @@ export default function CanvasGlassPreviewPage() {
     nextIdRef.current += 1;
     zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
     const z = zPeakRef.current;
+    const spot = at ?? findFreeSpot(620, 456);
     setFileCards((previous) => [...previous, {
       id,
       path,
       name: path.split('/').pop() || path,
-      x: at?.x ?? 300 + (previous.length % 3) * 90 + (id % 5) * 8,
-      y: at?.y ?? 96 + (previous.length % 3) * 64,
+      x: spot.x,
+      y: spot.y,
       w: at?.w ?? 620,
       h: at?.h ?? 420,
       z,
     }]);
-  }, []);
+  }, [findFreeSpot]);
 
   // ── Canvas persistence — the canvas is a place, not a session. ──────
   // Restore once on mount: pure-state kinds land directly, live kinds go
@@ -994,6 +1173,14 @@ export default function CanvasGlassPreviewPage() {
         return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, repoPath: saved.repoPath };
       })]);
     }
+    if (snap.brain?.length) {
+      setBrainCards((previous) => [...previous, ...(snap.brain ?? []).map((saved) => {
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, repoPath: saved.repoPath };
+      })]);
+    }
     if (snap.image.length) {
       setImageCards((previous) => [...previous, ...snap.image.map((saved) => {
         const id = nextIdRef.current;
@@ -1005,7 +1192,9 @@ export default function CanvasGlassPreviewPage() {
     snap.file.forEach((saved) => spawnFileCard(saved.path, saved));
     const settles: Array<Promise<unknown>> = [
       ...snap.chat.map((saved) => pickThread(saved.threadId, saved.repoPath, { title: saved.title, repoName: saved.repoName }, saved)),
-      ...snap.diff.map((saved) => spawnDiffCard({ id: saved.laneId, label: saved.title }, saved)),
+      ...snap.diff.map((saved) => (saved.laneId.startsWith('worktree:')
+        ? spawnWorktreeDiffCard(saved, saved.laneId.slice('worktree:'.length)) ?? Promise.resolve()
+        : spawnDiffCard({ id: saved.laneId, label: saved.title }, saved))),
     ];
     if (snap.term.length) {
       // The terminal ws needs a beat to connect before create requests land.
@@ -1016,7 +1205,7 @@ export default function CanvasGlassPreviewPage() {
       // guard, padded past the terminal respawn timer.
       persistArmedAtRef.current = Math.min(persistArmedAtRef.current, Date.now() + 2000);
     });
-  }, [pickThread, spawnDiffCard, spawnFileCard, spawnTerminal]);
+  }, [pickThread, spawnDiffCard, spawnFileCard, spawnTerminal, spawnWorktreeDiffCard]);
 
   // Save: one debounced snapshot whenever anything persistent changes.
   // The signature string IS the snapshot body — transient fields (term
@@ -1032,7 +1221,8 @@ export default function CanvasGlassPreviewPage() {
     chat: chatCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, threadId: card.threadId, repoPath: card.repoPath, repoName: card.repoName, title: card.title })),
     diff: diffCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, laneId: card.laneId, title: card.title })),
     spec: specCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards]);
+    brain: brainCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
+  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
   useEffect(() => {
     // Hold fire until restore's async spawns settle — an instant save of
     // the half-restored canvas would overwrite the snapshot.
@@ -1230,27 +1420,74 @@ export default function CanvasGlassPreviewPage() {
   const dropImages = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => file.type.startsWith('image/'));
+    // Drop point arrives in visual px — the card layer is zoomed.
+    const z = canvasZoom();
     files.forEach((file, index) => {
-      spawnImageCard(file, { x: event.clientX + index * 30, y: event.clientY + index * 24 });
+      spawnImageCard(file, { x: event.clientX / z + index * 30, y: event.clientY / z + index * 24 });
     });
   }, [spawnImageCard]);
 
   /** Top-right search — first matching card on the canvas comes forward. */
-  const runCanvasSearch = useCallback(() => {
+  /** Search reaches EVERYTHING — every card kind on the canvas plus past
+   *  sessions. Card hits come forward; session hits spawn as chat cards. */
+  const searchHits = useMemo((): SearchHit[] => {
     const query = searchQuery.trim().toLowerCase();
-    if (!query) return;
+    if (!query) return [];
     const matches = (value: string | null | undefined) => (value ?? '').toLowerCase().includes(query);
-    const term = termCards.find((card) => matches(card.cwdLabel) || matches(card.sessionName));
-    if (term) { focusCard('term', term.id); return; }
-    const file = fileCards.find((card) => matches(card.name) || matches(card.path));
-    if (file) { focusCard('file', file.id); return; }
-    const image = imageCards.find((card) => card.items.some((item) => matches(item.name)));
-    if (image) { focusCard('image', image.id); return; }
-    const chat = chatCards.find((card) => matches(card.title) || matches(card.repoName));
-    if (chat) { focusCard('chat', chat.id); return; }
-    const mock = cards.find((card) => matches(card.title));
-    if (mock) setSelectedCardId(mock.id);
-  }, [cards, chatCards, fileCards, focusCard, imageCards, searchQuery, termCards]);
+    const hits: SearchHit[] = [];
+    termCards.forEach((card) => {
+      if (matches(card.cwdLabel) || matches(card.sessionName)) hits.push({ kind: 'card', cardKind: 'term', id: card.id, title: card.cwdLabel ?? 'Terminal', meta: 'terminal · on the canvas' });
+    });
+    fileCards.forEach((card) => {
+      if (matches(card.name) || matches(card.path)) hits.push({ kind: 'card', cardKind: 'file', id: card.id, title: card.name, meta: 'file · on the canvas' });
+    });
+    imageCards.forEach((card) => {
+      const item = card.items.find((entry) => matches(entry.name));
+      if (item) hits.push({ kind: 'card', cardKind: 'image', id: card.id, title: item.name, meta: 'image · on the canvas' });
+    });
+    browserCards.forEach((card) => {
+      const tab = card.tabs.find((entry) => matches(entry.url));
+      if (tab) hits.push({ kind: 'card', cardKind: 'browser', id: card.id, title: tab.url.replace(/^https?:\/\//i, ''), meta: 'browser tab · on the canvas' });
+    });
+    chatCards.forEach((card) => {
+      if (matches(card.title) || matches(card.repoName)) hits.push({ kind: 'card', cardKind: 'chat', id: card.id, title: card.title, meta: `${card.repoName ?? 'chat'} · on the canvas` });
+    });
+    diffCards.forEach((card) => {
+      if (matches(card.title) || matches(card.branch)) hits.push({ kind: 'card', cardKind: 'diff', id: card.id, title: card.title, meta: 'diff · on the canvas' });
+    });
+    specCards.forEach((card) => {
+      const repoTail = card.repoPath?.split('/').pop() ?? null;
+      if (matches('o8.md') || matches(repoTail)) hits.push({ kind: 'card', cardKind: 'spec', id: card.id, title: `o8.md${repoTail ? ` — ${repoTail}` : ''}`, meta: 'notes · on the canvas' });
+    });
+    brainCards.forEach((card) => {
+      const repoTail = card.repoPath?.split('/').pop() ?? null;
+      if (matches('brain') || matches(repoTail)) hits.push({ kind: 'card', cardKind: 'brain', id: card.id, title: `Brain${repoTail ? ` — ${repoTail}` : ''}`, meta: 'engineering brain · on the canvas' });
+    });
+    const openThreadIds = new Set(chatCards.map((card) => card.threadId));
+    let threadHits = 0;
+    for (const thread of recentThreads) {
+      if (threadHits >= 8) break;
+      if (openThreadIds.has(thread.id)) continue;
+      if (!matches(thread.title) && !matches(thread.repoName)) continue;
+      threadHits += 1;
+      hits.push({
+        kind: 'thread',
+        threadId: thread.id,
+        repoPath: thread.repoPath,
+        repoName: thread.repoName,
+        title: thread.title?.trim() || 'Untitled session',
+        meta: [thread.repoName, relAge(thread.lastMessageAt)].filter(Boolean).join(' · ') || 'past session',
+      });
+    }
+    return hits;
+  }, [brainCards, browserCards, chatCards, diffCards, fileCards, imageCards, recentThreads, searchQuery, specCards, termCards]);
+
+  const applySearchHit = useCallback((hit: SearchHit) => {
+    if (hit.kind === 'card') focusCard(hit.cardKind, hit.id);
+    else void pickThread(hit.threadId, hit.repoPath, { title: hit.title, repoName: hit.repoName });
+    setSearchOpen(false);
+    setSearchQuery('');
+  }, [focusCard, pickThread]);
 
   if (!canvasEnabled) {
     return (
@@ -1313,6 +1550,12 @@ export default function CanvasGlassPreviewPage() {
 
       {/* Center emblem retired (operator call 2026-06-12) — the empty
           canvas stays clean; a logo / Lottie motion piece comes later. */}
+
+      {/* ── The card layer — CSS-zoomed as one unit. Chrome (top dock,
+            rails, composer, drawers) stays at 1:1; only the workspace
+            scales, buying breathing room around the cards. Drag/resize
+            handlers divide pointer deltas by the zoom (canvasZoom()). */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 2, zoom: canvasZoomLevel } as React.CSSProperties}>
 
       {/* ── Component cards ──────────────────────────────────────── */}
       {cards.map((card) => (
@@ -1420,6 +1663,20 @@ export default function CanvasGlassPreviewPage() {
         ))}
       </AnimatePresence>
 
+      {/* ── Brain cards — instant cited repo answers, on the canvas ── */}
+      <AnimatePresence>
+        {brainCards.map((card) => (
+          <BrainGlassCard
+            key={card.id}
+            card={card}
+            onMove={(id, x, y) => setBrainCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
+            onResize={(id, w, h) => setBrainCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+            onFocus={focusBrainCard}
+            onClose={(id) => setBrainCards((previous) => previous.filter((c) => c.id !== id))}
+          />
+        ))}
+      </AnimatePresence>
+
       {/* ── Chat cards — past sessions as their own glass boxes ───── */}
       <AnimatePresence>
         {chatCards.map((card) => (
@@ -1438,6 +1695,8 @@ export default function CanvasGlassPreviewPage() {
           />
         ))}
       </AnimatePresence>
+
+      </div>
 
       {/* ── Top dock — the important header controls ─────────────── */}
       <div
@@ -1765,40 +2024,66 @@ export default function CanvasGlassPreviewPage() {
               position: 'absolute',
               top: 64,
               right: 24,
-              width: 240,
+              width: 300,
               display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              height: 36,
-              paddingLeft: 12,
-              paddingRight: 12,
-              borderRadius: 18,
+              flexDirection: 'column',
+              borderRadius: 16,
               zIndex: 41,
+              overflow: 'hidden',
               ...glassPop(),
             }}
           >
-            <input
-              autoFocus
-              value={searchQuery}
-              onChange={(event) => setSearchQuery(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === 'Enter') runCanvasSearch();
-                if (event.key === 'Escape') setSearchOpen(false);
-              }}
-              placeholder="Find a card on the canvas"
-              aria-label="Search the canvas"
-              style={{
-                flex: 1,
-                borderWidth: 0,
-                outline: 'none',
-                background: 'transparent',
-                color: 'var(--cnv-ink)',
-                fontSize: 11.5,
-                fontWeight: 300,
-                letterSpacing: '-0.1px',
-                fontFamily: FONT,
-              }}
-            />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, height: 36, paddingLeft: 12, paddingRight: 12 }}>
+              <input
+                autoFocus
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && searchHits.length > 0) applySearchHit(searchHits[0]);
+                  if (event.key === 'Escape') setSearchOpen(false);
+                }}
+                placeholder="Cards on the canvas + past sessions"
+                aria-label="Search the canvas"
+                style={{
+                  flex: 1,
+                  borderWidth: 0,
+                  outline: 'none',
+                  background: 'transparent',
+                  color: 'var(--cnv-ink)',
+                  fontSize: 11.5,
+                  fontWeight: 300,
+                  letterSpacing: '-0.1px',
+                  fontFamily: FONT,
+                }}
+              />
+            </div>
+            {searchQuery.trim() ? (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingTop: 6, paddingBottom: 8, paddingLeft: 6, paddingRight: 6, borderTop: '1px solid var(--cnv-edge)', maxHeight: 300, overflowY: 'auto', scrollbarWidth: 'none' } as React.CSSProperties}>
+                {searchHits.length === 0 ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingTop: 4, paddingBottom: 4, paddingLeft: 8 }}>
+                    No matches — cards or past sessions.
+                  </span>
+                ) : (
+                  searchHits.slice(0, 12).map((hit) => (
+                    <button
+                      key={hit.kind === 'card' ? `card:${hit.cardKind}:${hit.id}` : `thread:${hit.threadId}`}
+                      type="button"
+                      onClick={() => applySearchHit(hit)}
+                      style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 9, borderWidth: 0, background: 'transparent', cursor: 'pointer', fontFamily: FONT, textAlign: 'left', width: '100%' }}
+                      onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                    >
+                      <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+                        {hit.title}
+                      </span>
+                      <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>
+                        {hit.meta}
+                      </span>
+                    </button>
+                  ))
+                )}
+              </div>
+            ) : null}
           </motion.div>
         ) : null}
       </AnimatePresence>
@@ -1832,6 +2117,9 @@ export default function CanvasGlassPreviewPage() {
         >
           <circle cx="12" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M12 8v4M12 12l-6 4M12 12l6 4" />
         </SpawnGlyphButton>
+        <SpawnGlyphButton label="Ask the Brain" onClick={spawnBrainCard}>
+          <circle cx="12" cy="12" r="10" /><path d="M12 7.4l1.1 2.9 2.9 1.1-2.9 1.1-1.1 2.9-1.1-2.9-2.9-1.1 2.9-1.1z" />
+        </SpawnGlyphButton>
         <SpawnGlyphButton label="Sessions" onClick={() => setSessionsOpen((value) => !value)}>
           <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" />
         </SpawnGlyphButton>
@@ -1850,6 +2138,52 @@ export default function CanvasGlassPreviewPage() {
         <SpawnGlyphButton label="Open o8.md" onClick={spawnSpecCard}>
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
         </SpawnGlyphButton>
+      </div>
+
+      {/* ── Mini zoom — fixed steps, breathing room only ──────────── */}
+      <div
+        style={{
+          position: 'absolute',
+          left: 16,
+          bottom: 18,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 2,
+          paddingTop: 3,
+          paddingBottom: 3,
+          paddingLeft: 6,
+          paddingRight: 6,
+          borderRadius: 12,
+          zIndex: 40,
+          ...glass(true),
+        }}
+      >
+        {ZOOM_STEPS.map((step) => (
+          <button
+            key={step}
+            type="button"
+            aria-label={`Zoom ${Math.round(step * 100)}%`}
+            onClick={() => setCanvasZoomLevel(step)}
+            style={{
+              borderWidth: 0,
+              borderRadius: 8,
+              background: canvasZoomLevel === step ? 'rgba(255,255,255,0.12)' : 'transparent',
+              color: canvasZoomLevel === step ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+              fontSize: 9.5,
+              fontWeight: 300,
+              fontFamily: FONT,
+              paddingTop: 3,
+              paddingBottom: 3,
+              paddingLeft: 7,
+              paddingRight: 7,
+              cursor: 'pointer',
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+            onMouseLeave={(event) => { if (canvasZoomLevel !== step) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+          >
+            {Math.round(step * 100)}%
+          </button>
+        ))}
       </div>
 
       {/* ── Terminal cwd drawer — same system as the Sessions drawer:
@@ -1960,6 +2294,30 @@ export default function CanvasGlassPreviewPage() {
               <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 7 }}>
                 Review
               </span>
+              {/* Pinned — YOUR uncommitted changes, not just agent lanes. */}
+              <button
+                type="button"
+                onClick={() => {
+                  void spawnWorktreeDiffCard();
+                  setReviewPickerOpen(false);
+                }}
+                disabled={!activeRepoPath}
+                style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 7, paddingLeft: 8, paddingRight: 8, borderRadius: 9, borderWidth: 0, background: 'transparent', cursor: activeRepoPath ? 'pointer' : 'default', fontFamily: FONT, textAlign: 'left', width: '100%', opacity: activeRepoPath ? 1 : 0.5 }}
+                onMouseEnter={(event) => { if (activeRepoPath) event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+              >
+                <svg style={{ width: 11, height: 11, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M12 3v12" /><path d="m8 11 4 4 4-4" /><path d="M3 21h18" />
+                </svg>
+                <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                  <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px' }}>
+                    Your working tree
+                  </span>
+                  <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>
+                    {activeRepoName ? `uncommitted changes · ${activeRepoName}` : 'pick a repo first'}
+                  </span>
+                </span>
+              </button>
               <div
                 style={{
                   flex: 1,

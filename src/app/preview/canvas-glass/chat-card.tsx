@@ -12,7 +12,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { DockEntryView } from './dock';
-import { FONT, TONE_DOT, chatVocabularyRebind, glassChat, type DockEntry } from './ui';
+import { canvasZoom, FONT, TONE_DOT, chatVocabularyRebind, glassChat, type DockEntry } from './ui';
 import { useThreadOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
 
 export interface ChatCard {
@@ -119,7 +119,7 @@ export function ChatGlassCard({
           onPointerMove={(event) => {
             const drag = dragRef.current;
             if (!drag || drag.pointerId !== event.pointerId) return;
-            onMove(card.id, Math.max(4, drag.originX + event.clientX - drag.startX), Math.max(40, drag.originY + event.clientY - drag.startY));
+            onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
           }}
           onPointerUp={() => { dragRef.current = null; setDragging(false); }}
           style={{
@@ -264,8 +264,8 @@ export function ChatGlassCard({
             if (!resize || resize.pointerId !== event.pointerId) return;
             onResize(
               card.id,
-              Math.max(CHAT_MIN_W, resize.originW + event.clientX - resize.startX),
-              Math.max(CHAT_MIN_H, resize.originH + event.clientY - resize.startY),
+              Math.max(CHAT_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
+              Math.max(CHAT_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
             );
           }}
           onPointerUp={() => { resizeRef.current = null; setResizing(false); }}

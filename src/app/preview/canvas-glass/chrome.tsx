@@ -5,7 +5,7 @@
  * browser-only diffusion backdrop (#1232).
  */
 
-import { useRef, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
+import { useRef, type CSSProperties, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { FONT, glass } from './ui';
 
@@ -52,7 +52,8 @@ export function EdgeRail({
         }}
       >
         {/* The Apple-style edge handle — the always-visible hint that a
-            rail lives here (the hot zone itself is invisible). Fades out
+            rail lives here (the hot zone itself is invisible). A micro
+            label names the rail so it's findable on day one; both fade
             while the rail is showing. */}
         <motion.div
           aria-hidden
@@ -63,15 +64,41 @@ export function EdgeRail({
             position: 'absolute',
             top: '50%',
             transform: 'translateY(-50%)',
-            ...(side === 'left' ? { left: 5 } : { right: 5 }),
-            width: 4,
-            height: 56,
-            borderRadius: 999,
-            background: 'rgba(255,255,255,0.38)',
-            boxShadow: '0 1px 6px rgba(0,0,0,0.28)',
+            ...(side === 'left' ? { left: 4 } : { right: 4 }),
+            display: 'flex',
+            alignItems: 'center',
+            gap: 4,
+            flexDirection: side === 'left' ? 'row' : 'row-reverse',
             pointerEvents: 'none',
           }}
-        />
+        >
+          <span
+            style={{
+              width: 5,
+              height: 84,
+              borderRadius: 999,
+              background: 'var(--cnv-ink-muted)',
+              opacity: 0.7,
+              boxShadow: '0 1px 6px rgba(0,0,0,0.3)',
+              flexShrink: 0,
+            }}
+          />
+          <span
+            style={{
+              writingMode: 'vertical-rl',
+              fontSize: 8.5,
+              fontWeight: 300,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: 'var(--cnv-ink-muted)',
+              opacity: 0.8,
+              fontFamily: FONT,
+              ...(side === 'left' ? { transform: 'rotate(180deg)' } : {}),
+            } as CSSProperties}
+          >
+            {title}
+          </span>
+        </motion.div>
       </div>
       <motion.div
         ref={railRef}
