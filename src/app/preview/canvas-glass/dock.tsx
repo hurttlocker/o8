@@ -380,12 +380,12 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
       ) : null}
       {entry.role === 'status' ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>
-          {entry.pending ? (
+          {entry.pending && entry.kind !== 'tool' ? (
             <motion.span
               aria-hidden
               animate={{ rotate: 360 }}
               transition={{ duration: 1.4, repeat: Infinity, ease: 'linear' }}
-              style={{ width: 9, height: 9, borderRadius: '50%', border: '1px solid transparent', borderTopColor: 'var(--cnv-ink)', borderRightColor: 'var(--cnv-edge)', flexShrink: 0 }}
+              style={{ width: 9, height: 9, borderRadius: '50%', borderWidth: 1, borderStyle: 'solid', borderColor: 'transparent', borderTopColor: 'var(--cnv-ink)', borderRightColor: 'var(--cnv-edge)', flexShrink: 0 }}
             />
           ) : entry.kind === 'tool' ? (
             <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT.working, flexShrink: 0 }} />
@@ -393,7 +393,21 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
             // Settled turn status gets the reference's spark, not a dot.
             <span style={{ color: 'var(--cnv-ink)', display: 'inline-flex' }}><SparkGlyph /></span>
           )}
-          <span style={{ fontSize: 10.5, fontWeight: 300, color: entry.pending || entry.kind === 'tool' ? 'var(--cnv-ink-muted)' : 'var(--cnv-ink)' }}>{entry.text}</span>
+          {entry.kind === 'tool' && entry.pending ? (
+            // The live activity line — one row per work phase, shimmering
+            // through the latest tool with a running count. Not a pill per
+            // call; the canvas side stays calm while the agent works.
+            <motion.span
+              animate={{ opacity: [0.45, 0.95, 0.45] }}
+              transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+              style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink)' }}
+            >
+              {entry.text}
+              {(entry.count ?? 1) > 1 ? <span style={{ color: 'var(--cnv-ink-muted)' }}>{` · ${entry.count}`}</span> : null}
+            </motion.span>
+          ) : (
+            <span style={{ fontSize: 10.5, fontWeight: 300, color: entry.pending || entry.kind === 'tool' ? 'var(--cnv-ink-muted)' : 'var(--cnv-ink)' }}>{entry.text}</span>
+          )}
         </div>
       ) : null}
       {entry.role === 'result' ? (

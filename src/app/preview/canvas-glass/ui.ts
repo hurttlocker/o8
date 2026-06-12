@@ -107,7 +107,10 @@ export interface OrchestratorLane {
  *  `live` text = real orchestrator deltas (grows in place, no word-fade). */
 export type NewDockEntry =
   | { role: 'user'; text: string }
-  | { role: 'status'; text: string; pending: boolean; kind?: 'tool' }
+  /** kind 'tool' = a live activity cluster — text is the latest tool name
+   *  while pending, count is how many calls it has absorbed. One row per
+   *  work phase, not one per call. */
+  | { role: 'status'; text: string; pending: boolean; kind?: 'tool'; count?: number }
   | { role: 'result'; title: string; meta: string }
   | { role: 'text'; text: string; live?: boolean }
   | { role: 'followups' };
