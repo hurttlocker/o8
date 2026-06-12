@@ -11,6 +11,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import {
   CANVAS_GLASS_DEFAULTS,
+  CANVAS_GLASS_PRESETS,
   CANVAS_GLASS_RANGES,
   applyCanvasGlassSettings,
   readCanvasGlassSettings,
@@ -58,6 +59,38 @@ export function CanvasGlassTuner() {
         <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontWeight: 300 }}>
           Preview at <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10.5 }}>/preview/canvas-glass</span>
         </span>
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        {CANVAS_GLASS_PRESETS.map((preset) => {
+          const active = settings.frost === preset.values.frost
+            && settings.tint === preset.values.tint
+            && settings.ink === preset.values.ink;
+          return (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => update({ ...preset.values })}
+              style={{
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: active ? 'var(--t-accent)' : 'var(--t-divider)',
+                background: active ? 'var(--t-bg-hover)' : 'transparent',
+                borderRadius: 999,
+                paddingTop: 3,
+                paddingRight: 12,
+                paddingBottom: 3,
+                paddingLeft: 12,
+                fontSize: 11,
+                fontWeight: active ? 500 : 300,
+                color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                cursor: 'pointer',
+                fontFamily: 'var(--font-sans-system)',
+              }}
+            >
+              {preset.label}
+            </button>
+          );
+        })}
       </div>
       <GlassSlider
         label="Frost"

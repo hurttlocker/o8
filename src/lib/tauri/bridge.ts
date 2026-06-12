@@ -93,6 +93,15 @@ export async function getAppDataDir(): Promise<string | null> {
   return invoke<string>('get_app_data_dir');
 }
 
+/**
+ * Swap the main window's glass material for Canvas mode (#1232).
+ * `clear: true` → Popover (desktop reads through, the Symon-settings glass);
+ * `clear: false` → the default HudWindow chrome. No-op outside Tauri/macOS.
+ */
+export async function setCanvasMaterial(clear: boolean): Promise<void> {
+  await invoke<void>('set_canvas_material', { clear });
+}
+
 // ── Notifications ──
 
 /**
