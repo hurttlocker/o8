@@ -10,6 +10,7 @@
 import { motion } from 'framer-motion';
 import {
   CANVAS_BACKDROPS,
+  CANVAS_CHAT_INKS,
   CANVAS_CHAT_TONES,
   CANVAS_GLASS_DEFAULTS,
   CANVAS_GLASS_MATERIALS,
@@ -32,7 +33,8 @@ function settingsMatch(a: CanvasGlassSettings, b: CanvasGlassSettings): boolean 
     && a.chatFrost === b.chatFrost
     && a.chatTint === b.chatTint
     && a.tone === b.tone
-    && a.chatTone === b.chatTone;
+    && a.chatTone === b.chatTone
+    && a.chatInk === b.chatInk;
 }
 
 export function TunerPanel({
@@ -192,6 +194,17 @@ export function TunerPanel({
             label={tone.label}
             active={settings.chatTone === tone.id}
             onClick={() => onChange({ chatTone: tone.id })}
+          />
+        ))}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingRight: 2 }}>Ink</span>
+        {CANVAS_CHAT_INKS.map((ink) => (
+          <PresetPill
+            key={ink.id}
+            label={ink.label}
+            active={settings.chatInk === ink.id}
+            onClick={() => onChange({ chatInk: ink.id })}
           />
         ))}
       </div>

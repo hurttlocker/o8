@@ -142,9 +142,11 @@ export type NewDockEntry =
   | { role: 'status'; text: string; pending: boolean; kind?: 'tool'; count?: number }
   | { role: 'result'; title: string; meta: string }
   | { role: 'text'; text: string; live?: boolean }
-  /** The model's reasoning stream — muted, clamped to a few lines, click
-   *  to expand. live grows in place like text. */
-  | { role: 'thinking'; text: string; live?: boolean }
+  /** The model's reasoning stream — rendered as a timeline (stages split
+   *  on paragraph breaks, REAL elapsed times). live grows in place.
+   *  startedAt = epoch ms of the first delta; marks[i] = elapsed seconds
+   *  when paragraph i closed. */
+  | { role: 'thinking'; text: string; live?: boolean; startedAt?: number; marks?: number[] }
   | { role: 'followups' };
 
 export type DockEntry = NewDockEntry & { id: number };

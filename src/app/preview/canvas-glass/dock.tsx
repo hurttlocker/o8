@@ -13,6 +13,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { FONT, TONE_DOT, glass, glassPop, type DockEntry, type OrchestratorLane } from './ui';
+import { ReasoningView } from './reasoning';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
@@ -284,8 +285,6 @@ export function OrchestratorDock({
 
 /** Shared by the dock AND the floating chat cards — one entry vocabulary. */
 export function DockEntryView({ entry }: { entry: DockEntry }) {
-  // Reasoning entries clamp to a few lines; click toggles the full stream.
-  const [thinkingOpen, setThinkingOpen] = useState(false);
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -331,30 +330,7 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
         </div>
       ) : null}
       {entry.role === 'thinking' ? (
-        <div
-          role="button"
-          tabIndex={0}
-          onClick={() => setThinkingOpen((value) => !value)}
-          onKeyDown={(event) => { if (event.key === 'Enter') setThinkingOpen((value) => !value); }}
-          title={thinkingOpen ? 'Collapse reasoning' : 'Expand reasoning'}
-          style={{
-            cursor: 'pointer',
-            fontSize: 10,
-            fontWeight: 260,
-            lineHeight: 1.55,
-            color: 'var(--cnv-ink-muted)',
-            letterSpacing: '-0.05px',
-            whiteSpace: 'pre-wrap',
-            ...(thinkingOpen ? {} : {
-              display: '-webkit-box',
-              WebkitLineClamp: 3,
-              WebkitBoxOrient: 'vertical' as const,
-              overflow: 'hidden',
-            }),
-          } as React.CSSProperties}
-        >
-          {entry.text}
-        </div>
+        <ReasoningView text={entry.text} live={entry.live === true} startedAt={entry.startedAt} marks={entry.marks} />
       ) : null}
       {entry.role === 'status' ? (
         <div style={{ display: 'flex', alignItems: 'center', gap: 7 }}>

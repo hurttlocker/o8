@@ -55,6 +55,10 @@ export interface CanvasGlassSettings {
   /** Chat cards can run their own tone — 'match' follows the canvas,
    *  or pin them light/dark so conversations stand apart. */
   chatTone: 'match' | 'dark' | 'light';
+  /** Chat text color, independent of the pane — 'auto' follows the chat
+   *  tone (light pane → dark ink); 'light' forces white ink, 'dark'
+   *  forces slate ink, wherever the operator wants it. */
+  chatInk: 'auto' | 'light' | 'dark';
 }
 
 export const CANVAS_GLASS_TONES: ReadonlyArray<{ id: CanvasGlassSettings['tone']; label: string }> = [
@@ -66,6 +70,12 @@ export const CANVAS_CHAT_TONES: ReadonlyArray<{ id: CanvasGlassSettings['chatTon
   { id: 'match', label: 'Match' },
   { id: 'dark', label: 'Dark' },
   { id: 'light', label: 'Light' },
+];
+
+export const CANVAS_CHAT_INKS: ReadonlyArray<{ id: CanvasGlassSettings['chatInk']; label: string }> = [
+  { id: 'auto', label: 'Auto' },
+  { id: 'light', label: 'White' },
+  { id: 'dark', label: 'Dark' },
 ];
 
 // veil defaults to 0 and vibrance to the recipe's long-standing 1.6 so a
@@ -85,6 +95,7 @@ export const CANVAS_GLASS_DEFAULTS: CanvasGlassSettings = {
   chatTint: 0.6,
   tone: 'dark',
   chatTone: 'match',
+  chatInk: 'auto',
 };
 
 /**
@@ -111,7 +122,7 @@ export const CANVAS_GLASS_RANGES = {
   vibrance: { min: 1, max: 2.2, step: 0.05 },
   veil: { min: 0, max: 0.8, step: 0.01 },
   backdropFrost: { min: 0, max: 64, step: 1 },
-  chatFrost: { min: 0, max: 64, step: 1 },
+  chatFrost: { min: 0, max: 100, step: 1 },
   chatTint: { min: 0, max: 0.92, step: 0.01 },
 } as const;
 
@@ -140,11 +151,11 @@ export const CANVAS_GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }
  * Siri = the dark Apple reference; Frost = heavy private glass.
  */
 export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; values: CanvasGlassSettings }> = [
-  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'none', backdropFrost: 12, backdrop: 'none', chatFrost: 20, chatTint: 0.38, tone: 'dark', chatTone: 'match' } },
-  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 34, chatTint: 0.6, tone: 'dark', chatTone: 'match' } },
-  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0, backdrop: 'none', chatFrost: 54, chatTint: 0.78, tone: 'dark', chatTone: 'match' } },
+  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'none', backdropFrost: 12, backdrop: 'none', chatFrost: 20, chatTint: 0.38, tone: 'dark', chatTone: 'match', chatInk: 'auto' } },
+  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 34, chatTint: 0.6, tone: 'dark', chatTone: 'match', chatInk: 'auto' } },
+  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0, backdrop: 'none', chatFrost: 54, chatTint: 0.78, tone: 'dark', chatTone: 'match', chatInk: 'auto' } },
   // The Symon-settings look — white fog, dark ink, light all over.
-  { id: 'ivory', label: 'Ivory', values: { frost: 30, tint: 0.5, ink: 0.92, vibrance: 1.5, veil: 0.12, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 38, chatTint: 0.66, tone: 'light', chatTone: 'match' } },
+  { id: 'ivory', label: 'Ivory', values: { frost: 30, tint: 0.5, ink: 0.92, vibrance: 1.5, veil: 0.12, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 38, chatTint: 0.66, tone: 'light', chatTone: 'match', chatInk: 'auto' } },
 ];
 
 const STORAGE_KEY = 'o8:canvas-glass';
@@ -193,6 +204,7 @@ export function readPersonalDefault(): CanvasGlassSettings | null {
       chatTint: readNumber(candidate.chatTint, CANVAS_GLASS_RANGES.chatTint, CANVAS_GLASS_DEFAULTS.chatTint),
       tone: candidate.tone === 'light' ? 'light' : 'dark',
       chatTone: candidate.chatTone === 'light' || candidate.chatTone === 'dark' ? candidate.chatTone : 'match',
+      chatInk: candidate.chatInk === 'light' || candidate.chatInk === 'dark' ? candidate.chatInk : 'auto',
     };
   } catch {
     return null;
@@ -243,6 +255,7 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
       chatTint: readNumber(candidate.chatTint, CANVAS_GLASS_RANGES.chatTint, CANVAS_GLASS_DEFAULTS.chatTint),
       tone: candidate.tone === 'light' ? 'light' : 'dark',
       chatTone: candidate.chatTone === 'light' || candidate.chatTone === 'dark' ? candidate.chatTone : 'match',
+      chatInk: candidate.chatInk === 'light' || candidate.chatInk === 'dark' ? candidate.chatInk : 'auto',
     });
   } catch {
     return { ...CANVAS_GLASS_DEFAULTS };
@@ -307,11 +320,15 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   // canvas (or the reverse) with ink that stays legible.
   const chatTone = value.chatTone === 'match' ? value.tone : value.chatTone;
   const chat = toneVocabulary(chatTone, value.chatTint, value.ink);
+  // The ink can defect from the pane tone — white text on light fog if
+  // that's what reads best where the card happens to float.
+  const inkTone = value.chatInk === 'auto' ? chatTone : value.chatInk === 'light' ? 'dark' : 'light';
+  const chatInk = value.chatInk === 'auto' ? chat : toneVocabulary(inkTone, value.chatTint, value.ink);
   root.style.setProperty('--cnv-chat-frost', `${Math.round(value.chatFrost)}px`);
   root.style.setProperty('--cnv-chat-tint', chat.tint);
   root.style.setProperty('--cnv-chat-tint-deep', chat.tintDeep);
   root.style.setProperty('--cnv-chat-tint-soft', toneVocabulary(chatTone, Math.max(0, value.chatTint - 0.2), value.ink).tint);
-  root.style.setProperty('--cnv-chat-ink', chat.ink);
-  root.style.setProperty('--cnv-chat-ink-muted', chat.inkMuted);
+  root.style.setProperty('--cnv-chat-ink', chatInk.ink);
+  root.style.setProperty('--cnv-chat-ink-muted', chatInk.inkMuted);
   root.style.setProperty('--cnv-chat-edge', chat.edge);
 }
