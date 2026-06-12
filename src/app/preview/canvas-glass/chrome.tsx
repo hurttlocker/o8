@@ -44,7 +44,7 @@ export function EdgeRail({
           bottom: 96,
           width: 18,
           ...(side === 'left' ? { left: 0 } : { right: 0 }),
-          zIndex: 5,
+          zIndex: 41,
         }}
       />
       <motion.div
@@ -69,7 +69,7 @@ export function EdgeRail({
           paddingBottom: 12,
           paddingLeft: 12,
           borderRadius: 14,
-          zIndex: 6,
+          zIndex: 42,
           pointerEvents: open ? 'auto' : 'none',
           ...glass(true),
         }}

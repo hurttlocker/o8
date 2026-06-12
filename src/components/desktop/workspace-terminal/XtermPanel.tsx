@@ -18,6 +18,11 @@ export interface XtermPanelProps {
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalDetach: (sessionName: string) => void;
   visible: boolean;
+  /** Render with no background so the host surface (canvas glass) reads
+   *  through. The host owns legibility (its own tint/veil behind the text). */
+  transparent?: boolean;
+  /** Override the terminal font size (default 12). */
+  fontSize?: number;
 }
 
 export interface XtermPanelHandle {
@@ -29,7 +34,7 @@ export interface XtermPanelHandle {
 }
 
 export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermPanel(
-  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible },
+  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize },
   ref,
 ) {
   const { themeId } = useTheme();
@@ -126,14 +131,14 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
 
         const term = new Terminal({
           fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
-          fontSize: 12,
+          fontSize: fontSize ?? 12,
           lineHeight: 1.35,
           cursorBlink: true,
           cursorStyle: 'block',
-          allowTransparency: false,
+          allowTransparency: transparent === true,
           allowProposedApi: true,
           scrollback: 10000,
-          theme: buildXtermTheme(),
+          theme: transparent ? { ...buildXtermTheme(), background: 'rgba(0,0,0,0)' } : buildXtermTheme(),
         });
 
         const fitAddon = new FitAddon();
@@ -206,18 +211,20 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       }
       fitAddonRef.current = null;
     };
-  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize]);
+  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize, transparent, fontSize]);
 
   // Live-update xterm theme on theme switch without recreating the terminal.
   // The canvas repaints next frame with the new palette, PTY state is preserved.
   useEffect(() => {
     if (!termRef.current) return;
     try {
-      termRef.current.options.theme = buildXtermTheme();
+      termRef.current.options.theme = transparent
+        ? { ...buildXtermTheme(), background: 'rgba(0,0,0,0)' }
+        : buildXtermTheme();
     } catch {
       // xterm may throw if the terminal was disposed mid-update; ignore.
     }
-  }, [themeId]);
+  }, [themeId, transparent]);
 
   if (error) {
     return (
@@ -262,7 +269,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         width: '100%',
         display: visible ? 'flex' : 'none',
         flexDirection: 'column',
-        background: 'var(--t-terminal-bg, #16191e)',
+        background: transparent ? 'transparent' : 'var(--t-terminal-bg, #16191e)',
         borderRadius: 0,
         overflow: 'hidden',
       }}
@@ -307,7 +314,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         style={{
           flex: 1,
           width: '100%',
-          background: 'var(--t-terminal-bg, #16191e)',
+          background: transparent ? 'transparent' : 'var(--t-terminal-bg, #16191e)',
           paddingTop: 2,
           paddingLeft: 2,
         }}

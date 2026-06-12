@@ -3,18 +3,30 @@
 /**
  * TerminalGlassCard — a REAL shell living on the canvas (#1232).
  *
- * Reuses the production terminal stack end-to-end: tmux-backed sessions
+ * Reuses the production terminal stack end-to-end: pty-backed sessions
  * over the desktop WebSocket, rendered by the same XtermPanel the
  * dashboard tabs use — so anything built here serves the default view
- * too. The card is the canvas treatment: glass frame, title-bar drag,
- * close exits the shell (input "exit\n" then detach, so the tmux session
- * dies instead of leaking into the dashboard's session list).
+ * too. The card is the canvas treatment: glass frame (same recipe as
+ * every other pane — transparent xterm over the card's tint + a tunable
+ * dark veil for legibility), title-bar drag, corner resize, click brings
+ * it forward, close exits the shell (input "exit\n" then detach, so the
+ * session dies instead of leaking into the dashboard's session list).
  */
 
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { FONT, TONE_DOT, glass } from './ui';
+
+/**
+ * DEV ONLY — operator dial for the terminal glass veil. Q tunes the value
+ * live, then we freeze it into TERM_VEIL_DEFAULT and flip this off before
+ * this surface graduates. Not a user-facing control.
+ */
+export const DEV_TERM_GLASS_TUNER = true;
+
+export const TERM_MIN_W = 340;
+export const TERM_MIN_H = 190;
 
 export interface TermCard {
   id: number;
@@ -23,12 +35,24 @@ export interface TermCard {
   exited: boolean;
   x: number;
   y: number;
+  /** Body (xterm area) size — the title bar adds its own height. */
+  w: number;
+  h: number;
+  /** Stacking order — bumped by the page when the card takes focus. */
+  z: number;
+  /** Working directory the shell opens in (null = shell default, HOME). */
+  cwd: string | null;
+  cwdLabel: string | null;
 }
 
 export function TerminalGlassCard({
   card,
+  termVeil,
   onMove,
+  onResize,
+  onFocus,
   onClose,
+  onTermVeilChange,
   registerHandle,
   sendTerminalAttach,
   sendTerminalInput,
@@ -36,8 +60,13 @@ export function TerminalGlassCard({
   sendTerminalDetach,
 }: {
   card: TermCard;
+  /** Dark wash painted behind the transparent xterm (legibility dial). */
+  termVeil: number;
   onMove: (id: number, x: number, y: number) => void;
+  onResize: (id: number, w: number, h: number) => void;
+  onFocus: (id: number) => void;
   onClose: (card: TermCard) => void;
+  onTermVeilChange: (value: number) => void;
   registerHandle: (sessionName: string, handle: XtermPanelHandle | null) => void;
   sendTerminalAttach: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalInput: (sessionName: string, data: string) => void;
@@ -45,7 +74,9 @@ export function TerminalGlassCard({
   sendTerminalDetach: (sessionName: string) => void;
 }) {
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [resizing, setResizing] = useState(false);
 
   return (
     <motion.div
@@ -53,16 +84,17 @@ export function TerminalGlassCard({
       animate={{ scale: 1, opacity: 1, y: 0 }}
       exit={{ scale: 0.86, opacity: 0 }}
       transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+      onPointerDownCapture={() => onFocus(card.id)}
       style={{
         position: 'absolute',
         left: card.x,
         top: card.y,
-        width: 480,
+        width: card.w,
         display: 'flex',
         flexDirection: 'column',
         borderRadius: 14,
         overflow: 'hidden',
-        zIndex: 3,
+        zIndex: card.z,
         ...glass(true),
       }}
     >
@@ -70,7 +102,7 @@ export function TerminalGlassCard({
       <div
         onPointerDown={(event) => {
           if (event.button !== 0) return;
-          event.currentTarget.setPointerCapture(event.pointerId);
+          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
           dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y };
           setDragging(true);
         }}
@@ -105,11 +137,39 @@ export function TerminalGlassCard({
           }}
         />
         <span style={{ flex: 1, fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {card.exited ? 'Terminal — exited' : card.sessionName ? `Terminal — ${card.sessionName.replace(/^cortex-dash-/, '').slice(0, 8)}` : 'Terminal — connecting…'}
+          {card.exited
+            ? 'Terminal — exited'
+            : card.sessionName
+              ? `Terminal — ${card.cwdLabel ?? card.sessionName.replace(/^cortex-dash-/, '').slice(0, 8)}`
+              : 'Terminal — connecting…'}
         </span>
+        {DEV_TERM_GLASS_TUNER ? (
+          <span
+            onPointerDown={(event) => event.stopPropagation()}
+            style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
+          >
+            <input
+              type="range"
+              aria-label="Terminal veil (dev)"
+              min={0}
+              max={0.85}
+              step={0.01}
+              value={termVeil}
+              onChange={(event) => {
+                const next = Number.parseFloat(event.target.value);
+                if (Number.isFinite(next)) onTermVeilChange(next);
+              }}
+              style={{ width: 54, accentColor: '#f59e0b', cursor: 'pointer' }}
+            />
+            <span style={{ fontSize: 9, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontVariantNumeric: 'tabular-nums', fontFamily: FONT, width: 24 }}>
+              {Math.round(termVeil * 100)}%
+            </span>
+          </span>
+        ) : null}
         <button
           type="button"
           aria-label="Close terminal"
+          onPointerDown={(event) => event.stopPropagation()}
           onClick={() => onClose(card)}
           style={{
             borderWidth: 0,
@@ -129,19 +189,25 @@ export function TerminalGlassCard({
         </button>
       </div>
 
-      {/* The shell — the real XtermPanel, same one the dashboard mounts. */}
-      <div style={{ height: 300, position: 'relative' }}>
+      {/* The shell — the real XtermPanel, same one the dashboard mounts.
+          Transparent over the card glass; the veil restores legibility. */}
+      <div style={{ height: card.h, position: 'relative' }}>
+        <div aria-hidden style={{ position: 'absolute', inset: 0, background: `rgba(7, 9, 13, ${termVeil.toFixed(2)})` }} />
         {card.sessionName ? (
-          <XtermPanel
-            key={card.sessionName}
-            ref={(handle) => registerHandle(card.sessionName!, handle)}
-            tmuxSession={card.sessionName}
-            sendTerminalAttach={sendTerminalAttach}
-            sendTerminalInput={sendTerminalInput}
-            sendTerminalResize={sendTerminalResize}
-            sendTerminalDetach={sendTerminalDetach}
-            visible
-          />
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', paddingTop: 6, paddingLeft: 10, paddingRight: 4, paddingBottom: 4 }}>
+            <XtermPanel
+              key={card.sessionName}
+              ref={(handle) => registerHandle(card.sessionName!, handle)}
+              tmuxSession={card.sessionName}
+              sendTerminalAttach={sendTerminalAttach}
+              sendTerminalInput={sendTerminalInput}
+              sendTerminalResize={sendTerminalResize}
+              sendTerminalDetach={sendTerminalDetach}
+              visible
+              transparent
+              fontSize={11.5}
+            />
+          </div>
         ) : (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
             <motion.span
@@ -152,6 +218,49 @@ export function TerminalGlassCard({
             />
           </div>
         )}
+
+        {/* Corner resize grip — XtermPanel's ResizeObserver refits the PTY. */}
+        <div
+          role="presentation"
+          onPointerDown={(event) => {
+            if (event.button !== 0) return;
+            event.stopPropagation();
+            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
+            resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originW: card.w, originH: card.h };
+            setResizing(true);
+          }}
+          onPointerMove={(event) => {
+            const resize = resizeRef.current;
+            if (!resize || resize.pointerId !== event.pointerId) return;
+            onResize(
+              card.id,
+              Math.max(TERM_MIN_W, resize.originW + event.clientX - resize.startX),
+              Math.max(TERM_MIN_H, resize.originH + event.clientY - resize.startY),
+            );
+          }}
+          onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
+          style={{
+            position: 'absolute',
+            right: 0,
+            bottom: 0,
+            width: 18,
+            height: 18,
+            cursor: 'nwse-resize',
+            touchAction: 'none',
+            display: 'flex',
+            alignItems: 'flex-end',
+            justifyContent: 'flex-end',
+            paddingRight: 4,
+            paddingBottom: 4,
+            opacity: resizing ? 1 : 0.55,
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
+          onMouseLeave={(event) => { if (!resizeRef.current) event.currentTarget.style.opacity = '0.55'; }}
+        >
+          <svg width={9} height={9} viewBox="0 0 9 9" aria-hidden>
+            <path d="M8 1 1 8M8 5 5 8" stroke="var(--cnv-ink-muted)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+          </svg>
+        </div>
       </div>
     </motion.div>
   );

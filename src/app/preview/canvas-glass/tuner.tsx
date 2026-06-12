@@ -60,7 +60,7 @@ export function TunerPanel({
         paddingBottom: 12,
         paddingLeft: 12,
         borderRadius: 14,
-        zIndex: 8,
+        zIndex: 44,
         ...glass(true),
       }}
     >
