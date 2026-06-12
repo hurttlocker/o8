@@ -66,12 +66,13 @@ export interface OrchestratorLane {
   tone: MockCard['tone'];
 }
 
-/** A single entry in a docked conversation (id-less authoring shape). */
+/** A single entry in a docked conversation (id-less authoring shape).
+ *  `live` text = real orchestrator deltas (grows in place, no word-fade). */
 export type NewDockEntry =
   | { role: 'user'; text: string }
   | { role: 'status'; text: string; pending: boolean }
   | { role: 'result'; title: string; meta: string }
-  | { role: 'text'; text: string }
+  | { role: 'text'; text: string; live?: boolean }
   | { role: 'followups' };
 
 export type DockEntry = NewDockEntry & { id: number };

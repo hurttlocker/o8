@@ -13,12 +13,6 @@ import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FONT, TONE_DOT, glass, type DockEntry, type OrchestratorLane } from './ui';
 
-export const MOCK_LANES: OrchestratorLane[] = [
-  { id: 'o8', label: 'o8 · main', repo: 'o8', tone: 'working' },
-  { id: 'o8-site', label: 'o8-site · landing', repo: 'o8-site', tone: 'idle' },
-  { id: 'eyes', label: 'eyes-web · prod', repo: 'mybeautifulwife', tone: 'waiting' },
-];
-
 const FOLLOW_UPS = [
   'Review the pending diff',
   'Dispatch a follow-up agent',
@@ -27,11 +21,13 @@ const FOLLOW_UPS = [
 ];
 
 export function OrchestratorDock({
+  lanes,
   entries,
   activeLane,
   onSelectLane,
   onClose,
 }: {
+  lanes: OrchestratorLane[];
   entries: DockEntry[];
   activeLane: string;
   onSelectLane: (id: string) => void;
@@ -83,7 +79,7 @@ export function OrchestratorDock({
             ✕
           </button>
         </div>
-        {MOCK_LANES.map((lane) => {
+        {lanes.map((lane) => {
           const active = lane.id === activeLane;
           return (
             <button
@@ -201,7 +197,16 @@ function DockEntryView({ entry }: { entry: DockEntry }) {
           <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>{entry.meta}</span>
         </div>
       ) : null}
-      {entry.role === 'text' ? <StreamedText text={entry.text} /> : null}
+      {entry.role === 'text' ? (
+        entry.live ? (
+          // Real orchestrator deltas — already streaming, render as they grow.
+          <p style={{ margin: 0, fontSize: 11, fontWeight: 300, lineHeight: 1.65, letterSpacing: '-0.05px', color: 'var(--cnv-ink)', whiteSpace: 'pre-wrap' }}>
+            {entry.text}
+          </p>
+        ) : (
+          <StreamedText text={entry.text} />
+        )
+      ) : null}
       {entry.role === 'followups' ? <FollowUps /> : null}
     </motion.div>
   );
