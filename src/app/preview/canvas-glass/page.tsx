@@ -46,6 +46,7 @@ import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSoc
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { BrowserGlassCard, type BrowserCard } from './browser-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { OrchestratorDock } from './dock';
@@ -55,7 +56,28 @@ import { CenterStage, type Stage } from './stage';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { useCanvasOrchestrator } from './use-canvas-orchestrator';
-import { FONT, IMG_MAX_SPAWN_EDGE, glass, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrchestratorLane } from './ui';
+import { FONT, IMG_MAX_SPAWN_EDGE, glass, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrcaThreadRow, type OrchestratorLane } from './ui';
+
+/** Live rows for the wired chrome — inbox items, active lanes, commits. */
+interface InboxRow {
+  id: string;
+  title: string;
+  detail?: string | null;
+  severity?: string | null;
+  kind?: string | null;
+}
+interface LaneRow {
+  id: string;
+  label?: string | null;
+  repoPath?: string | null;
+  status?: string | null;
+  runtime?: string | null;
+}
+interface CommitRow {
+  hash: string;
+  message: string;
+  date: string;
+}
 
 /** Terminal glass veil — persisted while Q dials it in (dev tuner). */
 const TERM_VEIL_KEY = 'o8:canvas-term-veil';
@@ -112,6 +134,13 @@ export default function CanvasGlassPreviewPage() {
   const [termPickerOpen, setTermPickerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [browserCards, setBrowserCards] = useState<BrowserCard[]>([]);
+  const [topMenu, setTopMenu] = useState<'alerts' | 'agents' | 'profile' | null>(null);
+  const [inboxItems, setInboxItems] = useState<InboxRow[]>([]);
+  const [activeLanes, setActiveLanes] = useState<LaneRow[]>([]);
+  const [recentThreads, setRecentThreads] = useState<OrcaThreadRow[]>([]);
+  const [recentCommits, setRecentCommits] = useState<CommitRow[]>([]);
+  const composerInputRef = useRef<HTMLInputElement | null>(null);
   const [repos, setRepos] = useState<RepoPickerRowData[] | null>(null);
   const nextIdRef = useRef(1);
   const entryIdRef = useRef(1);
@@ -224,6 +253,58 @@ export default function CanvasGlassPreviewPage() {
       disposed = true;
     };
   }, []);
+
+  // Live chrome data — inbox badge, running agents, past sessions. Light
+  // polling: the canvas is ambient, not a realtime surface.
+  useEffect(() => {
+    let disposed = false;
+    const refreshBadges = () => {
+      fetch('/api/mobile/inbox')
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data: { items?: InboxRow[] } | null) => {
+          if (!disposed && data && Array.isArray(data.items)) setInboxItems(data.items);
+        })
+        .catch(() => {});
+      fetch('/api/lanes?active=true')
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data: { lanes?: LaneRow[] } | null) => {
+          if (!disposed && data && Array.isArray(data.lanes)) setActiveLanes(data.lanes);
+        })
+        .catch(() => {});
+    };
+    const refreshThreads = () => {
+      fetch('/api/mobile/orchestrator/threads')
+        .then((response) => (response.ok ? response.json() : null))
+        .then((data: { threads?: OrcaThreadRow[] } | null) => {
+          if (!disposed && data && Array.isArray(data.threads)) setRecentThreads(data.threads);
+        })
+        .catch(() => {});
+    };
+    refreshBadges();
+    refreshThreads();
+    const badgeTimer = setInterval(refreshBadges, 90_000);
+    const threadTimer = setInterval(refreshThreads, 120_000);
+    return () => {
+      disposed = true;
+      clearInterval(badgeTimer);
+      clearInterval(threadTimer);
+    };
+  }, []);
+
+  // Right rail mirrors the active repo's recent commits.
+  useEffect(() => {
+    if (!activeRepoPath) return;
+    let disposed = false;
+    fetch(`/api/panel/commits?workspace=${encodeURIComponent(activeRepoPath)}&limit=5`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { commits?: CommitRow[] } | null) => {
+        if (!disposed && data && Array.isArray(data.commits)) setRecentCommits(data.commits);
+      })
+      .catch(() => {});
+    return () => {
+      disposed = true;
+    };
+  }, [activeRepoPath]);
 
   // Terminal sends drop silently while the socket is down and the server
   // never re-attaches a client — each connect bumps the epoch so every
@@ -386,6 +467,32 @@ export default function CanvasGlassPreviewPage() {
     }
   }, []);
 
+  /** Resume a PAST orchestrator session — history popover or Sessions rail.
+   *  Loads the stored transcript into the dock and re-points the live
+   *  socket at the old thread; the next send continues that conversation. */
+  const pickThread = useCallback((threadId: string, repoPath: string | null) => {
+    const repo = repoPath ?? activeRepoPath;
+    if (!repo) return;
+    setActiveRepoPath(repo);
+    orca.adoptThread(repo, threadId);
+    fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { messages?: Array<{ role?: string; content?: string }> } | null) => {
+        const messages = Array.isArray(data?.messages) ? data.messages : [];
+        const entries: DockEntry[] = [];
+        for (const message of messages) {
+          const text = typeof message.content === 'string' ? message.content.trim() : '';
+          if (!text) continue;
+          const id = entryIdRef.current;
+          entryIdRef.current += 1;
+          entries.push(message.role === 'user' ? { role: 'user', text, id } : { role: 'text', text, id });
+        }
+        setConvos((previous) => ({ ...previous, [repo]: entries }));
+        setDockOpen(true);
+      })
+      .catch(() => setDockOpen(true));
+  }, [activeRepoPath, orca]);
+
   const moveCard = useCallback((id: number, x: number, y: number) => {
     setCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
@@ -425,14 +532,16 @@ export default function CanvasGlassPreviewPage() {
     setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
   }, []);
 
-  /** Clicked card comes forward. Terminals + files + images share the
-   *  10–39 band — above the mock cards (3), below the chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file' | 'image', id: number) => {
+  /** Clicked card comes forward. Terminals + files + images + browsers
+   *  share the 10–39 band — above mock cards (3), below chrome (40+). */
+  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser', id: number) => {
     const current = kind === 'term'
       ? termCards.find((card) => card.id === id)
       : kind === 'file'
         ? fileCards.find((card) => card.id === id)
-        : imageCards.find((card) => card.id === id);
+        : kind === 'image'
+          ? imageCards.find((card) => card.id === id)
+          : browserCards.find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
@@ -440,12 +549,14 @@ export default function CanvasGlassPreviewPage() {
         ...termCards.map((card) => ({ kind: 'term' as const, id: card.id, z: card.z })),
         ...fileCards.map((card) => ({ kind: 'file' as const, id: card.id, z: card.z })),
         ...imageCards.map((card) => ({ kind: 'image' as const, id: card.id, z: card.z })),
+        ...browserCards.map((card) => ({ kind: 'browser' as const, id: card.id, z: card.z })),
       ].sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
       const top = 10 + combined.length;
       setTermCards((previous) => previous.map((card) => ({ ...card, z: kind === 'term' && card.id === id ? top : remap.get(`term:${card.id}`) ?? card.z })));
       setFileCards((previous) => previous.map((card) => ({ ...card, z: kind === 'file' && card.id === id ? top : remap.get(`file:${card.id}`) ?? card.z })));
       setImageCards((previous) => previous.map((card) => ({ ...card, z: kind === 'image' && card.id === id ? top : remap.get(`image:${card.id}`) ?? card.z })));
+      setBrowserCards((previous) => previous.map((card) => ({ ...card, z: kind === 'browser' && card.id === id ? top : remap.get(`browser:${card.id}`) ?? card.z })));
       zPeakRef.current = top;
       return;
     }
@@ -455,14 +566,49 @@ export default function CanvasGlassPreviewPage() {
       setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'file') {
       setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else {
+    } else if (kind === 'image') {
       setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else {
+      setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [fileCards, imageCards, termCards]);
+  }, [browserCards, fileCards, imageCards, termCards]);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
   const focusImageCard = useCallback((id: number) => focusCard('image', id), [focusCard]);
+  const focusBrowserCard = useCallback((id: number) => focusCard('browser', id), [focusCard]);
+
+  /** A REAL browser pane — defaults to the app's own dashboard. */
+  const spawnBrowserCard = useCallback(() => {
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    setBrowserCards((previous) => [...previous, {
+      id,
+      x: 220 + (previous.length % 3) * 110 + (id % 5) * 8,
+      y: 96 + (previous.length % 3) * 70,
+      z: zPeakRef.current,
+      w: 640,
+      h: 400,
+      url: `${window.location.origin}/dashboard`,
+    }]);
+  }, []);
+
+  const moveBrowserCard = useCallback((id: number, x: number, y: number) => {
+    setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
+  }, []);
+
+  const resizeBrowserCard = useCallback((id: number, w: number, h: number) => {
+    setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, w, h } : card)));
+  }, []);
+
+  const navigateBrowserCard = useCallback((id: number, url: string) => {
+    setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, url } : card)));
+  }, []);
+
+  const closeBrowserCard = useCallback((id: number) => {
+    setBrowserCards((previous) => previous.filter((card) => card.id !== id));
+  }, []);
 
   const changeTermVeil = useCallback((value: number) => {
     setTermVeil(value);
@@ -751,7 +897,7 @@ export default function CanvasGlassPreviewPage() {
 
       {/* ── Kivo stage — owns the canvas while it is empty ───────── */}
       <AnimatePresence mode="wait">
-        {(cards.length === 0 && termCards.length === 0 && fileCards.length === 0 && imageCards.length === 0) || summoning ? (
+        {(cards.length === 0 && termCards.length === 0 && fileCards.length === 0 && imageCards.length === 0 && browserCards.length === 0) || summoning ? (
           <CenterStage key={stage.kind} stage={stage} />
         ) : null}
       </AnimatePresence>
@@ -815,6 +961,21 @@ export default function CanvasGlassPreviewPage() {
         ))}
       </AnimatePresence>
 
+      {/* ── Browser cards — a real page in glass ─────────────────── */}
+      <AnimatePresence>
+        {browserCards.map((card) => (
+          <BrowserGlassCard
+            key={card.id}
+            card={card}
+            onMove={moveBrowserCard}
+            onResize={resizeBrowserCard}
+            onFocus={focusBrowserCard}
+            onNavigate={navigateBrowserCard}
+            onClose={closeBrowserCard}
+          />
+        ))}
+      </AnimatePresence>
+
       {/* ── Top dock — the important header controls ─────────────── */}
       <div
         style={{
@@ -855,8 +1016,21 @@ export default function CanvasGlassPreviewPage() {
           Canvas
         </button>
         <span style={{ width: 1, height: 16, background: 'var(--cnv-edge)' }} />
-        <DockGlyphButton label="Agents" path="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75" extra={<circle cx="9" cy="7" r="4" />} />
-        <DockGlyphButton label="Alerts" path="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0" />
+        <DockGlyphButton
+          label="Agents"
+          active={topMenu === 'agents'}
+          badge={activeLanes.length}
+          onClick={() => setTopMenu((value) => (value === 'agents' ? null : 'agents'))}
+          path="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"
+          extra={<circle cx="9" cy="7" r="4" />}
+        />
+        <DockGlyphButton
+          label="Alerts"
+          active={topMenu === 'alerts'}
+          badge={inboxItems.length}
+          onClick={() => setTopMenu((value) => (value === 'alerts' ? null : 'alerts'))}
+          path="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"
+        />
         <DockGlyphButton
           label="Orchestrators"
           active={dockOpen}
@@ -892,6 +1066,115 @@ export default function CanvasGlassPreviewPage() {
           Exit
         </button>
       </div>
+
+      {/* Top-dock popovers — live agents / live inbox, real data. */}
+      <AnimatePresence>
+        {topMenu === 'agents' || topMenu === 'alerts' ? (
+          <>
+            <div role="presentation" onClick={() => setTopMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
+            <motion.div
+              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -6, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+              style={{
+                position: 'absolute',
+                top: 64,
+                left: '50%',
+                marginLeft: -150,
+                width: 300,
+                maxHeight: 320,
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                paddingTop: 8,
+                paddingBottom: 8,
+                paddingLeft: 6,
+                paddingRight: 6,
+                borderRadius: 13,
+                zIndex: 46,
+                scrollbarWidth: 'none',
+                ...glass(true),
+              } as React.CSSProperties}
+            >
+              <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 4 }}>
+                {topMenu === 'agents' ? 'Running agents' : 'Inbox'}
+              </span>
+              {topMenu === 'agents' ? (
+                activeLanes.length === 0 ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingTop: 2, paddingBottom: 4 }}>
+                    No agents running — dispatch from the orchestrator below.
+                  </span>
+                ) : (
+                  activeLanes.slice(0, 10).map((lane) => (
+                    <div key={lane.id} style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8 }}>
+                      <span
+                        aria-hidden
+                        style={{
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          flexShrink: 0,
+                          background: lane.status === 'running' || lane.status === 'launching'
+                            ? '#22c55e'
+                            : lane.status === 'awaiting_input' || lane.status === 'reviewing'
+                              ? '#f59e0b'
+                              : lane.status === 'failed'
+                                ? '#ef4444'
+                                : 'rgba(255,255,255,0.4)',
+                        }}
+                      />
+                      <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, fontFamily: FONT }}>
+                        <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {lane.label || lane.id}
+                        </span>
+                        <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>
+                          {[lane.repoPath?.split('/').pop(), lane.runtime, lane.status].filter(Boolean).join(' · ')}
+                        </span>
+                      </span>
+                    </div>
+                  ))
+                )
+              ) : inboxItems.length === 0 ? (
+                <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingTop: 2, paddingBottom: 4 }}>
+                  Inbox zero — nothing needs you.
+                </span>
+              ) : (
+                inboxItems.slice(0, 10).map((item) => (
+                  <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8 }}>
+                    <span
+                      aria-hidden
+                      style={{
+                        width: 5,
+                        height: 5,
+                        borderRadius: '50%',
+                        flexShrink: 0,
+                        marginTop: 4,
+                        background: item.severity === 'critical' || item.severity === 'high'
+                          ? '#ef4444'
+                          : item.kind === 'approval' || item.severity === 'warning'
+                            ? '#f59e0b'
+                            : 'rgba(255,255,255,0.4)',
+                      }}
+                    />
+                    <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, fontFamily: FONT }}>
+                      <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {item.title}
+                      </span>
+                      {item.detail ? (
+                        <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {item.detail}
+                        </span>
+                      ) : null}
+                    </span>
+                  </div>
+                ))
+              )}
+            </motion.div>
+          </>
+        ) : null}
+      </AnimatePresence>
 
       {/* ── Top-right — search + the operator (reference borrow) ──── */}
       <div
@@ -929,30 +1212,76 @@ export default function CanvasGlassPreviewPage() {
           onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
           onMouseLeave={(event) => { if (!searchOpen) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
         >
-          <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          {/* width/height as inline style — attribute sizing collapses to 0
+              in this flex context (the missing-search-icon bug). */}
+          <svg style={{ width: 13, height: 13, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="11" cy="11" r="8" /><path d="m21 21-4.3-4.3" />
           </svg>
         </button>
-        <span
-          aria-label="Operator"
+        <button
+          type="button"
+          aria-label="Operator profile"
+          onClick={() => setTopMenu((value) => (value === 'profile' ? null : 'profile'))}
           style={{
             width: 26,
             height: 26,
             borderRadius: '50%',
-            border: '1px solid var(--cnv-edge)',
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--cnv-edge)',
             background: 'var(--cnv-tint)',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'var(--cnv-ink-muted)',
+            color: topMenu === 'profile' ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
             flexShrink: 0,
+            cursor: 'pointer',
+            padding: 0,
           }}
+          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+          onMouseLeave={(event) => { if (topMenu !== 'profile') event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
         >
-          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <svg style={{ width: 12, height: 12, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
           </svg>
-        </span>
+        </button>
       </div>
+
+      {/* Profile popover — the door to plan & account once accounts land. */}
+      <AnimatePresence>
+        {topMenu === 'profile' ? (
+          <>
+            <div role="presentation" onClick={() => setTopMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
+            <motion.div
+              initial={{ opacity: 0, y: -6, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: -6, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 420, damping: 32 }}
+              style={{
+                position: 'absolute',
+                top: 64,
+                right: 24,
+                width: 220,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                paddingTop: 12,
+                paddingBottom: 12,
+                paddingLeft: 14,
+                paddingRight: 14,
+                borderRadius: 13,
+                zIndex: 46,
+                ...glass(true),
+              }}
+            >
+              <span style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT }}>Operator</span>
+              <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.55, fontFamily: FONT }}>
+                Profile, plan, and usage land here with accounts. This avatar is the door.
+              </span>
+            </motion.div>
+          </>
+        ) : null}
+      </AnimatePresence>
 
       {/* Search popover — Enter brings the first matching card forward. */}
       <AnimatePresence>
@@ -1024,10 +1353,16 @@ export default function CanvasGlassPreviewPage() {
           ...glass(true),
         }}
       >
-        <SpawnGlyphButton label="Spawn orchestrator" onClick={() => spawnCard('packet', 'Orchestrator · o8', 'fleet · ready', 'idle')}>
+        <SpawnGlyphButton
+          label="Message the orchestrator"
+          onClick={() => {
+            if ((convos[activeRepoPath ?? '']?.length ?? 0) > 0) setDockOpen(true);
+            composerInputRef.current?.focus();
+          }}
+        >
           <circle cx="12" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M12 8v4M12 12l-6 4M12 12l6 4" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton label="Spawn browser" onClick={() => spawnCard('browser', 'Browser', 'localhost:3001', 'idle')}>
+        <SpawnGlyphButton label="Spawn browser" onClick={spawnBrowserCard}>
           <circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
         </SpawnGlyphButton>
         <SpawnGlyphButton label="Spawn terminal" onClick={toggleTermPicker}>
@@ -1039,7 +1374,12 @@ export default function CanvasGlassPreviewPage() {
         <SpawnGlyphButton label="Spawn review" onClick={() => spawnCard('review', 'Review — pending diff', '2 files · +14 −3', 'waiting')}>
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect width="8" height="4" x="8" y="2" rx="1" /><path d="m9 14 2 2 4-4" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton label="Spawn o8.md notes" onClick={() => spawnCard('packet', 'o8.md · o8', 'workspace notes', 'idle')}>
+        <SpawnGlyphButton
+          label="Open o8.md"
+          onClick={() => {
+            if (activeRepoPath) spawnFileCard(`${activeRepoPath}/o8.md`);
+          }}
+        >
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
         </SpawnGlyphButton>
       </div>
@@ -1104,17 +1444,21 @@ export default function CanvasGlassPreviewPage() {
         ) : null}
       </AnimatePresence>
 
-      {/* ── Edge hover rails ─────────────────────────────────────── */}
+      {/* ── Edge hover rails — real sessions, real commits ───────── */}
       <EdgeRail
         side="left"
         open={leftRailOpen}
         onOpenChange={setLeftRailOpen}
         title="Sessions"
-        rows={[
-          ['Quick round-trip check', 'orchestrator · 1h ago'],
-          ['Polish group C', 'merged · 2h ago'],
-          ['Fleet canvas v1', 'merged · 1h ago'],
-        ]}
+        rows={recentThreads.slice(0, 5).map((thread) => [
+          thread.title?.trim() || 'Untitled session',
+          [thread.repoName, relAge(thread.lastMessageAt)].filter(Boolean).join(' · '),
+        ])}
+        emptyHint="No orchestrator sessions yet — talk below."
+        onRowClick={(index) => {
+          const thread = recentThreads[index];
+          if (thread) pickThread(thread.id, thread.repoPath);
+        }}
       />
       {dockOpen ? null : (
         <EdgeRail
@@ -1122,11 +1466,11 @@ export default function CanvasGlassPreviewPage() {
           open={rightRailOpen}
           onOpenChange={setRightRailOpen}
           title="Activity"
-          rows={[
-            ['0.1.356 shipped', 'release · just now'],
-            ['feat(canvas): background controls', 'main · 10m ago'],
-            ['feat(canvas): v2 glass slice', 'main · 1h ago'],
-          ]}
+          rows={recentCommits.slice(0, 5).map((commit) => [
+            commit.message,
+            [commit.hash, relAge(commit.date)].filter(Boolean).join(' · '),
+          ])}
+          emptyHint="No recent commits on this repo."
         />
       )}
 
@@ -1140,6 +1484,7 @@ export default function CanvasGlassPreviewPage() {
             activeLabel={activeRepoName ?? '…'}
             activeTone={orcaBusy ? 'working' : 'idle'}
             onSelectLane={setActiveRepoPath}
+            onPickThread={pickThread}
             onClose={() => setDockOpen(false)}
           />
         ) : null}
@@ -1211,6 +1556,7 @@ export default function CanvasGlassPreviewPage() {
           onClick={() => setComposerMenu((value) => (value === 'repo' ? null : 'repo'))}
         />
         <input
+          ref={composerInputRef}
           value={composerValue}
           onChange={(event) => setComposerValue(event.target.value)}
           onKeyDown={(event) => {

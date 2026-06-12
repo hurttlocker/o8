@@ -19,6 +19,31 @@ import { getWsUrl } from '@/components/desktop/thoughts/use-orchestrator-stream/
 
 export type CanvasOrcaStatus = 'idle' | 'connecting' | 'ready' | 'busy' | 'dead';
 
+/** Thread ids survive reloads — same conversation, same repo, every visit. */
+const THREADS_KEY = 'o8:canvas-orca-threads';
+
+function loadThreadMap(): Map<string, string> {
+  if (typeof window === 'undefined') return new Map();
+  try {
+    const raw = window.localStorage.getItem(THREADS_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    if (parsed && typeof parsed === 'object') {
+      return new Map(Object.entries(parsed as Record<string, string>).filter(([, value]) => typeof value === 'string'));
+    }
+  } catch {
+    // corrupt entry — start fresh
+  }
+  return new Map();
+}
+
+function saveThreadMap(map: Map<string, string>) {
+  try {
+    window.localStorage.setItem(THREADS_KEY, JSON.stringify(Object.fromEntries(map)));
+  } catch {
+    // non-critical
+  }
+}
+
 export interface CanvasOrcaCallbacks {
   onOutput?: (repoPath: string, text: string, thinking: boolean) => void;
   onToolUse?: (repoPath: string, name: string) => void;
@@ -30,7 +55,9 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
   const wsRef = useRef<WebSocket | null>(null);
   const cbRef = useRef(callbacks);
   cbRef.current = callbacks;
-  const threadIdsRef = useRef(new Map<string, string>());
+  const threadIdsRef = useRef<Map<string, string> | null>(null);
+  if (threadIdsRef.current === null) threadIdsRef.current = loadThreadMap();
+  const threadIds = threadIdsRef.current;
   const [status, setStatus] = useState<CanvasOrcaStatus>('idle');
 
   useEffect(() => {
@@ -57,7 +84,7 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
         ws.send(JSON.stringify({
           type: 'orchestrator-subscribe',
           repoPath,
-          threadId: threadIdsRef.current.get(repoPath) ?? null,
+          threadId: threadIds.get(repoPath) ?? null,
         }));
       };
       ws.onmessage = (event) => {
@@ -99,7 +126,7 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
       wsRef.current = null;
       setStatus('idle');
     };
-  }, [repoPath]);
+  }, [repoPath, threadIds]);
 
   /** Send one user turn. Returns the threadId, or null if the socket
    *  isn't ready (caller surfaces "not connected"). */
@@ -107,10 +134,11 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
     if (!repoPath) return null;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return null;
-    let threadId = threadIdsRef.current.get(repoPath);
+    let threadId = threadIds.get(repoPath);
     if (!threadId) {
       threadId = `thoughts-${Date.now()}`;
-      threadIdsRef.current.set(repoPath, threadId);
+      threadIds.set(repoPath, threadId);
+      saveThreadMap(threadIds);
     }
     ws.send(JSON.stringify({
       type: 'orchestrator-send',
@@ -122,7 +150,7 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
       ...(opts?.thinkingEffort && opts.thinkingEffort !== 'adaptive' ? { thinkingEffort: opts.thinkingEffort } : {}),
     }));
     return threadId;
-  }, [repoPath]);
+  }, [repoPath, threadIds]);
 
   const interrupt = useCallback(() => {
     if (!repoPath) return;
@@ -131,9 +159,20 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
     ws.send(JSON.stringify({
       type: 'orchestrator-interrupt',
       repoPath,
-      threadId: threadIdsRef.current.get(repoPath) ?? null,
+      threadId: threadIds.get(repoPath) ?? null,
     }));
-  }, [repoPath]);
+  }, [repoPath, threadIds]);
 
-  return { status, send, interrupt };
+  /** Resume a PAST thread on a repo — history picks route through here.
+   *  Re-subscribes the live socket when the repo is the active one. */
+  const adoptThread = useCallback((repo: string, threadId: string) => {
+    threadIds.set(repo, threadId);
+    saveThreadMap(threadIds);
+    const ws = wsRef.current;
+    if (repo === repoPath && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: repo, threadId }));
+    }
+  }, [repoPath, threadIds]);
+
+  return { status, send, interrupt, adoptThread };
 }

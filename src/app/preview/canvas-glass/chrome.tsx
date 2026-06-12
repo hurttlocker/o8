@@ -15,12 +15,16 @@ export function EdgeRail({
   onOpenChange,
   title,
   rows,
+  emptyHint,
+  onRowClick,
 }: {
   side: 'left' | 'right';
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
   rows: Array<[string, string]>;
+  emptyHint?: string;
+  onRowClick?: (index: number) => void;
 }) {
   const zoneRef = useRef<HTMLDivElement | null>(null);
   const railRef = useRef<HTMLDivElement | null>(null);
@@ -99,20 +103,59 @@ export function EdgeRail({
         <span style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', marginBottom: 6, fontFamily: FONT }}>
           {title}
         </span>
-        {rows.map(([primary, secondary]) => (
-          <div key={primary} style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingTop: 5, paddingBottom: 5 }}>
-            <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: FONT }}>
-              {primary}
-            </span>
-            <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>{secondary}</span>
-          </div>
+        {rows.map(([primary, secondary], index) => (
+          onRowClick ? (
+            <button
+              key={`${primary}-${index}`}
+              type="button"
+              onClick={() => onRowClick(index)}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'flex-start',
+                gap: 1,
+                paddingTop: 5,
+                paddingBottom: 5,
+                paddingLeft: 6,
+                paddingRight: 6,
+                marginLeft: -6,
+                marginRight: -6,
+                borderWidth: 0,
+                borderRadius: 8,
+                background: 'transparent',
+                cursor: 'pointer',
+                textAlign: 'left',
+                fontFamily: FONT,
+                width: 'calc(100% + 12px)',
+              }}
+              onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+              onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+            >
+              <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--cnv-ink)', maxWidth: '100%' }}>
+                {primary}
+              </span>
+              <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>{secondary}</span>
+            </button>
+          ) : (
+            <div key={`${primary}-${index}`} style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingTop: 5, paddingBottom: 5 }}>
+              <span style={{ fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontFamily: FONT }}>
+                {primary}
+              </span>
+              <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>{secondary}</span>
+            </div>
+          )
         ))}
+        {rows.length === 0 ? (
+          <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.5, fontFamily: FONT }}>
+            {emptyHint ?? 'Nothing yet.'}
+          </span>
+        ) : null}
       </motion.div>
     </>
   );
 }
 
-export function DockGlyphButton({ label, path, extra, onClick, active }: { label: string; path: string; extra?: ReactNode; onClick?: () => void; active?: boolean }) {
+export function DockGlyphButton({ label, path, extra, onClick, active, badge }: { label: string; path: string; extra?: ReactNode; onClick?: () => void; active?: boolean; badge?: number }) {
   return (
     <button
       type="button"
@@ -120,6 +163,7 @@ export function DockGlyphButton({ label, path, extra, onClick, active }: { label
       title={label}
       onClick={onClick}
       style={{
+        position: 'relative',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -135,10 +179,36 @@ export function DockGlyphButton({ label, path, extra, onClick, active }: { label
       onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
       onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
     >
-      <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <svg style={{ width: 14, height: 14, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
         <path d={path} />
         {extra}
       </svg>
+      {badge && badge > 0 ? (
+        <span
+          aria-hidden
+          style={{
+            position: 'absolute',
+            top: -2,
+            right: -3,
+            minWidth: 12,
+            height: 12,
+            paddingLeft: 3,
+            paddingRight: 3,
+            borderRadius: 999,
+            background: '#f59e0b',
+            color: '#16191e',
+            fontSize: 7.5,
+            fontWeight: 600,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontFamily: FONT,
+            lineHeight: 1,
+          }}
+        >
+          {badge > 9 ? '9+' : badge}
+        </span>
+      ) : null}
     </button>
   );
 }
