@@ -97,6 +97,21 @@ const STORAGE_KEY = 'o8:canvas-glass';
 const PERSONAL_KEY = 'o8:canvas-glass-personal';
 export const CANVAS_GLASS_CHANGED_EVENT = 'o8:canvas-glass-changed';
 
+/**
+ * Liquid (no material) with zero backdrop frost is indistinguishable from
+ * no window at all — operator-locked floor of ~10% of the dial so the
+ * glass always reads as glass. Other materials carry their own blur, so
+ * the floor only applies to 'none'.
+ */
+export const LIQUID_MIN_BACKDROP_FROST = 6;
+
+function normalizeForMaterial(settings: CanvasGlassSettings): CanvasGlassSettings {
+  if (settings.material === 'none' && settings.backdropFrost < LIQUID_MIN_BACKDROP_FROST) {
+    return { ...settings, backdropFrost: LIQUID_MIN_BACKDROP_FROST };
+  }
+  return settings;
+}
+
 /** The operator's saved look — the "Mine" preset. Null until saved once. */
 export function readPersonalDefault(): CanvasGlassSettings | null {
   if (typeof window === 'undefined') return null;
@@ -150,7 +165,7 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
     const parsed: unknown = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object') return { ...CANVAS_GLASS_DEFAULTS };
     const candidate = parsed as Partial<CanvasGlassSettings>;
-    return {
+    return normalizeForMaterial({
       frost: readNumber(candidate.frost, CANVAS_GLASS_RANGES.frost, CANVAS_GLASS_DEFAULTS.frost),
       tint: readNumber(candidate.tint, CANVAS_GLASS_RANGES.tint, CANVAS_GLASS_DEFAULTS.tint),
       ink: readNumber(candidate.ink, CANVAS_GLASS_RANGES.ink, CANVAS_GLASS_DEFAULTS.ink),
@@ -160,21 +175,25 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
         ? candidate.material
         : CANVAS_GLASS_DEFAULTS.material,
       backdropFrost: readNumber(candidate.backdropFrost, CANVAS_GLASS_RANGES.backdropFrost, CANVAS_GLASS_DEFAULTS.backdropFrost),
-    };
+    });
   } catch {
     return { ...CANVAS_GLASS_DEFAULTS };
   }
 }
 
-export function writeCanvasGlassSettings(settings: CanvasGlassSettings): void {
-  if (typeof window === 'undefined') return;
+/** Persist + apply. Returns the normalized settings (the Liquid frost
+ *  floor may bump backdropFrost) — callers should adopt the return. */
+export function writeCanvasGlassSettings(settings: CanvasGlassSettings): CanvasGlassSettings {
+  const normalized = normalizeForMaterial(settings);
+  if (typeof window === 'undefined') return normalized;
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(settings));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(normalized));
   } catch {
     // non-critical — the look just won't survive reload
   }
-  applyCanvasGlassSettings(settings);
-  window.dispatchEvent(new CustomEvent(CANVAS_GLASS_CHANGED_EVENT, { detail: settings }));
+  applyCanvasGlassSettings(normalized);
+  window.dispatchEvent(new CustomEvent(CANVAS_GLASS_CHANGED_EVENT, { detail: normalized }));
+  return normalized;
 }
 
 /** Stamp the material onto :root so any surface can consume it. */
