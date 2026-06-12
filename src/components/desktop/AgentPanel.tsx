@@ -830,7 +830,11 @@ function MiniAgentPanelAction({
             alignItems: 'center',
             justifyContent: 'center',
             color: 'var(--t-text-faint)',
-            transform: 'translateX(7px)',
+            // Per-glyph optical nudge (2026-06-11 re-snap): both glyphs' ink
+            // sat 1-2px left of the right-rail column (ring+2). Menu's lines
+            // inset ~1px inside its 13px box, MenuScale's ~0.5px inside 12px
+            // — measured from rendered pixels at 4x, not the bbox math.
+            transform: disclosure === 'menu' ? 'translateX(9px)' : 'translateX(8px)',
           }}
         >
           {disclosure === 'menu' ? (
