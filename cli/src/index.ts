@@ -106,11 +106,12 @@ commands:
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
   ask "<question>"     ask the Engineering Brain about this repo (answer + cited sources)
-  browser open [url]   reveal o8's embedded browser, optionally at a URL
-  browser read         embedded-browser page text + interactive elements (selectors)
+  browser open [url]   open a page — localhost rides o8's embedded browser, external URLs auto-route to headless Chrome (engine)
+  browser read         page text + interactive elements (selectors)
   browser click <sel>  click an element (ghost cursor paints in the o8 UI)
   browser type <sel> <text…>  type into an input (--submit presses Enter)
   browser wait <sel>   poll until a selector resolves (--text, --timeout)
+  browser close        end this scope's engine (headless Chrome) session
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   task list            current task pool grouped by ready/running/review/etc.

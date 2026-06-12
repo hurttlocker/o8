@@ -121,6 +121,8 @@ const GATED_PREFIXES = [
   // Browser-agent verb bridge (drives the embedded browser) — exact subpath
   // only: /api/browser/proxy must stay open, iframes can't send a bearer.
   '/api/browser/agent',
+  // Engine tier (headless Chrome live view + verbs) — loopback img tags pass.
+  '/api/browser/engine',
   // Canvas intent bus (Symon / local agents drive the canvas surface).
   '/api/canvas/',
   '/api/runtime/',

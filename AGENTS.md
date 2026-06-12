@@ -76,14 +76,18 @@ o8 ask "<question>" [--repo <path>]    # e.g. o8 ask "What is the theming rule f
 # See "Contributing to the brain" below; this is the only way a worker writes to memory.
 o8 cortex observe --kind <regression|pattern|gotcha|preference> --text "..." [--scope packet|repo|global]
 
-# Embedded browser — drive o8's in-app browser (canvas browser cards / the Browser tab).
-# Localhost pages only at this tier; actions paint a ghost cursor the operator can watch,
-# and every call from a packet worktree lands in the lane audit trail as `browser_acted`.
-o8 browser open [url]                  # reveal the browser, optionally at a URL (new tab, reuses exact match)
+# Browser — two tiers, one contract. LOCALHOST pages ride o8's embedded browser
+# (canvas browser cards / Browser tab — ghost cursor paints so the operator watches);
+# `open` with an EXTERNAL url auto-routes to the ENGINE tier (headless installed-Chrome,
+# live-viewed in the canvas as an "Agent Chrome" tab), and later verbs stick with the
+# engine while its page is open (--surface canvas|panel|engine overrides). Every call
+# from a packet worktree lands in the lane audit trail as `browser_acted`.
+o8 browser open [url]                  # reveal the browser at a URL (localhost → embedded, external → engine)
 o8 browser read [--max-chars <n>]      # page text + interactive elements with stable CSS selectors
 o8 browser click "<selector>"          # click an element (selector from `read`)
 o8 browser type "<selector>" <text…> [--submit]   # type into an input; --submit presses Enter
 o8 browser wait "<selector>" [--text <s>] [--timeout <ms>]   # poll until the selector (and text) resolves
+o8 browser close                       # end this scope's engine (headless Chrome) session
 
 # o8.md review surface — the operator authors o8.md; you ANNOTATE it (never overwrite).
 o8 spec read     [--repo <path>]       # raw o8.md content
