@@ -30,6 +30,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { SmoothCorners } from '@lisse/react';
 import {
   CANVAS_GLASS_DEFAULTS,
   applyCanvasGlassSettings,
@@ -719,7 +720,12 @@ export default function CanvasGlassPreviewPage() {
   const hasTalked = Object.values(convos).some((entries) => entries.length > 0);
 
   return (
-    <div
+    // In the app the transparent window loses macOS's corner mask — clip the
+    // whole canvas to the window radius ourselves (continuous curve). The
+    // desktop reads through the clipped corners, restoring the Apple edge.
+    <SmoothCorners
+      corners={{ radius: inTauri ? 12 : 0 }}
+      autoEffects={false}
       onDragOver={(event) => { event.preventDefault(); }}
       onDrop={dropImages}
       style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: FONT, background: inTauri ? 'transparent' : '#07090d', userSelect: 'none' }}
@@ -1336,7 +1342,7 @@ export default function CanvasGlassPreviewPage() {
           />
         ) : null}
       </AnimatePresence>
-    </div>
+    </SmoothCorners>
   );
 }
 
