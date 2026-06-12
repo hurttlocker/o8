@@ -9,9 +9,11 @@
  * status line, result card, explanation text, numbered follow-ups.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FONT, TONE_DOT, glass, type DockEntry, type OrchestratorLane } from './ui';
+
+const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
 const FOLLOW_UPS = [
   'Review the pending diff',
@@ -197,40 +199,133 @@ function DockEntryView({ entry }: { entry: DockEntry }) {
           <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>{entry.meta}</span>
         </div>
       ) : null}
-      {entry.role === 'text' ? (
-        entry.live ? (
-          // Real orchestrator deltas — already streaming, render as they grow.
-          <p style={{ margin: 0, fontSize: 11, fontWeight: 300, lineHeight: 1.65, letterSpacing: '-0.05px', color: 'var(--cnv-ink)', whiteSpace: 'pre-wrap' }}>
-            {entry.text}
-          </p>
-        ) : (
-          <StreamedText text={entry.text} />
-        )
-      ) : null}
+      {entry.role === 'text' ? <CanvasMarkdown text={entry.text} /> : null}
       {entry.role === 'followups' ? <FollowUps /> : null}
     </motion.div>
   );
 }
 
-/** Words fade in one by one — the smooth streaming feel from the reference. */
-function StreamedText({ text }: { text: string }) {
-  const words = text.split(' ');
-  const [visible, setVisible] = useState(0);
-  useEffect(() => {
-    if (visible >= words.length) return;
-    const timer = setInterval(() => {
-      setVisible((value) => Math.min(words.length, value + 1));
-    }, 38);
-    return () => clearInterval(timer);
-  }, [visible, words.length]);
+/** Inline markdown — bold / italic / code / links — at the chat's type scale.
+ *  Canvas-token styled (not the dashboard's --t-* tokens). Partial spans mid
+ *  stream (e.g. an unclosed `**`) stay literal until their closer arrives. */
+function cnvInline(text: string, keyBase: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const pattern = /(\*\*[^*]+\*\*|\*[^*]+\*|`[^`]+`|\[[^\]]+\]\([^)]+\))/g;
+  let last = 0;
+  let i = 0;
+  for (const match of text.matchAll(pattern)) {
+    const value = match[0];
+    const index = match.index ?? 0;
+    if (index > last) nodes.push(text.slice(last, index));
+    const key = `${keyBase}:${i++}`;
+    if (value.startsWith('**')) {
+      nodes.push(<strong key={key} style={{ fontWeight: 500, color: 'var(--cnv-ink)' }}>{value.slice(2, -2)}</strong>);
+    } else if (value.startsWith('*')) {
+      nodes.push(<em key={key}>{value.slice(1, -1)}</em>);
+    } else if (value.startsWith('`')) {
+      nodes.push(
+        <code key={key} style={{ fontFamily: MONO, fontSize: '0.92em', background: 'var(--cnv-tint)', borderRadius: 5, paddingTop: 1, paddingBottom: 1, paddingLeft: 4, paddingRight: 4 }}>
+          {value.slice(1, -1)}
+        </code>,
+      );
+    } else {
+      const link = value.match(/^\[([^\]]+)\]\(([^)]+)\)$/);
+      nodes.push(
+        <a key={key} href={link?.[2] ?? '#'} target="_blank" rel="noreferrer" style={{ color: 'var(--cnv-ink)', textDecoration: 'underline', textUnderlineOffset: 2 }}>
+          {link?.[1] ?? value}
+        </a>,
+      );
+    }
+    last = index + value.length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+const UL_RE = /^\s*[-*]\s+(.+)$/;
+const OL_RE = /^\s*\d+\.\s+(.+)$/;
+
+/** Block markdown — headings, lists, code fences, blockquotes, paragraphs —
+ *  rendered as real elements so the orchestrator's answer reads as prose, not
+ *  raw `**` and `#` source. Line-based, like the dashboard's MarkdownRender. */
+function CanvasMarkdown({ text }: { text: string }) {
+  const blocks: ReactNode[] = [];
+  const lines = text.split('\n');
+  let i = 0;
+  let key = 0;
+  while (i < lines.length) {
+    const line = lines[i] ?? '';
+
+    // Fenced code — consume through the closing ``` (or end of stream).
+    if (/^```/.test(line)) {
+      const code: string[] = [];
+      i += 1;
+      while (i < lines.length && !/^```/.test(lines[i] ?? '')) {
+        code.push(lines[i] ?? '');
+        i += 1;
+      }
+      i += 1;
+      blocks.push(
+        <pre key={`md-${key++}`} style={{ margin: 0, marginTop: 6, marginBottom: 6, overflowX: 'auto', background: 'var(--cnv-tint)', border: '1px solid var(--cnv-edge)', borderRadius: 9, paddingTop: 7, paddingBottom: 7, paddingLeft: 9, paddingRight: 9 }}>
+          <code style={{ fontFamily: MONO, fontSize: 10.5, lineHeight: 1.5, color: 'var(--cnv-ink)', whiteSpace: 'pre' }}>{code.join('\n')}</code>
+        </pre>,
+      );
+      continue;
+    }
+
+    const heading = line.match(/^(#{1,4})\s+(.+)$/);
+    if (heading) {
+      const level = heading[1]?.length ?? 1;
+      const size = level <= 1 ? 14 : level === 2 ? 13 : 12;
+      blocks.push(
+        <div key={`md-${key++}`} style={{ fontFamily: FONT, fontSize: size, fontWeight: 500, lineHeight: 1.3, letterSpacing: '-0.2px', color: 'var(--cnv-ink)', marginTop: blocks.length === 0 ? 0 : 9, marginBottom: 3 }}>
+          {cnvInline(heading[2] ?? '', `md-${key}`)}
+        </div>,
+      );
+      i += 1;
+      continue;
+    }
+
+    // List — group consecutive items into one <ul>/<ol>.
+    if (UL_RE.test(line) || OL_RE.test(line)) {
+      const ordered = OL_RE.test(line);
+      const items: ReactNode[] = [];
+      while (i < lines.length && (UL_RE.test(lines[i] ?? '') || OL_RE.test(lines[i] ?? ''))) {
+        const m = (lines[i] ?? '').match(UL_RE) ?? (lines[i] ?? '').match(OL_RE);
+        items.push(<li key={`md-${key}-${i}`} style={{ marginBottom: 2 }}>{cnvInline(m?.[1] ?? '', `md-${key}-${i}`)}</li>);
+        i += 1;
+      }
+      const List = ordered ? 'ol' : 'ul';
+      blocks.push(<List key={`md-${key++}`} style={{ margin: 0, marginTop: 3, marginBottom: 3, paddingLeft: 18 }}>{items}</List>);
+      continue;
+    }
+
+    const quote = line.match(/^>\s?(.*)$/);
+    if (quote) {
+      // Full-border box, never a Material borderLeft accent.
+      blocks.push(
+        <blockquote key={`md-${key++}`} style={{ margin: 0, marginTop: 5, marginBottom: 5, border: '1px solid var(--cnv-edge)', borderRadius: 9, background: 'var(--cnv-tint)', paddingTop: 5, paddingBottom: 5, paddingLeft: 9, paddingRight: 9, color: 'var(--cnv-ink-muted)' }}>
+          {cnvInline(quote[1] ?? '', `md-${key}`)}
+        </blockquote>,
+      );
+      i += 1;
+      continue;
+    }
+
+    if (line.trim() === '') {
+      blocks.push(<div key={`md-${key++}`} style={{ height: 6 }} />);
+      i += 1;
+      continue;
+    }
+
+    blocks.push(<p key={`md-${key++}`} style={{ margin: 0, marginBottom: 5, lineHeight: 1.65 }}>{cnvInline(line, `md-${key}`)}</p>);
+    i += 1;
+  }
+
   return (
-    <p style={{ margin: 0, fontSize: 11, fontWeight: 300, lineHeight: 1.65, letterSpacing: '-0.05px', color: 'var(--cnv-ink)' }}>
-      {words.slice(0, visible).map((word, index) => (
-        <motion.span key={index} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.35 }}>
-          {word}{' '}
-        </motion.span>
-      ))}
-    </p>
+    <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.05px', color: 'var(--cnv-ink)', fontFamily: FONT }}>
+      {blocks}
+    </div>
   );
 }
 
