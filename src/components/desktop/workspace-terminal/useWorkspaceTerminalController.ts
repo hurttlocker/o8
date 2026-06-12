@@ -320,7 +320,13 @@ export function useWorkspaceTerminalController(
     if (restoreSettledRef.current) {
       persistTabs(tabs, effectiveActiveTabId);
     }
-  }, [effectiveActiveTabId, persistTabs, tabs]);
+    // `restoreCompletedKey` is a dep so this re-arms at every settle point
+    // (#1234): a tab op that lands while the gate is closed — or whose
+    // debounced save gets cleared by resetControllerRefs during a restore-key
+    // change — would otherwise never be re-persisted until the NEXT tab op.
+    // Every settle path calls setRestoreCompletedKey, so the gate opening
+    // flushes the accumulated state exactly once.
+  }, [effectiveActiveTabId, persistTabs, restoreCompletedKey, tabs]);
 
   // Capture each orchestrator tab's chat-history thread id so the exact
   // conversation survives reload. OrchestratorTab broadcasts
@@ -632,10 +638,25 @@ export function useWorkspaceTerminalController(
 
     return () => {
       cancelled = true;
+      // #1234 — if we're tearing down a restore that never settled, re-arm
+      // the one-shot guard so the successor effect run performs the restore
+      // instead of bailing at `restoredRef`. Without this, any dep-identity
+      // change mid-restore (WS send callbacks, StrictMode's dev double-mount)
+      // cancels the only run that would ever flip restoreSettledRef — and the
+      // persist effect stays disarmed for the whole session while the UI
+      // looks healthy: every tab op after boot silently fails to save.
+      if (restoreInFlightRef.current) {
+        restoredRef.current = false;
+      }
       restoreInFlightRef.current = false;
       window.clearTimeout(timer);
     };
-  }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultChatTabSet, createDefaultShellTab, defaultTab, requestTerminalForTab, splitCreated, stateScope]);
+    // `restoreKey` is a dep so a preferredRepo change re-runs this effect:
+    // the restore-key effect above resets/preserves the controller refs but
+    // cannot itself restore — without this dep, a non-preserve key change
+    // cleared the tabs and left restoredRef=false with nothing to re-trigger
+    // the restore (the second half of #1234).
+  }, [applyPersistedState, autoCreateDefaultTab, createDefaultChatTab, createDefaultChatTabSet, createDefaultShellTab, defaultTab, requestTerminalForTab, restoreKey, splitCreated, stateScope]);
 
   useEffect(() => {
     if (!termWsConnected || !restoreSettledRef.current || initialTerminalBootstrapRef.current) return;
