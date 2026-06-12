@@ -376,10 +376,37 @@ export default function CanvasGlassPreviewPage() {
   const resolveStatus = useCallback((lane: string, text: string) => {
     setConvos((previous) => ({
       ...previous,
-      [lane]: (previous[lane] ?? []).map((entry) => (
-        entry.role === 'status' && entry.pending ? { ...entry, pending: false, text } : entry
-      )),
+      [lane]: (previous[lane] ?? []).map((entry) => {
+        if (entry.role !== 'status' || !entry.pending) return entry;
+        // A live tool cluster settles to its own tally, not the turn label.
+        if (entry.kind === 'tool') {
+          const count = entry.count ?? 1;
+          return { ...entry, pending: false, text: `${count} action${count === 1 ? '' : 's'}` };
+        }
+        return { ...entry, pending: false, text };
+      }),
     }));
+  }, []);
+
+  /** Tool calls absorb into one live cluster per work phase — the row
+   *  shows the latest tool name + a running count instead of a pill per
+   *  call. A text delta in between starts the next cluster. */
+  const noteToolUse = useCallback((lane: string, name: string) => {
+    setConvos((previous) => {
+      const entries = previous[lane] ?? [];
+      const last = entries[entries.length - 1];
+      if (last && last.role === 'status' && last.kind === 'tool' && last.pending) {
+        const updated = [...entries];
+        updated[updated.length - 1] = { ...last, text: name, count: (last.count ?? 1) + 1 };
+        return { ...previous, [lane]: updated };
+      }
+      const id = entryIdRef.current;
+      entryIdRef.current += 1;
+      return {
+        ...previous,
+        [lane]: [...entries.filter((e) => e.role !== 'followups'), { role: 'status', text: name, pending: true, kind: 'tool', count: 1, id }],
+      };
+    });
   }, []);
 
   /** Real orchestrator deltas grow the last live text entry in place. */
@@ -416,7 +443,7 @@ export default function CanvasGlassPreviewPage() {
         resolveStatus(repo, 'Working');
         setDockOpen(true);
       }
-      appendEntries(repo, [{ role: 'status', text: name, pending: false, kind: 'tool' }]);
+      noteToolUse(repo, name);
     },
     onStatus: (repo, status) => {
       setOrchBusy(status === 'busy');
