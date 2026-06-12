@@ -78,7 +78,8 @@ export function TunerPanel({
                 && settings.tint === preset.values.tint
                 && settings.ink === preset.values.ink
                 && settings.veil === preset.values.veil
-                && settings.material === preset.values.material;
+                && settings.material === preset.values.material
+                && settings.backdropFrost === preset.values.backdropFrost;
               return (
                 <button
                   key={preset.id}
@@ -142,6 +143,7 @@ export function TunerPanel({
               );
             })}
           </div>
+          <TunerSlider label="Backdrop frost" display={`${Math.round(settings.backdropFrost)}px`} value={settings.backdropFrost} range={CANVAS_GLASS_RANGES.backdropFrost} onChange={(backdropFrost) => onChange({ backdropFrost })} />
           <TunerSlider label="Veil" display={`${Math.round(settings.veil * 100)}%`} value={settings.veil} range={CANVAS_GLASS_RANGES.veil} onChange={(veil) => onChange({ veil })} />
           <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
             Glass panes
