@@ -16,14 +16,41 @@ export function glass(deep = false): CSSProperties {
   } as CSSProperties;
 }
 
+/** Floating orchestrator chat cards run their OWN material dial — they
+ *  carry conversation ink, so the operator tunes them apart from the
+ *  ambient glass (the "Floating chats" sliders in the tuner). */
+export function glassChat(): CSSProperties {
+  return {
+    ...glass(true),
+    background: 'var(--cnv-chat-tint, var(--cnv-tint-deep))',
+    backdropFilter: 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
+    WebkitBackdropFilter: 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
+    border: '1px solid var(--cnv-chat-edge, var(--cnv-edge))',
+    color: 'var(--cnv-chat-ink, var(--cnv-ink))',
+  } as CSSProperties;
+}
+
+/** Rebinds the canvas ink/tint vocabulary INSIDE a chat card to the
+ *  chat-scoped values — so when chats run their own tone (light fog on a
+ *  dark canvas), every entry, dot, and hairline inside flips with them. */
+export function chatVocabularyRebind(): CSSProperties {
+  return {
+    ['--cnv-ink' as string]: 'var(--cnv-chat-ink)',
+    ['--cnv-ink-muted' as string]: 'var(--cnv-chat-ink-muted)',
+    ['--cnv-edge' as string]: 'var(--cnv-chat-edge)',
+    ['--cnv-tint' as string]: 'var(--cnv-chat-tint-soft)',
+    ['--cnv-tint-deep' as string]: 'var(--cnv-chat-tint)',
+  } as CSSProperties;
+}
+
 /** Floating menus/popovers that sit OVER text need a near-solid back —
  *  plain glass tint lets the content underneath bleed through the rows. */
 export function glassPop(): CSSProperties {
   return {
     ...glass(true),
-    // Layered: a near-opaque slate base under the tunable tint. Popovers
+    // Layered: a near-opaque tone base under the tunable tint. Popovers
     // stay in the glass family but never let text read through them.
-    background: 'linear-gradient(var(--cnv-tint-deep), var(--cnv-tint-deep)), rgba(13, 16, 21, 0.88)',
+    background: 'linear-gradient(var(--cnv-tint-deep), var(--cnv-tint-deep)), var(--cnv-pop-base, rgba(13, 16, 21, 0.88))',
   } as CSSProperties;
 }
 
@@ -106,13 +133,18 @@ export interface OrchestratorLane {
 /** A single entry in a docked conversation (id-less authoring shape).
  *  `live` text = real orchestrator deltas (grows in place, no word-fade). */
 export type NewDockEntry =
-  | { role: 'user'; text: string }
+  /** images = dataURIs of attachments that rode this send — rendered as
+   *  real thumbnails, not a "· 2 images attached" footnote. */
+  | { role: 'user'; text: string; images?: string[] }
   /** kind 'tool' = a live activity cluster — text is the latest tool name
    *  while pending, count is how many calls it has absorbed. One row per
    *  work phase, not one per call. */
   | { role: 'status'; text: string; pending: boolean; kind?: 'tool'; count?: number }
   | { role: 'result'; title: string; meta: string }
   | { role: 'text'; text: string; live?: boolean }
+  /** The model's reasoning stream — muted, clamped to a few lines, click
+   *  to expand. live grows in place like text. */
+  | { role: 'thinking'; text: string; live?: boolean }
   | { role: 'followups' };
 
 export type DockEntry = NewDockEntry & { id: number };

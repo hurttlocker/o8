@@ -422,6 +422,8 @@ export default function CanvasGlassPreviewPage() {
     setConvos((previous) => ({
       ...previous,
       [lane]: (previous[lane] ?? []).map((entry) => {
+        // The turn settling also settles any live reasoning stream.
+        if (entry.role === 'thinking' && entry.live) return { ...entry, live: false };
         if (entry.role !== 'status' || !entry.pending) return entry;
         // A live tool cluster settles to its own tally, not the turn label.
         if (entry.kind === 'tool') {
@@ -454,7 +456,8 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
-  /** Real orchestrator deltas grow the last live text entry in place. */
+  /** Real orchestrator deltas grow the last live text entry in place.
+   *  A text delta also settles any live reasoning stream above it. */
   const appendAssistantDelta = useCallback((lane: string, delta: string) => {
     setConvos((previous) => {
       const entries = previous[lane] ?? [];
@@ -466,7 +469,25 @@ export default function CanvasGlassPreviewPage() {
       }
       const id = entryIdRef.current;
       entryIdRef.current += 1;
-      return { ...previous, [lane]: [...entries, { role: 'text', text: delta, live: true, id }] };
+      const settled = entries.map((entry) => (entry.role === 'thinking' && entry.live ? { ...entry, live: false } : entry));
+      return { ...previous, [lane]: [...settled, { role: 'text', text: delta, live: true, id }] };
+    });
+  }, []);
+
+  /** Reasoning deltas — the model thinking out loud, visible on the canvas
+   *  as a muted clamped stream (Q: history should show reasoning). */
+  const appendThinkingDelta = useCallback((lane: string, delta: string) => {
+    setConvos((previous) => {
+      const entries = previous[lane] ?? [];
+      const last = entries[entries.length - 1];
+      if (last && last.role === 'thinking' && last.live) {
+        const updated = [...entries];
+        updated[updated.length - 1] = { ...last, text: last.text + delta };
+        return { ...previous, [lane]: updated };
+      }
+      const id = entryIdRef.current;
+      entryIdRef.current += 1;
+      return { ...previous, [lane]: [...entries, { role: 'thinking', text: delta, live: true, id }] };
     });
   }, []);
 
@@ -474,10 +495,13 @@ export default function CanvasGlassPreviewPage() {
    *  AND each chat card's thread-keyed convo flow through here. */
   const handleOrcaEvent = useCallback((lane: string, event: OrcaThreadEvent): void => {
     if (event.type === 'output') {
-      if (event.thinking) return;
       if (!firstOutputRef.current.has(lane)) {
         firstOutputRef.current.add(lane);
         resolveStatus(lane, 'Working');
+      }
+      if (event.thinking) {
+        appendThinkingDelta(lane, event.text);
+        return;
       }
       appendAssistantDelta(lane, event.text);
     } else if (event.type === 'tool') {
@@ -493,13 +517,13 @@ export default function CanvasGlassPreviewPage() {
       resolveStatus(lane, 'Failed');
       appendEntries(lane, [{ role: 'status', text: event.error.slice(0, 200), pending: false }]);
     }
-  }, [appendAssistantDelta, appendEntries, noteToolUse, resolveStatus]);
+  }, [appendAssistantDelta, appendEntries, appendThinkingDelta, noteToolUse, resolveStatus]);
 
   // The REAL orchestrator — same ws-server channel the OrchestratorTab
   // speaks, scoped to the composer's repo. Convos are keyed by repo path.
   const orca = useCanvasOrchestrator(activeRepoPath, {
     onOutput: (repo, text, thinking) => {
-      if (!thinking && !firstOutputRef.current.has(repo)) setDockOpen(true);
+      if (!firstOutputRef.current.has(repo)) setDockOpen(true);
       handleOrcaEvent(repo, { type: 'output', text, thinking });
     },
     onToolUse: (repo, name) => {
@@ -526,19 +550,21 @@ export default function CanvasGlassPreviewPage() {
       thinkingEffort: orcaEffort,
       ...(attachments?.length ? { attachments } : {}),
     });
-    const userText = attachments?.length
-      ? `${prompt}\n\n· ${attachments.length} image${attachments.length === 1 ? '' : 's'} attached`
-      : prompt;
+    const userEntry = {
+      role: 'user' as const,
+      text: prompt,
+      ...(attachments?.length ? { images: attachments.map((attachment) => attachment.dataUri) } : {}),
+    };
     if (!threadId) {
       appendEntries(activeRepoPath, [
-        { role: 'user', text: userText },
+        userEntry,
         { role: 'status', text: 'Not connected yet — try again in a second', pending: false },
       ]);
       setDockOpen(true);
       return false;
     }
     appendEntries(activeRepoPath, [
-      { role: 'user', text: userText },
+      userEntry,
       { role: 'status', text: 'Thinking', pending: true },
     ]);
     return true;

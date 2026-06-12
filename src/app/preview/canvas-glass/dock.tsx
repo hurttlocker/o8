@@ -284,6 +284,8 @@ export function OrchestratorDock({
 
 /** Shared by the dock AND the floating chat cards — one entry vocabulary. */
 export function DockEntryView({ entry }: { entry: DockEntry }) {
+  // Reasoning entries clamp to a few lines; click toggles the full stream.
+  const [thinkingOpen, setThinkingOpen] = useState(false);
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -296,6 +298,9 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
           style={{
             alignSelf: 'flex-end',
             maxWidth: 300,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: entry.images?.length ? 7 : 0,
             paddingTop: 8,
             paddingBottom: 8,
             paddingLeft: 12,
@@ -308,6 +313,45 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
             ...glass(true),
             boxShadow: 'none',
           }}
+        >
+          {entry.images?.length ? (
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 5 }}>
+              {entry.images.map((src, index) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={index}
+                  src={src}
+                  alt=""
+                  style={{ width: 84, height: 84, objectFit: 'cover', borderRadius: 9, border: '1px solid var(--cnv-edge)' }}
+                />
+              ))}
+            </div>
+          ) : null}
+          {entry.text ? <span>{entry.text}</span> : null}
+        </div>
+      ) : null}
+      {entry.role === 'thinking' ? (
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => setThinkingOpen((value) => !value)}
+          onKeyDown={(event) => { if (event.key === 'Enter') setThinkingOpen((value) => !value); }}
+          title={thinkingOpen ? 'Collapse reasoning' : 'Expand reasoning'}
+          style={{
+            cursor: 'pointer',
+            fontSize: 10,
+            fontWeight: 260,
+            lineHeight: 1.55,
+            color: 'var(--cnv-ink-muted)',
+            letterSpacing: '-0.05px',
+            whiteSpace: 'pre-wrap',
+            ...(thinkingOpen ? {} : {
+              display: '-webkit-box',
+              WebkitLineClamp: 3,
+              WebkitBoxOrient: 'vertical' as const,
+              overflow: 'hidden',
+            }),
+          } as React.CSSProperties}
         >
           {entry.text}
         </div>
