@@ -46,6 +46,18 @@ export const CARD_WIDTH: Record<CardKind, number> = {
   image: 200,
 };
 
+/**
+ * Terminal-card constants live HERE, not in terminal-card.tsx — a module
+ * that exports non-component values breaks the Fast Refresh boundary, and
+ * every edit to it would remount the live terminals (detach/re-attach churn).
+ * terminal-card.tsx must export only the component (+ types).
+ */
+export const TERM_MIN_W = 340;
+export const TERM_MIN_H = 190;
+/** DEV ONLY — title-bar veil slider for dialing the terminal glass; freeze
+ *  the chosen value into the default and flip this off before graduating. */
+export const DEV_TERM_GLASS_TUNER = true;
+
 /** One running-orchestrator row in the side dock switcher. */
 export interface OrchestratorLane {
   id: string;
