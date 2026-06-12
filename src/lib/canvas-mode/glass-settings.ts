@@ -71,6 +71,7 @@ export const CANVAS_BACKDROPS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'paper', label: 'Paper' },
   { id: 'aurora', label: 'Aurora' },
   { id: 'warp', label: 'Warp' },
+  { id: 'pulse', label: 'Pulse' },
   { id: 'radial', label: 'Radial' },
 ];
 
