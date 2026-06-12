@@ -58,7 +58,7 @@ import { CenterStage, type Stage } from './stage';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { useCanvasOrchestrator } from './use-canvas-orchestrator';
-import { FONT, IMG_MAX_SPAWN_EDGE, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
+import { FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
 
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -115,7 +115,6 @@ export default function CanvasGlassPreviewPage() {
   const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
   const [cards, setCards] = useState<MockCard[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
-  const [leftRailOpen, setLeftRailOpen] = useState(false);
   const [rightRailOpen, setRightRailOpen] = useState(false);
   const [composerValue, setComposerValue] = useState('');
   const [inTauri, setInTauri] = useState(false);
@@ -134,6 +133,7 @@ export default function CanvasGlassPreviewPage() {
   const [imageCards, setImageCards] = useState<ImageCard[]>([]);
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [browserCards, setBrowserCards] = useState<BrowserCard[]>([]);
@@ -293,6 +293,20 @@ export default function CanvasGlassPreviewPage() {
       clearInterval(threadTimer);
     };
   }, []);
+
+  // Opening the Sessions popover refetches so the list is never two
+  // minutes stale.
+  useEffect(() => {
+    if (!sessionsOpen) return;
+    let disposed = false;
+    fetch('/api/mobile/orchestrator/threads')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { threads?: CanvasThreadRow[] } | null) => {
+        if (!disposed && data && Array.isArray(data.threads)) setRecentThreads(data.threads);
+      })
+      .catch(() => {});
+    return () => { disposed = true; };
+  }, [sessionsOpen]);
 
   // Right rail mirrors the active repo's recent commits.
   useEffect(() => {
@@ -1454,6 +1468,9 @@ export default function CanvasGlassPreviewPage() {
         >
           <circle cx="12" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M12 8v4M12 12l-6 4M12 12l6 4" />
         </SpawnGlyphButton>
+        <SpawnGlyphButton label="Sessions" onClick={() => setSessionsOpen((value) => !value)}>
+          <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" />
+        </SpawnGlyphButton>
         <SpawnGlyphButton label="Spawn browser" onClick={spawnBrowserCard}>
           <circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
         </SpawnGlyphButton>
@@ -1536,22 +1553,109 @@ export default function CanvasGlassPreviewPage() {
         ) : null}
       </AnimatePresence>
 
-      {/* ── Edge hover rails — real sessions, real commits ───────── */}
-      <EdgeRail
-        side="left"
-        open={leftRailOpen}
-        onOpenChange={setLeftRailOpen}
-        title="Sessions"
-        rows={recentThreads.slice(0, 5).map((thread) => [
-          thread.title?.trim() || 'Untitled session',
-          [thread.repoName, relAge(thread.lastMessageAt)].filter(Boolean).join(' · '),
-        ])}
-        emptyHint="No orchestrator sessions yet — talk below."
-        onRowClick={(index) => {
-          const thread = recentThreads[index];
-          if (thread) pickThread(thread.id, thread.repoPath, { title: thread.title, repoName: thread.repoName });
-        }}
-      />
+      {/* ── Sessions drawer — history lives on the left, like the
+            default page. Glass matches the operator's tuner (no opaque
+            slab), hard edges, and the list dissolves at both ends as
+            you scroll — the cue that older sessions are down there. */}
+      <AnimatePresence>
+        {sessionsOpen ? (
+          <>
+            <div role="presentation" onClick={() => setSessionsOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
+            <motion.div
+              initial={{ opacity: 0, x: -16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -16 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 32 }}
+              style={{
+                position: 'absolute',
+                left: 64,
+                top: 74,
+                bottom: 96,
+                width: 272,
+                display: 'flex',
+                flexDirection: 'column',
+                paddingTop: 12,
+                paddingBottom: 4,
+                paddingLeft: 8,
+                paddingRight: 8,
+                borderRadius: 6,
+                zIndex: 46,
+                ...glass(true),
+              }}
+            >
+              <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 7 }}>
+                Sessions
+              </span>
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  paddingTop: 14,
+                  paddingBottom: 18,
+                  scrollbarWidth: 'none',
+                  maskImage: 'linear-gradient(to bottom, transparent 0, black 26px, black calc(100% - 30px), transparent 100%)',
+                  WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 26px, black calc(100% - 30px), transparent 100%)',
+                } as React.CSSProperties}
+              >
+              {(convos[activeRepoPath ?? '']?.length ?? 0) > 0 ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setDockOpen(true);
+                    setSessionsOpen(false);
+                  }}
+                  style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 7, paddingLeft: 8, paddingRight: 8, borderRadius: 9, borderWidth: 0, background: 'transparent', cursor: 'pointer', fontFamily: FONT, textAlign: 'left', width: '100%' }}
+                  onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                >
+                  <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: orchBusy ? TONE_DOT.working : TONE_DOT.idle, flexShrink: 0 }} />
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 11.5, fontWeight: 400, color: 'var(--cnv-ink)', letterSpacing: '-0.1px' }}>
+                      Live — {activeRepoName ?? 'orchestrator'}
+                    </span>
+                    <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>
+                      {orchBusy ? 'Working now · open the dock' : 'Open the dock'}
+                    </span>
+                  </span>
+                </button>
+              ) : null}
+              {recentThreads.length === 0 ? (
+                <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', paddingLeft: 8, paddingTop: 2, paddingBottom: 4, fontFamily: FONT }}>
+                  No orchestrator sessions yet — talk below.
+                </span>
+              ) : (
+                recentThreads.slice(0, 20).map((thread) => (
+                  <button
+                    key={thread.id}
+                    type="button"
+                    onClick={() => {
+                      pickThread(thread.id, thread.repoPath, { title: thread.title, repoName: thread.repoName });
+                      setSessionsOpen(false);
+                    }}
+                    style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8, borderRadius: 9, borderWidth: 0, background: 'transparent', cursor: 'pointer', fontFamily: FONT, textAlign: 'left', width: '100%' }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>
+                      {thread.title?.trim() || 'Untitled session'}
+                    </span>
+                    <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>
+                      {[thread.repoName, relAge(thread.lastMessageAt)].filter(Boolean).join(' · ')}
+                    </span>
+                  </button>
+                ))
+              )}
+              </div>
+            </motion.div>
+          </>
+        ) : null}
+      </AnimatePresence>
+
+      {/* ── Edge hover rail — real commits on the right ──────────── */}
       {dockOpen ? null : (
         <EdgeRail
           side="right"
@@ -1576,7 +1680,6 @@ export default function CanvasGlassPreviewPage() {
             activeLabel={activeRepoName ?? '…'}
             activeTone={orchBusy ? 'working' : 'idle'}
             onSelectLane={setActiveRepoPath}
-            onPickThread={pickThread}
             onClose={() => setDockOpen(false)}
           />
         ) : null}

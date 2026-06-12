@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import {
   GrainGradient,
   MeshGradient,
+  PulsingBorder,
   StaticRadialGradient,
   Warp,
 } from '@paper-design/shaders-react';
@@ -326,6 +327,29 @@ export function CanvasBackdropLayer({ kind }: { kind: string }) {
           {...TAME}
           speed={0.06}
           scale={1.2}
+        />
+      ));
+    case 'pulse':
+      // The o8 breath — amber + steel breathing at the window edge. The
+      // one accent piece; everything else stays ink. A natural "Symon is
+      // listening" presence glow later.
+      return wrap(0.45, (
+        <PulsingBorder
+          colorBack="#00000000"
+          colors={['#f59e0b', '#3a4a5f']}
+          thickness={0.08}
+          roundness={0.3}
+          softness={0.8}
+          intensity={0.25}
+          bloom={0.4}
+          spots={3}
+          spotSize={0.4}
+          pulse={0.3}
+          smoke={0.3}
+          smokeSize={0.5}
+          {...TAME}
+          speed={0.3}
+          fit="none"
         />
       ));
     case 'radial':
