@@ -765,6 +765,33 @@ export default function CanvasGlassPreviewPage() {
     }]);
   }, []);
 
+  // Agents reach this browser too — o8_view_open_browser (operator MCP)
+  // dispatches this same event for the default side; on canvas it lands as
+  // a browser card. New tab per URL, reusing an existing tab on a match.
+  useEffect(() => {
+    const onOpenBrowser = (event: Event) => {
+      const url = (event as CustomEvent<{ url?: string | null }>).detail?.url?.trim() || `${window.location.origin}/dashboard`;
+      setBrowserCards((previous) => {
+        if (previous.length === 0) {
+          const id = nextIdRef.current;
+          nextIdRef.current += 1;
+          zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+          return [{ id, x: 240, y: 110, z: zPeakRef.current, w: 640, h: 400, tabs: [{ id: 1, url }], activeTabId: 1 }];
+        }
+        const top = previous.reduce((best, card) => (card.z > best.z ? card : best), previous[0]);
+        return previous.map((card) => {
+          if (card.id !== top.id) return card;
+          const existing = card.tabs.find((tab) => tab.url === url);
+          if (existing) return { ...card, activeTabId: existing.id };
+          const nextTabId = card.tabs.reduce((max, tab) => Math.max(max, tab.id), 0) + 1;
+          return { ...card, tabs: [...card.tabs, { id: nextTabId, url }], activeTabId: nextTabId };
+        });
+      });
+    };
+    window.addEventListener('o8:open-browser', onOpenBrowser);
+    return () => window.removeEventListener('o8:open-browser', onOpenBrowser);
+  }, []);
+
   const moveBrowserCard = useCallback((id: number, x: number, y: number) => {
     setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
