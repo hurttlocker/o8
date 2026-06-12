@@ -74,6 +74,8 @@
     "@json-render/react": "^0.14.0",
     "@json-render/shadcn": "^0.14.0",
     "@lezer/highlight": "^1.2.3",
+    "@lisse/core": "^0.4.0",
+    "@lisse/react": "^0.4.0",
     "@monaco-editor/react": "^4.7.0",
     "@phosphor-icons/core": "^2.1.1",
     "@phosphor-icons/react": "^2.1.10",

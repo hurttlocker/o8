@@ -70,7 +70,7 @@ export interface OrchestratorLane {
  *  `live` text = real orchestrator deltas (grows in place, no word-fade). */
 export type NewDockEntry =
   | { role: 'user'; text: string }
-  | { role: 'status'; text: string; pending: boolean }
+  | { role: 'status'; text: string; pending: boolean; kind?: 'tool' }
   | { role: 'result'; title: string; meta: string }
   | { role: 'text'; text: string; live?: boolean }
   | { role: 'followups' };
