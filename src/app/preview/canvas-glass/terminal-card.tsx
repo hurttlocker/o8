@@ -17,6 +17,7 @@ import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
+import { CANVAS_GLASS_CHANGED_EVENT } from '@/lib/canvas-mode/glass-settings';
 import { DEV_TERM_GLASS_TUNER, FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
 
 // NOTE: this module must export ONLY the component (+ types) — runtime
@@ -126,6 +127,22 @@ export function TerminalGlassCard({
   const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
+
+  // The shell inks with the CANVAS vocabulary — one text color across the
+  // whole theme (Q, 2026-06-12). buildXtermTheme reads --t-terminal-* off
+  // the root, which the o8.md card's ThemeProvider stamps with dashboard
+  // palette values; this override keeps canvas terminals on --cnv-ink.
+  const [inkOverrides, setInkOverrides] = useState<Record<string, string> | undefined>(undefined);
+  useEffect(() => {
+    const read = () => {
+      const styles = getComputedStyle(document.documentElement);
+      const ink = styles.getPropertyValue('--cnv-ink').trim();
+      if (ink) setInkOverrides({ foreground: ink, cursor: ink, selectionForeground: ink });
+    };
+    read();
+    window.addEventListener(CANVAS_GLASS_CHANGED_EVENT, read);
+    return () => window.removeEventListener(CANVAS_GLASS_CHANGED_EVENT, read);
+  }, []);
 
   return (
     <motion.div
@@ -259,6 +276,7 @@ export function TerminalGlassCard({
               sendTerminalDetach={sendTerminalDetach}
               visible
               transparent
+              themeOverrides={inkOverrides}
               fontSize={11.5}
               connectionEpoch={connectionEpoch}
               spawnReveal
