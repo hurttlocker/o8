@@ -2,14 +2,22 @@
 
 /**
  * canvas-mode/glass-settings — operator-tunable glass material for Canvas
- * mode (#1232). Three knobs, persisted client-side and applied as CSS vars
- * so the Settings sliders and the /preview/canvas-glass test page share one
- * live value:
+ * mode (#1232). Two layers, persisted client-side and applied as CSS vars
+ * so the Settings sliders and the /preview/canvas-glass test page share
+ * one live value:
  *
- *   frost — backdrop blur radius (px). How much the world behind diffuses.
- *   tint  — dark tint alpha. 0 = clear glass, higher = the darker Apple/Siri
- *           material from the reference shots.
- *   ink   — text/icon white alpha. Legibility against whatever bleeds through.
+ * The floating glass (cards, docks, rails):
+ *   frost    — backdrop blur radius (px). How much the world behind a pane diffuses.
+ *   tint     — dark tint alpha. 0 = clear glass, higher = the darker Apple/Siri material.
+ *   ink      — text/icon white alpha. Legibility against whatever bleeds through.
+ *   vibrance — backdrop saturation multiplier. How colourful the bleed-through reads.
+ *
+ * The background (the whole window, behind everything):
+ *   material — the native NSVisualEffectMaterial id (discrete looks; the
+ *              desktop diffusion level comes from macOS, not CSS). Applied
+ *              by canvas surfaces via setCanvasMaterial — NOT a CSS var.
+ *   veil     — a window-wide dark wash painted over the material (alpha).
+ *              Continuous darkness control for the background itself.
  *
  * Vars (read them, never hardcode the material):
  *   --cnv-frost      blur(px) value, e.g. "26px"
@@ -18,36 +26,65 @@
  *   --cnv-ink        primary ink
  *   --cnv-ink-muted  secondary ink
  *   --cnv-edge       1px hairline for glass edges
+ *   --cnv-sat        saturate() multiplier for the glass recipe
+ *   --cnv-bg-veil    rgba window-wide wash (paint a full-inset layer with it)
  */
 
 export interface CanvasGlassSettings {
   frost: number;
   tint: number;
   ink: number;
+  vibrance: number;
+  veil: number;
+  material: string;
 }
 
+// veil defaults to 0 and vibrance to the recipe's long-standing 1.6 so a
+// stored look from before these knobs existed renders pixel-identical.
 export const CANVAS_GLASS_DEFAULTS: CanvasGlassSettings = {
   frost: 26,
   tint: 0.42,
   ink: 0.92,
+  vibrance: 1.6,
+  veil: 0,
+  material: 'popover',
 };
 
 export const CANVAS_GLASS_RANGES = {
   frost: { min: 0, max: 64, step: 1 },
   tint: { min: 0, max: 0.85, step: 0.01 },
   ink: { min: 0.55, max: 1, step: 0.01 },
+  vibrance: { min: 1, max: 2.2, step: 0.05 },
+  veil: { min: 0, max: 0.8, step: 0.01 },
 } as const;
 
 /**
- * One-click material presets — the "theme switcher" for the glass. Each is
- * just a frost/tint/ink combo; the sliders fine-tune from wherever a preset
+ * The native background materials a canvas surface can run on — each is a
+ * distinct macOS look (Popover = the clear Symon-settings glass, HUD = the
+ * dark chrome default, the rest sit between). Ids match the Rust
+ * set_canvas_material command.
+ */
+export const CANVAS_GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'popover', label: 'Popover' },
+  { id: 'menu', label: 'Menu' },
+  { id: 'sidebar', label: 'Sidebar' },
+  { id: 'sheet', label: 'Sheet' },
+  { id: 'window', label: 'Window' },
+  { id: 'under-window', label: 'Under' },
+  { id: 'fullscreen', label: 'Full' },
+  { id: 'hud', label: 'HUD' },
+];
+
+/**
+ * One-click looks — the "theme switcher" for the glass. Each is a full
+ * combo across both layers; the sliders fine-tune from wherever a preset
  * lands. Clear = the desktop reads through (the Symon-settings look);
  * Siri = the dark Apple reference; Frost = heavy private glass.
  */
 export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; values: CanvasGlassSettings }> = [
-  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96 } },
-  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92 } },
-  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96 } },
+  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'popover' } },
+  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover' } },
+  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar' } },
 ];
 
 const STORAGE_KEY = 'o8:canvas-glass';
@@ -55,6 +92,12 @@ export const CANVAS_GLASS_CHANGED_EVENT = 'o8:canvas-glass-changed';
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function readNumber(candidate: unknown, range: { min: number; max: number }, fallback: number): number {
+  return typeof candidate === 'number' && Number.isFinite(candidate)
+    ? clamp(candidate, range.min, range.max)
+    : fallback;
 }
 
 export function readCanvasGlassSettings(): CanvasGlassSettings {
@@ -66,15 +109,14 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
     if (!parsed || typeof parsed !== 'object') return { ...CANVAS_GLASS_DEFAULTS };
     const candidate = parsed as Partial<CanvasGlassSettings>;
     return {
-      frost: typeof candidate.frost === 'number' && Number.isFinite(candidate.frost)
-        ? clamp(candidate.frost, CANVAS_GLASS_RANGES.frost.min, CANVAS_GLASS_RANGES.frost.max)
-        : CANVAS_GLASS_DEFAULTS.frost,
-      tint: typeof candidate.tint === 'number' && Number.isFinite(candidate.tint)
-        ? clamp(candidate.tint, CANVAS_GLASS_RANGES.tint.min, CANVAS_GLASS_RANGES.tint.max)
-        : CANVAS_GLASS_DEFAULTS.tint,
-      ink: typeof candidate.ink === 'number' && Number.isFinite(candidate.ink)
-        ? clamp(candidate.ink, CANVAS_GLASS_RANGES.ink.min, CANVAS_GLASS_RANGES.ink.max)
-        : CANVAS_GLASS_DEFAULTS.ink,
+      frost: readNumber(candidate.frost, CANVAS_GLASS_RANGES.frost, CANVAS_GLASS_DEFAULTS.frost),
+      tint: readNumber(candidate.tint, CANVAS_GLASS_RANGES.tint, CANVAS_GLASS_DEFAULTS.tint),
+      ink: readNumber(candidate.ink, CANVAS_GLASS_RANGES.ink, CANVAS_GLASS_DEFAULTS.ink),
+      vibrance: readNumber(candidate.vibrance, CANVAS_GLASS_RANGES.vibrance, CANVAS_GLASS_DEFAULTS.vibrance),
+      veil: readNumber(candidate.veil, CANVAS_GLASS_RANGES.veil, CANVAS_GLASS_DEFAULTS.veil),
+      material: typeof candidate.material === 'string' && CANVAS_GLASS_MATERIALS.some((m) => m.id === candidate.material)
+        ? candidate.material
+        : CANVAS_GLASS_DEFAULTS.material,
     };
   } catch {
     return { ...CANVAS_GLASS_DEFAULTS };
@@ -104,4 +146,6 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   root.style.setProperty('--cnv-ink', `rgba(255, 255, 255, ${value.ink.toFixed(2)})`);
   root.style.setProperty('--cnv-ink-muted', `rgba(255, 255, 255, ${(value.ink * 0.62).toFixed(2)})`);
   root.style.setProperty('--cnv-edge', `rgba(255, 255, 255, ${(0.1 + value.tint * 0.1).toFixed(2)})`);
+  root.style.setProperty('--cnv-sat', `${value.vibrance.toFixed(2)}`);
+  root.style.setProperty('--cnv-bg-veil', `rgba(7, 9, 13, ${value.veil.toFixed(2)})`);
 }

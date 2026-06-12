@@ -3304,31 +3304,44 @@ fn o8_debug_show_dock(app: tauri::AppHandle) {
 }
 
 /// Swap the main window's vibrancy material for Canvas mode (#1232).
-/// `clear: true` → Popover (the Symon-settings glass — the desktop reads
-/// through nearly unblurred, Active so it stays vivid when unfocused);
-/// `clear: false` → the default HudWindow chrome material.
+/// `material` picks the NSVisualEffectMaterial behind the whole window —
+/// this IS the canvas background (the desktop reads through it). The ids
+/// mirror `CANVAS_GLASS_MATERIALS` in lib/canvas-mode/glass-settings.ts.
+/// `"default"` restores the HudWindow chrome material (follows-window
+/// state, matching the boot-time application).
 #[tauri::command]
-fn set_canvas_material(app: tauri::AppHandle, clear: bool) -> Result<(), String> {
+fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), String> {
     #[cfg(target_os = "macos")]
     {
         use tauri::Manager;
+        use window_vibrancy::NSVisualEffectMaterial as M;
         let Some(window) = app.get_webview_window("main") else {
             return Err("main window not found".into());
         };
         let target = window.clone();
         window
             .run_on_main_thread(move || {
+                let resolved = match material.as_str() {
+                    "popover" => M::Popover,
+                    "sidebar" => M::Sidebar,
+                    "menu" => M::Menu,
+                    "sheet" => M::Sheet,
+                    "window" => M::WindowBackground,
+                    "under-window" => M::UnderWindowBackground,
+                    "fullscreen" => M::FullScreenUI,
+                    "hud" => M::HudWindow,
+                    _ => M::HudWindow, // "default" and unknown ids → chrome material
+                };
+                // Canvas materials run Active so the glass stays vivid when the
+                // window loses focus; the chrome default keeps follows-window.
+                let state = if material == "default" {
+                    None
+                } else {
+                    Some(window_vibrancy::NSVisualEffectState::Active)
+                };
                 // apply_vibrancy stacks a new effect view per call — always clear first.
                 let _ = window_vibrancy::clear_vibrancy(&target);
-                let (material, state) = if clear {
-                    (
-                        window_vibrancy::NSVisualEffectMaterial::Popover,
-                        Some(window_vibrancy::NSVisualEffectState::Active),
-                    )
-                } else {
-                    (window_vibrancy::NSVisualEffectMaterial::HudWindow, None)
-                };
-                if let Err(e) = window_vibrancy::apply_vibrancy(&target, material, state, None) {
+                if let Err(e) = window_vibrancy::apply_vibrancy(&target, resolved, state, None) {
                     log::warn!("[canvas-material] apply_vibrancy failed: {e}");
                 }
             })
@@ -3336,7 +3349,7 @@ fn set_canvas_material(app: tauri::AppHandle, clear: bool) -> Result<(), String>
     }
     #[cfg(not(target_os = "macos"))]
     {
-        let _ = (app, clear);
+        let _ = (app, material);
     }
     Ok(())
 }
