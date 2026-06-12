@@ -140,8 +140,18 @@ export function TerminalGlassCard({
       if (ink) setInkOverrides({ foreground: ink, cursor: ink, selectionForeground: ink });
     };
     read();
-    window.addEventListener(CANVAS_GLASS_CHANGED_EVENT, read);
-    return () => window.removeEventListener(CANVAS_GLASS_CHANGED_EVENT, read);
+    // The tuner fires the event per slider input tick — rAF-coalesce so N
+    // open terminals don't each force a style read at drag frequency.
+    let frame = 0;
+    const onGlassChange = () => {
+      if (frame) return;
+      frame = requestAnimationFrame(() => { frame = 0; read(); });
+    };
+    window.addEventListener(CANVAS_GLASS_CHANGED_EVENT, onGlassChange);
+    return () => {
+      if (frame) cancelAnimationFrame(frame);
+      window.removeEventListener(CANVAS_GLASS_CHANGED_EVENT, onGlassChange);
+    };
   }, []);
 
   return (
