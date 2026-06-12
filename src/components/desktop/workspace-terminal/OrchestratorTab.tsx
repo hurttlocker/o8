@@ -617,15 +617,16 @@ function OrchestratorTabInner({
     chatPanelRef.current?.sendNow(prompt);
   }, []);
 
-  // Cmd+K opens the quick-action palette — EXCEPT when focus is
-  // already inside the composer textarea (the composer owns that
-  // keystroke for its own shortcuts).
+  // Cmd+Shift+K opens the quick-action palette. Plain Cmd+K belongs to the
+  // global CommandPalette (dashboard/page.tsx) — both used to bind bare ⌘K
+  // on window and the two palettes opened STACKED on orchestrator tabs.
+  // With shift held the letter reports as 'K', so match both cases.
   useEffect(() => {
     if (!active) return;
     const onKeyDown = (event: KeyboardEvent) => {
       const isMac = event.metaKey;
       const isCtrl = event.ctrlKey;
-      if (event.key !== 'k' || !(isMac || isCtrl)) return;
+      if ((event.key !== 'k' && event.key !== 'K') || !event.shiftKey || !(isMac || isCtrl)) return;
       const activeTag = (document.activeElement as HTMLElement | null)?.tagName;
       if (activeTag === 'TEXTAREA') return;
       event.preventDefault();

@@ -411,7 +411,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
                 paddingBottom: 8,
                 paddingLeft: 14,
                 fontSize: 11.5,
-                fontWeight: 440,
+                fontWeight: 300,
                 color: 'var(--t-text-faint)',
                 letterSpacing: '-0.005em',
                 fontFamily: 'var(--font-sans-system)',
@@ -958,7 +958,7 @@ function MiniProjectsMenu({
                     minHeight: 25,
                     boxSizing: 'border-box',
                     fontSize: 13.5,
-                    fontWeight: 440,
+                    fontWeight: 300,
                     letterSpacing: '-0.1px',
                     color: 'var(--t-text)',
                     background: 'var(--t-input-bg)',
@@ -994,9 +994,10 @@ function MiniProjectsMenu({
                   paddingTop: 3,
                   paddingRight: 18,
                   paddingBottom: 3,
-                  paddingLeft: 18,
+                  paddingLeft: 15,
                   textAlign: 'left',
                   fontFamily: 'var(--font-sans-system)',
+                  outlineOffset: -2,
                   transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                 }}
                 onMouseEnter={(event) => {
@@ -1013,11 +1014,17 @@ function MiniProjectsMenu({
                 <span
                   aria-hidden
                   style={{
+                    // Ring, not a filled dot: filled dots are the STATUS LED
+                    // vocabulary (green = running). A ring in the project color
+                    // reads as identity without implying agent state.
                     width: 6,
                     height: 6,
                     borderRadius: 999,
-                    background: project.color ?? 'var(--t-text-faint)',
+                    background: 'transparent',
+                    border: `1.5px solid ${project.color ?? 'var(--t-text-faint)'}`,
+                    boxSizing: 'border-box',
                     flexShrink: 0,
+                    marginRight: 9,
                   }}
                 />
                 <span
@@ -1029,7 +1036,7 @@ function MiniProjectsMenu({
                     whiteSpace: 'nowrap',
                     fontSize: 13.5,
                     lineHeight: 1.25,
-                    fontWeight: active ? 440 : 300,
+                    fontWeight: 300,
                     letterSpacing: '-0.1px',
                   }}
                 >
@@ -1103,9 +1110,10 @@ function MiniProjectsMenu({
                           paddingTop: 2,
                           paddingRight: 18,
                           paddingBottom: 2,
-                          paddingLeft: 30,
+                          paddingLeft: 35,
                           textAlign: 'left',
                           fontFamily: 'var(--font-sans-system)',
+                          outlineOffset: -2,
                           transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms cubic-bezier(0.22, 1, 0.36, 1)',
                         }}
                         onMouseEnter={(event) => {

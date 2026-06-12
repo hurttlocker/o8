@@ -45,6 +45,7 @@ const SECTIONS: ShortcutSection[] = [
     title: 'Navigation',
     rows: [
       { label: 'Command palette', chords: [['⌘', 'K']] },
+      { label: 'Orchestrator quick actions', chords: [['⌘', '⇧', 'K']] },
       { label: 'Cycle tabs', chords: [['⌘', '⌥', '←'], ['⌘', '⌥', '→']] },
       { label: 'Jump to tab 1–9', chords: [['⌘', '1']] },
     ],

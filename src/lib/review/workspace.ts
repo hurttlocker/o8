@@ -23,6 +23,8 @@ const FALLBACK_ACTIVE_ISSUE_NUMBER = FALLBACK_ACTIVE_ISSUE_NUMBER_RAW
   ? Number.parseInt(FALLBACK_ACTIVE_ISSUE_NUMBER_RAW, 10)
   : NaN;
 const REVIEW_NOISE_PATHS = new Set(['next-env.d.ts']);
+// o8's own machinery living inside the repo — never part of "your changes".
+const REVIEW_NOISE_PREFIXES = ['.cortex-worktrees/'];
 
 function shortenPath(path: string) {
   return path.replace(os.homedir() + '/', '~/');
@@ -206,7 +208,9 @@ function parseBranchStatus(raw: string) {
 }
 
 function isReviewNoisePath(path: string) {
-  return REVIEW_NOISE_PATHS.has(path.trim());
+  const trimmed = path.trim();
+  if (REVIEW_NOISE_PATHS.has(trimmed)) return true;
+  return REVIEW_NOISE_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
 }
 
 function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string, stagedPaths?: Set<string>, unstagedPaths?: Set<string>) {
