@@ -2,6 +2,26 @@
 
 **Status:** approved (Q, 2026-06-11) · builds on [`canvas-mode-vision.md`](./canvas-mode-vision.md) (strong version only). Everything here is additive and dismissible; nothing replaces an existing surface. **Fine-tuned 2026-06-11 against CNVS** (cnvs.dev, @_MaxBlade — the surface that seeded the idea); see "CNVS reference notes" at the bottom for what we borrow vs deliberately invert.
 
+---
+
+## Direction change — Canvas mode v2 (Q, 2026-06-11, supersedes the tab framing)
+
+After seeing v1, Q pivoted the destination: Canvas is not a tab — it's a **mode**. "When you click canvas, everything is glass." The locked v2 direction:
+
+- **Settings is the ONLY gate.** The `experimentalCanvas` toggle (Settings → Operator Defaults) is the single entry point — flag off means no canvas access *anywhere*. The v1 spawn rows in the New-session menus were removed; the `fleet-canvas` tab plumbing stays as internal substrate.
+- **Full-glass revamp, Siri material.** In canvas mode the entire app re-skins to dark tinted clear glass (the Apple Siri reference) — not light/dark themes, "straight glass." The material is **operator-tunable**: frost (backdrop blur), tint (dark glass density), ink (text brightness) sliders live under the settings toggle (`src/lib/canvas-mode/glass-settings.ts`, CSS vars `--cnv-*`, localStorage `o8:canvas-glass`).
+- **Test page first.** `/preview/canvas-glass` renders the full anatomy in the real material so the glass gets nailed *before* the shell revamp. Flag-gated like every canvas surface.
+- **Anatomy (from the CNVS image-8 reference, minus their background — we go glass + sliders):**
+  - **Top dock** — the existing important header controls (Agents / Alerts / Settings / Exit). **NOT Symon** — Symon lives in the macOS dock above everything; he is never a canvas element.
+  - **Left spawn dock** — spawn objects onto the canvas: orchestrator, browser, o8.md panel for a repo, terminal.
+  - **Left/right edges** — auto-minimized hover-reveal rails (sessions / activity feedback).
+  - **Bottom input** — the orchestrator composer for the scoped repo.
+  - **Glass cards** — packet-objects, draggable, status via the Symon-dock motion vocabulary.
+- **Who touches it.** "The canvas is not for the human to touch; it's more so for Symon to manipulate." Hierarchy: the operator talks to Symon (system level) → Symon tells the orchestrator (bottom composer) → things pop up on the canvas. Voice-first fleet control; the human watches and approves.
+- **Shipped in the v2 slice (0.1.354):** settings-only gating (menu rows removed), glass-settings lib + `CanvasGlassTuner` sliders in Operator Defaults, `/preview/canvas-glass` test page (material + anatomy + interactions verified). The full shell re-skin builds on the tuned material after Q signs off the look on the test page.
+
+The v1 plan below shipped as 0.1.352 and remains accurate as history + substrate detail.
+
 ## What v1 is
 
 A **fleet-overview tab**: live packet/task-objects as calm glass cards on a solid paper canvas, arranged freely by the operator, status readable at a distance, click to dive into the surfaces that already exist. NOT a node-graph builder; no edges, no pipelines.

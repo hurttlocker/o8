@@ -1,0 +1,161 @@
+'use client';
+
+/**
+ * CanvasGlassTuner — frost / tint / ink sliders for the Canvas-mode glass
+ * material (#1232). Renders under the Experimental: Canvas toggle when the
+ * flag is on. Values live-apply as CSS vars (see lib/canvas-mode/
+ * glass-settings) and persist client-side; the /preview/canvas-glass test
+ * page reads the same vars, so tuning here re-skins it live.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import {
+  CANVAS_GLASS_DEFAULTS,
+  CANVAS_GLASS_RANGES,
+  applyCanvasGlassSettings,
+  readCanvasGlassSettings,
+  writeCanvasGlassSettings,
+  type CanvasGlassSettings,
+} from '@/lib/canvas-mode/glass-settings';
+
+export function CanvasGlassTuner() {
+  const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
+
+  useEffect(() => {
+    const stored = readCanvasGlassSettings();
+    setSettings(stored);
+    applyCanvasGlassSettings(stored);
+  }, []);
+
+  const update = useCallback((patch: Partial<CanvasGlassSettings>) => {
+    setSettings((previous) => {
+      const next = { ...previous, ...patch };
+      writeCanvasGlassSettings(next);
+      return next;
+    });
+  }, []);
+
+  return (
+    <div
+      style={{
+        marginTop: 4,
+        marginBottom: 12,
+        paddingTop: 12,
+        paddingRight: 14,
+        paddingBottom: 12,
+        paddingLeft: 14,
+        borderRadius: 10,
+        border: '1px solid var(--t-divider)',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 12,
+      }}
+    >
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 500, color: 'var(--t-text)' }}>
+          Glass material
+        </span>
+        <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontWeight: 300 }}>
+          Preview at <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10.5 }}>/preview/canvas-glass</span>
+        </span>
+      </div>
+      <GlassSlider
+        label="Frost"
+        hint="Backdrop blur — how much the world behind diffuses"
+        value={settings.frost}
+        display={`${Math.round(settings.frost)}px`}
+        min={CANVAS_GLASS_RANGES.frost.min}
+        max={CANVAS_GLASS_RANGES.frost.max}
+        step={CANVAS_GLASS_RANGES.frost.step}
+        onChange={(frost) => update({ frost })}
+      />
+      <GlassSlider
+        label="Tint"
+        hint="Dark glass density — 0 is clear, high is the Siri material"
+        value={settings.tint}
+        display={`${Math.round(settings.tint * 100)}%`}
+        min={CANVAS_GLASS_RANGES.tint.min}
+        max={CANVAS_GLASS_RANGES.tint.max}
+        step={CANVAS_GLASS_RANGES.tint.step}
+        onChange={(tint) => update({ tint })}
+      />
+      <GlassSlider
+        label="Ink"
+        hint="Text + icon brightness against the glass"
+        value={settings.ink}
+        display={`${Math.round(settings.ink * 100)}%`}
+        min={CANVAS_GLASS_RANGES.ink.min}
+        max={CANVAS_GLASS_RANGES.ink.max}
+        step={CANVAS_GLASS_RANGES.ink.step}
+        onChange={(ink) => update({ ink })}
+      />
+      <div>
+        <button
+          type="button"
+          onClick={() => update({ ...CANVAS_GLASS_DEFAULTS })}
+          style={{
+            borderWidth: 0,
+            background: 'transparent',
+            padding: 0,
+            fontSize: 11,
+            fontWeight: 300,
+            color: 'var(--t-text-muted)',
+            cursor: 'pointer',
+            fontFamily: 'var(--font-sans-system)',
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
+          onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-muted)'; }}
+        >
+          Reset to defaults
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function GlassSlider({
+  label,
+  hint,
+  value,
+  display,
+  min,
+  max,
+  step,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  display: string;
+  min: number;
+  max: number;
+  step: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+      <div style={{ display: 'flex', alignItems: 'baseline', justifyContent: 'space-between', gap: 10 }}>
+        <span style={{ fontSize: 12, fontWeight: 400, color: 'var(--t-text)' }}>{label}</span>
+        <span style={{ fontSize: 11, color: 'var(--t-text-secondary)', fontVariantNumeric: 'tabular-nums' }}>{display}</span>
+      </div>
+      <input
+        type="range"
+        aria-label={`Canvas glass ${label.toLowerCase()}`}
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(event) => {
+          const next = Number.parseFloat(event.target.value);
+          if (Number.isFinite(next)) onChange(next);
+        }}
+        style={{
+          width: '100%',
+          accentColor: 'var(--t-accent)',
+          cursor: 'pointer',
+        }}
+      />
+      <span style={{ fontSize: 10.5, color: 'var(--t-text-faint)', fontWeight: 300, lineHeight: 1.4 }}>{hint}</span>
+    </div>
+  );
+}
