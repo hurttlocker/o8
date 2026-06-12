@@ -40,7 +40,7 @@ import {
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
-import { isTauri, setCanvasBackdropBlur, setCanvasMaterial } from '@/lib/tauri/bridge';
+import { isTauri, onFileOpenRequest, setCanvasBackdropBlur, setCanvasMaterial, takePendingFileOpens } from '@/lib/tauri/bridge';
 import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSocket';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { CanvasCard } from './cards';
@@ -414,6 +414,30 @@ export default function CanvasGlassPreviewPage() {
   const closeFileCard = useCallback((id: number) => {
     setFileCards((previous) => previous.filter((card) => card.id !== id));
   }, []);
+
+  // Finder "Open With → o8" / dock drop — drain the OS-handed paths into
+  // file cards, both at mount (cold launch routed here by FileOpenBridge)
+  // and live while the canvas is up.
+  useEffect(() => {
+    if (!canvasEnabled || !isTauri()) return;
+    let disposed = false;
+    let unlisten: (() => void) | null = null;
+    const drain = () => {
+      void takePendingFileOpens().then((paths) => {
+        if (disposed) return;
+        paths.forEach((path) => spawnFileCard(path));
+      });
+    };
+    drain();
+    void onFileOpenRequest(() => drain()).then((dispose) => {
+      if (disposed) dispose?.();
+      else unlisten = dispose;
+    });
+    return () => {
+      disposed = true;
+      unlisten?.();
+    };
+  }, [canvasEnabled, spawnFileCard]);
 
   /** Native macOS choose-file (server-side osascript, the browse-folder
    *  pattern) — no Tauri dialog plugin needed, works in dev-bridge too. */
