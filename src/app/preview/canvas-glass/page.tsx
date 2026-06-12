@@ -49,6 +49,7 @@ import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/o
 import { CanvasBackdropLayer } from './backdrops';
 import { BrowserGlassCard, type BrowserCard, type BrowserTab } from './browser-card';
 import { SpecGlassCard, type SpecCard } from './spec-card';
+import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
 import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
@@ -58,7 +59,7 @@ import { FileGlassCard, type FileCard } from './file-card';
 import { ImageGlassCard, type ImageCard } from './image-card';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
-import { useCanvasOrchestrator } from './use-canvas-orchestrator';
+import { useCanvasOrchestrator, type OrcaThreadEvent } from './use-canvas-orchestrator';
 import { FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrcaThreadRow, type OrchestratorLane } from './ui';
 
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
@@ -100,6 +101,7 @@ function readTermVeil(): number {
 interface RepoPickerRowData {
   name: string;
   path: string;
+  project: string | null;
 }
 
 // Mirrors COMPOSER_MODEL_OPTIONS in thoughts/InputButtons.tsx (not exported).
@@ -239,16 +241,29 @@ export default function CanvasGlassPreviewPage() {
   // keystroke, not from the first picker open. Default scope: o8, else first.
   useEffect(() => {
     let disposed = false;
-    fetch('/api/panel/repos')
-      .then((response) => (response.ok ? response.json() : { repos: [] }))
-      .then((data: { repos?: Array<{ name?: string | null; localPath?: string | null }> }) => {
+    Promise.all([
+      fetch('/api/panel/repos').then((response) => (response.ok ? response.json() : { repos: [] })),
+      fetch('/api/projects').then((response) => (response.ok ? response.json() : { projects: [] })).catch(() => ({ projects: [] })),
+    ])
+      .then(([data, projectData]: [
+        { repos?: Array<{ id?: string | null; name?: string | null; localPath?: string | null }> },
+        { projects?: Array<{ name?: string | null; repos?: Array<{ repoId?: string | null }> }> },
+      ]) => {
         if (disposed) return;
+        const projectByRepoId = new Map<string, string>();
+        for (const project of projectData?.projects ?? []) {
+          if (!project?.name) continue;
+          for (const member of project.repos ?? []) {
+            if (member?.repoId) projectByRepoId.set(member.repoId, project.name);
+          }
+        }
         const rows = Array.isArray(data?.repos)
           ? data.repos
             .filter((repo) => typeof repo?.localPath === 'string' && repo.localPath.length > 0)
             .map((repo) => ({
               name: repo.name && repo.name.length > 0 ? repo.name : (repo.localPath!.split('/').pop() ?? repo.localPath!),
               path: repo.localPath!,
+              project: (repo.id && projectByRepoId.get(repo.id)) || null,
             }))
           : [];
         setRepos(rows);
@@ -457,34 +472,48 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
+  /** ONE event pipeline for every live line — the dock's repo-keyed convo
+   *  AND each chat card's thread-keyed convo flow through here. */
+  const handleOrcaEvent = useCallback((lane: string, event: OrcaThreadEvent): void => {
+    if (event.type === 'output') {
+      if (event.thinking) return;
+      if (!firstOutputRef.current.has(lane)) {
+        firstOutputRef.current.add(lane);
+        resolveStatus(lane, 'Working');
+      }
+      appendAssistantDelta(lane, event.text);
+    } else if (event.type === 'tool') {
+      if (!firstOutputRef.current.has(lane)) {
+        firstOutputRef.current.add(lane);
+        resolveStatus(lane, 'Working');
+      }
+      noteToolUse(lane, event.name);
+    } else if (event.type === 'status') {
+      if (event.status === 'dead') resolveStatus(lane, 'Session ended');
+      else if (event.status === 'ready') resolveStatus(lane, 'Done');
+    } else {
+      resolveStatus(lane, 'Failed');
+      appendEntries(lane, [{ role: 'status', text: event.error.slice(0, 200), pending: false }]);
+    }
+  }, [appendAssistantDelta, appendEntries, noteToolUse, resolveStatus]);
+
   // The REAL orchestrator — same ws-server channel the OrchestratorTab
   // speaks, scoped to the composer's repo. Convos are keyed by repo path.
   const orca = useCanvasOrchestrator(activeRepoPath, {
     onOutput: (repo, text, thinking) => {
-      if (thinking) return;
-      if (!firstOutputRef.current.has(repo)) {
-        firstOutputRef.current.add(repo);
-        resolveStatus(repo, 'Working');
-        setDockOpen(true);
-      }
-      appendAssistantDelta(repo, text);
+      if (!thinking && !firstOutputRef.current.has(repo)) setDockOpen(true);
+      handleOrcaEvent(repo, { type: 'output', text, thinking });
     },
     onToolUse: (repo, name) => {
-      if (!firstOutputRef.current.has(repo)) {
-        firstOutputRef.current.add(repo);
-        resolveStatus(repo, 'Working');
-        setDockOpen(true);
-      }
-      noteToolUse(repo, name);
+      if (!firstOutputRef.current.has(repo)) setDockOpen(true);
+      handleOrcaEvent(repo, { type: 'tool', name });
     },
     onStatus: (repo, status) => {
       setOrcaBusy(status === 'busy');
-      if (status === 'dead') resolveStatus(repo, 'Session ended');
-      else if (status === 'ready') resolveStatus(repo, 'Done');
+      handleOrcaEvent(repo, { type: 'status', status });
     },
     onError: (repo, error) => {
-      resolveStatus(repo, 'Failed');
-      appendEntries(repo, [{ role: 'status', text: error.slice(0, 200), pending: false }]);
+      handleOrcaEvent(repo, { type: 'error', error });
     },
   });
 
@@ -564,7 +593,7 @@ export default function CanvasGlassPreviewPage() {
   /** A PAST session opens as its OWN draggable glass box — the dock stays
    *  reserved for the docked live orchestrator. The card's dock glyph
    *  promotes it into the dock if wanted. */
-  const pickThread = useCallback((threadId: string, repoPath: string | null, meta?: { title?: string | null; repoName?: string | null }) => {
+  const pickThread = useCallback((threadId: string, repoPath: string | null, meta?: { title?: string | null; repoName?: string | null }, at?: SnapGeometry) => {
     fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(threadId)}`)
       .then((response) => (response.ok ? response.json() : null))
       .then((data: { messages?: Array<{ role?: string; content?: string }>; title?: string | null; repoName?: string | null; repoPath?: string | null } | null) => {
@@ -581,22 +610,35 @@ export default function CanvasGlassPreviewPage() {
         nextIdRef.current += 1;
         zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
         const firstUser = messages.find((message) => message.role === 'user');
+        // The card's live convo lane starts from the history transcript —
+        // its in-card composer streams onto the same lane from there.
+        setConvos((previous) => ({ ...previous, [`thread:${threadId}`]: entries }));
         setChatCards((previous) => [...previous, {
           id,
           threadId,
           repoPath: repoPath ?? data?.repoPath ?? null,
           repoName: meta?.repoName ?? data?.repoName ?? null,
           title: meta?.title?.trim() || data?.title?.trim() || (typeof firstUser?.content === 'string' ? firstUser.content.slice(0, 60) : 'Past session'),
-          x: 200 + (previous.length % 3) * 110 + (id % 5) * 8,
-          y: 90 + (previous.length % 3) * 70,
+          x: at?.x ?? 200 + (previous.length % 3) * 110 + (id % 5) * 8,
+          y: at?.y ?? 90 + (previous.length % 3) * 70,
           z: zPeakRef.current,
-          w: 380,
-          h: 400,
+          w: at?.w ?? 380,
+          h: at?.h ?? 400,
           entries,
         }]);
       })
       .catch(() => {});
   }, []);
+
+  /** A chat card's own composer went out — append the turn to its lane.
+   *  Mirrors sendPrompt's entry shapes; the card already did the ws send. */
+  const noteCardSend = useCallback((card: ChatCard, text: string, sent: boolean) => {
+    const lane = `thread:${card.threadId}`;
+    firstOutputRef.current.delete(lane);
+    appendEntries(lane, sent
+      ? [{ role: 'user', text }, { role: 'status', text: 'Thinking', pending: true }]
+      : [{ role: 'user', text }, { role: 'status', text: 'Not connected yet — try again in a second', pending: false }]);
+  }, [appendEntries]);
 
   const moveChatCard = useCallback((id: number, x: number, y: number) => {
     setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
@@ -617,7 +659,7 @@ export default function CanvasGlassPreviewPage() {
     if (!repo) return;
     setActiveRepoPath(repo);
     orca.adoptThread(repo, card.threadId);
-    setConvos((previous) => ({ ...previous, [repo]: card.entries }));
+    setConvos((previous) => ({ ...previous, [repo]: previous[`thread:${card.threadId}`] ?? card.entries }));
     setChatCards((previous) => previous.filter((existing) => existing.id !== card.id));
     setDockOpen(true);
   }, [activeRepoPath, orca]);
@@ -627,7 +669,7 @@ export default function CanvasGlassPreviewPage() {
   }, []);
 
   /** Spawn a REAL shell — production transport, canvas treatment. */
-  const spawnTerminal = useCallback((cwd: string | null, cwdLabel: string | null) => {
+  const spawnTerminal = useCallback((cwd: string | null, cwdLabel: string | null, at?: SnapGeometry) => {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     const requestId = `cnv-term-${id}-${Math.random().toString(36).slice(2, 8)}`;
@@ -642,10 +684,10 @@ export default function CanvasGlassPreviewPage() {
       exited: false,
       live: false,
       revealHold,
-      x: 240 + (previous.length % 3) * 120 + (id % 5) * 10,
-      y: 110 + (previous.length % 3) * 80,
-      w: 560,
-      h: 300,
+      x: at?.x ?? 240 + (previous.length % 3) * 120 + (id % 5) * 10,
+      y: at?.y ?? 110 + (previous.length % 3) * 80,
+      w: at?.w ?? 560,
+      h: at?.h ?? 300,
       z,
       cwd,
       cwdLabel,
@@ -730,7 +772,7 @@ export default function CanvasGlassPreviewPage() {
 
   /** A lane's review diff lands as a glass card — the governance moat
    *  as a canvas object. */
-  const spawnDiffCard = useCallback((lane: LaneRow) => {
+  const spawnDiffCard = useCallback((lane: LaneRow, at?: SnapGeometry) => {
     fetch(`/api/lanes/${encodeURIComponent(lane.id)}/diff?maxBytes=131072`)
       .then((response) => (response.ok ? response.json() : null))
       .then((data: { ok?: boolean; packetId?: string | null; branch?: string | null; stat?: string; diff?: string; truncated?: boolean } | null) => {
@@ -740,11 +782,11 @@ export default function CanvasGlassPreviewPage() {
         zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
         setDiffCards((previous) => [...previous, {
           id,
-          x: 180 + (previous.length % 3) * 90 + (id % 5) * 8,
-          y: 88 + (previous.length % 3) * 56,
+          x: at?.x ?? 180 + (previous.length % 3) * 90 + (id % 5) * 8,
+          y: at?.y ?? 88 + (previous.length % 3) * 56,
           z: zPeakRef.current,
-          w: 560,
-          h: 320,
+          w: at?.w ?? 560,
+          h: at?.h ?? 320,
           laneId: lane.id,
           packetId: data.packetId ?? null,
           title: lane.label?.trim() || lane.id,
@@ -851,7 +893,7 @@ export default function CanvasGlassPreviewPage() {
   }, []);
 
   /** Open ANY file on the machine as a glass card — view, edit, ⌘S. */
-  const spawnFileCard = useCallback((path: string) => {
+  const spawnFileCard = useCallback((path: string, at?: SnapGeometry) => {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
@@ -860,13 +902,87 @@ export default function CanvasGlassPreviewPage() {
       id,
       path,
       name: path.split('/').pop() || path,
-      x: 300 + (previous.length % 3) * 90 + (id % 5) * 8,
-      y: 96 + (previous.length % 3) * 64,
-      w: 620,
-      h: 420,
+      x: at?.x ?? 300 + (previous.length % 3) * 90 + (id % 5) * 8,
+      y: at?.y ?? 96 + (previous.length % 3) * 64,
+      w: at?.w ?? 620,
+      h: at?.h ?? 420,
       z,
     }]);
   }, []);
+
+  // ── Canvas persistence — the canvas is a place, not a session. ──────
+  // Restore once on mount: pure-state kinds land directly, live kinds go
+  // back through their real spawn paths (terminals respawn shells in the
+  // saved cwd, chat cards refetch their thread, diff cards refetch the
+  // lane and silently drop if it's gone).
+  const restoredRef = useRef(false);
+  const persistArmedAtRef = useRef(0);
+  useEffect(() => {
+    if (restoredRef.current) return;
+    restoredRef.current = true;
+    persistArmedAtRef.current = Date.now() + 4000;
+    const snap = loadCanvasSnapshot();
+    if (!snap) return;
+    if (snap.activeRepoPath) setActiveRepoPath((current) => current ?? snap.activeRepoPath);
+    if (snap.dockOpen) setDockOpen(true);
+
+    if (snap.browser.length) {
+      setBrowserCards((previous) => [...previous, ...snap.browser.map((saved) => {
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, tabs: saved.tabs, activeTabId: saved.activeTabId };
+      })]);
+    }
+    if (snap.spec.length) {
+      setSpecCards((previous) => [...previous, ...snap.spec.map((saved) => {
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, repoPath: saved.repoPath };
+      })]);
+    }
+    if (snap.image.length) {
+      setImageCards((previous) => [...previous, ...snap.image.map((saved) => {
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        return { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, aspect: saved.aspect, items: saved.items };
+      })]);
+    }
+    snap.file.forEach((saved) => spawnFileCard(saved.path, saved));
+    snap.chat.forEach((saved) => pickThread(saved.threadId, saved.repoPath, { title: saved.title, repoName: saved.repoName }, saved));
+    snap.diff.forEach((saved) => spawnDiffCard({ id: saved.laneId, label: saved.title }, saved));
+    if (snap.term.length) {
+      // The terminal ws needs a beat to connect before create requests land.
+      setTimeout(() => snap.term.forEach((saved) => spawnTerminal(saved.cwd, saved.cwdLabel, saved)), 1200);
+    }
+  }, [pickThread, spawnDiffCard, spawnFileCard, spawnTerminal]);
+
+  // Save: one debounced snapshot whenever anything persistent changes.
+  // The signature string IS the snapshot body — transient fields (term
+  // liveness, diff text, chat entries) are excluded so churn never
+  // thrashes localStorage.
+  const persistSignature = JSON.stringify({
+    activeRepoPath,
+    dockOpen,
+    term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel })),
+    file: fileCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, path: card.path })),
+    image: imageCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, items: card.items })),
+    browser: browserCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, tabs: card.tabs, activeTabId: card.activeTabId })),
+    chat: chatCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, threadId: card.threadId, repoPath: card.repoPath, repoName: card.repoName, title: card.title })),
+    diff: diffCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, laneId: card.laneId, title: card.title })),
+    spec: specCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
+  });
+  useEffect(() => {
+    // Hold fire until restore's async spawns settle — an instant save of
+    // the half-restored canvas would overwrite the snapshot.
+    if (!restoredRef.current || Date.now() < persistArmedAtRef.current) return;
+    const timer = setTimeout(() => {
+      saveCanvasSnapshot({ v: 1, ...JSON.parse(persistSignature) });
+    }, 700);
+    return () => clearTimeout(timer);
+  }, [persistSignature]);
 
   const moveFileCard = useCallback((id: number, x: number, y: number) => {
     setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
@@ -1245,6 +1361,10 @@ export default function CanvasGlassPreviewPage() {
           <ChatGlassCard
             key={card.id}
             card={card}
+            liveEntries={convos[`thread:${card.threadId}`] ?? null}
+            sendDefaults={{ model: orcaModel, thinkingEffort: orcaEffort }}
+            onLiveEvent={handleOrcaEvent}
+            onUserSend={noteCardSend}
             onMove={moveChatCard}
             onResize={resizeChatCard}
             onFocus={focusChatCard}
@@ -2213,17 +2333,34 @@ export default function CanvasGlassPreviewPage() {
               <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 5 }}>
                 {composerMenu === 'repo' ? 'Orchestrator repo' : composerMenu === 'model' ? 'Model' : 'Thinking effort'}
               </span>
-              {composerMenu === 'repo' ? (repos ?? []).map((repo) => (
-                <PickerRow
-                  key={repo.path}
-                  name={repo.name}
-                  path={repo.path.replace(/^\/Users\/[^/]+/, '~')}
-                  onClick={() => {
-                    setActiveRepoPath(repo.path);
-                    setComposerMenu(null);
-                  }}
-                />
-              )) : null}
+              {composerMenu === 'repo' ? (() => {
+                const rows = repos ?? [];
+                const projectNames = [...new Set(rows.map((row) => row.project).filter((value): value is string => Boolean(value)))];
+                const groups = [
+                  ...projectNames.map((label) => ({ label, rows: rows.filter((row) => row.project === label) })),
+                  { label: projectNames.length ? 'Independent' : null, rows: rows.filter((row) => !row.project) },
+                ].filter((group) => group.rows.length > 0);
+                return groups.map((group) => (
+                  <div key={group.label ?? 'solo'} style={{ display: 'flex', flexDirection: 'column' }}>
+                    {group.label ? (
+                      <span style={{ fontSize: 8.5, fontWeight: 300, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingTop: 8, paddingBottom: 3, opacity: 0.8 }}>
+                        {group.label}
+                      </span>
+                    ) : null}
+                    {group.rows.map((repo) => (
+                      <PickerRow
+                        key={repo.path}
+                        name={repo.name}
+                        path={repo.path.replace(/^\/Users\/[^/]+/, '~')}
+                        onClick={() => {
+                          setActiveRepoPath(repo.path);
+                          setComposerMenu(null);
+                        }}
+                      />
+                    ))}
+                  </div>
+                ));
+              })() : null}
               {composerMenu === 'model' ? CANVAS_MODEL_OPTIONS.map((option) => (
                 <PickerRow key={option.value} name={option.label} onClick={() => chooseModel(option.value)} />
               )) : null}
