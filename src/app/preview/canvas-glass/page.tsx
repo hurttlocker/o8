@@ -43,14 +43,17 @@ import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canva
 import { isTauri, onFileOpenRequest, setCanvasBackdropBlur, setCanvasMaterial, takePendingFileOpens } from '@/lib/tauri/bridge';
 import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSocket';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
+import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
+import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
-import { MOCK_LANES, OrchestratorDock } from './dock';
+import { OrchestratorDock } from './dock';
 import { FileGlassCard, type FileCard } from './file-card';
 import { CenterStage, type Stage } from './stage';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
-import { FONT, glass, type CardKind, type DockEntry, type MockCard, type NewDockEntry } from './ui';
+import { useCanvasOrchestrator } from './use-canvas-orchestrator';
+import { FONT, glass, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrchestratorLane } from './ui';
 
 /** Terminal glass veil — persisted while Q dials it in (dev tuner). */
 const TERM_VEIL_KEY = 'o8:canvas-term-veil';
@@ -72,6 +75,15 @@ interface RepoPickerRowData {
   path: string;
 }
 
+// Mirrors COMPOSER_MODEL_OPTIONS in thoughts/InputButtons.tsx (not exported).
+const CANVAS_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
+  { value: 'claude-fable-5', label: 'Fable 5' },
+  { value: 'claude-opus-4-8', label: 'Opus 4.8' },
+  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+];
+const CANVAS_ORCA_MODEL_KEY = 'o8:canvas-orca-model';
+const CANVAS_ORCA_EFFORT_KEY = 'o8:canvas-orca-effort';
+
 export default function CanvasGlassPreviewPage() {
   const canvasEnabled = useExperimentalCanvasFlag();
   const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
@@ -81,11 +93,15 @@ export default function CanvasGlassPreviewPage() {
   const [rightRailOpen, setRightRailOpen] = useState(false);
   const [composerValue, setComposerValue] = useState('');
   const [inTauri, setInTauri] = useState(false);
-  const [stage, setStage] = useState<Stage>({ kind: 'idle' });
+  const [stage] = useState<Stage>({ kind: 'idle' });
   const [dockOpen, setDockOpen] = useState(false);
   const [tunerOpen, setTunerOpen] = useState(false);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
-  const [activeLane, setActiveLane] = useState(MOCK_LANES[0].id);
+  const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
+  const [composerMenu, setComposerMenu] = useState<'repo' | 'model' | 'effort' | null>(null);
+  const [orcaModel, setOrcaModel] = useState(DEFAULT_ORCHESTRATOR_MODEL);
+  const [orcaEffort, setOrcaEffort] = useState<ThinkingEffort>('adaptive');
+  const [orcaBusy, setOrcaBusy] = useState(false);
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
   const [termCards, setTermCards] = useState<TermCard[]>([]);
   const [fileCards, setFileCards] = useState<FileCard[]>([]);
@@ -94,6 +110,9 @@ export default function CanvasGlassPreviewPage() {
   const [repos, setRepos] = useState<RepoPickerRowData[] | null>(null);
   const nextIdRef = useRef(1);
   const entryIdRef = useRef(1);
+  // Cleared on every send; the first sign of life (text or tool) per turn
+  // resolves the pending "Thinking" row and opens the dock.
+  const firstOutputRef = useRef(new Set<string>());
   const timersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
   const xtermHandlesRef = useRef(new Map<string, XtermPanelHandle>());
   const liveSessionsRef = useRef(new Set<string>());
@@ -164,6 +183,41 @@ export default function CanvasGlassPreviewPage() {
     setInTauri(isTauri());
     setPersonalDefault(readPersonalDefault());
     setTermVeil(readTermVeil());
+    try {
+      const storedModel = window.localStorage.getItem(CANVAS_ORCA_MODEL_KEY);
+      if (storedModel && CANVAS_MODEL_OPTIONS.some((option) => option.value === storedModel)) setOrcaModel(storedModel);
+      const storedEffort = window.localStorage.getItem(CANVAS_ORCA_EFFORT_KEY);
+      if (isThinkingEffort(storedEffort)) setOrcaEffort(storedEffort);
+    } catch {
+      // defaults stand
+    }
+  }, []);
+
+  // Repos load at mount — the composer is scoped to a repo from the first
+  // keystroke, not from the first picker open. Default scope: o8, else first.
+  useEffect(() => {
+    let disposed = false;
+    fetch('/api/panel/repos')
+      .then((response) => (response.ok ? response.json() : { repos: [] }))
+      .then((data: { repos?: Array<{ name?: string | null; localPath?: string | null }> }) => {
+        if (disposed) return;
+        const rows = Array.isArray(data?.repos)
+          ? data.repos
+            .filter((repo) => typeof repo?.localPath === 'string' && repo.localPath.length > 0)
+            .map((repo) => ({
+              name: repo.name && repo.name.length > 0 ? repo.name : (repo.localPath!.split('/').pop() ?? repo.localPath!),
+              path: repo.localPath!,
+            }))
+          : [];
+        setRepos(rows);
+        setActiveRepoPath((current) => current ?? rows.find((row) => row.name === 'o8')?.path ?? rows[0]?.path ?? null);
+      })
+      .catch(() => {
+        if (!disposed) setRepos([]);
+      });
+    return () => {
+      disposed = true;
+    };
   }, []);
 
   // Terminal sends drop silently while the socket is down and the server
@@ -200,10 +254,6 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
-  const schedule = useCallback((fn: () => void, ms: number) => {
-    timersRef.current.push(setTimeout(fn, ms));
-  }, []);
-
   const spawnCard = useCallback((kind: CardKind, title: string, meta: string, tone: MockCard['tone'], at?: { x: number; y: number }, src?: string) => {
     setCards((previous) => {
       const id = nextIdRef.current;
@@ -222,40 +272,6 @@ export default function CanvasGlassPreviewPage() {
       }];
     });
   }, []);
-
-  /** The kivo transition — summon state, then agents fan out in an arc. */
-  const summonArc = useCallback((prompt: string) => {
-    setStage({ kind: 'summoning', prompt });
-    schedule(() => {
-      setCards((previous) => {
-        const width = typeof window !== 'undefined' ? window.innerWidth : 1280;
-        const height = typeof window !== 'undefined' ? window.innerHeight : 800;
-        const centerX = width / 2 - 105;
-        const baseY = height * 0.32;
-        const arc = [
-          { dx: -290, dy: 44, title: `Plan — ${prompt}`, meta: 'o8 · orchestrator · scoping', tone: 'idle' as const },
-          { dx: 0, dy: -14, title: prompt, meta: 'o8 · codex · dispatched', tone: 'working' as const },
-          { dx: 290, dy: 44, title: `Review — ${prompt}`, meta: 'o8 · gate · queued', tone: 'waiting' as const },
-        ];
-        const spawned = arc.map((slot, index) => {
-          const id = nextIdRef.current;
-          nextIdRef.current += 1;
-          return {
-            id,
-            kind: 'packet' as const,
-            title: slot.title.slice(0, 46),
-            meta: slot.meta,
-            tone: slot.tone,
-            x: Math.max(16, centerX + slot.dx),
-            y: Math.max(70, baseY + slot.dy),
-            entryDelay: index * 0.14,
-          };
-        });
-        return [...previous, ...spawned];
-      });
-      setStage({ kind: 'idle' });
-    }, 1300);
-  }, [schedule]);
 
   const appendEntries = useCallback((lane: string, entries: NewDockEntry[]) => {
     setConvos((previous) => {
@@ -277,33 +293,93 @@ export default function CanvasGlassPreviewPage() {
     }));
   }, []);
 
+  /** Real orchestrator deltas grow the last live text entry in place. */
+  const appendAssistantDelta = useCallback((lane: string, delta: string) => {
+    setConvos((previous) => {
+      const entries = previous[lane] ?? [];
+      const last = entries[entries.length - 1];
+      if (last && last.role === 'text' && last.live) {
+        const updated = [...entries];
+        updated[updated.length - 1] = { ...last, text: last.text + delta };
+        return { ...previous, [lane]: updated };
+      }
+      const id = entryIdRef.current;
+      entryIdRef.current += 1;
+      return { ...previous, [lane]: [...entries, { role: 'text', text: delta, live: true, id }] };
+    });
+  }, []);
+
+  // The REAL orchestrator — same ws-server channel the OrchestratorTab
+  // speaks, scoped to the composer's repo. Convos are keyed by repo path.
+  const orca = useCanvasOrchestrator(activeRepoPath, {
+    onOutput: (repo, text, thinking) => {
+      if (thinking) return;
+      if (!firstOutputRef.current.has(repo)) {
+        firstOutputRef.current.add(repo);
+        resolveStatus(repo, 'Working');
+        setDockOpen(true);
+      }
+      appendAssistantDelta(repo, text);
+    },
+    onToolUse: (repo, name) => {
+      if (!firstOutputRef.current.has(repo)) {
+        firstOutputRef.current.add(repo);
+        resolveStatus(repo, 'Working');
+        setDockOpen(true);
+      }
+      appendEntries(repo, [{ role: 'status', text: name, pending: false }]);
+    },
+    onStatus: (repo, status) => {
+      setOrcaBusy(status === 'busy');
+      if (status === 'dead') resolveStatus(repo, 'Session ended');
+      else if (status === 'ready') resolveStatus(repo, 'Done');
+    },
+    onError: (repo, error) => {
+      resolveStatus(repo, 'Failed');
+      appendEntries(repo, [{ role: 'status', text: error.slice(0, 200), pending: false }]);
+    },
+  });
+
   const submit = useCallback(() => {
-    const prompt = composerValue.trim().slice(0, 42);
-    if (!prompt || stage.kind === 'summoning') return;
-    const lane = activeLane;
-    appendEntries(lane, [
-      { role: 'user', text: prompt },
-      { role: 'status', text: 'Summoning the fleet', pending: true },
-    ]);
-    const empty = cards.length === 0;
-    if (empty) {
-      summonArc(prompt);
-    } else {
-      spawnCard('packet', prompt, 'o8 · codex · dispatched', 'working');
-    }
-    const explanation = `Dispatched a Plan / Build / Review lane for “${prompt}”. The builder runs in an isolated worktree; the review gate holds before anything touches main.`;
-    schedule(() => {
-      resolveStatus(lane, 'Fleet dispatched');
-      appendEntries(lane, [
-        { role: 'result', title: prompt, meta: 'o8 · codex · dispatched' },
-        { role: 'text', text: explanation },
+    const prompt = composerValue.trim();
+    if (!prompt || !activeRepoPath || orcaBusy) return;
+    firstOutputRef.current.delete(activeRepoPath);
+    const threadId = orca.send(prompt, { model: orcaModel, thinkingEffort: orcaEffort });
+    if (!threadId) {
+      // Socket not up yet — keep the draft in the composer for the retry.
+      appendEntries(activeRepoPath, [
+        { role: 'user', text: prompt },
+        { role: 'status', text: 'Not connected yet — try again in a second', pending: false },
       ]);
-      schedule(() => {
-        appendEntries(lane, [{ role: 'followups' }]);
-      }, explanation.split(' ').length * 38 + 350);
-    }, empty ? 1350 : 700);
+      setDockOpen(true);
+      return;
+    }
+    appendEntries(activeRepoPath, [
+      { role: 'user', text: prompt },
+      { role: 'status', text: 'Thinking', pending: true },
+    ]);
     setComposerValue('');
-  }, [activeLane, appendEntries, cards.length, composerValue, resolveStatus, schedule, spawnCard, stage.kind, summonArc]);
+  }, [activeRepoPath, appendEntries, composerValue, orca, orcaBusy, orcaEffort, orcaModel]);
+
+  const chooseModel = useCallback((value: string) => {
+    setOrcaModel(value);
+    setComposerMenu(null);
+    try {
+      window.localStorage.setItem(CANVAS_ORCA_MODEL_KEY, value);
+    } catch {
+      // non-critical
+    }
+  }, []);
+
+  const chooseEffort = useCallback((value: ThinkingEffort) => {
+    setOrcaEffort(value);
+    setComposerMenu(null);
+    try {
+      window.localStorage.setItem(CANVAS_ORCA_EFFORT_KEY, value);
+    } catch {
+      // non-critical
+    }
+  }, []);
 
   const moveCard = useCallback((id: number, x: number, y: number) => {
     setCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
@@ -457,22 +533,7 @@ export default function CanvasGlassPreviewPage() {
   /** The spawn-dock terminal button opens the cwd picker; rows spawn. */
   const toggleTermPicker = useCallback(() => {
     setTermPickerOpen((value) => !value);
-    if (repos !== null) return;
-    fetch('/api/panel/repos')
-      .then((response) => (response.ok ? response.json() : { repos: [] }))
-      .then((data: { repos?: Array<{ name?: string | null; localPath?: string | null }> }) => {
-        const rows = Array.isArray(data?.repos)
-          ? data.repos
-            .filter((repo) => typeof repo?.localPath === 'string' && repo.localPath.length > 0)
-            .map((repo) => ({
-              name: repo.name && repo.name.length > 0 ? repo.name : (repo.localPath!.split('/').pop() ?? repo.localPath!),
-              path: repo.localPath!,
-            }))
-          : [];
-        setRepos(rows);
-      })
-      .catch(() => setRepos([]));
-  }, [repos]);
+  }, []);
 
   /** Close = exit the shell (kills the tmux session) + detach + drop the card. */
   const closeTerminal = useCallback((card: TermCard) => {
@@ -532,7 +593,14 @@ export default function CanvasGlassPreviewPage() {
   }
 
   const summoning = stage.kind === 'summoning';
-  const activeConvo = convos[activeLane] ?? [];
+  const lanes: OrchestratorLane[] = (repos ?? []).map((repo) => ({
+    id: repo.path,
+    label: repo.name,
+    repo: repo.name,
+    tone: repo.path === activeRepoPath && orcaBusy ? 'working' : 'idle',
+  }));
+  const activeRepoName = repos?.find((repo) => repo.path === activeRepoPath)?.name ?? null;
+  const activeConvo = convos[activeRepoPath ?? ''] ?? [];
   const hasTalked = Object.values(convos).some((entries) => entries.length > 0);
 
   return (
@@ -817,9 +885,10 @@ export default function CanvasGlassPreviewPage() {
       <AnimatePresence>
         {dockOpen ? (
           <OrchestratorDock
+            lanes={lanes}
             entries={activeConvo}
-            activeLane={activeLane}
-            onSelectLane={setActiveLane}
+            activeLane={activeRepoPath ?? ''}
+            onSelectLane={setActiveRepoPath}
             onClose={() => setDockOpen(false)}
           />
         ) : null}
@@ -873,26 +942,31 @@ export default function CanvasGlassPreviewPage() {
           bottom: 24,
           left: '50%',
           transform: 'translateX(-50%)',
-          width: 'min(620px, calc(100vw - 220px))',
+          width: 'min(680px, calc(100vw - 240px))',
           display: 'flex',
           alignItems: 'center',
-          gap: 10,
+          gap: 8,
           height: 48,
-          paddingLeft: 18,
-          paddingRight: 12,
+          paddingLeft: 10,
+          paddingRight: 10,
           borderRadius: 24,
           zIndex: 40,
           ...glass(true),
         }}
       >
+        <ChipButton
+          label={activeRepoName ?? '…'}
+          active={composerMenu === 'repo'}
+          onClick={() => setComposerMenu((value) => (value === 'repo' ? null : 'repo'))}
+        />
         <input
           value={composerValue}
           onChange={(event) => setComposerValue(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') submit();
           }}
-          placeholder={`Message the orchestrator · ${activeLane}`}
-          aria-label="Orchestrator composer (mock)"
+          placeholder={`Message the orchestrator · ${activeRepoName ?? '…'}`}
+          aria-label="Orchestrator composer"
           style={{
             flex: 1,
             borderWidth: 0,
@@ -905,13 +979,102 @@ export default function CanvasGlassPreviewPage() {
             fontFamily: FONT,
           }}
         />
-        <span style={{ fontSize: 10, fontWeight: 300, color: 'var(--cnv-ink-muted)', flexShrink: 0 }}>
-          {cards.length === 0 ? 'Enter summons the fleet' : 'Enter spawns a card'}
-        </span>
-        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
-          <path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" />
-        </svg>
+        <ChipButton
+          label={CANVAS_MODEL_OPTIONS.find((option) => option.value === orcaModel)?.label ?? orcaModel}
+          active={composerMenu === 'model'}
+          onClick={() => setComposerMenu((value) => (value === 'model' ? null : 'model'))}
+        />
+        <ChipButton
+          label={orcaEffort}
+          active={composerMenu === 'effort'}
+          onClick={() => setComposerMenu((value) => (value === 'effort' ? null : 'effort'))}
+        />
+        <button
+          type="button"
+          aria-label={orcaBusy ? 'Interrupt the orchestrator' : 'Send'}
+          onClick={() => {
+            if (orcaBusy) orca.interrupt();
+            else submit();
+          }}
+          style={{
+            borderWidth: 0,
+            background: 'transparent',
+            padding: 4,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            cursor: 'pointer',
+            color: 'var(--cnv-ink-muted)',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+          onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+        >
+          {orcaBusy ? (
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          ) : (
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" />
+            </svg>
+          )}
+        </button>
       </div>
+
+      {/* Composer menus — repo scope / model / thinking effort. */}
+      <AnimatePresence>
+        {composerMenu ? (
+          <>
+            <div role="presentation" onClick={() => setComposerMenu(null)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
+            <motion.div
+              initial={{ opacity: 0, y: 8, scale: 0.98 }}
+              animate={{ opacity: 1, y: 0, scale: 1 }}
+              exit={{ opacity: 0, y: 8, scale: 0.98 }}
+              transition={{ type: 'spring', stiffness: 380, damping: 30 }}
+              style={{
+                position: 'absolute',
+                bottom: 84,
+                left: '50%',
+                // framer owns `transform` while animating — offset by margin.
+                marginLeft: -124,
+                width: 248,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 2,
+                paddingTop: 10,
+                paddingBottom: 10,
+                paddingLeft: 8,
+                paddingRight: 8,
+                borderRadius: 14,
+                zIndex: 46,
+                ...glass(true),
+              }}
+            >
+              <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 5 }}>
+                {composerMenu === 'repo' ? 'Orchestrator repo' : composerMenu === 'model' ? 'Model' : 'Thinking effort'}
+              </span>
+              {composerMenu === 'repo' ? (repos ?? []).map((repo) => (
+                <PickerRow
+                  key={repo.path}
+                  name={repo.name}
+                  path={repo.path.replace(/^\/Users\/[^/]+/, '~')}
+                  onClick={() => {
+                    setActiveRepoPath(repo.path);
+                    setComposerMenu(null);
+                  }}
+                />
+              )) : null}
+              {composerMenu === 'model' ? CANVAS_MODEL_OPTIONS.map((option) => (
+                <PickerRow key={option.value} name={option.label} onClick={() => chooseModel(option.value)} />
+              )) : null}
+              {composerMenu === 'effort' ? THINKING_EFFORTS.map((effort) => (
+                <PickerRow key={effort} name={effort} onClick={() => chooseEffort(effort)} />
+              )) : null}
+            </motion.div>
+          </>
+        ) : null}
+      </AnimatePresence>
 
       {/* Glass tuner — drops down under the "Canvas" word in the top dock. */}
       <AnimatePresence>
@@ -932,7 +1095,7 @@ export default function CanvasGlassPreviewPage() {
   );
 }
 
-function PickerRow({ name, path, onClick }: { name: string; path: string; onClick: () => void }) {
+function PickerRow({ name, path, onClick }: { name: string; path?: string; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -958,7 +1121,43 @@ function PickerRow({ name, path, onClick }: { name: string; path: string; onClic
       onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
     >
       <span style={{ fontSize: 11.5, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>{name}</span>
-      <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{path}</span>
+      {path ? (
+        <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{path}</span>
+      ) : null}
+    </button>
+  );
+}
+
+/** Small pill control in the composer — repo scope, model, thinking effort. */
+function ChipButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        height: 24,
+        paddingLeft: 10,
+        paddingRight: 10,
+        borderRadius: 999,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--cnv-edge)',
+        background: active ? 'var(--cnv-tint)' : 'transparent',
+        color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+        fontSize: 9.5,
+        fontWeight: 400,
+        letterSpacing: '0.02em',
+        cursor: 'pointer',
+        fontFamily: FONT,
+        flexShrink: 0,
+        whiteSpace: 'nowrap',
+      }}
+      onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+      onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+    >
+      {label}
     </button>
   );
 }
