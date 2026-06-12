@@ -26,8 +26,9 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
       spawnSingleRuntimeTab: controller.spawnSingleRuntimeTab,
       spawnChatTab: controller.spawnChatTab,
       spawnOrchestratorTab: controller.spawnOrchestratorTab,
+      spawnFleetCanvasTab: controller.spawnFleetCanvasTab,
       updateTabMode: controller.handleUpdateTabMode,
-    }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnOrchestratorTab, controller.spawnSingleRuntimeTab]);
+    }), [controller.handleUpdateTabMode, controller.spawnChatTab, controller.spawnFleetCanvasTab, controller.spawnOrchestratorTab, controller.spawnSingleRuntimeTab]);
     const activeTab = controller.activeTab;
     // workspaceConversationHeaderLabel only knows chat-shaped tabs
     // (orchestrator / llm-chat / single-runtime chat). For terminals
@@ -41,7 +42,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         ?? (activeTab.repo?.localPath ? activeTab.repo.localPath.split('/').filter(Boolean).pop() ?? null : null);
       const kindLabel = activeTab.kind === 'terminal'
         ? 'Shell'
-        : activeTab.kind === 'canvas'
+        : activeTab.kind === 'canvas' || activeTab.kind === 'fleet-canvas'
           ? 'Canvas'
           : null;
       if (!kindLabel) return null;
@@ -60,6 +61,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
     const handleNewTab = controller.handleNewTab;
     const handleNewLLMChatTab = controller.handleNewLLMChatTab;
     const spawnOrchestratorTab = controller.spawnOrchestratorTab;
+    const spawnFleetCanvasTab = controller.spawnFleetCanvasTab;
     const activeRepo = controller.activeRepo;
     const preferredRepo = props.preferredRepo;
     const onCloseTile = props.onCloseTile;
@@ -76,6 +78,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         if (detail?.kind === 'orchestrator') spawnOrchestratorTab?.();
         else if (detail?.kind === 'chat') handleNewLLMChatTab(repo ?? undefined);
         else if (detail?.kind === 'terminal') handleNewTab('shell', repo ?? undefined);
+        else if (detail?.kind === 'fleet-canvas') spawnFleetCanvasTab?.();
       };
       const onCloseWorkspace = (event: Event) => {
         const detail = (event as CustomEvent<{ workspaceId?: string }>).detail;
@@ -88,7 +91,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
         window.removeEventListener('o8:request-spawn-tab', onSpawn as EventListener);
         window.removeEventListener('o8:request-close-workspace', onCloseWorkspace as EventListener);
       };
-    }, [props.canCloseTile, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, activeRepo, preferredRepo, onCloseTile, workspaceInstanceId]);
+    }, [props.canCloseTile, handleNewTab, handleNewLLMChatTab, spawnOrchestratorTab, spawnFleetCanvasTab, activeRepo, preferredRepo, onCloseTile, workspaceInstanceId]);
 
     // Broadcast the active-tab label + tabId + kind + workspaceId + full
     // tabs list so the dashboard can route the title to the column-level

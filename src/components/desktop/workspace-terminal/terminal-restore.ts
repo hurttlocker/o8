@@ -157,6 +157,24 @@ export async function computeRestoredTabs(
       continue;
     }
 
+    if (tabKind === 'fleet-canvas') {
+      // Pure view over useOrchestratorData — nothing live to recover, so the
+      // tab restores unconditionally (card positions live in localStorage via
+      // fleet-canvas-store keyed by repo scope, not on the tab record).
+      const tabId = claimWorkspaceTabId('fleet-canvas', seenTabIds, savedTab.id);
+      restoredTabs.push({
+        id: tabId,
+        label: savedTab.label || 'Canvas',
+        kind: 'fleet-canvas',
+        tmuxSession: null,
+        repo: savedTab.repoPath ? { name: savedTab.repoName ?? 'repo', localPath: savedTab.repoPath } : (currentPreferredRepo ?? undefined),
+        createdAt: now,
+        lastActivity: now,
+      });
+      if (savedTab.id === saved.activeTabId) restoredActiveTabId = tabId;
+      continue;
+    }
+
     if (tabKind === 'chat') {
       // Reclassify runtime from sessionKey prefix if persisted value is stale.
       // Tabs saved pre-v0.1.24 persisted chatRuntime='codex' even for dispatched

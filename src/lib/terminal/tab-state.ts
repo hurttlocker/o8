@@ -18,7 +18,7 @@ export interface PersistedChatCheckpoint {
 export interface PersistedTab {
   id: string;
   label: string;
-  kind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator'; // defaults to 'terminal' for backward compat
+  kind?: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas'; // defaults to 'terminal' for backward compat
   cliAgent: string; // 'shell' | 'claude' | 'codex' | etc
   repoName?: string;
   repoPath?: string;

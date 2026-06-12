@@ -90,6 +90,14 @@ export interface OperatorDefaults {
    */
   experimentalChat: boolean;
   /**
+   * Off by default. The `fleet-canvas` workspace tab — live packet cards on
+   * a spatial canvas (docs/canvas-mode-plan.md). Flag ON surfaces a Canvas
+   * row in the New-tab picker; flag OFF hides the row AND any existing
+   * fleet-canvas tabs (mirrors `experimentalChat`: tab data stays persisted
+   * for when it flips back on).
+   */
+  experimentalCanvas: boolean;
+  /**
    * Q&A Class A composer model (#971). Production-only knob — eval mode keeps
    * its OpenRouter Sonnet 4.6 path either way.
    */
@@ -131,6 +139,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
+  experimentalCanvas: false,
   classAComposer: 'auto',
   // ON by default post-#1097. Subscription pool, not Agent SDK pool. See the
   // docstring above on the field for the rationale.
@@ -254,6 +263,13 @@ function envExperimentalChat(): boolean | null {
   return null;
 }
 
+function envExperimentalCanvas(): boolean | null {
+  const raw = process.env.O8_EXPERIMENTAL_CANVAS;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 function envClassAComposer(): ClassAComposer | null {
   const raw = process.env.O8_CLASS_A_COMPOSER?.trim();
   if (raw && isClassAComposer(raw)) return raw;
@@ -287,6 +303,7 @@ interface StoredOperatorDefaults {
   experimentalOpencode?: boolean;
   experimentalGemini?: boolean;
   experimentalChat?: boolean;
+  experimentalCanvas?: boolean;
   classAComposer?: ClassAComposer;
   inAppOrchestratorEnabled?: boolean;
   workersUseBrain?: WorkersUseBrain;
@@ -343,6 +360,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (typeof stored.experimentalChat === 'boolean') {
     result.experimentalChat = stored.experimentalChat;
   }
+  if (typeof stored.experimentalCanvas === 'boolean') {
+    result.experimentalCanvas = stored.experimentalCanvas;
+  }
   if (isClassAComposer(stored.classAComposer)) {
     result.classAComposer = stored.classAComposer;
   }
@@ -369,6 +389,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envOpencode = envExperimentalOpencode();
   const envGemini = envExperimentalGemini();
   const envChat = envExperimentalChat();
+  const envCanvas = envExperimentalCanvas();
   const envComposer = envClassAComposer();
   const envInApp = envInAppOrchestratorEnabled();
   const envBrain = envWorkersUseBrain();
@@ -387,6 +408,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
+    experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled:
       envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled,
@@ -407,6 +429,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
+    experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default',
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
       envInApp !== null ? 'env' : fileValues.inAppOrchestratorEnabled !== undefined ? 'file' : 'default',
@@ -503,6 +526,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.experimentalChat !== undefined) {
     stored.experimentalChat = Boolean(update.experimentalChat);
+  }
+  if (update.experimentalCanvas !== undefined) {
+    stored.experimentalCanvas = Boolean(update.experimentalCanvas);
   }
   if (update.classAComposer !== undefined) {
     if (!isClassAComposer(update.classAComposer)) {

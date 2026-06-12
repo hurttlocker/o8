@@ -14,6 +14,7 @@ import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspac
 // so the standalone LLMChat surface is no longer mounted from here.
 const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then((module) => ({ default: module.Canvas })));
 const LazyOrchestratorTab = lazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })));
+const LazyFleetCanvasTab = lazy(() => import('@/components/desktop/workspace-terminal/FleetCanvasTab').then((module) => ({ default: module.FleetCanvasTab })));
 
 interface WorkspaceTerminalPanelsProps {
   visibleTabs: TerminalTab[];
@@ -142,6 +143,13 @@ function WorkspaceTerminalPanelsBase({
               onRestoreLatestCheckpoint={onRestoreLatestCheckpoint}
             />
           </div>
+        ) : tab.kind === 'fleet-canvas' ? (
+          <Suspense key={tab.id} fallback={null}>
+            <LazyFleetCanvasTab
+              active={tab.id === effectiveActiveTabId}
+              repoPath={tab.repo?.localPath ?? null}
+            />
+          </Suspense>
         ) : tab.kind === 'canvas' && tab.canvasTab ? (
           <CanvasPanel
             key={tab.id}

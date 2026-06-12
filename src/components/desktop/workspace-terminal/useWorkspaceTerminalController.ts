@@ -11,6 +11,7 @@ import {
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { ChatModelId } from '@/components/desktop/orchestrator/chat-models';
 import { useExperimentalChatFlag } from '@/lib/operator/use-experimental-chat';
+import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { ORCHESTRATED_TAB_AUTO_ARCHIVE_MS } from '@/components/desktop/workspace-terminal/constants';
@@ -164,13 +165,17 @@ export function useWorkspaceTerminalController(
   // visible tab) and the composer unmounts, so the orchestrator is the only
   // conversational surface. The tab data stays persisted for when it flips on.
   const experimentalChat = useExperimentalChatFlag();
+  // Same alpha pattern for the fleet-canvas tab — hidden (data preserved)
+  // unless experimentalCanvas is on. See docs/canvas-mode-plan.md.
+  const experimentalCanvas = useExperimentalCanvasFlag();
   const visibleTabs = useMemo(
     () => tabs.filter((tab) => {
       if (tab.kind === 'canvas' && tab.canvasTab?.kind === 'ci') return false;
       if (!experimentalChat && tab.kind === 'llm-chat') return false;
+      if (!experimentalCanvas && tab.kind === 'fleet-canvas') return false;
       return true;
     }),
-    [tabs, experimentalChat],
+    [tabs, experimentalChat, experimentalCanvas],
   );
   const effectiveActiveTabId = useMemo(
     () => visibleTabs.some((tab) => tab.id === activeTabId)
@@ -474,6 +479,30 @@ export function useWorkspaceTerminalController(
     setActiveTabIdFromUser(newTab.id);
     return newTab.id;
   }, [createDefaultOrchestratorTab, setActiveTabIdFromUser]);
+
+  const spawnFleetCanvasTab = useCallback((): string => {
+    // One fleet canvas per workspace is enough — focus the existing tab
+    // instead of minting duplicates (the fleet data is identical anyway).
+    const existing = tabsRef.current.find((tab) => tab.kind === 'fleet-canvas');
+    if (existing) {
+      setActiveTabIdFromUser(existing.id);
+      return existing.id;
+    }
+    const newTab: TerminalTab = {
+      id: createWorkspaceTabId('fleet-canvas'),
+      label: 'Canvas',
+      kind: 'fleet-canvas',
+      tmuxSession: null,
+      repo: preferredRepoRef.current ?? undefined,
+      createdAt: Date.now(),
+      lastActivity: Date.now(),
+    };
+    const nextTabs = [...tabsRef.current, newTab];
+    tabsRef.current = nextTabs;
+    setTabs(nextTabs);
+    setActiveTabIdFromUser(newTab.id);
+    return newTab.id;
+  }, [setActiveTabIdFromUser]);
 
   const handleUpdateTabMode = useCallback((
     tabId: string,
@@ -1123,6 +1152,7 @@ export function useWorkspaceTerminalController(
     spawnSingleRuntimeTab,
     spawnChatTab,
     spawnOrchestratorTab,
+    spawnFleetCanvasTab,
     handleUpdateTabMode,
     undoCleanup,
     tabs,

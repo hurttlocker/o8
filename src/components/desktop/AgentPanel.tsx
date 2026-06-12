@@ -14,7 +14,8 @@ import { AddRepoDialog } from './repo-registry/AddRepoDialog';
 import { RepoStatusHover } from './repo-registry/RepoStatusHover';
 import type { RepoRegistryEntry } from './repo-registry/shared';
 import { useProjects, type ProjectRecord } from './repo-registry/useProjects';
-import { Menu, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
+import { LayoutGrid, Menu, MessageSquare, Play, Plus, Sparkles, Terminal, type LucideIcon } from './lucide-shims';
+import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { MenuScale } from 'iconoir-react';
 import { AutoFlash, Delivery, InputSearch } from 'iconoir-react';
 import { repoSlugFromRemote } from './canvas-utils';
@@ -498,6 +499,14 @@ function MiniAgentPanelHeader({
     setSessionMenuOpen(false);
     action?.();
   }, []);
+  // experimentalCanvas gates the Canvas row. Spawn goes through the same
+  // o8:request-spawn-tab event the EmptyWorkspaceCTA uses — keeps AgentPanel
+  // decoupled from the workspace controller (the o8:open-automations pattern).
+  const experimentalCanvas = useExperimentalCanvasFlag();
+  const handleCreateFleetCanvas = useCallback(() => {
+    if (typeof window === 'undefined') return;
+    window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind: 'fleet-canvas' } }));
+  }, []);
 
   return (
     <div
@@ -527,6 +536,7 @@ function MiniAgentPanelHeader({
             onCreateOrchestrator={() => runSessionAction(onCreateOrchestrator)}
             onCreateChat={() => runSessionAction(onCreateChat)}
             onCreateTerminal={() => runSessionAction(onCreateTerminal)}
+            onCreateFleetCanvas={experimentalCanvas ? () => runSessionAction(handleCreateFleetCanvas) : undefined}
           />
         ) : null}
         <MiniAgentPanelAction
@@ -581,10 +591,12 @@ function MiniSessionMenu({
   onCreateOrchestrator,
   onCreateChat,
   onCreateTerminal,
+  onCreateFleetCanvas,
 }: {
   onCreateOrchestrator: () => void;
   onCreateChat: () => void;
   onCreateTerminal: () => void;
+  onCreateFleetCanvas?: () => void;
 }) {
   return (
     <div
@@ -619,8 +631,17 @@ function MiniSessionMenu({
         title="Terminal"
         subtitle="Plain shell"
         onClick={onCreateTerminal}
-        last
+        last={!onCreateFleetCanvas}
       />
+      {onCreateFleetCanvas ? (
+        <MiniSessionMenuItem
+          icon={LayoutGrid}
+          title="Canvas"
+          subtitle="Your fleet, spatially"
+          onClick={onCreateFleetCanvas}
+          last
+        />
+      ) : null}
     </div>
   );
 }

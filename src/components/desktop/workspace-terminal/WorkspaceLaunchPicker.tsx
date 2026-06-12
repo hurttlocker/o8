@@ -9,6 +9,7 @@ import { THEME_ACCENT, THEME_ACCENT_SOFT } from '@/components/desktop/workspace-
 import { PhosphorPlay } from '@/components/desktop/workspace-terminal/icons';
 import { useWorkspaceSpawn } from '@/components/desktop/workspace-terminal/spawn-context';
 import { useExperimentalChatFlag } from '@/lib/operator/use-experimental-chat';
+import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import type { RegisteredRepo } from '@/components/desktop/workspace-terminal/types';
 
 interface WorkspaceLaunchPickerProps {
@@ -29,6 +30,8 @@ function WorkspaceLaunchPickerBase({
   const spawnHandlers = useWorkspaceSpawn();
   // Alpha: the casual "Chat" (llm-chat) option is hidden unless experimentalChat.
   const experimentalChat = useExperimentalChatFlag();
+  // Same gate for the fleet Canvas tab (docs/canvas-mode-plan.md).
+  const experimentalCanvas = useExperimentalCanvasFlag();
 
   useEffect(() => {
     if (!pickerOpen) return undefined;
@@ -52,6 +55,11 @@ function WorkspaceLaunchPickerBase({
 
   const handleNewChat = () => {
     onNewLLMChatTab(scopedRepo ?? undefined);
+    setPickerOpen(false);
+  };
+
+  const handleNewFleetCanvas = () => {
+    spawnHandlers?.spawnFleetCanvasTab?.();
     setPickerOpen(false);
   };
 
@@ -153,6 +161,28 @@ function WorkspaceLaunchPickerBase({
             </>
           ) : null}
 
+          {experimentalCanvas ? (
+            <>
+              <div style={dividerStyle} />
+              <button
+                type="button"
+                onClick={handleNewFleetCanvas}
+                disabled={!spawnHandlers?.spawnFleetCanvasTab}
+                style={menuButtonStyle}
+                onMouseEnter={highlightOn}
+                onMouseLeave={resetOn}
+              >
+                <span style={iconSlotStyle}>
+                  <FleetCanvasGlyph color={THEME_ACCENT} />
+                </span>
+                <div>
+                  <div style={{ fontWeight: 500 }}>Canvas</div>
+                  <div style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Your fleet, spatially</div>
+                </div>
+              </button>
+            </>
+          ) : null}
+
           <div style={dividerStyle} />
 
           <button
@@ -173,6 +203,16 @@ function WorkspaceLaunchPickerBase({
         </div>
       ) : null}
     </div>
+  );
+}
+
+function FleetCanvasGlyph({ color }: { color: string }) {
+  return (
+    <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect width="7" height="7" x="3" y="3" rx="1.5" />
+      <rect width="7" height="7" x="14" y="6" rx="1.5" />
+      <rect width="7" height="7" x="6" y="14" rx="1.5" />
+    </svg>
   );
 }
 

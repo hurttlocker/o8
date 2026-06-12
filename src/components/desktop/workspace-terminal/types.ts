@@ -42,9 +42,12 @@ export interface TerminalTab {
    *                       + persisted-state migration. Future cleanup:
    *                       rename 'chat' → 'session'.
    *   - 'terminal'      → tmux/PTY shell tab
-   *   - 'canvas'        → file/diff viewer tab
+   *   - 'canvas'        → file/diff viewer tab (agent-created inspector)
+   *   - 'fleet-canvas'  → spatial fleet overview — live packet cards on a
+   *                       canvas (experimentalCanvas flag; docs/canvas-mode-plan.md).
+   *                       NOT the same as 'canvas'.
    */
-  kind: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator';
+  kind: 'terminal' | 'chat' | 'llm-chat' | 'canvas' | 'orchestrator' | 'fleet-canvas';
   tmuxSession: string | null;
   cliAgent?: string;
   repo?: RegisteredRepo;

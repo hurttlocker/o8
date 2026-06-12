@@ -19,6 +19,7 @@ import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
 import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
+import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 
 interface WorkspaceHeaderStripProps {
   /** Render the 78px macOS traffic-light spacer — set when this strip is leftmost. */
@@ -248,9 +249,10 @@ function SplitHeaderPillStrips({
     contextRailVisible?: boolean;
   }>;
 }) {
-  const dispatchSpawn = useCallback((workspaceId: string, kind: 'orchestrator' | 'chat' | 'terminal') => {
+  const dispatchSpawn = useCallback((workspaceId: string, kind: 'orchestrator' | 'chat' | 'terminal' | 'fleet-canvas') => {
     window.dispatchEvent(new CustomEvent('o8:request-spawn-tab', { detail: { kind, workspaceId } }));
   }, []);
+  const experimentalCanvas = useExperimentalCanvasFlag();
   const dispatchClose = useCallback((workspaceId: string) => {
     window.dispatchEvent(new CustomEvent('o8:request-close-workspace', { detail: { workspaceId } }));
   }, []);
@@ -304,6 +306,7 @@ function SplitHeaderPillStrips({
                 onSpawnOrchestrator={() => dispatchSpawn(workspace.workspaceId, 'orchestrator')}
                 onSpawnChat={() => dispatchSpawn(workspace.workspaceId, 'chat')}
                 onSpawnTerminal={() => dispatchSpawn(workspace.workspaceId, 'terminal')}
+                onSpawnFleetCanvas={experimentalCanvas ? () => dispatchSpawn(workspace.workspaceId, 'fleet-canvas') : undefined}
                 ariaSuffix={paneLabel(index)}
               />
               {canClose ? (
@@ -731,6 +734,15 @@ function PillRuntimeGlyph({ kind }: { kind: string; runtime: string | null }) {
       </svg>
     );
   }
+  if (kind === 'fleet-canvas') {
+    return (
+      <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <rect width="7" height="7" x="3" y="3" rx="1.5" />
+        <rect width="7" height="7" x="14" y="6" rx="1.5" />
+        <rect width="7" height="7" x="6" y="14" rx="1.5" />
+      </svg>
+    );
+  }
   // llm-chat or single-runtime chat
   return (
     <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -756,11 +768,13 @@ function HeaderPlayButton({
   onSpawnOrchestrator,
   onSpawnChat,
   onSpawnTerminal,
+  onSpawnFleetCanvas,
   ariaSuffix,
 }: {
   onSpawnOrchestrator?: () => void;
   onSpawnChat?: () => void;
   onSpawnTerminal?: () => void;
+  onSpawnFleetCanvas?: () => void;
   /** Disambiguates the aria-label when two play buttons coexist in a
    *  split (e.g. "New tab (left pane)") — without this Playwright and
    *  other a11y tooling hit strict-mode duplicate-label violations. */
@@ -865,6 +879,9 @@ function HeaderPlayButton({
         ) : null}
         {onSpawnTerminal ? (
           <TitleMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} />
+        ) : null}
+        {onSpawnFleetCanvas ? (
+          <TitleMenuItem label="Canvas" onClick={pick(onSpawnFleetCanvas)} />
         ) : null}
       </div>
     </div>
