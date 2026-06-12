@@ -41,10 +41,13 @@ import {
 } from '@/lib/canvas-mode/glass-settings';
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { isTauri, setCanvasBackdropBlur, setCanvasMaterial } from '@/lib/tauri/bridge';
+import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSocket';
+import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { MOCK_LANES, OrchestratorDock } from './dock';
 import { CenterStage, type Stage } from './stage';
+import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { FONT, glass, type CardKind, type DockEntry, type MockCard, type NewDockEntry } from './ui';
 
@@ -63,9 +66,43 @@ export default function CanvasGlassPreviewPage() {
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeLane, setActiveLane] = useState(MOCK_LANES[0].id);
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
+  const [termCards, setTermCards] = useState<TermCard[]>([]);
   const nextIdRef = useRef(1);
   const entryIdRef = useRef(1);
   const timersRef = useRef<Array<ReturnType<typeof setTimeout>>>([]);
+  const xtermHandlesRef = useRef(new Map<string, XtermPanelHandle>());
+  const liveSessionsRef = useRef(new Set<string>());
+
+  // Real terminals ride the production WebSocket — same transport, tmux
+  // sessions and XtermPanel as the dashboard tabs.
+  const {
+    sendTerminalCreate,
+    sendTerminalAttach,
+    sendTerminalInput,
+    sendTerminalResize,
+    sendTerminalDetach,
+  } = useDesktopWebSocket(undefined, {
+    onTerminalCreated: (sessionName, requestId) => {
+      if (!requestId || !requestId.startsWith('cnv-term-')) return;
+      liveSessionsRef.current.add(sessionName);
+      setTermCards((previous) => previous.map((card) => (
+        card.requestId === requestId ? { ...card, sessionName } : card
+      )));
+    },
+    onTerminalData: (sessionName, data) => {
+      xtermHandlesRef.current.get(sessionName)?.writeData(data);
+    },
+    onTerminalExited: (sessionName) => {
+      liveSessionsRef.current.delete(sessionName);
+      xtermHandlesRef.current.get(sessionName)?.setExited();
+      setTermCards((previous) => previous.map((card) => (
+        card.sessionName === sessionName ? { ...card, exited: true } : card
+      )));
+    },
+    onTerminalError: (sessionName, error) => {
+      xtermHandlesRef.current.get(sessionName)?.setError(error);
+    },
+  });
 
   useEffect(() => {
     const stored = readCanvasGlassSettings();
@@ -210,6 +247,56 @@ export default function CanvasGlassPreviewPage() {
     setCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
 
+  /** Spawn a REAL shell — production transport, canvas treatment. */
+  const spawnTerminal = useCallback(() => {
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    const requestId = `cnv-term-${id}-${Math.random().toString(36).slice(2, 8)}`;
+    setTermCards((previous) => [...previous, {
+      id,
+      requestId,
+      sessionName: null,
+      exited: false,
+      x: 240 + (previous.length % 3) * 120 + (id % 5) * 10,
+      y: 120 + (previous.length % 3) * 90,
+    }]);
+    sendTerminalCreate(120, 30, requestId);
+  }, [sendTerminalCreate]);
+
+  const moveTermCard = useCallback((id: number, x: number, y: number) => {
+    setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
+  }, []);
+
+  /** Close = exit the shell (kills the tmux session) + detach + drop the card. */
+  const closeTerminal = useCallback((card: TermCard) => {
+    if (card.sessionName && !card.exited) {
+      sendTerminalInput(card.sessionName, 'exit\n');
+      sendTerminalDetach(card.sessionName);
+      liveSessionsRef.current.delete(card.sessionName);
+      xtermHandlesRef.current.delete(card.sessionName);
+    }
+    setTermCards((previous) => previous.filter((existing) => existing.id !== card.id));
+  }, [sendTerminalDetach, sendTerminalInput]);
+
+  const registerXtermHandle = useCallback((sessionName: string, handle: XtermPanelHandle | null) => {
+    if (handle) xtermHandlesRef.current.set(sessionName, handle);
+    else xtermHandlesRef.current.delete(sessionName);
+  }, []);
+
+  // Leaving the canvas exits every live canvas shell — they are canvas
+  // objects, not dashboard tabs; lingering tmux sessions would get adopted
+  // by the dashboard's terminal restore.
+  useEffect(() => {
+    const sessions = liveSessionsRef.current;
+    return () => {
+      for (const sessionName of sessions) {
+        sendTerminalInput(sessionName, 'exit\n');
+        sendTerminalDetach(sessionName);
+      }
+      sessions.clear();
+    };
+  }, [sendTerminalDetach, sendTerminalInput]);
+
   const dropImages = useCallback((event: React.DragEvent) => {
     event.preventDefault();
     const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => file.type.startsWith('image/'));
@@ -268,7 +355,7 @@ export default function CanvasGlassPreviewPage() {
 
       {/* ── the reference stage — owns the canvas while it is empty ───────── */}
       <AnimatePresence mode="wait">
-        {cards.length === 0 || summoning ? (
+        {(cards.length === 0 && termCards.length === 0) || summoning ? (
           <CenterStage key={stage.kind} stage={stage} />
         ) : null}
       </AnimatePresence>
@@ -277,6 +364,23 @@ export default function CanvasGlassPreviewPage() {
       {cards.map((card) => (
         <CanvasCard key={card.id} card={card} selected={selectedCardId === card.id} onMove={moveCard} onSelect={setSelectedCardId} />
       ))}
+
+      {/* ── Real terminals (production transport, canvas treatment) ── */}
+      <AnimatePresence>
+        {termCards.map((card) => (
+          <TerminalGlassCard
+            key={card.id}
+            card={card}
+            onMove={moveTermCard}
+            onClose={closeTerminal}
+            registerHandle={registerXtermHandle}
+            sendTerminalAttach={sendTerminalAttach}
+            sendTerminalInput={sendTerminalInput}
+            sendTerminalResize={sendTerminalResize}
+            sendTerminalDetach={sendTerminalDetach}
+          />
+        ))}
+      </AnimatePresence>
 
       {/* ── Top dock — the important header controls ─────────────── */}
       <div
@@ -382,7 +486,7 @@ export default function CanvasGlassPreviewPage() {
         <SpawnGlyphButton label="Spawn browser" onClick={() => spawnCard('browser', 'Browser', 'localhost:3001', 'idle')}>
           <circle cx="12" cy="12" r="10" /><path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton label="Spawn terminal" onClick={() => spawnCard('terminal', 'zsh · ~/o8', 'agent terminal', 'working')}>
+        <SpawnGlyphButton label="Spawn terminal" onClick={spawnTerminal}>
           <path d="m4 17 6-6-6-6" /><line x1="12" x2="20" y1="19" y2="19" />
         </SpawnGlyphButton>
         <SpawnGlyphButton label="Spawn review" onClick={() => spawnCard('review', 'Review — pending diff', '2 files · +14 −3', 'waiting')}>

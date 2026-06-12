@@ -64,7 +64,7 @@ export function TunerPanel({
         ...glass(true),
       }}
     >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+      <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
         {personalDefault ? (
           <PresetPill
             label="Mine"
@@ -186,7 +186,6 @@ function PresetPill({ label, active, onClick }: { label: string; active: boolean
       type="button"
       onClick={onClick}
       style={{
-        flex: 1,
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: active ? 'var(--cnv-ink-muted)' : 'var(--cnv-edge)',
@@ -194,13 +193,13 @@ function PresetPill({ label, active, onClick }: { label: string; active: boolean
         borderRadius: 999,
         paddingTop: 3,
         paddingBottom: 3,
+        paddingLeft: 11,
+        paddingRight: 11,
         fontSize: 10.5,
         fontWeight: active ? 500 : 300,
         color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
         cursor: 'pointer',
         fontFamily: FONT,
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
       }}
     >
