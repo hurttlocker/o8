@@ -55,6 +55,24 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
+  it('gates /api/v2/files (repo file WRITE surface) against LAN', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/v2/files', {
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('gates /api/panel/file-io (arbitrary-path canvas file card) against LAN', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/panel/file-io?path=/etc/hosts', {
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('passes the Tauri webview origin', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://localhost:3001/api/orchestrator/threads', {
