@@ -134,6 +134,7 @@ export default function CanvasGlassPreviewPage() {
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [composerImages, setComposerImages] = useState<Array<{ name: string; dataUri: string }>>([]);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [browserCards, setBrowserCards] = useState<BrowserCard[]>([]);
@@ -472,30 +473,56 @@ export default function CanvasGlassPreviewPage() {
 
   /** One send path for every composer — the bottom pill AND the dock's
    *  own reply input. Returns true when the message went out. */
-  const sendPrompt = useCallback((prompt: string): boolean => {
+  const sendPrompt = useCallback((prompt: string, attachments?: Array<{ dataUri: string; name?: string }>): boolean => {
     if (!prompt || !activeRepoPath || orcaBusy) return false;
     firstOutputRef.current.delete(activeRepoPath);
-    const threadId = orca.send(prompt, { model: orcaModel, thinkingEffort: orcaEffort });
+    const threadId = orca.send(prompt, {
+      model: orcaModel,
+      thinkingEffort: orcaEffort,
+      ...(attachments?.length ? { attachments } : {}),
+    });
+    const userText = attachments?.length
+      ? `${prompt}\n\n· ${attachments.length} image${attachments.length === 1 ? '' : 's'} attached`
+      : prompt;
     if (!threadId) {
       appendEntries(activeRepoPath, [
-        { role: 'user', text: prompt },
+        { role: 'user', text: userText },
         { role: 'status', text: 'Not connected yet — try again in a second', pending: false },
       ]);
       setDockOpen(true);
       return false;
     }
     appendEntries(activeRepoPath, [
-      { role: 'user', text: prompt },
+      { role: 'user', text: userText },
       { role: 'status', text: 'Thinking', pending: true },
     ]);
     return true;
   }, [activeRepoPath, appendEntries, orca, orcaBusy, orcaEffort, orcaModel]);
 
+  /** Files dropped or pasted onto the composer become picture pills,
+   *  ready to ride the next send as real image blocks. */
+  const addComposerImages = useCallback((files: Iterable<File>) => {
+    for (const file of files) {
+      if (!file.type.startsWith('image/')) continue;
+      const reader = new FileReader();
+      reader.onload = () => {
+        const dataUri = typeof reader.result === 'string' ? reader.result : null;
+        if (!dataUri) return;
+        setComposerImages((previous) => previous.length >= 8 ? previous : [...previous, { name: file.name || 'image', dataUri }]);
+      };
+      reader.readAsDataURL(file);
+    }
+  }, []);
+
   const submit = useCallback(() => {
     const prompt = composerValue.trim();
-    if (!prompt) return;
-    if (sendPrompt(prompt)) setComposerValue('');
-  }, [composerValue, sendPrompt]);
+    const images = composerImages;
+    if (!prompt && images.length === 0) return;
+    if (sendPrompt(prompt || 'Take a look at these.', images.length ? images : undefined)) {
+      setComposerValue('');
+      setComposerImages([]);
+    }
+  }, [composerImages, composerValue, sendPrompt]);
 
   const chooseModel = useCallback((value: string) => {
     setOrcaModel(value);
@@ -1751,8 +1778,68 @@ export default function CanvasGlassPreviewPage() {
         ) : null}
       </AnimatePresence>
 
+      {/* Picture pills — images dropped or pasted on the composer wait
+          here, then ride the next send as real image blocks. */}
+      <AnimatePresence>
+        {composerImages.length > 0 ? (
+          <motion.div
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.25, ease: 'easeOut' }}
+            style={{
+              position: 'absolute',
+              bottom: 78,
+              left: '50%',
+              transform: 'translateX(-50%)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              paddingTop: 6,
+              paddingBottom: 6,
+              paddingLeft: 8,
+              paddingRight: 8,
+              borderRadius: 13,
+              zIndex: 40,
+              ...glass(true),
+            }}
+          >
+            {composerImages.map((image, index) => (
+              <div key={`${image.name}-${index}`} style={{ position: 'relative', display: 'flex', alignItems: 'center', gap: 6, paddingRight: 4 }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={image.dataUri} alt={image.name} style={{ width: 30, height: 30, borderRadius: 7, objectFit: 'cover', display: 'block' }} />
+                <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, maxWidth: 90, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {image.name}
+                </span>
+                <button
+                  type="button"
+                  aria-label={`Remove ${image.name}`}
+                  onClick={() => setComposerImages((previous) => previous.filter((_, i) => i !== index))}
+                  style={{ borderWidth: 0, background: 'transparent', padding: 2, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontSize: 10, fontFamily: FONT }}
+                  onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+                  onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </motion.div>
+        ) : null}
+      </AnimatePresence>
+
       {/* ── Bottom orchestrator input — first contact lives here ─── */}
       <div
+        onDragOver={(event) => {
+          // Claim drags over the composer — the page-level veil stays out
+          // of it and the drop becomes a picture pill, not a canvas card.
+          event.preventDefault();
+          event.stopPropagation();
+        }}
+        onDrop={(event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          if (event.dataTransfer?.files?.length) addComposerImages(event.dataTransfer.files);
+        }}
         style={{
           position: 'absolute',
           bottom: 24,
@@ -1781,6 +1868,13 @@ export default function CanvasGlassPreviewPage() {
           onChange={(event) => setComposerValue(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === 'Enter') submit();
+          }}
+          onPaste={(event) => {
+            const files = [...(event.clipboardData?.files ?? [])].filter((file) => file.type.startsWith('image/'));
+            if (files.length) {
+              event.preventDefault();
+              addComposerImages(files);
+            }
           }}
           placeholder={`Message the orchestrator · ${activeRepoName ?? '…'}`}
           aria-label="Orchestrator composer"

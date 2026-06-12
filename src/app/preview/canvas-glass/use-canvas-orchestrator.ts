@@ -130,7 +130,7 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
 
   /** Send one user turn. Returns the threadId, or null if the socket
    *  isn't ready (caller surfaces "not connected"). */
-  const send = useCallback((message: string, opts?: { model?: string; thinkingEffort?: string }) => {
+  const send = useCallback((message: string, opts?: { model?: string; thinkingEffort?: string; attachments?: Array<{ dataUri: string; name?: string }> }) => {
     if (!repoPath) return null;
     const ws = wsRef.current;
     if (!ws || ws.readyState !== WebSocket.OPEN) return null;
@@ -148,6 +148,7 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
       permissionMode: 'full',
       ...(opts?.model ? { model: opts.model } : {}),
       ...(opts?.thinkingEffort && opts.thinkingEffort !== 'adaptive' ? { thinkingEffort: opts.thinkingEffort } : {}),
+      ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
     }));
     return threadId;
   }, [repoPath, threadIds]);

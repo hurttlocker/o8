@@ -97,6 +97,12 @@ interface OrchestratorSendOptions {
    * tools — and synthesize both, instead of doing everything single-threaded.
    */
   swarm?: boolean;
+  /**
+   * Composer picture pills. ThoughtsChatPanel has always passed these; the
+   * wire silently dropped them until 2026-06-12 — now they ride the
+   * orchestrator-send payload and reach the model as image blocks.
+   */
+  attachments?: Array<{ dataUri: string; name?: string }>;
 }
 
 // Prepended to the outbound orchestrator turn when swarm/UltraCode is on. Kept
@@ -840,6 +846,7 @@ export function useOrchestratorStream(
         permissionMode,
         ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
         model,
+        ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
       });
       const delivered = await deliverOrchestratorPayload({
         payload,
