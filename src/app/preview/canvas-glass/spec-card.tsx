@@ -17,7 +17,6 @@ import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { ThemeProvider } from '@/lib/theme/context';
 import { O8SpecPane } from '@/components/desktop/o8-panel/O8SpecPane';
-import { O8ScratchChat } from '@/components/desktop/o8-panel/workspace-rail/O8ScratchChat';
 import { FONT, glass } from './ui';
 
 export interface SpecCard {
@@ -159,18 +158,11 @@ export function SpecGlassCard({
             ...(dragging || resizing ? { pointerEvents: 'none' } : {}),
           } as React.CSSProperties}
         >
+          {/* No Ask-o8 scratch chat on the canvas (operator call 2026-06-12):
+              the canvas composer IS the talk surface here; the popover was
+              in the way. Dashboard keeps it. */}
           <ThemeProvider>
-            <O8SpecPane
-              repoPath={card.repoPath}
-              toolbarSlot={(
-                <O8ScratchChat
-                  repoPath={card.repoPath}
-                  selectedFile={null}
-                  surface="diff"
-                  surfaceLabel="o8.md"
-                />
-              )}
-            />
+            <O8SpecPane repoPath={card.repoPath} />
           </ThemeProvider>
 
           {/* Corner resize grip. */}
