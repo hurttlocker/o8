@@ -1025,12 +1025,18 @@ export default function CanvasGlassPreviewPage() {
   }, [activeRepoPath, findFreeSpot, focusSpecCard, specCards]);
 
   /** The Engineering Brain as a card — one per repo, like the o8.md card;
-   *  a second click focuses the open one. */
-  const spawnBrainCard = useCallback(() => {
+   *  a second click focuses the open one. An intent-bus question rides in as
+   *  a one-shot `initialQuestion` the card asks itself. */
+  const spawnBrainCard = useCallback((question?: string) => {
     const repoPath = activeRepoPath ?? null;
     const open = brainCards.find((card) => card.repoPath === repoPath);
     if (open) {
       focusBrainCard(open.id);
+      if (question?.trim()) {
+        setBrainCards((previous) => previous.map((card) => (
+          card.id === open.id ? { ...card, initialQuestion: question.trim() } : card
+        )));
+      }
       return;
     }
     const id = nextIdRef.current;
@@ -1045,6 +1051,7 @@ export default function CanvasGlassPreviewPage() {
       w: 360,
       h: 380,
       repoPath,
+      ...(question?.trim() ? { initialQuestion: question.trim() } : {}),
     }]);
   }, [activeRepoPath, brainCards, findFreeSpot, focusBrainCard]);
 
@@ -1488,6 +1495,86 @@ export default function CanvasGlassPreviewPage() {
     setSearchOpen(false);
     setSearchQuery('');
   }, [focusCard, pickThread]);
+
+  // Canvas intent bus (#1232 phase 2) — Symon and the gated /api/canvas/intent
+  // route drive the canvas through the SAME handlers the rail buttons call.
+  // Listeners run synchronously on dispatchEvent, so the ack stamped on
+  // window.__o8CanvasIntentLast is readable right after dispatch.
+  useEffect(() => {
+    if (!canvasEnabled) return;
+    const onIntent = (event: Event) => {
+      const detail = (event as CustomEvent<{ verb?: string; args?: Record<string, unknown> }>).detail ?? {};
+      const args = (detail.args && typeof detail.args === 'object' ? detail.args : {}) as Record<string, unknown>;
+      let ok = true;
+      let note: string | null = null;
+      try {
+        switch (detail.verb) {
+          case 'open-browser':
+            window.dispatchEvent(new CustomEvent('o8:open-browser', { detail: { url: typeof args.url === 'string' ? args.url : null } }));
+            break;
+          case 'ask-brain':
+            spawnBrainCard(typeof args.question === 'string' ? args.question : undefined);
+            break;
+          case 'open-spec':
+            spawnSpecCard();
+            break;
+          case 'spawn-terminal': {
+            const path = activeRepoPath ?? null;
+            spawnTerminal(path, path ? repos?.find((repo) => repo.path === path)?.name ?? null : null);
+            break;
+          }
+          case 'search':
+            setSearchOpen(true);
+            if (typeof args.query === 'string') setSearchQuery(args.query);
+            break;
+          case 'zoom': {
+            const level = typeof args.level === 'number' ? args.level : NaN;
+            if (ZOOM_STEPS.some((step) => step === level)) {
+              setCanvasZoomLevel(level);
+            } else if (args.direction === 'in' || args.direction === 'out') {
+              setCanvasZoomLevel((previous) => {
+                const index = ZOOM_STEPS.findIndex((step) => step === previous);
+                const next = args.direction === 'out' ? index + 1 : index - 1;
+                return ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, next))];
+              });
+            } else {
+              ok = false;
+              note = `zoom needs level (${ZOOM_STEPS.join(', ')}) or direction in|out`;
+            }
+            break;
+          }
+          case 'dock':
+            if (typeof args.open === 'boolean') setDockOpen(args.open);
+            else setDockOpen((previous) => !previous);
+            break;
+          case 'send-prompt': {
+            const text = typeof args.text === 'string' ? args.text.trim() : '';
+            if (!text) {
+              ok = false;
+              note = 'send-prompt needs args.text';
+            } else if (!sendPrompt(text)) {
+              ok = false;
+              note = 'orchestrator not ready — no repo scoped, busy, or not connected';
+            }
+            break;
+          }
+          default:
+            ok = false;
+            note = `unknown intent verb: ${String(detail.verb)}`;
+        }
+      } catch (error) {
+        ok = false;
+        note = error instanceof Error ? error.message : String(error);
+      }
+      (window as unknown as Record<string, unknown>).__o8CanvasIntentLast = { verb: detail.verb ?? null, ok, note, at: Date.now() };
+    };
+    window.addEventListener('o8:canvas-intent', onIntent);
+    (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = true;
+    return () => {
+      window.removeEventListener('o8:canvas-intent', onIntent);
+      (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
+    };
+  }, [activeRepoPath, canvasEnabled, repos, sendPrompt, spawnBrainCard, spawnSpecCard, spawnTerminal]);
 
   if (!canvasEnabled) {
     return (
@@ -2117,7 +2204,7 @@ export default function CanvasGlassPreviewPage() {
         >
           <circle cx="12" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M12 8v4M12 12l-6 4M12 12l6 4" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton label="Ask the Brain" onClick={spawnBrainCard}>
+        <SpawnGlyphButton label="Ask the Brain" onClick={() => spawnBrainCard()}>
           <circle cx="12" cy="12" r="10" /><path d="M12 7.4l1.1 2.9 2.9 1.1-2.9 1.1-1.1 2.9-1.1-2.9-2.9-1.1 2.9-1.1z" />
         </SpawnGlyphButton>
         <SpawnGlyphButton label="Sessions" onClick={() => setSessionsOpen((value) => !value)}>

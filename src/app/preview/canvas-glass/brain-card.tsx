@@ -24,6 +24,9 @@ export interface BrainCard {
   w: number;
   h: number;
   repoPath: string | null;
+  /** One-shot question injected by the canvas intent bus — asked on mount,
+   *  never persisted. A new value on an existing card asks again. */
+  initialQuestion?: string;
 }
 
 export const BRAIN_MIN_W = 300;
@@ -94,8 +97,8 @@ export function BrainGlassCard({
   // Leaving the canvas mid-answer cancels the stream.
   useEffect(() => () => abortRef.current?.abort(), []);
 
-  const ask = useCallback(async () => {
-    const question = draft.trim();
+  const ask = useCallback(async (overrideQuestion?: string) => {
+    const question = (overrideQuestion ?? draft).trim();
     if (!question || asking) return;
     const userId = idRef.current;
     idRef.current += 1;
@@ -170,6 +173,16 @@ export function BrainGlassCard({
       setAsking(false);
     }
   }, [asking, card.repoPath, draft]);
+
+  // A question injected by the canvas intent bus asks itself — once per value,
+  // so re-renders never re-fire it but a fresh intent on an open card does.
+  const lastInjectedRef = useRef<string | null>(null);
+  useEffect(() => {
+    const question = card.initialQuestion?.trim();
+    if (!question || lastInjectedRef.current === question) return;
+    lastInjectedRef.current = question;
+    void ask(question);
+  }, [ask, card.initialQuestion]);
 
   return (
     <motion.div
