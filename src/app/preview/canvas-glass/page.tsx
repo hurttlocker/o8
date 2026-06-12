@@ -96,6 +96,10 @@ export default function CanvasGlassPreviewPage() {
   const xtermHandlesRef = useRef(new Map<string, XtermPanelHandle>());
   const liveSessionsRef = useRef(new Set<string>());
   const cdSentRef = useRef(new Set<string>());
+  const dataSeenRef = useRef(new Set<string>());
+  // First spawn of the visit gets the full reveal (min-play); the rest
+  // bail the instant the shell answers — speed stays the default.
+  const firstSpawnRef = useRef(true);
 
   // Real terminals ride the production WebSocket — same transport, tmux
   // sessions and XtermPanel as the dashboard tabs.
@@ -116,6 +120,14 @@ export default function CanvasGlassPreviewPage() {
     },
     onTerminalData: (sessionName, data) => {
       xtermHandlesRef.current.get(sessionName)?.writeData(data);
+      // First PTY byte = the shell is real — flip the title off the
+      // summoning verb. One-shot per session, not per chunk.
+      if (!dataSeenRef.current.has(sessionName)) {
+        dataSeenRef.current.add(sessionName);
+        setTermCards((previous) => previous.map((card) => (
+          card.sessionName === sessionName && !card.live ? { ...card, live: true } : card
+        )));
+      }
     },
     onTerminalAttached: (sessionName) => {
       // cwd fallback: today's bundled ws-server ignores the create-payload
@@ -297,6 +309,8 @@ export default function CanvasGlassPreviewPage() {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     const requestId = `cnv-term-${id}-${Math.random().toString(36).slice(2, 8)}`;
+    const revealHold = firstSpawnRef.current;
+    firstSpawnRef.current = false;
     setTermCards((previous) => {
       const maxZ = previous.length > 0 ? Math.max(...previous.map((card) => card.z)) : 9;
       return [...previous, {
@@ -304,6 +318,8 @@ export default function CanvasGlassPreviewPage() {
         requestId,
         sessionName: null,
         exited: false,
+        live: false,
+        revealHold,
         x: 240 + (previous.length % 3) * 120 + (id % 5) * 10,
         y: 110 + (previous.length % 3) * 80,
         w: 560,
