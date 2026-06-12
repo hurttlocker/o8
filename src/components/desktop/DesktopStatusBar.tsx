@@ -20,7 +20,8 @@ import { ChromeButton } from './chrome/ChromeButton';
 import { MergeActionCluster } from './MergeActionCluster';
 import { FooterPorts } from './desktop-status-bar/footer-ports';
 import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
-import { DeviceMobileIcon, FolderPlusIcon, GearSixIcon } from './desktop-status-bar/status-bar-icons';
+import { CanvasModeIcon, DeviceMobileIcon, FolderPlusIcon, GearSixIcon } from './desktop-status-bar/status-bar-icons';
+import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { Terminal as TablerTerminal } from './tabler-shims';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { SettingsQuickDrawer } from './SettingsQuickDrawer';
@@ -74,6 +75,7 @@ function DesktopStatusBarBase({
   const settingsButtonRef = useRef<HTMLDivElement | null>(null);
   const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
   const [settingsAnchorRect, setSettingsAnchorRect] = useState<DOMRect | null>(null);
+  const experimentalCanvas = useExperimentalCanvasFlag();
   const leftFooterCollapsed = !compact && (leftColumnWidth ?? 0) <= 0;
   const leftFooterWidth = compact
     ? 'auto'
@@ -223,6 +225,15 @@ function DesktopStatusBarBase({
                 size={22}
                 radius={6}
               />
+              {experimentalCanvas ? (
+                <ChromeButton
+                  icon={<CanvasModeIcon size={14} color="var(--t-text)" />}
+                  label="Canvas mode"
+                  onClick={() => { window.location.assign('/preview/canvas-glass'); }}
+                  size={22}
+                  radius={6}
+                />
+              ) : null}
               {/* Ports count + supervisor inbox merged as one cluster — both pills
                   share dims (26h / 7r / 11/300 chrome label) and the wrapper has
                   flexShrink:0 + gap:4 so they stay locked together when the panel

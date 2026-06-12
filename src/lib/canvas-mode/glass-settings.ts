@@ -37,6 +37,9 @@ export interface CanvasGlassSettings {
   vibrance: number;
   veil: number;
   material: string;
+  /** Desktop blur behind the window (px) — native, continuous, the Liquid
+   *  frost dial. Applied via setCanvasBackdropBlur, not a CSS var. */
+  backdropFrost: number;
 }
 
 // veil defaults to 0 and vibrance to the recipe's long-standing 1.6 so a
@@ -48,6 +51,7 @@ export const CANVAS_GLASS_DEFAULTS: CanvasGlassSettings = {
   vibrance: 1.6,
   veil: 0,
   material: 'popover',
+  backdropFrost: 0,
 };
 
 export const CANVAS_GLASS_RANGES = {
@@ -56,6 +60,7 @@ export const CANVAS_GLASS_RANGES = {
   ink: { min: 0.55, max: 1, step: 0.01 },
   vibrance: { min: 1, max: 2.2, step: 0.05 },
   veil: { min: 0, max: 0.8, step: 0.01 },
+  backdropFrost: { min: 0, max: 64, step: 1 },
 } as const;
 
 /**
@@ -83,9 +88,9 @@ export const CANVAS_GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }
  * Siri = the dark Apple reference; Frost = heavy private glass.
  */
 export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; values: CanvasGlassSettings }> = [
-  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'popover' } },
-  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover' } },
-  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar' } },
+  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'none', backdropFrost: 12 } },
+  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0 } },
+  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0 } },
 ];
 
 const STORAGE_KEY = 'o8:canvas-glass';
@@ -118,6 +123,7 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
       material: typeof candidate.material === 'string' && CANVAS_GLASS_MATERIALS.some((m) => m.id === candidate.material)
         ? candidate.material
         : CANVAS_GLASS_DEFAULTS.material,
+      backdropFrost: readNumber(candidate.backdropFrost, CANVAS_GLASS_RANGES.backdropFrost, CANVAS_GLASS_DEFAULTS.backdropFrost),
     };
   } catch {
     return { ...CANVAS_GLASS_DEFAULTS };

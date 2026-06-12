@@ -38,7 +38,7 @@ import {
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
-import { isTauri, setCanvasMaterial } from '@/lib/tauri/bridge';
+import { isTauri, setCanvasBackdropBlur, setCanvasMaterial } from '@/lib/tauri/bridge';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { MOCK_LANES, OrchestratorDock } from './dock';
@@ -70,21 +70,25 @@ export default function CanvasGlassPreviewPage() {
     setInTauri(isTauri());
   }, []);
 
-  // Background material: apply the stored choice while this page is up,
-  // restore the HudWindow chrome on the way out. No-op in a plain browser.
+  // Background material + backdrop blur: apply the stored choices while
+  // this page is up, restore the chrome on the way out. No-op in a browser.
   useEffect(() => {
     if (!canvasEnabled) return;
-    void setCanvasMaterial(readCanvasGlassSettings().material);
+    const stored = readCanvasGlassSettings();
+    void setCanvasMaterial(stored.material);
+    void setCanvasBackdropBlur(stored.backdropFrost);
     const timers = timersRef.current;
     return () => {
       void setCanvasMaterial('default');
+      void setCanvasBackdropBlur(0);
       for (const timer of timers) clearTimeout(timer);
     };
   }, [canvasEnabled]);
 
   const updateSettings = useCallback((patch: Partial<CanvasGlassSettings>) => {
-    // Material is native, not CSS — swap the window live when it changes.
+    // Material + backdrop blur are native, not CSS — swap the window live.
     if (patch.material) void setCanvasMaterial(patch.material);
+    if (patch.backdropFrost !== undefined) void setCanvasBackdropBlur(patch.backdropFrost);
     setSettings((previous) => {
       const next = { ...previous, ...patch };
       writeCanvasGlassSettings(next);
@@ -304,9 +308,9 @@ export default function CanvasGlassPreviewPage() {
         <button
           type="button"
           onClick={() => {
-            // Restore the chrome material BEFORE the hard navigation — the
-            // unmount cleanup is not guaranteed across location.assign.
-            void setCanvasMaterial('default').finally(() => {
+            // Restore the chrome BEFORE the hard navigation — the unmount
+            // cleanup is not guaranteed across location.assign.
+            void Promise.allSettled([setCanvasMaterial('default'), setCanvasBackdropBlur(0)]).then(() => {
               window.location.assign('/dashboard');
             });
           }}

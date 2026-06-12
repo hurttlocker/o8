@@ -67,7 +67,8 @@ export function CanvasGlassTuner() {
             && settings.tint === preset.values.tint
             && settings.ink === preset.values.ink
             && settings.veil === preset.values.veil
-            && settings.material === preset.values.material;
+            && settings.material === preset.values.material
+            && settings.backdropFrost === preset.values.backdropFrost;
           return (
             <button
               key={preset.id}
@@ -137,6 +138,16 @@ export function CanvasGlassTuner() {
           The native macOS layer the whole canvas runs on — your desktop reads through it. Applies when a canvas surface opens.
         </span>
       </div>
+      <GlassSlider
+        label="Backdrop frost"
+        hint="Desktop blur behind the window — the Liquid-mode frost dial, works on every material"
+        value={settings.backdropFrost}
+        display={`${Math.round(settings.backdropFrost)}px`}
+        min={CANVAS_GLASS_RANGES.backdropFrost.min}
+        max={CANVAS_GLASS_RANGES.backdropFrost.max}
+        step={CANVAS_GLASS_RANGES.backdropFrost.step}
+        onChange={(backdropFrost) => update({ backdropFrost })}
+      />
       <GlassSlider
         label="Veil"
         hint="Window-wide dark wash over the background — darkness of the world itself"

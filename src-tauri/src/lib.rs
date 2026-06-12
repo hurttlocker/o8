@@ -3361,6 +3361,63 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
     Ok(())
 }
 
+// Window-server background blur (the iTerm2 trick) — the ONLY continuous
+// desktop-blur knob macOS offers; NSVisualEffectMaterial blur amounts are
+// fixed recipes. Private CGS API, battle-tested for a decade (iTerm2,
+// kitty, Alacritty). Failure is logged and harmless.
+#[cfg(target_os = "macos")]
+#[link(name = "CoreGraphics", kind = "framework")]
+extern "C" {
+    fn CGSMainConnectionID() -> u32;
+    fn CGSSetWindowBackgroundBlurRadius(cid: u32, wid: u32, radius: i32) -> i32;
+}
+
+/// Tunable desktop frost for Canvas mode (#1232): blurs whatever is behind
+/// the window's transparent regions. Pairs with the "none"/Liquid material
+/// for a continuous liquid-frost dial; radius 0 restores raw clarity.
+#[tauri::command]
+fn set_canvas_backdrop_blur(app: tauri::AppHandle, radius: u32) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        use tauri::Manager;
+        let Some(window) = app.get_webview_window("main") else {
+            return Err("main window not found".into());
+        };
+        let target = window.clone();
+        window
+            .run_on_main_thread(move || {
+                let Ok(ptr) = target.ns_window() else {
+                    log::warn!("[canvas-blur] ns_window unavailable");
+                    return;
+                };
+                if ptr.is_null() {
+                    return;
+                }
+                let object = ptr as *mut objc2::runtime::AnyObject;
+                let wid: isize = unsafe { objc2::msg_send![&*object, windowNumber] };
+                if wid <= 0 {
+                    return;
+                }
+                let err = unsafe {
+                    CGSSetWindowBackgroundBlurRadius(
+                        CGSMainConnectionID(),
+                        wid as u32,
+                        radius.min(64) as i32,
+                    )
+                };
+                if err != 0 {
+                    log::warn!("[canvas-blur] CGSSetWindowBackgroundBlurRadius failed: {err}");
+                }
+            })
+            .map_err(|e| format!("schedule backdrop blur failed: {e}"))?;
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (app, radius);
+    }
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let preship_gate = env_flag_enabled("O8_PRESHIP_GATE");
@@ -3500,6 +3557,7 @@ pub fn run() {
             read_workspaces,
             set_tray_badge,
             set_canvas_material,
+            set_canvas_backdrop_blur,
             notify_review_ready,
             record_console_error,
             read_dropped_file,
