@@ -40,6 +40,9 @@ export interface CanvasGlassSettings {
   /** Desktop blur behind the window (px) — native, continuous, the Liquid
    *  frost dial. Applied via setCanvasBackdropBlur, not a CSS var. */
   backdropFrost: number;
+  /** Depth layer painted over the veil — paper grain / mesh / aurora.
+   *  Ids match CANVAS_BACKDROPS; rendered by the canvas page, not a var. */
+  backdrop: string;
 }
 
 // veil defaults to 0 and vibrance to the recipe's long-standing 1.6 so a
@@ -52,7 +55,17 @@ export const CANVAS_GLASS_DEFAULTS: CanvasGlassSettings = {
   veil: 0,
   material: 'popover',
   backdropFrost: 0,
+  backdrop: 'none',
 };
+
+/** The see-through depth layers — professional paper/shader moods. */
+export const CANVAS_BACKDROPS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'none', label: 'None' },
+  { id: 'paper', label: 'Paper' },
+  { id: 'mesh', label: 'Mesh' },
+  { id: 'aurora', label: 'Aurora' },
+  { id: 'grain', label: 'Grain' },
+];
 
 export const CANVAS_GLASS_RANGES = {
   frost: { min: 0, max: 64, step: 1 },
@@ -88,9 +101,9 @@ export const CANVAS_GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }
  * Siri = the dark Apple reference; Frost = heavy private glass.
  */
 export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; values: CanvasGlassSettings }> = [
-  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'none', backdropFrost: 12 } },
-  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0 } },
-  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0 } },
+  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'none', backdropFrost: 12, backdrop: 'none' } },
+  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0, backdrop: 'none' } },
+  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0, backdrop: 'none' } },
 ];
 
 const STORAGE_KEY = 'o8:canvas-glass';
@@ -132,6 +145,9 @@ export function readPersonalDefault(): CanvasGlassSettings | null {
         ? candidate.material
         : CANVAS_GLASS_DEFAULTS.material,
       backdropFrost: readNumber(candidate.backdropFrost, CANVAS_GLASS_RANGES.backdropFrost, CANVAS_GLASS_DEFAULTS.backdropFrost),
+      backdrop: typeof candidate.backdrop === 'string' && CANVAS_BACKDROPS.some((b) => b.id === candidate.backdrop)
+        ? candidate.backdrop
+        : CANVAS_GLASS_DEFAULTS.backdrop,
     };
   } catch {
     return null;
@@ -175,6 +191,9 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
         ? candidate.material
         : CANVAS_GLASS_DEFAULTS.material,
       backdropFrost: readNumber(candidate.backdropFrost, CANVAS_GLASS_RANGES.backdropFrost, CANVAS_GLASS_DEFAULTS.backdropFrost),
+      backdrop: typeof candidate.backdrop === 'string' && CANVAS_BACKDROPS.some((b) => b.id === candidate.backdrop)
+        ? candidate.backdrop
+        : CANVAS_GLASS_DEFAULTS.backdrop,
     });
   } catch {
     return { ...CANVAS_GLASS_DEFAULTS };
