@@ -90,6 +90,7 @@ export const PrPanel = memo(function PrPanel({ prNumber, repoSlug, repoPath, onC
         url={detail.url}
         actions={(
           <O8ScratchChat
+            surfaceLabel="pull requests"
             repoPath={repoPath ?? null}
             selectedFile={null}
             surface="diff"

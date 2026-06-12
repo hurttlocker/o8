@@ -10,7 +10,7 @@
  * the dashboard gate compact mode / sidebar-collapsed state from the call site.
  */
 
-import { useCallback, useEffect, useId, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { SidebarTogglePill } from './SidebarTogglePill';
@@ -397,8 +397,22 @@ function HeaderPillStrip({
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   // Truncate to one word when the strip is crowded — Codex feel: at 5+
-  // tabs each pill compacts to just its first significant word.
+  // tabs each pill compacts to just its first significant word. Sibling
+  // packets often share a verb ("Add …" × 3), so when the one-word form
+  // collides we extend those pills to two words — three identical "Add"
+  // pills carry zero information.
   const crowded = tabs.length >= 5;
+  const crowdedLabels = useMemo(() => {
+    const firsts = tabs.map((tab) => significantWords(tab.label, 1));
+    const counts = new Map<string, number>();
+    for (const word of firsts) counts.set(word, (counts.get(word) ?? 0) + 1);
+    const out = new Map<string, string>();
+    tabs.forEach((tab, index) => {
+      const first = firsts[index];
+      out.set(tab.id, (counts.get(first) ?? 0) > 1 ? significantWords(tab.label, 2) : first);
+    });
+    return out;
+  }, [tabs]);
 
   // Overflow affordances. The strip hides its scrollbar (scrollbarWidth:none)
   // to stay chrome-clean, so when many tabs are open the off-screen ones are
@@ -541,6 +555,7 @@ function HeaderPillStrip({
               tab={tab}
               active={tab.id === activeTabId}
               crowded={crowded}
+              crowdedLabel={crowdedLabels.get(tab.id) ?? null}
               onSelect={handleSelect}
               onClose={handleClose}
             />
@@ -575,6 +590,7 @@ function HeaderPill({
   tab,
   active,
   crowded,
+  crowdedLabel,
   onSelect,
   onClose,
 }: {
@@ -587,11 +603,12 @@ function HeaderPill({
   };
   active: boolean;
   crowded: boolean;
+  crowdedLabel: string | null;
   onSelect: (tabId: string) => void;
   onClose: (tabId: string) => void;
 }) {
   const [hovered, setHovered] = useState(false);
-  const display = crowded ? firstSignificantWord(tab.label) : tab.label;
+  const display = crowded ? (crowdedLabel ?? significantWords(tab.label, 1)) : tab.label;
   return (
     <div
       data-no-drag
@@ -722,13 +739,13 @@ function PillRuntimeGlyph({ kind }: { kind: string; runtime: string | null }) {
   );
 }
 
-function firstSignificantWord(label: string): string {
+function significantWords(label: string, count: number): string {
   if (!label) return '';
   // Split on " / " first (repo / title pattern) — keep the title side.
   const slash = label.indexOf(' / ');
   const tail = slash >= 0 ? label.slice(slash + 3) : label;
   const words = tail.trim().split(/\s+/);
-  return words[0] ?? '';
+  return words.slice(0, count).join(' ');
 }
 
 /** Header ▶ play button — mirrors the WorkspaceLaunchPicker dropdown

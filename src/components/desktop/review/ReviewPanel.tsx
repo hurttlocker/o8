@@ -310,6 +310,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
           <DiffStatBadge additions={visibleStats.additions} deletions={visibleStats.deletions} />
           <div style={{ flex: 1, minWidth: 8 }} />
           <O8ScratchChat
+            surfaceLabel="review"
             repoPath={repoPath}
             selectedFile={selectedFile ?? null}
             surface="diff"
@@ -330,7 +331,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
             {mode === 'unified' ? <IconSplit size={14} /> : <IconUnified size={14} />}
           </ToolbarButton>
           <div ref={menuRef} style={{ position: 'relative', flexShrink: 0 }}>
-            <ToolbarButton title="More" active={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
+            <ToolbarButton title="View options" active={menuOpen} onClick={() => setMenuOpen((open) => !open)}>
               <IconMore size={15} />
             </ToolbarButton>
             {menuOpen ? (
