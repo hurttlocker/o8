@@ -16,6 +16,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
+import { CanvasMarkdown } from './dock';
 import { FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
 
 // NOTE: component (+ types) exports only — runtime const exports here would
@@ -62,6 +63,11 @@ export function FileGlassCard({
   const [confirmClose, setConfirmClose] = useState(false);
   const mtimeRef = useRef<number | null>(null);
   const confirmTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Markdown (o8.md, READMEs, notes) opens RENDERED and word-wrapped;
+  // everything else opens straight into the mono editor.
+  const isMarkdown = /\.(md|markdown)$/i.test(card.name);
+  const [mode, setMode] = useState<'preview' | 'edit'>(isMarkdown ? 'preview' : 'edit');
 
   const dirty = status === 'ready' && content !== savedContent;
 
@@ -215,6 +221,35 @@ export function FileGlassCard({
             Changed on disk — Save overwrites
           </span>
         ) : null}
+        {isMarkdown && status === 'ready' ? (
+          <span
+            onPointerDown={(event) => event.stopPropagation()}
+            style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 999, border: '1px solid var(--cnv-edge)', overflow: 'hidden', flexShrink: 0 }}
+          >
+            {(['preview', 'edit'] as const).map((option) => (
+              <button
+                key={option}
+                type="button"
+                onClick={() => setMode(option)}
+                style={{
+                  borderWidth: 0,
+                  background: mode === option ? 'rgba(255,255,255,0.12)' : 'transparent',
+                  paddingTop: 2,
+                  paddingBottom: 2,
+                  paddingLeft: 9,
+                  paddingRight: 9,
+                  fontSize: 9.5,
+                  fontWeight: mode === option ? 500 : 300,
+                  color: mode === option ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+                  cursor: 'pointer',
+                  fontFamily: FONT,
+                }}
+              >
+                {option === 'preview' ? 'Read' : 'Edit'}
+              </button>
+            ))}
+          </span>
+        ) : null}
         {dirty || saving ? (
           <button
             type="button"
@@ -271,7 +306,22 @@ export function FileGlassCard({
       {/* The editor — transparent mono over the glass + shared veil. */}
       <div style={{ height: card.h, position: 'relative' }}>
         <div aria-hidden style={{ position: 'absolute', inset: 0, background: `rgba(7, 9, 13, ${termVeil.toFixed(2)})` }} />
-        {status === 'ready' ? (
+        {status === 'ready' && mode === 'preview' ? (
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              overflowY: 'auto',
+              paddingTop: 14,
+              paddingLeft: 18,
+              paddingRight: 16,
+              paddingBottom: 16,
+              scrollbarWidth: 'none',
+            } as React.CSSProperties}
+          >
+            <CanvasMarkdown text={content} />
+          </div>
+        ) : status === 'ready' ? (
           <textarea
             value={content}
             onChange={(event) => setContent(event.target.value)}
@@ -295,14 +345,15 @@ export function FileGlassCard({
               color: 'var(--cnv-ink)',
               caretColor: '#f59e0b',
               fontSize: 11.5,
-              lineHeight: 1.5,
-              fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
+              lineHeight: isMarkdown ? 1.65 : 1.5,
+              fontFamily: isMarkdown ? FONT : 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
               paddingTop: 10,
               paddingLeft: 12,
               paddingRight: 10,
               paddingBottom: 10,
-              whiteSpace: 'pre',
-              overflowWrap: 'normal',
+              // Markdown wraps like prose; code stays pre/no-wrap.
+              whiteSpace: isMarkdown ? 'pre-wrap' : 'pre',
+              overflowWrap: isMarkdown ? 'break-word' : 'normal',
               overflow: 'auto',
             }}
           />

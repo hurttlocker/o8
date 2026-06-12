@@ -16,6 +16,17 @@ export function glass(deep = false): CSSProperties {
   } as CSSProperties;
 }
 
+/** Floating menus/popovers that sit OVER text need a near-solid back —
+ *  plain glass tint lets the content underneath bleed through the rows. */
+export function glassPop(): CSSProperties {
+  return {
+    ...glass(true),
+    // Layered: a near-opaque slate base under the tunable tint. Popovers
+    // stay in the glass family but never let text read through them.
+    background: 'linear-gradient(var(--cnv-tint-deep), var(--cnv-tint-deep)), rgba(13, 16, 21, 0.88)',
+  } as CSSProperties;
+}
+
 export type CardKind = 'packet' | 'browser' | 'terminal' | 'review' | 'image';
 
 export interface MockCard {

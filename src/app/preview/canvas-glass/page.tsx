@@ -46,6 +46,7 @@ import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSoc
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { CanvasBackdropLayer } from './backdrops';
 import { BrowserGlassCard, type BrowserCard } from './browser-card';
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
@@ -57,7 +58,7 @@ import { CenterStage, type Stage } from './stage';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { useCanvasOrchestrator } from './use-canvas-orchestrator';
-import { FONT, IMG_MAX_SPAWN_EDGE, glass, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrcaThreadRow, type OrchestratorLane } from './ui';
+import { FONT, IMG_MAX_SPAWN_EDGE, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type OrcaThreadRow, type OrchestratorLane } from './ui';
 
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
 interface InboxRow {
@@ -941,6 +942,9 @@ export default function CanvasGlassPreviewPage() {
         }}
       />
 
+      {/* Depth layer — the paper/shader mood from the Canvas tuner. */}
+      <CanvasBackdropLayer kind={settings.backdrop} />
+
       {/* ── Kivo stage — owns the canvas while it is empty ───────── */}
       <AnimatePresence mode="wait">
         {(cards.length === 0 && termCards.length === 0 && fileCards.length === 0 && imageCards.length === 0 && browserCards.length === 0 && chatCards.length === 0) || summoning ? (
@@ -1156,7 +1160,7 @@ export default function CanvasGlassPreviewPage() {
                 borderRadius: 13,
                 zIndex: 46,
                 scrollbarWidth: 'none',
-                ...glass(true),
+                ...glassPop(),
               } as React.CSSProperties}
             >
               <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 4 }}>
@@ -1332,7 +1336,7 @@ export default function CanvasGlassPreviewPage() {
                 paddingRight: 14,
                 borderRadius: 13,
                 zIndex: 46,
-                ...glass(true),
+                ...glassPop(),
               }}
             >
               <span style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT }}>Operator</span>
@@ -1365,7 +1369,7 @@ export default function CanvasGlassPreviewPage() {
               paddingRight: 12,
               borderRadius: 18,
               zIndex: 41,
-              ...glass(true),
+              ...glassPop(),
             }}
           >
             <input
@@ -1470,7 +1474,7 @@ export default function CanvasGlassPreviewPage() {
                 paddingRight: 8,
                 borderRadius: 14,
                 zIndex: 46,
-                ...glass(true),
+                ...glassPop(),
               }}
             >
               <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 5 }}>
@@ -1706,7 +1710,7 @@ export default function CanvasGlassPreviewPage() {
                 paddingRight: 8,
                 borderRadius: 14,
                 zIndex: 46,
-                ...glass(true),
+                ...glassPop(),
               }}
             >
               <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 5 }}>

@@ -9,6 +9,7 @@
 
 import { motion } from 'framer-motion';
 import {
+  CANVAS_BACKDROPS,
   CANVAS_GLASS_DEFAULTS,
   CANVAS_GLASS_MATERIALS,
   CANVAS_GLASS_PRESETS,
@@ -24,7 +25,8 @@ function settingsMatch(a: CanvasGlassSettings, b: CanvasGlassSettings): boolean 
     && a.veil === b.veil
     && a.vibrance === b.vibrance
     && a.material === b.material
-    && a.backdropFrost === b.backdropFrost;
+    && a.backdropFrost === b.backdropFrost
+    && a.backdrop === b.backdrop;
 }
 
 export function TunerPanel({
@@ -120,6 +122,43 @@ export function TunerPanel({
       </div>
       <TunerSlider label="Backdrop frost" display={`${Math.round(settings.backdropFrost)}px`} value={settings.backdropFrost} range={CANVAS_GLASS_RANGES.backdropFrost} onChange={(backdropFrost) => onChange({ backdropFrost })} />
       <TunerSlider label="Veil" display={`${Math.round(settings.veil * 100)}%`} value={settings.veil} range={CANVAS_GLASS_RANGES.veil} onChange={(veil) => onChange({ veil })} />
+      <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
+        Depth
+      </span>
+      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr 1fr 1fr', gap: 4 }}>
+        {CANVAS_BACKDROPS.map((backdrop) => {
+          const active = settings.backdrop === backdrop.id;
+          return (
+            <button
+              key={backdrop.id}
+              type="button"
+              onClick={() => onChange({ backdrop: backdrop.id })}
+              title={backdrop.label}
+              style={{
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: active ? 'var(--cnv-ink-muted)' : 'var(--cnv-edge)',
+                background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                borderRadius: 7,
+                paddingTop: 4,
+                paddingBottom: 4,
+                paddingLeft: 2,
+                paddingRight: 2,
+                fontSize: 8.5,
+                fontWeight: active ? 500 : 300,
+                color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+                cursor: 'pointer',
+                fontFamily: FONT,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {backdrop.label}
+            </button>
+          );
+        })}
+      </div>
       <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
         Glass panes
       </span>
