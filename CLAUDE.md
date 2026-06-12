@@ -178,6 +178,8 @@ The operator MCP server also exposes 12 tools for controlling the running o8 web
 
 These wrap a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock` exposed by the Tauri `dev-mcp-plugin` feature. Signed/prod builds always include the socket. Dev builds need `cargo tauri dev --features dev-mcp-plugin`.
 
+A sibling family, `o8_browser_read` / `o8_browser_click` / `o8_browser_type` / `o8_browser_wait` (#1232 phase 1), drives o8's EMBEDDED browser (canvas browser cards + the Browser tab) through the same socket — it evals into the in-page agent (`src/lib/browser-agent/page-agent.ts`, `window.__o8BrowserAgent`), which only reaches same-origin/proxied localhost frames. Actions paint a ghost cursor + amber card glow so the operator sees the agent working. Dispatched workers reach the same verbs via `o8 browser <verb>` (CLI → gated `/api/browser/agent` route), and packet-attributed calls record `browser_acted` lane events.
+
 **Known gotchas when driving the webview from another Claude session (#1105):**
 
 - **Eval-based tools time out but the action fires anyway.** `o8_view_type`, `o8_view_eval`, and `o8_view_snapshot` route through `eval_and_await` and can return `"eval_and_await failed: Timeout waiting for ..."` when the JS thread is briefly busy (hydration, route change, streaming response). The underlying side effect — the keystrokes, the `.click()`, the `setter.call(textarea, value)` — **already fired synchronously**. Don't retry on this error; take a screenshot to confirm whether the action happened.

@@ -22,6 +22,7 @@ import {
   ELEMENT_PICKER_RESULT_EVENT,
   type PickedElement,
 } from '@/lib/browser/element-picker-bridge';
+import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
 import { O8ElementPanel } from './O8ElementPanel';
 
 // ── iframe-proxy helper ──
@@ -160,6 +161,9 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
   const [visualAnnotation, setVisualAnnotation] = useState<PreviewAnnotationPayload | null>(null);
   const [capturingAnnotation, setCapturingAnnotation] = useState(false);
   const [annotationCaptureError, setAnnotationCaptureError] = useState<string | null>(null);
+
+  // Agent verbs (o8_browser_* / `o8 browser`) drive this pane's iframe too.
+  useEffect(() => { installBrowserAgent(); }, []);
 
   // Seed tabs from previews on first render
   useEffect(() => {
@@ -750,6 +754,8 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
               src={iframeSrc}
               title={activeTab.title}
               onLoad={handleIframeLoad}
+              data-o8-browser="panel"
+              data-o8-active="true"
               sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
               style={{
                 width: '100%', height: selectedElement || visualAnnotation ? 'calc(100% - 32px)' : '100%',
