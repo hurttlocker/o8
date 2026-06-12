@@ -17,7 +17,7 @@ import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { ThemeProvider } from '@/lib/theme/context';
 import { O8SpecPane } from '@/components/desktop/o8-panel/O8SpecPane';
-import { FONT, glass } from './ui';
+import { canvasZoom, FONT, glass } from './ui';
 
 export interface SpecCard {
   id: number;
@@ -83,7 +83,7 @@ export function SpecGlassCard({
           onPointerMove={(event) => {
             const drag = dragRef.current;
             if (!drag || drag.pointerId !== event.pointerId) return;
-            onMove(card.id, Math.max(4, drag.originX + event.clientX - drag.startX), Math.max(40, drag.originY + event.clientY - drag.startY));
+            onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
           }}
           onPointerUp={() => { dragRef.current = null; setDragging(false); }}
           style={{
@@ -180,8 +180,8 @@ export function SpecGlassCard({
               if (!resize || resize.pointerId !== event.pointerId) return;
               onResize(
                 card.id,
-                Math.max(SPEC_MIN_W, resize.originW + event.clientX - resize.startX),
-                Math.max(SPEC_MIN_H, resize.originH + event.clientY - resize.startY),
+                Math.max(SPEC_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
+                Math.max(SPEC_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
               );
             }}
             onPointerUp={() => { resizeRef.current = null; setResizing(false); }}

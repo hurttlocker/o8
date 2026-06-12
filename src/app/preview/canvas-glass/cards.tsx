@@ -9,7 +9,7 @@
 
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { CARD_WIDTH, FONT, TONE_DOT, glass, type MockCard } from './ui';
+import { canvasZoom, CARD_WIDTH, FONT, TONE_DOT, glass, type MockCard } from './ui';
 
 export function CanvasCard({
   card,
@@ -41,7 +41,7 @@ export function CanvasCard({
       onPointerMove={(event) => {
         const drag = dragRef.current;
         if (!drag || drag.pointerId !== event.pointerId) return;
-        onMove(card.id, Math.max(4, drag.originX + event.clientX - drag.startX), Math.max(4, drag.originY + event.clientY - drag.startY));
+        onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(4, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
       }}
       onPointerUp={() => { dragRef.current = null; setDragging(false); }}
       style={{

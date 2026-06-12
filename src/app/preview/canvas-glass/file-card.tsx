@@ -17,7 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { CanvasMarkdown } from './dock';
-import { FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
+import { canvasZoom, FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
 
 // NOTE: component (+ types) exports only — runtime const exports here would
 // break the Fast Refresh boundary and remount live cards on every edit.
@@ -179,7 +179,7 @@ export function FileGlassCard({
         onPointerMove={(event) => {
           const drag = dragRef.current;
           if (!drag || drag.pointerId !== event.pointerId) return;
-          onMove(card.id, Math.max(4, drag.originX + event.clientX - drag.startX), Math.max(40, drag.originY + event.clientY - drag.startY));
+          onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
         }}
         onPointerUp={() => { dragRef.current = null; setDragging(false); }}
         style={{
@@ -389,8 +389,8 @@ export function FileGlassCard({
             if (!resize || resize.pointerId !== event.pointerId) return;
             onResize(
               card.id,
-              Math.max(TERM_MIN_W, resize.originW + event.clientX - resize.startX),
-              Math.max(TERM_MIN_H, resize.originH + event.clientY - resize.startY),
+              Math.max(TERM_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
+              Math.max(TERM_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
             );
           }}
           onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
