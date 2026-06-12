@@ -94,7 +94,43 @@ export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; va
 ];
 
 const STORAGE_KEY = 'o8:canvas-glass';
+const PERSONAL_KEY = 'o8:canvas-glass-personal';
 export const CANVAS_GLASS_CHANGED_EVENT = 'o8:canvas-glass-changed';
+
+/** The operator's saved look — the "Mine" preset. Null until saved once. */
+export function readPersonalDefault(): CanvasGlassSettings | null {
+  if (typeof window === 'undefined') return null;
+  try {
+    const raw = window.localStorage.getItem(PERSONAL_KEY);
+    if (!raw) return null;
+    const parsed: unknown = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') return null;
+    // Run it through the same per-field validation as the live settings.
+    const candidate = parsed as Partial<CanvasGlassSettings>;
+    return {
+      frost: readNumber(candidate.frost, CANVAS_GLASS_RANGES.frost, CANVAS_GLASS_DEFAULTS.frost),
+      tint: readNumber(candidate.tint, CANVAS_GLASS_RANGES.tint, CANVAS_GLASS_DEFAULTS.tint),
+      ink: readNumber(candidate.ink, CANVAS_GLASS_RANGES.ink, CANVAS_GLASS_DEFAULTS.ink),
+      vibrance: readNumber(candidate.vibrance, CANVAS_GLASS_RANGES.vibrance, CANVAS_GLASS_DEFAULTS.vibrance),
+      veil: readNumber(candidate.veil, CANVAS_GLASS_RANGES.veil, CANVAS_GLASS_DEFAULTS.veil),
+      material: typeof candidate.material === 'string' && CANVAS_GLASS_MATERIALS.some((m) => m.id === candidate.material)
+        ? candidate.material
+        : CANVAS_GLASS_DEFAULTS.material,
+      backdropFrost: readNumber(candidate.backdropFrost, CANVAS_GLASS_RANGES.backdropFrost, CANVAS_GLASS_DEFAULTS.backdropFrost),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export function savePersonalDefault(settings: CanvasGlassSettings): void {
+  if (typeof window === 'undefined') return;
+  try {
+    window.localStorage.setItem(PERSONAL_KEY, JSON.stringify(settings));
+  } catch {
+    // non-critical
+  }
+}
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
