@@ -48,13 +48,13 @@ import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-or
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { CanvasBackdropLayer } from './backdrops';
 import { BrowserGlassCard, type BrowserCard } from './browser-card';
+import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
 import { OrchestratorDock } from './dock';
 import { FileGlassCard, type FileCard } from './file-card';
 import { ImageGlassCard, type ImageCard } from './image-card';
-import { CenterStage, type Stage } from './stage';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { useCanvasOrchestrator } from './use-canvas-orchestrator';
@@ -118,7 +118,6 @@ export default function CanvasGlassPreviewPage() {
   const [rightRailOpen, setRightRailOpen] = useState(false);
   const [composerValue, setComposerValue] = useState('');
   const [inTauri, setInTauri] = useState(false);
-  const [stage] = useState<Stage>({ kind: 'idle' });
   const [dockOpen, setDockOpen] = useState(false);
   const [tunerOpen, setTunerOpen] = useState(false);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
@@ -134,7 +133,10 @@ export default function CanvasGlassPreviewPage() {
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [sessionsRepoFilter, setSessionsRepoFilter] = useState<string | null>(null);
   const [composerImages, setComposerImages] = useState<Array<{ name: string; dataUri: string }>>([]);
+  const [diffCards, setDiffCards] = useState<DiffCard[]>([]);
+  const [reviewPickerOpen, setReviewPickerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [browserCards, setBrowserCards] = useState<BrowserCard[]>([]);
@@ -308,6 +310,19 @@ export default function CanvasGlassPreviewPage() {
       .catch(() => {});
     return () => { disposed = true; };
   }, [sessionsOpen]);
+
+  // Same for the Review drawer — lanes move fast, the list must be live.
+  useEffect(() => {
+    if (!reviewPickerOpen) return;
+    let disposed = false;
+    fetch('/api/lanes?active=true')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { lanes?: LaneRow[] } | null) => {
+        if (!disposed && data && Array.isArray(data.lanes)) setActiveLanes(data.lanes);
+      })
+      .catch(() => {});
+    return () => { disposed = true; };
+  }, [reviewPickerOpen]);
 
   // Right rail mirrors the active repo's recent commits.
   useEffect(() => {
@@ -646,7 +661,7 @@ export default function CanvasGlassPreviewPage() {
 
   /** Clicked card comes forward. Terminals + files + images + browsers +
    *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser' | 'chat', id: number) => {
+  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser' | 'chat' | 'diff', id: number) => {
     const current = kind === 'term'
       ? termCards.find((card) => card.id === id)
       : kind === 'file'
@@ -655,7 +670,9 @@ export default function CanvasGlassPreviewPage() {
           ? imageCards.find((card) => card.id === id)
           : kind === 'browser'
             ? browserCards.find((card) => card.id === id)
-            : chatCards.find((card) => card.id === id);
+            : kind === 'chat'
+              ? chatCards.find((card) => card.id === id)
+              : diffCards.find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
@@ -665,6 +682,7 @@ export default function CanvasGlassPreviewPage() {
         ...imageCards.map((card) => ({ kind: 'image' as const, id: card.id, z: card.z })),
         ...browserCards.map((card) => ({ kind: 'browser' as const, id: card.id, z: card.z })),
         ...chatCards.map((card) => ({ kind: 'chat' as const, id: card.id, z: card.z })),
+        ...diffCards.map((card) => ({ kind: 'diff' as const, id: card.id, z: card.z })),
       ].sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
       const top = 10 + combined.length;
@@ -673,6 +691,7 @@ export default function CanvasGlassPreviewPage() {
       setImageCards((previous) => previous.map((card) => ({ ...card, z: kind === 'image' && card.id === id ? top : remap.get(`image:${card.id}`) ?? card.z })));
       setBrowserCards((previous) => previous.map((card) => ({ ...card, z: kind === 'browser' && card.id === id ? top : remap.get(`browser:${card.id}`) ?? card.z })));
       setChatCards((previous) => previous.map((card) => ({ ...card, z: kind === 'chat' && card.id === id ? top : remap.get(`chat:${card.id}`) ?? card.z })));
+      setDiffCards((previous) => previous.map((card) => ({ ...card, z: kind === 'diff' && card.id === id ? top : remap.get(`diff:${card.id}`) ?? card.z })));
       zPeakRef.current = top;
       return;
     }
@@ -686,16 +705,48 @@ export default function CanvasGlassPreviewPage() {
       setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'browser') {
       setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else {
+    } else if (kind === 'chat') {
       setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else {
+      setDiffCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [browserCards, chatCards, fileCards, imageCards, termCards]);
+  }, [browserCards, chatCards, diffCards, fileCards, imageCards, termCards]);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
   const focusImageCard = useCallback((id: number) => focusCard('image', id), [focusCard]);
   const focusBrowserCard = useCallback((id: number) => focusCard('browser', id), [focusCard]);
   const focusChatCard = useCallback((id: number) => focusCard('chat', id), [focusCard]);
+  const focusDiffCard = useCallback((id: number) => focusCard('diff', id), [focusCard]);
+
+  /** A lane's review diff lands as a glass card — the governance moat
+   *  as a canvas object. */
+  const spawnDiffCard = useCallback((lane: LaneRow) => {
+    fetch(`/api/lanes/${encodeURIComponent(lane.id)}/diff?maxBytes=131072`)
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { ok?: boolean; packetId?: string | null; branch?: string | null; stat?: string; diff?: string; truncated?: boolean } | null) => {
+        if (!data?.ok) return;
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        setDiffCards((previous) => [...previous, {
+          id,
+          x: 180 + (previous.length % 3) * 90 + (id % 5) * 8,
+          y: 88 + (previous.length % 3) * 56,
+          z: zPeakRef.current,
+          w: 560,
+          h: 320,
+          laneId: lane.id,
+          packetId: data.packetId ?? null,
+          title: lane.label?.trim() || lane.id,
+          branch: data.branch ?? null,
+          stat: data.stat ?? '',
+          diff: data.diff ?? '',
+          truncated: Boolean(data.truncated),
+        }]);
+      })
+      .catch(() => {});
+  }, []);
 
   /** A REAL browser pane — defaults to the app's own dashboard. */
   const spawnBrowserCard = useCallback(() => {
@@ -971,7 +1022,6 @@ export default function CanvasGlassPreviewPage() {
     );
   }
 
-  const summoning = stage.kind === 'summoning';
   // The dock's switcher only lists lanes that are actually running (have a
   // conversation) — scoping a NEW repo happens from the composer chip.
   const runningLanes: OrchestratorLane[] = (repos ?? [])
@@ -1019,12 +1069,8 @@ export default function CanvasGlassPreviewPage() {
       {/* Depth layer — the paper/shader mood from the Canvas tuner. */}
       <CanvasBackdropLayer kind={settings.backdrop} />
 
-      {/* ── Kivo stage — owns the canvas while it is empty ───────── */}
-      <AnimatePresence mode="wait">
-        {(cards.length === 0 && termCards.length === 0 && fileCards.length === 0 && imageCards.length === 0 && browserCards.length === 0 && chatCards.length === 0) || summoning ? (
-          <CenterStage key={stage.kind} stage={stage} />
-        ) : null}
-      </AnimatePresence>
+      {/* Center emblem retired (operator call 2026-06-12) — the empty
+          canvas stays clean; a logo / Lottie motion piece comes later. */}
 
       {/* ── Component cards ──────────────────────────────────────── */}
       {cards.map((card) => (
@@ -1096,6 +1142,24 @@ export default function CanvasGlassPreviewPage() {
             onFocus={focusBrowserCard}
             onNavigate={navigateBrowserCard}
             onClose={closeBrowserCard}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* ── Diff cards — the governance moat as canvas objects ────── */}
+      <AnimatePresence>
+        {diffCards.map((card) => (
+          <DiffGlassCard
+            key={card.id}
+            card={card}
+            onMove={(id, x, y) => setDiffCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
+            onResize={(id, w, h) => setDiffCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+            onFocus={focusDiffCard}
+            onClose={(id) => setDiffCards((previous) => previous.filter((c) => c.id !== id))}
+            onRequestChanges={(diffCard) => {
+              setComposerValue(`Request changes on ${diffCard.title}${diffCard.branch ? ` (${diffCard.branch})` : ''}: `);
+              composerInputRef.current?.focus();
+            }}
           />
         ))}
       </AnimatePresence>
@@ -1513,7 +1577,7 @@ export default function CanvasGlassPreviewPage() {
         <SpawnGlyphButton label="Open file" onClick={openFilePicker}>
           <path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton label="Spawn review" onClick={() => spawnCard('review', 'Review — pending diff', '2 files · +14 −3', 'waiting')}>
+        <SpawnGlyphButton label="Review diffs" onClick={() => setReviewPickerOpen((value) => !value)}>
           <path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2" /><rect width="8" height="4" x="8" y="2" rx="1" /><path d="m9 14 2 2 4-4" />
         </SpawnGlyphButton>
         <SpawnGlyphButton
@@ -1603,6 +1667,89 @@ export default function CanvasGlassPreviewPage() {
         ) : null}
       </AnimatePresence>
 
+      {/* ── Review drawer — live lanes; in-review first. Click one and
+            its diff lands as a glass card with the governance actions. */}
+      <AnimatePresence>
+        {reviewPickerOpen ? (
+          <>
+            <div role="presentation" onClick={() => setReviewPickerOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
+            <motion.div
+              initial={{ opacity: 0, x: -16 }}
+              animate={{ opacity: 1, x: 0 }}
+              exit={{ opacity: 0, x: -16 }}
+              transition={{ type: 'spring', stiffness: 360, damping: 32 }}
+              style={{
+                position: 'absolute',
+                left: 64,
+                top: 74,
+                bottom: 96,
+                width: 272,
+                display: 'flex',
+                flexDirection: 'column',
+                paddingTop: 12,
+                paddingBottom: 4,
+                paddingLeft: 8,
+                paddingRight: 8,
+                borderRadius: 6,
+                zIndex: 46,
+                ...glass(true),
+              }}
+            >
+              <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 7 }}>
+                Review
+              </span>
+              <div
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  overflowY: 'auto',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 2,
+                  paddingTop: 14,
+                  paddingBottom: 18,
+                  scrollbarWidth: 'none',
+                  maskImage: 'linear-gradient(to bottom, transparent 0, black 26px, black calc(100% - 30px), transparent 100%)',
+                  WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 26px, black calc(100% - 30px), transparent 100%)',
+                } as React.CSSProperties}
+              >
+                {activeLanes.length === 0 ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', paddingLeft: 8, paddingTop: 2, paddingBottom: 4, fontFamily: FONT, lineHeight: 1.6 }}>
+                    Nothing running — dispatch from the composer and the diffs land here.
+                  </span>
+                ) : (
+                  [...activeLanes]
+                    .sort((a, b) => Number((b.status ?? '').includes('review')) - Number((a.status ?? '').includes('review')))
+                    .map((lane) => (
+                      <button
+                        key={lane.id}
+                        type="button"
+                        onClick={() => {
+                          spawnDiffCard(lane);
+                          setReviewPickerOpen(false);
+                        }}
+                        style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 7, paddingLeft: 8, paddingRight: 8, borderRadius: 9, borderWidth: 0, background: 'transparent', cursor: 'pointer', fontFamily: FONT, textAlign: 'left', width: '100%' }}
+                        onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
+                        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                      >
+                        <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: (lane.status ?? '').includes('review') ? TONE_DOT.waiting : TONE_DOT.working, flexShrink: 0 }} />
+                        <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                          <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 210 }}>
+                            {lane.label?.trim() || lane.id}
+                          </span>
+                          <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)' }}>
+                            {[lane.status, lane.runtime].filter(Boolean).join(' · ')}
+                          </span>
+                        </span>
+                      </button>
+                    ))
+                )}
+              </div>
+            </motion.div>
+          </>
+        ) : null}
+      </AnimatePresence>
+
       {/* ── Sessions drawer — history lives on the left, like the
             default page. Glass matches the operator's tuner (no opaque
             slab), hard edges, and the list dissolves at both ends as
@@ -1636,6 +1783,37 @@ export default function CanvasGlassPreviewPage() {
               <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 7 }}>
                 Sessions
               </span>
+              {/* Repo filter — newest-first stays the spine; chips narrow it. */}
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4, paddingLeft: 6, paddingRight: 6, paddingBottom: 4 }}>
+                {[null, ...[...new Set(recentThreads.map((thread) => thread.repoName).filter(Boolean))]].map((repoName) => {
+                  const active = sessionsRepoFilter === repoName;
+                  return (
+                    <button
+                      key={repoName ?? 'all'}
+                      type="button"
+                      onClick={() => setSessionsRepoFilter(repoName as string | null)}
+                      style={{
+                        borderWidth: 1,
+                        borderStyle: 'solid',
+                        borderColor: active ? 'var(--cnv-ink-muted)' : 'var(--cnv-edge)',
+                        background: active ? 'rgba(255,255,255,0.1)' : 'transparent',
+                        borderRadius: 999,
+                        paddingTop: 2,
+                        paddingBottom: 2,
+                        paddingLeft: 9,
+                        paddingRight: 9,
+                        fontSize: 9.5,
+                        fontWeight: active ? 500 : 300,
+                        color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+                        cursor: 'pointer',
+                        fontFamily: FONT,
+                      }}
+                    >
+                      {repoName ?? 'All'}
+                    </button>
+                  );
+                })}
+              </div>
               <div
                 style={{
                   flex: 1,
@@ -1678,7 +1856,7 @@ export default function CanvasGlassPreviewPage() {
                   No orchestrator sessions yet — talk below.
                 </span>
               ) : (
-                recentThreads.slice(0, 20).map((thread) => (
+                recentThreads.filter((thread) => !sessionsRepoFilter || thread.repoName === sessionsRepoFilter).slice(0, 20).map((thread) => (
                   <button
                     key={thread.id}
                     type="button"
