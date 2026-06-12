@@ -61,6 +61,29 @@ export const IMG_MAX_SPAWN_EDGE = 340;
  *  the chosen value into the default and flip this off before graduating. */
 export const DEV_TERM_GLASS_TUNER = true;
 
+/** Compact relative age for rails + history rows ("4m ago"). */
+export function relAge(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const ms = Date.now() - new Date(iso).getTime();
+  if (!Number.isFinite(ms) || ms < 0) return 'now';
+  const minutes = Math.floor(ms / 60000);
+  if (minutes < 1) return 'now';
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  return `${Math.floor(hours / 24)}d ago`;
+}
+
+/** One past orchestrator thread (mobile threads API, thoughts-* store). */
+export interface OrcaThreadRow {
+  id: string;
+  title: string | null;
+  repoPath: string | null;
+  repoName: string | null;
+  lastMessageAt: string | null;
+  messageCount?: number;
+}
+
 /** One running-orchestrator row in the side dock switcher. */
 export interface OrchestratorLane {
   id: string;
