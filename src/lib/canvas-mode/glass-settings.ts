@@ -65,6 +65,7 @@ export const CANVAS_GLASS_RANGES = {
  * set_canvas_material command.
  */
 export const CANVAS_GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }> = [
+  { id: 'none', label: 'Liquid' },
   { id: 'popover', label: 'Popover' },
   { id: 'menu', label: 'Menu' },
   { id: 'sidebar', label: 'Sidebar' },
