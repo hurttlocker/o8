@@ -224,8 +224,9 @@ export function OrchestratorDock({
         </div>
 
         {/* Tabs — the orchestrator NEVER rides without its Cortex side; both
-            share the one pane, switchable like the reference's two-tab card. */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18, paddingTop: 9, paddingBottom: 9, borderBottom: '1px solid var(--cnv-edge)', flexShrink: 0 }}>
+            share the one pane, spread + underlined like the reference's
+            two-tab card. */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 22, paddingRight: 22, paddingTop: 9, borderBottom: '1px solid var(--cnv-edge)', flexShrink: 0 }}>
           <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
           <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => { setActiveTab('cortex'); setLaneMenuOpen(false); }} />
         </div>
@@ -450,19 +451,21 @@ export function OrchestratorDock({
   );
 }
 
-/** One pane-header tab — Orchestrator | Brain, the reference's two-tab strip. */
+/** One pane-header tab — Orchestrator | Cortex, the reference's two-tab strip:
+ *  a weight + ink shift plus an underline indicator that sits on the divider. */
 function DockTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       style={{
+        position: 'relative',
         borderWidth: 0,
         background: 'transparent',
         paddingTop: 0,
-        paddingBottom: 0,
-        paddingLeft: 0,
-        paddingRight: 0,
+        paddingBottom: 9,
+        paddingLeft: 2,
+        paddingRight: 2,
         cursor: 'pointer',
         fontFamily: FONT,
         fontSize: 12.5,
@@ -475,6 +478,20 @@ function DockTab({ label, active, onClick }: { label: string; active: boolean; o
       onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
     >
       {label}
+      {/* Active indicator — a 2px ink bar flush on the strip's divider. */}
+      <span
+        aria-hidden
+        style={{
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: -1,
+          height: 2,
+          borderRadius: 2,
+          background: active ? 'var(--cnv-ink)' : 'transparent',
+          transition: 'background 160ms ease',
+        }}
+      />
     </button>
   );
 }
