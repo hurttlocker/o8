@@ -90,6 +90,19 @@ export function OrchestratorDock({
 
   const otherLanes = lanes.filter((lane) => lane.id !== activeLane);
 
+  // Re-point the canvas vars to the dock's own dial (glass-settings stamps
+  // --cnv-dock-*). Scoped to the dock surface, so lightening it never leaks
+  // to the rest of the canvas; 'match' resolves these to the global values.
+  const dockSurfaceVars = {
+    ['--cnv-tint' as string]: 'var(--cnv-dock-tint)',
+    ['--cnv-tint-deep' as string]: 'var(--cnv-dock-tint-deep)',
+    ['--cnv-ink' as string]: 'var(--cnv-dock-ink)',
+    ['--cnv-ink-muted' as string]: 'var(--cnv-dock-ink-muted)',
+    ['--cnv-edge' as string]: 'var(--cnv-dock-edge)',
+    ['--cnv-pop-tint' as string]: 'var(--cnv-dock-pop-tint)',
+    ['--cnv-pop-base' as string]: 'var(--cnv-dock-pop-base)',
+  };
+
   return (
     <motion.div
       initial={{ opacity: 0, x: 36 }}
@@ -116,6 +129,7 @@ export function OrchestratorDock({
         corners={{ topLeft: 0, bottomLeft: 0, topRight: 18, bottomRight: 18 }}
         autoEffects={false}
         style={{
+          ...dockSurfaceVars,
           width: '100%',
           height: '100%',
           display: 'flex',
@@ -124,7 +138,7 @@ export function OrchestratorDock({
           // transcript scrolls, the panel doesn't grow (Q hit a state where
           // the dock ran past the screen bottom and the reply was unreachable).
           overflow: 'hidden',
-          background: 'linear-gradient(270deg, var(--cnv-bg-veil) 0%, transparent 100%)',
+          background: 'linear-gradient(270deg, var(--cnv-dock-veil) 0%, transparent 100%)',
         }}
       >
         {/* Header — the active orchestrator + a dropdown of what's running. */}

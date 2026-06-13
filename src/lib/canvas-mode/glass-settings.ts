@@ -28,6 +28,9 @@
  *   --cnv-edge       1px hairline for glass edges
  *   --cnv-sat        saturate() multiplier for the glass recipe
  *   --cnv-bg-veil    rgba window-wide wash (paint a full-inset layer with it)
+ *   --cnv-dock-*     the docked orchestrator's own veil/tint/ink/edge/pop —
+ *                    scoped on the dock surface so it tones apart from the
+ *                    window without touching --cnv-bg-veil
  */
 
 export interface CanvasGlassSettings {
@@ -55,6 +58,16 @@ export interface CanvasGlassSettings {
   /** Chat cards can run their own tone — 'match' follows the canvas,
    *  or pin them light/dark so conversations stand apart. */
   chatTone: 'match' | 'dark' | 'light';
+  /** The docked orchestrator (right-side panel) gets its OWN veil + tone so
+   *  the operator can lighten it WITHOUT touching the window background
+   *  (which --cnv-bg-veil drives). 'match' follows the canvas tone + the
+   *  universal ink; pinning light/dark flips the dock's own vocabulary so a
+   *  lightened dock keeps its text legible. */
+  dockTone: 'match' | 'dark' | 'light';
+  /** Dock veil alpha — the dark (or light, when toned) wash behind the
+   *  docked orchestrator. Defaults to the window veil so the dock is
+   *  unchanged until the operator dials it apart. */
+  dockTint: number;
   /** UNIVERSAL text color — one slider for every pane (chat, terminal,
    *  o8.md, chrome, rail) so changing it moves ALL text in sync.
    *  0 = white, ~0.5 = the slate ink, 1 = black. Tone presets seed it
@@ -68,6 +81,12 @@ export const CANVAS_GLASS_TONES: ReadonlyArray<{ id: CanvasGlassSettings['tone']
 ];
 
 export const CANVAS_CHAT_TONES: ReadonlyArray<{ id: CanvasGlassSettings['chatTone']; label: string }> = [
+  { id: 'match', label: 'Match' },
+  { id: 'dark', label: 'Dark' },
+  { id: 'light', label: 'Light' },
+];
+
+export const CANVAS_DOCK_TONES: ReadonlyArray<{ id: CanvasGlassSettings['dockTone']; label: string }> = [
   { id: 'match', label: 'Match' },
   { id: 'dark', label: 'Dark' },
   { id: 'light', label: 'Light' },
@@ -96,6 +115,8 @@ export const CANVAS_GLASS_DEFAULTS: CanvasGlassSettings = {
   chatTint: 0.6,
   tone: 'dark',
   chatTone: 'match',
+  dockTone: 'match',
+  dockTint: 0,
   textShade: 0.04,
 };
 
@@ -125,6 +146,7 @@ export const CANVAS_GLASS_RANGES = {
   backdropFrost: { min: 0, max: 64, step: 1 },
   chatFrost: { min: 0, max: 100, step: 1 },
   chatTint: { min: 0, max: 0.92, step: 0.01 },
+  dockTint: { min: 0, max: 0.92, step: 0.01 },
   textShade: { min: 0, max: 1, step: 0.01 },
 } as const;
 
@@ -153,11 +175,11 @@ export const CANVAS_GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }
  * Siri = the dark Apple reference; Frost = heavy private glass.
  */
 export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; values: CanvasGlassSettings }> = [
-  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'none', backdropFrost: 12, backdrop: 'none', chatFrost: 20, chatTint: 0.38, tone: 'dark', chatTone: 'match', textShade: 0.04 } },
-  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 34, chatTint: 0.6, tone: 'dark', chatTone: 'match', textShade: 0.04 } },
-  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0, backdrop: 'none', chatFrost: 54, chatTint: 0.78, tone: 'dark', chatTone: 'match', textShade: 0.04 } },
+  { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'none', backdropFrost: 12, backdrop: 'none', chatFrost: 20, chatTint: 0.38, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0, textShade: 0.04 } },
+  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 34, chatTint: 0.6, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.3, textShade: 0.04 } },
+  { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0, backdrop: 'none', chatFrost: 54, chatTint: 0.78, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.5, textShade: 0.04 } },
   // The Symon-settings look — white fog, dark ink, light all over.
-  { id: 'ivory', label: 'Ivory', values: { frost: 30, tint: 0.5, ink: 0.92, vibrance: 1.5, veil: 0.12, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 38, chatTint: 0.66, tone: 'light', chatTone: 'match', textShade: 0.86 } },
+  { id: 'ivory', label: 'Ivory', values: { frost: 30, tint: 0.5, ink: 0.92, vibrance: 1.5, veil: 0.12, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 38, chatTint: 0.66, tone: 'light', chatTone: 'match', dockTone: 'match', dockTint: 0.12, textShade: 0.86 } },
 ];
 
 const STORAGE_KEY = 'o8:canvas-glass';
@@ -206,6 +228,10 @@ export function readPersonalDefault(): CanvasGlassSettings | null {
       chatTint: readNumber(candidate.chatTint, CANVAS_GLASS_RANGES.chatTint, CANVAS_GLASS_DEFAULTS.chatTint),
       tone: candidate.tone === 'light' ? 'light' : 'dark',
       chatTone: candidate.chatTone === 'light' || candidate.chatTone === 'dark' ? candidate.chatTone : 'match',
+      dockTone: candidate.dockTone === 'light' || candidate.dockTone === 'dark' ? candidate.dockTone : 'match',
+      // Absent dockTint inherits the window veil — the dock looks unchanged
+      // until the operator dials it apart.
+      dockTint: readNumber(candidate.dockTint, CANVAS_GLASS_RANGES.dockTint, readNumber(candidate.veil, CANVAS_GLASS_RANGES.veil, CANVAS_GLASS_DEFAULTS.veil)),
       textShade: readNumber(candidate.textShade, CANVAS_GLASS_RANGES.textShade, defaultTextShadeForTone(candidate.tone === 'light' ? 'light' : 'dark')),
     };
   } catch {
@@ -257,6 +283,10 @@ export function readCanvasGlassSettings(): CanvasGlassSettings {
       chatTint: readNumber(candidate.chatTint, CANVAS_GLASS_RANGES.chatTint, CANVAS_GLASS_DEFAULTS.chatTint),
       tone: candidate.tone === 'light' ? 'light' : 'dark',
       chatTone: candidate.chatTone === 'light' || candidate.chatTone === 'dark' ? candidate.chatTone : 'match',
+      dockTone: candidate.dockTone === 'light' || candidate.dockTone === 'dark' ? candidate.dockTone : 'match',
+      // Absent dockTint inherits the window veil — the dock looks unchanged
+      // until the operator dials it apart.
+      dockTint: readNumber(candidate.dockTint, CANVAS_GLASS_RANGES.dockTint, readNumber(candidate.veil, CANVAS_GLASS_RANGES.veil, CANVAS_GLASS_DEFAULTS.veil)),
       textShade: readNumber(candidate.textShade, CANVAS_GLASS_RANGES.textShade, defaultTextShadeForTone(candidate.tone === 'light' ? 'light' : 'dark')),
     });
   } catch {
@@ -333,7 +363,10 @@ function inkFromShade(shade: number, alpha: number) {
 /** Stamp the material onto :root so any surface can consume it. */
 export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   if (typeof document === 'undefined') return;
-  const value = settings ?? readCanvasGlassSettings();
+  // Merge over defaults so a caller passing a settings object that predates a
+  // newer field (e.g. Fast-Refresh-preserved React state from before dockTint
+  // existed) can never throw here and crash the canvas mount.
+  const value = { ...CANVAS_GLASS_DEFAULTS, ...(settings ?? readCanvasGlassSettings()) };
   const root = document.documentElement;
   const base = toneVocabulary(value.tone, value.tint);
   // ONE text color for the whole canvas — the universal slider drives
@@ -367,4 +400,37 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   root.style.setProperty('--cnv-chat-ink', text.ink);
   root.style.setProperty('--cnv-chat-ink-muted', text.inkMuted);
   root.style.setProperty('--cnv-chat-edge', chat.edge);
+  // The docked orchestrator: its own veil, scoped to the dock so lightening
+  // it never touches the window background. The dock has ALWAYS faded in the
+  // fixed dark slate (old --cnv-bg-veil was rgba(7,9,13,·) regardless of the
+  // canvas tone), so 'match' keeps that exact wash + the universal everything
+  // — pixel-identical to before this dial. 'dark' is match with a pinned
+  // near-white ink (legible at any textShade); 'light' switches the veil to a
+  // white fog and pins the ink dark so a lightened dock still reads.
+  const dockVeilLight = value.dockTone === 'light';
+  const dockVeilRgb = dockVeilLight ? '252, 253, 255' : '7, 9, 13';
+  root.style.setProperty('--cnv-dock-veil', `rgba(${dockVeilRgb}, ${value.dockTint.toFixed(2)})`);
+  if (value.dockTone === 'match') {
+    // Inherit the global vocabulary verbatim — the dock surface override is a no-op.
+    root.style.setProperty('--cnv-dock-tint', base.tint);
+    root.style.setProperty('--cnv-dock-tint-deep', base.tintDeep);
+    root.style.setProperty('--cnv-dock-edge', base.edge);
+    root.style.setProperty('--cnv-dock-ink', text.ink);
+    root.style.setProperty('--cnv-dock-ink-muted', text.inkMuted);
+    root.style.setProperty('--cnv-dock-pop-tint', pop.tintDeep);
+    root.style.setProperty('--cnv-dock-pop-base', pop.popBase);
+  } else {
+    const dockToneId = dockVeilLight ? 'light' : 'dark';
+    const dockVocab = toneVocabulary(dockToneId, value.tint);
+    root.style.setProperty('--cnv-dock-tint', dockVocab.tint);
+    root.style.setProperty('--cnv-dock-tint-deep', dockVocab.tintDeep);
+    root.style.setProperty('--cnv-dock-edge', dockVocab.edge);
+    const dockText = inkFromShade(dockVeilLight ? 0.9 : 0.06, value.ink);
+    root.style.setProperty('--cnv-dock-ink', dockText.ink);
+    root.style.setProperty('--cnv-dock-ink-muted', dockText.inkMuted);
+    // Lane-menu popover contrasts the dock ink: light dock → light menu, dark dock → dark menu.
+    const dockPop = toneVocabulary(dockVeilLight ? 'light' : 'dark', Math.min(0.92, value.tint + 0.16));
+    root.style.setProperty('--cnv-dock-pop-tint', dockPop.tintDeep);
+    root.style.setProperty('--cnv-dock-pop-base', dockPop.popBase);
+  }
 }
