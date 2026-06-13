@@ -80,7 +80,7 @@ export function ReasoningView({
           <span aria-hidden className="o8-orbit" style={{ width: 9, height: 9, color: TONE_DOT.working, flexShrink: 0 }} />
         ) : null}
         <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
-          {`Reasoning · ${formatElapsed(totalSeconds)}`}
+          {`Reasoning · ${formatElapsed(totalSeconds)} min`}
         </span>
         {!live && stages.length > 1 ? (
           <span style={{ fontSize: 9, fontWeight: 260, color: 'var(--cnv-ink-muted)', opacity: 0.7 }}>
@@ -107,7 +107,7 @@ export function ReasoningView({
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: lastVisible ? 0 : 11, minWidth: 0 }}>
                 {stageSeconds !== null ? (
-                  <span style={{ fontSize: 8.5, fontWeight: 300, letterSpacing: '0.07em', color: 'var(--cnv-ink-muted)', opacity: 0.8, fontVariantNumeric: 'tabular-nums', fontFamily: FONT }}>
+                  <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', opacity: 0.85, fontVariantNumeric: 'tabular-nums', fontFamily: FONT }}>
                     {`${formatElapsed(stageSeconds)} min`}
                   </span>
                 ) : null}
