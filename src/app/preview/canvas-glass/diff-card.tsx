@@ -111,7 +111,7 @@ export function DiffGlassCard({
       <SmoothCorners
         corners={{ radius: 14 }}
         shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', ...glass(true) }}
+        style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', ...glass(true, dragging || resizing) }}
       >
         {/* Title bar — drag handle. */}
         <div

@@ -4,12 +4,16 @@ import type { CSSProperties } from 'react';
 
 export const FONT = 'var(--font-sans-system)';
 
-/** The one glass recipe — every surface consumes the tunable vars. */
-export function glass(deep = false): CSSProperties {
+/** The one glass recipe — every surface consumes the tunable vars.
+ *  `suppressBlur` drops the live `backdrop-filter` (set true WHILE a card is
+ *  dragged): a moving backdrop-filter re-samples the dark native vibrancy each
+ *  frame and flickers the canvas. With it off, the static tint fill stands in
+ *  for the drag; the blur returns on release, so the slider stays fully live. */
+export function glass(deep = false, suppressBlur = false): CSSProperties {
   return {
     background: deep ? 'var(--cnv-tint-deep)' : 'var(--cnv-tint)',
-    backdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
-    WebkitBackdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+    backdropFilter: suppressBlur ? 'none' : 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+    WebkitBackdropFilter: suppressBlur ? 'none' : 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
     border: '1px solid var(--cnv-edge)',
     color: 'var(--cnv-ink)',
     boxShadow: '0 12px 40px rgba(0, 0, 0, 0.35)',
@@ -18,13 +22,14 @@ export function glass(deep = false): CSSProperties {
 
 /** Floating orchestrator chat cards run their OWN material dial — they
  *  carry conversation ink, so the operator tunes them apart from the
- *  ambient glass (the "Floating chats" sliders in the tuner). */
-export function glassChat(): CSSProperties {
+ *  ambient glass (the "Floating chats" sliders in the tuner). `suppressBlur`
+ *  drops the live blur during a drag (see `glass`). */
+export function glassChat(suppressBlur = false): CSSProperties {
   return {
-    ...glass(true),
+    ...glass(true, suppressBlur),
     background: 'var(--cnv-chat-tint, var(--cnv-tint-deep))',
-    backdropFilter: 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
-    WebkitBackdropFilter: 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
+    backdropFilter: suppressBlur ? 'none' : 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
+    WebkitBackdropFilter: suppressBlur ? 'none' : 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
     border: '1px solid var(--cnv-chat-edge, var(--cnv-edge))',
     color: 'var(--cnv-chat-ink, var(--cnv-ink))',
   } as CSSProperties;

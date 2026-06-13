@@ -325,7 +325,7 @@ export function BrainGlassCard({
       <SmoothCorners
         corners={{ radius: 14 }}
         shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', ...glassChat(), ...chatVocabularyRebind() }}
+        style={{ display: 'flex', flexDirection: 'column', ...glassChat(dragging || resizing), ...chatVocabularyRebind() }}
       >
         {/* Title bar — drag handle. */}
         <div

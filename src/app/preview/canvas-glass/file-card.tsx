@@ -166,7 +166,7 @@ export function FileGlassCard({
       <SmoothCorners
         corners={{ radius: 14 }}
         shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', ...glass(true) }}
+        style={{ display: 'flex', flexDirection: 'column', ...glass(true, dragging || resizing) }}
       >
       {/* Title bar — drag handle, dirty dot, save, close. */}
       <div
