@@ -66,10 +66,50 @@ export function OrchestratorDock({
   const laneMenuRef = useRef<HTMLDivElement | null>(null);
   const laneButtonRef = useRef<HTMLButtonElement | null>(null);
 
+  // Stick the transcript to the bottom as the orchestrator streams. The
+  // [entries] identity alone misses in-place delta growth (text streamed into
+  // an existing entry), which left the panel frozen at the top while output
+  // piled up below the fold. Observe the DOM directly instead: ResizeObserver
+  // catches card/text height growth, MutationObserver catches new nodes +
+  // streamed characters. Pin only when the reader is already near the bottom,
+  // so scrolling up to read history isn't yanked back down. Re-binds on
+  // activeTab because the scroll container unmounts on the Cortex tab.
   useEffect(() => {
     const el = scrollRef.current;
-    if (el) el.scrollTop = el.scrollHeight;
-  }, [entries]);
+    if (!el) return;
+    let stick = true;
+    let raf = 0;
+    const pin = () => {
+      cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        const node = scrollRef.current;
+        if (stick && node) node.scrollTop = node.scrollHeight;
+      });
+    };
+    const onScroll = () => {
+      stick = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    };
+    el.addEventListener('scroll', onScroll, { passive: true });
+    const ro = new ResizeObserver(pin);
+    ro.observe(el);
+    Array.from(el.children).forEach((child) => ro.observe(child));
+    const mo = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        mutation.addedNodes.forEach((node) => {
+          if (node instanceof Element) ro.observe(node);
+        });
+      }
+      pin();
+    });
+    mo.observe(el, { childList: true, subtree: true, characterData: true });
+    pin();
+    return () => {
+      el.removeEventListener('scroll', onScroll);
+      ro.disconnect();
+      mo.disconnect();
+      cancelAnimationFrame(raf);
+    };
+  }, [activeTab]);
 
   // The dock sits inside a transformed ancestor, so a fixed veil would
   // anchor to the panel, not the viewport — dismiss via document listeners
@@ -179,7 +219,7 @@ export function OrchestratorDock({
             composer below). The dock is pinned, so this strip is the panel's
             only chrome — no drag bar. */}
         <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 18, paddingRight: 10, paddingTop: 11, flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', flex: 1 }}>
+          <div role="tablist" aria-label="Orchestrator panel views" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', flex: 1 }}>
             <DockTab label={nameTab} active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
             <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => { setActiveTab('cortex'); setLaneMenuOpen(false); }} />
           </div>
@@ -356,6 +396,8 @@ export function DockTab({ label, active, onClick }: { label: string; active: boo
   return (
     <button
       type="button"
+      role="tab"
+      aria-selected={active}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={onClick}
       style={{
