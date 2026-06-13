@@ -131,7 +131,7 @@ export function OrchestratorDock({
           there's no drag/resize and no per-frame backdrop re-sample to flicker. */}
       <SmoothCorners
         corners={{ topLeft: 0, bottomLeft: 0, topRight: 18, bottomRight: 18 }}
-        autoEffects={false}
+        shadowStrategy="box-shadow"
         style={{
           ...dockSurfaceVars,
           width: '100%',
@@ -142,7 +142,20 @@ export function OrchestratorDock({
           // transcript scrolls, the panel doesn't grow.
           overflow: 'hidden',
           color: 'var(--cnv-ink)',
-          background: 'linear-gradient(270deg, var(--cnv-dock-veil) 0%, transparent 100%)',
+          // A soft shadow LIFTS the dock off the canvas — in light mode the
+          // surface is near-white on a near-white canvas (~3% contrast), so a
+          // shadow is the only thing that reads the panel's edges. The left
+          // component defines the fade-in edge; the drop adds depth. Same
+          // language as the bench/chat-card.
+          boxShadow: '0 18px 50px -16px rgba(8, 12, 20, 0.22), -12px 0 38px -18px rgba(8, 12, 20, 0.12)',
+          // A surface FLOOR so the dock always reads as a card: --cnv-dock-tint
+          // always carries alpha, while --cnv-dock-veil collapses to fully
+          // transparent when the operator's dock dial (dockTint) is 0 — which
+          // the default light look ships, otherwise leaving the whole panel
+          // see-through (the orchestrator's chrome floated on bare canvas). The
+          // veil layers the operator's extra wash on top; both fade left so the
+          // pinned panel still melts into the canvas on its open side.
+          background: 'linear-gradient(270deg, var(--cnv-dock-veil) 0%, transparent 100%), linear-gradient(270deg, var(--cnv-dock-tint) 0%, transparent 70%)',
         } as React.CSSProperties}
       >
         {/* Tabs — the orchestrator NEVER rides without its Cortex side; both
