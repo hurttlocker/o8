@@ -94,6 +94,16 @@ export function OrchestratorDock({
 
   const otherLanes = lanes.filter((lane) => lane.id !== activeLane);
 
+  // The orchestrator tab wears the active lane's NAME instead of the generic
+  // "Orchestrator" (Q: save space + identify the chat — mirrors the chat-card
+  // modal's name-tab). Truncated so it never overflows the strip; falls back to
+  // "Orchestrator" for an unscoped/placeholder lane.
+  const nameTab = (() => {
+    const t = (activeLabel || '').trim();
+    if (!t || t === '…') return 'Orchestrator';
+    return t.length > 20 ? `${t.slice(0, 19).trimEnd()}…` : t;
+  })();
+
   // Re-point the canvas vars to the dock's own dial (glass-settings stamps
   // --cnv-dock-*). Scoped to the dock surface, so lightening it never leaks
   // to the rest of the canvas; 'match' resolves these to the global values.
@@ -121,9 +131,15 @@ export function OrchestratorDock({
         width: 400,
         zIndex: 43,
         fontFamily: FONT,
-        // Lisse's wrapper is an unstyled block — grid stretches it to fill so
-        // the panel runs top-to-bottom (height 100% chain).
+        // SmoothCorners (autoEffects) wraps our surface in an extra unstyled
+        // `position:relative` div — that breaks the height:100% chain, so a
+        // single `auto` grid row would size to the TRANSCRIPT and overflow the
+        // pinned bounds (composer falls off the bottom). `minmax(0, 1fr)` pins
+        // the one row to the container's definite height (top/bottom) and the
+        // 0-floor stops content from blowing it out — the wrapper fills it, our
+        // height:100% surface resolves, the transcript scrolls, composer stays.
         display: 'grid',
+        gridTemplateRows: 'minmax(0, 1fr)',
       }}
     >
       {/* No hard panel — the dock FADES into the canvas on its left; the solid
@@ -164,7 +180,7 @@ export function OrchestratorDock({
             only chrome — no drag bar. */}
         <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 18, paddingRight: 10, paddingTop: 11, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', flex: 1 }}>
-            <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
+            <DockTab label={nameTab} active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
             <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => { setActiveTab('cortex'); setLaneMenuOpen(false); }} />
           </div>
           <button
@@ -185,7 +201,11 @@ export function OrchestratorDock({
           <BrainConversation repoPath={activeLane || null} />
         ) : (
           <>
-            {/* Header — the active orchestrator + a dropdown of what's running. */}
+            {/* Lane switcher — only when another orchestrator is actually
+                running. The active lane's name now lives in the tab, so with
+                nothing to switch to this row is pure duplicate chrome; hiding it
+                reclaims height and keeps the composer in view. */}
+            {otherLanes.length > 0 ? (
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 9, paddingBottom: 7, paddingLeft: 14, paddingRight: 12, position: 'relative', flexShrink: 0 }}>
               <button
                 ref={laneButtonRef}
@@ -249,12 +269,7 @@ export function OrchestratorDock({
                       ...glassPop(),
                     }}
                   >
-                    {otherLanes.length === 0 ? (
-                      <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', paddingTop: 4, paddingBottom: 4, paddingLeft: 8, paddingRight: 8 }}>
-                        Nothing else running — scope a repo from the composer.
-                      </span>
-                    ) : (
-                      otherLanes.map((lane) => (
+                    {otherLanes.map((lane) => (
                         <button
                           key={lane.id}
                           type="button"
@@ -283,12 +298,12 @@ export function OrchestratorDock({
                           <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT[lane.tone], flexShrink: 0 }} />
                           <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px' }}>{lane.label}</span>
                         </button>
-                      ))
-                    )}
+                    ))}
                   </motion.div>
                 ) : null}
               </AnimatePresence>
             </div>
+            ) : null}
 
             {/* Conversation. */}
             <div
