@@ -60,46 +60,11 @@ export default function AgentCardBench() {
   const [tab, setTab] = useState<'orchestrator' | 'cortex'>('orchestrator');
   const [inTauri, setInTauri] = useState(false);
   const [working, setWorking] = useState(false);
-  const [geom, setGeom] = useState<Geom>({ x: 300, y: 110, w: 470, h: 440 });
-  const [dragging, setDragging] = useState(false);
-  const [resizing, setResizing] = useState(false);
-
-  const dragRef = useRef<{ id: number; sx: number; sy: number; ox: number; oy: number } | null>(null);
-  const resizeRef = useRef<{ id: number; edge: Edge; sx: number; sy: number; start: Geom } | null>(null);
 
   useEffect(() => {
     applyCanvasGlassSettings(CANVAS_GLASS_DEFAULTS);
     setInTauri(typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window);
   }, []);
-
-  const onDragDown = (event: React.PointerEvent) => {
-    if (event.button !== 0) return;
-    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic */ }
-    dragRef.current = { id: event.pointerId, sx: event.clientX, sy: event.clientY, ox: geom.x, oy: geom.y };
-    setDragging(true);
-  };
-  const onDragMove = (event: React.PointerEvent) => {
-    const d = dragRef.current;
-    if (!d || d.id !== event.pointerId) return;
-    setGeom((g) => ({ ...g, x: Math.max(8, d.ox + (event.clientX - d.sx)), y: Math.max(8, d.oy + (event.clientY - d.sy)) }));
-  };
-  const onDragUp = () => { dragRef.current = null; setDragging(false); };
-
-  const onResizeDown = (edge: Edge) => (event: React.PointerEvent) => {
-    if (event.button !== 0) return;
-    event.stopPropagation();
-    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic */ }
-    resizeRef.current = { id: event.pointerId, edge, sx: event.clientX, sy: event.clientY, start: geom };
-    setResizing(true);
-  };
-  const onResizeMove = (event: React.PointerEvent) => {
-    const r = resizeRef.current;
-    if (!r || r.id !== event.pointerId) return;
-    setGeom(resizeGeom(r.edge, event.clientX - r.sx, event.clientY - r.sy, r.start));
-  };
-  const onResizeUp = () => { resizeRef.current = null; setResizing(false); };
-
-  const locked = dragging || resizing;
 
   return (
     <div
@@ -139,7 +104,68 @@ export default function AgentCardBench() {
         </button>
       </div>
 
-      {/* The card. */}
+      {/* Two cards, same content — only the surface presence differs, so the
+          density/contrast call is a direct side-by-side. Both share the tab +
+          working state; each owns its geometry, drag, and resize. */}
+      <AgentCard presence="current" label="Current · tone-adaptive" initial={{ x: 96, y: 118, w: 426, h: 430 }} tab={tab} setTab={setTab} working={working} />
+      <AgentCard presence="boosted" label="More presence" initial={{ x: 566, y: 118, w: 426, h: 430 }} tab={tab} setTab={setTab} working={working} />
+    </div>
+  );
+}
+
+/** One agent card — owns its geometry, drag, and 8-angle resize. The
+ *  `presence` prop is the only visual difference across the side-by-side pair:
+ *  'current' = the tone-adaptive surface; 'boosted' = an extra tint layer +
+ *  hairline edge + inner highlight + deeper shadow so it holds on light. */
+function AgentCard({ presence, label, initial, tab, setTab, working }: {
+  presence: 'current' | 'boosted';
+  label: string;
+  initial: Geom;
+  tab: 'orchestrator' | 'cortex';
+  setTab: (value: 'orchestrator' | 'cortex') => void;
+  working: boolean;
+}) {
+  const [geom, setGeom] = useState<Geom>(initial);
+  const [dragging, setDragging] = useState(false);
+  const [resizing, setResizing] = useState(false);
+  const dragRef = useRef<{ id: number; sx: number; sy: number; ox: number; oy: number } | null>(null);
+  const resizeRef = useRef<{ id: number; edge: Edge; sx: number; sy: number; start: Geom } | null>(null);
+
+  const onDragDown = (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic */ }
+    dragRef.current = { id: event.pointerId, sx: event.clientX, sy: event.clientY, ox: geom.x, oy: geom.y };
+    setDragging(true);
+  };
+  const onDragMove = (event: React.PointerEvent) => {
+    const d = dragRef.current;
+    if (!d || d.id !== event.pointerId) return;
+    setGeom((g) => ({ ...g, x: Math.max(8, d.ox + (event.clientX - d.sx)), y: Math.max(8, d.oy + (event.clientY - d.sy)) }));
+  };
+  const onDragUp = () => { dragRef.current = null; setDragging(false); };
+
+  const onResizeDown = (edge: Edge) => (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic */ }
+    resizeRef.current = { id: event.pointerId, edge, sx: event.clientX, sy: event.clientY, start: geom };
+    setResizing(true);
+  };
+  const onResizeMove = (event: React.PointerEvent) => {
+    const r = resizeRef.current;
+    if (!r || r.id !== event.pointerId) return;
+    setGeom(resizeGeom(r.edge, event.clientX - r.sx, event.clientY - r.sy, r.start));
+  };
+  const onResizeUp = () => { resizeRef.current = null; setResizing(false); };
+
+  const locked = dragging || resizing;
+  const boosted = presence === 'boosted';
+
+  return (
+    <>
+      <div style={{ position: 'absolute', left: geom.x + 2, top: geom.y - 22, zIndex: 2, fontSize: 10.5, fontWeight: 400, letterSpacing: '0.04em', color: 'var(--cnv-ink-muted)', pointerEvents: 'none' }}>
+        {label}
+      </div>
       <motion.div
         initial={{ scale: 0.94, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -155,11 +181,16 @@ export default function AgentCardBench() {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            background: 'var(--cnv-chat-tint, var(--cnv-tint-deep))',
+            background: boosted
+              ? 'linear-gradient(var(--cnv-tint-deep), var(--cnv-tint-deep)), var(--cnv-chat-tint, var(--cnv-tint-deep))'
+              : 'var(--cnv-chat-tint, var(--cnv-tint-deep))',
             backdropFilter: locked ? 'none' : 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
             WebkitBackdropFilter: locked ? 'none' : 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
             color: 'var(--cnv-ink)',
-            boxShadow: '0 24px 70px rgba(0, 0, 0, 0.42)',
+            ...(boosted ? { borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--cnv-edge)' } : {}),
+            boxShadow: boosted
+              ? 'inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 30px 80px rgba(0, 0, 0, 0.48)'
+              : '0 24px 70px rgba(0, 0, 0, 0.42)',
           } as React.CSSProperties}
         >
           {/* Header = grab pill + tabs. The only chrome: no underline, no
@@ -208,10 +239,7 @@ export default function AgentCardBench() {
             {tab === 'orchestrator' ? (working ? <WorkingResponse /> : <SampleResponse />) : <SampleCortex />}
           </div>
 
-          {/* Compact composer — canvas-composer style, smaller. The textarea
-              grows with content (field-sizing) instead of nested-scrolling, and
-              the focus ring anticipates the pointer. Send flips to stop while
-              the orchestrator works. */}
+          {/* Compact composer — canvas-composer style, smaller. */}
           <CompactComposer working={tab === 'orchestrator' && working} />
         </SmoothCorners>
 
@@ -227,7 +255,7 @@ export default function AgentCardBench() {
           />
         ))}
       </motion.div>
-    </div>
+    </>
   );
 }
 
