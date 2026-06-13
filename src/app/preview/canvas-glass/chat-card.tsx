@@ -222,7 +222,7 @@ export function ChatGlassCard({
               } as React.CSSProperties}
             >
               {entries.map((entry) => (
-                <DockEntryView key={entry.id} entry={entry} suppressBlur={dragging || resizing} />
+                <DockEntryView key={entry.id} entry={entry} />
               ))}
               {entries.length === 0 ? (
                 <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.6, fontFamily: FONT }}>
