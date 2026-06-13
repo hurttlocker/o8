@@ -21,12 +21,15 @@ export function CardComposer({
   onSubmit,
   busy = false,
   placeholder,
+  model,
 }: {
   value: string;
   onChange: (next: string) => void;
   onSubmit: () => void;
   busy?: boolean;
   placeholder: string;
+  /** Model label shown as a quiet chip before the send button (bench parity). */
+  model?: string;
 }) {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const ringRef = useRef<HTMLDivElement | null>(null);
@@ -92,6 +95,11 @@ export function CardComposer({
         disabled={busy}
         style={inputStyle}
       />
+      {model ? (
+        <span style={{ fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', whiteSpace: 'nowrap', paddingBottom: 1, flexShrink: 0 }}>
+          {model}
+        </span>
+      ) : null}
       <button
         type="button"
         aria-label="Send"

@@ -14,7 +14,7 @@ import { SmoothCorners } from '@lisse/react';
 import { DockEntryView, DockTab } from './dock';
 import { BrainConversation } from './brain-card';
 import { CardComposer } from './card-composer';
-import { canvasZoom, FONT, TONE_DOT, chatVocabularyRebind, glassChat, type DockEntry } from './ui';
+import { canvasZoom, FONT, chatVocabularyRebind, glassChat, type DockEntry } from './ui';
 import { useThreadOrchestrator, type OrcaThreadEvent } from './use-canvas-orchestrator';
 
 export interface ChatCard {
@@ -101,6 +101,9 @@ export function ChatGlassCard({
   const resizeRef = useRef<{ pointerId: number; edge: Edge; startX: number; startY: number; start: Geom } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
+  // Dock + close ride as hover-revealed ghost icons so the bench header (grab
+  // pill + tabs) stays clean.
+  const [hovered, setHovered] = useState(false);
   // Every orchestrator carries its Cortex side — default Orchestrator, one
   // click to the Brain. Same split the dock runs.
   const [activeTab, setActiveTab] = useState<'orchestrator' | 'cortex'>('orchestrator');
@@ -147,6 +150,16 @@ export function ChatGlassCard({
   };
   const onResizeUp = () => { resizeRef.current = null; setResizing(false); };
 
+  // The orchestrator tab wears the chat's NAME instead of the generic
+  // "Orchestrator" (Q: save space + identify the card — the name is the only
+  // session label now that the title bar is gone). Truncated so it never
+  // overflows the strip; falls back to "Orchestrator" for an untitled lane.
+  const nameTab = (() => {
+    const t = (card.title || '').trim();
+    if (!t) return 'Orchestrator';
+    return t.length > 20 ? `${t.slice(0, 19).trimEnd()}…` : t;
+  })();
+
   return (
     <motion.div
       initial={{ scale: 0.7, opacity: 0, y: 24 }}
@@ -154,6 +167,8 @@ export function ChatGlassCard({
       exit={{ scale: 0.86, opacity: 0 }}
       transition={{ type: 'spring', stiffness: 360, damping: 28 }}
       onPointerDownCapture={() => onFocus(card.id)}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
       style={{
         position: 'absolute',
         left: card.x,
@@ -178,7 +193,9 @@ export function ChatGlassCard({
           boxShadow: '0 14px 42px rgba(0, 0, 0, 0.24)',
         }}
       >
-        {/* Title bar — drag handle, dock-it, close. */}
+        {/* Header — grab pill + split tabs, 100% the agent-card bench (Q: match
+            the test page). The whole header drags; the pill is the affordance.
+            Busy shows via the composer + transcript, not a header dot. */}
         <div
           onPointerDown={(event) => {
             if (event.button !== 0) return;
@@ -194,30 +211,41 @@ export function ChatGlassCard({
           onPointerUp={() => { dragRef.current = null; setDragging(false); }}
           style={{
             display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 8,
-            paddingBottom: 8,
-            paddingLeft: 12,
-            paddingRight: 8,
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            paddingTop: 9,
             cursor: dragging ? 'grabbing' : 'grab',
             touchAction: 'none',
             userSelect: 'none',
+            flexShrink: 0,
           }}
         >
-          {busy ? (
-            <span aria-hidden className="o8-orbit" style={{ width: 10, height: 10, color: TONE_DOT.working, flexShrink: 0 }} />
-          ) : (
-            <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: line.status === 'ready' ? TONE_DOT.working : TONE_DOT.idle, flexShrink: 0 }} />
-          )}
-          <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 0 }}>
-            <span style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {card.title}
-            </span>
-            {card.repoName ? (
-              <span style={{ fontSize: 9, fontWeight: 260, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>{card.repoName}</span>
-            ) : null}
-          </span>
+          <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 8 }}>
+            <span aria-hidden style={{ width: 34, height: 4, borderRadius: 3, background: 'var(--cnv-ink-muted)', opacity: 0.35 }} />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', paddingLeft: 20, paddingRight: 20, paddingBottom: 13 }}>
+            <DockTab label={nameTab} active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
+            <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => setActiveTab('cortex')} />
+          </div>
+        </div>
+
+        {/* Dock + close — hover-revealed ghost icons, top-right corner, so the
+            bench header stays clean. pointer-events off when hidden so they
+            never swallow the corner resize zone. */}
+        <div
+          style={{
+            position: 'absolute',
+            top: 7,
+            right: 9,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 1,
+            opacity: hovered ? 1 : 0,
+            pointerEvents: hovered ? 'auto' : 'none',
+            transition: 'opacity 160ms ease',
+            zIndex: 7,
+          }}
+        >
           <button
             type="button"
             aria-label="Dock this conversation"
@@ -237,30 +265,12 @@ export function ChatGlassCard({
             aria-label="Close conversation"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => onClose(card.id)}
-            style={{
-              borderWidth: 0,
-              background: 'transparent',
-              padding: 2,
-              paddingLeft: 6,
-              paddingRight: 6,
-              fontSize: 11,
-              color: 'var(--cnv-ink-muted)',
-              cursor: 'pointer',
-              fontFamily: FONT,
-            }}
+            style={{ borderWidth: 0, background: 'transparent', padding: 2, paddingLeft: 6, paddingRight: 6, fontSize: 11, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
             ✕
           </button>
-        </div>
-
-        {/* Split tabs — same strip the dock runs; Orchestrator default, one
-            click to the Brain. No separate brain icon: Cortex rides here.
-            Borderless (Q's reference) — no underline, no divider. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20, paddingLeft: 16, paddingRight: 16, paddingTop: 9, flexShrink: 0 }}>
-          <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
-          <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => setActiveTab('cortex')} />
         </div>
 
         {activeTab === 'cortex' ? (
@@ -278,11 +288,11 @@ export function ChatGlassCard({
                 overflowY: 'auto',
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 10,
-                paddingTop: 12,
-                paddingLeft: 14,
-                paddingRight: 14,
-                paddingBottom: 12,
+                gap: 18,
+                paddingTop: 2,
+                paddingLeft: 22,
+                paddingRight: 22,
+                paddingBottom: 18,
                 scrollbarWidth: 'none',
                 position: 'relative',
               } as React.CSSProperties}
@@ -299,11 +309,12 @@ export function ChatGlassCard({
 
             {/* In-card composer — talk to this orchestrator right here. Shared
                 with the dock: borderless, field-sizing + Input Anticipation. */}
-            <div style={{ paddingTop: 7, paddingBottom: 9, paddingLeft: 12, paddingRight: 12, flexShrink: 0 }}>
+            <div style={{ paddingTop: 2, paddingBottom: 14, paddingLeft: 14, paddingRight: 14, flexShrink: 0 }}>
               <CardComposer
                 value={draft}
                 onChange={setDraft}
                 busy={busy}
+                model="Opus 4.8"
                 placeholder={busy ? 'Working — interrupt from the dock' : `Reply to ${card.title.length > 26 ? `${card.title.slice(0, 26)}…` : card.title}`}
                 onSubmit={submit}
               />
