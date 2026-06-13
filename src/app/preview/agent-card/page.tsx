@@ -252,7 +252,9 @@ function SmoothTab({ label, active, onClick }: { label: string; active: boolean;
 function SampleResponse() {
   return (
     <>
-      <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', paddingTop: 6 }}>
+      <UserMessage text="Review the pinned dock before we merge — does it still match the reference?" />
+
+      <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', paddingTop: 2 }}>
         Reasoning · 1:12 min
       </span>
 
@@ -336,24 +338,99 @@ function ScreenshotThumb() {
   );
 }
 
-/** Cortex side — a sample cited Brain answer, equally smooth. */
+const SOURCES: Array<{ kind: string; title: string }> = [
+  { kind: 'memory', title: 'canvas-orchestrator-brain-pane' },
+  { kind: 'spec', title: 'o8 CLAUDE.md — Orchestrator Architecture' },
+  { kind: 'pr', title: '#374945e2 · pinned dock + split-tab modals' },
+  { kind: 'outcome', title: 'session: dock revert to pinned' },
+];
+
+/** Cortex side — a sample cited Brain answer, the same smooth surface. A
+ *  user question, the streamed answer (no box), then titled citations. */
 function SampleCortex() {
   return (
     <>
-      <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', paddingTop: 6 }}>
-        Reading 7 sources
+      <UserMessage text="Where does the orchestrator dock live now, and what carries the Cortex tab?" />
+
+      {/* Retrieval beat — the 'Reading N sources' line settles into a count. */}
+      <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', paddingTop: 2 }}>
+        Read 7 sources · 0.3s
       </span>
+
       <span style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.65, color: 'var(--cnv-ink)' }}>
-        The dock is a pinned right-edge panel; the floating role belongs to the chat-card modal. Every orchestrator surface carries the Orchestrator | Cortex split, defaulting to Orchestrator.
+        The dock is a <strong style={{ fontWeight: 500 }}>pinned right-edge panel</strong> — the floating role belongs to the chat-card modal. Every orchestrator surface (the dock and each spawned modal) carries the <strong style={{ fontWeight: 500 }}>Orchestrator | Cortex</strong> split, defaulting to Orchestrator, so the Brain is always one tab away.
+      </span>
+
+      <Citations sources={SOURCES} cited={SOURCES.length} considered={7} />
+    </>
+  );
+}
+
+/** Smooth citations — borderless titled pills (the titled-sources contract),
+ *  a muted kind dot per source, then the 'N cited · M considered' caption. */
+function Citations({ sources, cited, considered }: { sources: Array<{ kind: string; title: string }>; cited: number; considered: number }) {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 2 }}>
+      <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', opacity: 0.85 }}>
+        Sources
       </span>
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-        {['canvas-orchestrator-brain-pane', 'orchestrator-tab-architecture', 'o8 CLAUDE.md'].map((title) => (
-          <span key={title} style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', opacity: 0.85 }}>
-            {`· ${title}`}
+        {sources.map((source) => (
+          <span
+            key={source.title}
+            title={`${source.title} · ${source.kind}`}
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 7,
+              maxWidth: 220,
+              background: 'var(--cnv-tint)',
+              borderRadius: 9,
+              paddingTop: 4,
+              paddingBottom: 4,
+              paddingLeft: 9,
+              paddingRight: 11,
+              fontSize: 11,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
+              color: 'var(--cnv-ink)',
+            }}
+          >
+            <span aria-hidden style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--cnv-ink-muted)', flexShrink: 0 }} />
+            <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{source.title}</span>
           </span>
         ))}
       </div>
-    </>
+      <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', opacity: 0.85 }}>
+        {`${cited} cited · ${considered} considered`}
+      </span>
+    </div>
+  );
+}
+
+/** A user message — right-aligned soft pill (no hard box, no border). The one
+ *  speaker distinction in the smooth surface; agent content flows borderless. */
+function UserMessage({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        alignSelf: 'flex-end',
+        maxWidth: '82%',
+        background: 'var(--cnv-tint)',
+        borderRadius: 15,
+        paddingTop: 8,
+        paddingBottom: 8,
+        paddingLeft: 13,
+        paddingRight: 13,
+        fontSize: 12.5,
+        fontWeight: 300,
+        lineHeight: 1.5,
+        letterSpacing: '-0.1px',
+        color: 'var(--cnv-ink)',
+      }}
+    >
+      {text}
+    </div>
   );
 }
 
