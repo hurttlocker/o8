@@ -31,9 +31,6 @@ export interface CanvasSnapshotV1 {
   v: 1;
   activeRepoPath: string | null;
   dockOpen: boolean;
-  /** Optional — the orchestrator dock became a floating draggable card after
-   *  v1 snapshots existed; absent means it spawns at its default spot. */
-  dockGeom?: SnapGeometry;
   term: Array<SnapGeometry & { cwd: string | null; cwdLabel: string | null }>;
   file: Array<SnapGeometry & { path: string }>;
   image: Array<SnapGeometry & { aspect: number; items: Array<{ src: string; name: string }> }>;
