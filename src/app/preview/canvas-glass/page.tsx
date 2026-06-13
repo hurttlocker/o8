@@ -1654,7 +1654,17 @@ export default function CanvasGlassPreviewPage() {
           backgroundSize: '26px 26px',
           pointerEvents: 'none',
           zIndex: 1,
-        }}
+          // Drag-flicker fix: a moving backdrop-filter card forces WebKit to
+          // re-rasterize its repaint region, which includes this full-screen
+          // veil. Without its own compositor layer the veil drops a frame and
+          // the dark native vibrancy (HudWindow) flashes through. Pin it to a
+          // persistent, isolated GPU layer so card movement never re-paints it.
+          transform: 'translateZ(0)',
+          willChange: 'transform',
+          backfaceVisibility: 'hidden',
+          WebkitBackfaceVisibility: 'hidden',
+          isolation: 'isolate',
+        } as React.CSSProperties}
       />
 
       {/* Depth layer — the paper/shader mood from the Canvas tuner. */}
