@@ -14,6 +14,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { FONT, TONE_DOT, glass, glassPop, type DockEntry, type OrchestratorLane } from './ui';
 import { ReasoningView } from './reasoning';
+import { BrainConversation } from './brain-card';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
@@ -57,6 +58,7 @@ export function OrchestratorDock({
   onClose: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [activeTab, setActiveTab] = useState<'orchestrator' | 'brain'>('orchestrator');
   const [laneMenuOpen, setLaneMenuOpen] = useState(false);
   const [draft, setDraft] = useState('');
   const laneMenuRef = useRef<HTMLDivElement | null>(null);
@@ -141,8 +143,29 @@ export function OrchestratorDock({
           background: 'linear-gradient(270deg, var(--cnv-dock-veil) 0%, transparent 100%)',
         }}
       >
+        {/* Tabs — the orchestrator NEVER spawns without its Brain side; they
+            ride the same pane, switchable like the reference's two-tab card. */}
+        <div style={{ position: 'relative', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 18, paddingTop: 11, paddingBottom: 10, borderBottom: '1px solid var(--cnv-edge)', flexShrink: 0 }}>
+          <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
+          <DockTab label="Brain" active={activeTab === 'brain'} onClick={() => { setActiveTab('brain'); setLaneMenuOpen(false); }} />
+          <button
+            type="button"
+            aria-label="Undock"
+            onClick={onClose}
+            style={{ position: 'absolute', right: 12, top: '50%', transform: 'translateY(-50%)', borderWidth: 0, background: 'transparent', padding: 2, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontSize: 11, fontFamily: FONT }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+          >
+            ✕
+          </button>
+        </div>
+
+        {activeTab === 'brain' ? (
+          <BrainConversation repoPath={activeLane || null} />
+        ) : (
+        <>
         {/* Header — the active orchestrator + a dropdown of what's running. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 12, paddingBottom: 10, paddingLeft: 14, paddingRight: 12, position: 'relative' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 10, paddingBottom: 8, paddingLeft: 14, paddingRight: 12, position: 'relative' }}>
           <button
             ref={laneButtonRef}
             type="button"
@@ -184,18 +207,6 @@ export function OrchestratorDock({
               <path d="m6 9 6 6 6-6" />
             </svg>
           </button>
-          <span style={{ flex: 1 }} />
-          <button
-            type="button"
-            aria-label="Undock orchestrator"
-            onClick={onClose}
-            style={{ borderWidth: 0, background: 'transparent', padding: 2, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontSize: 11, fontFamily: FONT }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            ✕
-          </button>
-
           {/* Dropdown — only orchestrators that are actually running. */}
           <AnimatePresence>
             {laneMenuOpen ? (
@@ -320,8 +331,39 @@ export function OrchestratorDock({
             }}
           />
         </div>
+        </>
+        )}
       </SmoothCorners>
     </motion.div>
+  );
+}
+
+/** One pane-header tab — Orchestrator | Brain, the reference's two-tab strip. */
+function DockTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        borderWidth: 0,
+        background: 'transparent',
+        paddingTop: 0,
+        paddingBottom: 0,
+        paddingLeft: 0,
+        paddingRight: 0,
+        cursor: 'pointer',
+        fontFamily: FONT,
+        fontSize: 12.5,
+        fontWeight: active ? 500 : 400,
+        letterSpacing: '-0.1px',
+        color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+        transition: 'color 140ms ease',
+      }}
+      onMouseEnter={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+      onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+    >
+      {label}
+    </button>
   );
 }
 
