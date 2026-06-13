@@ -228,7 +228,10 @@ export function BrainConversation({
                 ) : null}
                 {message.content ? (
                   <span style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.65, color: 'var(--cnv-ink)', fontFamily: FONT, whiteSpace: 'pre-wrap' }}>
-                    <InlineMarkdown text={message.content} />
+                    {/* Strip the Brain's inline [CITATION:rowId] markers — the
+                        titled Sources pills below carry them; raw markers in the
+                        prose read as a bug. */}
+                    <InlineMarkdown text={message.content.replace(/\s*\[CITATION:[^\]]*\]/g, '')} />
                   </span>
                 ) : null}
                 {!message.pending && message.citations?.length ? (
