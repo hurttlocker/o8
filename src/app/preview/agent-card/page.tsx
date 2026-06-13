@@ -3,12 +3,15 @@
 /**
  * Test bench for the smooth agent card (#1232 polish pass, 2026-06-13).
  *
- * Q's reference: a glass card with two tabs ("Agentic | Chat History" →
- * here "Orchestrator | Cortex") and an agent response rendered SMOOTH —
- * no underline under the tabs, no divider lines, no boxes around results.
- * Reasoning label, then a result that's just thumbnail + bold title +
- * wrapped description flowing on the glass. Resize from all 8 angles with
- * the handles hidden (native-window feel).
+ * Q's reference: a glass card with a grab pill, two tabs ("Agentic | Chat
+ * History" → here "Orchestrator | Cortex") and an agent response rendered
+ * SMOOTH — no underline under the tabs, no divider lines, no boxes around
+ * results. Reasoning label, a result that's just thumbnail + bold title +
+ * wrapped description, then a staged reasoning timeline (dashed connectors,
+ * time chips, titles, bodies). A compact composer (canvas-composer style,
+ * smaller) lives under each card; its textarea grows with content
+ * (`field-sizing: content`) instead of nested-scrolling. Resize from all 8
+ * angles with the handles hidden.
  *
  * This page is the isolation bench: nail the feel here, then port the
  * locked treatment into dock.tsx + chat-card.tsx + the shared entry view.
@@ -21,7 +24,7 @@ import { applyCanvasGlassSettings, CANVAS_GLASS_DEFAULTS } from '@/lib/canvas-mo
 import { FONT } from '../canvas-glass/ui';
 
 const MIN_W = 320;
-const MIN_H = 240;
+const MIN_H = 260;
 
 type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 
@@ -56,7 +59,7 @@ function resizeGeom(edge: Edge, dx: number, dy: number, start: Geom): Geom {
 export default function AgentCardBench() {
   const [tab, setTab] = useState<'orchestrator' | 'cortex'>('orchestrator');
   const [inTauri, setInTauri] = useState(false);
-  const [geom, setGeom] = useState<Geom>({ x: 320, y: 130, w: 460, h: 380 });
+  const [geom, setGeom] = useState<Geom>({ x: 300, y: 110, w: 470, h: 440 });
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
 
@@ -122,7 +125,7 @@ export default function AgentCardBench() {
 
       {/* A caption so the bench is self-describing. */}
       <div style={{ position: 'absolute', top: 18, left: 22, zIndex: 1, fontSize: 11, fontWeight: 300, letterSpacing: '0.04em', color: 'var(--cnv-ink-muted)' }}>
-        agent-card bench · drag the header · resize from any edge or corner
+        agent-card bench · drag the grab pill · resize from any edge or corner
       </div>
 
       {/* The card. */}
@@ -148,27 +151,30 @@ export default function AgentCardBench() {
             boxShadow: '0 24px 70px rgba(0, 0, 0, 0.42)',
           } as React.CSSProperties}
         >
-          {/* Tabs = the only chrome. No underline, no divider — the active tab
-              is a weight + ink shift only. The strip is the drag handle. */}
+          {/* Header = grab pill + tabs. The only chrome: no underline, no
+              divider. Active tab is a weight + ink shift. The whole header
+              drags (the pill is the visible affordance). */}
           <div
             onPointerDown={onDragDown}
             onPointerMove={onDragMove}
             onPointerUp={onDragUp}
             style={{
               display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-around',
-              paddingTop: 17,
-              paddingBottom: 15,
-              paddingLeft: 20,
-              paddingRight: 20,
+              flexDirection: 'column',
+              alignItems: 'stretch',
+              paddingTop: 9,
               cursor: dragging ? 'grabbing' : 'grab',
               touchAction: 'none',
               flexShrink: 0,
             }}
           >
-            <SmoothTab label="Orchestrator" active={tab === 'orchestrator'} onClick={() => setTab('orchestrator')} />
-            <SmoothTab label="Cortex" active={tab === 'cortex'} onClick={() => setTab('cortex')} />
+            <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 8 }}>
+              <span aria-hidden style={{ width: 34, height: 4, borderRadius: 3, background: 'var(--cnv-ink-muted)', opacity: 0.35 }} />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', paddingLeft: 20, paddingRight: 20, paddingBottom: 13 }}>
+              <SmoothTab label="Orchestrator" active={tab === 'orchestrator'} onClick={() => setTab('orchestrator')} />
+              <SmoothTab label="Cortex" active={tab === 'cortex'} onClick={() => setTab('cortex')} />
+            </div>
           </div>
 
           {/* Response body — everything flows on the glass, no boxes. */}
@@ -180,16 +186,20 @@ export default function AgentCardBench() {
               display: 'flex',
               flexDirection: 'column',
               gap: 18,
-              paddingLeft: 24,
-              paddingRight: 24,
-              paddingTop: 4,
-              paddingBottom: 24,
+              paddingLeft: 22,
+              paddingRight: 22,
+              paddingTop: 2,
+              paddingBottom: 18,
               scrollbarWidth: 'none',
               ...(locked ? { pointerEvents: 'none' } : {}),
             } as React.CSSProperties}
           >
             {tab === 'orchestrator' ? <SampleResponse /> : <SampleCortex />}
           </div>
+
+          {/* Compact composer — canvas-composer style, smaller. The textarea
+              grows with content (field-sizing) instead of nested-scrolling. */}
+          <CompactComposer />
         </SmoothCorners>
 
         {/* Invisible resize zones — hidden handles, all 8 angles. */}
@@ -236,40 +246,93 @@ function SmoothTab({ label, active, onClick }: { label: string; active: boolean;
   );
 }
 
-/** A sample agent response — reasoning label, then a borderless result
- *  (thumbnail + bold title + wrapped description), then a closing line. */
+/** A sample agent response — a true o8 moment: the orchestrator reviewing
+ *  its own pinned-dock change with a screenshot it captured, then the
+ *  staged reasoning timeline. All borderless on the glass. */
 function SampleResponse() {
   return (
     <>
       <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', paddingTop: 6 }}>
-        Reasoning · 1:34 min
+        Reasoning · 1:12 min
       </span>
 
+      {/* The captured screenshot the orchestrator reviewed mid-process —
+          thumbnail + bold title + wrapped description, no box. */}
       <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
-        <div
-          aria-hidden
-          style={{
-            width: 64,
-            height: 64,
-            borderRadius: 13,
-            flexShrink: 0,
-            background: 'linear-gradient(140deg, #b5a37c 0%, #7c6b4a 45%, #3c3322 100%)',
-          }}
-        />
+        <ScreenshotThumb />
         <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
           <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--cnv-ink)', lineHeight: 1.3 }}>
-            Desert Weaver Beneath the Tree
+            Reviewed the pinned dock on the live app
           </span>
           <span style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.55, color: 'var(--cnv-ink-muted)' }}>
-            A sepia-toned scene shows a person sitting on the ground beneath a large, leaning tree, operating a simple loom-like structure made from wood and hanging threads. The figure appears as a dark silhouette while working with the threads, surrounded by a dry, natural landscape.
+            Captured the running canvas to check the dock against the reference before approving the merge — right-edge berth, the Orchestrator | Cortex strip reads borderless, and no divider lines bleed into the glass.
           </span>
         </div>
       </div>
 
-      <span style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.65, color: 'var(--cnv-ink)' }}>
-        Done — the composition reads as a quiet, focused craft moment. Want me to push a higher-contrast variant or keep this palette?
-      </span>
+      {/* Reasoning timeline — staged, dashed connectors, time + title + body. */}
+      <ReasoningTimeline />
     </>
+  );
+}
+
+const STAGES = [
+  { time: '0:21 min', title: 'Scoped the change', body: 'Read dock.tsx and chat-card.tsx to map the floating-vs-pinned split before touching either surface.' },
+  { time: '0:40 min', title: 'Verified the geometry', body: 'Drove the live app and checked the dock against the reference — pinned right-edge berth, the tab strip with no underline, the response flowing on the glass.' },
+  { time: '0:11 min', title: 'Confirmed clean', body: 'Typecheck, lint, and the 89-test suite all green; committed and pushed, ready to port.' },
+];
+
+/** The model's thinking as a staged timeline — dashed spine, time chips,
+ *  stage titles, muted bodies. Matches the reference's lower section. */
+function ReasoningTimeline() {
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column' }}>
+      {STAGES.map((stage, index) => {
+        const last = index === STAGES.length - 1;
+        return (
+          <div key={stage.title} style={{ display: 'flex', gap: 11 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 6, flexShrink: 0, paddingTop: 5 }}>
+              <span aria-hidden style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--cnv-ink-muted)', flexShrink: 0 }} />
+              {!last ? <span aria-hidden style={{ flex: 1, width: 0, marginTop: 3, marginBottom: 1, borderLeft: '1px dashed var(--cnv-edge)' } as React.CSSProperties} /> : null}
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 3, paddingBottom: last ? 0 : 16, minWidth: 0 }}>
+              <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', opacity: 0.85, fontVariantNumeric: 'tabular-nums' }}>
+                {stage.time}
+              </span>
+              <span style={{ fontSize: 12.5, fontWeight: 500, letterSpacing: '-0.15px', color: 'var(--cnv-ink)' }}>
+                {stage.title}
+              </span>
+              <span style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.55, color: 'var(--cnv-ink-muted)' }}>
+                {stage.body}
+              </span>
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+/** A faux app screenshot — what the orchestrator captured to review. Fixed
+ *  dark UI (it depicts an image, not a theme surface), title bar + sidebar +
+ *  content lines so it reads as a real capture at thumbnail size. */
+function ScreenshotThumb() {
+  return (
+    <div style={{ width: 92, height: 66, borderRadius: 11, overflow: 'hidden', flexShrink: 0, background: 'linear-gradient(160deg, #2b303b 0%, #14171d 100%)', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ height: 13, display: 'flex', alignItems: 'center', gap: 3, paddingLeft: 6, background: 'rgba(255,255,255,0.05)' }}>
+        <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'rgba(255,255,255,0.28)' }} />
+        <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'rgba(255,255,255,0.18)' }} />
+        <span style={{ width: 4, height: 4, borderRadius: '50%', background: 'rgba(255,255,255,0.12)' }} />
+      </div>
+      <div style={{ flex: 1, display: 'flex', gap: 5, paddingTop: 6, paddingBottom: 6, paddingLeft: 6, paddingRight: 8 }}>
+        <div style={{ width: 16, background: 'rgba(255,255,255,0.06)', borderRadius: 3, flexShrink: 0 }} />
+        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 4, paddingTop: 2 }}>
+          <div style={{ height: 5, width: '64%', background: 'rgba(255,255,255,0.12)', borderRadius: 2 }} />
+          <div style={{ height: 5, background: 'rgba(255,255,255,0.06)', borderRadius: 2 }} />
+          <div style={{ height: 5, width: '84%', background: 'rgba(255,255,255,0.06)', borderRadius: 2 }} />
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -291,5 +354,58 @@ function SampleCortex() {
         ))}
       </div>
     </>
+  );
+}
+
+/** Compact composer — the canvas bottom-composer's style at card scale. The
+ *  textarea grows with content via `field-sizing: content` (Q's tip) instead
+ *  of introducing nested scroll; caps at ~5 rows, then scrolls. */
+function CompactComposer() {
+  const [draft, setDraft] = useState('');
+  const inputStyle: React.CSSProperties & { fieldSizing?: 'content' } = {
+    flex: 1,
+    borderWidth: 0,
+    outline: 'none',
+    resize: 'none',
+    background: 'transparent',
+    color: 'var(--cnv-ink)',
+    fontSize: 12.5,
+    fontWeight: 300,
+    letterSpacing: '-0.1px',
+    fontFamily: FONT,
+    lineHeight: 1.45,
+    maxHeight: 104,
+    overflowY: 'auto',
+    fieldSizing: 'content',
+  };
+  return (
+    <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, paddingTop: 2 }}>
+      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, paddingTop: 7, paddingBottom: 7, paddingLeft: 13, paddingRight: 9, borderRadius: 18, background: 'var(--cnv-tint)' }}>
+        <textarea
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => { if (event.key === 'Enter' && !event.shiftKey) event.preventDefault(); }}
+          rows={1}
+          placeholder="Reply to this orchestrator"
+          aria-label="Reply to this orchestrator"
+          spellCheck={false}
+          style={inputStyle}
+        />
+        <span style={{ fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', whiteSpace: 'nowrap', paddingBottom: 1 }}>
+          Opus 4.8
+        </span>
+        <button
+          type="button"
+          aria-label="Send"
+          style={{ borderWidth: 0, background: 'transparent', padding: 3, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--cnv-ink-muted)', flexShrink: 0 }}
+          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+          onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+        >
+          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" />
+          </svg>
+        </button>
+      </div>
+    </div>
   );
 }
