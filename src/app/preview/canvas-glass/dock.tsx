@@ -147,7 +147,13 @@ export function OrchestratorDock({
         // Chrome space (outside the zoom layer) — always above the card band.
         zIndex: 43,
         fontFamily: FONT,
-      }}
+        // Keep the card on its own hot GPU layer so dragging it composites
+        // instead of re-sampling its backdrop-filter each frame (drag-flicker
+        // fix — the full-screen veil promotion in page.tsx is the primary cure).
+        willChange: 'transform',
+        backfaceVisibility: 'hidden',
+        WebkitBackfaceVisibility: 'hidden',
+      } as React.CSSProperties}
     >
       <SmoothCorners
         corners={{ radius: 16 }}
