@@ -106,10 +106,16 @@ interface RepoPickerRowData {
 }
 
 /** Mini zoom — fixed steps, zoom OUT only. Just breathing room around the
- *  cards, not a camera. Persisted; stamped as --cnv-zoom for the pointer
- *  math in the card drag handlers. */
+ *  cards, not a camera. 100% is the operator's tuned default view (the look
+ *  that used to sit at the old 70% step); 85% and 70% scale OUT from there.
+ *  Label and actual CSS-zoom are decoupled — `label` is what the chip reads,
+ *  `value` is what `--cnv-zoom` carries for the pointer math. Persisted. */
 const ZOOM_KEY = 'o8:canvas-zoom';
-const ZOOM_STEPS = [1, 0.85, 0.7] as const;
+const ZOOM_STEPS = [
+  { label: 100, value: 0.7 },
+  { label: 85, value: 0.595 },
+  { label: 70, value: 0.49 },
+] as const;
 
 /** One row in the canvas search dropdown — a card to bring forward, or a
  *  past session to spawn onto the canvas. */
@@ -135,16 +141,8 @@ export default function CanvasGlassPreviewPage() {
   const [composerValue, setComposerValue] = useState('');
   const [inTauri, setInTauri] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
-  // The orchestrator dock is a floating draggable card now (not a pinned
-  // panel) — its geometry lives here, defaults to the old top-right berth.
-  const [dockGeom, setDockGeom] = useState<{ x: number; y: number; w: number; h: number }>(() => ({
-    x: typeof window !== 'undefined' ? Math.max(24, window.innerWidth - 24 - 408) : 880,
-    y: 90,
-    w: 408,
-    h: 392,
-  }));
   const [tunerOpen, setTunerOpen] = useState(false);
-  const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(1);
+  const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS[0].value);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
   const [composerMenu, setComposerMenu] = useState<'repo' | 'model' | 'effort' | null>(null);
@@ -256,7 +254,7 @@ export default function CanvasGlassPreviewPage() {
       const storedEffort = window.localStorage.getItem(CANVAS_EFFORT_KEY);
       if (isThinkingEffort(storedEffort)) setOrchEffort(storedEffort);
       const storedZoom = Number.parseFloat(window.localStorage.getItem(ZOOM_KEY) ?? '');
-      if (ZOOM_STEPS.some((step) => step === storedZoom)) setCanvasZoomLevel(storedZoom);
+      if (ZOOM_STEPS.some((step) => step.value === storedZoom)) setCanvasZoomLevel(storedZoom);
     } catch {
       // defaults stand
     }
@@ -805,14 +803,6 @@ export default function CanvasGlassPreviewPage() {
       : [{ role: 'user', text }, { role: 'status', text: 'Not connected yet — try again in a second', pending: false }]);
   }, [appendEntries]);
 
-  const moveDock = useCallback((x: number, y: number) => {
-    setDockGeom((geom) => ({ ...geom, x, y }));
-  }, []);
-
-  const resizeDock = useCallback((w: number, h: number) => {
-    setDockGeom((geom) => ({ ...geom, w, h }));
-  }, []);
-
   const moveChatCard = useCallback((id: number, x: number, y: number) => {
     setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
@@ -1179,14 +1169,6 @@ export default function CanvasGlassPreviewPage() {
     persistArmedAtRef.current = Date.now() + 12000;
     if (snap.activeRepoPath) setActiveRepoPath((current) => current ?? snap.activeRepoPath);
     if (snap.dockOpen) setDockOpen(true);
-    if (snap.dockGeom && Number.isFinite(snap.dockGeom.x) && Number.isFinite(snap.dockGeom.y)) {
-      setDockGeom({
-        x: snap.dockGeom.x,
-        y: snap.dockGeom.y,
-        w: Math.max(330, snap.dockGeom.w || 408),
-        h: Math.max(220, snap.dockGeom.h || 392),
-      });
-    }
 
     if (snap.browser.length) {
       setBrowserCards((previous) => [...previous, ...snap.browser.map((saved) => {
@@ -1245,7 +1227,6 @@ export default function CanvasGlassPreviewPage() {
   const persistSignature = useMemo(() => JSON.stringify({
     activeRepoPath,
     dockOpen,
-    dockGeom: { x: Math.round(dockGeom.x), y: Math.round(dockGeom.y), w: Math.round(dockGeom.w), h: Math.round(dockGeom.h) },
     term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel })),
     file: fileCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, path: card.path })),
     image: imageCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, items: card.items })),
@@ -1254,7 +1235,7 @@ export default function CanvasGlassPreviewPage() {
     diff: diffCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, laneId: card.laneId, title: card.title })),
     spec: specCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
     brain: brainCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-  }), [activeRepoPath, dockOpen, dockGeom, termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
   useEffect(() => {
     // Hold fire until restore's async spawns settle — an instant save of
     // the half-restored canvas would overwrite the snapshot.
@@ -1554,17 +1535,17 @@ export default function CanvasGlassPreviewPage() {
             break;
           case 'zoom': {
             const level = typeof args.level === 'number' ? args.level : NaN;
-            if (ZOOM_STEPS.some((step) => step === level)) {
+            if (ZOOM_STEPS.some((step) => step.value === level)) {
               setCanvasZoomLevel(level);
             } else if (args.direction === 'in' || args.direction === 'out') {
               setCanvasZoomLevel((previous) => {
-                const index = ZOOM_STEPS.findIndex((step) => step === previous);
+                const index = ZOOM_STEPS.findIndex((step) => step.value === previous);
                 const next = args.direction === 'out' ? index + 1 : index - 1;
-                return ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, next))];
+                return ZOOM_STEPS[Math.max(0, Math.min(ZOOM_STEPS.length - 1, next))].value;
               });
             } else {
               ok = false;
-              note = `zoom needs level (${ZOOM_STEPS.join(', ')}) or direction in|out`;
+              note = `zoom needs level (${ZOOM_STEPS.map((step) => step.value).join(', ')}) or direction in|out`;
             }
             break;
           }
@@ -2239,9 +2220,6 @@ export default function CanvasGlassPreviewPage() {
         >
           <circle cx="12" cy="6" r="2" /><circle cx="6" cy="18" r="2" /><circle cx="18" cy="18" r="2" /><path d="M12 8v4M12 12l-6 4M12 12l6 4" />
         </SpawnGlyphButton>
-        <SpawnGlyphButton label="Ask the Brain" onClick={() => spawnBrainCard()}>
-          <circle cx="12" cy="12" r="10" /><path d="M12 7.4l1.1 2.9 2.9 1.1-2.9 1.1-1.1 2.9-1.1-2.9-2.9-1.1 2.9-1.1z" />
-        </SpawnGlyphButton>
         <SpawnGlyphButton label="Sessions" onClick={() => setSessionsOpen((value) => !value)}>
           <path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /><path d="M12 7v5l4 2" />
         </SpawnGlyphButton>
@@ -2282,15 +2260,15 @@ export default function CanvasGlassPreviewPage() {
       >
         {ZOOM_STEPS.map((step) => (
           <button
-            key={step}
+            key={step.value}
             type="button"
-            aria-label={`Zoom ${Math.round(step * 100)}%`}
-            onClick={() => setCanvasZoomLevel(step)}
+            aria-label={`Zoom ${step.label}%`}
+            onClick={() => setCanvasZoomLevel(step.value)}
             style={{
               borderWidth: 0,
               borderRadius: 8,
-              background: canvasZoomLevel === step ? 'rgba(255,255,255,0.12)' : 'transparent',
-              color: canvasZoomLevel === step ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+              background: canvasZoomLevel === step.value ? 'rgba(255,255,255,0.12)' : 'transparent',
+              color: canvasZoomLevel === step.value ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
               fontSize: 9.5,
               fontWeight: 300,
               fontFamily: FONT,
@@ -2301,9 +2279,9 @@ export default function CanvasGlassPreviewPage() {
               cursor: 'pointer',
             }}
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { if (canvasZoomLevel !== step) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+            onMouseLeave={(event) => { if (canvasZoomLevel !== step.value) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
-            {Math.round(step * 100)}%
+            {step.label}%
           </button>
         ))}
       </div>
@@ -2653,12 +2631,6 @@ export default function CanvasGlassPreviewPage() {
             onSend={sendPrompt}
             busy={orchBusy}
             onClose={() => setDockOpen(false)}
-            x={dockGeom.x}
-            y={dockGeom.y}
-            w={dockGeom.w}
-            h={dockGeom.h}
-            onMove={moveDock}
-            onResize={resizeDock}
           />
         ) : null}
       </AnimatePresence>

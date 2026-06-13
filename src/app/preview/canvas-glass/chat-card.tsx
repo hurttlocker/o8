@@ -11,7 +11,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { DockEntryView } from './dock';
+import { DockEntryView, DockTab } from './dock';
+import { BrainConversation } from './brain-card';
 import { canvasZoom, FONT, TONE_DOT, chatVocabularyRebind, glassChat, type DockEntry } from './ui';
 import { useThreadOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
 
@@ -62,6 +63,9 @@ export function ChatGlassCard({
   const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
+  // Every orchestrator carries its Cortex side — default Orchestrator, one
+  // click to the Brain. Same split the dock runs.
+  const [activeTab, setActiveTab] = useState<'orchestrator' | 'cortex'>('orchestrator');
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -186,68 +190,84 @@ export function ChatGlassCard({
           </button>
         </div>
 
-        {/* Transcript — same entry vocabulary the dock renders. */}
-        <div
-          ref={scrollRef}
-          style={{
-            height: card.h,
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-            paddingTop: 12,
-            paddingLeft: 14,
-            paddingRight: 14,
-            paddingBottom: 12,
-            scrollbarWidth: 'none',
-            position: 'relative',
-          } as React.CSSProperties}
-        >
-          {entries.map((entry) => (
-            <DockEntryView key={entry.id} entry={entry} suppressBlur={dragging || resizing} />
-          ))}
-          {entries.length === 0 ? (
-            <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.6, fontFamily: FONT }}>
-              Nothing in this session yet.
-            </span>
-          ) : null}
+        {/* Split tabs — same strip the dock runs; Orchestrator default, one
+            click to the Brain. No separate brain icon: Cortex rides here. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, paddingLeft: 16, paddingRight: 16, paddingTop: 9, borderBottom: '1px solid var(--cnv-edge)', flexShrink: 0 }}>
+          <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
+          <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => setActiveTab('cortex')} />
         </div>
 
-        {/* In-card composer — talk to this orchestrator right here. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 9, paddingLeft: 12, paddingRight: 12, borderTop: '1px solid var(--cnv-edge)' }}>
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                submit();
-              }
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            placeholder={busy ? 'Working — interrupt from the dock' : `Reply to ${card.title.length > 26 ? `${card.title.slice(0, 26)}…` : card.title}`}
-            aria-label={`Message ${card.title}`}
-            spellCheck={false}
-            disabled={busy}
-            style={{
-              flex: 1,
-              borderWidth: 0,
-              outline: 'none',
-              background: 'var(--cnv-tint)',
-              borderRadius: 9,
-              paddingTop: 5,
-              paddingBottom: 5,
-              paddingLeft: 9,
-              paddingRight: 9,
-              color: 'var(--cnv-ink)',
-              fontSize: 11,
-              fontWeight: 300,
-              letterSpacing: '-0.05px',
-              fontFamily: FONT,
-              opacity: busy ? 0.55 : 1,
-            }}
-          />
-        </div>
+        {activeTab === 'cortex' ? (
+          <div style={{ height: card.h, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <BrainConversation repoPath={card.repoPath} locked={dragging || resizing} />
+          </div>
+        ) : (
+          <div style={{ height: card.h, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            {/* Transcript — same entry vocabulary the dock renders. */}
+            <div
+              ref={scrollRef}
+              style={{
+                flex: 1,
+                minHeight: 0,
+                overflowY: 'auto',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 10,
+                paddingTop: 12,
+                paddingLeft: 14,
+                paddingRight: 14,
+                paddingBottom: 12,
+                scrollbarWidth: 'none',
+                position: 'relative',
+              } as React.CSSProperties}
+            >
+              {entries.map((entry) => (
+                <DockEntryView key={entry.id} entry={entry} suppressBlur={dragging || resizing} />
+              ))}
+              {entries.length === 0 ? (
+                <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.6, fontFamily: FONT }}>
+                  Nothing in this session yet.
+                </span>
+              ) : null}
+            </div>
+
+            {/* In-card composer — talk to this orchestrator right here. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 9, paddingLeft: 12, paddingRight: 12, borderTop: '1px solid var(--cnv-edge)' }}>
+              <input
+                value={draft}
+                onChange={(event) => setDraft(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter' && !event.shiftKey) {
+                    event.preventDefault();
+                    submit();
+                  }
+                }}
+                onPointerDown={(event) => event.stopPropagation()}
+                placeholder={busy ? 'Working — interrupt from the dock' : `Reply to ${card.title.length > 26 ? `${card.title.slice(0, 26)}…` : card.title}`}
+                aria-label={`Message ${card.title}`}
+                spellCheck={false}
+                disabled={busy}
+                style={{
+                  flex: 1,
+                  borderWidth: 0,
+                  outline: 'none',
+                  background: 'var(--cnv-tint)',
+                  borderRadius: 9,
+                  paddingTop: 5,
+                  paddingBottom: 5,
+                  paddingLeft: 9,
+                  paddingRight: 9,
+                  color: 'var(--cnv-ink)',
+                  fontSize: 11,
+                  fontWeight: 300,
+                  letterSpacing: '-0.05px',
+                  fontFamily: FONT,
+                  opacity: busy ? 0.55 : 1,
+                }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Corner resize grip. */}
         <div

@@ -18,11 +18,6 @@ import { BrainConversation } from './brain-card';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
-/** Floating-card resize floor — the conversation body never collapses past
- *  a usable transcript. */
-const DOCK_MIN_W = 330;
-const DOCK_MIN_H = 220;
-
 /** The reference's spark — marks a settled turn-status line. */
 function SparkGlyph({ size = 11 }: { size?: number }) {
   return (
@@ -49,12 +44,6 @@ export function OrchestratorDock({
   onSend,
   busy,
   onClose,
-  x,
-  y,
-  w,
-  h,
-  onMove,
-  onResize,
 }: {
   /** Lanes with a running conversation — the dropdown's contents. */
   lanes: OrchestratorLane[];
@@ -67,16 +56,6 @@ export function OrchestratorDock({
   onSend: (message: string) => void;
   busy: boolean;
   onClose: () => void;
-  /** Floating-card geometry — the orchestrator is a draggable canvas card now,
-   *  not a pinned panel (Q: "make it a floating draggable card instead of the
-   *  dock"). It lives in chrome space (outside the zoom layer), so pointer
-   *  deltas apply raw — no canvasZoom divide. */
-  x: number;
-  y: number;
-  w: number;
-  h: number;
-  onMove: (x: number, y: number) => void;
-  onResize: (w: number, h: number) => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [activeTab, setActiveTab] = useState<'orchestrator' | 'cortex'>('orchestrator');
@@ -84,10 +63,6 @@ export function OrchestratorDock({
   const [draft, setDraft] = useState('');
   const laneMenuRef = useRef<HTMLDivElement | null>(null);
   const laneButtonRef = useRef<HTMLButtonElement | null>(null);
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [resizing, setResizing] = useState(false);
 
   useEffect(() => {
     const el = scrollRef.current;
@@ -116,9 +91,6 @@ export function OrchestratorDock({
   }, [laneMenuOpen]);
 
   const otherLanes = lanes.filter((lane) => lane.id !== activeLane);
-  // The card's identity line — the conversation's opening prompt reads truer
-  // than the bare repo name; fall back to the repo before anything's been said.
-  const threadTitle = entries.find((entry) => entry.role === 'user')?.text?.trim() || activeLabel;
 
   // Re-point the canvas vars to the dock's own dial (glass-settings stamps
   // --cnv-dock-*). Scoped to the dock surface, so lightening it never leaks
@@ -135,93 +107,57 @@ export function OrchestratorDock({
 
   return (
     <motion.div
-      initial={{ scale: 0.7, opacity: 0, y: 24 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      exit={{ scale: 0.86, opacity: 0 }}
-      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
+      initial={{ opacity: 0, x: 36 }}
+      animate={{ opacity: 1, x: 0 }}
+      exit={{ opacity: 0, x: 36 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 32 }}
       style={{
         position: 'absolute',
-        left: x,
-        top: y,
-        width: w,
-        // Chrome space (outside the zoom layer) — always above the card band.
+        top: 74,
+        right: 24,
+        bottom: 96,
+        width: 400,
         zIndex: 43,
         fontFamily: FONT,
-        // Keep the card on its own hot GPU layer so dragging it composites
-        // instead of re-sampling its backdrop-filter each frame (drag-flicker
-        // fix — the full-screen veil promotion in page.tsx is the primary cure).
-        willChange: 'transform',
-        backfaceVisibility: 'hidden',
-        WebkitBackfaceVisibility: 'hidden',
-      } as React.CSSProperties}
+        // Lisse's wrapper is an unstyled block — grid stretches it to fill so
+        // the panel runs top-to-bottom (height 100% chain).
+        display: 'grid',
+      }}
     >
+      {/* No hard panel — the dock FADES into the canvas on its left; the solid
+          right side gets the Apple-smooth per-corner clip. The dock is PINNED
+          (not a floating card — that role belongs to the chat-card modal), so
+          there's no drag/resize and no per-frame backdrop re-sample to flicker. */}
       <SmoothCorners
-        corners={{ radius: 16 }}
-        shadowStrategy="box-shadow"
+        corners={{ topLeft: 0, bottomLeft: 0, topRight: 18, bottomRight: 18 }}
+        autoEffects={false}
         style={{
           ...dockSurfaceVars,
+          width: '100%',
+          height: '100%',
           display: 'flex',
           flexDirection: 'column',
-          // The dock's own tone-aware veil + the ambient frost = a glass card
-          // that still reads when the veil is fully clear (dark default).
-          background: 'var(--cnv-dock-veil)',
-          backdropFilter: dragging || resizing ? 'none' : 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
-          WebkitBackdropFilter: dragging || resizing ? 'none' : 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
-          border: '1px solid var(--cnv-edge)',
+          // Content can never push the panel past its pinned bounds — the
+          // transcript scrolls, the panel doesn't grow.
+          overflow: 'hidden',
           color: 'var(--cnv-ink)',
-          boxShadow: '0 18px 50px rgba(0, 0, 0, 0.40)',
+          background: 'linear-gradient(270deg, var(--cnv-dock-veil) 0%, transparent 100%)',
         } as React.CSSProperties}
       >
-        {/* Title bar — the drag handle. Status mark + the thread's identity
-            (opening prompt over the repo); ✕ closes the card. */}
-        <div
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: x, originY: y };
-            setDragging(true);
-          }}
-          onPointerMove={(event) => {
-            const drag = dragRef.current;
-            if (!drag || drag.pointerId !== event.pointerId) return;
-            onMove(Math.max(4, drag.originX + (event.clientX - drag.startX)), Math.max(8, drag.originY + (event.clientY - drag.startY)));
-          }}
-          onPointerUp={() => { dragRef.current = null; setDragging(false); }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 8,
-            paddingBottom: 8,
-            paddingLeft: 12,
-            paddingRight: 8,
-            borderBottom: '1px solid var(--cnv-edge)',
-            cursor: dragging ? 'grabbing' : 'grab',
-            touchAction: 'none',
-            userSelect: 'none',
-            flexShrink: 0,
-          }}
-        >
-          {activeTone === 'working' ? (
-            // The agents-working binary orbit — same mark as the fleet rows.
-            <span aria-hidden className="o8-orbit" style={{ width: 10, height: 10, color: TONE_DOT.working, flexShrink: 0 }} />
-          ) : (
-            <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: TONE_DOT[activeTone], flexShrink: 0 }} />
-          )}
-          <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 0 }}>
-            <span style={{ fontSize: 11.5, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {threadTitle}
-            </span>
-            <span style={{ fontSize: 9, fontWeight: 260, color: 'var(--cnv-ink-muted)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {activeLabel}
-            </span>
-          </span>
+        {/* Tabs — the orchestrator NEVER rides without its Cortex side; both
+            share the one pane, spread + underlined like the reference. The ✕
+            undocks (the conversation returns to the composer below). The dock
+            is pinned, so this strip is the panel's only chrome — no drag bar. */}
+        <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 18, paddingRight: 10, paddingTop: 11, borderBottom: '1px solid var(--cnv-edge)', flexShrink: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 20, flex: 1 }}>
+            <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
+            <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => { setActiveTab('cortex'); setLaneMenuOpen(false); }} />
+          </div>
           <button
             type="button"
-            aria-label="Close"
-            onPointerDown={(event) => event.stopPropagation()}
+            aria-label="Undock"
             onClick={onClose}
-            style={{ borderWidth: 0, background: 'transparent', paddingTop: 2, paddingBottom: 2, paddingLeft: 6, paddingRight: 6, fontSize: 11, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
+            style={{ borderWidth: 0, background: 'transparent', paddingTop: 2, paddingBottom: 9, paddingLeft: 6, paddingRight: 6, fontSize: 11, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
@@ -229,22 +165,12 @@ export function OrchestratorDock({
           </button>
         </div>
 
-        {/* Tabs — the orchestrator NEVER rides without its Cortex side; both
-            share the one pane, spread + underlined like the reference's
-            two-tab card. */}
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', paddingLeft: 22, paddingRight: 22, paddingTop: 9, borderBottom: '1px solid var(--cnv-edge)', flexShrink: 0 }}>
-          <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
-          <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => { setActiveTab('cortex'); setLaneMenuOpen(false); }} />
-        </div>
-
-        {/* Bounded body — both tabs run the same height so switching never
-            jumps the card; the resize grip drives h. */}
+        {/* Both tabs fill the pinned panel's remaining height — its bounds are
+            fixed (top/bottom), so the transcript scrolls inside, never grows. */}
         {activeTab === 'cortex' ? (
-          <div style={{ height: h, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <BrainConversation repoPath={activeLane || null} locked={dragging || resizing} />
-          </div>
+          <BrainConversation repoPath={activeLane || null} />
         ) : (
-          <div style={{ height: h, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <>
             {/* Header — the active orchestrator + a dropdown of what's running. */}
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 9, paddingBottom: 7, paddingLeft: 14, paddingRight: 12, position: 'relative', flexShrink: 0 }}>
               <button
@@ -353,14 +279,14 @@ export function OrchestratorDock({
             {/* Conversation. */}
             <div
               ref={scrollRef}
-              style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, scrollbarWidth: 'none', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) } as React.CSSProperties}
+              style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, scrollbarWidth: 'none' } as React.CSSProperties}
               onClick={() => {
                 if (laneMenuOpen) setLaneMenuOpen(false);
               }}
             >
               <AnimatePresence initial={false}>
                 {entries.map((entry) => (
-                  <DockEntryView key={entry.id} entry={entry} suppressBlur={dragging || resizing} />
+                  <DockEntryView key={entry.id} entry={entry} />
                 ))}
               </AnimatePresence>
               {entries.length === 0 ? (
@@ -407,59 +333,17 @@ export function OrchestratorDock({
                 }}
               />
             </div>
-          </div>
+          </>
         )}
-
-        {/* Corner resize grip — raw deltas (chrome space). */}
-        <div
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.stopPropagation();
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originW: w, originH: h };
-            setResizing(true);
-          }}
-          onPointerMove={(event) => {
-            const resize = resizeRef.current;
-            if (!resize || resize.pointerId !== event.pointerId) return;
-            onResize(
-              Math.max(DOCK_MIN_W, resize.originW + (event.clientX - resize.startX)),
-              Math.max(DOCK_MIN_H, resize.originH + (event.clientY - resize.startY)),
-            );
-          }}
-          onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
-          style={{
-            position: 'absolute',
-            right: 0,
-            bottom: 0,
-            width: 18,
-            height: 18,
-            cursor: 'nwse-resize',
-            touchAction: 'none',
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'flex-end',
-            paddingRight: 4,
-            paddingBottom: 4,
-            opacity: resizing ? 1 : 0.55,
-            zIndex: 2,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={(event) => { if (!resizeRef.current) event.currentTarget.style.opacity = '0.55'; }}
-        >
-          <svg width={9} height={9} viewBox="0 0 9 9" aria-hidden>
-            <path d="M8 1 1 8M8 5 5 8" stroke="var(--cnv-ink-muted)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-          </svg>
-        </div>
       </SmoothCorners>
     </motion.div>
   );
 }
 
 /** One pane-header tab — Orchestrator | Cortex, the reference's two-tab strip:
- *  a weight + ink shift plus an underline indicator that sits on the divider. */
-function DockTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+ *  a weight + ink shift plus an underline indicator that sits on the divider.
+ *  Exported: the chat-card orchestrator modal renders the same strip. */
+export function DockTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
