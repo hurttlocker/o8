@@ -142,7 +142,7 @@ export const CANVAS_GLASS_RANGES = {
   tint: { min: 0, max: 0.85, step: 0.01 },
   ink: { min: 0.55, max: 1, step: 0.01 },
   vibrance: { min: 1, max: 2.2, step: 0.05 },
-  veil: { min: 0, max: 0.8, step: 0.01 },
+  veil: { min: 0, max: 1, step: 0.01 },
   backdropFrost: { min: 0, max: 64, step: 1 },
   chatFrost: { min: 0, max: 100, step: 1 },
   chatTint: { min: 0, max: 0.92, step: 0.01 },
@@ -175,11 +175,12 @@ export const CANVAS_GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }
  * Siri = the dark Apple reference; Frost = heavy private glass.
  */
 export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; values: CanvasGlassSettings }> = [
+  // Slate — the dark Siri reference; the default look.
+  { id: 'siri', label: 'Slate', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 34, chatTint: 0.6, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.3, textShade: 0.04 } },
+  // Paper — the white canvas: light wash, dark ink, light glass throughout.
+  { id: 'paper', label: 'Paper', values: { frost: 22, tint: 0.5, ink: 0.95, vibrance: 1.4, veil: 0.9, material: 'window', backdropFrost: 0, backdrop: 'none', chatFrost: 30, chatTint: 0.62, tone: 'light', chatTone: 'match', dockTone: 'match', dockTint: 0.9, textShade: 0.86 } },
   { id: 'clear', label: 'Clear', values: { frost: 10, tint: 0.16, ink: 0.96, vibrance: 1.5, veil: 0, material: 'none', backdropFrost: 12, backdrop: 'none', chatFrost: 20, chatTint: 0.38, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0, textShade: 0.04 } },
-  { id: 'siri', label: 'Siri', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 34, chatTint: 0.6, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.3, textShade: 0.04 } },
   { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0, backdrop: 'none', chatFrost: 54, chatTint: 0.78, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.5, textShade: 0.04 } },
-  // The Symon-settings look — white fog, dark ink, light all over.
-  { id: 'ivory', label: 'Ivory', values: { frost: 30, tint: 0.5, ink: 0.92, vibrance: 1.5, veil: 0.12, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 38, chatTint: 0.66, tone: 'light', chatTone: 'match', dockTone: 'match', dockTint: 0.12, textShade: 0.86 } },
 ];
 
 const STORAGE_KEY = 'o8:canvas-glass';
@@ -388,7 +389,12 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   root.style.setProperty('--cnv-pop-tint', pop.tintDeep);
   root.style.setProperty('--cnv-pop-base', pop.popBase);
   root.style.setProperty('--cnv-sat', `${value.vibrance.toFixed(2)}`);
-  root.style.setProperty('--cnv-bg-veil', `rgba(7, 9, 13, ${value.veil.toFixed(2)})`);
+  // Background follows the appearance — dark slate or light paper — and the
+  // dot grid flips so it reads on either. THIS is what makes Light a true
+  // white canvas, not just light panes floating over a dark desktop.
+  const bgLight = value.tone === 'light';
+  root.style.setProperty('--cnv-bg-veil', `rgba(${bgLight ? '244, 246, 249' : '7, 9, 13'}, ${value.veil.toFixed(2)})`);
+  root.style.setProperty('--cnv-bg-dot', bgLight ? 'rgba(12, 15, 22, 0.05)' : 'rgba(255, 255, 255, 0.055)');
   // Chat cards: their own frost + tint amounts, optionally their own pane
   // tone — but the TEXT is the universal shade, same as everything else.
   const chatTone = value.chatTone === 'match' ? value.tone : value.chatTone;
@@ -407,11 +413,12 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   // — pixel-identical to before this dial. 'dark' is match with a pinned
   // near-white ink (legible at any textShade); 'light' switches the veil to a
   // white fog and pins the ink dark so a lightened dock still reads.
-  const dockVeilLight = value.dockTone === 'light';
-  const dockVeilRgb = dockVeilLight ? '252, 253, 255' : '7, 9, 13';
-  root.style.setProperty('--cnv-dock-veil', `rgba(${dockVeilRgb}, ${value.dockTint.toFixed(2)})`);
+  const dockToneResolved = value.dockTone === 'match' ? value.tone : value.dockTone;
+  const dockVeilLight = dockToneResolved === 'light';
+  root.style.setProperty('--cnv-dock-veil', `rgba(${dockVeilLight ? '252, 253, 255' : '7, 9, 13'}, ${value.dockTint.toFixed(2)})`);
   if (value.dockTone === 'match') {
-    // Inherit the global vocabulary verbatim — the dock surface override is a no-op.
+    // Inherit the global vocabulary — the dock surface override is a no-op, so
+    // the dock follows the appearance (light canvas → light dock, dark ink).
     root.style.setProperty('--cnv-dock-tint', base.tint);
     root.style.setProperty('--cnv-dock-tint-deep', base.tintDeep);
     root.style.setProperty('--cnv-dock-edge', base.edge);
@@ -420,8 +427,7 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
     root.style.setProperty('--cnv-dock-pop-tint', pop.tintDeep);
     root.style.setProperty('--cnv-dock-pop-base', pop.popBase);
   } else {
-    const dockToneId = dockVeilLight ? 'light' : 'dark';
-    const dockVocab = toneVocabulary(dockToneId, value.tint);
+    const dockVocab = toneVocabulary(dockToneResolved, value.tint);
     root.style.setProperty('--cnv-dock-tint', dockVocab.tint);
     root.style.setProperty('--cnv-dock-tint-deep', dockVocab.tintDeep);
     root.style.setProperty('--cnv-dock-edge', dockVocab.edge);
