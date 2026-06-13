@@ -17,6 +17,8 @@
 import './neutralize-server-only';
 
 import { createInterface } from 'node:readline';
+import { createServer } from 'node:http';
+import { randomUUID } from 'node:crypto';
 import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
@@ -587,17 +589,22 @@ function send(msg: JsonRpcResponse): void {
   process.stdout.write(JSON.stringify(msg) + '\n');
 }
 
-async function handleMessage(msg: JsonRpcRequest): Promise<void> {
+/** Build the JSON-RPC response for one request (null for a notification).
+ *  Transport-agnostic: it RETURNS the response rather than writing stdout, so
+ *  the stdio loop wraps it with send() and the HTTP daemon returns it in the
+ *  POST /mcp body. Returning (not a shared output side-effect) is what keeps
+ *  the HTTP path safe under concurrent requests. */
+async function buildResponse(msg: JsonRpcRequest): Promise<JsonRpcResponse | null> {
   const { method, id, params } = msg;
 
-  // Notifications (no id) — just acknowledge
-  if (id === undefined || id === null) return;
+  // Notifications (no id) — nothing to return.
+  if (id === undefined || id === null) return null;
 
   switch (method) {
-    case 'initialize': {
-      // Fire-and-forget health check so first tool call has warm status
+    case 'initialize':
+      // Fire-and-forget health check so the first tool call has warm status.
       checkApiHealth().catch(() => {});
-      send({
+      return {
         jsonrpc: '2.0',
         id,
         result: {
@@ -605,17 +612,10 @@ async function handleMessage(msg: JsonRpcRequest): Promise<void> {
           capabilities: { tools: {} },
           serverInfo: { name: 'o8-operator', version: '1.0.0' },
         },
-      });
-      break;
-    }
+      };
 
     case 'tools/list':
-      send({
-        jsonrpc: '2.0',
-        id,
-        result: { tools: TOOLS },
-      });
-      break;
+      return { jsonrpc: '2.0', id, result: { tools: TOOLS } };
 
     case 'tools/call': {
       const toolName = (params as Record<string, unknown>)?.name as string;
@@ -624,24 +624,18 @@ async function handleMessage(msg: JsonRpcRequest): Promise<void> {
       ) as Record<string, unknown>;
       const handler = TOOL_HANDLERS[toolName];
       if (!handler) {
-        send({ jsonrpc: '2.0', id, result: textResult(`Unknown tool: ${toolName}`, true) });
-        break;
+        return { jsonrpc: '2.0', id, result: textResult(`Unknown tool: ${toolName}`, true) };
       }
       try {
         const result = await handler(toolArgs);
-        send({ jsonrpc: '2.0', id, result });
+        return { jsonrpc: '2.0', id, result };
       } catch (err) {
-        send({ jsonrpc: '2.0', id, result: textResult(`Tool error: ${err}`, true) });
+        return { jsonrpc: '2.0', id, result: textResult(`Tool error: ${err}`, true) };
       }
-      break;
     }
 
     default:
-      send({
-        jsonrpc: '2.0',
-        id,
-        error: { code: -32601, message: `Method not found: ${method}` },
-      });
+      return { jsonrpc: '2.0', id, error: { code: -32601, message: `Method not found: ${method}` } };
   }
 }
 
@@ -655,27 +649,141 @@ process.on('unhandledRejection', (reason) => {
   console.error(`[o8-operator] Unhandled rejection (survived): ${reason}`);
 });
 
-// ── Main Loop ──
+// ── Transports ──
 
-killOrphanInstances();
-runPreflightDiagnostics();
+/** stdio (default): one process per client, spawned via --mcp-config. */
+function startStdio(): void {
+  // De-dupe stray stdio instances (a per-client-spawn hazard) before serving.
+  killOrphanInstances();
+  runPreflightDiagnostics();
 
-const rl = createInterface({ input: process.stdin, terminal: false });
+  const rl = createInterface({ input: process.stdin, terminal: false });
+  rl.on('line', (line) => {
+    if (!line.trim()) return;
+    let msg: JsonRpcRequest;
+    try {
+      msg = JSON.parse(line) as JsonRpcRequest;
+    } catch (err) {
+      // Malformed JSON-RPC line — log it (a silent drop leaves the client
+      // hanging until its own timeout) but keep the server alive.
+      console.error(`[o8-operator] Dropped malformed JSON-RPC line (${line.length} bytes): ${err}`);
+      return;
+    }
+    buildResponse(msg)
+      .then((resp) => { if (resp) send(resp); })
+      .catch((err) => {
+        if (msg.id !== undefined && msg.id !== null) {
+          send({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: String(err) } });
+        }
+      });
+  });
+  rl.on('close', () => process.exit(0));
+}
 
-rl.on('line', (line) => {
-  if (!line.trim()) return;
-  try {
-    const msg = JSON.parse(line) as JsonRpcRequest;
-    handleMessage(msg).catch((err) => {
-      if (msg.id !== undefined) {
-        send({ jsonrpc: '2.0', id: msg.id, error: { code: -32603, message: String(err) } });
-      }
+/** Streamable-HTTP (daemon): ONE shared instance for every client, run under a
+ *  launchd KeepAlive agent — the fleet pattern (discord/ugc/playwright). A
+ *  plain POST /mcp routes each JSON-RPC message through buildResponse. No
+ *  orphan-killing here: the daemon IS the single instance, and culling siblings
+ *  would fight launchd. */
+function startHttp(port: number): void {
+  runPreflightDiagnostics();
+
+  const server = createServer((req, res) => {
+    const path = (req.url ?? '').split('?')[0];
+    if (req.method === 'GET' && path === '/health') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, server: 'o8-operator', api: resolveApiBase() }));
+      return;
+    }
+    if (req.method !== 'POST' || path !== '/mcp') {
+      res.writeHead(req.method === 'GET' ? 405 : 404);
+      res.end();
+      return;
+    }
+
+    let body = '';
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > 8 * 1024 * 1024) req.destroy(); // 8MB guard
     });
-  } catch (err) {
-    // Malformed JSON-RPC line — log it (a silent drop leaves the client
-    // hanging until its own timeout) but keep the server alive.
-    console.error(`[o8-operator] Dropped malformed JSON-RPC line (${line.length} bytes): ${err}`);
-  }
-});
+    req.on('end', () => {
+      void (async () => {
+        // Follow the LIVE o8 backend port — it shifts across app relaunches /
+        // dev-bridge, and a daemon (unlike a per-session stdio spawn) outlives
+        // those shifts. resolveApiBase() reads ~/.o8/api-port first.
+        setApiBase(resolveApiBase());
 
-rl.on('close', () => process.exit(0));
+        let parsed: unknown;
+        try {
+          parsed = JSON.parse(body);
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ jsonrpc: '2.0', id: null, error: { code: -32700, message: 'Parse error' } }));
+          return;
+        }
+
+        const batch = Array.isArray(parsed);
+        const messages = (batch ? parsed : [parsed]) as JsonRpcRequest[];
+        const responses: JsonRpcResponse[] = [];
+        for (const message of messages) {
+          try {
+            const resp = await buildResponse(message);
+            if (resp) responses.push(resp);
+          } catch (err) {
+            if (message && message.id !== undefined && message.id !== null) {
+              responses.push({ jsonrpc: '2.0', id: message.id, error: { code: -32603, message: String(err) } });
+            }
+          }
+        }
+
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        // A Streamable-HTTP client expects a session id on initialize (a bare
+        // reply downgrades some clients to SSE).
+        if (messages.some((m) => m && m.method === 'initialize')) headers['Mcp-Session-Id'] = randomUUID();
+
+        if (!responses.length) {
+          res.writeHead(202, headers);
+          res.end();
+          return;
+        }
+        res.writeHead(200, headers);
+        res.end(JSON.stringify(batch ? responses : responses[0]));
+      })();
+    });
+  });
+
+  // A listen/server error (most often EADDRINUSE from a stale instance during
+  // a restart) is FATAL — exit so launchd KeepAlive respawns us once the port
+  // clears. Without this the global uncaughtException handler would swallow it
+  // and leave a zombie (alive but not listening) that KeepAlive never restarts.
+  server.on('error', (err) => {
+    console.error(`[o8-operator] HTTP server error — exiting for KeepAlive restart: ${err.message}`);
+    process.exit(1);
+  });
+
+  // Tool calls can be slow (webview eval, merges) — don't let the HTTP layer
+  // time them out.
+  server.requestTimeout = 0;
+  server.headersTimeout = 0;
+  // Bind 127.0.0.1 EXPLICITLY — defaulting can land on IPv6 ::1 and break IPv4
+  // loopback clients (the playwright daemon hit exactly that).
+  server.listen(port, '127.0.0.1', () => {
+    console.error(`[o8-operator] HTTP transport on http://127.0.0.1:${port}/mcp (api ${resolveApiBase()})`);
+  });
+}
+
+// ── Entry ──
+
+const argv = process.argv.slice(2);
+const flagValue = (name: string): string | undefined => {
+  const i = argv.indexOf(name);
+  return i >= 0 ? argv[i + 1] : undefined;
+};
+const transport = flagValue('--transport') ?? process.env.O8_MCP_TRANSPORT ?? 'stdio';
+
+if (transport === 'http') {
+  const port = Number(flagValue('--port')) || Number(process.env.O8_MCP_PORT) || 18795;
+  startHttp(port);
+} else {
+  startStdio();
+}
