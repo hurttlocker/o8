@@ -17,6 +17,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { canvasZoom, FONT, glassChat, chatVocabularyRebind } from './ui';
+import { Citations, InlineMarkdown, SourcesLine } from './response-blocks';
+import { CardComposer } from './card-composer';
 
 export interface BrainCard {
   id: number;
@@ -209,40 +211,32 @@ export function BrainConversation({
           </span>
         ) : null}
         {messages.map((message) => (
-          <div key={message.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
+          <div key={message.id} style={{ display: 'flex', flexDirection: 'column', gap: 8, alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
             {message.role === 'user' ? (
-              <span style={{ maxWidth: '88%', fontSize: 11.5, fontWeight: 300, lineHeight: 1.55, color: 'var(--cnv-ink)', fontFamily: FONT, background: 'var(--cnv-tint)', borderRadius: 11, paddingTop: 6, paddingBottom: 6, paddingLeft: 10, paddingRight: 10 }}>
+              // Soft pill — the same UserMessage shape the orchestrator tab runs.
+              <span style={{ maxWidth: '82%', fontSize: 12.5, fontWeight: 300, lineHeight: 1.5, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, background: 'var(--cnv-tint)', borderRadius: 15, paddingTop: 8, paddingBottom: 8, paddingLeft: 13, paddingRight: 13 }}>
                 {message.content}
               </span>
             ) : (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: '94%' }}>
-                {message.pending && !message.content ? (
-                  <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
-                    {message.sources ? `Reading ${message.sources.count} sources…` : 'Thinking…'}
-                  </span>
+              // Cortex turn — Read N sources → answer (inline md) → titled citations,
+              // 100% the agent-card bench Cortex block.
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 8, maxWidth: '94%' }}>
+                {message.sources ? (
+                  <SourcesLine count={message.sources.count} pending={message.pending && !message.content} />
+                ) : message.pending && !message.content ? (
+                  <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>Thinking…</span>
                 ) : null}
                 {message.content ? (
-                  <span style={{ fontSize: 11.5, fontWeight: 300, lineHeight: 1.6, color: 'var(--cnv-ink)', fontFamily: FONT, whiteSpace: 'pre-wrap' }}>
-                    {message.content}
+                  <span style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.65, color: 'var(--cnv-ink)', fontFamily: FONT, whiteSpace: 'pre-wrap' }}>
+                    <InlineMarkdown text={message.content} />
                   </span>
                 ) : null}
                 {!message.pending && message.citations?.length ? (
-                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                    {message.citations.slice(0, 6).map((citation, index) => (
-                      <span
-                        key={`${message.id}-${index}`}
-                        title={citation.title ?? citation.rowId}
-                        style={{ fontSize: 9, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, border: '1px solid var(--cnv-edge)', borderRadius: 7, paddingTop: 2, paddingBottom: 2, paddingLeft: 7, paddingRight: 7, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                      >
-                        {citation.title ?? `${citation.kind ?? 'source'}`}
-                      </span>
-                    ))}
-                    {message.sources ? (
-                      <span style={{ fontSize: 9, fontWeight: 260, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingTop: 3 }}>
-                        {`${Math.min(message.citations.length, 6)} cited · ${message.sources.count} considered`}
-                      </span>
-                    ) : null}
-                  </div>
+                  <Citations
+                    sources={message.citations.slice(0, 6).map((citation) => ({ kind: citation.kind, title: citation.title ?? citation.kind ?? 'source' }))}
+                    cited={Math.min(message.citations.length, 6)}
+                    considered={message.sources?.count ?? message.citations.length}
+                  />
                 ) : null}
               </div>
             )}
@@ -250,37 +244,15 @@ export function BrainConversation({
         ))}
       </div>
 
-      {/* Composer. */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, paddingBottom: 10, paddingLeft: 12, paddingRight: 12, borderTop: '1px solid var(--cnv-edge)' }}>
-        <input
+      {/* Composer — shared soft pill (field-sizing + Input Anticipation), no
+          top divider, matching the orchestrator tab. */}
+      <div style={{ paddingTop: 2, paddingBottom: 14, paddingLeft: 14, paddingRight: 14, flexShrink: 0 }}>
+        <CardComposer
           value={draft}
-          onChange={(event) => setDraft(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.shiftKey) {
-              event.preventDefault();
-              void ask();
-            }
-          }}
-          onPointerDown={(event) => event.stopPropagation()}
+          onChange={setDraft}
+          busy={asking}
           placeholder={asking ? 'Answering…' : `Ask the Brain about ${repoTail ?? 'this repo'}`}
-          aria-label="Ask the Brain"
-          disabled={asking}
-          style={{
-            flex: 1,
-            borderWidth: 0,
-            outline: 'none',
-            background: 'var(--cnv-tint)',
-            borderRadius: 9,
-            paddingTop: 6,
-            paddingBottom: 6,
-            paddingLeft: 10,
-            paddingRight: 10,
-            color: 'var(--cnv-ink)',
-            fontSize: 11,
-            fontWeight: 300,
-            fontFamily: FONT,
-            opacity: asking ? 0.6 : 1,
-          }}
+          onSubmit={() => { void ask(); }}
         />
       </div>
     </div>

@@ -155,7 +155,25 @@ export type NewDockEntry =
    *  while pending, count is how many calls it has absorbed. One row per
    *  work phase, not one per call. */
   | { role: 'status'; text: string; pending: boolean; kind?: 'tool'; count?: number }
-  | { role: 'result'; title: string; meta: string }
+  /** A turn artifact — the reference's rich result blocks. `kind` picks the
+   *  shape; the extra fields carry the real data (file set + diff stats, a PR's
+   *  number/state/checks, a captured screenshot src). `generic` keeps the old
+   *  title+meta+open-arrow row. */
+  | {
+      role: 'result';
+      kind?: 'generic' | 'files' | 'pr' | 'screenshot';
+      title: string;
+      meta?: string;
+      body?: string;
+      files?: string[];
+      adds?: number;
+      dels?: number;
+      prNumber?: number;
+      repo?: string;
+      prState?: string;
+      checks?: string;
+      src?: string;
+    }
   | { role: 'text'; text: string; live?: boolean }
   /** The model's reasoning stream — rendered as a timeline (stages split
    *  on paragraph breaks, REAL elapsed times). live grows in place.

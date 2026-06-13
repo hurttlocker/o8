@@ -15,10 +15,13 @@
 import { useEffect, useState } from 'react';
 import { FONT, TONE_DOT } from './ui';
 
+/** Seconds while under a minute ("38s"), m:ss + " min" once it crosses one
+ *  (Q: "reasoning should be in seconds not minutes only if it's at a minute"). */
 function formatElapsed(seconds: number): string {
+  if (seconds < 60) return `${seconds}s`;
   const m = Math.floor(seconds / 60);
   const s = seconds % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
+  return `${m}:${String(s).padStart(2, '0')} min`;
 }
 
 /** A short, unpunctuated first line reads as the stage's title. */
@@ -79,8 +82,8 @@ export function ReasoningView({
         {live ? (
           <span aria-hidden className="o8-orbit" style={{ width: 9, height: 9, color: TONE_DOT.working, flexShrink: 0 }} />
         ) : null}
-        <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
-          {`Reasoning · ${formatElapsed(totalSeconds)} min`}
+        <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
+          {`Reasoning · ${formatElapsed(totalSeconds)}`}
         </span>
         {!live && stages.length > 1 ? (
           <span style={{ fontSize: 9, fontWeight: 260, color: 'var(--cnv-ink-muted)', opacity: 0.7 }}>
@@ -97,26 +100,26 @@ export function ReasoningView({
             : null;
           const lastVisible = index === visible.length - 1;
           return (
-            <div key={index} style={{ display: 'flex', gap: 9 }}>
+            <div key={index} style={{ display: 'flex', gap: 11 }}>
               {/* Node dot + dashed connector down to the next stage. */}
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 7, flexShrink: 0, paddingTop: 5 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 6, flexShrink: 0, paddingTop: 5 }}>
                 <span aria-hidden style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--cnv-ink-muted)', flexShrink: 0 }} />
                 {!lastVisible ? (
                   <span aria-hidden style={{ flex: 1, width: 0, marginTop: 3, marginBottom: 1, borderLeft: '1px dashed var(--cnv-edge)' } as React.CSSProperties} />
                 ) : null}
               </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2, paddingBottom: lastVisible ? 0 : 11, minWidth: 0 }}>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 3, paddingBottom: lastVisible ? 0 : 16, minWidth: 0 }}>
                 {stageSeconds !== null ? (
-                  <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', opacity: 0.85, fontVariantNumeric: 'tabular-nums', fontFamily: FONT }}>
-                    {`${formatElapsed(stageSeconds)} min`}
+                  <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', opacity: 0.85, fontVariantNumeric: 'tabular-nums', fontFamily: FONT }}>
+                    {formatElapsed(stageSeconds)}
                   </span>
                 ) : null}
                 {title ? (
-                  <span style={{ fontSize: 10.5, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT }}>
+                  <span style={{ fontSize: 12.5, fontWeight: 500, letterSpacing: '-0.15px', color: 'var(--cnv-ink)', fontFamily: FONT }}>
                     {title}
                   </span>
                 ) : null}
-                <span style={{ fontSize: 10, fontWeight: 260, lineHeight: 1.6, color: 'var(--cnv-ink-muted)', whiteSpace: 'pre-wrap', fontFamily: FONT }}>
+                <span style={{ fontSize: 12, fontWeight: 300, lineHeight: 1.55, color: 'var(--cnv-ink-muted)', whiteSpace: 'pre-wrap', fontFamily: FONT }}>
                   {body}
                 </span>
               </div>
