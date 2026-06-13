@@ -130,7 +130,7 @@ export function OrchestratorDock({
           (not a floating card — that role belongs to the chat-card modal), so
           there's no drag/resize and no per-frame backdrop re-sample to flicker. */}
       <SmoothCorners
-        corners={{ topLeft: 0, bottomLeft: 0, topRight: 18, bottomRight: 18 }}
+        corners={{ radius: 22 }}
         shadowStrategy="box-shadow"
         style={{
           ...dockSurfaceVars,
@@ -142,20 +142,18 @@ export function OrchestratorDock({
           // transcript scrolls, the panel doesn't grow.
           overflow: 'hidden',
           color: 'var(--cnv-ink)',
-          // A soft shadow LIFTS the dock off the canvas — in light mode the
-          // surface is near-white on a near-white canvas (~3% contrast), so a
-          // shadow is the only thing that reads the panel's edges. The left
-          // component defines the fade-in edge; the drop adds depth. Same
-          // language as the bench/chat-card.
-          boxShadow: '0 18px 50px -16px rgba(8, 12, 20, 0.22), -12px 0 38px -18px rgba(8, 12, 20, 0.12)',
-          // A surface FLOOR so the dock always reads as a card: --cnv-dock-tint
-          // always carries alpha, while --cnv-dock-veil collapses to fully
-          // transparent when the operator's dock dial (dockTint) is 0 — which
-          // the default light look ships, otherwise leaving the whole panel
-          // see-through (the orchestrator's chrome floated on bare canvas). The
-          // veil layers the operator's extra wash on top; both fade left so the
-          // pinned panel still melts into the canvas on its open side.
-          background: 'linear-gradient(270deg, var(--cnv-dock-veil) 0%, transparent 100%), linear-gradient(270deg, var(--cnv-dock-tint) 0%, transparent 70%)',
+          // SOLID surface + blur, the agent-card bench treatment (Q: "make the
+          // edge solid like the test"). The dock used to fade into the canvas
+          // on a veil gradient that collapsed to fully transparent at the
+          // default dockTint:0; now it's a defined card with a solid edge. The
+          // dock is PINNED (no drag), so the backdrop blur can't trigger the
+          // drag flicker. The shadow lifts it — the drop matches the bench, and
+          // a left component defines the tall panel's open edge in light mode
+          // (near-white surface on a near-white canvas).
+          background: 'var(--cnv-tint-deep)',
+          backdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+          WebkitBackdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+          boxShadow: '0 14px 42px rgba(0, 0, 0, 0.22), -14px 0 40px -18px rgba(8, 12, 20, 0.14)',
         } as React.CSSProperties}
       >
         {/* Tabs — the orchestrator NEVER rides without its Cortex side; both
@@ -164,7 +162,7 @@ export function OrchestratorDock({
             composer below). The dock is pinned, so this strip is the panel's
             only chrome — no drag bar. */}
         <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 18, paddingRight: 10, paddingTop: 11, flexShrink: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 20, flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', flex: 1 }}>
             <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
             <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => { setActiveTab('cortex'); setLaneMenuOpen(false); }} />
           </div>
@@ -318,6 +316,7 @@ export function OrchestratorDock({
                 value={draft}
                 onChange={setDraft}
                 busy={busy}
+                model="Opus 4.8"
                 placeholder={busy ? 'Working — interrupt from the main composer' : `Reply to ${activeLabel}`}
                 onSubmit={() => {
                   const prompt = draft.trim();
@@ -352,9 +351,9 @@ export function DockTab({ label, active, onClick }: { label: string; active: boo
         paddingRight: 2,
         cursor: 'pointer',
         fontFamily: FONT,
-        fontSize: 12.5,
+        fontSize: 14,
         fontWeight: active ? 500 : 400,
-        letterSpacing: '-0.1px',
+        letterSpacing: '-0.2px',
         color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
         opacity: active ? 1 : 0.7,
         transition: 'color 160ms ease, opacity 160ms ease',
