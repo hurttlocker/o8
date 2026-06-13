@@ -104,11 +104,9 @@ export default function AgentCardBench() {
         </button>
       </div>
 
-      {/* Two cards, same content — only the surface presence differs, so the
-          density/contrast call is a direct side-by-side. Both share the tab +
-          working state; each owns its geometry, drag, and resize. */}
-      <AgentCard presence="current" label="Current · tone-adaptive" initial={{ x: 96, y: 118, w: 426, h: 430 }} tab={tab} setTab={setTab} working={working} />
-      <AgentCard presence="boosted" label="More presence" initial={{ x: 566, y: 118, w: 426, h: 430 }} tab={tab} setTab={setTab} working={working} />
+      {/* The card — Current surface (softer, tone-adaptive — Q's pick), with a
+          lighter shadow. Drag the grab pill, resize from any edge or corner. */}
+      <AgentCard initial={{ x: 470, y: 116, w: 452, h: 452 }} tab={tab} setTab={setTab} working={working} />
     </div>
   );
 }
@@ -117,9 +115,7 @@ export default function AgentCardBench() {
  *  `presence` prop is the only visual difference across the side-by-side pair:
  *  'current' = the tone-adaptive surface; 'boosted' = an extra tint layer +
  *  hairline edge + inner highlight + deeper shadow so it holds on light. */
-function AgentCard({ presence, label, initial, tab, setTab, working }: {
-  presence: 'current' | 'boosted';
-  label: string;
+function AgentCard({ initial, tab, setTab, working }: {
   initial: Geom;
   tab: 'orchestrator' | 'cortex';
   setTab: (value: 'orchestrator' | 'cortex') => void;
@@ -159,13 +155,8 @@ function AgentCard({ presence, label, initial, tab, setTab, working }: {
   const onResizeUp = () => { resizeRef.current = null; setResizing(false); };
 
   const locked = dragging || resizing;
-  const boosted = presence === 'boosted';
 
   return (
-    <>
-      <div style={{ position: 'absolute', left: geom.x + 2, top: geom.y - 22, zIndex: 2, fontSize: 10.5, fontWeight: 400, letterSpacing: '0.04em', color: 'var(--cnv-ink-muted)', pointerEvents: 'none' }}>
-        {label}
-      </div>
       <motion.div
         initial={{ scale: 0.94, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -181,16 +172,11 @@ function AgentCard({ presence, label, initial, tab, setTab, working }: {
             display: 'flex',
             flexDirection: 'column',
             overflow: 'hidden',
-            background: boosted
-              ? 'linear-gradient(var(--cnv-tint-deep), var(--cnv-tint-deep)), var(--cnv-chat-tint, var(--cnv-tint-deep))'
-              : 'var(--cnv-chat-tint, var(--cnv-tint-deep))',
+            background: 'var(--cnv-chat-tint, var(--cnv-tint-deep))',
             backdropFilter: locked ? 'none' : 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
             WebkitBackdropFilter: locked ? 'none' : 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
             color: 'var(--cnv-ink)',
-            ...(boosted ? { borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--cnv-edge)' } : {}),
-            boxShadow: boosted
-              ? 'inset 0 1px 0 rgba(255, 255, 255, 0.10), 0 30px 80px rgba(0, 0, 0, 0.48)'
-              : '0 24px 70px rgba(0, 0, 0, 0.42)',
+            boxShadow: '0 14px 42px rgba(0, 0, 0, 0.24)',
           } as React.CSSProperties}
         >
           {/* Header = grab pill + tabs. The only chrome: no underline, no
@@ -255,7 +241,6 @@ function AgentCard({ presence, label, initial, tab, setTab, working }: {
           />
         ))}
       </motion.div>
-    </>
   );
 }
 
