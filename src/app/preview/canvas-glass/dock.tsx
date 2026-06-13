@@ -544,13 +544,29 @@ function cnvInline(text: string, keyBase: string): ReactNode[] {
 const UL_RE = /^\s*[-*]\s+(.+)$/;
 const OL_RE = /^\s*\d+\.\s+(.+)$/;
 
+/** The orchestrator streams one `text` event per model content block — the
+ *  prose around each tool call. ws-server forwards them verbatim and the page
+ *  appends raw, so two abutting blocks read as "…screenshot.I'm on…": a
+ *  sentence end with NO separating space before the next capital. The model
+ *  never writes that inside a block (sentences always get a space), so it's a
+ *  safe seam to break into paragraphs. Code is protected — never split inside
+ *  ` ` / ``` spans (a `file.Name` there is real). The accumulation-seam fix
+ *  (page.tsx appendAssistantDelta) is more precise; this render guard is the
+ *  surface-side belt that keeps every transcript readable regardless. */
+function splitRunOnSeams(text: string): string {
+  return text
+    .split(/(`{1,3}[^`]*`{1,3})/g)
+    .map((part, i) => (i % 2 === 1 ? part : part.replace(/([a-z0-9)\]"'])([.!?])([A-Z])/g, '$1$2\n\n$3')))
+    .join('');
+}
+
 /** Block markdown — headings, lists, code fences, blockquotes, paragraphs —
  *  rendered as real elements so the orchestrator's answer reads as prose, not
  *  raw `**` and `#` source. Line-based, like the dashboard's MarkdownRender.
  *  Exported: the o8.md / file cards render their preview with it too. */
 export function CanvasMarkdown({ text }: { text: string }) {
   const blocks: ReactNode[] = [];
-  const lines = text.split('\n');
+  const lines = splitRunOnSeams(text).split('\n');
   let i = 0;
   let key = 0;
   while (i < lines.length) {
