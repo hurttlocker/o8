@@ -223,7 +223,7 @@ export function ChatGlassCard({
           <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 8 }}>
             <span aria-hidden style={{ width: 34, height: 4, borderRadius: 3, background: 'var(--cnv-ink-muted)', opacity: 0.35 }} />
           </div>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', paddingLeft: 20, paddingRight: 20, paddingBottom: 13 }}>
+          <div role="tablist" aria-label="Orchestrator panel views" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', paddingLeft: 20, paddingRight: 20, paddingBottom: 13 }}>
             <DockTab label={nameTab} active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
             <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => setActiveTab('cortex')} />
           </div>
