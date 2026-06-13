@@ -16,6 +16,7 @@ import { FONT, TONE_DOT, glassPop, type DockEntry, type OrchestratorLane } from 
 import { ReasoningView } from './reasoning';
 import { BrainConversation } from './brain-card';
 import { CardComposer } from './card-composer';
+import { FilesResult, PrResult, ScreenshotResult } from './response-blocks';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
@@ -449,45 +450,34 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
         </div>
       ) : null}
       {entry.role === 'result' ? (
-        // Borderless result — leading tile, title + meta, open arrow. Flows on
-        // the glass like the reference's response block (no boxed card).
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 11,
-            paddingTop: 2,
-            paddingBottom: 2,
-          }}
-        >
-          <span
-            aria-hidden
-            style={{
-              width: 32,
-              height: 32,
-              borderRadius: 9,
-              background: 'var(--cnv-tint)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-              color: 'var(--cnv-ink-muted)',
-            }}
-          >
-            <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" />
-            </svg>
-          </span>
-          <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
-            <span style={{ fontSize: 11.5, fontWeight: 400, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--cnv-ink)' }}>
-              {entry.title}
+        entry.kind === 'files' ? (
+          <FilesResult title={entry.title} files={entry.files ?? []} adds={entry.adds} dels={entry.dels} onReview={() => {}} onUndo={() => {}} />
+        ) : entry.kind === 'pr' ? (
+          <PrResult title={entry.title} number={entry.prNumber} repo={entry.repo} state={entry.prState} adds={entry.adds} dels={entry.dels} checks={entry.checks} onOpen={() => {}} />
+        ) : entry.kind === 'screenshot' ? (
+          <ScreenshotResult title={entry.title} body={entry.body} src={entry.src} onOpen={() => {}} />
+        ) : (
+          // generic — leading tile, title + meta, open arrow (flows on the glass).
+          <div style={{ display: 'flex', alignItems: 'center', gap: 11, paddingTop: 2, paddingBottom: 2 }}>
+            <span
+              aria-hidden
+              style={{ width: 32, height: 32, borderRadius: 9, background: 'var(--cnv-tint)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: 'var(--cnv-ink-muted)' }}
+            >
+              <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" />
+              </svg>
             </span>
-            <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.meta}</span>
-          </span>
-          <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
-            <path d="M7 17 17 7" /><path d="M7 7h10v10" />
-          </svg>
-        </div>
+            <span style={{ display: 'flex', flexDirection: 'column', gap: 2, minWidth: 0, flex: 1 }}>
+              <span style={{ fontSize: 11.5, fontWeight: 400, letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'var(--cnv-ink)' }}>
+                {entry.title}
+              </span>
+              {entry.meta ? <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{entry.meta}</span> : null}
+            </span>
+            <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+              <path d="M7 17 17 7" /><path d="M7 7h10v10" />
+            </svg>
+          </div>
+        )
       ) : null}
       {entry.role === 'text' ? (
         // Borderless prose — the assistant's turn flows on the glass, no boxed
