@@ -135,6 +135,14 @@ export default function CanvasGlassPreviewPage() {
   const [composerValue, setComposerValue] = useState('');
   const [inTauri, setInTauri] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
+  // The orchestrator dock is a floating draggable card now (not a pinned
+  // panel) — its geometry lives here, defaults to the old top-right berth.
+  const [dockGeom, setDockGeom] = useState<{ x: number; y: number; w: number; h: number }>(() => ({
+    x: typeof window !== 'undefined' ? Math.max(24, window.innerWidth - 24 - 408) : 880,
+    y: 90,
+    w: 408,
+    h: 392,
+  }));
   const [tunerOpen, setTunerOpen] = useState(false);
   const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(1);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
@@ -797,6 +805,14 @@ export default function CanvasGlassPreviewPage() {
       : [{ role: 'user', text }, { role: 'status', text: 'Not connected yet — try again in a second', pending: false }]);
   }, [appendEntries]);
 
+  const moveDock = useCallback((x: number, y: number) => {
+    setDockGeom((geom) => ({ ...geom, x, y }));
+  }, []);
+
+  const resizeDock = useCallback((w: number, h: number) => {
+    setDockGeom((geom) => ({ ...geom, w, h }));
+  }, []);
+
   const moveChatCard = useCallback((id: number, x: number, y: number) => {
     setChatCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
@@ -1163,6 +1179,14 @@ export default function CanvasGlassPreviewPage() {
     persistArmedAtRef.current = Date.now() + 12000;
     if (snap.activeRepoPath) setActiveRepoPath((current) => current ?? snap.activeRepoPath);
     if (snap.dockOpen) setDockOpen(true);
+    if (snap.dockGeom && Number.isFinite(snap.dockGeom.x) && Number.isFinite(snap.dockGeom.y)) {
+      setDockGeom({
+        x: snap.dockGeom.x,
+        y: snap.dockGeom.y,
+        w: Math.max(330, snap.dockGeom.w || 408),
+        h: Math.max(220, snap.dockGeom.h || 392),
+      });
+    }
 
     if (snap.browser.length) {
       setBrowserCards((previous) => [...previous, ...snap.browser.map((saved) => {
@@ -1221,6 +1245,7 @@ export default function CanvasGlassPreviewPage() {
   const persistSignature = useMemo(() => JSON.stringify({
     activeRepoPath,
     dockOpen,
+    dockGeom: { x: Math.round(dockGeom.x), y: Math.round(dockGeom.y), w: Math.round(dockGeom.w), h: Math.round(dockGeom.h) },
     term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel })),
     file: fileCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, path: card.path })),
     image: imageCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, items: card.items })),
@@ -1229,7 +1254,7 @@ export default function CanvasGlassPreviewPage() {
     diff: diffCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, laneId: card.laneId, title: card.title })),
     spec: specCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
     brain: brainCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+  }), [activeRepoPath, dockOpen, dockGeom, termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
   useEffect(() => {
     // Hold fire until restore's async spawns settle — an instant save of
     // the half-restored canvas would overwrite the snapshot.
@@ -2618,6 +2643,12 @@ export default function CanvasGlassPreviewPage() {
             onSend={sendPrompt}
             busy={orcaBusy}
             onClose={() => setDockOpen(false)}
+            x={dockGeom.x}
+            y={dockGeom.y}
+            w={dockGeom.w}
+            h={dockGeom.h}
+            onMove={moveDock}
+            onResize={resizeDock}
           />
         ) : null}
       </AnimatePresence>
