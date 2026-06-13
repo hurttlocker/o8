@@ -114,7 +114,7 @@ export function TunerPanel({
             onClick={() => onChange({
               tone: tone.id,
               textShade: defaultTextShadeForTone(tone.id),
-              veil: tone.id === 'light' ? 0.85 : 0.3,
+              veil: tone.id === 'light' ? 1 : 0.3,
             })}
           />
         ))}

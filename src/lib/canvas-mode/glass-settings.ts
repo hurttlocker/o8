@@ -95,29 +95,30 @@ export const CANVAS_DOCK_TONES: ReadonlyArray<{ id: CanvasGlassSettings['dockTon
 /** The tone's natural text level — applied when the operator flips tone
  *  so panes and text never land same-on-same. The slider adjusts from there. */
 export function defaultTextShadeForTone(tone: CanvasGlassSettings['tone']): number {
-  return tone === 'light' ? 0.86 : 0.04;
+  return tone === 'light' ? 1 : 0.04;
 }
 
-// veil defaults to 0 and vibrance to the recipe's long-standing 1.6 so a
-// stored look from before these knobs existed renders pixel-identical.
-// Chat cards default HEAVIER than the ambient glass — conversation ink
-// needs a darker pane behind it than chrome does (the "fog" fix).
+// The default look is the operator's tuned LIGHT canvas (locked 2026-06-13):
+// a true white wash (veil 1), clear glass (tint 0), black text (textShade 1)
+// at 62% opacity on the Window material. Booting + Reset land here; flipping to
+// Dark (Appearance) or picking a Look reshapes it. The personal "Mine" slot is
+// independent (PERSONAL_KEY), so making this the default never clobbers it.
 export const CANVAS_GLASS_DEFAULTS: CanvasGlassSettings = {
-  frost: 26,
-  tint: 0.42,
-  ink: 0.92,
-  vibrance: 1.6,
-  veil: 0,
-  material: 'popover',
+  frost: 64,
+  tint: 0,
+  ink: 0.62,
+  vibrance: 2.2,
+  veil: 1,
+  material: 'window',
   backdropFrost: 0,
   backdrop: 'none',
-  chatFrost: 34,
-  chatTint: 0.6,
-  tone: 'dark',
-  chatTone: 'match',
-  dockTone: 'match',
+  chatFrost: 27,
+  chatTint: 0.62,
+  tone: 'light',
+  chatTone: 'light',
+  dockTone: 'light',
   dockTint: 0,
-  textShade: 0.04,
+  textShade: 1,
 };
 
 /**
