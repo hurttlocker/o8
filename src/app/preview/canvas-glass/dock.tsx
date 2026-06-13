@@ -12,7 +12,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { FONT, TONE_DOT, glass, glassPop, type DockEntry, type OrchestratorLane } from './ui';
+import { FONT, TONE_DOT, glassPop, type DockEntry, type OrchestratorLane } from './ui';
 import { ReasoningView } from './reasoning';
 import { BrainConversation } from './brain-card';
 
@@ -386,8 +386,10 @@ export function DockTab({ label, active, onClick }: { label: string; active: boo
   );
 }
 
-/** Shared by the dock AND the floating chat cards — one entry vocabulary. */
-export function DockEntryView({ entry, suppressBlur = false }: { entry: DockEntry; suppressBlur?: boolean }) {
+/** Shared by the dock AND the floating chat cards — one entry vocabulary.
+ *  Borderless throughout (Q's reference): user = soft pill, result + prose flow
+ *  on the glass, no boxed cards or divider lines. */
+export function DockEntryView({ entry }: { entry: DockEntry }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -407,13 +409,12 @@ export function DockEntryView({ entry, suppressBlur = false }: { entry: DockEntr
             paddingBottom: 8,
             paddingLeft: 12,
             paddingRight: 12,
-            borderRadius: 13,
-            fontSize: 11.5,
+            borderRadius: 15,
+            fontSize: 12.5,
             fontWeight: 300,
-            lineHeight: 1.55,
+            lineHeight: 1.5,
             letterSpacing: '-0.1px',
-            ...glass(true, suppressBlur),
-            boxShadow: 'none',
+            background: 'var(--cnv-tint)',
           }}
         >
           {entry.images?.length ? (
@@ -468,29 +469,24 @@ export function DockEntryView({ entry, suppressBlur = false }: { entry: DockEntr
         </div>
       ) : null}
       {entry.role === 'result' ? (
-        // The reference's response card: leading tile, title + meta, open arrow.
+        // Borderless result — leading tile, title + meta, open arrow. Flows on
+        // the glass like the reference's response block (no boxed card).
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
-            gap: 10,
-            paddingTop: 8,
-            paddingBottom: 8,
-            paddingLeft: 9,
-            paddingRight: 10,
-            borderRadius: 12,
-            ...glass(false, suppressBlur),
-            boxShadow: 'none',
+            gap: 11,
+            paddingTop: 2,
+            paddingBottom: 2,
           }}
         >
           <span
             aria-hidden
             style={{
-              width: 30,
-              height: 30,
-              borderRadius: 8,
+              width: 32,
+              height: 32,
+              borderRadius: 9,
               background: 'var(--cnv-tint)',
-              border: '1px solid var(--cnv-edge)',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -514,24 +510,9 @@ export function DockEntryView({ entry, suppressBlur = false }: { entry: DockEntr
         </div>
       ) : null}
       {entry.role === 'text' ? (
-        // Each assistant turn reads as its own quiet card — a hairline
-        // pane instead of a wall of flowing text (Q: "do we have cards
-        // we can use for turns?").
-        <div
-          style={{
-            borderRadius: 12,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--cnv-edge)',
-            background: 'var(--cnv-tint)',
-            paddingTop: 10,
-            paddingBottom: 11,
-            paddingLeft: 13,
-            paddingRight: 13,
-          }}
-        >
-          <CanvasMarkdown text={entry.text} />
-        </div>
+        // Borderless prose — the assistant's turn flows on the glass, no boxed
+        // card (Q's reference: smooth, no extra lines).
+        <CanvasMarkdown text={entry.text} />
       ) : null}
       {entry.role === 'followups' ? <FollowUps /> : null}
     </motion.div>
