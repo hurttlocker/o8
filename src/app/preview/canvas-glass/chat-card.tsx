@@ -108,9 +108,20 @@ export function ChatGlassCard({
       }}
     >
       <SmoothCorners
-        corners={{ radius: 14 }}
+        corners={{ radius: 22 }}
         shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', ...glassChat(dragging || resizing), ...chatVocabularyRebind() }}
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          ...glassChat(dragging || resizing),
+          ...chatVocabularyRebind(),
+          // Locked bench treatment: borderless + a lighter shadow (Q: "shadow
+          // may be a bit too deep, it can be lesser"). Overrides glassChat's
+          // border + deeper shadow for THIS card only — the canvas-wide glass()
+          // helper is untouched.
+          border: 'none',
+          boxShadow: '0 14px 42px rgba(0, 0, 0, 0.24)',
+        }}
       >
         {/* Title bar — drag handle, dock-it, close. */}
         <div
@@ -134,7 +145,6 @@ export function ChatGlassCard({
             paddingBottom: 8,
             paddingLeft: 12,
             paddingRight: 8,
-            borderBottom: '1px solid var(--cnv-edge)',
             cursor: dragging ? 'grabbing' : 'grab',
             touchAction: 'none',
             userSelect: 'none',
@@ -191,8 +201,9 @@ export function ChatGlassCard({
         </div>
 
         {/* Split tabs — same strip the dock runs; Orchestrator default, one
-            click to the Brain. No separate brain icon: Cortex rides here. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 20, paddingLeft: 16, paddingRight: 16, paddingTop: 9, borderBottom: '1px solid var(--cnv-edge)', flexShrink: 0 }}>
+            click to the Brain. No separate brain icon: Cortex rides here.
+            Borderless (Q's reference) — no underline, no divider. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20, paddingLeft: 16, paddingRight: 16, paddingTop: 9, flexShrink: 0 }}>
           <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
           <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => setActiveTab('cortex')} />
         </div>
@@ -231,8 +242,9 @@ export function ChatGlassCard({
               ) : null}
             </div>
 
-            {/* In-card composer — talk to this orchestrator right here. */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 9, paddingLeft: 12, paddingRight: 12, borderTop: '1px solid var(--cnv-edge)' }}>
+            {/* In-card composer — talk to this orchestrator right here.
+                Borderless (Q's reference) — no top divider. */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 9, paddingLeft: 12, paddingRight: 12 }}>
               <input
                 value={draft}
                 onChange={(event) => setDraft(event.target.value)}

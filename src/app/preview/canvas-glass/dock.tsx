@@ -145,10 +145,11 @@ export function OrchestratorDock({
         } as React.CSSProperties}
       >
         {/* Tabs — the orchestrator NEVER rides without its Cortex side; both
-            share the one pane, spread + underlined like the reference. The ✕
-            undocks (the conversation returns to the composer below). The dock
-            is pinned, so this strip is the panel's only chrome — no drag bar. */}
-        <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 18, paddingRight: 10, paddingTop: 11, borderBottom: '1px solid var(--cnv-edge)', flexShrink: 0 }}>
+            share the one pane, smooth + borderless (no underline, no divider —
+            Q's reference). The ✕ undocks (the conversation returns to the
+            composer below). The dock is pinned, so this strip is the panel's
+            only chrome — no drag bar. */}
+        <div style={{ display: 'flex', alignItems: 'center', paddingLeft: 18, paddingRight: 10, paddingTop: 11, flexShrink: 0 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 20, flex: 1 }}>
             <DockTab label="Orchestrator" active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
             <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => { setActiveTab('cortex'); setLaneMenuOpen(false); }} />
@@ -340,16 +341,16 @@ export function OrchestratorDock({
   );
 }
 
-/** One pane-header tab — Orchestrator | Cortex, the reference's two-tab strip:
- *  a weight + ink shift plus an underline indicator that sits on the divider.
+/** One pane-header tab — Orchestrator | Cortex. Borderless (Q's reference):
+ *  no underline, no box — the active tab is a weight + ink + opacity shift.
  *  Exported: the chat-card orchestrator modal renders the same strip. */
 export function DockTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
+      onPointerDown={(event) => event.stopPropagation()}
       onClick={onClick}
       style={{
-        position: 'relative',
         borderWidth: 0,
         background: 'transparent',
         paddingTop: 0,
@@ -362,26 +363,13 @@ export function DockTab({ label, active, onClick }: { label: string; active: boo
         fontWeight: active ? 500 : 400,
         letterSpacing: '-0.1px',
         color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
-        transition: 'color 140ms ease',
+        opacity: active ? 1 : 0.7,
+        transition: 'color 160ms ease, opacity 160ms ease',
       }}
-      onMouseEnter={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-      onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+      onMouseEnter={(event) => { if (!active) event.currentTarget.style.opacity = '1'; }}
+      onMouseLeave={(event) => { if (!active) event.currentTarget.style.opacity = '0.7'; }}
     >
       {label}
-      {/* Active indicator — a 2px ink bar flush on the strip's divider. */}
-      <span
-        aria-hidden
-        style={{
-          position: 'absolute',
-          left: 0,
-          right: 0,
-          bottom: -1,
-          height: 2,
-          borderRadius: 2,
-          background: active ? 'var(--cnv-ink)' : 'transparent',
-          transition: 'background 160ms ease',
-        }}
-      />
     </button>
   );
 }
