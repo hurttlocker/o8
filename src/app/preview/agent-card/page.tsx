@@ -59,6 +59,7 @@ function resizeGeom(edge: Edge, dx: number, dy: number, start: Geom): Geom {
 export default function AgentCardBench() {
   const [tab, setTab] = useState<'orchestrator' | 'cortex'>('orchestrator');
   const [inTauri, setInTauri] = useState(false);
+  const [working, setWorking] = useState(false);
   const [geom, setGeom] = useState<Geom>({ x: 300, y: 110, w: 470, h: 440 });
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
@@ -123,9 +124,19 @@ export default function AgentCardBench() {
         }}
       />
 
-      {/* A caption so the bench is self-describing. */}
-      <div style={{ position: 'absolute', top: 18, left: 22, zIndex: 1, fontSize: 11, fontWeight: 300, letterSpacing: '0.04em', color: 'var(--cnv-ink-muted)' }}>
-        agent-card bench · drag the grab pill · resize from any edge or corner
+      {/* Caption + a toggle to flip the orchestrator turn between settled and
+          live-working (so both states are screenshot-able on the bench). */}
+      <div style={{ position: 'absolute', top: 16, left: 22, zIndex: 1, display: 'flex', alignItems: 'center', gap: 14 }}>
+        <span style={{ fontSize: 11, fontWeight: 300, letterSpacing: '0.04em', color: 'var(--cnv-ink-muted)' }}>
+          agent-card bench · drag the grab pill · resize from any edge or corner
+        </span>
+        <button
+          type="button"
+          onClick={() => setWorking((value) => !value)}
+          style={{ borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--cnv-edge)', background: 'var(--cnv-tint)', borderRadius: 999, paddingTop: 3, paddingBottom: 3, paddingLeft: 11, paddingRight: 11, fontSize: 10.5, fontWeight: 400, color: 'var(--cnv-ink)', cursor: 'pointer', fontFamily: FONT }}
+        >
+          {working ? '● working' : '○ settled'}
+        </button>
       </div>
 
       {/* The card. */}
@@ -194,12 +205,14 @@ export default function AgentCardBench() {
               ...(locked ? { pointerEvents: 'none' } : {}),
             } as React.CSSProperties}
           >
-            {tab === 'orchestrator' ? <SampleResponse /> : <SampleCortex />}
+            {tab === 'orchestrator' ? (working ? <WorkingResponse /> : <SampleResponse />) : <SampleCortex />}
           </div>
 
           {/* Compact composer — canvas-composer style, smaller. The textarea
-              grows with content (field-sizing) instead of nested-scrolling. */}
-          <CompactComposer />
+              grows with content (field-sizing) instead of nested-scrolling, and
+              the focus ring anticipates the pointer. Send flips to stop while
+              the orchestrator works. */}
+          <CompactComposer working={tab === 'orchestrator' && working} />
         </SmoothCorners>
 
         {/* Invisible resize zones — hidden handles, all 8 angles. */}
@@ -273,7 +286,45 @@ function SampleResponse() {
       </div>
 
       {/* Reasoning timeline — staged, dashed connectors, time + title + body. */}
-      <ReasoningTimeline />
+      <ReasoningTimeline stages={STAGES} />
+    </>
+  );
+}
+
+/** Live working turn — the agent mid-flight: ticking reasoning header with
+ *  the orbit, the settled stages so far, then a shimmering tool-activity
+ *  line. No result yet — it's still working. */
+function WorkingResponse() {
+  return (
+    <>
+      <UserMessage text="Add the live working state — show the agent actually working." />
+
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2 }}>
+        <motion.span
+          aria-hidden
+          animate={{ rotate: 360 }}
+          transition={{ duration: 1.4, repeat: Infinity, ease: 'linear' }}
+          style={{ width: 10, height: 10, borderRadius: '50%', borderWidth: 1.5, borderStyle: 'solid', borderColor: 'transparent', borderTopColor: 'var(--cnv-ink)', borderRightColor: 'var(--cnv-edge)', flexShrink: 0 }}
+        />
+        <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>
+          Reasoning · 0:38 min
+        </span>
+      </div>
+
+      <ReasoningTimeline stages={WORKING_STAGES} />
+
+      {/* Live tool-activity — one shimmering row for the current work phase. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+        <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: 'var(--cnv-ink)', flexShrink: 0 }} />
+        <motion.span
+          animate={{ opacity: [0.45, 0.95, 0.45] }}
+          transition={{ duration: 1.8, repeat: Infinity, ease: 'easeInOut' }}
+          style={{ fontSize: 12.5, fontWeight: 300, color: 'var(--cnv-ink)' }}
+        >
+          Editing chat-card.tsx
+          <span style={{ color: 'var(--cnv-ink-muted)' }}>{' · 3 files'}</span>
+        </motion.span>
+      </div>
     </>
   );
 }
@@ -284,13 +335,18 @@ const STAGES = [
   { time: '0:11 min', title: 'Confirmed clean', body: 'Typecheck, lint, and the 89-test suite all green; committed and pushed, ready to port.' },
 ];
 
+const WORKING_STAGES = [
+  { time: '0:14 min', title: 'Read the bench', body: 'Mapped the card — header, response body, composer — before threading the live state through.' },
+  { time: '0:24 min', title: 'Wiring the working view', body: 'Streaming the reasoning header with the orbit, then a shimmering tool line under the settled stages.' },
+];
+
 /** The model's thinking as a staged timeline — dashed spine, time chips,
  *  stage titles, muted bodies. Matches the reference's lower section. */
-function ReasoningTimeline() {
+function ReasoningTimeline({ stages }: { stages: Array<{ time: string; title: string; body: string }> }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column' }}>
-      {STAGES.map((stage, index) => {
-        const last = index === STAGES.length - 1;
+      {stages.map((stage, index) => {
+        const last = index === stages.length - 1;
         return (
           <div key={stage.title} style={{ display: 'flex', gap: 11 }}>
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', width: 6, flexShrink: 0, paddingTop: 5 }}>
@@ -434,11 +490,34 @@ function UserMessage({ text }: { text: string }) {
   );
 }
 
-/** Compact composer — the canvas bottom-composer's style at card scale. The
- *  textarea grows with content via `field-sizing: content` (Q's tip) instead
- *  of introducing nested scroll; caps at ~5 rows, then scrolls. */
-function CompactComposer() {
+/** Compact composer — the canvas bottom-composer's style at card scale.
+ *  - textarea grows with content via `field-sizing: content` (Q's tip),
+ *    capped at ~5 rows then scrolls.
+ *  - Input Anticipation (Q's tip): the focus ring fades in as the pointer
+ *    nears the composer — the card reaches back before you click. Driven by
+ *    direct style mutation off the render path.
+ *  - send flips to stop while the orchestrator is working. */
+function CompactComposer({ working = false }: { working?: boolean }) {
   const [draft, setDraft] = useState('');
+  const boxRef = useRef<HTMLDivElement | null>(null);
+  const ringRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      const box = boxRef.current;
+      const ring = ringRef.current;
+      if (!box || !ring) return;
+      const r = box.getBoundingClientRect();
+      const dx = Math.max(r.left - event.clientX, 0, event.clientX - r.right);
+      const dy = Math.max(r.top - event.clientY, 0, event.clientY - r.bottom);
+      const distance = Math.hypot(dx, dy);
+      const intent = Math.max(0, 1 - distance / 180) ** 2;
+      ring.style.opacity = String(intent);
+    };
+    window.addEventListener('pointermove', onMove);
+    return () => window.removeEventListener('pointermove', onMove);
+  }, []);
+
   const inputStyle: React.CSSProperties & { fieldSizing?: 'content' } = {
     flex: 1,
     borderWidth: 0,
@@ -457,7 +536,16 @@ function CompactComposer() {
   };
   return (
     <div style={{ flexShrink: 0, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, paddingTop: 2 }}>
-      <div style={{ display: 'flex', alignItems: 'flex-end', gap: 8, paddingTop: 7, paddingBottom: 7, paddingLeft: 13, paddingRight: 9, borderRadius: 18, background: 'var(--cnv-tint)' }}>
+      <div
+        ref={boxRef}
+        style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 8, paddingTop: 7, paddingBottom: 7, paddingLeft: 13, paddingRight: 9, borderRadius: 18, background: 'var(--cnv-tint)' }}
+      >
+        {/* Input Anticipation focus ring — opacity driven by pointer proximity. */}
+        <div
+          ref={ringRef}
+          aria-hidden
+          style={{ position: 'absolute', inset: 0, borderRadius: 18, pointerEvents: 'none', opacity: 0, boxShadow: 'inset 0 0 0 1.5px var(--cnv-ink), 0 0 16px -4px var(--cnv-ink)' }}
+        />
         <textarea
           value={draft}
           onChange={(event) => setDraft(event.target.value)}
@@ -473,14 +561,20 @@ function CompactComposer() {
         </span>
         <button
           type="button"
-          aria-label="Send"
+          aria-label={working ? 'Interrupt' : 'Send'}
           style={{ borderWidth: 0, background: 'transparent', padding: 3, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: 'pointer', color: 'var(--cnv-ink-muted)', flexShrink: 0 }}
           onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
           onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
         >
-          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" />
-          </svg>
+          {working ? (
+            <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+              <rect x="6" y="6" width="12" height="12" rx="2" />
+            </svg>
+          ) : (
+            <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" />
+            </svg>
+          )}
         </button>
       </div>
     </div>
