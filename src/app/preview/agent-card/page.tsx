@@ -265,28 +265,32 @@ function SmoothTab({ label, active, onClick }: { label: string; active: boolean;
 function SampleResponse() {
   return (
     <>
-      <UserMessage text="Review the pinned dock before we merge — does it still match the reference?" />
+      <UserMessage text="Review the pinned dock and ship it if it's clean." />
 
       <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.11em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', paddingTop: 2 }}>
         Reasoning · 1:12 min
       </span>
 
-      {/* The captured screenshot the orchestrator reviewed mid-process —
-          thumbnail + bold title + wrapped description, no box. */}
-      <div style={{ display: 'flex', gap: 14, alignItems: 'flex-start' }}>
+      {/* The captured screenshot the orchestrator reviewed — image-led result,
+          borderless, faint hover to open. */}
+      <ResultRow onOpen={() => {}}>
         <ScreenshotThumb />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0, flex: 1 }}>
           <span style={{ fontSize: 14, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--cnv-ink)', lineHeight: 1.3 }}>
             Reviewed the pinned dock on the live app
           </span>
           <span style={{ fontSize: 12.5, fontWeight: 300, lineHeight: 1.55, color: 'var(--cnv-ink-muted)' }}>
-            Captured the running canvas to check the dock against the reference before approving the merge — right-edge berth, the Orchestrator | Cortex strip reads borderless, and no divider lines bleed into the glass.
+            Captured the running canvas to check the dock against the reference — right-edge berth, the Orchestrator | Cortex strip reads borderless, no divider lines.
           </span>
         </div>
-      </div>
+      </ResultRow>
 
       {/* Reasoning timeline — staged, dashed connectors, time + title + body. */}
       <ReasoningTimeline stages={STAGES} />
+
+      {/* Concrete outputs — same borderless result shape, icon-led. */}
+      <EditedFilesResult />
+      <PrResult />
     </>
   );
 }
@@ -400,6 +404,111 @@ const SOURCES: Array<{ kind: string; title: string }> = [
   { kind: 'pr', title: '#374945e2 · pinned dock + split-tab modals' },
   { kind: 'outcome', title: 'session: dock revert to pinned' },
 ];
+
+/** A result row — borderless at rest, a faint tint on hover to afford the
+ *  click (open the PR, the diff, the file set). The leading visual + title +
+ *  meta shape comes straight from the reference's result block. */
+function ResultRow({ children, onOpen }: { children: React.ReactNode; onOpen?: () => void }) {
+  return (
+    <div
+      onClick={onOpen}
+      style={{ display: 'flex', gap: 13, alignItems: 'flex-start', borderRadius: 12, paddingTop: 8, paddingBottom: 8, paddingLeft: 8, paddingRight: 8, marginLeft: -8, marginRight: -8, cursor: onOpen ? 'pointer' : 'default', transition: 'background 140ms ease' }}
+      onMouseEnter={(event) => { if (onOpen) event.currentTarget.style.background = 'var(--cnv-tint)'; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+    >
+      {children}
+    </div>
+  );
+}
+
+/** Leading icon tile — the borderless analog of the screenshot thumbnail for
+ *  icon-style results (edits, PRs). */
+function ResultTile({ children, tone }: { children: React.ReactNode; tone?: string }) {
+  return (
+    <span style={{ width: 40, height: 40, borderRadius: 11, background: 'var(--cnv-tint)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, color: tone ?? 'var(--cnv-ink-muted)' }}>
+      {children}
+    </span>
+  );
+}
+
+/** Borderless text action (Review / Undo) — a soft tint chip. */
+function ActionChip({ label }: { label: string }) {
+  return (
+    <button
+      type="button"
+      onClick={(event) => event.stopPropagation()}
+      style={{ borderWidth: 0, background: 'var(--cnv-tint)', borderRadius: 7, paddingTop: 3, paddingBottom: 3, paddingLeft: 9, paddingRight: 9, fontSize: 11, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', cursor: 'pointer', fontFamily: FONT }}
+    >
+      {label}
+    </button>
+  );
+}
+
+/** Diff stats — semantic +adds (green) / −dels (red). */
+function DiffStat({ adds, dels }: { adds: number; dels: number }) {
+  return (
+    <span style={{ fontSize: 11, fontWeight: 400, fontVariantNumeric: 'tabular-nums', letterSpacing: '-0.1px', whiteSpace: 'nowrap' }}>
+      <span style={{ color: '#3fb950' }}>{`+${adds}`}</span>
+      <span>{'  '}</span>
+      <span style={{ color: '#f85149' }}>{`−${dels}`}</span>
+    </span>
+  );
+}
+
+/** "Edited N files" result — icon tile, title, the file set, stats + actions. */
+function EditedFilesResult() {
+  return (
+    <ResultRow onOpen={() => {}}>
+      <ResultTile>
+        <svg width={17} height={17} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6" /><path d="m10 13-2 2 2 2" /><path d="m14 13 2 2-2 2" />
+        </svg>
+      </ResultTile>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0, flex: 1 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--cnv-ink)' }}>Edited 4 files</span>
+        <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          dock.tsx · chat-card.tsx · page.tsx · canvas-persistence.ts
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, paddingTop: 2 }}>
+          <DiffStat adds={149} dels={276} />
+          <span style={{ flex: 1 }} />
+          <ActionChip label="Review" />
+          <ActionChip label="Undo" />
+        </div>
+      </div>
+    </ResultRow>
+  );
+}
+
+/** PR result — icon tile (merged purple), title, number/repo/status, stats +
+ *  checks. The same borderless shape, an opener for the pull request. */
+function PrResult() {
+  return (
+    <ResultRow onOpen={() => {}}>
+      <ResultTile tone="#a371f7">
+        <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <line x1="6" x2="6" y1="3" y2="15" /><circle cx="18" cy="6" r="3" /><circle cx="6" cy="18" r="3" /><path d="M18 9a9 9 0 0 1-9 9" />
+        </svg>
+      </ResultTile>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, minWidth: 0, flex: 1 }}>
+        <span style={{ fontSize: 13.5, fontWeight: 600, letterSpacing: '-0.2px', color: 'var(--cnv-ink)', lineHeight: 1.3 }}>
+          Pinned dock + split-tab orchestrator modals
+        </span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink-muted)' }}>
+          #374 · hurttlocker/o8
+          <span aria-hidden style={{ width: 5, height: 5, borderRadius: '50%', background: '#a371f7', flexShrink: 0 }} />
+          merged
+        </span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 2 }}>
+          <DiffStat adds={149} dels={276} />
+          <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)' }}>
+            <span style={{ color: '#3fb950' }}>✓</span> typecheck · lint · 89 tests
+          </span>
+        </div>
+      </div>
+    </ResultRow>
+  );
+}
 
 /** Cortex side — a sample cited Brain answer, the same smooth surface. A
  *  user question, the streamed answer (no box), then titled citations. */
