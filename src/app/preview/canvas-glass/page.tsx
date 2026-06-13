@@ -1625,7 +1625,7 @@ export default function CanvasGlassPreviewPage() {
           position: 'absolute',
           inset: 0,
           background: 'var(--cnv-bg-veil)',
-          backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.055) 1px, transparent 1.4px)',
+          backgroundImage: 'radial-gradient(circle, var(--cnv-bg-dot, rgba(255,255,255,0.055)) 1px, transparent 1.4px)',
           backgroundSize: '26px 26px',
           pointerEvents: 'none',
           zIndex: 1,
