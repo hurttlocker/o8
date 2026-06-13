@@ -13,6 +13,7 @@ import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { DockEntryView, DockTab } from './dock';
 import { BrainConversation } from './brain-card';
+import { CardComposer } from './card-composer';
 import { canvasZoom, FONT, TONE_DOT, chatVocabularyRebind, glassChat, type DockEntry } from './ui';
 import { useThreadOrchestrator, type OrcaThreadEvent } from './use-canvas-orchestrator';
 
@@ -242,40 +243,15 @@ export function ChatGlassCard({
               ) : null}
             </div>
 
-            {/* In-card composer — talk to this orchestrator right here.
-                Borderless (Q's reference) — no top divider. */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 9, paddingLeft: 12, paddingRight: 12 }}>
-              <input
+            {/* In-card composer — talk to this orchestrator right here. Shared
+                with the dock: borderless, field-sizing + Input Anticipation. */}
+            <div style={{ paddingTop: 7, paddingBottom: 9, paddingLeft: 12, paddingRight: 12, flexShrink: 0 }}>
+              <CardComposer
                 value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    submit();
-                  }
-                }}
-                onPointerDown={(event) => event.stopPropagation()}
+                onChange={setDraft}
+                busy={busy}
                 placeholder={busy ? 'Working — interrupt from the dock' : `Reply to ${card.title.length > 26 ? `${card.title.slice(0, 26)}…` : card.title}`}
-                aria-label={`Message ${card.title}`}
-                spellCheck={false}
-                disabled={busy}
-                style={{
-                  flex: 1,
-                  borderWidth: 0,
-                  outline: 'none',
-                  background: 'var(--cnv-tint)',
-                  borderRadius: 9,
-                  paddingTop: 5,
-                  paddingBottom: 5,
-                  paddingLeft: 9,
-                  paddingRight: 9,
-                  color: 'var(--cnv-ink)',
-                  fontSize: 11,
-                  fontWeight: 300,
-                  letterSpacing: '-0.05px',
-                  fontFamily: FONT,
-                  opacity: busy ? 0.55 : 1,
-                }}
+                onSubmit={submit}
               />
             </div>
           </div>

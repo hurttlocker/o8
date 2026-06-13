@@ -15,6 +15,7 @@ import { SmoothCorners } from '@lisse/react';
 import { FONT, TONE_DOT, glassPop, type DockEntry, type OrchestratorLane } from './ui';
 import { ReasoningView } from './reasoning';
 import { BrainConversation } from './brain-card';
+import { CardComposer } from './card-composer';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
@@ -297,40 +298,19 @@ export function OrchestratorDock({
               ) : null}
             </div>
 
-            {/* Reply right here — the card owns its own composer. */}
+            {/* Reply right here — the card owns its own composer (shared with
+                the chat-card: field-sizing textarea + Input Anticipation ring). */}
             <div style={{ paddingLeft: 12, paddingRight: 12, paddingBottom: 12, paddingTop: 4, flexShrink: 0 }}>
-              <input
+              <CardComposer
                 value={draft}
-                onChange={(event) => setDraft(event.target.value)}
-                onPointerDown={(event) => event.stopPropagation()}
-                onKeyDown={(event) => {
-                  if (event.key === 'Enter' && !event.shiftKey) {
-                    event.preventDefault();
-                    const prompt = draft.trim();
-                    if (!prompt || busy) return;
-                    onSend(prompt);
-                    setDraft('');
-                  }
-                }}
+                onChange={setDraft}
+                busy={busy}
                 placeholder={busy ? 'Working — interrupt from the main composer' : `Reply to ${activeLabel}`}
-                aria-label="Reply to the orchestrator"
-                style={{
-                  width: '100%',
-                  boxSizing: 'border-box',
-                  paddingTop: 9,
-                  paddingBottom: 9,
-                  paddingLeft: 13,
-                  paddingRight: 13,
-                  borderRadius: 11,
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: 'var(--cnv-edge)',
-                  background: 'var(--cnv-tint)',
-                  color: 'var(--cnv-ink)',
-                  fontSize: 12,
-                  fontWeight: 300,
-                  fontFamily: FONT,
-                  outline: 'none',
+                onSubmit={() => {
+                  const prompt = draft.trim();
+                  if (!prompt || busy) return;
+                  onSend(prompt);
+                  setDraft('');
                 }}
               />
             </div>
