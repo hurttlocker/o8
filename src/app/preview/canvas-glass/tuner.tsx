@@ -11,6 +11,7 @@ import { motion } from 'framer-motion';
 import {
   CANVAS_BACKDROPS,
   CANVAS_CHAT_TONES,
+  CANVAS_DOCK_TONES,
   CANVAS_GLASS_DEFAULTS,
   CANVAS_GLASS_MATERIALS,
   CANVAS_GLASS_PRESETS,
@@ -34,6 +35,8 @@ function settingsMatch(a: CanvasGlassSettings, b: CanvasGlassSettings): boolean 
     && a.chatTint === b.chatTint
     && a.tone === b.tone
     && a.chatTone === b.chatTone
+    && a.dockTone === b.dockTone
+    && a.dockTint === b.dockTint
     && a.textShade === b.textShade;
 }
 
@@ -213,6 +216,20 @@ export function TunerPanel({
       </div>
       <TunerSlider label="Frost" display={`${Math.round(settings.chatFrost)}px`} value={settings.chatFrost} range={CANVAS_GLASS_RANGES.chatFrost} onChange={(chatFrost) => onChange({ chatFrost })} />
       <TunerSlider label="Tint" display={`${Math.round(settings.chatTint * 100)}%`} value={settings.chatTint} range={CANVAS_GLASS_RANGES.chatTint} onChange={(chatTint) => onChange({ chatTint })} />
+      <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
+        Dock orchestrator
+      </span>
+      <div style={{ display: 'flex', gap: 5 }}>
+        {CANVAS_DOCK_TONES.map((tone) => (
+          <PresetPill
+            key={tone.id}
+            label={tone.label}
+            active={settings.dockTone === tone.id}
+            onClick={() => onChange({ dockTone: tone.id })}
+          />
+        ))}
+      </div>
+      <TunerSlider label="Tint" display={`${Math.round(settings.dockTint * 100)}%`} value={settings.dockTint} range={CANVAS_GLASS_RANGES.dockTint} onChange={(dockTint) => onChange({ dockTint })} />
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
         <button
           type="button"
