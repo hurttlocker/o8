@@ -34,6 +34,39 @@ export interface ChatCard {
 const CHAT_MIN_W = 300;
 const CHAT_MIN_H = 240;
 
+type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
+interface Geom { x: number; y: number; w: number; h: number; }
+
+/** Invisible resize zones — all 8 angles, hidden handles (Q's bench
+ *  reference). Edges are thin strips inset from the corners; corners are small
+ *  squares that mostly extend OUTWARD so they don't swallow the title-bar
+ *  buttons. The top strip stays a hair (10px) so the rest of the title bar
+ *  still drags. */
+const RESIZE_ZONES: Array<{ key: Edge; cursor: string; style: React.CSSProperties }> = [
+  { key: 'n', cursor: 'ns-resize', style: { top: -5, left: 16, right: 16, height: 10 } },
+  { key: 's', cursor: 'ns-resize', style: { bottom: -5, left: 16, right: 16, height: 10 } },
+  { key: 'e', cursor: 'ew-resize', style: { top: 16, bottom: 16, right: -5, width: 10 } },
+  { key: 'w', cursor: 'ew-resize', style: { top: 16, bottom: 16, left: -5, width: 10 } },
+  { key: 'ne', cursor: 'nesw-resize', style: { top: -8, right: -8, width: 16, height: 16 } },
+  { key: 'nw', cursor: 'nwse-resize', style: { top: -8, left: -8, width: 16, height: 16 } },
+  { key: 'se', cursor: 'nwse-resize', style: { bottom: -8, right: -8, width: 16, height: 16 } },
+  { key: 'sw', cursor: 'nesw-resize', style: { bottom: -8, left: -8, width: 16, height: 16 } },
+];
+
+/** New geometry for a resize drag. card.h is the BODY height (chrome sits on
+ *  top), so a top/left grab repositions x/y while the opposite edge stays
+ *  put — y += dy with h -= dy keeps the bottom fixed. */
+function resizeGeom(edge: Edge, dx: number, dy: number, start: Geom): Geom {
+  let { x, y, w, h } = start;
+  if (edge.includes('e')) w = start.w + dx;
+  if (edge.includes('s')) h = start.h + dy;
+  if (edge.includes('w')) { w = start.w - dx; x = start.x + dx; }
+  if (edge.includes('n')) { h = start.h - dy; y = start.y + dy; }
+  if (w < CHAT_MIN_W) { if (edge.includes('w')) x -= CHAT_MIN_W - w; w = CHAT_MIN_W; }
+  if (h < CHAT_MIN_H) { if (edge.includes('n')) y -= CHAT_MIN_H - h; h = CHAT_MIN_H; }
+  return { x, y, w, h };
+}
+
 export function ChatGlassCard({
   card,
   liveEntries,
@@ -61,7 +94,7 @@ export function ChatGlassCard({
   onClose: (id: number) => void;
 }) {
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
+  const resizeRef = useRef<{ pointerId: number; edge: Edge; startX: number; startY: number; start: Geom } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
   // Every orchestrator carries its Cortex side — default Orchestrator, one
@@ -92,6 +125,23 @@ export function ChatGlassCard({
     onUserSend(card, text, sent);
     if (sent) setDraft('');
   };
+
+  const onResizeDown = (edge: Edge) => (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    event.stopPropagation();
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
+    resizeRef.current = { pointerId: event.pointerId, edge, startX: event.clientX, startY: event.clientY, start: { x: card.x, y: card.y, w: card.w, h: card.h } };
+    setResizing(true);
+  };
+  const onResizeMove = (event: React.PointerEvent) => {
+    const resize = resizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    const zoom = canvasZoom();
+    const next = resizeGeom(resize.edge, (event.clientX - resize.startX) / zoom, (event.clientY - resize.startY) / zoom, resize.start);
+    onResize(card.id, next.w, next.h);
+    if (next.x !== resize.start.x || next.y !== resize.start.y) onMove(card.id, next.x, next.y);
+  };
+  const onResizeUp = () => { resizeRef.current = null; setResizing(false); };
 
   return (
     <motion.div
@@ -257,50 +307,21 @@ export function ChatGlassCard({
           </div>
         )}
 
-        {/* Corner resize grip. */}
-        <div
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.stopPropagation();
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originW: card.w, originH: card.h };
-            setResizing(true);
-          }}
-          onPointerMove={(event) => {
-            const resize = resizeRef.current;
-            if (!resize || resize.pointerId !== event.pointerId) return;
-            onResize(
-              card.id,
-              Math.max(CHAT_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
-              Math.max(CHAT_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
-            );
-          }}
-          onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
-          style={{
-            position: 'absolute',
-            right: 0,
-            bottom: 0,
-            width: 18,
-            height: 18,
-            cursor: 'nwse-resize',
-            touchAction: 'none',
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'flex-end',
-            paddingRight: 4,
-            paddingBottom: 4,
-            opacity: resizing ? 1 : 0.55,
-            zIndex: 2,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={(event) => { if (!resizeRef.current) event.currentTarget.style.opacity = '0.55'; }}
-        >
-          <svg width={9} height={9} viewBox="0 0 9 9" aria-hidden>
-            <path d="M8 1 1 8M8 5 5 8" stroke="var(--cnv-ink-muted)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-          </svg>
-        </div>
       </SmoothCorners>
+
+      {/* Invisible resize handles — all 8 angles, hidden (Q's bench reference).
+          Siblings of SmoothCorners so the slight outward overhang isn't clipped
+          by the smooth-corner mask. */}
+      {RESIZE_ZONES.map((zone) => (
+        <div
+          key={zone.key}
+          role="presentation"
+          onPointerDown={onResizeDown(zone.key)}
+          onPointerMove={onResizeMove}
+          onPointerUp={onResizeUp}
+          style={{ position: 'absolute', cursor: zone.cursor, touchAction: 'none', zIndex: zone.key.length === 2 ? 6 : 5, ...zone.style }}
+        />
+      ))}
     </motion.div>
   );
 }
