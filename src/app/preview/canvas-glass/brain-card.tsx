@@ -1,14 +1,16 @@
 'use client';
 
 /**
- * Brain card — the Engineering Brain ON the canvas (#1232). Ask a question
- * about the scoped repo, watch retrieval ("Reading N sources…") then the
- * streamed answer with titled citation pills — the same titled-sources
- * contract every Brain surface renders, in the canvas chat glass.
+ * Brain on the canvas (#1232). `BrainConversation` is the chrome-agnostic
+ * core — ask a question about the scoped repo, watch retrieval ("Reading N
+ * sources…") then the streamed answer with titled citation pills (the same
+ * titled-sources contract every Brain surface renders). It inherits whatever
+ * --cnv-* vars its host provides, so it drops into the floating Brain card OR
+ * the orchestrator dock's Brain tab unchanged.
  *
- * Self-contained: streams the SSE /api/cortex/ask route directly (the
- * ScratchChat popover's plumbing, card-shaped). Conversation is ephemeral
- * like the popover's — the card's geometry persists, the transcript doesn't.
+ * `BrainGlassCard` wraps it in the draggable/resizable canvas card chrome.
+ * Conversation is ephemeral like the ScratchChat popover's — the card's
+ * geometry persists, the transcript doesn't.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
@@ -63,23 +65,20 @@ function parseFrame(block: string): { event: string; payload: Record<string, unk
   }
 }
 
-export function BrainGlassCard({
-  card,
-  onMove,
-  onResize,
-  onFocus,
-  onClose,
+/**
+ * The Brain Q&A core — transcript + composer, no card chrome. Fills its
+ * parent (flex column); the host owns the height and the glass vars.
+ */
+export function BrainConversation({
+  repoPath,
+  initialQuestion,
+  locked,
 }: {
-  card: BrainCard;
-  onMove: (id: number, x: number, y: number) => void;
-  onResize: (id: number, w: number, h: number) => void;
-  onFocus: (id: number) => void;
-  onClose: (id: number) => void;
+  repoPath: string | null;
+  initialQuestion?: string;
+  /** Host is mid drag/resize — suppress transcript pointer events. */
+  locked?: boolean;
 }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [resizing, setResizing] = useState(false);
   const [messages, setMessages] = useState<BrainMessage[]>([]);
   const [draft, setDraft] = useState('');
   const [asking, setAsking] = useState(false);
@@ -87,14 +86,14 @@ export function BrainGlassCard({
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const abortRef = useRef<AbortController | null>(null);
 
-  const repoTail = card.repoPath ? card.repoPath.split('/').filter(Boolean).pop() ?? null : null;
+  const repoTail = repoPath ? repoPath.split('/').filter(Boolean).pop() ?? null : null;
 
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages]);
 
-  // Leaving the canvas mid-answer cancels the stream.
+  // Leaving the host mid-answer cancels the stream.
   useEffect(() => () => abortRef.current?.abort(), []);
 
   const ask = useCallback(async (overrideQuestion?: string) => {
@@ -126,7 +125,7 @@ export function BrainGlassCard({
       const response = await fetch('/api/cortex/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question, repoPath: card.repoPath ?? undefined }),
+        body: JSON.stringify({ question, repoPath: repoPath ?? undefined }),
         signal: controller.signal,
       });
       if (!response.ok || !response.body) throw new Error(`Brain ask failed (${response.status}).`);
@@ -172,17 +171,141 @@ export function BrainGlassCard({
       if (abortRef.current === controller) abortRef.current = null;
       setAsking(false);
     }
-  }, [asking, card.repoPath, draft]);
+  }, [asking, repoPath, draft]);
 
   // A question injected by the canvas intent bus asks itself — once per value,
-  // so re-renders never re-fire it but a fresh intent on an open card does.
+  // so re-renders never re-fire it but a fresh intent on an open host does.
   const lastInjectedRef = useRef<string | null>(null);
   useEffect(() => {
-    const question = card.initialQuestion?.trim();
+    const question = initialQuestion?.trim();
     if (!question || lastInjectedRef.current === question) return;
     lastInjectedRef.current = question;
     void ask(question);
-  }, [ask, card.initialQuestion]);
+  }, [ask, initialQuestion]);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', minHeight: 0, flex: 1 }}>
+      {/* Transcript. */}
+      <div
+        ref={scrollRef}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+          paddingTop: 12,
+          paddingBottom: 12,
+          paddingLeft: 14,
+          paddingRight: 14,
+          scrollbarWidth: 'none',
+          ...(locked ? { pointerEvents: 'none' } : {}),
+        } as React.CSSProperties}
+      >
+        {messages.length === 0 ? (
+          <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, lineHeight: 1.6 }}>
+            Ask the Engineering Brain about {repoTail ?? 'this repo'} — instant cited answers from directives, sessions, and PRs.
+          </span>
+        ) : null}
+        {messages.map((message) => (
+          <div key={message.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
+            {message.role === 'user' ? (
+              <span style={{ maxWidth: '88%', fontSize: 11.5, fontWeight: 300, lineHeight: 1.55, color: 'var(--cnv-ink)', fontFamily: FONT, background: 'var(--cnv-tint)', borderRadius: 11, paddingTop: 6, paddingBottom: 6, paddingLeft: 10, paddingRight: 10 }}>
+                {message.content}
+              </span>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: '94%' }}>
+                {message.pending && !message.content ? (
+                  <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
+                    {message.sources ? `Reading ${message.sources.count} sources…` : 'Thinking…'}
+                  </span>
+                ) : null}
+                {message.content ? (
+                  <span style={{ fontSize: 11.5, fontWeight: 300, lineHeight: 1.6, color: 'var(--cnv-ink)', fontFamily: FONT, whiteSpace: 'pre-wrap' }}>
+                    {message.content}
+                  </span>
+                ) : null}
+                {!message.pending && message.citations?.length ? (
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
+                    {message.citations.slice(0, 6).map((citation, index) => (
+                      <span
+                        key={`${message.id}-${index}`}
+                        title={citation.title ?? citation.rowId}
+                        style={{ fontSize: 9, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, border: '1px solid var(--cnv-edge)', borderRadius: 7, paddingTop: 2, paddingBottom: 2, paddingLeft: 7, paddingRight: 7, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                      >
+                        {citation.title ?? `${citation.kind ?? 'source'}`}
+                      </span>
+                    ))}
+                    {message.sources ? (
+                      <span style={{ fontSize: 9, fontWeight: 260, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingTop: 3 }}>
+                        {`${Math.min(message.citations.length, 6)} cited · ${message.sources.count} considered`}
+                      </span>
+                    ) : null}
+                  </div>
+                ) : null}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+
+      {/* Composer. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, paddingBottom: 10, paddingLeft: 12, paddingRight: 12, borderTop: '1px solid var(--cnv-edge)' }}>
+        <input
+          value={draft}
+          onChange={(event) => setDraft(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              void ask();
+            }
+          }}
+          onPointerDown={(event) => event.stopPropagation()}
+          placeholder={asking ? 'Answering…' : `Ask the Brain about ${repoTail ?? 'this repo'}`}
+          aria-label="Ask the Brain"
+          disabled={asking}
+          style={{
+            flex: 1,
+            borderWidth: 0,
+            outline: 'none',
+            background: 'var(--cnv-tint)',
+            borderRadius: 9,
+            paddingTop: 6,
+            paddingBottom: 6,
+            paddingLeft: 10,
+            paddingRight: 10,
+            color: 'var(--cnv-ink)',
+            fontSize: 11,
+            fontWeight: 300,
+            fontFamily: FONT,
+            opacity: asking ? 0.6 : 1,
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+export function BrainGlassCard({
+  card,
+  onMove,
+  onResize,
+  onFocus,
+  onClose,
+}: {
+  card: BrainCard;
+  onMove: (id: number, x: number, y: number) => void;
+  onResize: (id: number, w: number, h: number) => void;
+  onFocus: (id: number) => void;
+  onClose: (id: number) => void;
+}) {
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
+  const [dragging, setDragging] = useState(false);
+  const [resizing, setResizing] = useState(false);
+
+  const repoTail = card.repoPath ? card.repoPath.split('/').filter(Boolean).pop() ?? null : null;
 
   return (
     <motion.div
@@ -264,102 +387,9 @@ export function BrainGlassCard({
           </button>
         </div>
 
-        {/* Transcript. */}
-        <div
-          ref={scrollRef}
-          style={{
-            height: card.h,
-            overflowY: 'auto',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: 10,
-            paddingTop: 12,
-            paddingBottom: 12,
-            paddingLeft: 14,
-            paddingRight: 14,
-            scrollbarWidth: 'none',
-            ...(dragging || resizing ? { pointerEvents: 'none' } : {}),
-          } as React.CSSProperties}
-        >
-          {messages.length === 0 ? (
-            <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, lineHeight: 1.6 }}>
-              Ask the Engineering Brain about {repoTail ?? 'this repo'} — instant cited answers from directives, sessions, and PRs.
-            </span>
-          ) : null}
-          {messages.map((message) => (
-            <div key={message.id} style={{ display: 'flex', flexDirection: 'column', gap: 4, alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
-              {message.role === 'user' ? (
-                <span style={{ maxWidth: '88%', fontSize: 11.5, fontWeight: 300, lineHeight: 1.55, color: 'var(--cnv-ink)', fontFamily: FONT, background: 'var(--cnv-tint)', borderRadius: 11, paddingTop: 6, paddingBottom: 6, paddingLeft: 10, paddingRight: 10 }}>
-                  {message.content}
-                </span>
-              ) : (
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 6, maxWidth: '94%' }}>
-                  {message.pending && !message.content ? (
-                    <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
-                      {message.sources ? `Reading ${message.sources.count} sources…` : 'Thinking…'}
-                    </span>
-                  ) : null}
-                  {message.content ? (
-                    <span style={{ fontSize: 11.5, fontWeight: 300, lineHeight: 1.6, color: 'var(--cnv-ink)', fontFamily: FONT, whiteSpace: 'pre-wrap' }}>
-                      {message.content}
-                    </span>
-                  ) : null}
-                  {!message.pending && message.citations?.length ? (
-                    <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
-                      {message.citations.slice(0, 6).map((citation, index) => (
-                        <span
-                          key={`${message.id}-${index}`}
-                          title={citation.title ?? citation.rowId}
-                          style={{ fontSize: 9, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, border: '1px solid var(--cnv-edge)', borderRadius: 7, paddingTop: 2, paddingBottom: 2, paddingLeft: 7, paddingRight: 7, maxWidth: 180, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
-                        >
-                          {citation.title ?? `${citation.kind ?? 'source'}`}
-                        </span>
-                      ))}
-                      {message.sources ? (
-                        <span style={{ fontSize: 9, fontWeight: 260, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingTop: 3 }}>
-                          {`${Math.min(message.citations.length, 6)} cited · ${message.sources.count} considered`}
-                        </span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-
-        {/* Composer. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, paddingBottom: 10, paddingLeft: 12, paddingRight: 12, borderTop: '1px solid var(--cnv-edge)' }}>
-          <input
-            value={draft}
-            onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                void ask();
-              }
-            }}
-            onPointerDown={(event) => event.stopPropagation()}
-            placeholder={asking ? 'Answering…' : `Ask the Brain about ${repoTail ?? 'this repo'}`}
-            aria-label="Ask the Brain"
-            disabled={asking}
-            style={{
-              flex: 1,
-              borderWidth: 0,
-              outline: 'none',
-              background: 'var(--cnv-tint)',
-              borderRadius: 9,
-              paddingTop: 6,
-              paddingBottom: 6,
-              paddingLeft: 10,
-              paddingRight: 10,
-              color: 'var(--cnv-ink)',
-              fontSize: 11,
-              fontWeight: 300,
-              fontFamily: FONT,
-              opacity: asking ? 0.6 : 1,
-            }}
-          />
+        {/* Conversation core. */}
+        <div style={{ height: card.h, display: 'flex', flexDirection: 'column' }}>
+          <BrainConversation repoPath={card.repoPath} initialQuestion={card.initialQuestion} locked={dragging || resizing} />
         </div>
 
         {/* Corner resize grip. */}
