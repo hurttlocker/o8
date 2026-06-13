@@ -323,7 +323,7 @@ export function BrowserGlassCard({
         style={{
           display: 'flex',
           flexDirection: 'column',
-          ...glass(true),
+          ...glass(true, dragging || resizing),
           ...(agentGlow ? { boxShadow: '0 0 0 1.5px rgba(245,158,11,0.75), 0 12px 40px rgba(0, 0, 0, 0.35)' } : {}),
         }}
       >

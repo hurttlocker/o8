@@ -165,8 +165,8 @@ export function OrchestratorDock({
           // The dock's own tone-aware veil + the ambient frost = a glass card
           // that still reads when the veil is fully clear (dark default).
           background: 'var(--cnv-dock-veil)',
-          backdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
-          WebkitBackdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+          backdropFilter: dragging || resizing ? 'none' : 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+          WebkitBackdropFilter: dragging || resizing ? 'none' : 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
           border: '1px solid var(--cnv-edge)',
           color: 'var(--cnv-ink)',
           boxShadow: '0 18px 50px rgba(0, 0, 0, 0.40)',
@@ -360,7 +360,7 @@ export function OrchestratorDock({
             >
               <AnimatePresence initial={false}>
                 {entries.map((entry) => (
-                  <DockEntryView key={entry.id} entry={entry} />
+                  <DockEntryView key={entry.id} entry={entry} suppressBlur={dragging || resizing} />
                 ))}
               </AnimatePresence>
               {entries.length === 0 ? (
@@ -503,7 +503,7 @@ function DockTab({ label, active, onClick }: { label: string; active: boolean; o
 }
 
 /** Shared by the dock AND the floating chat cards — one entry vocabulary. */
-export function DockEntryView({ entry }: { entry: DockEntry }) {
+export function DockEntryView({ entry, suppressBlur = false }: { entry: DockEntry; suppressBlur?: boolean }) {
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -528,7 +528,7 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
             fontWeight: 300,
             lineHeight: 1.55,
             letterSpacing: '-0.1px',
-            ...glass(true),
+            ...glass(true, suppressBlur),
             boxShadow: 'none',
           }}
         >
@@ -595,7 +595,7 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
             paddingLeft: 9,
             paddingRight: 10,
             borderRadius: 12,
-            ...glass(),
+            ...glass(false, suppressBlur),
             boxShadow: 'none',
           }}
         >
