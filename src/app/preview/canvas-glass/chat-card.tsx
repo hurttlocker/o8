@@ -31,8 +31,12 @@ export interface ChatCard {
   entries: DockEntry[];
 }
 
-const CHAT_MIN_W = 300;
-const CHAT_MIN_H = 240;
+// Low floors so the card can shrink to a small near-square if the operator
+// wants one (Q: "make it a square size"). Width floor keeps the
+// Orchestrator | Cortex strip from wrapping; height floor is the body (chrome
+// sits on top), so total ≈ MIN_H + ~63px chrome.
+const CHAT_MIN_W = 200;
+const CHAT_MIN_H = 140;
 
 type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 interface Geom { x: number; y: number; w: number; h: number; }
