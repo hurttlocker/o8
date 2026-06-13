@@ -3048,19 +3048,21 @@ fn open_voice_settings(app: tauri::AppHandle) {
             ) {
                 log::warn!("[voice-settings] vibrancy failed: {e}");
             }
-            round_voice_window(&win, 22.0);
+            round_window_corners(&win, 22.0);
             log::info!("[voice-settings] window opened → {url}");
         }
         Err(e) => log::warn!("[voice-settings] failed to open window: {e}"),
     }
 }
 
-/// Round all four corners of the voice-settings window by clipping its NSWindow
-/// content-view layer (cornerRadius + masksToBounds). The layer tracks the view
-/// bounds, so the rounding follows window resize — fixing the square corners that
-/// peeked behind the CSS card when the effect-view's own radius went stale.
+/// Round all four corners of a window by clipping its NSWindow content-view
+/// layer (cornerRadius + masksToBounds). The layer tracks the view bounds, so
+/// the rounding follows window resize — and because it clips the vibrancy effect
+/// view AND the webview together, the corners never go square/pointed behind the
+/// CSS (the effect-view's own radius alone went stale; this is the durable fix).
+/// Used by the Symon voice panel AND the main window.
 #[cfg(target_os = "macos")]
-fn round_voice_window(win: &tauri::WebviewWindow, radius: f64) {
+fn round_window_corners(win: &tauri::WebviewWindow, radius: f64) {
     use objc2::{msg_send, runtime::AnyObject};
     let ptr = match win.ns_window() {
         Ok(p) if !p.is_null() => p as *mut AnyObject,
@@ -3348,10 +3350,12 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
                 } else {
                     Some(window_vibrancy::NSVisualEffectState::Active)
                 };
-                // Transparent windows lose macOS's corner mask — round the
-                // effect view to the window radius so canvas materials don't
-                // paint square corners (web content clips itself to match).
-                let radius = if material == "default" { None } else { Some(12.0) };
+                // Rounding is owned by the content-view clip (round_window_corners,
+                // applied at setup) which clips the effect view AND the webview
+                // together and tracks resize. Keep the effect view square (None)
+                // so it fills to the corner and the content-view mask rounds it
+                // cleanly — no sliver between two mismatched radii.
+                let radius: Option<f64> = None;
                 if let Err(e) = window_vibrancy::apply_vibrancy(&target, resolved, state, radius) {
                     log::warn!("[canvas-material] apply_vibrancy failed: {e}");
                 }
@@ -3909,6 +3913,14 @@ pub fn run() {
                 {
                     log::warn!("Failed to apply macOS vibrancy: {}", err);
                 }
+
+                // Transparent windows lose macOS's automatic corner mask, so the
+                // webview's square corners poke past the vibrancy and read as a
+                // hard/pointed edge with the desktop showing through. Clip the
+                // content-view layer to round the vibrancy + webview together —
+                // a normal rounded Mac window. Tracks resize.
+                #[cfg(target_os = "macos")]
+                round_window_corners(&window, 12.0);
 
                 #[cfg(target_os = "windows")]
                 if let Err(err) = apply_blur(&window, Some((24, 26, 30, 168))) {
