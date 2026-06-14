@@ -103,6 +103,9 @@ import { __iconNode as WrenchNode } from 'lucide-react/dist/esm/icons/wrench.js'
 import { __iconNode as XNode } from 'lucide-react/dist/esm/icons/x.js';
 import { __iconNode as XCircleNode } from 'lucide-react/dist/esm/icons/circle-x.js';
 import { __iconNode as ZapNode } from 'lucide-react/dist/esm/icons/zap.js';
+import { __iconNode as GithubNode } from 'lucide-react/dist/esm/icons/github.js';
+import { __iconNode as LogOutNode } from 'lucide-react/dist/esm/icons/log-out.js';
+import { __iconNode as CircleUserNode } from 'lucide-react/dist/esm/icons/circle-user.js';
 
 export interface LucideProps extends Omit<SVGProps<SVGSVGElement>, "color"> {
   size?: number | string;
@@ -232,3 +235,6 @@ export const Wrench: LucideIcon = makeIcon(WrenchNode as IconNode, 'Wrench');
 export const X: LucideIcon = makeIcon(XNode as IconNode, 'X');
 export const XCircle: LucideIcon = makeIcon(XCircleNode as IconNode, 'XCircle');
 export const Zap: LucideIcon = makeIcon(ZapNode as IconNode, 'Zap');
+export const Github: LucideIcon = makeIcon(GithubNode as IconNode, 'Github');
+export const LogOut: LucideIcon = makeIcon(LogOutNode as IconNode, 'LogOut');
+export const CircleUser: LucideIcon = makeIcon(CircleUserNode as IconNode, 'CircleUser');

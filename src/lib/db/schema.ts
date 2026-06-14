@@ -21,6 +21,8 @@ export const users = sqliteTable('users', {
   githubId: integer('github_id').unique(),
   /** Discord user ID (unique, nullable) */
   discordId: text('discord_id').unique(),
+  /** Clerk user ID (unique, nullable) — identity source-of-truth when Clerk is configured */
+  clerkUserId: text('clerk_user_id').unique(),
   /** Email address */
   email: text('email').unique(),
   /** Display name */
