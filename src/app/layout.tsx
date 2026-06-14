@@ -2,6 +2,7 @@ import './globals.css';
 import type { Metadata, Viewport } from 'next';
 import { resolvePortInfo } from '@/lib/panel/api-port';
 import NavigationBridge from '@/components/NavigationBridge';
+import { O8AuthProvider } from '@/components/auth/O8AuthProvider';
 
 export const metadata: Metadata = {
   title: 'o8',
@@ -53,7 +54,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
             AgentPanel above the chrome icons (o8/AgentPanel.tsx).
             That stops it from covering the workspace tab strip + reconnect
             banner when an update lands. */}
-        {children}
+        <O8AuthProvider>{children}</O8AuthProvider>
         <script
           dangerouslySetInnerHTML={{
             __html: `
