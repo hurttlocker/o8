@@ -193,7 +193,7 @@ export default function CanvasGlassPreviewPage() {
   const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS[0].value);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
-  const [composerMenu, setComposerMenu] = useState<'repo' | 'model' | 'effort' | null>(null);
+  const [composerMenu, setComposerMenu] = useState<'repo' | 'model' | null>(null);
   const [orcaModel, setOrcaModel] = useState(DEFAULT_ORCHESTRATOR_MODEL);
   const [orcaEffort, setOrcaEffort] = useState<ThinkingEffort>('adaptive');
   const [orcaBusy, setOrcaBusy] = useState(false);
@@ -872,7 +872,8 @@ export default function CanvasGlassPreviewPage() {
 
   const chooseModel = useCallback((value: string) => {
     setOrcaModel(value);
-    setComposerMenu(null);
+    // Drawer stays open — the merged picker lets you set model AND thinking in
+    // one visit; the backdrop click dismisses it.
     try {
       window.localStorage.setItem(CANVAS_ORCA_MODEL_KEY, value);
     } catch {
@@ -882,7 +883,7 @@ export default function CanvasGlassPreviewPage() {
 
   const chooseEffort = useCallback((value: ThinkingEffort) => {
     setOrcaEffort(value);
-    setComposerMenu(null);
+    // Stays open (see chooseModel) — set model + thinking, then click away.
     try {
       window.localStorage.setItem(CANVAS_ORCA_EFFORT_KEY, value);
     } catch {
@@ -3334,15 +3335,13 @@ export default function CanvasGlassPreviewPage() {
             paddingBottom: 0,
           } as React.CSSProperties}
         />
+        {/* One model chip — its drawer sets BOTH model + thinking. The current
+            thinking effort rides as a muted suffix so it stays at-a-glance. */}
         <ChipButton
           label={CANVAS_MODEL_OPTIONS.find((option) => option.value === orcaModel)?.label ?? orcaModel}
+          sub={orcaEffort}
           active={composerMenu === 'model'}
           onClick={() => setComposerMenu((value) => (value === 'model' ? null : 'model'))}
-        />
-        <ChipButton
-          label={orcaEffort}
-          active={composerMenu === 'effort'}
-          onClick={() => setComposerMenu((value) => (value === 'effort' ? null : 'effort'))}
         />
         {/* Push-to-talk — speak the prompt. Canvas-tinted to sit flush with the
             send arrow; hides itself when no dictation host is mounted. */}
@@ -3409,43 +3408,54 @@ export default function CanvasGlassPreviewPage() {
                 ...glassPop(),
               }}
             >
-              <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 5 }}>
-                {composerMenu === 'repo' ? 'Orchestrator repo' : composerMenu === 'model' ? 'Model' : 'Thinking effort'}
-              </span>
-              {composerMenu === 'repo' ? (() => {
-                const rows = repos ?? [];
-                const projectNames = [...new Set(rows.map((row) => row.project).filter((value): value is string => Boolean(value)))];
-                const groups = [
-                  ...projectNames.map((label) => ({ label, rows: rows.filter((row) => row.project === label) })),
-                  { label: projectNames.length ? 'Independent' : null, rows: rows.filter((row) => !row.project) },
-                ].filter((group) => group.rows.length > 0);
-                return groups.map((group) => (
-                  <div key={group.label ?? 'solo'} style={{ display: 'flex', flexDirection: 'column' }}>
-                    {group.label ? (
-                      <span style={{ fontSize: 8.5, fontWeight: 300, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingTop: 8, paddingBottom: 3, opacity: 0.8 }}>
-                        {group.label}
-                      </span>
-                    ) : null}
-                    {group.rows.map((repo) => (
-                      <PickerRow
-                        key={repo.path}
-                        name={repo.name}
-                        path={repo.path.replace(/^\/Users\/[^/]+/, '~')}
-                        onClick={() => {
-                          setActiveRepoPath(repo.path);
-                          setComposerMenu(null);
-                        }}
-                      />
-                    ))}
-                  </div>
-                ));
-              })() : null}
-              {composerMenu === 'model' ? CANVAS_MODEL_OPTIONS.map((option) => (
-                <PickerRow key={option.value} name={option.label} onClick={() => chooseModel(option.value)} />
-              )) : null}
-              {composerMenu === 'effort' ? THINKING_EFFORTS.map((effort) => (
-                <PickerRow key={effort} name={effort} onClick={() => chooseEffort(effort)} />
-              )) : null}
+              {composerMenu === 'repo' ? (
+                <>
+                  <DrawerLabel>Orchestrator repo</DrawerLabel>
+                  {(() => {
+                    const rows = repos ?? [];
+                    const projectNames = [...new Set(rows.map((row) => row.project).filter((value): value is string => Boolean(value)))];
+                    const groups = [
+                      ...projectNames.map((label) => ({ label, rows: rows.filter((row) => row.project === label) })),
+                      { label: projectNames.length ? 'Independent' : null, rows: rows.filter((row) => !row.project) },
+                    ].filter((group) => group.rows.length > 0);
+                    return groups.map((group) => (
+                      <div key={group.label ?? 'solo'} style={{ display: 'flex', flexDirection: 'column' }}>
+                        {group.label ? (
+                          <span style={{ fontSize: 8.5, fontWeight: 300, letterSpacing: '0.09em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingTop: 8, paddingBottom: 3, opacity: 0.8 }}>
+                            {group.label}
+                          </span>
+                        ) : null}
+                        {group.rows.map((repo) => (
+                          <PickerRow
+                            key={repo.path}
+                            name={repo.name}
+                            path={repo.path.replace(/^\/Users\/[^/]+/, '~')}
+                            onClick={() => {
+                              setActiveRepoPath(repo.path);
+                              setComposerMenu(null);
+                            }}
+                          />
+                        ))}
+                      </div>
+                    ));
+                  })()}
+                </>
+              ) : (
+                <>
+                  {/* Merged Model + Thinking drawer (operator call 2026-06-14):
+                      one chip, two sections, checkmark on the live choice, set
+                      both before dismissing. */}
+                  <DrawerLabel>Model</DrawerLabel>
+                  {CANVAS_MODEL_OPTIONS.map((option) => (
+                    <PickerRow key={option.value} name={option.label} active={option.value === orcaModel} onClick={() => chooseModel(option.value)} />
+                  ))}
+                  <div style={{ height: 1, background: 'var(--cnv-edge)', opacity: 0.6, marginTop: 7, marginBottom: 5, marginLeft: 8, marginRight: 8 }} />
+                  <DrawerLabel>Thinking</DrawerLabel>
+                  {THINKING_EFFORTS.map((effort) => (
+                    <PickerRow key={effort} name={effort} active={effort === orcaEffort} onClick={() => chooseEffort(effort)} />
+                  ))}
+                </>
+              )}
             </motion.div>
           </>
         ) : null}
@@ -3470,16 +3480,25 @@ export default function CanvasGlassPreviewPage() {
   );
 }
 
-function PickerRow({ name, path, onClick }: { name: string; path?: string; onClick: () => void }) {
+/** Section label inside the composer drawer (uppercase, muted). */
+function DrawerLabel({ children }: { children: React.ReactNode }) {
+  return (
+    <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 5 }}>
+      {children}
+    </span>
+  );
+}
+
+function PickerRow({ name, path, active, onClick }: { name: string; path?: string; active?: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
       onClick={onClick}
       style={{
         display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'flex-start',
-        gap: 1,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
         borderWidth: 0,
         background: 'transparent',
         borderRadius: 9,
@@ -3495,16 +3514,24 @@ function PickerRow({ name, path, onClick }: { name: string; path?: string; onCli
       onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.08)'; }}
       onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
     >
-      <span style={{ fontSize: 11.5, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>{name}</span>
-      {path ? (
-        <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{path}</span>
+      <span style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: 1, flex: 1, minWidth: 0 }}>
+        <span style={{ fontSize: 11.5, fontWeight: active ? 500 : 400, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>{name}</span>
+        {path ? (
+          <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '100%' }}>{path}</span>
+        ) : null}
+      </span>
+      {active ? (
+        <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+          <path d="M20 6 9 17l-5-5" />
+        </svg>
       ) : null}
     </button>
   );
 }
 
-/** Small pill control in the composer — repo scope, model, thinking effort. */
-function ChipButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+/** Small pill control in the composer — repo scope + model (with a muted
+ *  thinking-effort suffix via `sub`). */
+function ChipButton({ label, sub, active, onClick }: { label: string; sub?: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"
@@ -3533,6 +3560,7 @@ function ChipButton({ label, active, onClick }: { label: string; active: boolean
       onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
     >
       {label}
+      {sub ? <span style={{ marginLeft: 5, fontWeight: 300, opacity: 0.55 }}>{sub}</span> : null}
     </button>
   );
 }

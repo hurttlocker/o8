@@ -267,10 +267,14 @@ export function FileGlassCard({
               paddingLeft: 16,
               paddingRight: 16,
               paddingBottom: 10,
-              // Markdown wraps like prose; code stays pre/no-wrap.
-              whiteSpace: isMarkdown ? 'pre-wrap' : 'pre',
-              overflowWrap: isMarkdown ? 'break-word' : 'normal',
-              overflow: 'auto',
+              // Auto word-wrap EVERY file (code included) so long lines scroll
+              // vertically on the canvas instead of running off the right edge —
+              // pre-wrap keeps indentation, break-word handles long unbroken
+              // tokens. (Operator call 2026-06-14.)
+              whiteSpace: 'pre-wrap',
+              overflowWrap: 'break-word',
+              overflowX: 'hidden',
+              overflowY: 'auto',
             }}
           />
         ) : (
