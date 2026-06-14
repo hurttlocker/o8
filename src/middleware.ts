@@ -312,13 +312,20 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
 
 const clerkPublishableKey =
   optionalEnv('NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY') ?? optionalEnv('CLERK_PUBLISHABLE_KEY');
+const clerkSecretKey = optionalEnv('CLERK_SECRET_KEY');
 
-// When no Clerk key is configured (fresh install, no .env), bypass Clerk entirely
-// and run the loopback gate directly. Clerk-protected routes like /api/v2/chat still
-// fail closed inside their handlers, but the local-only API surface stays reachable.
-export default clerkPublishableKey
+// clerkMiddleware REQUIRES a secret key — with a publishable key but NO secret it
+// throws on every request (verified: all gated routes 500'd, even allowlisted GETs,
+// because the wrapper fails before our gate runs). The DESKTOP never ships the
+// secret: Clerk runs client-side via the publishable key + the o8:// ticket flow,
+// and server-side user resolution verifies the session token networklessly in the
+// route handler (not via auth()/clerkMiddleware). So only wrap with clerkMiddleware
+// when BOTH keys are present (the hosted/web path); otherwise — fresh install OR the
+// desktop (publishable-only) — run the bare loopback gate. Clerk-gated routes like
+// /api/v2/chat still fail closed inside their own handlers.
+export default clerkPublishableKey && clerkSecretKey
   ? clerkMiddleware((_auth, req) => panelGateMiddleware(req), {
       publishableKey: clerkPublishableKey,
-      secretKey: optionalEnv('CLERK_SECRET_KEY'),
+      secretKey: clerkSecretKey,
     })
   : (req: NextRequest) => panelGateMiddleware(req);
