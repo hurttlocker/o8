@@ -456,7 +456,11 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
         <div
           style={{
             alignSelf: 'flex-end',
-            maxWidth: 300,
+            // % not a fixed px so the bubble reads as a real right-aligned chat
+            // bubble at ANY container width — 300px looked right in the 400px
+            // dock but shrank to a lost narrow column in the wider undocked
+            // card. 80% ≈ the dock's old 300px, and scales with the card.
+            maxWidth: '80%',
             display: 'flex',
             flexDirection: 'column',
             gap: entry.images?.length ? 7 : 0,
