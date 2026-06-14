@@ -41,6 +41,9 @@ export interface CanvasSnapshotV1 {
   /** Optional — Brain cards arrived after v1 snapshots existed; absent
    *  means none (older snapshots stay loadable). */
   brain?: Array<SnapGeometry & { repoPath: string | null }>;
+  /** Optional — video cards carry only the IndexedDB media id + name (the
+   *  bytes live in canvas-media-store, never the snapshot). Absent = none. */
+  video?: Array<SnapGeometry & { mediaId: string; name: string; aspect: number }>;
 }
 
 export function loadCanvasSnapshot(): CanvasSnapshotV1 | null {
