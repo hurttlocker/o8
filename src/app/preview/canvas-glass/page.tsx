@@ -68,6 +68,7 @@ import { FileGlassCard, type FileCard } from './file-card';
 import { ImageGlassCard, type ImageCard } from './image-card';
 import { VideoGlassCard, type VideoCard } from './video-card';
 import { putMedia, getMedia, deleteMedia } from './canvas-media-store';
+import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { useCanvasOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
@@ -130,6 +131,40 @@ const ZOOM_STEPS = [
   { label: 85, value: 0.595 },
   { label: 70, value: 0.49 },
 ] as const;
+
+// Account dossier (the Clerk sign-in popover) — one row vocabulary shared by
+// Manage account / Sign out / Sign in, matching the operator's reference.
+const DOSSIER_ROW: React.CSSProperties = {
+  display: 'flex',
+  alignItems: 'center',
+  gap: 11,
+  paddingTop: 7,
+  paddingBottom: 7,
+  paddingLeft: 6,
+  paddingRight: 8,
+  borderRadius: 10,
+  borderWidth: 0,
+  background: 'transparent',
+  cursor: 'pointer',
+  fontFamily: FONT,
+  fontSize: 12.5,
+  fontWeight: 400,
+  letterSpacing: '-0.1px',
+  color: 'var(--cnv-ink)',
+  textAlign: 'left',
+  width: '100%',
+};
+const DOSSIER_TILE: React.CSSProperties = {
+  width: 30,
+  height: 30,
+  borderRadius: 9,
+  flexShrink: 0,
+  background: 'var(--cnv-tint)',
+  display: 'inline-flex',
+  alignItems: 'center',
+  justifyContent: 'center',
+  color: 'var(--cnv-ink-muted)',
+};
 
 /** One row in the canvas search dropdown — a card to bring forward, or a
  *  past session to spawn onto the canvas. */
@@ -218,6 +253,9 @@ export default function CanvasGlassPreviewPage() {
   const [recentThreads, setRecentThreads] = useState<CanvasThreadRow[]>([]);
   const [recentCommits, setRecentCommits] = useState<CommitRow[]>([]);
   const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  // Shared identity hook (Clerk) — safe even with no keys: returns a disabled,
+  // signed-out state, so the account control degrades to a "Sign in" door.
+  const auth = useO8Auth();
   // Push-to-talk for the primary stage composer — speak instead of type, same
   // engine as the default IDE. Speech lands via a functional setState so it
   // appends to whatever is already drafted (no stale snapshot).
@@ -2712,7 +2750,7 @@ export default function CanvasGlassPreviewPage() {
         </button>
         <button
           type="button"
-          aria-label="Operator profile"
+          aria-label="Account"
           onClick={() => setTopMenu((value) => (value === 'profile' ? null : 'profile'))}
           style={{
             width: 26,
@@ -2720,14 +2758,18 @@ export default function CanvasGlassPreviewPage() {
             borderRadius: '50%',
             borderWidth: 1,
             borderStyle: 'solid',
-            borderColor: 'var(--cnv-edge)',
-            background: 'var(--cnv-tint)',
+            borderColor: topMenu === 'profile' ? 'var(--cnv-ink-muted)' : 'var(--cnv-edge)',
+            backgroundColor: auth.signedIn && auth.user?.avatarUrl ? 'transparent' : 'var(--cnv-tint)',
+            backgroundImage: auth.signedIn && auth.user?.avatarUrl ? `url("${auth.user.avatarUrl}")` : undefined,
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
             color: topMenu === 'profile' ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
             flexShrink: 0,
             cursor: 'pointer',
+            overflow: 'hidden',
             paddingTop: 0,
             paddingBottom: 0,
             paddingLeft: 0,
@@ -2736,13 +2778,15 @@ export default function CanvasGlassPreviewPage() {
           onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
           onMouseLeave={(event) => { if (topMenu !== 'profile') event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
         >
-          <svg style={{ width: 12, height: 12, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
-          </svg>
+          {auth.signedIn && auth.user?.avatarUrl ? null : (
+            <svg style={{ width: 12, height: 12, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+              <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+            </svg>
+          )}
         </button>
       </div>
 
-      {/* Profile popover — the door to plan & account once accounts land. */}
+      {/* Account dossier — the Clerk sign-in popover (operator's reference). */}
       <AnimatePresence>
         {topMenu === 'profile' ? (
           <>
@@ -2756,23 +2800,115 @@ export default function CanvasGlassPreviewPage() {
                 position: 'absolute',
                 top: 64,
                 right: 24,
-                width: 220,
+                width: 268,
                 display: 'flex',
                 flexDirection: 'column',
-                gap: 6,
-                paddingTop: 12,
-                paddingBottom: 12,
+                paddingTop: 14,
+                paddingBottom: 10,
                 paddingLeft: 14,
                 paddingRight: 14,
-                borderRadius: 13,
+                borderRadius: 16,
                 zIndex: 46,
+                fontFamily: FONT,
                 ...glassPop(),
               }}
             >
-              <span style={{ fontSize: 12, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT }}>Operator</span>
-              <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.55, fontFamily: FONT }}>
-                Profile, plan, and usage land here with accounts. This avatar is the door.
-              </span>
+              {auth.signedIn && auth.user ? (
+                <>
+                  {/* Identity — avatar, name, email. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingLeft: 2, paddingRight: 2, paddingBottom: 12 }}>
+                    <div
+                      aria-hidden
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
+                        flexShrink: 0,
+                        backgroundColor: 'var(--cnv-tint)',
+                        backgroundImage: auth.user.avatarUrl ? `url("${auth.user.avatarUrl}")` : undefined,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                        border: '1px solid var(--cnv-edge)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        color: 'var(--cnv-ink-muted)',
+                      }}
+                    >
+                      {auth.user.avatarUrl ? null : (
+                        <svg style={{ width: 18, height: 18 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+                        </svg>
+                      )}
+                    </div>
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                        {auth.user.name || 'Account'}
+                      </span>
+                      {auth.user.email ? (
+                        <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                          {auth.user.email}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div aria-hidden style={{ height: 1, background: 'var(--cnv-edge)', marginLeft: 2, marginRight: 2, marginBottom: 6 }} />
+                  <button
+                    type="button"
+                    onClick={() => { auth.openManageAccount(); setTopMenu(null); }}
+                    style={DOSSIER_ROW}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={DOSSIER_TILE} aria-hidden>
+                      <svg style={{ width: 15, height: 15 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2 4 6.5v9L12 20l8-4.5v-9L12 2Z" /><circle cx="12" cy="11.5" r="2.6" /></svg>
+                    </span>
+                    Manage account
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => { void auth.signOut(); setTopMenu(null); }}
+                    style={DOSSIER_ROW}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={DOSSIER_TILE} aria-hidden>
+                      <svg style={{ width: 15, height: 15 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" /><path d="m16 17 5-5-5-5" /><path d="M21 12H9" /></svg>
+                    </span>
+                    Sign out
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Signed-out / not-yet-configured — the sign-in door. */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingLeft: 2, paddingRight: 2, paddingBottom: 12 }}>
+                    <div aria-hidden style={{ width: 40, height: 40, borderRadius: 12, flexShrink: 0, background: 'var(--cnv-tint)', border: '1px solid var(--cnv-edge)', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--cnv-ink-muted)' }}>
+                      <svg style={{ width: 18, height: 18 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                        <path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
+                      </svg>
+                    </div>
+                    <div style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+                      <span style={{ fontSize: 13.5, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)' }}>Sign in</span>
+                      <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.45 }}>
+                        {auth.clerkEnabled ? 'Sync your identity across desktop and web.' : 'Activates once sign-in keys are set.'}
+                      </span>
+                    </div>
+                  </div>
+                  <div aria-hidden style={{ height: 1, background: 'var(--cnv-edge)', marginLeft: 2, marginRight: 2, marginBottom: 6 }} />
+                  <button
+                    type="button"
+                    onClick={() => { auth.signIn(); setTopMenu(null); }}
+                    style={DOSSIER_ROW}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.06)'; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                  >
+                    <span style={DOSSIER_TILE} aria-hidden>
+                      <svg style={{ width: 14, height: 14 }} viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M12 2C6.477 2 2 6.484 2 12.017c0 4.425 2.865 8.18 6.839 9.504.5.092.682-.217.682-.483 0-.237-.008-.868-.013-1.703-2.782.605-3.369-1.343-3.369-1.343-.454-1.158-1.11-1.466-1.11-1.466-.908-.62.069-.608.069-.608 1.003.07 1.531 1.032 1.531 1.032.892 1.53 2.341 1.088 2.91.832.092-.647.35-1.088.636-1.339-2.22-.253-4.555-1.113-4.555-4.951 0-1.093.39-1.988 1.029-2.688-.103-.253-.446-1.272.098-2.65 0 0 .84-.27 2.75 1.026A9.564 9.564 0 0 1 12 6.844c.85.004 1.705.115 2.504.337 1.909-1.296 2.747-1.027 2.747-1.027.546 1.379.203 2.398.1 2.651.64.7 1.028 1.595 1.028 2.688 0 3.848-2.339 4.695-4.566 4.943.359.309.678.92.678 1.855 0 1.338-.012 2.419-.012 2.747 0 .268.18.58.688.482A10.02 10.02 0 0 0 22 12.017C22 6.484 17.523 2 12 2Z" /></svg>
+                    </span>
+                    Sign in with GitHub
+                  </button>
+                </>
+              )}
             </motion.div>
           </>
         ) : null}
