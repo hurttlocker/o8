@@ -136,6 +136,7 @@ export const CANVAS_BACKDROPS: ReadonlyArray<{ id: string; label: string }> = [
   { id: 'warp', label: 'Warp' },
   { id: 'pulse', label: 'Pulse' },
   { id: 'radial', label: 'Radial' },
+  { id: 'ember', label: 'Ember' },
 ];
 
 export const CANVAS_GLASS_RANGES = {

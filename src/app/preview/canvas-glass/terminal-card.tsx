@@ -8,17 +8,17 @@
  * dashboard tabs use — so anything built here serves the default view
  * too. The card is the canvas treatment: glass frame (same recipe as
  * every other pane — transparent xterm over the card's tint + a tunable
- * dark veil for legibility), title-bar drag, corner resize, click brings
- * it forward, close exits the shell (input "exit\n" then detach, so the
- * session dies instead of leaking into the dashboard's session list).
+ * dark veil for legibility); the GlassCardShell owns drag + resize +
+ * focus + the close ✕. Close exits the shell (input "exit\n" then detach,
+ * so the session dies instead of leaking into the dashboard's session list).
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { motion } from 'framer-motion';
-import { SmoothCorners } from '@lisse/react';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { CANVAS_GLASS_CHANGED_EVENT } from '@/lib/canvas-mode/glass-settings';
-import { canvasZoom, DEV_TERM_GLASS_TUNER, FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
+import { DEV_TERM_GLASS_TUNER, FONT, TERM_FONT_PX, TERM_MIN_H, TERM_MIN_W } from './ui';
+import { GlassCardShell } from './card-shell';
 
 // NOTE: this module must export ONLY the component (+ types) — runtime
 // const exports here would break the Fast Refresh boundary and remount
@@ -123,11 +123,6 @@ export function TerminalGlassCard({
   sendTerminalResize: (sessionName: string, cols: number, rows: number) => void;
   sendTerminalDetach: (sessionName: string) => void;
 }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [resizing, setResizing] = useState(false);
-
   // The shell inks with the CANVAS vocabulary — one text color across the
   // whole theme (Q, 2026-06-12). buildXtermTheme reads --t-terminal-* off
   // the root, which the o8.md card's ThemeProvider stamps with dashboard
@@ -154,118 +149,49 @@ export function TerminalGlassCard({
     };
   }, []);
 
+  const titleLabel = card.exited
+    ? 'Terminal — exited'
+    : card.sessionName && card.live
+      ? `Terminal — ${card.cwdLabel ?? card.sessionName.replace(/^cortex-dash-/, '').slice(0, 8)}`
+      : 'Terminal';
+
   return (
-    <motion.div
-      initial={{ scale: 0.7, opacity: 0, y: 24 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      exit={{ scale: 0.86, opacity: 0 }}
-      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-      onPointerDownCapture={() => onFocus(card.id)}
-      style={{
-        position: 'absolute',
-        left: card.x,
-        top: card.y,
-        width: card.w,
-        zIndex: card.z,
-      }}
+    <GlassCardShell
+      card={card}
+      minW={TERM_MIN_W}
+      minH={TERM_MIN_H}
+      title={titleLabel}
+      onMove={onMove}
+      onResize={onResize}
+      onFocus={onFocus}
+      onClose={() => onClose(card)}
     >
-      {/* Visual shell — Apple-smooth squircle corners (Lisse). The motion
-          div above owns geometry + springs; this owns glass + clip. */}
-      <SmoothCorners
-        corners={{ radius: 14 }}
-        shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', ...glass(true, dragging || resizing) }}
-      >
-      {/* Title bar — the drag handle. The body belongs to the shell. */}
-      <div
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-          dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y };
-          setDragging(true);
-        }}
-        onPointerMove={(event) => {
-          const drag = dragRef.current;
-          if (!drag || drag.pointerId !== event.pointerId) return;
-          onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
-        }}
-        onPointerUp={() => { dragRef.current = null; setDragging(false); }}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          paddingTop: 8,
-          paddingBottom: 8,
-          paddingLeft: 12,
-          paddingRight: 8,
-          borderBottom: '1px solid var(--cnv-edge)',
-          cursor: dragging ? 'grabbing' : 'grab',
-          touchAction: 'none',
-          userSelect: 'none',
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            flexShrink: 0,
-            background: card.exited ? '#ef4444' : card.sessionName && card.live ? TONE_DOT.working : TONE_DOT.waiting,
-          }}
-        />
-        <span style={{ flex: 1, fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {card.exited
-            ? 'Terminal — exited'
-            : card.sessionName && card.live
-              ? `Terminal — ${card.cwdLabel ?? card.sessionName.replace(/^cortex-dash-/, '').slice(0, 8)}`
-              : <ConnectingVerb />}
-        </span>
-        {DEV_TERM_GLASS_TUNER ? (
-          <span
-            onPointerDown={(event) => event.stopPropagation()}
-            style={{ display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 }}
-          >
-            <input
-              type="range"
-              aria-label="Terminal veil (dev)"
-              min={0}
-              max={0.85}
-              step={0.01}
-              value={termVeil}
-              onChange={(event) => {
-                const next = Number.parseFloat(event.target.value);
-                if (Number.isFinite(next)) onTermVeilChange(next);
-              }}
-              style={{ width: 54, accentColor: '#f59e0b', cursor: 'pointer' }}
-            />
-            <span style={{ fontSize: 9, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontVariantNumeric: 'tabular-nums', fontFamily: FONT, width: 24 }}>
-              {Math.round(termVeil * 100)}%
-            </span>
-          </span>
-        ) : null}
-        <button
-          type="button"
-          aria-label="Close terminal"
+      {/* DEV ONLY — veil dial for the terminal glass legibility wash. Lives at
+          the top of the body (not a ghost action button); freeze the chosen
+          value into the default + flip DEV_TERM_GLASS_TUNER off to retire. */}
+      {DEV_TERM_GLASS_TUNER ? (
+        <div
           onPointerDown={(event) => event.stopPropagation()}
-          onClick={() => onClose(card)}
-          style={{
-            borderWidth: 0,
-            background: 'transparent',
-            padding: 2,
-            paddingLeft: 8,
-            paddingRight: 8,
-            fontSize: 11,
-            color: 'var(--cnv-ink-muted)',
-            cursor: 'pointer',
-            fontFamily: FONT,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-          onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+          style={{ display: 'flex', alignItems: 'center', justifyContent: 'flex-end', gap: 5, paddingTop: 2, paddingBottom: 4, paddingLeft: 16, paddingRight: 16, flexShrink: 0 }}
         >
-          ✕
-        </button>
-      </div>
+          <input
+            type="range"
+            aria-label="Terminal veil (dev)"
+            min={0}
+            max={0.85}
+            step={0.01}
+            value={termVeil}
+            onChange={(event) => {
+              const next = Number.parseFloat(event.target.value);
+              if (Number.isFinite(next)) onTermVeilChange(next);
+            }}
+            style={{ width: 54, accentColor: '#f59e0b', cursor: 'pointer' }}
+          />
+          <span style={{ fontSize: 9, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontVariantNumeric: 'tabular-nums', fontFamily: FONT, width: 24 }}>
+            {Math.round(termVeil * 100)}%
+          </span>
+        </div>
+      ) : null}
 
       {/* The shell — the real XtermPanel, same one the dashboard mounts.
           Transparent over the card glass; the veil restores legibility.
@@ -287,67 +213,24 @@ export function TerminalGlassCard({
               visible
               transparent
               themeOverrides={inkOverrides}
-              fontSize={11.5}
+              fontSize={TERM_FONT_PX}
               connectionEpoch={connectionEpoch}
               spawnReveal
               revealMinPlay={card.revealHold}
             />
           </div>
         ) : (
-          <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 12 }}>
             <motion.span
               aria-hidden
               animate={{ rotate: 360 }}
               transition={{ duration: 1.4, repeat: Infinity, ease: 'linear' }}
               style={{ width: 14, height: 14, borderRadius: '50%', border: '1px solid transparent', borderTopColor: 'var(--cnv-ink)', borderRightColor: 'var(--cnv-edge)' }}
             />
+            <ConnectingVerb />
           </div>
         )}
-
-        {/* Corner resize grip — XtermPanel's ResizeObserver refits the PTY. */}
-        <div
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.stopPropagation();
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originW: card.w, originH: card.h };
-            setResizing(true);
-          }}
-          onPointerMove={(event) => {
-            const resize = resizeRef.current;
-            if (!resize || resize.pointerId !== event.pointerId) return;
-            onResize(
-              card.id,
-              Math.max(TERM_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
-              Math.max(TERM_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
-            );
-          }}
-          onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
-          style={{
-            position: 'absolute',
-            right: 0,
-            bottom: 0,
-            width: 18,
-            height: 18,
-            cursor: 'nwse-resize',
-            touchAction: 'none',
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'flex-end',
-            paddingRight: 4,
-            paddingBottom: 4,
-            opacity: resizing ? 1 : 0.55,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={(event) => { if (!resizeRef.current) event.currentTarget.style.opacity = '0.55'; }}
-        >
-          <svg width={9} height={9} viewBox="0 0 9 9" aria-hidden>
-            <path d="M8 1 1 8M8 5 5 8" stroke="var(--cnv-ink-muted)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-          </svg>
-        </div>
       </div>
-      </SmoothCorners>
-    </motion.div>
+    </GlassCardShell>
   );
 }

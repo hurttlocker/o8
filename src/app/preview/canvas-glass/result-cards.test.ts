@@ -81,4 +81,39 @@ describe('result-cards turn accumulator', () => {
     expect(card).toMatchObject({ kind: 'files', title: 'Edited 1 file' });
     expect(card).not.toHaveProperty('adds');
   });
+
+  it('captures a screencapture output path; pathless captures get nothing', () => {
+    const acc = emptyTurnTools();
+    recordTool(acc, 'o8_view_screenshot', undefined); // base64, truncated off the stream → not showable
+    recordTool(acc, 'Bash', { command: 'screencapture -x /tmp/shot.png' });
+    expect(acc.screenshotPaths).toEqual(['/tmp/shot.png']);
+    expect(acc.files).toEqual([]); // a screenshot is not a file edit
+  });
+
+  it('handles array-form shell commands (Codex) and a ~ path', () => {
+    const acc = emptyTurnTools();
+    recordTool(acc, 'shell', { command: ['screencapture', '-x', '~/Desktop/c.png'] });
+    expect(acc.screenshotPaths).toEqual(['~/Desktop/c.png']);
+  });
+
+  it('captures o8_view_screenshot from the saved-path tool-result (MCP path)', () => {
+    const acc = emptyTurnTools();
+    // The orchestrator emitter swaps the base64 for the persisted file path.
+    recordToolResult(acc, 'o8_view_screenshot', undefined, '/tmp/o8-screenshots/1718300000-ab12cd.png');
+    expect(acc.screenshotPaths).toEqual(['/tmp/o8-screenshots/1718300000-ab12cd.png']);
+    const [card] = synthesizeResultEntries(acc);
+    expect(card).toMatchObject({ role: 'result', kind: 'screenshot', title: '' });
+    expect((card as { src?: string }).src).toContain('serve-image?path=');
+  });
+
+  it('synthesizes image-led screenshot cards (real served src, no label) per capture', () => {
+    const acc = emptyTurnTools();
+    recordTool(acc, 'Bash', { command: 'screencapture -x ~/Desktop/a.png' });
+    recordTool(acc, 'Bash', { command: 'screencapture -x /tmp/b.png' });
+    const entries = synthesizeResultEntries(acc);
+    expect(entries).toHaveLength(2);
+    expect(entries[0]).toMatchObject({ role: 'result', kind: 'screenshot', title: '' });
+    expect((entries[0] as { src?: string }).src).toBe('/api/panel/serve-image?path=' + encodeURIComponent('~/Desktop/a.png'));
+    expect((entries[1] as { src?: string }).src).toBe('/api/panel/serve-image?path=' + encodeURIComponent('/tmp/b.png'));
+  });
 });

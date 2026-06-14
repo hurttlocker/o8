@@ -29,7 +29,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { AnimatePresence, motion } from 'framer-motion';
+import { AnimatePresence, animate, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import {
   CANVAS_GLASS_DEFAULTS,
@@ -43,9 +43,15 @@ import {
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
 import { isTauri, onFileOpenRequest, setCanvasBackdropBlur, setCanvasMaterial, takePendingFileOpens } from '@/lib/tauri/bridge';
 import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSocket';
+import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
+import { MicButton } from '@/components/desktop/thoughts/MicButton';
 import type { XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { DEFAULT_ORCHESTRATOR_MODEL } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
 import { THINKING_EFFORTS, isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import { usableCanvasArea } from './canvas-drag';
+import { computeGrid, slotToCardGeom, type GridItem, type Slot } from './form-fit';
+import { NavigatorLoupe, type MinimapCard } from './navigator-loupe';
+import { ORB_DEFAULTS, readOrbSettings, writeOrbSettings, type OrbSettings } from './orb-settings';
 import { CanvasBackdropLayer } from './backdrops';
 import { BrowserGlassCard, type BrowserCard, type BrowserTab } from './browser-card';
 import { SpecGlassCard, type SpecCard } from './spec-card';
@@ -55,12 +61,16 @@ import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-car
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
+import { ProximityDock } from './proximity-dock';
+import { AnticipationRing } from './anticipation-ring';
 import { OrchestratorDock } from './dock';
 import { FileGlassCard, type FileCard } from './file-card';
 import { ImageGlassCard, type ImageCard } from './image-card';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { useCanvasOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
+import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS, type ComposerImage } from './use-send-buffer';
+import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, type TurnTools } from './result-cards';
 import { FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
 
 /** Live rows for the wired chrome — inbox items, active lanes, commits. */
@@ -111,6 +121,13 @@ interface RepoPickerRowData {
  *  Label and actual CSS-zoom are decoupled — `label` is what the chip reads,
  *  `value` is what `--cnv-zoom` carries for the pointer math. Persisted. */
 const ZOOM_KEY = 'o8:canvas-zoom';
+/** Canvas layout mode — 'grid' = form-fit hard placement (#1239), else free-flow. */
+const GRID_MODE_KEY = 'o8:canvas-grid-mode';
+/** Dropped image cards persist across reloads (data-URL photos) so test pics
+ *  survive a refresh — invaluable while tuning the orb. Capped to stay under the
+ *  localStorage quota; oldest are dropped first if the set gets too big. */
+const IMAGE_CARDS_KEY = 'o8:canvas-image-cards';
+const IMAGE_CARDS_MAX_BYTES = 4_500_000;
 const ZOOM_STEPS = [
   { label: 100, value: 0.7 },
   { label: 85, value: 0.595 },
@@ -132,16 +149,47 @@ const CANVAS_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
 const CANVAS_MODEL_KEY = 'o8:canvas-model';
 const CANVAS_EFFORT_KEY = 'o8:canvas-effort';
 
+/** Pickers pop out only as tall as the spawn rail (7 glyph buttons) and
+ *  centered like it — not the full window height. Mirrors the rail's measured
+ *  height; centering uses top:50% + marginTop so framer keeps the transform. */
+const RAIL_PANEL_HEIGHT = 296;
+
+/** Dock-matched Lisse panel surface — the dock's solid blur, no border, so a
+ *  panel wrapped in <SmoothCorners> reads as the same family as the
+ *  orchestrator dock (just thinner). Shared by the Review + Sessions pickers. */
+const LISSE_PANEL_SURFACE = {
+  width: '100%',
+  height: '100%',
+  display: 'flex',
+  flexDirection: 'column',
+  overflow: 'hidden',
+  background: 'var(--cnv-tint-deep)',
+  backdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+  WebkitBackdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+  boxShadow: '0 14px 42px rgba(0, 0, 0, 0.22)',
+  color: 'var(--cnv-ink)',
+} as React.CSSProperties;
+
 export default function CanvasGlassPreviewPage() {
   const canvasEnabled = useExperimentalCanvasFlag();
   const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
   const [cards, setCards] = useState<MockCard[]>([]);
   const [selectedCardId, setSelectedCardId] = useState<number | null>(null);
   const [rightRailOpen, setRightRailOpen] = useState(false);
+  // Form-fit "hard placement" mode (#1239) — cards pack into a viewport-filling
+  // grid. Free-flow is the default. winSize re-grids the layout on resize.
+  const [gridMode, setGridMode] = useState(false);
+  const [winSize, setWinSize] = useState({ w: 1600, h: 900 });
+  // Infinite-canvas pan (#1239 Phase 2) — view offset in canvas px. Free mode
+  // only; grid mode resets it to origin and packs to the viewport.
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const panningRef = useRef(false);
   const [composerValue, setComposerValue] = useState('');
+  const [composerFocused, setComposerFocused] = useState(false);
   const [inTauri, setInTauri] = useState(false);
   const [dockOpen, setDockOpen] = useState(false);
   const [tunerOpen, setTunerOpen] = useState(false);
+  const [orbSettings, setOrbSettings] = useState<OrbSettings>(ORB_DEFAULTS);
   const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS[0].value);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
@@ -171,7 +219,19 @@ export default function CanvasGlassPreviewPage() {
   const [activeLanes, setActiveLanes] = useState<LaneRow[]>([]);
   const [recentThreads, setRecentThreads] = useState<CanvasThreadRow[]>([]);
   const [recentCommits, setRecentCommits] = useState<CommitRow[]>([]);
-  const composerInputRef = useRef<HTMLInputElement | null>(null);
+  const composerInputRef = useRef<HTMLTextAreaElement | null>(null);
+  // Push-to-talk for the primary stage composer — speak instead of type, same
+  // engine as the default IDE. Speech lands via a functional setState so it
+  // appends to whatever is already drafted (no stale snapshot).
+  const dictationHost = useDictationHostOptional();
+  const registerComposerDictation = useCallback(() => {
+    const node = composerInputRef.current;
+    if (!node || !dictationHost) return;
+    dictationHost.setActiveComposer({
+      node,
+      fill: (text: string) => setComposerValue((current) => (current.trim() ? `${current.trim()} ${text}` : text)),
+    });
+  }, [dictationHost]);
   const [repos, setRepos] = useState<RepoPickerRowData[] | null>(null);
   const nextIdRef = useRef(1);
   const entryIdRef = useRef(1);
@@ -255,6 +315,16 @@ export default function CanvasGlassPreviewPage() {
       if (isThinkingEffort(storedEffort)) setOrchEffort(storedEffort);
       const storedZoom = Number.parseFloat(window.localStorage.getItem(ZOOM_KEY) ?? '');
       if (ZOOM_STEPS.some((step) => step.value === storedZoom)) setCanvasZoomLevel(storedZoom);
+      const storedImages = window.localStorage.getItem(IMAGE_CARDS_KEY);
+      if (storedImages) {
+        const cards = JSON.parse(storedImages) as ImageCard[];
+        if (Array.isArray(cards) && cards.length > 0) {
+          setImageCards(cards);
+          // Keep new spawns from colliding with restored ids / z-order.
+          nextIdRef.current = Math.max(nextIdRef.current, cards.reduce((m, c) => Math.max(m, c.id), 0) + 1);
+          zPeakRef.current = Math.max(zPeakRef.current, cards.reduce((m, c) => Math.max(m, c.z), 0));
+        }
+      }
     } catch {
       // defaults stand
     }
@@ -270,6 +340,33 @@ export default function CanvasGlassPreviewPage() {
       // non-critical
     }
   }, [canvasZoomLevel]);
+
+  // Persist dropped image cards (data-URL photos) so test pics survive a reload.
+  useEffect(() => {
+    try {
+      if (imageCards.length === 0) {
+        window.localStorage.removeItem(IMAGE_CARDS_KEY);
+        return;
+      }
+      // Trim oldest (lowest id) until the payload fits under the quota.
+      let cards = imageCards;
+      let json = JSON.stringify(cards);
+      while (json.length > IMAGE_CARDS_MAX_BYTES && cards.length > 1) {
+        cards = cards.slice(1);
+        json = JSON.stringify(cards);
+      }
+      window.localStorage.setItem(IMAGE_CARDS_KEY, json);
+    } catch {
+      // quota / serialization issue — non-critical; pics just won't persist
+    }
+  }, [imageCards]);
+
+  // Stamp the right-dock reserve (screen px it eats) on the same channel as
+  // --cnv-zoom, so drag-boundary resistance keeps cards clear of the dock.
+  // 0 when closed; 424 = dock.tsx right:24 + width:400.
+  useEffect(() => {
+    document.documentElement.style.setProperty('--cnv-dock-reserve', dockOpen ? '424' : '0');
+  }, [dockOpen]);
 
   // Escape closes every ephemeral layer — popovers, pickers, drawers,
   // search. They all have outside-click veils; this is the keyboard peer.
@@ -438,6 +535,23 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
+  // Orb refraction dials — scoped per canvas tone (glass reads differently on a
+  // light vs dark backdrop), persisted, and applied to the WebGL ball live.
+  useEffect(() => {
+    setOrbSettings(readOrbSettings(settings.tone));
+  }, [settings.tone]);
+  const updateOrbSettings = useCallback((patch: Partial<OrbSettings>) => {
+    setOrbSettings((previous) => {
+      const next = { ...previous, ...patch };
+      writeOrbSettings(settings.tone, next);
+      return next;
+    });
+  }, [settings.tone]);
+  const resetOrbSettings = useCallback(() => {
+    writeOrbSettings(settings.tone, ORB_DEFAULTS);
+    setOrbSettings({ ...ORB_DEFAULTS });
+  }, [settings.tone]);
+
   const spawnCard = useCallback((kind: CardKind, title: string, meta: string, tone: MockCard['tone'], at?: { x: number; y: number }, src?: string) => {
     setCards((previous) => {
       const id = nextIdRef.current;
@@ -464,7 +578,7 @@ export default function CanvasGlassPreviewPage() {
         entryIdRef.current += 1;
         return { ...entry, id };
       });
-      return { ...previous, [lane]: [...(previous[lane] ?? []).filter((e) => e.role !== 'followups'), ...next] };
+      return { ...previous, [lane]: [...(previous[lane] ?? []), ...next] };
     });
   }, []);
 
@@ -501,14 +615,19 @@ export default function CanvasGlassPreviewPage() {
       entryIdRef.current += 1;
       return {
         ...previous,
-        [lane]: [...entries.filter((e) => e.role !== 'followups'), { role: 'status', text: name, pending: true, kind: 'tool', count: 1, id }],
+        [lane]: [...entries, { role: 'status', text: name, pending: true, kind: 'tool', count: 1, id }],
       };
     });
   }, []);
 
+  /** The full assistant answer for the in-flight turn, per lane — fed to the
+   *  end-of-turn playback bar so it can speak "the entire thing he said." */
+  const turnTextRef = useRef(new Map<string, string>());
+
   /** Real orchestrator deltas grow the last live text entry in place.
    *  A text delta also settles any live reasoning stream above it. */
   const appendAssistantDelta = useCallback((lane: string, delta: string) => {
+    turnTextRef.current.set(lane, (turnTextRef.current.get(lane) ?? '') + delta);
     setConvos((previous) => {
       const entries = previous[lane] ?? [];
       const last = entries[entries.length - 1];
@@ -551,6 +670,15 @@ export default function CanvasGlassPreviewPage() {
 
   /** ONE event pipeline for every live line — the dock's repo-keyed convo
    *  AND each chat card's thread-keyed convo flow through here. */
+  // One result-card accumulator per lane — collects the turn's edits / PR and
+  // rolls them into result entries when the turn settles (status 'ready').
+  const turnToolsRef = useRef(new Map<string, TurnTools>());
+  const ensureTurnTools = useCallback((lane: string): TurnTools => {
+    let acc = turnToolsRef.current.get(lane);
+    if (!acc) { acc = emptyTurnTools(); turnToolsRef.current.set(lane, acc); }
+    return acc;
+  }, []);
+
   const handleOrchEvent = useCallback((lane: string, event: CanvasThreadEvent): void => {
     if (event.type === 'output') {
       if (!firstOutputRef.current.has(lane)) {
@@ -567,15 +695,37 @@ export default function CanvasGlassPreviewPage() {
         firstOutputRef.current.add(lane);
         resolveStatus(lane, 'Working');
       }
+      // Fold the edit into the turn's result accumulator (→ a rolled-up
+      // "Edited N files" card at turn end), then surface the live activity line.
+      recordTool(ensureTurnTools(lane), event.name, event.args);
       noteToolUse(lane, event.name);
+    } else if (event.type === 'tool-result') {
+      // Only `gh pr create` output matters (the PR card). MUST stay above the
+      // `else` — that reads event.error, which a tool-result lacks (would throw).
+      recordToolResult(ensureTurnTools(lane), event.name, event.args, event.output);
     } else if (event.type === 'status') {
-      if (event.status === 'dead') resolveStatus(lane, 'Session ended');
-      else if (event.status === 'ready') resolveStatus(lane, 'Done');
+      if (event.status === 'dead') {
+        turnToolsRef.current.delete(lane);
+        turnTextRef.current.delete(lane);
+        resolveStatus(lane, 'Session ended');
+      } else if (event.status === 'ready') {
+        // Roll the turn's edits / PR / captured screenshots into result cards.
+        const acc = turnToolsRef.current.get(lane);
+        const toAppend: NewDockEntry[] = acc ? synthesizeResultEntries(acc) : [];
+        // …then a playback bar at the very end, carrying the full answer so the
+        // operator can hear the whole turn read back (Symon voice).
+        const said = (turnTextRef.current.get(lane) ?? '').trim();
+        turnTextRef.current.delete(lane);
+        if (said) toAppend.push({ role: 'playback', text: said });
+        if (toAppend.length) appendEntries(lane, toAppend);
+        turnToolsRef.current.delete(lane);
+        resolveStatus(lane, 'Done');
+      }
     } else {
       resolveStatus(lane, 'Failed');
       appendEntries(lane, [{ role: 'status', text: event.error.slice(0, 200), pending: false }]);
     }
-  }, [appendAssistantDelta, appendEntries, appendThinkingDelta, noteToolUse, resolveStatus]);
+  }, [appendAssistantDelta, appendEntries, appendThinkingDelta, ensureTurnTools, noteToolUse, resolveStatus]);
 
   // The REAL orchestrator — same ws-server channel the OrchestratorTab
   // speaks, scoped to the composer's repo. Convos are keyed by repo path.
@@ -584,9 +734,12 @@ export default function CanvasGlassPreviewPage() {
       if (!firstOutputRef.current.has(repo)) setDockOpen(true);
       handleOrchEvent(repo, { type: 'output', text, thinking });
     },
-    onToolUse: (repo, name) => {
+    onToolUse: (repo, name, args) => {
       if (!firstOutputRef.current.has(repo)) setDockOpen(true);
-      handleOrchEvent(repo, { type: 'tool', name });
+      handleOrchEvent(repo, { type: 'tool', name, args });
+    },
+    onToolResult: (repo, name, args, output) => {
+      handleOrchEvent(repo, { type: 'tool-result', name, args, output });
     },
     onStatus: (repo, status) => {
       setOrchBusy(status === 'busy');
@@ -628,35 +781,69 @@ export default function CanvasGlassPreviewPage() {
       .catch(() => {});
   }, [dockOpen, activeRepoPath, convos, orch]);
 
-  /** One send path for every composer — the bottom pill AND the dock's
-   *  own reply input. Returns true when the message went out. */
-  const sendPrompt = useCallback((prompt: string, attachments?: Array<{ dataUri: string; name?: string }>): boolean => {
-    if (!prompt || !activeRepoPath || orchBusy) return false;
-    firstOutputRef.current.delete(activeRepoPath);
-    const threadId = orch.send(prompt, {
+  /** Erase a lane's transcript back to a boundary — powers undo-send
+   *  (everything at/after the just-sent user entry vanishes, like it never was). */
+  const truncateLane = useCallback((lane: string, fromEntryId: number) => {
+    setConvos((previous) => ({
+      ...previous,
+      [lane]: (previous[lane] ?? []).filter((entry) => entry.id < fromEntryId),
+    }));
+  }, []);
+
+  /** The raw send for the docked / bottom conversation — fires the turn,
+   *  appends the user entry, and returns the undo-truncation boundary (or null
+   *  if it never went out). */
+  const dispatchMain = useCallback((text: string, images: ComposerImage[]) => {
+    const lane = activeRepoPath;
+    if (!lane) return null;
+    firstOutputRef.current.delete(lane);
+    const threadId = orch.send(text, {
       model: orchModel,
       thinkingEffort: orchEffort,
-      ...(attachments?.length ? { attachments } : {}),
+      ...(images.length ? { attachments: images } : {}),
     });
+    const fromEntryId = entryIdRef.current;
     const userEntry = {
       role: 'user' as const,
-      text: prompt,
-      ...(attachments?.length ? { images: attachments.map((attachment) => attachment.dataUri) } : {}),
+      text,
+      ...(images.length ? { images: images.map((image) => image.dataUri) } : {}),
     };
     if (!threadId) {
-      appendEntries(activeRepoPath, [
-        userEntry,
-        { role: 'status', text: 'Not connected yet — try again in a second', pending: false },
-      ]);
+      appendEntries(lane, [userEntry, { role: 'status', text: 'Not connected yet — try again in a second', pending: false }]);
       setDockOpen(true);
-      return false;
+      return null;
     }
-    appendEntries(activeRepoPath, [
-      userEntry,
-      { role: 'status', text: 'Thinking', pending: true },
-    ]);
-    return true;
-  }, [activeRepoPath, appendEntries, orch, orchBusy, orchEffort, orchModel]);
+    appendEntries(lane, [userEntry, { role: 'status', text: 'Thinking', pending: true }]);
+    setDockOpen(true);
+    return { lane, fromEntryId };
+  }, [activeRepoPath, appendEntries, orch, orchEffort, orchModel]);
+
+  // Mistake-proofing for the main conversation (bottom pill + dock): undo-send
+  // grace buffer + queue-when-busy. Both composers route through `mainSend`.
+  const {
+    send: mainSend,
+    stopOrUndo: mainStopOrUndo,
+    undoArmed: mainUndoArmed,
+    queued: mainQueued,
+    cancelQueued: mainCancelQueued,
+  } = useSendBuffer({
+    busy: orchBusy,
+    dispatch: dispatchMain,
+    interrupt: orch.interrupt,
+    restore: (text, images) => {
+      setComposerValue(text);
+      setComposerImages(images);
+      composerInputRef.current?.focus();
+    },
+    truncate: truncateLane,
+  });
+
+  /** One send path for every main-conversation composer — the bottom pill AND
+   *  the dock's own reply input. Queues when busy; arms undo when it goes out. */
+  const sendPrompt = useCallback((prompt: string, attachments?: Array<{ dataUri: string; name?: string }>): boolean => {
+    const images: ComposerImage[] = (attachments ?? []).map((attachment) => ({ name: attachment.name ?? 'image', dataUri: attachment.dataUri }));
+    return mainSend(prompt, images);
+  }, [mainSend]);
 
   /** Files dropped or pasted onto the composer become picture pills,
    *  ready to ride the next send as real image blocks. */
@@ -795,12 +982,14 @@ export default function CanvasGlassPreviewPage() {
 
   /** A chat card's own composer went out — append the turn to its lane.
    *  Mirrors sendPrompt's entry shapes; the card already did the ws send. */
-  const noteCardSend = useCallback((card: ChatCard, text: string, sent: boolean) => {
+  const noteCardSend = useCallback((card: ChatCard, text: string, sent: boolean): number => {
     const lane = `thread:${card.threadId}`;
     firstOutputRef.current.delete(lane);
+    const fromEntryId = entryIdRef.current;
     appendEntries(lane, sent
       ? [{ role: 'user', text }, { role: 'status', text: 'Thinking', pending: true }]
       : [{ role: 'user', text }, { role: 'status', text: 'Not connected yet — try again in a second', pending: false }]);
+    return fromEntryId;
   }, [appendEntries]);
 
   const moveChatCard = useCallback((id: number, x: number, y: number) => {
@@ -830,6 +1019,277 @@ export default function CanvasGlassPreviewPage() {
   const moveCard = useCallback((id: number, x: number, y: number) => {
     setCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
+
+  // ── Form-fit grid (#1239) — pack every card into a viewport-filling grid.
+  // A ref mirror of all card geometry keeps applyGridLayout's identity stable so
+  // the trigger effect below never loops on the layout's own per-frame writes.
+  const gridItemsRef = useRef<Array<GridItem & { x: number; y: number; w: number; h: number }>>([]);
+  useEffect(() => {
+    gridItemsRef.current = [
+      ...termCards.map((c) => ({ kind: 'term', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...fileCards.map((c) => ({ kind: 'file', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...imageCards.map((c) => ({ kind: 'image', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...browserCards.map((c) => ({ kind: 'browser', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...chatCards.map((c) => ({ kind: 'chat', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...diffCards.map((c) => ({ kind: 'diff', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...specCards.map((c) => ({ kind: 'spec', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...brainCards.map((c) => ({ kind: 'brain', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+    ];
+  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+
+  const gridAnimRef = useRef<{ stop: () => void } | null>(null);
+  const [gridPlaceholder, setGridPlaceholder] = useState<Slot | null>(null);
+
+  // Animate id→geom across all 8 card arrays with the ~180ms ease-out settle.
+  const writeGridTargets = useCallback((targets: Map<number, { x: number; y: number; w: number; h: number }>) => {
+    gridAnimRef.current?.stop();
+    const starts = new Map(gridItemsRef.current.map((it) => [it.id, { x: it.x, y: it.y, w: it.w, h: it.h }]));
+    const lerp = <T extends { id: number; x: number; y: number; w: number; h: number }>(card: T, t: number): T => {
+      const s = starts.get(card.id);
+      const e = targets.get(card.id);
+      if (!s || !e) return card;
+      // Only touch a dimension that actually changes — a pure reorder keeps the
+      // cell size, so rewriting w/h every frame would needlessly churn the card
+      // bodies (terminals re-fit on size change → render storms).
+      const next = { ...card, x: s.x + (e.x - s.x) * t, y: s.y + (e.y - s.y) * t };
+      if (Math.abs(e.w - s.w) > 1) next.w = Math.round(s.w + (e.w - s.w) * t);
+      if (Math.abs(e.h - s.h) > 1) next.h = Math.round(s.h + (e.h - s.h) * t);
+      return next;
+    };
+    const writeAll = (t: number) => {
+      setTermCards((p) => p.map((c) => lerp(c, t)));
+      setFileCards((p) => p.map((c) => lerp(c, t)));
+      setImageCards((p) => p.map((c) => lerp(c, t)));
+      setBrowserCards((p) => p.map((c) => lerp(c, t)));
+      setChatCards((p) => p.map((c) => lerp(c, t)));
+      setDiffCards((p) => p.map((c) => lerp(c, t)));
+      setSpecCards((p) => p.map((c) => lerp(c, t)));
+      setBrainCards((p) => p.map((c) => lerp(c, t)));
+    };
+    gridAnimRef.current = animate(0, 1, { duration: 0.18, ease: [0.22, 0.61, 0.36, 1], onUpdate: writeAll });
+  }, []);
+
+  // Core form-fit layout — pack `order` (card ids) into grid slots filling the
+  // usable area minus a gap-margin (so the grid sits off the dock/rails/composer),
+  // then animate everyone into place. Real chrome is measured per card so TOTAL
+  // heights match the slot (no overlap, symmetric rows).
+  const layoutGrid = useCallback((order: number[]) => {
+    if (order.length === 0) return;
+    const zoom = canvasZoom();
+    const gap = 26 / zoom;
+    const raw = usableCanvasArea();
+    const area = { x: raw.x + gap, y: raw.y + gap, w: raw.w - 2 * gap, h: raw.h - 2 * gap };
+    if (area.w < 120 || area.h < 120) return;
+    const slotMap = computeGrid(Array.from({ length: order.length }, (_, i) => ({ id: i, kind: 'slot' })), area, gap);
+    const byId = new Map(gridItemsRef.current.map((it) => [it.id, it]));
+    const chromeOf = (id: number): number | undefined => {
+      const it = byId.get(id);
+      const el = typeof document !== 'undefined' ? document.querySelector(`[data-card-id="${id}"]`) : null;
+      if (el && it) {
+        const c = el.getBoundingClientRect().height / zoom - it.h;
+        if (c > 0 && c < 400) return c;
+      }
+      return undefined;
+    };
+    const targets = new Map<number, { x: number; y: number; w: number; h: number }>();
+    order.forEach((id, i) => {
+      const slot = slotMap.get(i);
+      if (!slot) return;
+      targets.set(id, slotToCardGeom(slot, byId.get(id)?.kind ?? 'x', chromeOf(id)));
+    });
+    writeGridTargets(targets);
+  }, [writeGridTargets]);
+
+  // Reading order (top→bottom, left→right) keeps the grid near each card's
+  // current spot, so a reflow reads as "tidy", not "shuffle".
+  const applyGridLayout = useCallback(() => {
+    const order = [...gridItemsRef.current].sort((a, b) => a.y - b.y || a.x - b.x).map((c) => c.id);
+    layoutGrid(order);
+  }, [layoutGrid]);
+
+  // Restore the persisted mode + track window size for grid re-fits.
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(GRID_MODE_KEY) === '1') setGridMode(true);
+    } catch {
+      // non-critical
+    }
+    const onResize = () => setWinSize({ w: window.innerWidth, h: window.innerHeight });
+    onResize();
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
+  // Re-grid on: entering grid mode, card add/remove, resize, zoom, dock open/close
+  // (the dock reserves right-side space, so the grid must re-pack clear of it).
+  // Keyed on a COUNT signature (not the arrays) so the layout's own writes don't
+  // re-trigger. dockOpen's --cnv-dock-reserve stamp effect is declared earlier, so
+  // it lands before this reads usableCanvasArea().
+  const gridCardCount =
+    termCards.length + fileCards.length + imageCards.length + browserCards.length +
+    chatCards.length + diffCards.length + specCards.length + brainCards.length;
+
+  // Navigator loupe minimap (#1239) — every card as a scaled rect; image cards
+  // carry their thumbnail. The usable area is the minimap's stable frame.
+  const minimapCards = useMemo<MinimapCard[]>(() => [
+    ...termCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'term' })),
+    ...fileCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'file' })),
+    ...imageCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'image', src: c.items[0]?.src })),
+    ...browserCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'browser' })),
+    ...chatCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'chat' })),
+    ...diffCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'diff' })),
+    ...specCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'spec' })),
+    ...brainCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'brain' })),
+  ], [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+  // The navigator frames a region ~1.25× the viewport, CENTERED on where you're
+  // looking (pan). Framing a bit MORE than the viewport keeps each card a small
+  // tile (several tiling the sphere, reference-style) rather than 2-3 big cards
+  // filling it. Uses canvasZoomLevel directly (not the lagged stamp).
+  const loupeArea = useMemo(() => {
+    const zoom = canvasZoomLevel || 1;
+    const vw = winSize.w;
+    const vh = winSize.h;
+    const viewCenterX = (vw / 2 - pan.x) / zoom;
+    const viewCenterY = (vh / 2 - pan.y) / zoom;
+    const regionW = (vw / zoom) * 1.25;
+    const regionH = (vh / zoom) * 1.25;
+    return { x: viewCenterX - regionW / 2, y: viewCenterY - regionH / 2, w: regionW, h: regionH };
+  }, [winSize.w, winSize.h, canvasZoomLevel, pan.x, pan.y]);
+
+  useEffect(() => {
+    if (!gridMode) return;
+    // Defer past the commit + debounce rapid re-triggers: snapshot restore mounts
+    // the cards across several renders, and applyGridLayout's per-frame animation
+    // setState must never re-enter this effect synchronously (→ "maximum update
+    // depth"). One rAF after the render storm settles applies the layout once.
+    const raf = requestAnimationFrame(() => applyGridLayout());
+    return () => cancelAnimationFrame(raf);
+  }, [gridMode, gridCardCount, winSize.w, winSize.h, canvasZoomLevel, dockOpen, applyGridLayout]);
+
+  // Grid mode packs to the viewport — snap the pan back to origin so the grid
+  // lands centered, not wherever you'd roamed.
+  useEffect(() => {
+    if (gridMode) setPan({ x: 0, y: 0 });
+  }, [gridMode]);
+
+  // Two-finger scroll pans the infinite canvas (free mode only), over the canvas
+  // background — cards keep their own content scroll, chrome is untouched. Window
+  // listener (not onWheel) so it fires reliably + can preventDefault. `pan` is a
+  // SCREEN-px offset (WebKit `transform: translate` on a `zoom` layer is NOT
+  // scaled by the zoom), so the scroll delta maps 1:1.
+  useEffect(() => {
+    if (gridMode) return;
+    const onWheel = (event: WheelEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (!target?.closest?.('[data-canvas-layer]')) return;
+      if (target.closest('[data-card-id]')) return;
+      event.preventDefault();
+      setPan((prev) => ({ x: prev.x - event.deltaX, y: prev.y - event.deltaY }));
+    };
+    window.addEventListener('wheel', onWheel, { passive: false });
+    return () => window.removeEventListener('wheel', onWheel);
+  }, [gridMode]);
+
+  useEffect(() => {
+    // Stamp the mode so canvas-drag's dragBounds knows whether to fence (grid) or
+    // roam (free / infinite canvas).
+    document.documentElement.style.setProperty('--cnv-grid', gridMode ? '1' : '0');
+    try {
+      window.localStorage.setItem(GRID_MODE_KEY, gridMode ? '1' : '0');
+    } catch {
+      // non-critical
+    }
+  }, [gridMode]);
+
+  // Grid drag-to-reorder with LIVE placeholder (the reference feel): pick a card
+  // up (it floats free via its own drag), the others reflow INSTANTLY to open a
+  // hole where it will land, a ghost slot marks the spot, and on drop everyone
+  // settles with the ease. No per-card wiring — the lifted card is identified by
+  // its data-card-id under the pointer; its live center picks the target slot.
+  useEffect(() => {
+    if (!gridMode) return;
+    let drag: { id: number; order: number[]; lastIndex: number; placed: boolean } | null = null;
+    // Coalesce the reflow to one per animation frame: pointermove fires far faster
+    // than we want to re-pack, and deferring the setState to rAF keeps it off the
+    // render/commit path (no "maximum update depth" under a fast drag).
+    let reflowRaf = 0;
+
+    const onDown = (event: PointerEvent) => {
+      if (event.button !== 0) { drag = null; return; }
+      const el = (event.target as HTMLElement | null)?.closest?.('[data-card-id]');
+      if (!el) { drag = null; return; }
+      const id = Number(el.getAttribute('data-card-id'));
+      const order = [...gridItemsRef.current].sort((a, b) => a.y - b.y || a.x - b.x).map((c) => c.id);
+      const idx = order.indexOf(id);
+      if (idx < 0) { drag = null; return; }
+      drag = { id, order, lastIndex: idx, placed: false };
+    };
+
+    const onMove = () => {
+      if (!drag || reflowRaf) return;
+      reflowRaf = requestAnimationFrame(() => {
+        reflowRaf = 0;
+        if (!drag) return;
+        const liftedEl = document.querySelector(`[data-card-id="${drag.id}"]`);
+        if (!liftedEl) return;
+        const zoom = canvasZoom();
+        const r = liftedEl.getBoundingClientRect();
+        const cx = (r.left + r.width / 2) / zoom;
+        const cy = (r.top + r.height / 2) / zoom;
+        const gap = 26 / zoom;
+        const raw = usableCanvasArea();
+        const area = { x: raw.x + gap, y: raw.y + gap, w: raw.w - 2 * gap, h: raw.h - 2 * gap };
+        const slotMap = computeGrid(Array.from({ length: drag.order.length }, (_, i) => ({ id: i, kind: 'slot' })), area, gap);
+        let targetIndex = drag.lastIndex;
+        let best = Infinity;
+        for (let i = 0; i < drag.order.length; i += 1) {
+          const s = slotMap.get(i);
+          if (!s) continue;
+          const dx = s.x + s.w / 2 - cx;
+          const dy = s.y + s.h / 2 - cy;
+          const d = dx * dx + dy * dy;
+          if (d < best) { best = d; targetIndex = i; }
+        }
+        if (drag.placed && targetIndex === drag.lastIndex) return; // ghost already here
+        drag.lastIndex = targetIndex;
+        drag.placed = true;
+        // Show the ghost where the card will land — but DON'T reflow the other cards
+        // mid-drag. Re-rendering the heavy card bodies (terminals/chats) every reflow
+        // frame trips their own effects' update-depth guard under StrictMode. Only
+        // the lightweight placeholder updates here (the others keep unchanged props,
+        // so React skips re-rendering them); everything re-packs on drop.
+        const slotArr: Slot[] = [];
+        for (let i = 0; i < drag.order.length; i += 1) {
+          const s = slotMap.get(i);
+          if (s) slotArr.push(s);
+        }
+        setGridPlaceholder(slotArr[targetIndex] ?? null);
+      });
+    };
+
+    const onUp = () => {
+      if (reflowRaf) { cancelAnimationFrame(reflowRaf); reflowRaf = 0; }
+      if (drag && drag.placed) {
+        const others = drag.order.filter((other) => other !== drag!.id);
+        const finalOrder = [...others];
+        finalOrder.splice(drag.lastIndex, 0, drag.id); // lifted lands at the placeholder
+        layoutGrid(finalOrder);
+      }
+      setGridPlaceholder(null);
+      drag = null;
+    };
+
+    window.addEventListener('pointerdown', onDown, true);
+    window.addEventListener('pointermove', onMove, true);
+    window.addEventListener('pointerup', onUp);
+    return () => {
+      window.removeEventListener('pointerdown', onDown, true);
+      window.removeEventListener('pointermove', onMove, true);
+      window.removeEventListener('pointerup', onUp);
+      if (reflowRaf) cancelAnimationFrame(reflowRaf);
+      setGridPlaceholder(null);
+    };
+  }, [gridMode, layoutGrid]);
 
   /** Spawn a REAL shell — production transport, canvas treatment. */
   const spawnTerminal = useCallback((cwd: string | null, cwdLabel: string | null, at?: SnapGeometry) => {
@@ -986,24 +1446,35 @@ export default function CanvasGlassPreviewPage() {
         nextIdRef.current += 1;
         zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
         const spot = at ?? findFreeSpot(560, 356);
-        setDiffCards((previous) => [...previous, {
-          id,
-          x: spot.x,
-          y: spot.y,
-          z: zPeakRef.current,
-          w: at?.w ?? 560,
-          h: at?.h ?? 320,
-          laneId: `worktree:${repoPath}`,
-          packetId: null,
-          title: `Your changes — ${repoTail}`,
-          branch: data.branch ?? null,
-          stat: data.stat ?? '',
-          diff: data.diff?.trim() ? data.diff : 'Working tree clean — nothing uncommitted.',
-          truncated: Boolean(data.truncated),
-        }]);
+        setDiffCards((previous) => {
+          // One working-tree card per repo — auto-show + the picker row both
+          // route here, so a re-trigger must never stack a duplicate.
+          if (previous.some((card) => card.laneId === `worktree:${repoPath}`)) return previous;
+          return [...previous, {
+            id,
+            x: spot.x,
+            y: spot.y,
+            z: zPeakRef.current,
+            w: at?.w ?? 560,
+            h: at?.h ?? 320,
+            laneId: `worktree:${repoPath}`,
+            packetId: null,
+            title: `Your changes — ${repoTail}`,
+            branch: data.branch ?? null,
+            stat: data.stat ?? '',
+            diff: data.diff?.trim() ? data.diff : 'Working tree clean — nothing uncommitted.',
+            truncated: Boolean(data.truncated),
+          }];
+        });
       })
       .catch(() => {});
   }, [activeRepoPath, findFreeSpot]);
+
+  // Auto-show YOUR working tree the moment the Review picker opens — no
+  // hunting for the row. spawnWorktreeDiffCard dedupes, so this never stacks.
+  useEffect(() => {
+    if (reviewPickerOpen && activeRepoPath) void spawnWorktreeDiffCard();
+  }, [reviewPickerOpen, activeRepoPath, spawnWorktreeDiffCard]);
 
   /** The operator's o8.md notes — the REAL spec pane in a glass card.
    *  One card per repo: a second click focuses the open one instead of
@@ -1649,7 +2120,7 @@ export default function CanvasGlassPreviewPage() {
       />
 
       {/* Depth layer — the paper/shader mood from the Canvas tuner. */}
-      <CanvasBackdropLayer kind={settings.backdrop} />
+      <CanvasBackdropLayer kind={settings.backdrop} tone={settings.tone} />
 
       {/* Center emblem retired (operator call 2026-06-12) — the empty
           canvas stays clean; a logo / Lottie motion piece comes later. */}
@@ -1658,7 +2129,30 @@ export default function CanvasGlassPreviewPage() {
             rails, composer, drawers) stays at 1:1; only the workspace
             scales, buying breathing room around the cards. Drag/resize
             handlers divide pointer deltas by the zoom (canvasZoom()). */}
-      <div style={{ position: 'absolute', inset: 0, zIndex: 2, zoom: canvasZoomLevel } as React.CSSProperties}>
+      <div data-canvas-layer style={{ position: 'absolute', inset: 0, zIndex: 2, zoom: canvasZoomLevel, transform: `translate(${pan.x}px, ${pan.y}px)`, willChange: 'transform' } as React.CSSProperties}>
+
+      {/* ── Grid drag placeholder — the ghost slot the lifted card will land in.
+            Sits behind the cards in the hole they reflow open; glides between
+            slots as the target changes. ─────────────────────────────────── */}
+      {gridPlaceholder ? (
+        <div
+          aria-hidden
+          style={{
+            position: 'absolute',
+            left: gridPlaceholder.x,
+            top: gridPlaceholder.y,
+            width: gridPlaceholder.w,
+            height: gridPlaceholder.h,
+            borderRadius: 22,
+            border: '2px dashed var(--cnv-ink-muted)',
+            background: 'rgba(255, 255, 255, 0.04)',
+            opacity: 0.6,
+            zIndex: 0,
+            pointerEvents: 'none',
+            transition: 'left 130ms ease, top 130ms ease, width 130ms ease, height 130ms ease',
+          }}
+        />
+      ) : null}
 
       {/* ── Component cards ──────────────────────────────────────── */}
       {cards.map((card) => (
@@ -1752,19 +2246,9 @@ export default function CanvasGlassPreviewPage() {
         ))}
       </AnimatePresence>
 
-      {/* ── o8.md cards — the operator's notes, full spec-pane parity ── */}
-      <AnimatePresence>
-        {specCards.map((card) => (
-          <SpecGlassCard
-            key={card.id}
-            card={card}
-            onMove={(id, x, y) => setSpecCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
-            onResize={(id, w, h) => setSpecCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
-            onFocus={focusSpecCard}
-            onClose={(id) => setSpecCards((previous) => previous.filter((c) => c.id !== id))}
-          />
-        ))}
-      </AnimatePresence>
+      {/* o8.md cards render in a SEPARATE overlay OUTSIDE this zoom layer (just
+          after it) — CodeMirror caret hit-testing breaks under any CSS scale, so
+          they render at true device-1:1 and scale numerically instead (#1241). */}
 
       {/* ── Brain cards — instant cited repo answers, on the canvas ── */}
       <AnimatePresence>
@@ -1790,6 +2274,7 @@ export default function CanvasGlassPreviewPage() {
             sendDefaults={{ model: orchModel, thinkingEffort: orchEffort }}
             onLiveEvent={handleOrchEvent}
             onUserSend={noteCardSend}
+            onTruncate={truncateLane}
             onMove={moveChatCard}
             onResize={resizeChatCard}
             onFocus={focusChatCard}
@@ -1799,6 +2284,31 @@ export default function CanvasGlassPreviewPage() {
         ))}
       </AnimatePresence>
 
+      </div>
+
+      {/* ── o8.md overlay — OUTSIDE the zoom layer so CodeMirror renders at true
+            device-1:1 (WebKit caret hit-testing breaks under ANY CSS scale in
+            the ancestry — even a nested counter-scale to net-1.0; proven). Each
+            card maps its layer-local x/y to screen via screenMap = zoom·(coord+
+            pan) and scales its own size + chrome + editor NUMERICALLY by the
+            zoom, so it looks identical to an in-layer card but the caret works
+            everywhere (#1241). Container is pointerEvents:none (empty canvas
+            stays clickable); each card opts back in. zIndex 3 = above the canvas
+            layer (2), below the chrome (40+). */}
+      <div style={{ position: 'absolute', inset: 0, zIndex: 3, pointerEvents: 'none' } as React.CSSProperties}>
+        <AnimatePresence>
+          {specCards.map((card) => (
+            <SpecGlassCard
+              key={card.id}
+              card={card}
+              screenMap={{ zoom: canvasZoomLevel, panX: pan.x, panY: pan.y }}
+              onMove={(id, x, y) => setSpecCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
+              onResize={(id, w, h) => setSpecCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+              onFocus={focusSpecCard}
+              onClose={(id) => setSpecCards((previous) => previous.filter((c) => c.id !== id))}
+            />
+          ))}
+        </AnimatePresence>
       </div>
 
       {/* ── Top dock — the important header controls ─────────────── */}
@@ -2192,7 +2702,9 @@ export default function CanvasGlassPreviewPage() {
       </AnimatePresence>
 
       {/* ── Left spawn dock — the component vocabulary ───────────── */}
-      <div
+      <ProximityDock
+        axis="y"
+        itemRadius={11}
         style={{
           position: 'absolute',
           left: 16,
@@ -2238,53 +2750,25 @@ export default function CanvasGlassPreviewPage() {
         <SpawnGlyphButton label="Open o8.md" onClick={spawnSpecCard}>
           <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" /><path d="M14 2v6h6M16 13H8M16 17H8M10 9H8" />
         </SpawnGlyphButton>
-      </div>
+      </ProximityDock>
 
-      {/* ── Mini zoom — fixed steps, breathing room only ──────────── */}
-      <div
-        style={{
-          position: 'absolute',
-          left: 16,
-          bottom: 18,
-          display: 'flex',
-          alignItems: 'center',
-          gap: 2,
-          paddingTop: 3,
-          paddingBottom: 3,
-          paddingLeft: 6,
-          paddingRight: 6,
-          borderRadius: 12,
-          zIndex: 40,
-          ...glass(true),
-        }}
-      >
-        {ZOOM_STEPS.map((step) => (
-          <button
-            key={step.value}
-            type="button"
-            aria-label={`Zoom ${step.label}%`}
-            onClick={() => setCanvasZoomLevel(step.value)}
-            style={{
-              borderWidth: 0,
-              borderRadius: 8,
-              background: canvasZoomLevel === step.value ? 'rgba(255,255,255,0.12)' : 'transparent',
-              color: canvasZoomLevel === step.value ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
-              fontSize: 9.5,
-              fontWeight: 300,
-              fontFamily: FONT,
-              paddingTop: 3,
-              paddingBottom: 3,
-              paddingLeft: 7,
-              paddingRight: 7,
-              cursor: 'pointer',
-            }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { if (canvasZoomLevel !== step.value) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            {step.label}%
-          </button>
-        ))}
-      </div>
+      {/* ── Navigator loupe (#1239) — minimap + −/fit/+ zoom + Free/Grid toggle,
+            replacing the old zoom-level chip. Bottom-left. ───────────── */}
+      <NavigatorLoupe
+        cards={minimapCards}
+        area={loupeArea}
+        size={160}
+        zoomSteps={ZOOM_STEPS}
+        zoomValue={canvasZoomLevel}
+        onZoomChange={setCanvasZoomLevel}
+        gridMode={gridMode}
+        onGridModeChange={setGridMode}
+        onPanBy={(dx, dy) => setPan((prev) => ({ x: prev.x + dx, y: prev.y + dy }))}
+        orbSettings={orbSettings}
+        onOrbChange={updateOrbSettings}
+        onOrbReset={resetOrbSettings}
+        tone={settings.tone}
+      />
 
       {/* ── Terminal cwd drawer — same system as the Sessions drawer:
             tuner-matched glass, hard edges, the list dissolves at both
@@ -2376,21 +2860,26 @@ export default function CanvasGlassPreviewPage() {
               transition={{ type: 'spring', stiffness: 360, damping: 32 }}
               style={{
                 position: 'absolute',
-                left: 64,
-                top: 74,
-                bottom: 96,
+                left: 80,
+                top: '50%',
+                height: RAIL_PANEL_HEIGHT,
+                marginTop: -(RAIL_PANEL_HEIGHT / 2),
                 width: 272,
-                display: 'flex',
-                flexDirection: 'column',
-                paddingTop: 12,
-                paddingBottom: 4,
-                paddingLeft: 8,
-                paddingRight: 8,
-                borderRadius: 6,
                 zIndex: 46,
-                ...glass(true),
+                display: 'grid',
+                // Pin the single row to the box height (minmax 0-floor stops it
+                // growing to content) so a long list scrolls INSIDE the 296px
+                // panel instead of overflowing it. Plain '1fr' wouldn't — its
+                // auto min-floor lets the row grow.
+                gridTemplateRows: 'minmax(0, 1fr)',
+                fontFamily: FONT,
               }}
             >
+              <SmoothCorners
+                corners={{ radius: 22 }}
+                shadowStrategy="box-shadow"
+                style={{ ...LISSE_PANEL_SURFACE, paddingTop: 12, paddingBottom: 4, paddingLeft: 8, paddingRight: 8 }}
+              >
               <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 7 }}>
                 Review
               </span>
@@ -2435,7 +2924,7 @@ export default function CanvasGlassPreviewPage() {
               >
                 {activeLanes.length === 0 ? (
                   <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', paddingLeft: 8, paddingTop: 2, paddingBottom: 4, fontFamily: FONT, lineHeight: 1.6 }}>
-                    Nothing running — dispatch from the composer and the diffs land here.
+                    No agents running yet — dispatch from the composer and lane diffs land here. (Your own changes are above.)
                   </span>
                 ) : (
                   [...activeLanes]
@@ -2465,6 +2954,7 @@ export default function CanvasGlassPreviewPage() {
                     ))
                 )}
               </div>
+            </SmoothCorners>
             </motion.div>
           </>
         ) : null}
@@ -2485,21 +2975,26 @@ export default function CanvasGlassPreviewPage() {
               transition={{ type: 'spring', stiffness: 360, damping: 32 }}
               style={{
                 position: 'absolute',
-                left: 64,
-                top: 74,
-                bottom: 96,
+                left: 80,
+                top: '50%',
+                height: RAIL_PANEL_HEIGHT,
+                marginTop: -(RAIL_PANEL_HEIGHT / 2),
                 width: 272,
-                display: 'flex',
-                flexDirection: 'column',
-                paddingTop: 12,
-                paddingBottom: 4,
-                paddingLeft: 8,
-                paddingRight: 8,
-                borderRadius: 6,
                 zIndex: 46,
-                ...glass(true),
+                display: 'grid',
+                // Pin the single row to the box height (minmax 0-floor stops it
+                // growing to content) so a long list scrolls INSIDE the 296px
+                // panel instead of overflowing it. Plain '1fr' wouldn't — its
+                // auto min-floor lets the row grow.
+                gridTemplateRows: 'minmax(0, 1fr)',
+                fontFamily: FONT,
               }}
             >
+              <SmoothCorners
+                corners={{ radius: 22 }}
+                shadowStrategy="box-shadow"
+                style={{ ...LISSE_PANEL_SURFACE, paddingTop: 12, paddingBottom: 4, paddingLeft: 8, paddingRight: 8 }}
+              >
               <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 7 }}>
                 Sessions
               </span>
@@ -2598,6 +3093,7 @@ export default function CanvasGlassPreviewPage() {
                 ))
               )}
               </div>
+            </SmoothCorners>
             </motion.div>
           </>
         ) : null}
@@ -2630,6 +3126,10 @@ export default function CanvasGlassPreviewPage() {
             onSelectLane={setActiveRepoPath}
             onSend={sendPrompt}
             busy={orchBusy}
+            queued={mainQueued}
+            onCancelQueued={mainCancelQueued}
+            undoArmed={mainUndoArmed}
+            onUndoSend={mainStopOrUndo}
             onClose={() => setDockOpen(false)}
           />
         ) : null}
@@ -2725,6 +3225,31 @@ export default function CanvasGlassPreviewPage() {
         ) : null}
       </AnimatePresence>
 
+      {/* Mistake-proofing — queued follow-ups + the undo-send pill, floating
+          just above the composer (clears of the picture pills when present). */}
+      <div
+        style={{
+          position: 'absolute',
+          bottom: composerImages.length ? 132 : 78,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          width: 'min(680px, calc(100vw - 240px))',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 6,
+          zIndex: 41,
+          pointerEvents: mainQueued.length || mainUndoArmed ? 'auto' : 'none',
+        }}
+      >
+        <div style={{ width: '100%' }}>
+          <QueuedSends items={mainQueued} onCancel={mainCancelQueued} />
+        </div>
+        <AnimatePresence>
+          {mainUndoArmed ? <UndoSendPill key="undo" onUndo={mainStopOrUndo} graceMs={SEND_UNDO_GRACE_MS} /> : null}
+        </AnimatePresence>
+      </div>
+
       {/* ── Bottom orchestrator input — first contact lives here ─── */}
       <div
         onDragOver={(event) => {
@@ -2747,7 +3272,9 @@ export default function CanvasGlassPreviewPage() {
           display: 'flex',
           alignItems: 'center',
           gap: 8,
-          height: 48,
+          minHeight: 48,
+          paddingTop: 8,
+          paddingBottom: 8,
           paddingLeft: 10,
           paddingRight: 10,
           borderRadius: 24,
@@ -2755,17 +3282,22 @@ export default function CanvasGlassPreviewPage() {
           ...glass(true),
         }}
       >
+        <AnticipationRing focused={composerFocused} radius={24} />
         <ChipButton
           label={activeRepoName ?? '…'}
           active={composerMenu === 'repo'}
           onClick={() => setComposerMenu((value) => (value === 'repo' ? null : 'repo'))}
         />
-        <input
+        <textarea
           ref={composerInputRef}
           value={composerValue}
           onChange={(event) => setComposerValue(event.target.value)}
           onKeyDown={(event) => {
-            if (event.key === 'Enter') submit();
+            // Enter sends; Shift+Enter drops a newline (the field grows to fit).
+            if (event.key === 'Enter' && !event.shiftKey) {
+              event.preventDefault();
+              submit();
+            }
           }}
           onPaste={(event) => {
             const files = [...(event.clipboardData?.files ?? [])].filter((file) => file.type.startsWith('image/'));
@@ -2776,8 +3308,12 @@ export default function CanvasGlassPreviewPage() {
           }}
           placeholder={`Message the orchestrator · ${activeRepoName ?? '…'}`}
           aria-label="Orchestrator composer"
+          onFocus={() => { setComposerFocused(true); registerComposerDictation(); }}
+          onBlur={() => setComposerFocused(false)}
+          rows={1}
           style={{
             flex: 1,
+            minWidth: 0,
             borderWidth: 0,
             outline: 'none',
             background: 'transparent',
@@ -2786,7 +3322,17 @@ export default function CanvasGlassPreviewPage() {
             fontWeight: 300,
             letterSpacing: '-0.1px',
             fontFamily: FONT,
-          }}
+            // Grow with the content instead of nested scrolling (design-eng
+            // tip). field-sizing is supported in the app's WebKit — verified
+            // live; it caps at maxHeight, then scrolls.
+            fieldSizing: 'content',
+            resize: 'none',
+            maxHeight: 160,
+            overflowY: 'auto',
+            lineHeight: 1.4,
+            paddingTop: 0,
+            paddingBottom: 0,
+          } as React.CSSProperties}
         />
         <ChipButton
           label={CANVAS_MODEL_OPTIONS.find((option) => option.value === orchModel)?.label ?? orchModel}
@@ -2798,11 +3344,14 @@ export default function CanvasGlassPreviewPage() {
           active={composerMenu === 'effort'}
           onClick={() => setComposerMenu((value) => (value === 'effort' ? null : 'effort'))}
         />
+        {/* Push-to-talk — speak the prompt. Canvas-tinted to sit flush with the
+            send arrow; hides itself when no dictation host is mounted. */}
+        <MicButton idleColor="var(--cnv-ink-muted)" />
         <button
           type="button"
-          aria-label={orchBusy ? 'Interrupt the orchestrator' : 'Send'}
+          aria-label={orchBusy ? (mainUndoArmed ? 'Stop and undo the send' : 'Interrupt the orchestrator') : 'Send'}
           onClick={() => {
-            if (orchBusy) orch.interrupt();
+            if (orchBusy) mainStopOrUndo();
             else submit();
           }}
           style={{

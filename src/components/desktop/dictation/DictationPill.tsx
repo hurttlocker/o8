@@ -632,6 +632,15 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
 
   const [anchor, setAnchor] = useState<AnchorPos | null>(null);
 
+  // SSR-safe portal gate. `typeof document` alone is the anti-pattern React
+  // warns about — it's false on the server but TRUE on the client's first
+  // (hydration) render, so the portal node appears where the server rendered
+  // nothing → hydration mismatch. A mounted flag is false on the server AND
+  // the first client render, then flips post-mount. The pill is idle/invisible
+  // until a mic click (long after mount), so the one-tick defer is invisible.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   // Anchor: above the active composer, else bottom-center (Symon docks the
   // pill at bottom-center of its own window).
   useEffect(() => {
@@ -670,7 +679,7 @@ export function DictationPill({ snapshot, onCancel, anchorRef, position }: Dicta
     };
   }, [visible, anchorRef, position, pillWidth]);
 
-  if (typeof document === 'undefined') return null;
+  if (!mounted) return null;
 
   const pillNode = (
     <div

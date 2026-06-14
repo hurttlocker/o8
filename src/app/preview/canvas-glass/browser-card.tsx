@@ -2,7 +2,7 @@
 
 /**
  * Browser cards — a REAL browser pane on the canvas (#1232). URL bar +
- * iframe in the same squircle glass shell the terminals use. Defaults to
+ * iframe in the shared GlassCardShell every canvas modal uses. Defaults to
  * the app's own dashboard (always frameable); external sites work when
  * they allow framing, and the hint line says so when they don't.
  *
@@ -13,10 +13,9 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
-import { SmoothCorners } from '@lisse/react';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
-import { canvasZoom, FONT, TERM_MIN_H, TERM_MIN_W, glass } from './ui';
+import { FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
+import { GlassCardShell } from './card-shell';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
@@ -160,10 +159,6 @@ export function BrowserGlassCard({
   onTabsChange: (id: number, tabs: BrowserTab[], activeTabId: number) => void;
   onClose: (id: number) => void;
 }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [resizing, setResizing] = useState(false);
   const activeTab = card.tabs.find((tab) => tab.id === card.activeTabId) ?? card.tabs[0];
   const activeUrl = activeTab?.url ?? '';
   const [urlDraft, setUrlDraft] = useState(fromProxyUrl(activeUrl));
@@ -303,58 +298,19 @@ export function BrowserGlassCard({
   }, [activeUrl, card.activeTabId]);
 
   return (
-    <motion.div
-      initial={{ scale: 0.7, opacity: 0, y: 24 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      exit={{ scale: 0.86, opacity: 0 }}
-      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-      onPointerDownCapture={() => onFocus(card.id)}
-      style={{
-        position: 'absolute',
-        left: card.x,
-        top: card.y,
-        width: card.w,
-        zIndex: card.z,
-      }}
+    <GlassCardShell
+      card={card}
+      minW={TERM_MIN_W}
+      minH={TERM_MIN_H}
+      title={tabLabel(activeUrl)}
+      onMove={onMove}
+      onResize={onResize}
+      onFocus={onFocus}
+      onClose={onClose}
     >
-      <SmoothCorners
-        corners={{ radius: 14 }}
-        shadowStrategy="box-shadow"
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          ...glass(true, dragging || resizing),
-          ...(agentGlow ? { boxShadow: '0 0 0 1.5px rgba(245,158,11,0.75), 0 12px 40px rgba(0, 0, 0, 0.35)' } : {}),
-        }}
-      >
-        {/* Title bar — drag handle + URL bar. */}
-        <div
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y };
-            setDragging(true);
-          }}
-          onPointerMove={(event) => {
-            const drag = dragRef.current;
-            if (!drag || drag.pointerId !== event.pointerId) return;
-            onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
-          }}
-          onPointerUp={() => { dragRef.current = null; setDragging(false); }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 7,
-            paddingBottom: 7,
-            paddingLeft: 12,
-            paddingRight: 8,
-            borderBottom: '1px solid var(--cnv-edge)',
-            cursor: dragging ? 'grabbing' : 'grab',
-            touchAction: 'none',
-            userSelect: 'none',
-          }}
-        >
+        {/* URL bar — stays in the BODY (the shell's grab pill is the drag
+            handle now). Globe + address + element picker. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2, paddingBottom: 6, paddingLeft: 16, paddingRight: 16 }}>
           <svg style={{ width: 11, height: 11, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
           </svg>
@@ -412,32 +368,11 @@ export function BrowserGlassCard({
               <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
             </svg>
           </button>
-          <button
-            type="button"
-            aria-label="Close browser"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onClose(card.id)}
-            style={{
-              borderWidth: 0,
-              background: 'transparent',
-              padding: 2,
-              paddingLeft: 8,
-              paddingRight: 8,
-              fontSize: 11,
-              color: 'var(--cnv-ink-muted)',
-              cursor: 'pointer',
-              fontFamily: FONT,
-            }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            ✕
-          </button>
         </div>
 
         {/* Tab strip — pills, like the default-side browser. Always present so
             the + is one click away; slim enough to cost nothing. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingTop: 4, paddingBottom: 4, paddingLeft: 8, paddingRight: 8, borderBottom: '1px solid var(--cnv-edge)', overflowX: 'auto', scrollbarWidth: 'none' } as React.CSSProperties}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4, paddingTop: 2, paddingBottom: 4, paddingLeft: 12, paddingRight: 12, overflowX: 'auto', scrollbarWidth: 'none', flexShrink: 0 } as React.CSSProperties}>
           {card.tabs.map((tab) => {
             const active = tab.id === card.activeTabId;
             return (
@@ -505,7 +440,7 @@ export function BrowserGlassCard({
 
         {/* Selector readout — appears while picking / after a pick. */}
         {readout ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 4, paddingBottom: 4, paddingLeft: 12, paddingRight: 8, borderBottom: '1px solid var(--cnv-edge)' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2, paddingBottom: 4, paddingLeft: 16, paddingRight: 16, flexShrink: 0 }}>
             <span style={{ flex: 1, fontFamily: MONO, fontSize: 9.5, fontWeight: 300, color: picking ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {readout}
             </span>
@@ -523,13 +458,14 @@ export function BrowserGlassCard({
 
         {/* The page — solid paper behind the iframes, never glass-through.
             Every tab stays mounted (display toggles) so scroll/form state
-            survives switching, like a real browser. */}
-        <div style={{ height: card.h, position: 'relative', background: '#fff' }}>
+            survives switching, like a real browser. The amber ring pulses
+            when an agent verb lands on this surface. */}
+        <div style={{ height: card.h, position: 'relative', background: '#fff', boxShadow: agentGlow ? 'inset 0 0 0 1.5px rgba(245,158,11,0.75)' : 'none' }}>
           {card.tabs.map((tab) => {
             const liveScope = engineScope(tab.url);
             if (liveScope) {
               return (
-                <div key={tab.id} style={{ position: 'absolute', inset: 0, display: tab.id === card.activeTabId ? 'block' : 'none', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}>
+                <div key={tab.id} style={{ position: 'absolute', inset: 0, display: tab.id === card.activeTabId ? 'block' : 'none' }}>
                   <EngineLiveView scope={liveScope} active={tab.id === card.activeTabId} />
                 </div>
               );
@@ -550,56 +486,12 @@ export function BrowserGlassCard({
                 }}
                 data-o8-browser="canvas"
                 data-o8-active={tab.id === card.activeTabId ? 'true' : 'false'}
-                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, display: tab.id === card.activeTabId ? 'block' : 'none', ...(dragging || resizing ? { pointerEvents: 'none' } : {}) }}
+                style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, display: tab.id === card.activeTabId ? 'block' : 'none' }}
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
               />
             );
           })}
-
-          {/* Corner resize grip. */}
-          <div
-            role="presentation"
-            onPointerDown={(event) => {
-              if (event.button !== 0) return;
-              event.stopPropagation();
-              try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-              resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originW: card.w, originH: card.h };
-              setResizing(true);
-            }}
-            onPointerMove={(event) => {
-              const resize = resizeRef.current;
-              if (!resize || resize.pointerId !== event.pointerId) return;
-              onResize(
-                card.id,
-                Math.max(TERM_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
-                Math.max(TERM_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
-              );
-            }}
-            onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
-            style={{
-              position: 'absolute',
-              right: 0,
-              bottom: 0,
-              width: 18,
-              height: 18,
-              cursor: 'nwse-resize',
-              touchAction: 'none',
-              display: 'flex',
-              alignItems: 'flex-end',
-              justifyContent: 'flex-end',
-              paddingRight: 4,
-              paddingBottom: 4,
-              opacity: resizing ? 1 : 0.55,
-            }}
-            onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
-            onMouseLeave={(event) => { if (!resizeRef.current) event.currentTarget.style.opacity = '0.55'; }}
-          >
-            <svg width={9} height={9} viewBox="0 0 9 9" aria-hidden>
-              <path d="M8 1 1 8M8 5 5 8" stroke="rgba(0,0,0,0.45)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-            </svg>
-          </div>
         </div>
-      </SmoothCorners>
-    </motion.div>
+    </GlassCardShell>
   );
 }

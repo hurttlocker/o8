@@ -12,11 +12,14 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { FONT, TONE_DOT, glassPop, type DockEntry, type OrchestratorLane } from './ui';
+import { FONT, TONE_DOT, glassPop, scrollFadeY, type DockEntry, type OrchestratorLane } from './ui';
+import { useScrollBlurFade } from './use-scroll-blur-fade';
 import { ReasoningView } from './reasoning';
 import { BrainConversation } from './brain-card';
 import { CardComposer } from './card-composer';
 import { FilesResult, PrResult, ScreenshotResult } from './response-blocks';
+import { TurnPlaybackBar } from './turn-playback';
+import { QueuedSends, UndoSendPill, SEND_UNDO_GRACE_MS, type QueuedSend } from './use-send-buffer';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
@@ -29,13 +32,6 @@ function SparkGlyph({ size = 11 }: { size?: number }) {
   );
 }
 
-const FOLLOW_UPS = [
-  'Review the pending diff',
-  'Dispatch a follow-up agent',
-  'Open the packet terminal',
-  'Ask the Brain about this lane',
-];
-
 export function OrchestratorDock({
   lanes,
   entries,
@@ -45,6 +41,10 @@ export function OrchestratorDock({
   onSelectLane,
   onSend,
   busy,
+  queued,
+  onCancelQueued,
+  undoArmed,
+  onUndoSend,
   onClose,
 }: {
   /** Lanes with a running conversation — the dropdown's contents. */
@@ -57,9 +57,16 @@ export function OrchestratorDock({
   /** Send a reply from the dock's own composer. */
   onSend: (message: string) => void;
   busy: boolean;
+  /** Messages waiting for the current turn to finish (shared main-convo queue). */
+  queued: QueuedSend[];
+  onCancelQueued: (id: number) => void;
+  /** A just-sent message is still inside the undo-send grace window. */
+  undoArmed: boolean;
+  onUndoSend: () => void;
   onClose: () => void;
 }) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  useScrollBlurFade(scrollRef);
   const [activeTab, setActiveTab] = useState<'orchestrator' | 'cortex'>('orchestrator');
   const [laneMenuOpen, setLaneMenuOpen] = useState(false);
   const [draft, setDraft] = useState('');
@@ -163,6 +170,7 @@ export function OrchestratorDock({
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: 36 }}
       transition={{ type: 'spring', stiffness: 300, damping: 32 }}
+      data-glass-surface
       style={{
         position: 'absolute',
         top: 74,
@@ -208,8 +216,8 @@ export function OrchestratorDock({
           // a left component defines the tall panel's open edge in light mode
           // (near-white surface on a near-white canvas).
           background: 'var(--cnv-tint-deep)',
-          backdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
-          WebkitBackdropFilter: 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+          backdropFilter: 'blur(calc(var(--cnv-frost) * var(--cnv-frost-scale, 1))) saturate(var(--cnv-sat, 1.6))',
+          WebkitBackdropFilter: 'blur(calc(var(--cnv-frost) * var(--cnv-frost-scale, 1))) saturate(var(--cnv-sat, 1.6))',
           boxShadow: '0 14px 42px rgba(0, 0, 0, 0.22), -14px 0 40px -18px rgba(8, 12, 20, 0.14)',
         } as React.CSSProperties}
       >
@@ -348,7 +356,7 @@ export function OrchestratorDock({
             {/* Conversation. */}
             <div
               ref={scrollRef}
-              style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, scrollbarWidth: 'none' } as React.CSSProperties}
+              style={{ ...scrollFadeY, flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10, paddingLeft: 14, paddingRight: 14, paddingBottom: 14, scrollbarWidth: 'none' } as React.CSSProperties}
               onClick={() => {
                 if (laneMenuOpen) setLaneMenuOpen(false);
               }}
@@ -366,17 +374,25 @@ export function OrchestratorDock({
             </div>
 
             {/* Reply right here — the card owns its own composer (shared with
-                the chat-card: field-sizing textarea + Input Anticipation ring). */}
+                the chat-card: field-sizing textarea + Input Anticipation ring).
+                Sending while busy QUEUES (the default composer's behavior); a
+                just-sent message can still be taken back via the undo pill. */}
             <div style={{ paddingLeft: 12, paddingRight: 12, paddingBottom: 12, paddingTop: 4, flexShrink: 0 }}>
+              <QueuedSends items={queued} onCancel={onCancelQueued} />
+              <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: undoArmed ? 6 : 0 }}>
+                <AnimatePresence>
+                  {undoArmed ? <UndoSendPill key="undo" onUndo={onUndoSend} graceMs={SEND_UNDO_GRACE_MS} /> : null}
+                </AnimatePresence>
+              </div>
               <CardComposer
                 value={draft}
                 onChange={setDraft}
-                busy={busy}
+                busy={false}
                 model="Opus 4.8"
-                placeholder={busy ? 'Working — interrupt from the main composer' : `Reply to ${activeLabel}`}
+                placeholder={busy ? `Queue a follow-up to ${activeLabel}…` : `Reply to ${activeLabel}`}
                 onSubmit={() => {
                   const prompt = draft.trim();
-                  if (!prompt || busy) return;
+                  if (!prompt) return;
                   onSend(prompt);
                   setDraft('');
                 }}
@@ -541,7 +557,10 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
         // card (Q's reference: smooth, no extra lines).
         <CanvasMarkdown text={entry.text} />
       ) : null}
-      {entry.role === 'followups' ? <FollowUps /> : null}
+      {entry.role === 'playback' ? (
+        // Pops up at the end of a turn — play back the full answer aloud.
+        <TurnPlaybackBar text={entry.text} messageId={String(entry.id)} />
+      ) : null}
     </motion.div>
   );
 }
@@ -687,59 +706,3 @@ export function CanvasMarkdown({ text }: { text: string }) {
   );
 }
 
-function FollowUps() {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.06em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', marginBottom: 2 }}>
-        Suggested follow-ups
-      </span>
-      {FOLLOW_UPS.map((label, index) => (
-        <motion.button
-          key={label}
-          type="button"
-          initial={{ opacity: 0, y: 8 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.35, delay: 0.12 * index, ease: 'easeOut' }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: 8,
-            paddingTop: 7,
-            paddingBottom: 7,
-            paddingLeft: 11,
-            paddingRight: 9,
-            borderRadius: 10,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--cnv-edge)',
-            background: 'transparent',
-            cursor: 'pointer',
-            fontFamily: FONT,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--cnv-tint)'; }}
-          onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-        >
-          <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', textAlign: 'left' }}>{label}</span>
-          <span
-            style={{
-              fontSize: 9,
-              fontWeight: 400,
-              color: 'var(--cnv-ink-muted)',
-              width: 14,
-              height: 14,
-              borderRadius: 4,
-              border: '1px solid var(--cnv-edge)',
-              display: 'inline-flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              flexShrink: 0,
-            }}
-          >
-            {index + 1}
-          </span>
-        </motion.button>
-      ))}
-    </div>
-  );
-}

@@ -10,6 +10,11 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { canvasZoom, CARD_WIDTH, FONT, TONE_DOT, glass, type MockCard } from './ui';
+import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
+
+/** MockCards are auto-height (no stored h) — a nominal full height for the
+ *  bottom drag boundary so they don't bury under the composer. */
+const CARD_NOMINAL_H = 130;
 
 export function CanvasCard({
   card,
@@ -22,7 +27,8 @@ export function CanvasCard({
   onMove: (id: number, x: number, y: number) => void;
   onSelect: (id: number) => void;
 }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; lastX: number; lastY: number } | null>(null);
+  const settleRef = useRef<{ stop: () => void } | null>(null);
   const [dragging, setDragging] = useState(false);
   const working = card.kind === 'packet' && card.tone === 'working';
   const width = CARD_WIDTH[card.kind];
@@ -33,17 +39,31 @@ export function CanvasCard({
       transition={{ type: 'spring', stiffness: 380, damping: 28, delay: card.entryDelay ?? 0 }}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
+        settleRef.current?.stop();
         event.currentTarget.setPointerCapture(event.pointerId);
-        dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y };
+        dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y, lastX: card.x, lastY: card.y };
         setDragging(true);
         onSelect(card.id);
       }}
       onPointerMove={(event) => {
         const drag = dragRef.current;
         if (!drag || drag.pointerId !== event.pointerId) return;
-        onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(4, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
+        const bounds = dragBounds(width, CARD_NOMINAL_H);
+        const zoom = canvasZoom();
+        const x = resistAxis(drag.originX + (event.clientX - drag.startX) / zoom, bounds.minX, bounds.maxX);
+        const y = resistAxis(drag.originY + (event.clientY - drag.startY) / zoom, bounds.minY, bounds.maxY);
+        drag.lastX = x;
+        drag.lastY = y;
+        onMove(card.id, x, y);
       }}
-      onPointerUp={() => { dragRef.current = null; setDragging(false); }}
+      onPointerUp={() => {
+        const drag = dragRef.current;
+        if (drag) {
+          settleRef.current = settleInBounds(drag.lastX, drag.lastY, dragBounds(width, CARD_NOMINAL_H), (x, y) => onMove(card.id, x, y));
+        }
+        dragRef.current = null;
+        setDragging(false);
+      }}
       style={{
         position: 'absolute',
         left: card.x,

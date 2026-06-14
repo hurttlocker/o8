@@ -12,8 +12,11 @@ export const FONT = 'var(--font-sans-system)';
 export function glass(deep = false, suppressBlur = false): CSSProperties {
   return {
     background: deep ? 'var(--cnv-tint-deep)' : 'var(--cnv-tint)',
-    backdropFilter: suppressBlur ? 'none' : 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
-    WebkitBackdropFilter: suppressBlur ? 'none' : 'blur(var(--cnv-frost)) saturate(var(--cnv-sat, 1.6))',
+    // --cnv-frost-scale (default 1) lets a surface scale its blur DOWN while
+    // its content scrolls fast (useScrollBlurFade) — crisp in motion, full
+    // frost at rest. Set per-surface, so it never touches the slider value.
+    backdropFilter: suppressBlur ? 'none' : 'blur(calc(var(--cnv-frost) * var(--cnv-frost-scale, 1))) saturate(var(--cnv-sat, 1.6))',
+    WebkitBackdropFilter: suppressBlur ? 'none' : 'blur(calc(var(--cnv-frost) * var(--cnv-frost-scale, 1))) saturate(var(--cnv-sat, 1.6))',
     border: '1px solid var(--cnv-edge)',
     color: 'var(--cnv-ink)',
     boxShadow: '0 12px 40px rgba(0, 0, 0, 0.35)',
@@ -28,12 +31,25 @@ export function glassChat(suppressBlur = false): CSSProperties {
   return {
     ...glass(true, suppressBlur),
     background: 'var(--cnv-chat-tint, var(--cnv-tint-deep))',
-    backdropFilter: suppressBlur ? 'none' : 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
-    WebkitBackdropFilter: suppressBlur ? 'none' : 'blur(var(--cnv-chat-frost, var(--cnv-frost))) saturate(var(--cnv-sat, 1.6))',
+    backdropFilter: suppressBlur ? 'none' : 'blur(calc(var(--cnv-chat-frost, var(--cnv-frost)) * var(--cnv-frost-scale, 1))) saturate(var(--cnv-sat, 1.6))',
+    WebkitBackdropFilter: suppressBlur ? 'none' : 'blur(calc(var(--cnv-chat-frost, var(--cnv-frost)) * var(--cnv-frost-scale, 1))) saturate(var(--cnv-sat, 1.6))',
     border: '1px solid var(--cnv-chat-edge, var(--cnv-edge))',
     color: 'var(--cnv-chat-ink, var(--cnv-ink))',
   } as CSSProperties;
 }
+
+/** Skiper-style edge fade for scrollable lists — content dissolves at the top
+ *  and bottom edges instead of hard-cutting at the scroll bounds. Matches the
+ *  o8.md panel / default chat's `cortex-scroll-fade-y`, inlined for the canvas
+ *  (inline-styles only). Spread onto any scroll container. */
+export const scrollFadeY = {
+  WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%)',
+  maskImage: 'linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%)',
+  WebkitMaskSize: '100% 100%',
+  maskSize: '100% 100%',
+  WebkitMaskRepeat: 'no-repeat',
+  maskRepeat: 'no-repeat',
+} as CSSProperties;
 
 /** Rebinds the canvas ink/tint vocabulary INSIDE a chat card to the
  *  chat-scoped values — so when chats run their own tone (light fog on a
@@ -98,6 +114,11 @@ export const CARD_WIDTH: Record<CardKind, number> = {
  */
 export const TERM_MIN_W = 340;
 export const TERM_MIN_H = 190;
+/** xterm font size for canvas shells. The terminal card lives INSIDE the zoom
+ *  layer (CSS `zoom`), so this px is scaled by the canvas zoom on screen —
+ *  17 reads ~12px at the 0.7 ("100%") zoom, matching the o8.md body + the
+ *  orchestrator dock instead of the old ~8px squint. Tune here. */
+export const TERM_FONT_PX = 17;
 /** Image cards resize aspect-locked from the corner grip. */
 export const IMG_MIN_W = 120;
 export const IMG_MAX_SPAWN_EDGE = 340;
@@ -180,6 +201,8 @@ export type NewDockEntry =
    *  startedAt = epoch ms of the first delta; marks[i] = elapsed seconds
    *  when paragraph i closed. */
   | { role: 'thinking'; text: string; live?: boolean; startedAt?: number; marks?: number[] }
-  | { role: 'followups' };
+  /** Emitted once when a turn settles — carries the full assistant answer so
+   *  the end-of-turn playback bar can speak "the entire thing he said." */
+  | { role: 'playback'; text: string };
 
 export type DockEntry = NewDockEntry & { id: number };

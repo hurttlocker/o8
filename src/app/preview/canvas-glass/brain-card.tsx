@@ -14,11 +14,11 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
-import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, glassChat, chatVocabularyRebind } from './ui';
+import { FONT, scrollFadeY } from './ui';
 import { Citations, InlineMarkdown, SourcesLine } from './response-blocks';
 import { CardComposer } from './card-composer';
+import { GlassCardShell } from './card-shell';
+import { useScrollBlurFade } from './use-scroll-blur-fade';
 
 export interface BrainCard {
   id: number;
@@ -86,6 +86,7 @@ export function BrainConversation({
   const [asking, setAsking] = useState(false);
   const idRef = useRef(1);
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  useScrollBlurFade(scrollRef);
   const abortRef = useRef<AbortController | null>(null);
 
   const repoTail = repoPath ? repoPath.split('/').filter(Boolean).pop() ?? null : null;
@@ -191,6 +192,7 @@ export function BrainConversation({
       <div
         ref={scrollRef}
         style={{
+          ...scrollFadeY,
           flex: 1,
           minHeight: 0,
           overflowY: 'auto',
@@ -275,142 +277,24 @@ export function BrainGlassCard({
   onFocus: (id: number) => void;
   onClose: (id: number) => void;
 }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [resizing, setResizing] = useState(false);
-
   const repoTail = card.repoPath ? card.repoPath.split('/').filter(Boolean).pop() ?? null : null;
 
   return (
-    <motion.div
-      initial={{ scale: 0.7, opacity: 0, y: 24 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      exit={{ scale: 0.86, opacity: 0 }}
-      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-      onPointerDownCapture={() => onFocus(card.id)}
-      style={{
-        position: 'absolute',
-        left: card.x,
-        top: card.y,
-        width: card.w,
-        zIndex: card.z,
-      }}
+    <GlassCardShell
+      card={card}
+      minW={BRAIN_MIN_W}
+      minH={BRAIN_MIN_H}
+      title="Brain"
+      badge={repoTail ?? undefined}
+      onMove={onMove}
+      onResize={onResize}
+      onFocus={onFocus}
+      onClose={onClose}
     >
-      <SmoothCorners
-        corners={{ radius: 14 }}
-        shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', ...glassChat(dragging || resizing), ...chatVocabularyRebind() }}
-      >
-        {/* Title bar — drag handle. */}
-        <div
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y };
-            setDragging(true);
-          }}
-          onPointerMove={(event) => {
-            const drag = dragRef.current;
-            if (!drag || drag.pointerId !== event.pointerId) return;
-            onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
-          }}
-          onPointerUp={() => { dragRef.current = null; setDragging(false); }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 7,
-            paddingBottom: 7,
-            paddingLeft: 12,
-            paddingRight: 8,
-            borderBottom: '1px solid var(--cnv-edge)',
-            cursor: dragging ? 'grabbing' : 'grab',
-            touchAction: 'none',
-            userSelect: 'none',
-          }}
-        >
-          <svg style={{ width: 11, height: 11, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <circle cx="12" cy="12" r="10" />
-            <path d="M12 7.4l1.1 2.9 2.9 1.1-2.9 1.1-1.1 2.9-1.1-2.9-2.9-1.1 2.9-1.1z" />
-          </svg>
-          <span style={{ flex: 1, fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            Brain
-            {repoTail ? <span style={{ color: 'var(--cnv-ink-muted)', fontWeight: 260 }}>{`  ·  ${repoTail}`}</span> : null}
-          </span>
-          <button
-            type="button"
-            aria-label="Close Brain"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onClose(card.id)}
-            style={{
-              borderWidth: 0,
-              background: 'transparent',
-              paddingTop: 2,
-              paddingBottom: 2,
-              paddingLeft: 8,
-              paddingRight: 8,
-              fontSize: 11,
-              color: 'var(--cnv-ink-muted)',
-              cursor: 'pointer',
-              fontFamily: FONT,
-            }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Conversation core. */}
-        <div style={{ height: card.h, display: 'flex', flexDirection: 'column' }}>
-          <BrainConversation repoPath={card.repoPath} initialQuestion={card.initialQuestion} locked={dragging || resizing} />
-        </div>
-
-        {/* Corner resize grip. */}
-        <div
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.stopPropagation();
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originW: card.w, originH: card.h };
-            setResizing(true);
-          }}
-          onPointerMove={(event) => {
-            const resize = resizeRef.current;
-            if (!resize || resize.pointerId !== event.pointerId) return;
-            onResize(
-              card.id,
-              Math.max(BRAIN_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
-              Math.max(BRAIN_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
-            );
-          }}
-          onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
-          style={{
-            position: 'absolute',
-            right: 0,
-            bottom: 0,
-            width: 18,
-            height: 18,
-            cursor: 'nwse-resize',
-            touchAction: 'none',
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'flex-end',
-            paddingRight: 4,
-            paddingBottom: 4,
-            opacity: resizing ? 1 : 0.55,
-            zIndex: 2,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={(event) => { if (!resizeRef.current) event.currentTarget.style.opacity = '0.55'; }}
-        >
-          <svg width={9} height={9} viewBox="0 0 9 9" aria-hidden>
-            <path d="M8 1 1 8M8 5 5 8" stroke="var(--cnv-ink-muted)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-          </svg>
-        </div>
-      </SmoothCorners>
-    </motion.div>
+      {/* Conversation core. */}
+      <div style={{ height: card.h, display: 'flex', flexDirection: 'column' }}>
+        <BrainConversation repoPath={card.repoPath} initialQuestion={card.initialQuestion} />
+      </div>
+    </GlassCardShell>
   );
 }

@@ -44,9 +44,15 @@ function saveThreadMap(map: Map<string, string>) {
   }
 }
 
+/** Narrow an event's `args`/payload (it arrives as `unknown` off the wire). */
+const asRecord = (v: unknown): Record<string, unknown> | undefined =>
+  (typeof v === 'object' && v !== null ? (v as Record<string, unknown>) : undefined);
+
 export interface CanvasOrchCallbacks {
   onOutput?: (repoPath: string, text: string, thinking: boolean) => void;
-  onToolUse?: (repoPath: string, name: string) => void;
+  onToolUse?: (repoPath: string, name: string, args?: Record<string, unknown>) => void;
+  /** A tool finished — carries its output (the PR-card wire reads `gh pr` URLs). */
+  onToolResult?: (repoPath: string, name: string, args: Record<string, unknown> | undefined, output: string | undefined) => void;
   onStatus?: (repoPath: string, status: CanvasOrchStatus) => void;
   onError?: (repoPath: string, error: string) => void;
   /** A lane changed state somewhere (agent spawned, review-ready, merged…)
@@ -59,7 +65,8 @@ export interface CanvasOrchCallbacks {
  *  these up to the page's shared entry pipeline. */
 export type CanvasThreadEvent =
   | { type: 'output'; text: string; thinking: boolean }
-  | { type: 'tool'; name: string }
+  | { type: 'tool'; name: string; args?: Record<string, unknown> }
+  | { type: 'tool-result'; name: string; args?: Record<string, unknown>; output?: string }
   | { type: 'status'; status: CanvasOrchStatus }
   | { type: 'error'; error: string };
 
@@ -115,7 +122,9 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
         if (msg.event === 'output' && typeof data.text === 'string') {
           cbRef.current.onOutput?.(repoPath, data.text, data.thinking === true);
         } else if (msg.event === 'tool-use' && typeof data.name === 'string') {
-          cbRef.current.onToolUse?.(repoPath, data.name);
+          cbRef.current.onToolUse?.(repoPath, data.name, asRecord(data.args));
+        } else if (msg.event === 'tool-result' && typeof data.name === 'string') {
+          cbRef.current.onToolResult?.(repoPath, data.name, asRecord(data.args), typeof data.output === 'string' ? data.output : undefined);
         } else if (msg.event === 'status' && typeof data.status === 'string') {
           const next = data.status === 'busy' ? 'busy' : data.status === 'dead' ? 'dead' : 'ready';
           setStatus(next);
@@ -247,7 +256,9 @@ export function useThreadOrchestrator(
         if (msg.event === 'output' && typeof data.text === 'string') {
           onEventRef.current({ type: 'output', text: data.text, thinking: data.thinking === true });
         } else if (msg.event === 'tool-use' && typeof data.name === 'string') {
-          onEventRef.current({ type: 'tool', name: data.name });
+          onEventRef.current({ type: 'tool', name: data.name, args: asRecord(data.args) });
+        } else if (msg.event === 'tool-result' && typeof data.name === 'string') {
+          onEventRef.current({ type: 'tool-result', name: data.name, args: asRecord(data.args), output: typeof data.output === 'string' ? data.output : undefined });
         } else if (msg.event === 'status' && typeof data.status === 'string') {
           const next: CanvasOrchStatus = data.status === 'busy' ? 'busy' : data.status === 'dead' ? 'dead' : 'ready';
           setStatus(next);
@@ -292,5 +303,14 @@ export function useThreadOrchestrator(
     return true;
   }, [repoPath, threadId]);
 
-  return { status, send };
+  /** Halt this card's running turn — same interrupt the dock line has, scoped
+   *  to this thread (powers the chat card's stop / undo-send). */
+  const interrupt = useCallback(() => {
+    if (!repoPath || !threadId) return;
+    const ws = wsRef.current;
+    if (!ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'orchestrator-interrupt', repoPath, threadId }));
+  }, [repoPath, threadId]);
+
+  return { status, send, interrupt };
 }

@@ -24,6 +24,30 @@ export async function GET(request: Request) {
     let diff = execFileSync('git', ['diff', '--no-color', 'HEAD'], {
       cwd: root, encoding: 'utf-8', timeout: 8000, maxBuffer: 4 * 1024 * 1024,
     });
+    // `git diff HEAD` omits untracked (new) files — append them as new-file
+    // diffs so the canvas card shows new files too, matching the default
+    // review snapshot's completeness. Read-only (`--no-index`, `--exclude-standard`
+    // respects .gitignore); never stages or touches the index.
+    try {
+      const untracked = execFileSync('git', ['ls-files', '--others', '--exclude-standard'], {
+        cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024,
+      }).split('\n').map((line) => line.trim()).filter(Boolean);
+      for (const file of untracked) {
+        if (Buffer.byteLength(diff, 'utf-8') > maxBytes) break;
+        try {
+          execFileSync('git', ['diff', '--no-color', '--no-index', '--', '/dev/null', file], {
+            cwd: root, encoding: 'utf-8', timeout: 5000, maxBuffer: 1024 * 1024,
+          });
+        } catch (untrackedError) {
+          // --no-index always "differs" vs /dev/null → exits 1, so the diff
+          // text comes back on the thrown error's stdout.
+          const out = (untrackedError as { stdout?: string }).stdout ?? '';
+          if (out) diff += (diff && !diff.endsWith('\n') ? '\n' : '') + out;
+        }
+      }
+    } catch {
+      // no untracked files, or git error — the tracked diff still stands
+    }
     let branch = '';
     try {
       branch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], { cwd: root, encoding: 'utf-8', timeout: 3000 }).trim();

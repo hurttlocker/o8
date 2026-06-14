@@ -616,11 +616,15 @@ export async function sendToCodexOrchestrator(
 
           if (type === 'response_item' && payload?.type === 'function_call_output') {
             const output = typeof payload.output === 'string' ? payload.output : '';
+            // A screenshot tool's base64 is swamped + truncated; surface the
+            // saved file path (o8_view_screenshot persists it) so the canvas can
+            // SHOW the capture via serve-image.
+            const shot = output.match(/\/tmp\/o8-screenshots\/[^\s"']+\.(?:png|jpe?g)/i);
             onEvent({
               type: 'tool_result',
               id: typeof payload.call_id === 'string' ? payload.call_id : null,
               name: typeof payload.name === 'string' ? payload.name : 'function',
-              output: output.slice(0, 4_000),
+              output: shot ? shot[0] : output.slice(0, 4_000),
             });
             continue;
           }

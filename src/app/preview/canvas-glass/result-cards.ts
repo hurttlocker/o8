@@ -25,10 +25,15 @@ export interface TurnTools {
   dels: number;
   /** A pull request opened this turn, if a `gh pr create` landed one. */
   pr: { number: number; repo?: string } | null;
+  /** Output paths of `screencapture` shells this turn — the one capture form we
+   *  can actually SHOW (served via /api/panel/serve-image). o8_view_screenshot's
+   *  image is base64, truncated off the stream, so it has no path and gets no
+   *  card — the orchestrator names it in its reply instead. */
+  screenshotPaths: string[];
 }
 
 export function emptyTurnTools(): TurnTools {
-  return { files: [], adds: 0, dels: 0, pr: null };
+  return { files: [], adds: 0, dels: 0, pr: null, screenshotPaths: [] };
 }
 
 /** Claude Code + Codex file-mutation tools. (Read/Bash/Grep don't count.) */
@@ -65,8 +70,32 @@ function statFrom(name: string, args: Record<string, unknown>): { adds: number; 
   return { adds: lines(args.new_string), dels: lines(args.old_string) };
 }
 
+/** Coerce a shell tool's `command` arg to a string — Claude Code passes a
+ *  string, Codex passes a string[]. */
+function cmdString(args: Record<string, unknown> | undefined): string {
+  if (!args) return '';
+  const c = args.command;
+  if (typeof c === 'string') return c;
+  if (Array.isArray(c)) return c.map((x) => (typeof x === 'string' ? x : '')).join(' ');
+  return '';
+}
+
+/** The output path of a `screencapture` shell, if it wrote a showable image to
+ *  an absolute or ~ path (the last image-looking token). null for anything else
+ *  — incl. o8_view_screenshot, whose base64 is truncated off the stream. */
+function screencapturePath(args: Record<string, unknown> | undefined): string | null {
+  const cmd = cmdString(args);
+  if (!/\bscreencapture\b/.test(cmd)) return null;
+  const hits = [...cmd.matchAll(/(\S+\.(?:png|jpg|jpeg|gif|webp))\b/gi)].map((m) => m[1].replace(/^["']|["']$/g, ''));
+  const path = hits.length ? hits[hits.length - 1] : null;
+  if (!path || (!path.startsWith('/') && !path.startsWith('~'))) return null;
+  return path;
+}
+
 /** Fold a tool-use into the turn accumulator (mutates + returns it). */
 export function recordTool(acc: TurnTools, name: string, args: Record<string, unknown> | undefined): TurnTools {
+  const shot = screencapturePath(args);
+  if (shot) { if (!acc.screenshotPaths.includes(shot)) acc.screenshotPaths.push(shot); return acc; }
   if (!args || !FILE_EDIT_TOOLS.has(name)) return acc;
   const fp = filePathFrom(args);
   if (fp && !acc.files.includes(fp)) acc.files.push(fp);
@@ -76,13 +105,19 @@ export function recordTool(acc: TurnTools, name: string, args: Record<string, un
   return acc;
 }
 
-/** Fold a tool-result — only `gh pr create` matters (PR number from its URL). */
+/** Fold a tool-result. Two things matter: a webview screenshot (o8_view_screenshot
+ *  — the orchestrator emitter swaps its base64 for the saved /tmp path so it
+ *  survives truncation), and a `gh pr create` (PR number from its URL). */
 export function recordToolResult(
   acc: TurnTools,
   name: string,
   args: Record<string, unknown> | undefined,
   output: string | undefined,
 ): TurnTools {
+  if (output) {
+    const shot = output.match(/\/tmp\/o8-screenshots\/[^\s"']+\.(?:png|jpe?g)/i);
+    if (shot) { if (!acc.screenshotPaths.includes(shot[0])) acc.screenshotPaths.push(shot[0]); return acc; }
+  }
   const cmd = args ? str(args.command) : '';
   if (!/\bgh\s+pr\s+create\b/.test(cmd) || !output) return acc;
   const url = output.match(/github\.com\/([^/\s]+\/[^/\s]+)\/pull\/(\d+)/);
@@ -120,6 +155,14 @@ export function synthesizeResultEntries(acc: TurnTools): NewDockEntry[] {
       prNumber: acc.pr.number,
       ...(acc.pr.repo ? { repo: acc.pr.repo } : {}),
       prState: 'open',
+    });
+  }
+  for (const path of acc.screenshotPaths) {
+    entries.push({
+      role: 'result',
+      kind: 'screenshot',
+      title: '', // image-led — no label; the capture shows itself (the orchestrator names it in text).
+      src: `/api/panel/serve-image?path=${encodeURIComponent(path)}`,
     });
   }
   return entries;

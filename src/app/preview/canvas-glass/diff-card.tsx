@@ -9,9 +9,9 @@
  */
 
 import { useRef, useState } from 'react';
-import { motion } from 'framer-motion';
-import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, TONE_DOT, glass } from './ui';
+import { FONT, scrollFadeY } from './ui';
+import { GlassCardShell } from './card-shell';
+import { useScrollBlurFade } from './use-scroll-blur-fade';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 export const DIFF_MIN_W = 380;
@@ -66,11 +66,9 @@ export function DiffGlassCard({
   /** Hands the operator's words back to the composer, prefilled. */
   onRequestChanges: (card: DiffCard) => void;
 }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [resizing, setResizing] = useState(false);
   const [merge, setMerge] = useState<MergeState>({ kind: 'idle' });
+  const diffScrollRef = useRef<HTMLDivElement | null>(null);
+  useScrollBlurFade(diffScrollRef);
 
   const approve = async () => {
     if (merge.kind === 'merging' || merge.kind === 'merged') return;
@@ -100,71 +98,19 @@ export function DiffGlassCard({
   };
 
   return (
-    <motion.div
-      initial={{ scale: 0.7, opacity: 0, y: 24 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      exit={{ scale: 0.86, opacity: 0 }}
-      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-      onPointerDownCapture={() => onFocus(card.id)}
-      style={{ position: 'absolute', left: card.x, top: card.y, width: card.w, zIndex: card.z }}
+    <GlassCardShell
+      card={card}
+      minW={DIFF_MIN_W}
+      minH={DIFF_MIN_H}
+      title={card.title}
+      badge={card.branch ?? undefined}
+      onMove={onMove}
+      onResize={onResize}
+      onFocus={onFocus}
+      onClose={onClose}
     >
-      <SmoothCorners
-        corners={{ radius: 14 }}
-        shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', overflow: 'hidden', ...glass(true, dragging || resizing) }}
-      >
-        {/* Title bar — drag handle. */}
-        <div
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y };
-            setDragging(true);
-          }}
-          onPointerMove={(event) => {
-            const drag = dragRef.current;
-            if (!drag || drag.pointerId !== event.pointerId) return;
-            onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
-          }}
-          onPointerUp={() => { dragRef.current = null; setDragging(false); }}
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: 8,
-            paddingTop: 8,
-            paddingBottom: 8,
-            paddingLeft: 12,
-            paddingRight: 8,
-            borderBottom: '1px solid var(--cnv-edge)',
-            cursor: dragging ? 'grabbing' : 'grab',
-            touchAction: 'none',
-            userSelect: 'none',
-          }}
-        >
-          <span aria-hidden style={{ width: 6, height: 6, borderRadius: '50%', background: merge.kind === 'merged' ? '#8b5cf6' : TONE_DOT.waiting, flexShrink: 0 }} />
-          <span style={{ flex: 1, fontSize: 11.5, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            {card.title}
-          </span>
-          {card.branch ? (
-            <span style={{ fontSize: 9, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: 130 }}>
-              {card.branch}
-            </span>
-          ) : null}
-          <button
-            type="button"
-            aria-label="Close diff"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onClose(card.id)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 2, paddingLeft: 8, paddingRight: 6, fontSize: 11, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            ✕
-          </button>
-        </div>
-
-        {/* Stat strip. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 5, paddingBottom: 5, paddingLeft: 12, paddingRight: 12, borderBottom: '1px solid var(--cnv-edge)' }}>
+        {/* Stat strip — quiet, no divider line. */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2, paddingBottom: 6, paddingLeft: 16, paddingRight: 16 }}>
           <span style={{ flex: 1, fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: MONO, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
             {card.stat.split('\n').pop()?.trim() || 'No changes'}
             {card.truncated ? '  ·  truncated' : ''}
@@ -172,7 +118,7 @@ export function DiffGlassCard({
         </div>
 
         {/* The diff — one continuous read, glass tones. */}
-        <div style={{ height: card.h, overflowY: 'auto', overflowX: 'auto', paddingTop: 8, paddingBottom: 8, paddingLeft: 12, paddingRight: 12, scrollbarWidth: 'thin' } as React.CSSProperties}>
+        <div ref={diffScrollRef} style={{ ...scrollFadeY, height: card.h, overflowY: 'auto', overflowX: 'auto', paddingTop: 2, paddingBottom: 8, paddingLeft: 16, paddingRight: 16, scrollbarWidth: 'thin' } as React.CSSProperties}>
           {card.diff.trim() === '' ? (
             <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
               Clean worktree — nothing to review on this lane.
@@ -188,7 +134,7 @@ export function DiffGlassCard({
 
         {/* Governance row — approve or push back, right here. A worktree
             diff is YOUR uncommitted work, not a lane — no merge actions. */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 8, paddingBottom: 10, paddingLeft: 12, paddingRight: 12, borderTop: '1px solid var(--cnv-edge)' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 6, paddingBottom: 14, paddingLeft: 16, paddingRight: 16, flexShrink: 0 }}>
           {card.laneId.startsWith('worktree:') ? (
             <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
               Your uncommitted changes — commit from a terminal or the dashboard.
@@ -253,50 +199,6 @@ export function DiffGlassCard({
             </span>
           ) : null}
         </div>
-
-        {/* Corner resize grip. */}
-        <div
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.stopPropagation();
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originW: card.w, originH: card.h };
-            setResizing(true);
-          }}
-          onPointerMove={(event) => {
-            const resize = resizeRef.current;
-            if (!resize || resize.pointerId !== event.pointerId) return;
-            onResize(
-              card.id,
-              Math.max(DIFF_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
-              Math.max(DIFF_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
-            );
-          }}
-          onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
-          style={{
-            position: 'absolute',
-            right: 2,
-            bottom: 2,
-            width: 18,
-            height: 18,
-            cursor: 'nwse-resize',
-            touchAction: 'none',
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'flex-end',
-            paddingRight: 4,
-            paddingBottom: 4,
-            opacity: resizing ? 1 : 0.55,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={(event) => { if (!resizeRef.current) event.currentTarget.style.opacity = '0.55'; }}
-        >
-          <svg width={9} height={9} viewBox="0 0 9 9" aria-hidden>
-            <path d="M8 1 1 8M8 5 5 8" stroke="var(--cnv-ink-muted)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-          </svg>
-        </div>
-      </SmoothCorners>
-    </motion.div>
+    </GlassCardShell>
   );
 }

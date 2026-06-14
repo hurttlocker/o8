@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
@@ -298,6 +298,23 @@ function imageResult(base64: string, mimeType: string, meta: Record<string, unkn
       { type: 'text', text: JSON.stringify(meta) },
     ],
   };
+}
+
+/** Persist a captured screenshot to a temp file so consumers that can't carry
+ *  the base64 (the canvas, whose orchestrator stream truncates tool output) can
+ *  still SHOW it via /api/panel/serve-image. Returns the path, or null if the
+ *  write fails — the base64 in the result is always the source of truth. */
+const SCREENSHOT_DIR = '/tmp/o8-screenshots';
+function persistScreenshot(base64: string, mimeType: string): string | null {
+  try {
+    mkdirSync(SCREENSHOT_DIR, { recursive: true });
+    const ext = mimeType.includes('jpeg') ? 'jpg' : 'png';
+    const file = join(SCREENSHOT_DIR, `${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${ext}`);
+    writeFileSync(file, Buffer.from(base64, 'base64'));
+    return file;
+  } catch {
+    return null;
+  }
 }
 
 function structuredErrorResult(error: unknown): McpToolResult {
@@ -629,11 +646,13 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
   return {
     o8_view_screenshot: async () => withStructuredErrors(async () => {
       const screenshot = await getClient().screenshot();
+      const path = persistScreenshot(screenshot.imageBase64, screenshot.mimeType);
       return imageResult(screenshot.imageBase64, screenshot.mimeType, {
         ok: true,
         width: screenshot.width,
         height: screenshot.height,
         mimeType: screenshot.mimeType,
+        ...(path ? { path } : {}),
       });
     }),
 

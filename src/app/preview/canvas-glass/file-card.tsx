@@ -9,15 +9,20 @@
  * geometry. Same glass treatment as the terminal: transparent editor over
  * the card tint + the shared veil dial.
  *
+ * Chrome is the shared GlassCardShell (centered grab pill, no title-bar
+ * lines, Lisse corners, 8-edge resize). The Read/Edit toggle + Save (⌘S)
+ * ride the shell's hover actions slot; the editor + save/load logic stay
+ * in the body.
+ *
  * v1 is a mono textarea — the CodeMirror upgrade (syntax, o8.md blend,
  * agent-surfaced files) rides the regular-UI issue.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { motion } from 'framer-motion';
-import { SmoothCorners } from '@lisse/react';
 import { CanvasMarkdown } from './dock';
-import { canvasZoom, FONT, TERM_MIN_H, TERM_MIN_W, TONE_DOT, glass } from './ui';
+import { FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
+import { GlassCardShell, ShellAction } from './card-shell';
 
 // NOTE: component (+ types) exports only — runtime const exports here would
 // break the Fast Refresh boundary and remount live cards on every edit.
@@ -49,11 +54,6 @@ export function FileGlassCard({
   onFocus: (id: number) => void;
   onClose: (id: number) => void;
 }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; startX: number; startY: number; originW: number; originH: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
-  const [resizing, setResizing] = useState(false);
-
   const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
   const [content, setContent] = useState('');
   const [savedContent, setSavedContent] = useState('');
@@ -146,163 +146,79 @@ export function FileGlassCard({
   };
 
   const shortPath = card.path.replace(/^\/Users\/[^/]+/, '~');
+  // Badge carries the quiet state line: the close-confirm prompt wins, then a
+  // disk-conflict warning, then a dirty marker, else the path tail.
+  const badge = confirmClose
+    ? 'Unsaved — close again to discard'
+    : conflict
+      ? 'Changed on disk — Save overwrites'
+      : dirty
+        ? `${shortPath}  ·  edited`
+        : shortPath;
+
+  // Hover actions — Read/Edit toggle (markdown) + Save (⌘S). Body controls
+  // stay in the body.
+  const actions = (
+    <>
+      {isMarkdown && status === 'ready' ? (
+        <span
+          onPointerDown={(event) => event.stopPropagation()}
+          style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 999, border: '1px solid var(--cnv-edge)', overflow: 'hidden', flexShrink: 0 }}
+        >
+          {(['preview', 'edit'] as const).map((option) => (
+            <button
+              key={option}
+              type="button"
+              onClick={() => setMode(option)}
+              style={{
+                borderWidth: 0,
+                background: mode === option ? 'rgba(255,255,255,0.12)' : 'transparent',
+                paddingTop: 2,
+                paddingBottom: 2,
+                paddingLeft: 9,
+                paddingRight: 9,
+                fontSize: 9.5,
+                fontWeight: mode === option ? 500 : 300,
+                color: mode === option ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+                cursor: 'pointer',
+                fontFamily: FONT,
+              }}
+            >
+              {option === 'preview' ? 'Read' : 'Edit'}
+            </button>
+          ))}
+        </span>
+      ) : null}
+      {dirty || saving ? (
+        <ShellAction label={saving ? 'Saving…' : 'Save (⌘S)'} onClick={() => { void save(); }}>
+          <svg width={13} height={13} viewBox="0 0 24 24" aria-hidden style={{ opacity: saving ? 0.5 : 1 }}>
+            <path
+              d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z M17 21v-8H7v8 M7 3v5h8"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.6"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </ShellAction>
+      ) : null}
+    </>
+  );
 
   return (
-    <motion.div
-      initial={{ scale: 0.7, opacity: 0, y: 24 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
-      exit={{ scale: 0.86, opacity: 0 }}
-      transition={{ type: 'spring', stiffness: 360, damping: 28 }}
-      onPointerDownCapture={() => onFocus(card.id)}
-      style={{
-        position: 'absolute',
-        left: card.x,
-        top: card.y,
-        width: card.w,
-        zIndex: card.z,
-      }}
+    <GlassCardShell
+      card={card}
+      minW={TERM_MIN_W}
+      minH={TERM_MIN_H}
+      title={card.name}
+      badge={badge}
+      actions={actions}
+      onMove={onMove}
+      onResize={onResize}
+      onFocus={onFocus}
+      onClose={() => requestClose()}
     >
-      {/* Visual shell — Apple-smooth squircle corners (Lisse). */}
-      <SmoothCorners
-        corners={{ radius: 14 }}
-        shadowStrategy="box-shadow"
-        style={{ display: 'flex', flexDirection: 'column', ...glass(true, dragging || resizing) }}
-      >
-      {/* Title bar — drag handle, dirty dot, save, close. */}
-      <div
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-          dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y };
-          setDragging(true);
-        }}
-        onPointerMove={(event) => {
-          const drag = dragRef.current;
-          if (!drag || drag.pointerId !== event.pointerId) return;
-          onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
-        }}
-        onPointerUp={() => { dragRef.current = null; setDragging(false); }}
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 8,
-          paddingTop: 8,
-          paddingBottom: 8,
-          paddingLeft: 12,
-          paddingRight: 8,
-          borderBottom: '1px solid var(--cnv-edge)',
-          cursor: dragging ? 'grabbing' : 'grab',
-          touchAction: 'none',
-          userSelect: 'none',
-        }}
-      >
-        <span
-          aria-hidden
-          style={{
-            width: 6,
-            height: 6,
-            borderRadius: '50%',
-            flexShrink: 0,
-            background: status === 'error' ? '#ef4444' : dirty ? TONE_DOT.waiting : TONE_DOT.idle,
-          }}
-        />
-        <span style={{ flex: 1, display: 'flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
-          <span style={{ fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, whiteSpace: 'nowrap' }}>
-            {confirmClose ? 'Unsaved — close again to discard' : card.name}
-          </span>
-          {confirmClose ? null : (
-            <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {shortPath}
-            </span>
-          )}
-        </span>
-        {conflict ? (
-          <span style={{ fontSize: 9.5, fontWeight: 300, color: TONE_DOT.waiting, fontFamily: FONT, flexShrink: 0 }}>
-            Changed on disk — Save overwrites
-          </span>
-        ) : null}
-        {isMarkdown && status === 'ready' ? (
-          <span
-            onPointerDown={(event) => event.stopPropagation()}
-            style={{ display: 'inline-flex', alignItems: 'center', borderRadius: 999, border: '1px solid var(--cnv-edge)', overflow: 'hidden', flexShrink: 0 }}
-          >
-            {(['preview', 'edit'] as const).map((option) => (
-              <button
-                key={option}
-                type="button"
-                onClick={() => setMode(option)}
-                style={{
-                  borderWidth: 0,
-                  background: mode === option ? 'rgba(255,255,255,0.12)' : 'transparent',
-                  paddingTop: 2,
-                  paddingBottom: 2,
-                  paddingLeft: 9,
-                  paddingRight: 9,
-                  fontSize: 9.5,
-                  fontWeight: mode === option ? 500 : 300,
-                  color: mode === option ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
-                  cursor: 'pointer',
-                  fontFamily: FONT,
-                }}
-              >
-                {option === 'preview' ? 'Read' : 'Edit'}
-              </button>
-            ))}
-          </span>
-        ) : null}
-        {dirty || saving ? (
-          <button
-            type="button"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => { void save(); }}
-            disabled={saving}
-            style={{
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'var(--cnv-edge)',
-              background: 'transparent',
-              borderRadius: 999,
-              paddingTop: 2,
-              paddingBottom: 2,
-              paddingLeft: 10,
-              paddingRight: 10,
-              fontSize: 10,
-              fontWeight: 400,
-              color: 'var(--cnv-ink)',
-              cursor: saving ? 'default' : 'pointer',
-              fontFamily: FONT,
-              flexShrink: 0,
-              opacity: saving ? 0.6 : 1,
-            }}
-            onMouseEnter={(event) => { if (!saving) event.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-          >
-            {saving ? 'Saving…' : 'Save'}
-          </button>
-        ) : null}
-        <button
-          type="button"
-          aria-label="Close file"
-          onPointerDown={(event) => event.stopPropagation()}
-          onClick={requestClose}
-          style={{
-            borderWidth: 0,
-            background: 'transparent',
-            padding: 2,
-            paddingLeft: 8,
-            paddingRight: 8,
-            fontSize: 11,
-            color: confirmClose ? TONE_DOT.waiting : 'var(--cnv-ink-muted)',
-            cursor: 'pointer',
-            fontFamily: FONT,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-          onMouseLeave={(event) => { event.currentTarget.style.color = confirmClose ? TONE_DOT.waiting : 'var(--cnv-ink-muted)'; }}
-        >
-          ✕
-        </button>
-      </div>
-
       {/* The editor — transparent mono over the glass + shared veil. */}
       <div style={{ height: card.h, position: 'relative' }}>
         <div aria-hidden style={{ position: 'absolute', inset: 0, background: `rgba(7, 9, 13, ${termVeil.toFixed(2)})` }} />
@@ -348,8 +264,8 @@ export function FileGlassCard({
               lineHeight: isMarkdown ? 1.65 : 1.5,
               fontFamily: isMarkdown ? FONT : 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
               paddingTop: 10,
-              paddingLeft: 12,
-              paddingRight: 10,
+              paddingLeft: 16,
+              paddingRight: 16,
               paddingBottom: 10,
               // Markdown wraps like prose; code stays pre/no-wrap.
               whiteSpace: isMarkdown ? 'pre-wrap' : 'pre',
@@ -373,51 +289,7 @@ export function FileGlassCard({
             )}
           </div>
         )}
-
-        {/* Corner resize grip — same vocabulary as the terminal card. */}
-        <div
-          role="presentation"
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            event.stopPropagation();
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originW: card.w, originH: card.h };
-            setResizing(true);
-          }}
-          onPointerMove={(event) => {
-            const resize = resizeRef.current;
-            if (!resize || resize.pointerId !== event.pointerId) return;
-            onResize(
-              card.id,
-              Math.max(TERM_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()),
-              Math.max(TERM_MIN_H, resize.originH + (event.clientY - resize.startY) / canvasZoom()),
-            );
-          }}
-          onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
-          style={{
-            position: 'absolute',
-            right: 0,
-            bottom: 0,
-            width: 18,
-            height: 18,
-            cursor: 'nwse-resize',
-            touchAction: 'none',
-            display: 'flex',
-            alignItems: 'flex-end',
-            justifyContent: 'flex-end',
-            paddingRight: 4,
-            paddingBottom: 4,
-            opacity: resizing ? 1 : 0.55,
-          }}
-          onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
-          onMouseLeave={(event) => { if (!resizeRef.current) event.currentTarget.style.opacity = '0.55'; }}
-        >
-          <svg width={9} height={9} viewBox="0 0 9 9" aria-hidden>
-            <path d="M8 1 1 8M8 5 5 8" stroke="var(--cnv-ink-muted)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
-          </svg>
-        </div>
       </div>
-      </SmoothCorners>
-    </motion.div>
+    </GlassCardShell>
   );
 }
