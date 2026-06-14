@@ -1,8 +1,9 @@
 'use client';
 
-import { createContext, useContext, useMemo, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
 import { ClerkProvider, useUser, useClerk } from '@clerk/nextjs';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
+import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 
 // The Clerk publishable key is app-wide and public, baked into the build at ship
 // time. When it's absent (fresh build with no Clerk app yet), Clerk is disabled
@@ -63,6 +64,29 @@ export function useO8Auth(): O8AuthState {
 function ClerkAuthBridge({ children }: { children: ReactNode }) {
   const { isLoaded, isSignedIn, user } = useUser();
   const clerk = useClerk();
+  const provisionedRef = useRef<string | null>(null);
+
+  // Mirror the active Clerk user into the local users table, once per user.
+  // The route re-derives the authoritative id from the verified session.
+  useEffect(() => {
+    if (!isSignedIn || !user) return;
+    if (provisionedRef.current === user.id) return;
+    provisionedRef.current = user.id;
+    const githubId = user.externalAccounts?.find((a) => String(a.provider).includes('github'))?.providerUserId;
+    void fetch('/api/panel/auth/clerk-provision', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        clerkUserId: user.id,
+        githubId,
+        email: user.primaryEmailAddress?.emailAddress ?? null,
+        name: user.fullName ?? user.username ?? null,
+        avatarUrl: user.imageUrl ?? null,
+      }),
+    }).catch(() => {
+      /* provisioning is best-effort; getCurrentUser retries on next sign-in */
+    });
+  }, [isSignedIn, user]);
 
   const value = useMemo<O8AuthState>(
     () => ({
@@ -88,7 +112,12 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
     [isLoaded, isSignedIn, user, clerk],
   );
 
-  return <O8AuthContext.Provider value={value}>{children}</O8AuthContext.Provider>;
+  return (
+    <O8AuthContext.Provider value={value}>
+      <DesktopAuthCallbackHandler />
+      {children}
+    </O8AuthContext.Provider>
+  );
 }
 
 /**
