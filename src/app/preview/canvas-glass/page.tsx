@@ -66,6 +66,8 @@ import { AnticipationRing } from './anticipation-ring';
 import { OrchestratorDock } from './dock';
 import { FileGlassCard, type FileCard } from './file-card';
 import { ImageGlassCard, type ImageCard } from './image-card';
+import { VideoGlassCard, type VideoCard } from './video-card';
+import { putMedia, getMedia, deleteMedia } from './canvas-media-store';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { useCanvasOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
@@ -201,6 +203,7 @@ export default function CanvasGlassPreviewPage() {
   const [termCards, setTermCards] = useState<TermCard[]>([]);
   const [fileCards, setFileCards] = useState<FileCard[]>([]);
   const [imageCards, setImageCards] = useState<ImageCard[]>([]);
+  const [videoCards, setVideoCards] = useState<VideoCard[]>([]);
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
   const [sessionsOpen, setSessionsOpen] = useState(false);
@@ -1413,22 +1416,24 @@ export default function CanvasGlassPreviewPage() {
 
   /** Clicked card comes forward. Terminals + files + images + browsers +
    *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain', id: number) => {
+  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain', id: number) => {
     const current = kind === 'term'
       ? termCards.find((card) => card.id === id)
       : kind === 'file'
         ? fileCards.find((card) => card.id === id)
         : kind === 'image'
           ? imageCards.find((card) => card.id === id)
-          : kind === 'browser'
-            ? browserCards.find((card) => card.id === id)
-            : kind === 'chat'
-              ? chatCards.find((card) => card.id === id)
-              : kind === 'diff'
-                ? diffCards.find((card) => card.id === id)
-                : kind === 'spec'
-                  ? specCards.find((card) => card.id === id)
-                  : brainCards.find((card) => card.id === id);
+          : kind === 'video'
+            ? videoCards.find((card) => card.id === id)
+            : kind === 'browser'
+              ? browserCards.find((card) => card.id === id)
+              : kind === 'chat'
+                ? chatCards.find((card) => card.id === id)
+                : kind === 'diff'
+                  ? diffCards.find((card) => card.id === id)
+                  : kind === 'spec'
+                    ? specCards.find((card) => card.id === id)
+                    : brainCards.find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
@@ -1436,6 +1441,7 @@ export default function CanvasGlassPreviewPage() {
         ...termCards.map((card) => ({ kind: 'term' as const, id: card.id, z: card.z })),
         ...fileCards.map((card) => ({ kind: 'file' as const, id: card.id, z: card.z })),
         ...imageCards.map((card) => ({ kind: 'image' as const, id: card.id, z: card.z })),
+        ...videoCards.map((card) => ({ kind: 'video' as const, id: card.id, z: card.z })),
         ...browserCards.map((card) => ({ kind: 'browser' as const, id: card.id, z: card.z })),
         ...chatCards.map((card) => ({ kind: 'chat' as const, id: card.id, z: card.z })),
         ...diffCards.map((card) => ({ kind: 'diff' as const, id: card.id, z: card.z })),
@@ -1447,6 +1453,7 @@ export default function CanvasGlassPreviewPage() {
       setTermCards((previous) => previous.map((card) => ({ ...card, z: kind === 'term' && card.id === id ? top : remap.get(`term:${card.id}`) ?? card.z })));
       setFileCards((previous) => previous.map((card) => ({ ...card, z: kind === 'file' && card.id === id ? top : remap.get(`file:${card.id}`) ?? card.z })));
       setImageCards((previous) => previous.map((card) => ({ ...card, z: kind === 'image' && card.id === id ? top : remap.get(`image:${card.id}`) ?? card.z })));
+      setVideoCards((previous) => previous.map((card) => ({ ...card, z: kind === 'video' && card.id === id ? top : remap.get(`video:${card.id}`) ?? card.z })));
       setBrowserCards((previous) => previous.map((card) => ({ ...card, z: kind === 'browser' && card.id === id ? top : remap.get(`browser:${card.id}`) ?? card.z })));
       setChatCards((previous) => previous.map((card) => ({ ...card, z: kind === 'chat' && card.id === id ? top : remap.get(`chat:${card.id}`) ?? card.z })));
       setDiffCards((previous) => previous.map((card) => ({ ...card, z: kind === 'diff' && card.id === id ? top : remap.get(`diff:${card.id}`) ?? card.z })));
@@ -1463,6 +1470,8 @@ export default function CanvasGlassPreviewPage() {
       setFileCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'image') {
       setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else if (kind === 'video') {
+      setVideoCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'browser') {
       setBrowserCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'chat') {
@@ -1474,11 +1483,12 @@ export default function CanvasGlassPreviewPage() {
     } else {
       setBrainCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [brainCards, browserCards, chatCards, diffCards, fileCards, imageCards, specCards, termCards]);
+  }, [brainCards, browserCards, chatCards, diffCards, fileCards, imageCards, videoCards, specCards, termCards]);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
   const focusImageCard = useCallback((id: number) => focusCard('image', id), [focusCard]);
+  const focusVideoCard = useCallback((id: number) => focusCard('video', id), [focusCard]);
   const focusBrowserCard = useCallback((id: number) => focusCard('browser', id), [focusCard]);
   const focusChatCard = useCallback((id: number) => focusCard('chat', id), [focusCard]);
   const focusDiffCard = useCallback((id: number) => focusCard('diff', id), [focusCard]);
@@ -1758,7 +1768,20 @@ export default function CanvasGlassPreviewPage() {
       })]);
     }
     snap.file.forEach((saved) => spawnFileCard(saved.path, saved));
+    // Video cards restore async — the bytes come back from IndexedDB and get a
+    // fresh object URL (the snapshot only carried the media id). A clip whose
+    // blob is gone (storage cleared) drops silently.
+    const videoRestores = (snap.video ?? []).map(async (saved) => {
+      const blob = await getMedia(saved.mediaId);
+      if (!blob) return;
+      const src = URL.createObjectURL(blob);
+      const id = nextIdRef.current;
+      nextIdRef.current += 1;
+      zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+      setVideoCards((previous) => [...previous, { id, x: saved.x, y: saved.y, z: zPeakRef.current, w: saved.w, h: saved.h, aspect: saved.aspect, src, name: saved.name, mediaId: saved.mediaId }]);
+    });
     const settles: Array<Promise<unknown>> = [
+      ...videoRestores,
       ...snap.chat.map((saved) => pickThread(saved.threadId, saved.repoPath, { title: saved.title, repoName: saved.repoName }, saved)),
       ...snap.diff.map((saved) => (saved.laneId.startsWith('worktree:')
         ? spawnWorktreeDiffCard(saved, saved.laneId.slice('worktree:'.length)) ?? Promise.resolve()
@@ -1785,12 +1808,13 @@ export default function CanvasGlassPreviewPage() {
     term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel })),
     file: fileCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, path: card.path })),
     image: imageCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, items: card.items })),
+    video: videoCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, mediaId: card.mediaId, name: card.name })),
     browser: browserCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, tabs: card.tabs, activeTabId: card.activeTabId })),
     chat: chatCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, threadId: card.threadId, repoPath: card.repoPath, repoName: card.repoName, title: card.title })),
     diff: diffCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, laneId: card.laneId, title: card.title })),
     spec: specCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
     brain: brainCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, repoPath: card.repoPath })),
-  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+  }), [activeRepoPath, dockOpen, termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards]);
   useEffect(() => {
     // Hold fire until restore's async spawns settle — an instant save of
     // the half-restored canvas would overwrite the snapshot.
@@ -1985,15 +2009,77 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
+  /** Drop a video clip onto the canvas — the bytes go to IndexedDB (a clip is
+   *  far too big for the localStorage photos ride on), and the card renders an
+   *  object URL minted from them. The snapshot keeps only the media id. */
+  const spawnVideoCard = useCallback((file: File, at: { x: number; y: number }) => {
+    const src = URL.createObjectURL(file);
+    const mediaId = (typeof crypto !== 'undefined' && crypto.randomUUID) ? crypto.randomUUID() : `vid-${Date.now()}-${nextIdRef.current}`;
+    const probe = document.createElement('video');
+    probe.preload = 'metadata';
+    probe.onloadedmetadata = () => {
+      const natW = probe.videoWidth || 16;
+      const natH = probe.videoHeight || 9;
+      const aspect = natW / natH;
+      const w = natW >= natH ? IMG_MAX_SPAWN_EDGE : Math.round(IMG_MAX_SPAWN_EDGE * aspect);
+      const h = Math.round(w / aspect);
+      const id = nextIdRef.current;
+      nextIdRef.current += 1;
+      zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+      const z = zPeakRef.current;
+      setVideoCards((previous) => [...previous, {
+        id,
+        x: Math.max(8, at.x - w / 2),
+        y: Math.max(48, at.y - h / 2),
+        z,
+        w,
+        h,
+        aspect,
+        src,
+        name: file.name,
+        mediaId,
+      }]);
+      void putMedia(mediaId, file);
+    };
+    probe.onerror = () => { URL.revokeObjectURL(src); };
+    probe.src = src;
+  }, []);
+
+  const moveVideoCard = useCallback((id: number, x: number, y: number) => {
+    setVideoCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
+  }, []);
+
+  const resizeVideoCard = useCallback((id: number, w: number) => {
+    setVideoCards((previous) => previous.map((card) => (
+      card.id === id ? { ...card, w, h: Math.round(w / card.aspect) } : card
+    )));
+  }, []);
+
+  const closeVideoCard = useCallback((id: number) => {
+    setVideoCards((previous) => {
+      const target = previous.find((card) => card.id === id);
+      if (target) {
+        URL.revokeObjectURL(target.src);
+        void deleteMedia(target.mediaId);
+      }
+      return previous.filter((card) => card.id !== id);
+    });
+  }, []);
+
   const dropImages = useCallback((event: React.DragEvent) => {
     event.preventDefault();
-    const files = Array.from(event.dataTransfer?.files ?? []).filter((file) => file.type.startsWith('image/'));
+    const all = Array.from(event.dataTransfer?.files ?? []);
+    const videos = all.filter((file) => file.type.startsWith('video/'));
+    const files = all.filter((file) => file.type.startsWith('image/'));
     // Drop point arrives in visual px — the card layer is zoomed.
     const z = canvasZoom();
     files.forEach((file, index) => {
       spawnImageCard(file, { x: event.clientX / z + index * 30, y: event.clientY / z + index * 24 });
     });
-  }, [spawnImageCard]);
+    videos.forEach((file, index) => {
+      spawnVideoCard(file, { x: event.clientX / z + (files.length + index) * 30, y: event.clientY / z + (files.length + index) * 24 });
+    });
+  }, [spawnImageCard, spawnVideoCard]);
 
   /** Top-right search — first matching card on the canvas comes forward. */
   /** Search reaches EVERYTHING — every card kind on the canvas plus past
@@ -2293,6 +2379,20 @@ export default function CanvasGlassPreviewPage() {
             onDrop={dropImageCard}
             onTap={unstackImageCard}
             onClose={closeImageCard}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* ── Video cards — UI clips that sit on the canvas for reference ── */}
+      <AnimatePresence>
+        {videoCards.map((card) => (
+          <VideoGlassCard
+            key={card.id}
+            card={card}
+            onMove={moveVideoCard}
+            onResize={resizeVideoCard}
+            onFocus={focusVideoCard}
+            onClose={closeVideoCard}
           />
         ))}
       </AnimatePresence>
