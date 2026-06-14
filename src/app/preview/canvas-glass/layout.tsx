@@ -1,6 +1,7 @@
 import type { Metadata } from 'next';
 import type { ReactNode } from 'react';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 
 // Same ws-token injection as the dashboard layout — the canvas mounts real
 // terminals over the desktop WebSocket, which requires the token in a meta
@@ -17,5 +18,8 @@ export function generateMetadata(): Metadata {
 }
 
 export default function CanvasGlassLayout({ children }: { children: ReactNode }) {
-  return children;
+  // DictationHost provides the push-to-talk context the canvas composers'
+  // mic buttons plug into — same engine the default IDE composer uses. It
+  // also renders the dictation pill overlay anchored to the active composer.
+  return <DictationHost>{children}</DictationHost>;
 }

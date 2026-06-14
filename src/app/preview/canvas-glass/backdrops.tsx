@@ -32,8 +32,13 @@ const TAME = { speed: 0.12, fit: 'cover' as const, minPixelRatio: 1, maxPixelCou
  * each walker breathes in and out of existence so it never demands the
  * eye. Plain 2D canvas — no WebGL needed for this one.
  */
-function SnakeTrails() {
+function SnakeTrails({ ink }: { ink: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  // Latest trail color without restarting the walker sim — the frame loop
+  // reads colorRef.current, so flipping the canvas tone recolours the
+  // trails live (white on the dark slate, black on the light fog).
+  const colorRef = useRef(ink);
+  colorRef.current = ink;
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -136,7 +141,7 @@ function SnakeTrails() {
       }
 
       ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.fillStyle = '#ffffff';
+      ctx.fillStyle = colorRef.current;
       for (const [key, entry] of lit) {
         const t = (now - entry.at) / DECAY_MS;
         if (t >= 1) {
@@ -384,7 +389,7 @@ function OrbitPulse() {
   return <canvas ref={canvasRef} style={FILL} />;
 }
 
-export function CanvasBackdropLayer({ kind }: { kind: string }) {
+export function CanvasBackdropLayer({ kind, tone }: { kind: string; tone: 'dark' | 'light' }) {
   // WebGL2 probe — the shader library throws without it. Trails is 2D
   // canvas and exempt.
   const [webgl, setWebgl] = useState(false);
@@ -404,7 +409,9 @@ export function CanvasBackdropLayer({ kind }: { kind: string }) {
     </div>
   );
 
-  if (kind === 'trails') return wrap(1, <SnakeTrails />);
+  // Trails light along the dot lattice in the canvas ink — black on the
+  // light fog, white on the dark slate — so they read on either tone.
+  if (kind === 'trails') return wrap(1, <SnakeTrails ink={tone === 'light' ? '#000000' : '#ffffff'} />);
   if (kind === 'dots') return wrap(1, <WindDots />);
   if (kind === 'pulse') return wrap(1, <OrbitPulse />);
   if (!webgl) return null;
@@ -433,6 +440,22 @@ export function CanvasBackdropLayer({ kind }: { kind: string }) {
           grainOverlay={0.08}
           {...TAME}
           speed={0.1}
+          scale={1.15}
+        />
+      ));
+    case 'ember':
+      // The o8 landing's signature scene — a deep navy field folding
+      // through steel to the brand's one warm ember, settling into
+      // near-black. Ported from o8-site Scene.tsx (the glass-landing hero).
+      return wrap(0.6, (
+        <MeshGradient
+          colors={['#04060a', '#0b1320', '#1d2c42', '#31495f', '#c2470e', '#140a05']}
+          distortion={0.8}
+          swirl={0.66}
+          grainMixer={0.14}
+          grainOverlay={0.05}
+          {...TAME}
+          speed={0.2}
           scale={1.15}
         />
       ));

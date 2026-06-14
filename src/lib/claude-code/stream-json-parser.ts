@@ -258,7 +258,12 @@ export function createClaudeCodeStreamJsonParser(
     const toolUseId = asString(block.tool_use_id) ?? asString(block.id) ?? null;
     const matchedTool = tracker.resolve(toolUseId);
     const explicitOutput = asString(block.output) ?? asString(block.result);
-    const output = explicitOutput ?? stringifyToolResultContent(block.content);
+    const rawOutput = explicitOutput ?? stringifyToolResultContent(block.content);
+    // A screenshot tool's base64 is swamped in the result; surface the saved
+    // file path (o8_view_screenshot persists it) so the canvas can SHOW the
+    // capture via serve-image instead of dropping it.
+    const shot = rawOutput ? rawOutput.match(/\/tmp\/o8-screenshots\/[^\s"']+\.(?:png|jpe?g)/i) : null;
+    const output = shot ? shot[0] : rawOutput;
     events.push({
       type: 'tool_result',
       id: matchedTool?.id ?? toolUseId,

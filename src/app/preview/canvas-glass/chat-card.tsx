@@ -9,13 +9,16 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
-import { motion } from 'framer-motion';
+import { AnimatePresence, motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { DockEntryView, DockTab } from './dock';
 import { BrainConversation } from './brain-card';
 import { CardComposer } from './card-composer';
-import { canvasZoom, FONT, chatVocabularyRebind, glassChat, type DockEntry } from './ui';
+import { canvasZoom, FONT, chatVocabularyRebind, glassChat, scrollFadeY, type DockEntry } from './ui';
+import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 import { useThreadOrchestrator, type OrcaThreadEvent } from './use-canvas-orchestrator';
+import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS } from './use-send-buffer';
+import { useScrollBlurFade } from './use-scroll-blur-fade';
 
 export interface ChatCard {
   id: number;
@@ -37,6 +40,9 @@ export interface ChatCard {
 // sits on top), so total ≈ MIN_H + ~63px chrome.
 const CHAT_MIN_W = 200;
 const CHAT_MIN_H = 140;
+/** Header chrome above the body (grab pill + tabs) — added to card.h so the
+ *  bottom drag boundary clears the composer by the card's TRUE height. */
+const CHAT_CHROME_H = 63;
 
 type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 interface Geom { x: number; y: number; w: number; h: number; }
@@ -77,6 +83,7 @@ export function ChatGlassCard({
   sendDefaults,
   onLiveEvent,
   onUserSend,
+  onTruncate,
   onMove,
   onResize,
   onFocus,
@@ -89,7 +96,10 @@ export function ChatGlassCard({
   liveEntries: DockEntry[] | null;
   sendDefaults: { model?: string; thinkingEffort?: string };
   onLiveEvent: (lane: string, event: OrcaThreadEvent) => void;
-  onUserSend: (card: ChatCard, text: string, sent: boolean) => void;
+  /** Appends the user entry + returns the undo-truncation boundary for it. */
+  onUserSend: (card: ChatCard, text: string, sent: boolean) => number;
+  /** Erase this card's transcript back to a boundary (undo-send). */
+  onTruncate: (lane: string, fromEntryId: number) => void;
   onMove: (id: number, x: number, y: number) => void;
   onResize: (id: number, w: number, h: number) => void;
   onFocus: (id: number) => void;
@@ -97,7 +107,8 @@ export function ChatGlassCard({
   onDock: (card: ChatCard) => void;
   onClose: (id: number) => void;
 }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number } | null>(null);
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; lastX: number; lastY: number } | null>(null);
+  const settleRef = useRef<{ stop: () => void } | null>(null);
   const resizeRef = useRef<{ pointerId: number; edge: Edge; startX: number; startY: number; start: Geom } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
@@ -109,6 +120,7 @@ export function ChatGlassCard({
   const [activeTab, setActiveTab] = useState<'orchestrator' | 'cortex'>('orchestrator');
   const [draft, setDraft] = useState('');
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  useScrollBlurFade(scrollRef);
 
   // The card IS conversable — its own live line to this exact thread.
   // Docking stays the durability move; talking works right here.
@@ -116,6 +128,20 @@ export function ChatGlassCard({
     onLiveEvent(`thread:${card.threadId}`, event);
   });
   const busy = line.status === 'busy';
+
+  // Same mistake-proofing as the dock + bottom composer: queue-when-busy + an
+  // undo-send grace window. Text-only here (chat cards don't attach images).
+  const cardBuffer = useSendBuffer({
+    busy,
+    interrupt: line.interrupt,
+    dispatch: (text) => {
+      const sent = line.send(text, sendDefaults);
+      const fromEntryId = onUserSend(card, text, sent);
+      return sent ? { lane: `thread:${card.threadId}`, fromEntryId } : null;
+    },
+    restore: (text) => setDraft(text),
+    truncate: onTruncate,
+  });
 
   const entries = liveEntries ?? card.entries;
 
@@ -126,11 +152,8 @@ export function ChatGlassCard({
   }, [entries.length, busy]);
 
   const submit = () => {
-    const text = draft.trim();
-    if (!text || busy) return;
-    const sent = line.send(text, sendDefaults);
-    onUserSend(card, text, sent);
-    if (sent) setDraft('');
+    // Queues if the card is mid-turn; arms undo if it goes out now.
+    if (cardBuffer.send(draft)) setDraft('');
   };
 
   const onResizeDown = (edge: Edge) => (event: React.PointerEvent) => {
@@ -169,6 +192,8 @@ export function ChatGlassCard({
       onPointerDownCapture={() => onFocus(card.id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      data-glass-surface
+      data-card-id={card.id}
       style={{
         position: 'absolute',
         left: card.x,
@@ -199,16 +224,30 @@ export function ChatGlassCard({
         <div
           onPointerDown={(event) => {
             if (event.button !== 0) return;
+            settleRef.current?.stop();
             try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y };
+            dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y, lastX: card.x, lastY: card.y };
             setDragging(true);
           }}
           onPointerMove={(event) => {
             const drag = dragRef.current;
             if (!drag || drag.pointerId !== event.pointerId) return;
-            onMove(card.id, Math.max(4, drag.originX + (event.clientX - drag.startX) / canvasZoom()), Math.max(40, drag.originY + (event.clientY - drag.startY) / canvasZoom()));
+            const bounds = dragBounds(card.w, card.h + CHAT_CHROME_H);
+            const zoom = canvasZoom();
+            const x = resistAxis(drag.originX + (event.clientX - drag.startX) / zoom, bounds.minX, bounds.maxX);
+            const y = resistAxis(drag.originY + (event.clientY - drag.startY) / zoom, bounds.minY, bounds.maxY);
+            drag.lastX = x;
+            drag.lastY = y;
+            onMove(card.id, x, y);
           }}
-          onPointerUp={() => { dragRef.current = null; setDragging(false); }}
+          onPointerUp={() => {
+            const drag = dragRef.current;
+            if (drag) {
+              settleRef.current = settleInBounds(drag.lastX, drag.lastY, dragBounds(card.w, card.h + CHAT_CHROME_H), (x, y) => onMove(card.id, x, y));
+            }
+            dragRef.current = null;
+            setDragging(false);
+          }}
           style={{
             display: 'flex',
             flexDirection: 'column',
@@ -283,6 +322,7 @@ export function ChatGlassCard({
             <div
               ref={scrollRef}
               style={{
+                ...scrollFadeY,
                 flex: 1,
                 minHeight: 0,
                 overflowY: 'auto',
@@ -308,14 +348,22 @@ export function ChatGlassCard({
             </div>
 
             {/* In-card composer — talk to this orchestrator right here. Shared
-                with the dock: borderless, field-sizing + Input Anticipation. */}
+                with the dock: borderless, field-sizing + Input Anticipation.
+                Sending while busy QUEUES; a just-sent message is take-back-able
+                via the undo pill. */}
             <div style={{ paddingTop: 2, paddingBottom: 14, paddingLeft: 14, paddingRight: 14, flexShrink: 0 }}>
+              <QueuedSends items={cardBuffer.queued} onCancel={cardBuffer.cancelQueued} />
+              <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: cardBuffer.undoArmed ? 6 : 0 }}>
+                <AnimatePresence>
+                  {cardBuffer.undoArmed ? <UndoSendPill key="undo" onUndo={cardBuffer.stopOrUndo} graceMs={SEND_UNDO_GRACE_MS} /> : null}
+                </AnimatePresence>
+              </div>
               <CardComposer
                 value={draft}
                 onChange={setDraft}
-                busy={busy}
+                busy={false}
                 model="Opus 4.8"
-                placeholder={busy ? 'Working — interrupt from the dock' : `Reply to ${card.title.length > 26 ? `${card.title.slice(0, 26)}…` : card.title}`}
+                placeholder={busy ? `Queue a follow-up to ${card.title.length > 22 ? `${card.title.slice(0, 22)}…` : card.title}…` : `Reply to ${card.title.length > 26 ? `${card.title.slice(0, 26)}…` : card.title}`}
                 onSubmit={submit}
               />
             </div>

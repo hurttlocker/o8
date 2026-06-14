@@ -90,8 +90,25 @@ export function ScreenshotThumb({ src }: { src?: string }) {
   );
 }
 
-/** A captured-screenshot result — image-led, borderless, title + body. */
-export function ScreenshotResult({ title, body, src, onOpen }: { title: string; body?: string; src?: string; onOpen?: () => void }) {
+/** A captured-screenshot result. No title → image-led: just show the capture
+ *  (Q's call — the orchestrator names it in its reply, the card only needs to
+ *  show what it grabbed). With a title it keeps the labelled thumb+text row. */
+export function ScreenshotResult({ title, body, src, onOpen }: { title?: string; body?: string; src?: string; onOpen?: () => void }) {
+  if (!title) {
+    return (
+      <div
+        onClick={onOpen}
+        style={{ width: '100%', maxHeight: 260, overflow: 'hidden', borderRadius: 12, border: '1px solid var(--cnv-edge)', cursor: onOpen ? 'pointer' : 'default' }}
+      >
+        {src ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img src={src} alt="screen capture" style={{ display: 'block', width: '100%', height: 'auto' }} />
+        ) : (
+          <ScreenshotThumb src={src} />
+        )}
+      </div>
+    );
+  }
   return (
     <ResultRow onOpen={onOpen}>
       <ScreenshotThumb src={src} />

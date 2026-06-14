@@ -1,0 +1,140 @@
+/**
+ * Canvas drag boundary resistance (#1232 design-eng tip — "drag resistance near
+ * boundaries"). Cards used to fling off-screen or bury under the chrome; this
+ * gives every floating-card drag SOFT WALLS at the usable workspace edges (left
+ * spawn rail, right dock, bottom composer, top bar): the card rubber-bands a few
+ * px past, then springs back in-bounds on release.
+ *
+ * Why a manual helper and NOT framer's `drag`/`dragConstraints`: the card layer
+ * carries a CSS `zoom` (--cnv-zoom), and framer maps pointer deltas → transform
+ * in UNzoomed space — the same mismatch the manual handlers already divide out
+ * with canvasZoom(). So resistance lives where the zoom math already does.
+ *
+ * Coordinate space: the card layer is `inset: 0` + `zoom` (no pan), so a card at
+ * canvas (x, y) paints on screen at (x·zoom, y·zoom). Chrome is fixed screen px,
+ * so each inset converts to canvas space by ÷ zoom.
+ */
+import { animate, type AnimationPlaybackControls } from 'framer-motion';
+import { canvasZoom } from './ui';
+
+/** Chrome insets in SCREEN px — the workspace region clear of fixed chrome.
+ *  Side chrome (left rail / right dock) is full-height; the top bar + composer
+ *  are centered pills, so a uniform box is a hair conservative at the top/bottom
+ *  corners — which keeps cards in the comfortable central field. */
+const INSET_LEFT = 96; // ProximityDock spawn rail
+const INSET_TOP = 70; // top control pill (top:18 + height:40, + margin)
+const INSET_BOTTOM = 88; // bottom composer (bottom:24 + ~56 tall, + margin)
+/** Margin off the right screen edge when the dock is closed. */
+const INSET_RIGHT_BARE = 32;
+
+/** Rubber-band stiffness past a wall — the card follows at 8% of the overdrag
+ *  (drag 100px past → 8px past), so the edge reads as a soft wall, not a cliff.
+ *  Matches the design-eng tip's dragElastic={0.08}. */
+const ELASTIC = 0.08;
+
+export interface DragBounds {
+  minX: number;
+  minY: number;
+  maxX: number;
+  maxY: number;
+}
+
+/** Reserve (screen px) the right dock eats — stamped on documentElement by the
+ *  page like --cnv-zoom (0 when the dock is closed). Source: dock.tsx right:24 +
+ *  width:400 = 424. */
+function readDockReserve(): number {
+  if (typeof document === 'undefined') return 0;
+  const raw = Number.parseFloat(document.documentElement.style.getPropertyValue('--cnv-dock-reserve'));
+  return Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+/** Grid mode keeps the viewport fence; free mode is the infinite canvas. */
+function readGridMode(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.documentElement.style.getPropertyValue('--cnv-grid') === '1';
+}
+
+/** Allowed box for a card's ORIGIN (top-left) in canvas px. In FREE mode this is
+ *  effectively unbounded — the infinite canvas, where cards roam the plane and
+ *  the navigator ball is how you find them. In GRID mode it fences to the usable
+ *  viewport so a reorder drag stays sane. */
+export function dragBounds(cardW: number, cardH: number): DragBounds {
+  if (!readGridMode()) {
+    return { minX: -1e6, minY: -1e6, maxX: 1e6, maxY: 1e6 };
+  }
+  const zoom = canvasZoom();
+  const vw = typeof window === 'undefined' ? 1600 : window.innerWidth;
+  const vh = typeof window === 'undefined' ? 900 : window.innerHeight;
+  const dockReserve = readDockReserve();
+  const right = dockReserve > 0 ? dockReserve : INSET_RIGHT_BARE;
+  const minX = INSET_LEFT / zoom;
+  const minY = INSET_TOP / zoom;
+  let maxX = (vw - right) / zoom - cardW;
+  let maxY = (vh - INSET_BOTTOM) / zoom - cardH;
+  // Card wider/taller than the usable field → pin to the near edge rather than
+  // invert the box (an inverted box would resist toward the chrome).
+  if (maxX < minX) maxX = minX;
+  if (maxY < minY) maxY = minY;
+  return { minX, minY, maxX, maxY };
+}
+
+/** The usable workspace as a rect in CANVAS px (the same box dragBounds fences
+ *  to, but expressed as origin + size). The form-fit grid packs into this. */
+export function usableCanvasArea(): { x: number; y: number; w: number; h: number } {
+  const zoom = canvasZoom();
+  const vw = typeof window === 'undefined' ? 1600 : window.innerWidth;
+  const vh = typeof window === 'undefined' ? 900 : window.innerHeight;
+  const dockReserve = readDockReserve();
+  const right = dockReserve > 0 ? dockReserve : INSET_RIGHT_BARE;
+  return {
+    x: INSET_LEFT / zoom,
+    y: INSET_TOP / zoom,
+    w: Math.max(0, vw - right - INSET_LEFT) / zoom,
+    h: Math.max(0, vh - INSET_BOTTOM - INSET_TOP) / zoom,
+  };
+}
+
+let reduceMotion: boolean | null = null;
+function prefersReducedMotion(): boolean {
+  if (reduceMotion !== null) return reduceMotion;
+  reduceMotion =
+    typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+      ? window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      : false;
+  return reduceMotion;
+}
+
+/** One axis of rubber-band: 1:1 inside [min, max], 8% follow past either wall.
+ *  Under prefers-reduced-motion the wall is hard (clamp, no give). */
+export function resistAxis(v: number, min: number, max: number): number {
+  if (prefersReducedMotion()) return Math.min(Math.max(v, min), max);
+  if (v < min) return min - (min - v) * ELASTIC;
+  if (v > max) return max + (v - max) * ELASTIC;
+  return v;
+}
+
+/** On release, spring the card from its (slightly-past) position back to the
+ *  nearest in-bounds rest. No-op (returns null) when already in-bounds. Under
+ *  prefers-reduced-motion it hard-snaps in one onMove. Returns the animation so
+ *  the caller can `.stop()` it if the card is re-grabbed mid-settle. */
+export function settleInBounds(
+  x: number,
+  y: number,
+  bounds: DragBounds,
+  onMove: (x: number, y: number) => void,
+): AnimationPlaybackControls | null {
+  const restX = Math.min(Math.max(x, bounds.minX), bounds.maxX);
+  const restY = Math.min(Math.max(y, bounds.minY), bounds.maxY);
+  if (restX === x && restY === y) return null;
+  if (prefersReducedMotion()) {
+    onMove(restX, restY);
+    return null;
+  }
+  return animate(0, 1, {
+    type: 'spring',
+    stiffness: 700,
+    damping: 42,
+    restDelta: 0.5,
+    onUpdate: (t) => onMove(x + (restX - x) * t, y + (restY - y) * t),
+  });
+}

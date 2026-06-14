@@ -11,11 +11,27 @@ interface O8SpecPaneProps {
   /** Slot for the Ask-o8 chat trigger so it sits IN the toolbar next to
    *  Ask-to-review + Settings rather than floating below the header. */
   toolbarSlot?: ReactNode;
+  /** Canvas treatment: the GlassCardShell already IS the card frame + header,
+   *  so drop the inner bordered editor box (border / radius / fill / maxWidth /
+   *  frame padding) and let the editor fill the modal body directly — same as
+   *  the terminal card. Dashboard (O8Panel) leaves this off and keeps its inset
+   *  editor frame. */
+  embedded?: boolean;
 }
 
 const SAVE_DEBOUNCE_MS = 800;
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
+
+// Canvas scales the card via CSS `zoom` (--cnv-zoom on <html>). Under `zoom`,
+// getBoundingClientRect() returns LAYOUT px while a pointer's clientX is VISUAL
+// px — so any (clientX - rect.left) hit-math (the note-color hue picker) lands
+// wrong unless clientX is divided by the zoom. Returns 1 off-canvas (var unset).
+function canvasZoomFactor(): number {
+  if (typeof document === 'undefined') return 1;
+  const v = Number.parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--cnv-zoom'));
+  return Number.isFinite(v) && v > 0 ? v : 1;
+}
 
 function savedLabel(savedAt: number | null, now: number) {
   if (!savedAt) return 'Loaded';
@@ -51,7 +67,7 @@ function countChangedLines(base: string, next: string) {
   };
 }
 
-export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
+export function O8SpecPane({ repoPath, toolbarSlot, embedded }: O8SpecPaneProps) {
   const [content, setContent] = useState('');
   const [loadedContent, setLoadedContent] = useState('');
   const [loading, setLoading] = useState(true);
@@ -267,6 +283,29 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
         ['--t-input-bg' as unknown as string]: 'var(--t-chat-surface-input-bg)',
       }
     : {};
+  // Diff stats (+adds / -dels) — shared between the dashboard header (inline
+  // with the "Workspace Notes" title) and the canvas/embedded header (in the
+  // slim right-aligned control cluster next to review + settings).
+  const diffStatsEl = (
+    <div
+      aria-label={`Notes diff ${diffStats.additions} additions, ${diffStats.deletions} deletions`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        fontFamily: MONO_FONT,
+        fontSize: 9.5,
+        fontWeight: 300,
+        letterSpacing: '-0.2px',
+        fontVariantNumeric: 'tabular-nums',
+        flexShrink: 0,
+      }}
+    >
+      {diffStats.additions > 0 ? <span style={{ color: 'var(--t-terminal-ansi-bright-green, #16a34a)' }}>+{diffStats.additions}</span> : null}
+      {diffStats.deletions > 0 ? <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{diffStats.deletions}</span> : null}
+      {diffStats.additions === 0 && diffStats.deletions === 0 ? <span style={{ color: 'var(--t-text-faint)' }}>0</span> : null}
+    </div>
+  );
   return (
     <div style={{
       display: 'flex',
@@ -277,7 +316,21 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
       color: surface === 'solid' ? 'var(--t-chat-surface-text)' : 'var(--t-text)',
       ...contentRebinds,
     } as CSSProperties}>
-      <div style={{
+      <div style={embedded ? {
+        // Canvas: the GlassCardShell already IS the card frame + "o8.md" title,
+        // so this collapses to a slim, borderless, right-aligned control strip
+        // (diff · review · settings) that reads as part of the card header —
+        // no "Workspace Notes" label, no status line, no divider.
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        minHeight: 34,
+        paddingTop: 2,
+        paddingLeft: 16,
+        paddingRight: 10,
+        justifyContent: 'flex-end',
+        fontFamily: UI_FONT,
+      } : {
         display: 'flex',
         alignItems: 'center',
         gap: 12,
@@ -290,52 +343,39 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
         borderBottom: '1px solid var(--t-divider-subtle)',
         fontFamily: UI_FONT,
       }}>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+        {embedded ? (
+          diffStatsEl
+        ) : (
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'baseline', gap: 10, minWidth: 0 }}>
+              <div style={{
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                color: surface === 'solid' ? 'var(--t-chat-surface-text)' : 'var(--t-text)',
+                fontSize: 13.5,
+                fontWeight: 350,
+                letterSpacing: '-0.1px',
+                lineHeight: 1.25,
+              }}>
+                Workspace Notes
+              </div>
+              {diffStatsEl}
+            </div>
             <div style={{
+              marginTop: 3,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',
-              color: surface === 'solid' ? 'var(--t-chat-surface-text)' : 'var(--t-text)',
-              fontSize: 13.5,
-              fontWeight: 350,
-              letterSpacing: '-0.1px',
-              lineHeight: 1.25,
+              color: error ? 'var(--t-brand-red)' : reviewing ? noteColor : 'var(--t-text-faint)',
+              fontSize: 9.5,
+              fontWeight: 260,
+              letterSpacing: '-0.4px',
             }}>
-              Workspace Notes
-            </div>
-            <div
-              aria-label={`Notes diff ${diffStats.additions} additions, ${diffStats.deletions} deletions`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                fontFamily: MONO_FONT,
-                fontSize: 9.5,
-                fontWeight: 300,
-                letterSpacing: '-0.2px',
-                fontVariantNumeric: 'tabular-nums',
-                flexShrink: 0,
-              }}
-            >
-              {diffStats.additions > 0 ? <span style={{ color: 'var(--t-terminal-ansi-bright-green, #16a34a)' }}>+{diffStats.additions}</span> : null}
-              {diffStats.deletions > 0 ? <span style={{ color: 'var(--t-terminal-ansi-bright-red, #ef4444)' }}>-{diffStats.deletions}</span> : null}
-              {diffStats.additions === 0 && diffStats.deletions === 0 ? <span style={{ color: 'var(--t-text-faint)' }}>0</span> : null}
+              {reviewing ? 'o8 is reading your notes…' : status}
             </div>
           </div>
-          <div style={{
-            marginTop: 3,
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-            whiteSpace: 'nowrap',
-            color: error ? 'var(--t-brand-red)' : reviewing ? noteColor : 'var(--t-text-faint)',
-            fontSize: 9.5,
-            fontWeight: 260,
-            letterSpacing: '-0.4px',
-          }}>
-            {reviewing ? 'o8 is reading your notes…' : status}
-          </div>
-        </div>
+        )}
         {toolbarSlot}
         <TitleBarButton
           label="Ask o8 to review"
@@ -368,8 +408,11 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
               }}>
                 <div style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.04em', textTransform: 'uppercase', color: isLight ? '#8a93a3' : '#9aa3b2', marginBottom: 10 }}>Note color</div>
                 <div
-                  onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); pickHue(((e.clientX - r.left) / r.width) * 360); }}
-                  onPointerMove={(e) => { if (e.buttons === 1) { const r = e.currentTarget.getBoundingClientRect(); pickHue(((e.clientX - r.left) / r.width) * 360); } }}
+                  // embedded (canvas) divides clientX by the zoom so the picked
+                  // hue matches the pointer — getBoundingClientRect is layout px
+                  // under CSS zoom but clientX is visual px (1:1 off-canvas).
+                  onPointerDown={(e) => { e.currentTarget.setPointerCapture(e.pointerId); const r = e.currentTarget.getBoundingClientRect(); const z = embedded ? canvasZoomFactor() : 1; pickHue((((e.clientX / z) - r.left) / r.width) * 360); }}
+                  onPointerMove={(e) => { if (e.buttons === 1) { const r = e.currentTarget.getBoundingClientRect(); const z = embedded ? canvasZoomFactor() : 1; pickHue((((e.clientX / z) - r.left) / r.width) * 360); } }}
                   style={{
                     position: 'relative', height: 16, borderRadius: 8, cursor: 'pointer', touchAction: 'none',
                     background: 'linear-gradient(to right, hsl(0, 80%, 55%), hsl(60, 80%, 55%), hsl(120, 80%, 55%), hsl(180, 80%, 55%), hsl(240, 80%, 55%), hsl(300, 80%, 55%), hsl(360, 80%, 55%))',
@@ -405,18 +448,20 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
           ) : null}
         </div>
       </div>
-      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', paddingTop: 14, paddingRight: 14, paddingBottom: 14, paddingLeft: 14 }}>
+      <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden', paddingTop: embedded ? 0 : 14, paddingRight: embedded ? 0 : 14, paddingBottom: embedded ? 0 : 14, paddingLeft: embedded ? 0 : 14 }}>
         <div style={{
           display: 'flex',
           flex: 1,
           minWidth: 0,
           minHeight: 0,
-          maxWidth: 920,
-          marginLeft: 'auto',
-          marginRight: 'auto',
-          borderRadius: 18,
-          border: '1px solid var(--t-divider-subtle)',
-          background: surface === 'solid' ? 'var(--t-chat-surface-input-bg)' : 'rgba(255, 255, 255, 0.04)',
+          // Canvas (embedded): no inner frame — the editor fills the modal body
+          // directly, so the card reads as one surface like the terminal card.
+          maxWidth: embedded ? undefined : 920,
+          marginLeft: embedded ? undefined : 'auto',
+          marginRight: embedded ? undefined : 'auto',
+          borderRadius: embedded ? 0 : 18,
+          border: embedded ? 'none' : '1px solid var(--t-divider-subtle)',
+          background: embedded ? 'transparent' : (surface === 'solid' ? 'var(--t-chat-surface-input-bg)' : 'rgba(255, 255, 255, 0.04)'),
           overflow: 'hidden',
         }}>
           {loading ? (
@@ -442,6 +487,12 @@ export function O8SpecPane({ repoPath, toolbarSlot }: O8SpecPaneProps) {
                 ['--o8ed-add' as string]: 'var(--t-terminal-ansi-bright-green, #16a34a)',
                 ['--o8ed-del' as string]: 'var(--t-brand-red, #ef4444)',
                 ['--o8ed-hilite' as string]: noteHilite,
+                // Canvas: size the handwritten margin-note (agent) text to a
+                // "good middle" — a touch above the boosted prose so the Caveat
+                // hand reads as an annotation, not the headline. 0.89 → ~16px at
+                // the 0.7 ("100%") canvas zoom. The rail font sizes multiply by
+                // this var (1 off-canvas). Tune here.
+                ['--o8ed-note-scale' as string]: embedded ? 0.89 : 1,
               } as CSSProperties}
             >
               <O8SpecEditor value={content} onChange={handleChange} repoPath={repoPath} />
