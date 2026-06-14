@@ -361,6 +361,22 @@ export default function CanvasGlassPreviewPage() {
     }
   }, [imageCards]);
 
+  // Kill the text-selection "highlight" a drag leaves behind: dragging the
+  // navigator ball / a card / panning the canvas paints a selection across the
+  // whole screen. The canvas is user-select:none by design, but WebKit still
+  // lets a drag that STARTS on a non-selectable surface extend a selection over
+  // the page. Suppress selectstart everywhere EXCEPT real text entry (composer,
+  // CodeMirror, inputs) so dragging never highlights while typing still selects.
+  useEffect(() => {
+    const onSelectStart = (event: Event) => {
+      const target = event.target;
+      if (target instanceof Element && target.closest('input, textarea, [contenteditable=""], [contenteditable="true"]')) return;
+      event.preventDefault();
+    };
+    document.addEventListener('selectstart', onSelectStart);
+    return () => document.removeEventListener('selectstart', onSelectStart);
+  }, []);
+
   // Stamp the right-dock reserve (screen px it eats) on the same channel as
   // --cnv-zoom, so drag-boundary resistance keeps cards clear of the dock.
   // 0 when closed; 424 = dock.tsx right:24 + width:400.
