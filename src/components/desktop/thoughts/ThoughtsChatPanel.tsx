@@ -1980,11 +1980,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         // px so the relationship holds when the bottom panel opens.
         style={{
           flexShrink: 0,
-          transform: displayMessages.length === 0
-            ? 'translateY(-38cqh)'
-            : 'translateY(0)',
-          transition: 'transform 420ms cubic-bezier(0.22, 1, 0.36, 1)',
-          willChange: 'transform',
+          // Compose-first positioning is handled by the empty-state flex layout
+          // (OrchestratorEmptyState centers the title + quick-actions in the list
+          // area; the composer rests at the bottom of the column). The old
+          // translateY(-38cqh) lift was a *visual* move that reserved no space, so
+          // it painted the composer over the title/quick-actions whenever the
+          // hand-tuned cqh offsets didn't match the container size — the overlap
+          // bug on resize. Plain flow + flex centering reflows at any size.
+          transform: 'none',
         }}
       >
       <ComposerArea
