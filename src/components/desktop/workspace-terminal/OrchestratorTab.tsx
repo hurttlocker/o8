@@ -432,6 +432,9 @@ function OrchestratorTabInner({
   // true from the moment we know we're going to restore until the
   // chat panel has actually loaded the messages (hasMessages flips).
   const restoredThreadRef = useRef<string | null>(null);
+  // Timestamp the boot loader first showed — drives its minimum on-screen window
+  // so a fast restore resolves as one smooth beat instead of a sub-100ms flicker.
+  const restoreShownAtRef = useRef<number | null>(null);
   const [isRestoringThread, setIsRestoringThread] = useState<boolean>(() => {
     if (typeof window === 'undefined') return false;
     if (!restoreLastThread) return false;
@@ -485,12 +488,19 @@ function OrchestratorTabInner({
   // would sit forever.
   useEffect(() => {
     if (!isRestoringThread) return;
-    if (chatChromeState.hasMessages) {
-      setIsRestoringThread(false);
-      return;
-    }
-    const fallback = window.setTimeout(() => setIsRestoringThread(false), 3000);
-    return () => window.clearTimeout(fallback);
+    if (restoreShownAtRef.current == null) restoreShownAtRef.current = Date.now();
+    let timer: number | undefined;
+    const scheduleFinish = (extraDelay: number) => {
+      const shownAt = restoreShownAtRef.current ?? Date.now();
+      // Keep the loader on screen >=480ms total so a fast restore reads as one
+      // smooth beat, never a flash you can't catch.
+      const minRemaining = Math.max(0, 480 - (Date.now() - shownAt));
+      timer = window.setTimeout(() => setIsRestoringThread(false), Math.max(extraDelay, minRemaining));
+    };
+    // Messages arrived -> resolve to the conversation (after the minimum window).
+    // Empty restore target (no messages will ever arrive) -> bail after ~3s.
+    scheduleFinish(chatChromeState.hasMessages ? 0 : 3000);
+    return () => { if (timer != null) window.clearTimeout(timer); };
   }, [isRestoringThread, chatChromeState.hasMessages]);
 
   useEffect(() => {
@@ -892,7 +902,7 @@ function OrchestratorTabInner({
   // gets replaced with a real conversation.
   const restoringShimmerNode = useMemo(
     () => (
-      <ThreadRestoreShimmer />
+      <WorkspaceBootLoader />
     ),
     [],
   );
@@ -1139,12 +1149,13 @@ function OrchestratorTabInner({
   );
 }
 
-/** Loading placeholder that swaps in for OrchestratorEmptyState while
- *  the last-active thread is rehydrating from localStorage. Three thin
- *  bars + a thicker one mimic the shape of an arriving conversation
- *  without claiming any specific content. The shimmer sweep matches
- *  the SessionTimeline pattern so motion vocabulary stays consistent. */
-function ThreadRestoreShimmer() {
+/** Calm, branded boot loader that swaps in for OrchestratorEmptyState while the
+ *  last-active thread rehydrates. A single quietly-pulsing o8 wordmark over
+ *  "Loading workspace" — no fake conversation shapes. Paired with the minimum
+ *  on-screen window in `isRestoringThread` (>=480ms) + a fade-in, so the boot
+ *  reads as one smooth loading beat instead of the old empty-state -> shimmer
+ *  flicker that flashed by too fast to register. */
+function WorkspaceBootLoader() {
   return (
     <div
       style={{
@@ -1152,40 +1163,54 @@ function ThreadRestoreShimmer() {
         minHeight: 0,
         display: 'flex',
         flexDirection: 'column',
-        alignItems: 'stretch',
-        justifyContent: 'flex-start',
-        gap: 12,
-        paddingTop: 64,
-        paddingLeft: 'max(8vw, 80px)',
-        paddingRight: 'max(8vw, 80px)',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 13,
       }}
-      aria-label="Restoring conversation"
+      aria-label="Loading workspace"
       aria-live="polite"
     >
       <style>{`
-        @keyframes o8RestoreShimmer {
-          0%   { background-position: 200% 0; }
-          100% { background-position: -200% 0; }
+        @keyframes o8BootPulse {
+          0%, 100% { opacity: 0.32; transform: scale(0.99); }
+          50%      { opacity: 1;    transform: scale(1); }
         }
+        @keyframes o8BootFadeIn { from { opacity: 0; } to { opacity: 1; } }
       `}</style>
-      {[68, 84, 52, 76].map((widthPct, i) => (
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 12,
+          animation: 'o8BootFadeIn 260ms ease-out both',
+        }}
+      >
         <div
-          key={i}
           style={{
-            alignSelf: i % 2 === 0 ? 'flex-start' : 'flex-end',
-            width: `${widthPct}%`,
-            maxWidth: 520,
-            height: i === 1 ? 64 : 16,
-            borderRadius: i === 1 ? 14 : 6,
-            // Fixed slate rgba — the previous `var(--t-bg-card)` / `var(--t-hover)`
-            // resolved to near-transparent in light mode, making the bars
-            // invisible. These constants read on both light and midnight.
-            background: 'linear-gradient(90deg, rgba(15, 23, 42, 0.06) 0%, rgba(15, 23, 42, 0.14) 50%, rgba(15, 23, 42, 0.06) 100%)',
-            backgroundSize: '200% 100%',
-            animation: 'o8RestoreShimmer 1.8s linear infinite',
+            fontSize: 34,
+            fontWeight: 300,
+            letterSpacing: '-0.04em',
+            lineHeight: 1,
+            color: 'var(--t-text)',
+            fontFamily: 'var(--font-sans-system)',
+            animation: 'o8BootPulse 1.8s ease-in-out infinite',
           }}
-        />
-      ))}
+        >
+          o8
+        </div>
+        <div
+          style={{
+            fontSize: 11.5,
+            fontWeight: 320,
+            letterSpacing: '0.01em',
+            color: 'var(--t-text-faint)',
+            fontFamily: 'var(--font-sans-system)',
+          }}
+        >
+          Loading workspace…
+        </div>
+      </div>
     </div>
   );
 }

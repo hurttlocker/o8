@@ -107,16 +107,15 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
         display: 'flex',
         flex: 1,
         minHeight: 0,
-        // Sit the title right above the composer, not at the top of
-        // the column. 28cqh of paddingTop puts the title near the
-        // upper-middle of the workspace, so the lifted composer (which
-        // lands around 50% via translateY(-32cqh)) meets the title
-        // bottom with a tight gap. Scales with the column so a
-        // shrunken workspace (bottom panel open) keeps the same
-        // visual relationship.
-        alignItems: 'flex-start',
+        // Center the title + quick-actions in the list area on BOTH axes with
+        // plain flexbox. The composer rests at the bottom of the column (no
+        // translate lift), so the empty state reads: centered prompt +
+        // suggestions, composer below. Pure flex centering reflows correctly at
+        // any workspace size — this replaces the old `28cqh` paddingTop +
+        // composer `translateY` dance that overlapped whenever the panel resized.
+        alignItems: 'center',
         justifyContent: 'center',
-        paddingTop: '28cqh',
+        paddingTop: 24,
         paddingRight: 24,
         paddingBottom: 24,
         paddingLeft: 24,
