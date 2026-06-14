@@ -24,6 +24,7 @@ export function CardComposer({
   busy = false,
   placeholder,
   model,
+  anticipate = false,
 }: {
   value: string;
   onChange: (next: string) => void;
@@ -32,6 +33,13 @@ export function CardComposer({
   placeholder: string;
   /** Model label shown as a quiet chip before the send button (bench parity). */
   model?: string;
+  /** Input Anticipation focus ring — fades in as the pointer nears. OFF by
+   *  default and opt-in only for ANCHORED composers (the pinned dock, the
+   *  bottom o8 composer). A floating canvas chat-card sits INSIDE the CSS-zoom
+   *  layer, where the ring's rect (zoom-scaled) vs the global pointer coords
+   *  make it mis-anchor + light up from across the canvas — so the small chats
+   *  leave it off (operator call 2026-06-14). */
+  anticipate?: boolean;
 }) {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const ringRef = useRef<HTMLDivElement | null>(null);
@@ -63,6 +71,7 @@ export function CardComposer({
   }, [host]);
 
   useEffect(() => {
+    if (!anticipate) return;
     const onMove = (event: PointerEvent) => {
       const box = boxRef.current;
       const ring = ringRef.current;
@@ -75,7 +84,7 @@ export function CardComposer({
     };
     window.addEventListener('pointermove', onMove);
     return () => window.removeEventListener('pointermove', onMove);
-  }, []);
+  }, [anticipate]);
 
   const inputStyle: React.CSSProperties & { fieldSizing?: 'content' } = {
     flex: 1,
@@ -100,12 +109,15 @@ export function CardComposer({
       ref={boxRef}
       style={{ position: 'relative', display: 'flex', alignItems: 'flex-end', gap: 8, paddingTop: 7, paddingBottom: 7, paddingLeft: 13, paddingRight: 9, borderRadius: 18, background: 'var(--cnv-tint)' }}
     >
-      {/* Input Anticipation focus ring — opacity driven by pointer proximity. */}
-      <div
-        ref={ringRef}
-        aria-hidden
-        style={{ position: 'absolute', inset: 0, borderRadius: 18, pointerEvents: 'none', opacity: 0, boxShadow: 'inset 0 0 0 1.5px var(--cnv-ink), 0 0 16px -4px var(--cnv-ink)' }}
-      />
+      {/* Input Anticipation focus ring — opacity driven by pointer proximity.
+          Anchored composers only (see `anticipate`); off for floating chats. */}
+      {anticipate ? (
+        <div
+          ref={ringRef}
+          aria-hidden
+          style={{ position: 'absolute', inset: 0, borderRadius: 18, pointerEvents: 'none', opacity: 0, boxShadow: 'inset 0 0 0 1.5px var(--cnv-ink), 0 0 16px -4px var(--cnv-ink)' }}
+        />
+      ) : null}
       <textarea
         ref={textareaRef}
         value={value}

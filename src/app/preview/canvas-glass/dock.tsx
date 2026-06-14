@@ -389,6 +389,7 @@ export function OrchestratorDock({
                 onChange={setDraft}
                 busy={false}
                 model="Opus 4.8"
+                anticipate
                 placeholder={busy ? `Queue a follow-up to ${activeLabel}…` : `Reply to ${activeLabel}`}
                 onSubmit={() => {
                   const prompt = draft.trim();
