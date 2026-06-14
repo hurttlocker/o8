@@ -180,6 +180,21 @@ const CANVAS_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
 ];
 const CANVAS_ORCA_MODEL_KEY = 'o8:canvas-orca-model';
 const CANVAS_ORCA_EFFORT_KEY = 'o8:canvas-orca-effort';
+const CANVAS_ORCA_MODE_KEY = 'o8:canvas-orca-mode';
+
+/** How the canvas orchestrator runs a turn — mirrors the default composer's
+ *  MODE chip so the operator can keep it from spawning Codex workers at all.
+ *   - fleet   — orchestrator dispatches sub-agents in worktrees (default).
+ *   - single  — talk to the orchestrator solo, no dispatch.
+ *   - fusion  — the deep multi-agent pass we call "ultracode (with Codex)" in
+ *               the default composer, renamed here. Backend honoring for fusion
+ *               lands later for BOTH surfaces; for now this picks + persists. */
+type CanvasMode = 'fleet' | 'single' | 'fusion';
+const CANVAS_MODES: Array<{ id: CanvasMode; title: string; detail: string }> = [
+  { id: 'fleet', title: 'Fleet orchestration', detail: 'Orchestrator dispatches sub-agents in worktrees.' },
+  { id: 'single', title: 'Single agent', detail: 'Talk to the orchestrator solo · no dispatch.' },
+  { id: 'fusion', title: 'Fusion', detail: 'Deep multi-agent pass · parallel agents, cross-verified.' },
+];
 
 /** Pickers pop out only as tall as the spawn rail (7 glyph buttons) and
  *  centered like it — not the full window height. Mirrors the rail's measured
@@ -225,9 +240,10 @@ export default function CanvasGlassPreviewPage() {
   const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS[0].value);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
-  const [composerMenu, setComposerMenu] = useState<'repo' | 'model' | null>(null);
+  const [composerMenu, setComposerMenu] = useState<'repo' | 'model' | 'mode' | null>(null);
   const [orcaModel, setOrcaModel] = useState(DEFAULT_ORCHESTRATOR_MODEL);
   const [orcaEffort, setOrcaEffort] = useState<ThinkingEffort>('adaptive');
+  const [orchMode, setOrchMode] = useState<CanvasMode>('fleet');
   const [orcaBusy, setOrcaBusy] = useState(false);
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
   const [termCards, setTermCards] = useState<TermCard[]>([]);
@@ -349,6 +365,8 @@ export default function CanvasGlassPreviewPage() {
       if (storedModel && CANVAS_MODEL_OPTIONS.some((option) => option.value === storedModel)) setOrcaModel(storedModel);
       const storedEffort = window.localStorage.getItem(CANVAS_ORCA_EFFORT_KEY);
       if (isThinkingEffort(storedEffort)) setOrcaEffort(storedEffort);
+      const storedMode = window.localStorage.getItem(CANVAS_ORCA_MODE_KEY);
+      if (storedMode === 'fleet' || storedMode === 'single' || storedMode === 'fusion') setOrchMode(storedMode);
       const storedZoom = Number.parseFloat(window.localStorage.getItem(ZOOM_KEY) ?? '');
       if (ZOOM_STEPS.some((step) => step.value === storedZoom)) setCanvasZoomLevel(storedZoom);
       // Image cards restore through the canvas snapshot (loadCanvasSnapshot)
@@ -921,6 +939,16 @@ export default function CanvasGlassPreviewPage() {
     // Stays open (see chooseModel) — set model + thinking, then click away.
     try {
       window.localStorage.setItem(CANVAS_ORCA_EFFORT_KEY, value);
+    } catch {
+      // non-critical
+    }
+  }, []);
+
+  const chooseMode = useCallback((value: CanvasMode) => {
+    setOrchMode(value);
+    setComposerMenu(null);
+    try {
+      window.localStorage.setItem(CANVAS_ORCA_MODE_KEY, value);
     } catch {
       // non-critical
     }
@@ -3572,6 +3600,41 @@ export default function CanvasGlassPreviewPage() {
         }}
       >
         <AnticipationRing focused={composerFocused} radius={24} />
+        {/* Mode — fleet (dispatch) / single (solo) / fusion. The glyph IS the
+            chip (the operator asked for "a fleet icon"); the popover carries the
+            labels. Orange marks the live mode, matching the default composer. */}
+        <button
+          type="button"
+          aria-label="Orchestration mode"
+          aria-haspopup="menu"
+          aria-expanded={composerMenu === 'mode'}
+          title={`Mode: ${CANVAS_MODES.find((option) => option.id === orchMode)?.title ?? 'Fleet orchestration'}`}
+          onClick={() => setComposerMenu((value) => (value === 'mode' ? null : 'mode'))}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 3,
+            height: 24,
+            paddingLeft: 8,
+            paddingRight: 6,
+            borderRadius: 999,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--cnv-edge)',
+            background: composerMenu === 'mode' ? 'var(--cnv-tint)' : 'transparent',
+            cursor: 'pointer',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--cnv-tint)'; }}
+          onMouseLeave={(event) => { if (composerMenu !== 'mode') event.currentTarget.style.background = 'transparent'; }}
+        >
+          <span aria-hidden style={{ display: 'inline-flex', color: 'var(--t-brand-orange, #FF5A1F)' }}>
+            <ModeGlyph mode={orchMode} size={12} />
+          </span>
+          <svg width={8} height={8} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ opacity: 0.7 }}>
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </button>
         <ChipButton
           label={activeRepoName ?? '…'}
           active={composerMenu === 'repo'}
@@ -3728,6 +3791,20 @@ export default function CanvasGlassPreviewPage() {
                     ));
                   })()}
                 </>
+              ) : composerMenu === 'mode' ? (
+                <>
+                  <DrawerLabel>Mode</DrawerLabel>
+                  {CANVAS_MODES.map((option) => (
+                    <ModeRow
+                      key={option.id}
+                      mode={option.id}
+                      title={option.title}
+                      detail={option.detail}
+                      active={option.id === orchMode}
+                      onClick={() => chooseMode(option.id)}
+                    />
+                  ))}
+                </>
               ) : (
                 <>
                   {/* Merged Model + Thinking drawer (operator call 2026-06-14):
@@ -3849,6 +3926,85 @@ function ChipButton({ label, sub, active, onClick }: { label: string; sub?: stri
     >
       {label}
       {sub ? <span style={{ marginLeft: 5, fontWeight: 300, opacity: 0.55 }}>{sub}</span> : null}
+    </button>
+  );
+}
+
+/** Glyph for an orchestration mode — fleet fan-out, single node, fusion
+ *  sparkle. Shared by the composer's mode trigger and the MODE popover rows so
+ *  the chip always shows the live mode's mark. */
+function ModeGlyph({ mode, size = 13 }: { mode: CanvasMode; size?: number }) {
+  if (mode === 'single') {
+    // One node inside a ring — the visual opposite of fleet's three-node fan-out.
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ display: 'block' }}>
+        <circle cx="12" cy="12" r="3" />
+        <circle cx="12" cy="12" r="8" />
+      </svg>
+    );
+  }
+  if (mode === 'fusion') {
+    // Sparkle — reads as the "deeper / more" pass beside the fleet fan-out.
+    return (
+      <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ display: 'block' }}>
+        <path d="m12 3-1.9 5.8a2 2 0 0 1-1.3 1.3L3 12l5.8 1.9a2 2 0 0 1 1.3 1.3L12 21l1.9-5.8a2 2 0 0 1 1.3-1.3L21 12l-5.8-1.9a2 2 0 0 1-1.3-1.3z" />
+      </svg>
+    );
+  }
+  // fleet — three nodes fanning out (matches the default composer's FleetGlyph).
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.1" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ display: 'block' }}>
+      <circle cx="12" cy="6" r="2" />
+      <circle cx="6" cy="18" r="2" />
+      <circle cx="18" cy="18" r="2" />
+      <path d="M12 8v4" />
+      <path d="m12 12-6 4" />
+      <path d="m12 12 6 4" />
+    </svg>
+  );
+}
+
+/** One row in the composer's MODE popover — glyph + title + detail, orange
+ *  check on the live mode. Canvas-token twin of the default composer's
+ *  PopoverRow (richer than PickerRow, which is title-only). */
+function ModeRow({ mode, title, detail, active, onClick }: { mode: CanvasMode; title: string; detail: string; active: boolean; onClick: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      role="menuitem"
+      style={{
+        display: 'grid',
+        gridTemplateColumns: '18px minmax(0, 1fr) 14px',
+        alignItems: 'center',
+        gap: 9,
+        width: '100%',
+        borderWidth: 0,
+        background: active ? 'var(--cnv-tint)' : 'transparent',
+        borderRadius: 9,
+        paddingTop: 7,
+        paddingBottom: 7,
+        paddingLeft: 8,
+        paddingRight: 8,
+        cursor: 'pointer',
+        textAlign: 'left',
+        fontFamily: FONT,
+      }}
+      onMouseEnter={(event) => { if (!active) event.currentTarget.style.background = 'var(--cnv-tint)'; }}
+      onMouseLeave={(event) => { if (!active) event.currentTarget.style.background = 'transparent'; }}
+    >
+      <span aria-hidden style={{ display: 'inline-flex', color: active ? 'var(--t-brand-orange, #FF5A1F)' : 'var(--cnv-ink-muted)' }}>
+        <ModeGlyph mode={mode} size={13} />
+      </span>
+      <span style={{ minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
+        <span style={{ fontSize: 12.5, fontWeight: 400, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', lineHeight: 1.25 }}>{title}</span>
+        <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', letterSpacing: '-0.05px', lineHeight: 1.3 }}>{detail}</span>
+      </span>
+      <span aria-hidden style={{ display: 'inline-flex', opacity: active ? 1 : 0, color: 'var(--t-brand-orange, #FF5A1F)' }}>
+        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round">
+          <path d="m5 12 4 4 10-10" />
+        </svg>
+      </span>
     </button>
   );
 }
