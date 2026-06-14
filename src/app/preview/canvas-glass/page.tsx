@@ -829,6 +829,15 @@ export default function CanvasGlassPreviewPage() {
       setDockOpen(true);
       return null;
     }
+    // The bottom composer and the dock are one view of this lane. If it's
+    // currently floating as an undocked card, adopt the card's thread lane (the
+    // complete record, incl. turns typed in the card) onto the dock lane BEFORE
+    // appending this turn, then fold the card away — never two views at once.
+    const tId = orca.threadIdFor(lane);
+    if (tId) {
+      setConvos((previous) => (previous[`thread:${tId}`] ? { ...previous, [lane]: previous[`thread:${tId}`] } : previous));
+      setChatCards((previous) => previous.filter((card) => card.threadId !== tId));
+    }
     appendEntries(lane, [userEntry, { role: 'status', text: 'Thinking', pending: true }]);
     setDockOpen(true);
     return { lane, fromEntryId };
@@ -1032,6 +1041,64 @@ export default function CanvasGlassPreviewPage() {
     setChatCards((previous) => previous.filter((existing) => existing.id !== card.id));
     setDockOpen(true);
   }, [activeRepoPath, orca]);
+
+  /** Undock the live orchestrator back onto the canvas as a floating chat card
+   *  — the exact inverse of dockChatCard. The conversation KEEPS rendering
+   *  (the bug was that undock hid the transcript entirely: dockOpen=false with
+   *  nothing below it). The lane stays live the whole time — the `orca` socket
+   *  never unsubscribes from activeRepoPath — so convos[repo] is the source and
+   *  the card's own thread socket picks up exactly where the dock left off. The
+   *  same dock button folds it back in via redockActiveLane. */
+  const undockToCard = useCallback(() => {
+    const repo = activeRepoPath;
+    if (!repo) { setDockOpen(false); return; }
+    const threadId = orca.threadIdFor(repo);
+    const entries = convos[repo] ?? [];
+    // No thread yet / empty lane — nothing conversable to float; just hide.
+    if (!threadId || entries.length === 0) { setDockOpen(false); return; }
+    // Already on the canvas as a card — don't spawn a duplicate, just hide.
+    if (chatCards.some((card) => card.threadId === threadId)) { setDockOpen(false); return; }
+    const name = repos?.find((r) => r.path === repo)?.name ?? null;
+    const firstUser = entries.find((entry) => entry.role === 'user');
+    const title = firstUser && firstUser.role === 'user' && firstUser.text.trim()
+      ? firstUser.text.trim().slice(0, 60)
+      : (name ?? 'Orchestrator');
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    const spot = findFreeSpot(380, 400);
+    // Seed the card's live lane from the dock lane so its transcript is there
+    // on first paint and its socket streams onto the same conversation.
+    setConvos((previous) => ({ ...previous, [`thread:${threadId}`]: previous[repo] ?? entries }));
+    setChatCards((previous) => [...previous, {
+      id,
+      threadId,
+      repoPath: repo,
+      repoName: name,
+      title,
+      x: spot.x,
+      y: spot.y,
+      z: zPeakRef.current,
+      w: 380,
+      h: 400,
+      entries,
+    }]);
+    setDockOpen(false);
+  }, [activeRepoPath, convos, orca, repos, chatCards, findFreeSpot]);
+
+  /** Re-dock the active lane — if it's floating as a card, fold that exact card
+   *  back in via dockChatCard (which adopts the card's thread lane, the complete
+   *  record incl. anything typed in the card, back onto the dock). Otherwise
+   *  just open the dock on the active lane. */
+  const redockActiveLane = useCallback(() => {
+    const repo = activeRepoPath;
+    const threadId = repo ? orca.threadIdFor(repo) : null;
+    if (repo && threadId) {
+      const card = chatCards.find((existing) => existing.threadId === threadId);
+      if (card) { dockChatCard(card); return; }
+    }
+    setDockOpen(true);
+  }, [activeRepoPath, orca, chatCards, dockChatCard]);
 
   const moveCard = useCallback((id: number, x: number, y: number) => {
     setCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
@@ -2389,7 +2456,7 @@ export default function CanvasGlassPreviewPage() {
         <DockGlyphButton
           label="Orchestrators"
           active={dockOpen}
-          onClick={() => setDockOpen((value) => !value)}
+          onClick={() => (dockOpen ? undockToCard() : redockActiveLane())}
           path="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"
           extra={<path d="M15 3v18" />}
         />
@@ -2743,7 +2810,7 @@ export default function CanvasGlassPreviewPage() {
         <SpawnGlyphButton
           label="Message the orchestrator"
           onClick={() => {
-            if ((convos[activeRepoPath ?? '']?.length ?? 0) > 0) setDockOpen(true);
+            if ((convos[activeRepoPath ?? '']?.length ?? 0) > 0) redockActiveLane();
             composerInputRef.current?.focus();
           }}
         >
@@ -3065,7 +3132,7 @@ export default function CanvasGlassPreviewPage() {
                 <button
                   type="button"
                   onClick={() => {
-                    setDockOpen(true);
+                    redockActiveLane();
                     setSessionsOpen(false);
                   }}
                   style={{ display: 'flex', alignItems: 'center', gap: 7, paddingTop: 7, paddingBottom: 7, paddingLeft: 8, paddingRight: 8, borderRadius: 9, borderWidth: 0, background: 'transparent', cursor: 'pointer', fontFamily: FONT, textAlign: 'left', width: '100%' }}
@@ -3147,7 +3214,7 @@ export default function CanvasGlassPreviewPage() {
             onCancelQueued={mainCancelQueued}
             undoArmed={mainUndoArmed}
             onUndoSend={mainStopOrUndo}
-            onClose={() => setDockOpen(false)}
+            onClose={undockToCard}
           />
         ) : null}
       </AnimatePresence>
@@ -3161,7 +3228,7 @@ export default function CanvasGlassPreviewPage() {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
             transition={{ duration: 0.35, ease: 'easeOut' }}
-            onClick={() => setDockOpen(true)}
+            onClick={redockActiveLane}
             style={{
               position: 'absolute',
               bottom: 86,
