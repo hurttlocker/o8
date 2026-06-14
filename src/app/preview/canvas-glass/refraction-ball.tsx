@@ -140,10 +140,13 @@ void main() {
   float ang = atan(p.y, p.x);
   float rimGrad = pow(smoothstep(0.85, 1.0, r), 2.4);
   vec3 fringe = (0.5 + 0.5 * cos(vec3(0.0, 2.094, 4.188) + ang * 1.4 + r * 20.0)) * rimGrad * u_rim;
-  float edge = pow(smoothstep(0.90, 1.0, r), 2.5) * 0.6;
+  // Grazing edge + rim alpha are FULLY rim-glow-driven — no baseline ring. At
+  // Rim glow ≈ 0 the glass edge disappears entirely (only content + clear glass
+  // remain); the operator drives the whole edge treatment via the dials.
+  float edge = pow(smoothstep(0.90, 1.0, r), 2.5) * u_rim;
 
   vec3 glassLight = vec3(spec) + fringe + vec3(edge);
-  float glassA = clamp(spec * 0.9 + rimGrad * (u_rim * 0.5 + 0.12) + edge * 0.85, 0.0, 1.0);
+  float glassA = clamp(spec * 0.9 + rimGrad * u_rim * 0.6 + edge * 0.85, 0.0, 1.0);
 
   // Composite — content over the clear canvas behind, glass shell added on top.
   vec3 outRgb = clamp(content + glassLight, 0.0, 1.0);
