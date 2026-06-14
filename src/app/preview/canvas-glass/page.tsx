@@ -125,11 +125,6 @@ interface RepoPickerRowData {
 const ZOOM_KEY = 'o8:canvas-zoom';
 /** Canvas layout mode — 'grid' = form-fit hard placement (#1239), else free-flow. */
 const GRID_MODE_KEY = 'o8:canvas-grid-mode';
-/** Dropped image cards persist across reloads (data-URL photos) so test pics
- *  survive a refresh — invaluable while tuning the orb. Capped to stay under the
- *  localStorage quota; oldest are dropped first if the set gets too big. */
-const IMAGE_CARDS_KEY = 'o8:canvas-image-cards';
-const IMAGE_CARDS_MAX_BYTES = 4_500_000;
 const ZOOM_STEPS = [
   { label: 100, value: 0.7 },
   { label: 85, value: 0.595 },
@@ -318,16 +313,10 @@ export default function CanvasGlassPreviewPage() {
       if (isThinkingEffort(storedEffort)) setOrcaEffort(storedEffort);
       const storedZoom = Number.parseFloat(window.localStorage.getItem(ZOOM_KEY) ?? '');
       if (ZOOM_STEPS.some((step) => step.value === storedZoom)) setCanvasZoomLevel(storedZoom);
-      const storedImages = window.localStorage.getItem(IMAGE_CARDS_KEY);
-      if (storedImages) {
-        const cards = JSON.parse(storedImages) as ImageCard[];
-        if (Array.isArray(cards) && cards.length > 0) {
-          setImageCards(cards);
-          // Keep new spawns from colliding with restored ids / z-order.
-          nextIdRef.current = Math.max(nextIdRef.current, cards.reduce((m, c) => Math.max(m, c.id), 0) + 1);
-          zPeakRef.current = Math.max(zPeakRef.current, cards.reduce((m, c) => Math.max(m, c.z), 0));
-        }
-      }
+      // Image cards restore through the canvas snapshot (loadCanvasSnapshot)
+      // like every other card kind — NOT through a second store here. Loading
+      // them in both places spawned a perfect-overlap duplicate that only
+      // showed when you dragged one off the other.
     } catch {
       // defaults stand
     }
@@ -343,26 +332,6 @@ export default function CanvasGlassPreviewPage() {
       // non-critical
     }
   }, [canvasZoomLevel]);
-
-  // Persist dropped image cards (data-URL photos) so test pics survive a reload.
-  useEffect(() => {
-    try {
-      if (imageCards.length === 0) {
-        window.localStorage.removeItem(IMAGE_CARDS_KEY);
-        return;
-      }
-      // Trim oldest (lowest id) until the payload fits under the quota.
-      let cards = imageCards;
-      let json = JSON.stringify(cards);
-      while (json.length > IMAGE_CARDS_MAX_BYTES && cards.length > 1) {
-        cards = cards.slice(1);
-        json = JSON.stringify(cards);
-      }
-      window.localStorage.setItem(IMAGE_CARDS_KEY, json);
-    } catch {
-      // quota / serialization issue — non-critical; pics just won't persist
-    }
-  }, [imageCards]);
 
   // Kill the text-selection "highlight" a drag leaves behind: dragging the
   // navigator ball / a card / panning the canvas paints a selection across the
