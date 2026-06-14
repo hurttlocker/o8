@@ -172,22 +172,25 @@ const reviewField = StateField.define<{ deco: DecorationSet; atomic: DecorationS
 });
 
 const mdHighlight = HighlightStyle.define([
-  { tag: tags.heading1, fontSize: '18px', fontWeight: '400', letterSpacing: '-0.2px', color: 'var(--o8ed-ink)' },
-  { tag: tags.heading2, fontSize: '10px', fontWeight: '300', color: 'var(--o8ed-ink-faint)', textTransform: 'uppercase', letterSpacing: '0.04em' },
-  { tag: tags.heading3, fontSize: '13.5px', fontWeight: '400', letterSpacing: '-0.1px', color: 'var(--o8ed-ink-soft)' },
+  { tag: tags.heading1, fontSize: 'calc(18px * var(--spec-scale, 1))', fontWeight: '400', letterSpacing: '-0.2px', color: 'var(--o8ed-ink)' },
+  { tag: tags.heading2, fontSize: 'calc(10px * var(--spec-scale, 1))', fontWeight: '300', color: 'var(--o8ed-ink-faint)', textTransform: 'uppercase', letterSpacing: '0.04em' },
+  { tag: tags.heading3, fontSize: 'calc(13.5px * var(--spec-scale, 1))', fontWeight: '400', letterSpacing: '-0.1px', color: 'var(--o8ed-ink-soft)' },
   { tag: tags.strong, fontWeight: '500', color: 'var(--o8ed-ink)' },
   { tag: tags.emphasis, fontStyle: 'italic' },
   { tag: tags.link, color: 'var(--o8ed-orange)', textDecoration: 'underline' },
-  { tag: tags.monospace, fontFamily: "'SF Mono', Menlo, monospace", fontSize: '12px' },
+  { tag: tags.monospace, fontFamily: "'SF Mono', Menlo, monospace", fontSize: 'calc(12px * var(--spec-scale, 1))' },
 ]);
 
 // height:auto + scroller overflow visible → the editor grows to content so the
 // PARENT scrolls; margin notes positioned in the same (scroll-shared) space.
 const editorTheme = EditorView.theme({
+  // --spec-scale: 1 on the dashboard; on the canvas it's the canvas zoom, so the
+  // editor renders at device 1:1 (caret hit-testing works) but its type/padding
+  // shrink to match the scaled card. lineHeight stays unitless (scales w/ font).
   '&': { backgroundColor: 'transparent', color: 'var(--o8ed-ink)', height: 'auto' },
-  '.cm-scroller': { fontFamily: PROSE, fontSize: '13.5px', fontWeight: '300', letterSpacing: '-0.1px', lineHeight: '1.55', overflow: 'visible' },
-  '.cm-content': { paddingTop: '22px', paddingBottom: '26px', paddingLeft: '4px', caretColor: 'var(--o8ed-orange)' },
-  '.cm-line': { paddingLeft: '0', paddingRight: '8px' },
+  '.cm-scroller': { fontFamily: PROSE, fontSize: 'calc(13.5px * var(--spec-scale, 1))', fontWeight: '300', letterSpacing: '-0.1px', lineHeight: '1.55', overflow: 'visible' },
+  '.cm-content': { paddingTop: 'calc(22px * var(--spec-scale, 1))', paddingBottom: 'calc(26px * var(--spec-scale, 1))', paddingLeft: 'calc(4px * var(--spec-scale, 1))', caretColor: 'var(--o8ed-orange)' },
+  '.cm-line': { paddingLeft: '0', paddingRight: 'calc(8px * var(--spec-scale, 1))' },
   '&.cm-focused': { outline: 'none' },
   '.cm-cursor': { borderLeftColor: 'var(--o8ed-orange)', borderLeftWidth: '1.5px' },
   '&.cm-focused .cm-selectionBackground, .cm-selectionBackground': { backgroundColor: 'var(--o8ed-hilite)' },
@@ -499,11 +502,11 @@ function MarginNote({ note, onResolve, onResolveComment, onReply }: {
         </span>
         {resolved ? <span style={{ fontFamily: PROSE, fontSize: 9, color: 'var(--o8ed-ink-faint)' }}>resolved</span> : null}
       </div>
-      <div style={{ fontFamily: HAND, fontSize: 18, lineHeight: 1.15, color: ink, textDecoration: resolved ? 'line-through' : 'none' }}>
+      <div style={{ fontFamily: HAND, fontSize: 'calc(18px * var(--o8ed-note-scale, 1))', lineHeight: 1.15, color: ink, textDecoration: resolved ? 'line-through' : 'none' }}>
         {isSuggestion && !note.text ? 'suggested edit' : note.text}
       </div>
       {note.replies.map((r, i) => (
-        <div key={i} style={{ fontFamily: HAND, fontSize: 16, lineHeight: 1.15, color: r.author === 'AI' ? 'var(--o8ed-orange)' : 'var(--o8ed-ink-soft)', paddingLeft: 12, marginTop: 3 }}>
+        <div key={i} style={{ fontFamily: HAND, fontSize: 'calc(16px * var(--o8ed-note-scale, 1))', lineHeight: 1.15, color: r.author === 'AI' ? 'var(--o8ed-orange)' : 'var(--o8ed-ink-soft)', paddingLeft: 12, marginTop: 3 }}>
           ↳ {r.text}
         </div>
       ))}
@@ -529,7 +532,7 @@ function MarginNote({ note, onResolve, onResolveComment, onReply }: {
             if (e.key === 'Escape') { setReplying(false); setDraft(''); }
           }}
           placeholder="Reply…"
-          style={{ marginTop: 5, width: '100%', fontFamily: HAND, fontSize: 16, lineHeight: 1.2, color: 'var(--o8ed-ink)', background: 'transparent', border: 'none', borderBottom: '1px solid var(--o8ed-ink-faint)', outline: 'none', paddingTop: 2, paddingBottom: 2 }}
+          style={{ marginTop: 5, width: '100%', fontFamily: HAND, fontSize: 'calc(16px * var(--o8ed-note-scale, 1))', lineHeight: 1.2, color: 'var(--o8ed-ink)', background: 'transparent', border: 'none', borderBottom: '1px solid var(--o8ed-ink-faint)', outline: 'none', paddingTop: 2, paddingBottom: 2 }}
         />
       ) : null}
     </div>

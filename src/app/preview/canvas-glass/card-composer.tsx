@@ -12,8 +12,10 @@
  *    style mutation off the render path.
  */
 
-import { useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import { FONT } from './ui';
+import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
+import { MicButton } from '@/components/desktop/thoughts/MicButton';
 
 export function CardComposer({
   value,
@@ -33,6 +35,32 @@ export function CardComposer({
 }) {
   const boxRef = useRef<HTMLDivElement | null>(null);
   const ringRef = useRef<HTMLDivElement | null>(null);
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Latest value + onChange kept in refs so the dictation fill closure
+  // (registered once on focus, invoked async when speech lands) appends to the
+  // current draft instead of a stale snapshot.
+  const valueRef = useRef(value);
+  valueRef.current = value;
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+
+  // Register this composer as the dictation target on focus — speech is
+  // transcribed by the shared DictationHost and routed back through `fill`,
+  // appended to whatever is already typed. Same engine the default IDE
+  // composer uses; null host (no provider) is a no-op (mic hides itself).
+  const host = useDictationHostOptional();
+  const registerForDictation = useCallback(() => {
+    const node = textareaRef.current;
+    if (!node || !host) return;
+    host.setActiveComposer({
+      node,
+      fill: (text: string) => {
+        const current = valueRef.current.trim();
+        onChangeRef.current(current ? `${current} ${text}` : text);
+      },
+    });
+  }, [host]);
 
   useEffect(() => {
     const onMove = (event: PointerEvent) => {
@@ -79,8 +107,10 @@ export function CardComposer({
         style={{ position: 'absolute', inset: 0, borderRadius: 18, pointerEvents: 'none', opacity: 0, boxShadow: 'inset 0 0 0 1.5px var(--cnv-ink), 0 0 16px -4px var(--cnv-ink)' }}
       />
       <textarea
+        ref={textareaRef}
         value={value}
         onChange={(event) => onChange(event.target.value)}
+        onFocus={registerForDictation}
         onPointerDown={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
           if (event.key === 'Enter' && !event.shiftKey) {
@@ -95,25 +125,34 @@ export function CardComposer({
         disabled={busy}
         style={inputStyle}
       />
-      {model ? (
-        <span style={{ fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', whiteSpace: 'nowrap', paddingBottom: 1, flexShrink: 0 }}>
-          {model}
-        </span>
-      ) : null}
-      <button
-        type="button"
-        aria-label="Send"
-        onPointerDown={(event) => event.stopPropagation()}
-        onClick={onSubmit}
-        disabled={busy}
-        style={{ borderWidth: 0, background: 'transparent', padding: 3, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: busy ? 'default' : 'pointer', color: 'var(--cnv-ink-muted)', flexShrink: 0, opacity: busy ? 0.4 : 1 }}
-        onMouseEnter={(event) => { if (!busy) event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-        onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-      >
-        <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-          <path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" />
-        </svg>
-      </button>
+      {/* Model chip + send ride as one center-aligned group so the label sits
+          on the arrow's vertical center (not bottom-baselined low). The group
+          stays a flex-end child of the row, so it pins to the bottom as the
+          textarea grows multi-line. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        {model ? (
+          <span style={{ fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--cnv-ink-muted)', whiteSpace: 'nowrap' }}>
+            {model}
+          </span>
+        ) : null}
+        {/* Push-to-talk — speak instead of type. Canvas-tinted idle color so it
+            sits flush with the send arrow. Hidden when no dictation host. */}
+        <MicButton idleColor="var(--cnv-ink-muted)" />
+        <button
+          type="button"
+          aria-label="Send"
+          onPointerDown={(event) => event.stopPropagation()}
+          onClick={onSubmit}
+          disabled={busy}
+          style={{ borderWidth: 0, background: 'transparent', padding: 3, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', cursor: busy ? 'default' : 'pointer', color: 'var(--cnv-ink-muted)', flexShrink: 0, opacity: busy ? 0.4 : 1 }}
+          onMouseEnter={(event) => { if (!busy) event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+          onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+        >
+          <svg width={14} height={14} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="m22 2-7 20-4-9-9-4z" /><path d="M22 2 11 13" />
+          </svg>
+        </button>
+      </div>
     </div>
   );
 }

@@ -262,6 +262,20 @@ Lucide is the bulk because most of the 85+ shimmed icons read fine. Switching wh
 
 ---
 
+## Design Engineering Tips (motion / interaction)
+
+Reusable interaction techniques every agent should reach for when building a UI surface — adopt the *principle*, implement it framework-idiomatically. These mirror the operator's global `~/CLAUDE.md` "Design Engineering Tips" (fuller rules + snippets there); kept here so any agent reading the design spec has them. **Gate all of these off under `prefers-reduced-motion`, and the cursor ones only on `(hover: hover) and (pointer: fine)`.**
+
+1. **React to cursor VELOCITY, not just position.** A fast move adds a momentary tilt / specular sheen that springs back — physical because it responds to motion. Use the framework's velocity primitive (motion/react `useVelocity → useTransform/useSpring`), never raw `el.style.transform` (it clobbers existing transforms + spikes on pointer re-entry). Always clamp (rotation ≈ ±6°, scale < 1.5×). **Never on text people read** — sheen/tilt only on spectacle surfaces (hero media, floating cards). Canonical: `~/o8-site/app/components/glass/HeroWindow.tsx`.
+
+2. **React to PROXIMITY, not just hover (the macOS dock).** Nearby items scale + brighten by *distance*, not binary hover. `t = max(0, 1 − dist/RADIUS)` (≈120px), `scale = 1 + t*MAX` (clamp MAX ~0.2 for text). Direct ref writes on `pointermove` are correct here (you touch N elements/frame). On dark themes **brighten, don't darken.** For equal, closely-spaced rows (docks, pill rows) — *not* nav links (hurts click-targeting). Canonical: `~/o8-site/app/components/glass/RuntimeDock.tsx`.
+
+3. **Fade scrollable list EDGES, don't hard-cut.** Content dissolves at top/bottom via `mask-image: linear-gradient(to bottom, transparent 0, #000 24px, #000 calc(100% - 24px), transparent 100%)` (+ the `-webkit-` twin, `mask-size: 100% 100%`, `mask-repeat: no-repeat`). Only on lists that actually overflow. See **"Mask gradient (scroll fade)"** above for the pinned-header 16/32 variant. Canonical: inline `scrollFadeY` in `src/app/preview/canvas-glass/ui.ts`; the dashboard's `cortex-scroll-fade-y` class (`globals.css`) adds a scroll-timeline dynamic variant that fades only the edge you're scrolled away from.
+
+4. **Reduce backdrop blur while scrolling fast.** Heavy `backdrop-filter` blur during motion kills perceived smoothness + spikes GPU (it re-samples every frame). Scale it via a var multiplier — `blur(calc(var(--frost) * var(--frost-scale, 1)))` — set `--frost-scale ≈ 0.4` on scroll → `1` on settle (debounce ~140ms), **per-surface** (find the `[data-glass-surface]` ancestor), never global, never hardcode the blur value (keep the operator's slider as truth). Invisible at rest — pair with tip 3 for the visible fade. Operator-shared (gabriell_lab on X, 2026-06-13). Canonical: `useScrollBlurFade` in `src/app/preview/canvas-glass/use-scroll-blur-fade.ts`.
+
+---
+
 ## Open items for next-level theming
 
 This file captures what got *locked*. The roadmap below is what's *open* — the work that comes next when theme v2 starts from scratch.

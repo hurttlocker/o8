@@ -16,6 +16,7 @@ import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { canvasZoom, FONT, IMG_MIN_W, glass } from './ui';
+import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 
 export interface ImageItem {
   src: string;
@@ -57,7 +58,8 @@ export function ImageGlassCard({
   onTap: (id: number) => void;
   onClose: (id: number) => void;
 }) {
-  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean } | null>(null);
+  const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean; lastX: number; lastY: number } | null>(null);
+  const settleRef = useRef<{ stop: () => void } | null>(null);
   const resizeRef = useRef<{ pointerId: number; startX: number; originW: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
@@ -75,10 +77,12 @@ export function ImageGlassCard({
       onPointerDownCapture={() => onFocus(card.id)}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
+      data-card-id={card.id}
       onPointerDown={(event) => {
         if (event.button !== 0) return;
+        settleRef.current?.stop();
         try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-        dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y, moved: false };
+        dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y, moved: false, lastX: card.x, lastY: card.y };
         setDragging(true);
       }}
       onPointerMove={(event) => {
@@ -86,9 +90,18 @@ export function ImageGlassCard({
         if (!drag || drag.pointerId !== event.pointerId) return;
         const dx = event.clientX - drag.startX;
         const dy = event.clientY - drag.startY;
+        // Tap-vs-drag threshold stays in SCREEN px (physical travel); the
+        // position delta divides by zoom to track the cursor like every other
+        // canvas drag site.
         if (!drag.moved && Math.hypot(dx, dy) < 5) return;
         drag.moved = true;
-        onMove(card.id, Math.max(4, drag.originX + dx), Math.max(40, drag.originY + dy));
+        const zoom = canvasZoom();
+        const bounds = dragBounds(card.w, card.h);
+        const x = resistAxis(drag.originX + dx / zoom, bounds.minX, bounds.maxX);
+        const y = resistAxis(drag.originY + dy / zoom, bounds.minY, bounds.maxY);
+        drag.lastX = x;
+        drag.lastY = y;
+        onMove(card.id, x, y);
       }}
       onPointerUp={(event) => {
         const drag = dragRef.current;
@@ -96,7 +109,11 @@ export function ImageGlassCard({
         setDragging(false);
         if (!drag) return;
         if (drag.moved) {
+          // Stacking hit-test first (page may absorb/reposition this card), then
+          // spring the last few resisted px back in-bounds — a no-op if the card
+          // was consumed into a deck or already settled inside the walls.
           onDrop(card.id, event.clientX, event.clientY);
+          settleRef.current = settleInBounds(drag.lastX, drag.lastY, dragBounds(card.w, card.h), (x, y) => onMove(card.id, x, y));
         } else if (stack) {
           onTap(card.id);
         }
