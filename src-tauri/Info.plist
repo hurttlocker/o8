@@ -31,5 +31,19 @@
             </array>
         </dict>
     </array>
+    <!-- Custom URL scheme o8:// for the Clerk auth deep-link handoff
+         (o8://auth/callback?ticket=...&state=...). macOS LaunchServices routes
+         it to the running app → RunEvent::Opened in lib.rs. -->
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>ai.o8.desktop.auth</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>o8</string>
+            </array>
+        </dict>
+    </array>
 </dict>
 </plist>

@@ -16,6 +16,7 @@ export type Plan = 'free' | 'pro' | 'team';
 export interface CreateUserInput {
   githubId?: number;
   discordId?: string;
+  clerkUserId?: string;
   email?: string;
   name?: string;
   avatarUrl?: string;
@@ -26,6 +27,7 @@ export interface UserProfile {
   id: string;
   githubId: number | null;
   discordId: string | null;
+  clerkUserId: string | null;
   email: string | null;
   name: string | null;
   avatarUrl: string | null;
@@ -66,6 +68,7 @@ export function createUser(input: CreateUserInput) {
     id,
     githubId: input.githubId ?? null,
     discordId: input.discordId ?? null,
+    clerkUserId: input.clerkUserId ?? null,
     email: input.email ?? null,
     name: input.name ?? null,
     avatarUrl: input.avatarUrl ?? null,
@@ -98,6 +101,13 @@ export function findUserByDiscordId(discordId: string) {
 }
 
 /**
+ * Find user by Clerk user ID. Used during Clerk session resolution.
+ */
+export function findUserByClerkId(clerkUserId: string) {
+  return getDb()!.select().from(users).where(eq(users.clerkUserId, clerkUserId)).get() ?? null;
+}
+
+/**
  * Find user by email.
  */
 export function findUserByEmail(email: string) {
@@ -123,12 +133,63 @@ export function findOrCreateByGithub(githubId: number, profile: { email?: string
 }
 
 /**
+ * Find or create a user from a Clerk session (upsert pattern for Clerk sign-in).
+ *
+ * Resolution order avoids duplicating users that already exist from the legacy
+ * GitHub device flow:
+ *   1. Match on clerkUserId — returning user, refresh profile.
+ *   2. Else match on githubId (Clerk signs in via GitHub) — link the existing
+ *      row to this Clerk id rather than creating a second account.
+ *   3. Else create a fresh user keyed by clerkUserId.
+ */
+export function findOrCreateByClerk(
+  clerkUserId: string,
+  profile: { githubId?: number; email?: string; name?: string; avatarUrl?: string } = {},
+) {
+  const now = new Date().toISOString();
+
+  // 1. Known Clerk user — refresh profile on each login.
+  const existing = findUserByClerkId(clerkUserId);
+  if (existing) {
+    updateUser(existing.id, {
+      name: profile.name ?? existing.name,
+      avatarUrl: profile.avatarUrl ?? existing.avatarUrl,
+      email: profile.email ?? existing.email,
+      lastLoginAt: now,
+    });
+    return findUserById(existing.id)!;
+  }
+
+  // 2. Existing GitHub user (legacy device flow) — link to this Clerk id
+  //    instead of creating a duplicate account.
+  if (profile.githubId != null) {
+    const byGithub = findUserByGithubId(profile.githubId);
+    if (byGithub) {
+      updateUser(byGithub.id, {
+        clerkUserId,
+        name: profile.name ?? byGithub.name,
+        avatarUrl: profile.avatarUrl ?? byGithub.avatarUrl,
+        email: profile.email ?? byGithub.email,
+        lastLoginAt: now,
+      });
+      return findUserById(byGithub.id)!;
+    }
+  }
+
+  // 3. Brand-new user.
+  const created = createUser({ clerkUserId, ...profile });
+  updateUser(created.id, { lastLoginAt: now });
+  return findUserById(created.id)!;
+}
+
+/**
  * Update user fields. Only updates provided fields.
  */
 export function updateUser(id: string, fields: Partial<{
   name: string | null;
   email: string | null;
   avatarUrl: string | null;
+  clerkUserId: string | null;
   plan: Plan;
   tokenBudgetUsd: number | null;
   lastLoginAt: string | null;
@@ -164,6 +225,7 @@ export function getUserProfile(id: string): UserProfile | null {
     id: user.id,
     githubId: user.githubId,
     discordId: user.discordId,
+    clerkUserId: user.clerkUserId,
     email: user.email,
     name: user.name,
     avatarUrl: user.avatarUrl,

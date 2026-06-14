@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 27;
+const DB_SCHEMA_VERSION = 28;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -105,6 +105,7 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
 }
 
 function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
+  ensureUserColumns(sqlite);
   ensureApprovalContextColumns(sqlite);
   ensureWatchedAgentColumns(sqlite);
   ensureChatHistoryColumns(sqlite);
@@ -397,6 +398,7 @@ function ensureTables(sqlite: Database.Database): void {
       id TEXT PRIMARY KEY,
       github_id INTEGER UNIQUE,
       discord_id TEXT UNIQUE,
+      clerk_user_id TEXT UNIQUE,
       email TEXT UNIQUE,
       name TEXT,
       avatar_url TEXT,
@@ -949,6 +951,18 @@ function addColumnTolerant(sqlite: Database.Database, sql: string): void {
     if (err instanceof Error && /duplicate column name/i.test(err.message)) return;
     throw err;
   }
+}
+
+function ensureUserColumns(sqlite: Database.Database): void {
+  // Clerk identity link. SQLite ALTER TABLE ADD COLUMN can't add a UNIQUE
+  // column, so add the plain column then enforce uniqueness with a partial
+  // unique index (NULLs are allowed for pre-Clerk / BYOK-only local users).
+  if (!tableColumnExists(sqlite, 'users', 'clerk_user_id')) {
+    addColumnTolerant(sqlite, 'ALTER TABLE users ADD COLUMN clerk_user_id TEXT');
+  }
+  sqlite.exec(
+    'CREATE UNIQUE INDEX IF NOT EXISTS idx_users_clerk_user_id ON users(clerk_user_id) WHERE clerk_user_id IS NOT NULL',
+  );
 }
 
 function ensureApprovalContextColumns(sqlite: Database.Database): void {

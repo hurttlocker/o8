@@ -7,11 +7,15 @@ import { ClaudeIcon, CodexIcon } from './repo-registry/shared';
 import {
   ChevronDown,
   ChevronRight,
+  CircleUser,
   Cpu,
   Gauge,
+  Github,
+  LogOut,
   RefreshCw,
   Settings2,
 } from './lucide-shims';
+import { useO8Auth, type O8AuthState } from '@/components/auth/O8AuthProvider';
 
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -280,6 +284,95 @@ function separatorStyle(): CSSProperties {
   };
 }
 
+/**
+ * Identity header for the quick drawer. Replaces the static "Local desktop
+ * profile / o8" header once Clerk is configured: signed-out shows a GitHub
+ * sign-in CTA, signed-in shows avatar + name/email + Manage account / Sign out.
+ * Builds without a Clerk key keep the original local-profile header.
+ */
+function AccountSection({ auth }: { auth: O8AuthState }) {
+  if (!auth.clerkEnabled) {
+    return (
+      <>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 7px 1px', minWidth: 0 }}>
+          <IconFrame><Cpu size={15} /></IconFrame>
+          <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              Local desktop profile
+            </div>
+            <div style={{ color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              o8
+            </div>
+          </div>
+        </div>
+        <div style={separatorStyle()} />
+      </>
+    );
+  }
+
+  if (!auth.signedIn) {
+    return (
+      <>
+        <RowButton onClick={auth.signIn}>
+          <IconFrame><Github size={13} /></IconFrame>
+          <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Sign in with GitHub</span>
+        </RowButton>
+        <div style={separatorStyle()} />
+      </>
+    );
+  }
+
+  const user = auth.user;
+  const displayName = user?.name || user?.email || 'Signed in';
+  return (
+    <>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '2px 7px 1px', minWidth: 0 }}>
+        {user?.avatarUrl ? (
+          <div
+            aria-hidden="true"
+            style={{
+              width: 26,
+              height: 26,
+              borderRadius: 999,
+              flexShrink: 0,
+              backgroundImage: `url("${user.avatarUrl}")`,
+              backgroundSize: 'cover',
+              backgroundPosition: 'center',
+              border: `1px solid ${BORDER}`,
+            }}
+          />
+        ) : (
+          <IconFrame><CircleUser size={15} /></IconFrame>
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {displayName}
+          </div>
+          {user?.email ? (
+            <div style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {user.email}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <div style={separatorStyle()} />
+
+      <RowButton onClick={auth.openManageAccount}>
+        <IconFrame><CircleUser size={13} /></IconFrame>
+        <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Manage account</span>
+      </RowButton>
+
+      <RowButton onClick={() => { void auth.signOut(); }}>
+        <IconFrame><LogOut size={13} /></IconFrame>
+        <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Sign out</span>
+      </RowButton>
+
+      <div style={separatorStyle()} />
+    </>
+  );
+}
+
 export function SettingsQuickDrawer({
   open,
   anchorRect,
@@ -290,6 +383,7 @@ export function SettingsQuickDrawer({
   const [mounted, setMounted] = useState(false);
   const [usageOpen, setUsageOpen] = useState(false);
   const [usageState, setUsageState] = useState<UsageState>({ status: 'idle', snapshot: null, error: null });
+  const auth = useO8Auth();
 
   useEffect(() => {
     setMounted(true);
@@ -385,48 +479,7 @@ export function SettingsQuickDrawer({
             gap: 4,
           }}
         >
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '2px 7px 1px',
-              minWidth: 0,
-            }}
-          >
-            <IconFrame><Cpu size={15} /></IconFrame>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  color: 'var(--t-text-faint)',
-                  fontSize: 9.5,
-                  fontWeight: 260,
-                  letterSpacing: '-0.4px',
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                Local desktop profile
-              </div>
-              <div
-                style={{
-                  color: TEXT,
-                  fontSize: 13.5,
-                  fontWeight: 300,
-                  letterSpacing: '-0.1px',
-                  lineHeight: 1.25,
-                  overflow: 'hidden',
-                  textOverflow: 'ellipsis',
-                  whiteSpace: 'nowrap',
-                }}
-              >
-                o8
-              </div>
-            </div>
-          </div>
-
-          <div style={separatorStyle()} />
+          <AccountSection auth={auth} />
 
           <RowButton onClick={onOpenSettings}>
             <IconFrame><Settings2 size={13} /></IconFrame>
