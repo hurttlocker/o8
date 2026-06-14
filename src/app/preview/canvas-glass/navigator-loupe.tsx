@@ -2,19 +2,20 @@
 
 /**
  * NavigatorLoupe (#1239) — the bottom-left canvas navigator that replaces the
- * zoom-level chip. A circular minimap of the canvas content with a −/fit/+ pill
- * and the Free/Grid mode toggle. Phase 1: minimap + zoom steps + mode toggle.
- * Phase 2 (needs the pan-offset refactor): drag-inside-to-pan + a viewport rect.
+ * zoom-level chip. A circular minimap of the canvas content with a Free/Grid
+ * switch + −/fit/+ zoom in ONE clean bottom cluster.
+ *
+ * The orb-refraction tuner is admin-only: its gear button is hidden. Open it
+ * with ⌥⇧O, or dispatch the `o8:toggle-orb-tuner` window event.
  *
  * Visual ref: operator screenshot — a small glass circle showing the cards as an
  * overview, a dark pill at its lower edge.
  */
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { FONT, glass } from './ui';
 import { RefractionBall } from './refraction-ball';
-import { IconButton } from './icon-button';
 import { OrbTuner } from './orb-tuner';
 import type { CanvasTone, OrbSettings } from './orb-settings';
 
@@ -78,6 +79,25 @@ export function NavigatorLoupe({
   const [rolling, setRolling] = useState(false);
   const [tunerOpen, setTunerOpen] = useState(false);
 
+  // The orb-tuner gear is hidden (admin-only). Open the tuner with ⌥⇧O, or via
+  // the `o8:toggle-orb-tuner` window event (lets an operator/agent pop it open
+  // without a visible control).
+  useEffect(() => {
+    const toggle = () => setTunerOpen((value) => !value);
+    const onKey = (event: KeyboardEvent) => {
+      if (event.altKey && event.shiftKey && event.code === 'KeyO') {
+        event.preventDefault();
+        toggle();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    window.addEventListener('o8:toggle-orb-tuner', toggle);
+    return () => {
+      window.removeEventListener('keydown', onKey);
+      window.removeEventListener('o8:toggle-orb-tuner', toggle);
+    };
+  }, []);
+
   // Zoom steps run 100% (most zoomed-in) → 70% (most out). − steps out, + in.
   const idx = Math.max(0, zoomSteps.findIndex((s) => s.value === zoomValue));
   const stepZoom = (delta: number) => {
@@ -100,77 +120,16 @@ export function NavigatorLoupe({
         zIndex: 40,
       }}
     >
-      {/* Orb-refraction tuner — opens upward from the gear toggle (#1239). */}
+      {/* Orb-refraction tuner — admin-only (⌥⇧O); opens upward, above the ball. */}
       <AnimatePresence>
         {tunerOpen ? (
           <OrbTuner settings={orbSettings} onChange={onOrbChange} onReset={onOrbReset} tone={tone} />
         ) : null}
       </AnimatePresence>
 
-      {/* Free / Grid mode toggle — lives on the navigator (#1239). */}
-      <div
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          gap: 2,
-          paddingTop: 3,
-          paddingBottom: 3,
-          paddingLeft: 6,
-          paddingRight: 6,
-          borderRadius: 11,
-          ...glass(true),
-        }}
-      >
-        {([['free', 'Free'], ['grid', 'Grid']] as const).map(([mode, label]) => {
-          const active = (mode === 'grid') === gridMode;
-          return (
-            <button
-              key={mode}
-              type="button"
-              aria-label={`${label} layout`}
-              aria-pressed={active}
-              onClick={() => onGridModeChange(mode === 'grid')}
-              style={{
-                borderWidth: 0,
-                borderRadius: 8,
-                background: active ? 'rgba(255,255,255,0.12)' : 'transparent',
-                color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
-                fontSize: 9.5,
-                fontWeight: 300,
-                fontFamily: FONT,
-                paddingTop: 3,
-                paddingBottom: 3,
-                paddingLeft: 8,
-                paddingRight: 8,
-                cursor: 'pointer',
-              }}
-              onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-              onMouseLeave={(event) => { if (!active) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-            >
-              {label}
-            </button>
-          );
-        })}
-        {/* Divider + reusable icon button → opens the orb refraction tuner. */}
-        <span aria-hidden style={{ width: 1, alignSelf: 'stretch', marginTop: 2, marginBottom: 2, marginLeft: 3, marginRight: 1, background: 'var(--cnv-edge)' }} />
-        <IconButton label="Tune orb refraction" active={tunerOpen} size={20} onClick={() => setTunerOpen((value) => !value)}>
-          <line x1="21" x2="14" y1="4" y2="4" />
-          <line x1="10" x2="3" y1="4" y2="4" />
-          <line x1="21" x2="12" y1="12" y2="12" />
-          <line x1="8" x2="3" y1="12" y2="12" />
-          <line x1="21" x2="16" y1="20" y2="20" />
-          <line x1="12" x2="3" y1="20" y2="20" />
-          <line x1="14" x2="14" y1="2" y2="6" />
-          <line x1="8" x2="8" y1="10" y2="14" />
-          <line x1="16" x2="16" y1="18" y2="22" />
-        </IconButton>
-      </div>
-
       {/* Crystal-ball navigator (#1239) — a glass sphere showing the cards near
-          you, with a refractive sheen + the roll-arc from the ref photo. */}
+          you, bent through a real lens. */}
       <div style={{ position: 'relative', width: size, height: size }}>
-        {/* (Roll-arc removed — the dashed indicator read as a skewed refraction
-            seam crossing the content. The ball is still draggable to roll/pan.) */}
         <div
           aria-label="Canvas navigator"
           onPointerDown={gridMode ? undefined : (event) => {
@@ -205,14 +164,13 @@ export function NavigatorLoupe({
           }}
         >
           {/* WebGL glass-sphere refraction (#1239) — the cards near you, bent
-              through a real lens: magnified centre, chromatic aberration + a
-              rainbow fringe at the rim, specular highlight, edge falloff. The
-              outer div's radial-gradient shows through the transparent rim as
-              the glass body. */}
+              onto the sphere surface: foreshortening toward the rim, specular,
+              rim chroma. The outer div's transparent body shows the glass. */}
           <RefractionBall cards={cards} area={area} size={size} settings={orbSettings} />
         </div>
 
-        {/* −/fit/+ pill — overlaps the circle's lower edge (ref placement). */}
+        {/* Bottom cluster — Free/Grid switch + −/fit/+ zoom in ONE row, overlapping
+            the circle's lower edge (ref placement). */}
         <div
           style={{
             position: 'absolute',
@@ -221,18 +179,19 @@ export function NavigatorLoupe({
             transform: 'translateX(-50%)',
             display: 'flex',
             alignItems: 'center',
-            gap: 1,
+            gap: 4,
             paddingTop: 3,
             paddingBottom: 3,
-            paddingLeft: 4,
-            paddingRight: 4,
-            // Themed glass — same recipe as the Free/Grid toggle, so the pill
-            // follows the palette (dark glass + light ink in dark, light glass +
-            // dark ink in light) instead of a fixed dark control.
+            paddingLeft: 5,
+            paddingRight: 5,
+            // Themed glass — follows the palette (dark glass + light ink in dark,
+            // light glass + dark ink in light).
             ...glass(true),
             borderRadius: 999,
           }}
         >
+          <ModeSwitch gridMode={gridMode} onChange={onGridModeChange} />
+          <span aria-hidden style={{ width: 1, alignSelf: 'stretch', marginTop: 3, marginBottom: 3, background: 'var(--cnv-edge)' }} />
           <LoupeButton label="Zoom out" disabled={atMin} onClick={() => stepZoom(1)}>
             <line x1="5" y1="12" x2="19" y2="12" />
           </LoupeButton>
@@ -246,6 +205,39 @@ export function NavigatorLoupe({
         </div>
       </div>
     </div>
+  );
+}
+
+/** Free ⟷ Grid — ONE toggle button: shows the current mode and flips to the
+ *  other on click (a single control, not two). */
+function ModeSwitch({ gridMode, onChange }: { gridMode: boolean; onChange: (grid: boolean) => void }) {
+  return (
+    <button
+      type="button"
+      aria-label={`Layout: ${gridMode ? 'Grid' : 'Free'}. Click to switch.`}
+      aria-pressed={gridMode}
+      onClick={() => onChange(!gridMode)}
+      style={{
+        borderWidth: 0,
+        borderRadius: 7,
+        background: 'rgba(255,255,255,0.12)',
+        color: 'var(--cnv-ink)',
+        fontSize: 9.5,
+        fontWeight: 300,
+        fontFamily: FONT,
+        paddingTop: 4,
+        paddingBottom: 4,
+        paddingLeft: 10,
+        paddingRight: 10,
+        minWidth: 36,
+        textAlign: 'center',
+        cursor: 'pointer',
+      }}
+      onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.18)'; }}
+      onMouseLeave={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.12)'; }}
+    >
+      {gridMode ? 'Grid' : 'Free'}
+    </button>
   );
 }
 
