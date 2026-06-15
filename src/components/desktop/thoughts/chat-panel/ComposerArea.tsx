@@ -433,6 +433,10 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           onSelect={handleSelectSlashCommand}
         />
         <div
+          // The bottom status bar measures this element to center its branch
+          // cluster directly under the composer — the column-width props it used
+          // before ignored insets/gaps + a hidden right region and drifted ~125px.
+          data-composer-center=""
           onDragOver={dragHandlers?.onDragOver}
           onDragLeave={dragHandlers?.onDragLeave}
           onDrop={dragHandlers?.onDrop}
