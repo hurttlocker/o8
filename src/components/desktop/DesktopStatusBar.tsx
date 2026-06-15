@@ -143,6 +143,7 @@ function DesktopStatusBarBase({
         borderTopWidth: 0,
         fontFamily: 'var(--font-sans-system)',
         boxSizing: 'border-box',
+        position: 'relative',
       }}
     >
       {/* Left footer — bottom half of the SAME visual card as the panel
@@ -260,30 +261,50 @@ function DesktopStatusBarBase({
         </div>
       </div>
 
+      {/* Flow spacer keeps the right-edge chrome (the ? button) pinned right.
+          The branch/merge cluster itself is lifted into the absolute overlay
+          below so it centers on the TRUE workspace surface, not on this
+          leftover flex gap (which the collapsed-left gear's 34px floor would
+          otherwise shove ~17px off-center). */}
+      <div style={{ flex: 1, minWidth: 0 }} />
+
+      {/* Center cluster — absolutely centered on the true workspace surface
+          (leftColumnWidth .. rightColumnWidth, the real widths, 0 when a panel
+          is collapsed) so the branch/merge cluster sits dead-center under the
+          composer and its chips in EVERY panel state, instead of drifting with
+          the chrome-button section widths (operator: "they look cheap when they
+          don't line up", 2026-06-15). pointerEvents:none lets clicks fall
+          through the empty span to the floating gear beneath; the cluster
+          re-enables them. */}
       <div
         style={{
-          flex: 1,
-          minWidth: 0,
+          position: 'absolute',
+          top: 0,
+          bottom: 0,
+          left: leftColumnWidth ?? 0,
+          right: rightColumnWidth ?? 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 6,
+          pointerEvents: 'none',
         }}
       >
-        <MergeBeacon parked={parkedLanes} compact={compact} />
-        <MergeActionCluster
-          branchName={branchName}
-          repoName={repoName}
-          repoRemoteUrl={repoRemoteUrl}
-          compact={compact}
-        />
-        {!compact && onToggleBottomPanel ? (
-          <StatusBottomPanelControl
-            active={bottomPanelVisible}
-            onToggle={onToggleBottomPanel}
-            onOpenSurface={onOpenBottomPanelSurface}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
+          <MergeBeacon parked={parkedLanes} compact={compact} />
+          <MergeActionCluster
+            branchName={branchName}
+            repoName={repoName}
+            repoRemoteUrl={repoRemoteUrl}
+            compact={compact}
           />
-        ) : null}
+          {!compact && onToggleBottomPanel ? (
+            <StatusBottomPanelControl
+              active={bottomPanelVisible}
+              onToggle={onToggleBottomPanel}
+              onOpenSurface={onOpenBottomPanelSurface}
+            />
+          ) : null}
+        </div>
       </div>
 
       <div
