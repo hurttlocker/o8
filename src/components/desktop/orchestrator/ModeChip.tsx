@@ -17,6 +17,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { useComposerChipCompact } from '@/components/desktop/thoughts/composer-compact-context';
 
 interface ModeChipProps {
   selectedMode: OrchestrationMode;
@@ -53,6 +54,9 @@ export function ModeChip({
   onSelectSingle,
 }: ModeChipProps) {
   const [open, setOpen] = useState(false);
+  // Collapses to icon-only when the composer button row is too narrow for
+  // labels — same signal that drops the model picker's label, kept in lockstep.
+  const compact = useComposerChipCompact();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
   const popoverRef = useRef<HTMLDivElement | null>(null);
   // Anchor the popover from the BOTTOM (so it grows UPWARD) — the chip
@@ -156,7 +160,7 @@ export function ModeChip({
             <path d="m12 12 6 4" />
           </svg>
         </span>
-        <span>{label}</span>
+        {compact ? null : <span>{label}</span>}
         <svg width={8} height={8} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ opacity: 0.7 }}>
           <path d="m6 9 6 6 6-6" />
         </svg>
