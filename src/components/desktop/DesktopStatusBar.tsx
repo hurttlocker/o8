@@ -18,6 +18,8 @@
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
 import { ChromeButton } from './chrome/ChromeButton';
 import { MergeActionCluster } from './MergeActionCluster';
+import { MergeBeacon } from './merge-beacon/MergeBeacon';
+import type { ParkedLane } from './merge-beacon/derive';
 import { FooterPorts } from './desktop-status-bar/footer-ports';
 import { SupervisorInboxBadge } from './desktop-status-bar/supervisor-inbox-badge';
 import { CanvasModeIcon, DeviceMobileIcon, FolderPlusIcon, GearSixIcon } from './desktop-status-bar/status-bar-icons';
@@ -41,6 +43,9 @@ interface DesktopStatusBarProps {
   rightColumnWidth?: number;
   /** Narrow desktop mode: keep durable status text and collapse action chrome. */
   compact?: boolean;
+  /** Lanes parked in the review/escalation gates — drives the merge beacon
+   *  (fleet-wide "something's ready to merge / needs you" pill). */
+  parkedLanes?: ParkedLane[];
   onOpenSettings: () => void;
   onAddRepo: () => void;
   /** Open the full-screen mobile-pairing QR view (a canvas tab). */
@@ -67,6 +72,7 @@ function DesktopStatusBarBase({
   leftColumnWidth,
   rightColumnWidth,
   compact = false,
+  parkedLanes = [],
   onOpenSettings,
   onAddRepo,
   onOpenMobilePairing,
@@ -264,6 +270,7 @@ function DesktopStatusBarBase({
           gap: 6,
         }}
       >
+        <MergeBeacon parked={parkedLanes} compact={compact} />
         <MergeActionCluster
           branchName={branchName}
           repoName={repoName}
