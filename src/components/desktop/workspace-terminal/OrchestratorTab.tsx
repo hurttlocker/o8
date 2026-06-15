@@ -1123,8 +1123,21 @@ function OrchestratorTabInner({
         </div>
 
         {/* Right: Branch details launcher (Codex pattern). Self-hides when
-            the wide O8 right panel is open and when no packet is selected. */}
-        <BranchDetailsLauncher visible={projectContextRailVisible} />
+            the wide O8 right panel is open and when no packet is selected.
+            Wrapped in a width-animating column so toggling the workspace-detail
+            rail PUSHES the chat (its flex:1 sibling) smoothly in lockstep — the
+            Codex drawer motion — instead of snapping in/out. The rail content
+            stays mounted and is clipped (never faded) as the width collapses. */}
+        <div
+          style={{
+            width: (projectContextRailVisible && !data.o8PanelVisible) ? 256 : 0,
+            flexShrink: 0,
+            overflow: 'hidden',
+            transition: 'width 240ms cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        >
+          <BranchDetailsLauncher visible={projectContextRailVisible} />
+        </div>
       </div>
       <span style={{ display: 'none' }} aria-hidden data-chrome={chatChromeState.activeTargetLabel} />
       <QuickActionPalette

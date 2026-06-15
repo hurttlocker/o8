@@ -194,8 +194,8 @@ export function WorkspaceHeaderStrip({
             {showProjectContextToggle ? (
               <HeaderIconPill
                 icon={<IconInfoCircle />}
-                label={projectContextRailVisible ? 'Hide project context' : 'Show project context'}
-                title={projectContextRailVisible ? 'Hide project context' : 'Show project context'}
+                label={projectContextRailVisible ? 'Hide workspace detail' : 'Show workspace detail'}
+                title={projectContextRailVisible ? 'Hide workspace detail' : 'Show workspace detail'}
                 onClick={onToggleProjectContextRail}
                 yNudge={-3}
               />
