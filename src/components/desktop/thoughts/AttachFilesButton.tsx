@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { ComposerPopover } from './chat-panel/ComposerPopover';
 
 interface FileSuggestion {
   path: string;
@@ -50,18 +51,8 @@ export function AttachFilesButton({
   const [query, setQuery] = useState('');
   const [suggestions, setSuggestions] = useState<FileSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
-  const rootRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleDocumentMouseDown = (event: MouseEvent) => {
-      if (rootRef.current?.contains(event.target as Node)) return;
-      setOpen(false);
-    };
-    document.addEventListener('mousedown', handleDocumentMouseDown);
-    return () => document.removeEventListener('mousedown', handleDocumentMouseDown);
-  }, [open]);
 
   useEffect(() => {
     if (!open) return;
@@ -109,8 +100,9 @@ export function AttachFilesButton({
   };
 
   return (
-    <div ref={rootRef} style={{ position: 'relative', display: 'inline-flex' }}>
+    <div style={{ display: 'inline-flex' }}>
       <button
+        ref={triggerRef}
         type="button"
         title="Attach files"
         aria-label="Attach files"
@@ -156,20 +148,15 @@ export function AttachFilesButton({
         }}
       />
 
-      {open ? (
+      <ComposerPopover anchorRef={triggerRef} open={open} onClose={() => setOpen(false)} align="end">
         <div
           style={{
-            position: 'absolute',
-            right: 0,
-            bottom: '100%',
-            marginBottom: 8,
             width: 288,
             maxWidth: 'min(288px, calc(100vw - 32px))',
             borderRadius: 14,
             border: '1px solid var(--t-panel-border)',
             background: 'var(--t-panel-solid, var(--t-panel))',
             boxShadow: 'var(--t-panel-shadow)',
-            zIndex: 200,
             overflow: 'hidden',
           }}
         >
@@ -296,7 +283,7 @@ export function AttachFilesButton({
             </div>
           </div>
         </div>
-      ) : null}
+      </ComposerPopover>
     </div>
   );
 }
