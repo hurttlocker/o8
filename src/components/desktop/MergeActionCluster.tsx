@@ -287,22 +287,24 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact =
         }}
       >
         <span
+          // Harmonized with the composer-below ChipShell vocabulary — see the
+          // non-compact branch span below.
           style={{
             display: 'inline-flex',
             alignItems: 'center',
-            gap: 5,
+            gap: 7,
             minWidth: 0,
             maxWidth: 'min(46vw, 240px)',
             overflow: 'hidden',
-            color: 'var(--t-text-muted)',
-            fontSize: 11,
-            fontWeight: 440,
-            letterSpacing: 0,
+            color: 'var(--t-text-secondary)',
+            fontSize: 12,
+            fontWeight: 360,
+            letterSpacing: '-0.005em',
             whiteSpace: 'nowrap',
           }}
           title={repoName ? `${repoName} · ${branchName}` : branchName ?? undefined}
         >
-          <GitBranch size={11} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+          <GitBranch size={13} strokeWidth={1.8} style={{ flexShrink: 0, color: 'var(--t-text-faint)' }} />
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayBranch}</span>
         </span>
       </div>
@@ -329,22 +331,25 @@ function MergeActionClusterBase({ branchName, repoName, repoRemoteUrl, compact =
       }}
     >
       <span
+        // Harmonized with the composer-below ChipShell vocabulary (size 12 /
+        // weight 360 / text-secondary label / text-faint icon / -0.005em) so the
+        // status row and the o8·Work-locally chip row read as one design system.
         style={{
           display: 'inline-flex',
           alignItems: 'center',
-          gap: 5,
+          gap: 7,
           minWidth: 0,
           maxWidth: 180,
           overflow: 'hidden',
-          fontSize: 11,
-          fontWeight: 440,
-          color: 'var(--t-text-muted)',
-          letterSpacing: 0,
+          fontSize: 12,
+          fontWeight: 360,
+          color: 'var(--t-text-secondary)',
+          letterSpacing: '-0.005em',
           whiteSpace: 'nowrap',
         }}
         title={repoName ? `${repoName} · ${branchName}` : branchName ?? undefined}
       >
-        <GitBranch size={11} strokeWidth={1.8} style={{ flexShrink: 0 }} />
+        <GitBranch size={13} strokeWidth={1.8} style={{ flexShrink: 0, color: 'var(--t-text-faint)' }} />
         <span style={{ overflow: 'hidden', textOverflow: 'ellipsis' }}>{displayBranch}</span>
       </span>
 
