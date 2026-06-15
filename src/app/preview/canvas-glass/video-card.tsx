@@ -16,7 +16,7 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, IMG_MIN_W, glass } from './ui';
+import { canvasZoom, FONT, IMG_MIN_W, RESIZE_ARC, glass } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 
 export interface VideoCard {
@@ -179,10 +179,23 @@ export function VideoGlassCard({
         </div>
       ) : null}
 
-      {/* The clip — squircle corners; native controls. It swallows its own
-          pointer events (stopPropagation) so play/scrub/volume work without
-          ever starting a card drag — drag the card by the pill above. */}
-      <SmoothCorners corners={{ radius: 16 }} autoEffects={false} style={{ position: 'absolute', inset: 0, background: '#000' }}>
+      {/* ~5px frosted rim — the defined outline (reference-matched). Blur is
+          suppressed while dragging/resizing so the moving glass never flickers
+          the native vibrancy (see canvas drag flicker). */}
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          inset: 0,
+          borderRadius: 18,
+          ...glass(false, dragging || resizing),
+          boxShadow: '0 10px 28px rgba(0, 0, 0, 0.22)',
+        }}
+      />
+      {/* The clip — squircle corners, inset inside the rim; native controls. It
+          swallows its own pointer events (stopPropagation) so play/scrub/volume
+          work without ever starting a card drag — drag the card by the pill. */}
+      <SmoothCorners corners={{ radius: 13 }} autoEffects={false} style={{ position: 'absolute', inset: 5, background: '#000' }}>
         <video
           src={card.src}
           controls
@@ -207,7 +220,9 @@ export function VideoGlassCard({
         />
       </SmoothCorners>
 
-      {/* Corner resize grip — aspect-locked. */}
+      {/* Off-edge resize handle — a squircle corner arc CONCENTRIC with the
+          card's own corner (lisse-generated so the curve matches), sitting just
+          outside the bottom-right. Drag it to resize (aspect-locked). */}
       <div
         role="presentation"
         onPointerDown={(event) => {
@@ -225,22 +240,19 @@ export function VideoGlassCard({
         onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
         style={{
           position: 'absolute',
-          right: 0,
-          bottom: 0,
-          width: 18,
-          height: 18,
+          left: '100%',
+          top: '100%',
+          width: RESIZE_ARC.size,
+          height: RESIZE_ARC.size,
+          transform: 'translate(-7px, -7px)',
           cursor: 'nwse-resize',
           touchAction: 'none',
-          display: 'flex',
-          alignItems: 'flex-end',
-          justifyContent: 'flex-end',
-          paddingRight: 4,
-          paddingBottom: 4,
-          opacity: resizing || hovered ? 0.8 : 0,
+          opacity: resizing || hovered ? 1 : 0,
+          transition: 'opacity 140ms ease',
         }}
       >
-        <svg width={9} height={9} viewBox="0 0 9 9" aria-hidden>
-          <path d="M8 1 1 8M8 5 5 8" stroke="var(--cnv-ink-muted)" strokeWidth="1.2" strokeLinecap="round" fill="none" />
+        <svg width={RESIZE_ARC.size} height={RESIZE_ARC.size} viewBox={`0 0 ${RESIZE_ARC.size} ${RESIZE_ARC.size}`} fill="none" aria-hidden style={{ display: 'block', overflow: 'visible' }}>
+          <path d={RESIZE_ARC.d} stroke="var(--cnv-ink-muted)" strokeWidth={2.5} strokeLinecap="round" />
         </svg>
       </div>
     </motion.div>
