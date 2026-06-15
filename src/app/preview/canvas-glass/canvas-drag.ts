@@ -21,11 +21,13 @@ import { canvasZoom } from './ui';
  *  Side chrome (left rail / right dock) is full-height; the top bar + composer
  *  are centered pills, so a uniform box is a hair conservative at the top/bottom
  *  corners — which keeps cards in the comfortable central field. */
-const INSET_LEFT = 96; // ProximityDock spawn rail
+// Symmetric side clearance: the ProximityDock spawn rail's glyphs end at ~57px,
+// so 64 clears them — and using the SAME inset on both sides centers the grid
+// when the dock is closed (was 96 left / 32 right, which read off-center). When
+// the dock is open it replaces the right inset (real chrome, asymmetry is right).
+const INSET_SIDE = 64;
 const INSET_TOP = 70; // top control pill (top:18 + height:40, + margin)
 const INSET_BOTTOM = 88; // bottom composer (bottom:24 + ~56 tall, + margin)
-/** Margin off the right screen edge when the dock is closed. */
-const INSET_RIGHT_BARE = 32;
 
 /** Rubber-band stiffness past a wall — the card follows at 8% of the overdrag
  *  (drag 100px past → 8px past), so the edge reads as a soft wall, not a cliff.
@@ -66,8 +68,8 @@ export function dragBounds(cardW: number, cardH: number): DragBounds {
   const vw = typeof window === 'undefined' ? 1600 : window.innerWidth;
   const vh = typeof window === 'undefined' ? 900 : window.innerHeight;
   const dockReserve = readDockReserve();
-  const right = dockReserve > 0 ? dockReserve : INSET_RIGHT_BARE;
-  const minX = INSET_LEFT / zoom;
+  const right = dockReserve > 0 ? dockReserve : INSET_SIDE;
+  const minX = INSET_SIDE / zoom;
   const minY = INSET_TOP / zoom;
   let maxX = (vw - right) / zoom - cardW;
   let maxY = (vh - INSET_BOTTOM) / zoom - cardH;
@@ -85,11 +87,11 @@ export function usableCanvasArea(): { x: number; y: number; w: number; h: number
   const vw = typeof window === 'undefined' ? 1600 : window.innerWidth;
   const vh = typeof window === 'undefined' ? 900 : window.innerHeight;
   const dockReserve = readDockReserve();
-  const right = dockReserve > 0 ? dockReserve : INSET_RIGHT_BARE;
+  const right = dockReserve > 0 ? dockReserve : INSET_SIDE;
   return {
-    x: INSET_LEFT / zoom,
+    x: INSET_SIDE / zoom,
     y: INSET_TOP / zoom,
-    w: Math.max(0, vw - right - INSET_LEFT) / zoom,
+    w: Math.max(0, vw - right - INSET_SIDE) / zoom,
     h: Math.max(0, vh - INSET_BOTTOM - INSET_TOP) / zoom,
   };
 }

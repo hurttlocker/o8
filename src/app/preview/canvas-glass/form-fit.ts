@@ -40,11 +40,17 @@ export const GRID_MIN_BODY_H = 96;
  *  gap reads the same on screen at any zoom (a fixed canvas gap shrinks visually
  *  when zoomed out). */
 export const DEFAULT_GAP = 24;
-const TARGET_CELL_ASPECT = 4 / 3; // preferred cell w/h — keeps cells card-shaped
+const TARGET_CELL_ASPECT = 1.6; // preferred cell w/h — cards read landscape
+/** How hard a partial last row is penalized. Balance is the OCD priority: a lone
+ *  card centered under a full row (6 → 5+1) reads broken. This weight makes the
+ *  packer prefer a FULL grid (6 → 3×2) over a perfect-aspect lopsided one, while
+ *  still letting aspect break ties between balanced options (3×2 vs 6×1). */
+const BALANCE_WEIGHT = 0.7;
 
-/** Column count whose resulting cells sit closest to TARGET_CELL_ASPECT for this
- *  item count + area shape (so 6 cards in a wide area land as 3×2, like the
- *  reference, not 6×1 or 1×6). */
+/** Column count for `count` cards in an area. Balance-first: minimize the holes
+ *  in the last row (so 6 → 3×2, never 5+1), then tie-break toward landscape
+ *  cells. Tuned so composites land as clean rectangles and the cells stay
+ *  card-shaped rather than slivers. */
 export function columnsFor(count: number, areaW: number, areaH: number, gap = DEFAULT_GAP): number {
   if (count <= 1) return 1;
   let best = 1;
@@ -54,7 +60,9 @@ export function columnsFor(count: number, areaW: number, areaH: number, gap = DE
     const cellW = (areaW - gap * (cols - 1)) / cols;
     const cellH = (areaH - gap * (rows - 1)) / rows;
     if (cellW <= 0 || cellH <= 0) continue;
-    const score = Math.abs(cellW / cellH - TARGET_CELL_ASPECT);
+    const holes = cols * rows - count; // empty cells in the last row
+    const aspectDev = Math.abs(cellW / cellH - TARGET_CELL_ASPECT);
+    const score = holes * BALANCE_WEIGHT + aspectDev;
     if (score < bestScore) {
       bestScore = score;
       best = cols;
@@ -93,8 +101,8 @@ export function computeGrid(items: GridItem[], area: Slot, gap = DEFAULT_GAP): M
 export function slotToCardGeom(slot: Slot, kind: string, chromeOverride?: number): Slot {
   const chrome = chromeOverride ?? CARD_CHROME[kind] ?? 40;
   return {
-    x: slot.x,
-    y: slot.y,
+    x: Math.round(slot.x),
+    y: Math.round(slot.y),
     w: Math.round(slot.w),
     h: Math.max(GRID_MIN_BODY_H, Math.round(slot.h - chrome)),
   };
