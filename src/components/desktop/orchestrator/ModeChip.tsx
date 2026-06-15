@@ -14,10 +14,10 @@
  * gate in ThoughtsChatPanel (chip hides when lockedMode is set).
  */
 
-import { useEffect, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useRef, useState } from 'react';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { useComposerChipCompact } from '@/components/desktop/thoughts/composer-compact-context';
+import { ComposerPopover } from '@/components/desktop/thoughts/chat-panel/ComposerPopover';
 
 interface ModeChipProps {
   selectedMode: OrchestrationMode;
@@ -58,44 +58,6 @@ export function ModeChip({
   // labels — same signal that drops the model picker's label, kept in lockstep.
   const compact = useComposerChipCompact();
   const triggerRef = useRef<HTMLButtonElement | null>(null);
-  const popoverRef = useRef<HTMLDivElement | null>(null);
-  // Anchor the popover from the BOTTOM (so it grows UPWARD) — the chip
-  // lives near the bottom of the composer footer and a downward menu
-  // gets clipped by the workspace edge. `bottom` in CSS is measured
-  // from the viewport bottom; we fix the popover's bottom edge 6px
-  // above the chip's top edge.
-  const [position, setPosition] = useState<{ left: number; bottom: number } | null>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const trigger = triggerRef.current;
-    if (!trigger) return;
-    const rect = trigger.getBoundingClientRect();
-    setPosition({
-      left: Math.round(rect.left),
-      bottom: Math.round(window.innerHeight - rect.top + 6),
-    });
-  }, [open]);
-
-  useEffect(() => {
-    if (!open) return;
-    const handleDocClick = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (popoverRef.current?.contains(target)) return;
-      if (triggerRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('mousedown', handleDocClick);
-    window.addEventListener('keydown', handleKey);
-    return () => {
-      window.removeEventListener('mousedown', handleDocClick);
-      window.removeEventListener('keydown', handleKey);
-    };
-  }, [open]);
 
   const label = chipLabel(selectedMode, selectedSingleRuntime);
 
@@ -166,47 +128,39 @@ export function ModeChip({
         </svg>
       </button>
 
-      {open && position
-        ? createPortal(
-            <div
-              ref={popoverRef}
-              role="menu"
-              style={{
-                position: 'fixed',
-                left: position.left,
-                bottom: position.bottom,
-                zIndex: 1000,
-                minWidth: 240,
-                paddingTop: 6,
-                paddingRight: 6,
-                paddingBottom: 6,
-                paddingLeft: 6,
-                borderRadius: 12,
-                background: 'var(--t-panel-solid, #ffffff)',
-                border: '1px solid var(--t-border, rgba(15,23,42,0.12))',
-                boxShadow: '0 18px 42px rgba(15, 23, 42, 0.16)',
-                fontFamily: FONT_FAMILY,
-              }}
-            >
-              <PopoverSectionLabel>Mode</PopoverSectionLabel>
-              <PopoverRow
-                active={selectedMode === 'fleet'}
-                title="Fleet orchestration"
-                detail="Orchestrator dispatches sub-agents in worktrees."
-                onClick={handlePickFleet}
-                glyph={<FleetGlyph />}
-              />
-              <PopoverRow
-                active={selectedMode === 'single'}
-                title="Single agent"
-                detail="Talk to the orchestrator solo · no dispatch."
-                onClick={handlePickSingle}
-                glyph={<SingleGlyph />}
-              />
-            </div>,
-            document.body,
-          )
-        : null}
+      <ComposerPopover anchorRef={triggerRef} open={open} onClose={() => setOpen(false)} align="start">
+        <div
+          role="menu"
+          style={{
+            minWidth: 240,
+            paddingTop: 6,
+            paddingRight: 6,
+            paddingBottom: 6,
+            paddingLeft: 6,
+            borderRadius: 12,
+            background: 'var(--t-panel-solid, #ffffff)',
+            border: '1px solid var(--t-border, rgba(15,23,42,0.12))',
+            boxShadow: '0 18px 42px rgba(15, 23, 42, 0.16)',
+            fontFamily: FONT_FAMILY,
+          }}
+        >
+          <PopoverSectionLabel>Mode</PopoverSectionLabel>
+          <PopoverRow
+            active={selectedMode === 'fleet'}
+            title="Fleet orchestration"
+            detail="Orchestrator dispatches sub-agents in worktrees."
+            onClick={handlePickFleet}
+            glyph={<FleetGlyph />}
+          />
+          <PopoverRow
+            active={selectedMode === 'single'}
+            title="Single agent"
+            detail="Talk to the orchestrator solo · no dispatch."
+            onClick={handlePickSingle}
+            glyph={<SingleGlyph />}
+          />
+        </div>
+      </ComposerPopover>
     </>
   );
 }
