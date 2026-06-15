@@ -4380,14 +4380,23 @@ function DashboardInner() {
         {showRightPanelColumn ? (
           <motion.div
             key="right-panel-shell"
-            initial={{ opacity: 0, x: 20 }}
-            animate={{ opacity: 1, x: 0 }}
-            exit={{ opacity: 0, x: 20 }}
-            transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+            // Animate the LAYOUT WIDTH (not just opacity/x) so the center
+            // column reflows smoothly as the panel collapses — instead of
+            // the panel holding its full footprint through a cosmetic
+            // fade/slide and then snapping the center when it unmounts.
+            // overflow:hidden clips the fixed-width content during the
+            // collapse; the inner keeps its own drag-resize width animation.
+            // (resize-audit 2026-06-14). The +10 covers the 6px drag handle
+            // + the inner's 4px right margin so nothing clips when open.
+            initial={{ width: 0, opacity: 0 }}
+            animate={{ width: 10 + (rightPanelKind === 'o8' ? o8Width : rightWidth), opacity: 1 }}
+            exit={{ width: 0, opacity: 0 }}
+            transition={{ duration: 0.26, ease: [0.22, 1, 0.36, 1] }}
             style={{
               display: 'flex',
               height: '100%',
               flexShrink: 0,
+              overflow: 'hidden',
             }}
           >
             <div
