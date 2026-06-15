@@ -47,12 +47,16 @@ function WorkspaceBootLoaderBase() {
       aria-live="polite"
     >
       <style>{`
-        @keyframes o8MarkSweep {
-          0%   { background: var(--t-text-faint); }
-          10%  { background: rgb(251, 191, 36); }
-          17%  { background: rgb(245, 158, 11); }
-          30%  { background: var(--t-text-faint); }
-          100% { background: var(--t-text-faint); }
+        /* The sweep drives OPACITY (GPU-composited) instead of
+           background-color (a main-thread paint property). On a page reload
+           the main thread is slammed hydrating the dashboard; a color
+           animation can't repaint and FREEZES on an early frame (the
+           "static old loader"). An opacity animation runs on the compositor,
+           so the glow keeps moving even while the main thread is blocked. */
+        @keyframes o8MarkGlow {
+          0%, 30%, 100% { opacity: 0; }
+          12%           { opacity: 1; }
+          20%           { opacity: 0.72; }
         }
         @keyframes o8BootFadeIn {
           from { opacity: 0; transform: translateY(2px); }
@@ -83,17 +87,30 @@ function WorkspaceBootLoaderBase() {
                 <div
                   key={`${r}-${c}`}
                   style={{
+                    position: 'relative',
                     width: CELL,
                     height: CELL,
                     borderRadius: 1.5,
                     background: 'var(--t-text-faint)',
-                    // Diagonal orange sweep, staggered along (col + 0.45·row)
-                    // so the crest wipes left-to-right with the same downward
-                    // skew as the terminal spawn-reveal, then settles + repeats.
-                    animation: 'o8MarkSweep 2s ease-in-out infinite',
-                    animationDelay: `${(c + r * 0.45) * 0.06}s`,
                   }}
-                />
+                >
+                  {/* Orange crest as an opacity-animated overlay (composited),
+                      staggered along (col + 0.45·row) so it wipes left-to-right
+                      with the same downward skew as the terminal spawn-reveal. */}
+                  <span
+                    aria-hidden
+                    style={{
+                      position: 'absolute',
+                      inset: 0,
+                      borderRadius: 1.5,
+                      background: 'rgb(251, 191, 36)',
+                      opacity: 0,
+                      willChange: 'opacity',
+                      animation: 'o8MarkGlow 2s ease-in-out infinite',
+                      animationDelay: `${(c + r * 0.45) * 0.06}s`,
+                    }}
+                  />
+                </div>
               ) : (
                 <div key={`${r}-${c}`} style={{ width: CELL, height: CELL }} />
               ),
