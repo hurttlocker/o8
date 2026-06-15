@@ -28,6 +28,12 @@ function squircleCornerArc(radius: number, stroke: number): { d: string; size: n
  *  Computed once (radius is fixed) — cards read `.d` + `.size`. */
 export const RESIZE_ARC = squircleCornerArc(18, 2.5);
 
+/** Photo/video card frame geometry — the grey frosted frame is the card bounds;
+ *  the media insets MEDIA_RIM on the sides/bottom and sits below a
+ *  MEDIA_HEADER_H header strip at the top (icon + filename, reference look). */
+export const MEDIA_RIM = 7;
+export const MEDIA_HEADER_H = 28;
+
 /** The one glass recipe — every surface consumes the tunable vars.
  *  `suppressBlur` drops the live `backdrop-filter` (set true WHILE a card is
  *  dragged): a moving backdrop-filter re-samples the dark native vibrancy each
@@ -44,6 +50,20 @@ export function glass(deep = false, suppressBlur = false): CSSProperties {
     border: '1px solid var(--cnv-edge)',
     color: 'var(--cnv-ink)',
     boxShadow: '0 12px 40px rgba(0, 0, 0, 0.35)',
+  } as CSSProperties;
+}
+
+/** Media-card frost — the grey rim/header recipe for photo & video cards.
+ *  Uses `--cnv-media-rim` (a tone-aware NEUTRAL grey, not the near-white pane
+ *  tint) so the outline + header read as grey-on-white on the paper canvas.
+ *  `suppressBlur` drops the live blur during a drag (see `glass`). */
+export function glassMedia(suppressBlur = false): CSSProperties {
+  return {
+    background: 'var(--cnv-media-rim)',
+    backdropFilter: suppressBlur ? 'none' : 'blur(calc(var(--cnv-frost) * var(--cnv-frost-scale, 1))) saturate(var(--cnv-sat, 1.6))',
+    WebkitBackdropFilter: suppressBlur ? 'none' : 'blur(calc(var(--cnv-frost) * var(--cnv-frost-scale, 1))) saturate(var(--cnv-sat, 1.6))',
+    border: '1px solid var(--cnv-edge)',
+    color: 'var(--cnv-ink)',
   } as CSSProperties;
 }
 

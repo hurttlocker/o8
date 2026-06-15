@@ -321,6 +321,10 @@ function toneVocabulary(tone: CanvasGlassSettings['tone'], tint: number) {
       tint: `rgba(252, 253, 255, ${tint.toFixed(2)})`,
       tintDeep: `rgba(255, 255, 255, ${Math.min(0.95, tint + 0.16).toFixed(2)})`,
       edge: `rgba(12, 16, 24, ${(0.1 + tint * 0.08).toFixed(2)})`,
+      // Neutral GREY frost for media rims/headers — the near-white tints above
+      // vanish on a white/paper canvas, so photo & video cards use this so the
+      // outline + header read as grey-on-white (fixed alpha, slider-independent).
+      mediaRim: 'rgba(108, 116, 130, 0.20)',
       popBase: 'rgba(250, 251, 253, 0.9)',
     };
   }
@@ -328,6 +332,8 @@ function toneVocabulary(tone: CanvasGlassSettings['tone'], tint: number) {
     tint: `rgba(9, 11, 16, ${tint.toFixed(2)})`,
     tintDeep: `rgba(7, 9, 13, ${Math.min(0.92, tint + 0.16).toFixed(2)})`,
     edge: `rgba(255, 255, 255, ${(0.1 + tint * 0.1).toFixed(2)})`,
+    // On the dark canvas a light frost already reads — keep media rims light.
+    mediaRim: 'rgba(255, 255, 255, 0.10)',
     popBase: 'rgba(13, 16, 21, 0.88)',
   };
 }
@@ -382,6 +388,7 @@ export function applyCanvasGlassSettings(settings?: CanvasGlassSettings): void {
   root.style.setProperty('--cnv-ink', text.ink);
   root.style.setProperty('--cnv-ink-muted', text.inkMuted);
   root.style.setProperty('--cnv-edge', base.edge);
+  root.style.setProperty('--cnv-media-rim', base.mediaRim);
   // Popovers must CONTRAST with the universal text, not follow the pane
   // tone — light text gets the dark near-solid base (the composer-pill
   // family), dark text gets the white one. Menus stay readable at any

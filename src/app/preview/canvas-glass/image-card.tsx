@@ -15,7 +15,7 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, IMG_MIN_W, RESIZE_ARC, glass } from './ui';
+import { canvasZoom, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, RESIZE_ARC, glassMedia } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 
 export interface ImageItem {
@@ -131,73 +131,6 @@ export function ImageGlassCard({
         fontFamily: FONT,
       }}
     >
-      {/* Filename pill — floats above the photo, reference-style. */}
-      <div
-        style={{
-          position: 'absolute',
-          top: -28,
-          left: 0,
-          maxWidth: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          height: 22,
-          paddingLeft: 9,
-          paddingRight: hovered ? 4 : 9,
-          borderRadius: 999,
-          ...glass(true),
-          boxShadow: 'none',
-        }}
-      >
-        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
-          <rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
-        </svg>
-        <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.05px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {stack ? `${card.items.length} images` : lead?.name}
-        </span>
-        {hovered ? (
-          <button
-            type="button"
-            aria-label="Remove image"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onClose(card.id)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: 9.5, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, flexShrink: 0 }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            ✕
-          </button>
-        ) : null}
-      </div>
-
-      {/* W×H chip — only while the corner grip is live, reference-style. */}
-      {resizing ? (
-        <div
-          style={{
-            position: 'absolute',
-            top: -28,
-            right: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            height: 22,
-            paddingLeft: 8,
-            paddingRight: 8,
-            borderRadius: 999,
-            fontFamily: MONO,
-            fontSize: 9,
-            color: 'var(--cnv-ink)',
-            ...glass(true),
-            boxShadow: 'none',
-          }}
-        >
-          <span style={{ color: 'var(--cnv-ink-muted)' }}>W</span>
-          {Math.round(card.w)}
-          <span style={{ color: 'var(--cnv-ink-muted)' }}>H</span>
-          {Math.round(card.h)}
-        </div>
-      ) : null}
-
       {/* Deck ghosts — the fanned edges behind a stack. */}
       {stack ? (
         <>
@@ -206,22 +139,46 @@ export function ImageGlassCard({
         </>
       ) : null}
 
-      {/* ~5px frosted rim — the defined outline (reference-matched), replacing
-          the old bottom-dissolve so the photo reads as a grabbable object. The
-          backdrop blur is SUPPRESSED while the card drags/resizes, or the
-          moving glass flickers the native vibrancy (see canvas drag flicker). */}
+      {/* The grey frosted frame — the card bounds. Media insets MEDIA_RIM on the
+          sides/bottom and sits below a MEDIA_HEADER_H header strip on top (the
+          reference look). Blur SUPPRESSED while dragging/resizing so the moving
+          glass never flickers the native vibrancy (see canvas drag flicker). */}
       <div
         aria-hidden
         style={{
           position: 'absolute',
           inset: 0,
           borderRadius: 18,
-          ...glass(false, dragging || resizing),
+          ...glassMedia(dragging || resizing),
           boxShadow: '0 10px 28px rgba(0, 0, 0, 0.22)',
         }}
       />
-      {/* The photo — squircle, inset inside the rim so the 5px band shows. */}
-      <SmoothCorners corners={{ radius: 13 }} autoEffects={false} style={{ position: 'absolute', inset: 5 }}>
+      {/* Header strip — icon + filename on the frosted frame top (reference). */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: MEDIA_HEADER_H, display: 'flex', alignItems: 'center', gap: 7, paddingLeft: 11, paddingRight: 9, fontFamily: FONT }}>
+        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+          <rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
+        </svg>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: 400, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {stack ? `${card.items.length} images` : lead?.name}
+        </span>
+        {resizing ? (
+          <span style={{ flexShrink: 0, fontFamily: MONO, fontSize: 9.5, color: 'var(--cnv-ink-muted)' }}>{Math.round(card.w)}×{Math.round(card.h)}</span>
+        ) : hovered ? (
+          <button
+            type="button"
+            aria-label="Remove image"
+            onPointerDown={(event) => event.stopPropagation()}
+            onClick={() => onClose(card.id)}
+            style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: 12, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, flexShrink: 0 }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+          >
+            ✕
+          </button>
+        ) : null}
+      </div>
+      {/* The photo — squircle, below the header with the grey rim on the other sides. */}
+      <SmoothCorners corners={{ radius: 11 }} autoEffects={false} style={{ position: 'absolute', top: MEDIA_HEADER_H, left: MEDIA_RIM, right: MEDIA_RIM, bottom: MEDIA_RIM }}>
         {lead ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -238,8 +195,8 @@ export function ImageGlassCard({
         <span
           style={{
             position: 'absolute',
-            top: 8,
-            right: 8,
+            top: MEDIA_HEADER_H + 6,
+            right: MEDIA_RIM + 4,
             height: 18,
             paddingLeft: 7,
             paddingRight: 7,
@@ -250,7 +207,7 @@ export function ImageGlassCard({
             fontWeight: 400,
             color: 'var(--cnv-ink)',
             fontFamily: FONT,
-            ...glass(true),
+            ...glassMedia(dragging),
             boxShadow: 'none',
           }}
         >
@@ -290,7 +247,7 @@ export function ImageGlassCard({
         }}
       >
         <svg width={RESIZE_ARC.size} height={RESIZE_ARC.size} viewBox={`0 0 ${RESIZE_ARC.size} ${RESIZE_ARC.size}`} fill="none" aria-hidden style={{ display: 'block', overflow: 'visible' }}>
-          <path d={RESIZE_ARC.d} stroke="var(--cnv-ink-muted)" strokeWidth={2.5} strokeLinecap="round" />
+          <path d={RESIZE_ARC.d} stroke="var(--cnv-media-rim)" strokeWidth={7} strokeLinecap="round" />
         </svg>
       </div>
     </motion.div>

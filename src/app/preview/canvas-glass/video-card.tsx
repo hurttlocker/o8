@@ -16,7 +16,7 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, IMG_MIN_W, RESIZE_ARC, glass } from './ui';
+import { canvasZoom, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, RESIZE_ARC, glassMedia } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 
 export interface VideoCard {
@@ -112,37 +112,37 @@ export function VideoGlassCard({
         fontFamily: FONT,
       }}
     >
-      {/* Filename pill — the drag handle + close, floating above the clip. */}
+      {/* The grey frosted frame — the card bounds. The clip insets MEDIA_RIM on
+          the sides/bottom and sits below a MEDIA_HEADER_H header strip on top
+          (the reference look). Blur SUPPRESSED while dragging/resizing so the
+          moving glass never flickers the native vibrancy. */}
       <div
+        aria-hidden
         style={{
           position: 'absolute',
-          top: -28,
-          left: 0,
-          maxWidth: '100%',
-          display: 'flex',
-          alignItems: 'center',
-          gap: 6,
-          height: 22,
-          paddingLeft: 9,
-          paddingRight: hovered ? 4 : 9,
-          borderRadius: 999,
-          ...glass(true),
-          boxShadow: 'none',
+          inset: 0,
+          borderRadius: 18,
+          ...glassMedia(dragging || resizing),
+          boxShadow: '0 10px 28px rgba(0, 0, 0, 0.22)',
         }}
-      >
-        <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+      />
+      {/* Header strip — icon + filename on the frosted frame top (reference). */}
+      <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: MEDIA_HEADER_H, display: 'flex', alignItems: 'center', gap: 7, paddingLeft: 11, paddingRight: 9, fontFamily: FONT }}>
+        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
           <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
         </svg>
-        <span style={{ fontSize: 9.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.05px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: 400, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {card.name}
         </span>
-        {hovered ? (
+        {resizing ? (
+          <span style={{ flexShrink: 0, fontFamily: MONO, fontSize: 9.5, color: 'var(--cnv-ink-muted)' }}>{Math.round(card.w)}×{Math.round(card.h)}</span>
+        ) : hovered ? (
           <button
             type="button"
             aria-label="Remove video"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => onClose(card.id)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: 9.5, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, flexShrink: 0 }}
+            style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: 12, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, flexShrink: 0 }}
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
@@ -150,52 +150,11 @@ export function VideoGlassCard({
           </button>
         ) : null}
       </div>
-
-      {/* W×H chip — only while the corner grip is live. */}
-      {resizing ? (
-        <div
-          style={{
-            position: 'absolute',
-            top: -28,
-            right: 0,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            height: 22,
-            paddingLeft: 8,
-            paddingRight: 8,
-            borderRadius: 999,
-            fontFamily: MONO,
-            fontSize: 9,
-            color: 'var(--cnv-ink)',
-            ...glass(true),
-            boxShadow: 'none',
-          }}
-        >
-          <span style={{ color: 'var(--cnv-ink-muted)' }}>W</span>
-          {Math.round(card.w)}
-          <span style={{ color: 'var(--cnv-ink-muted)' }}>H</span>
-          {Math.round(card.h)}
-        </div>
-      ) : null}
-
-      {/* ~5px frosted rim — the defined outline (reference-matched). Blur is
-          suppressed while dragging/resizing so the moving glass never flickers
-          the native vibrancy (see canvas drag flicker). */}
-      <div
-        aria-hidden
-        style={{
-          position: 'absolute',
-          inset: 0,
-          borderRadius: 18,
-          ...glass(false, dragging || resizing),
-          boxShadow: '0 10px 28px rgba(0, 0, 0, 0.22)',
-        }}
-      />
-      {/* The clip — squircle corners, inset inside the rim; native controls. It
-          swallows its own pointer events (stopPropagation) so play/scrub/volume
-          work without ever starting a card drag — drag the card by the pill. */}
-      <SmoothCorners corners={{ radius: 13 }} autoEffects={false} style={{ position: 'absolute', inset: 5, background: '#000' }}>
+      {/* The clip — squircle, below the header with the grey rim on the other
+          sides; native controls. It swallows its own pointer events
+          (stopPropagation) so play/scrub/volume work without ever starting a
+          card drag — drag the card by the header. */}
+      <SmoothCorners corners={{ radius: 11 }} autoEffects={false} style={{ position: 'absolute', top: MEDIA_HEADER_H, left: MEDIA_RIM, right: MEDIA_RIM, bottom: MEDIA_RIM, background: '#000' }}>
         <video
           src={card.src}
           controls
@@ -252,7 +211,7 @@ export function VideoGlassCard({
         }}
       >
         <svg width={RESIZE_ARC.size} height={RESIZE_ARC.size} viewBox={`0 0 ${RESIZE_ARC.size} ${RESIZE_ARC.size}`} fill="none" aria-hidden style={{ display: 'block', overflow: 'visible' }}>
-          <path d={RESIZE_ARC.d} stroke="var(--cnv-ink-muted)" strokeWidth={2.5} strokeLinecap="round" />
+          <path d={RESIZE_ARC.d} stroke="var(--cnv-media-rim)" strokeWidth={7} strokeLinecap="round" />
         </svg>
       </div>
     </motion.div>
