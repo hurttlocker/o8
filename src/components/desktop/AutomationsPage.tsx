@@ -669,7 +669,7 @@ function RowActions({
   );
 }
 
-export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
+export function AutomationsPage({ currentOwner, onClose }: { currentOwner: string; onClose?: () => void }) {
   const [rows, setRows] = useState<AutomationRow[]>([]);
   const [repos, setRepos] = useState<RegisteredRepo[]>([]);
   const [loading, setLoading] = useState(true);
@@ -822,6 +822,37 @@ export function AutomationsPage({ currentOwner }: { currentOwner: string }) {
         paddingLeft: 32,
         borderBottom: '1px solid var(--t-divider)',
       }}>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            title="Back to workspace"
+            aria-label="Back to workspace"
+            style={{
+              height: 30,
+              width: 30,
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              alignSelf: 'center',
+              flexShrink: 0,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-divider)',
+              borderRadius: 8,
+              background: 'var(--t-input-bg)',
+              color: 'var(--t-text-muted)',
+              cursor: 'pointer',
+              transition: 'color 120ms',
+            }}
+            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
+            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-muted)'; }}
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
+          </button>
+        ) : null}
         <div style={{
           fontSize: 22,
           fontWeight: 300,
