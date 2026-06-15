@@ -40,7 +40,8 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-          // Full-viewport scrim — dims + frosts the whole canvas behind the card.
+          // Full-viewport scrim — lightly dims + frosts the canvas so it still
+          // reads THROUGH the glass panes of the card (a little fog, not a wall).
           onClick={onClose}
           style={{
             position: 'fixed',
@@ -49,9 +50,9 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            background: 'rgba(8, 10, 14, 0.42)',
-            backdropFilter: 'blur(10px) saturate(1.1)',
-            WebkitBackdropFilter: 'blur(10px) saturate(1.1)',
+            background: 'rgba(8, 10, 14, 0.18)',
+            backdropFilter: 'blur(6px) saturate(1.1)',
+            WebkitBackdropFilter: 'blur(6px) saturate(1.1)',
             fontFamily: FONT,
           }}
         >
@@ -83,7 +84,11 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
                 paddingBottom: 34,
                 paddingLeft: 34,
                 paddingRight: 30,
-                background: 'linear-gradient(155deg, rgba(24, 26, 32, 0.96), rgba(13, 15, 19, 0.97))',
+                // Translucent dark glass — the canvas fogs through behind it,
+                // headline stays readable on the dark tint. (Not a solid wall.)
+                background: 'linear-gradient(155deg, rgba(28, 30, 38, 0.55), rgba(15, 17, 23, 0.62))',
+                backdropFilter: 'blur(32px) saturate(1.4)',
+                WebkitBackdropFilter: 'blur(32px) saturate(1.4)',
                 color: 'rgba(255, 255, 255, 0.92)',
               }}
             >
