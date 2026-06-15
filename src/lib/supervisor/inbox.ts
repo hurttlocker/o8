@@ -26,6 +26,14 @@ export type SupervisorInboxStatus =
   | 'pending'
   | 'healing'
   | 'self_healed'
+  // Handed to the orchestrator via "Add to orchestrator chat". In-flight: a
+  // human/orchestrator is actively driving a fix. Auto-resolves when the
+  // faulting packet's latest lane merges (heal-bot). See #1075 — never a
+  // direct-dispatch button.
+  | 'escalated'
+  // Auto-closed: the fault's packet finally merged. resolution_lane_id stamps
+  // which lane closed it (audit trail).
+  | 'resolved'
   | 'human_required'
   | 'dismissed';
 
@@ -54,6 +62,7 @@ interface SupervisorInboxRow {
   repeat_count: number | null;
   status: SupervisorInboxStatus;
   resolved_at: string | null;
+  resolution_lane_id: string | null;
 }
 
 export interface SupervisorInboxItem {
@@ -68,6 +77,7 @@ export interface SupervisorInboxItem {
   repeatCount: number;
   status: SupervisorInboxStatus;
   resolvedAt: string | null;
+  resolutionLaneId: string | null;
   packetTitle: string | null;
   packetReferenceLabel: string | null;
   sessionKey: string | null;
@@ -111,7 +121,8 @@ function ensureSupervisorInboxTable() {
       last_seen_at TEXT,
       repeat_count INTEGER NOT NULL DEFAULT 1,
       status TEXT NOT NULL DEFAULT 'pending',
-      resolved_at TEXT
+      resolved_at TEXT,
+      resolution_lane_id TEXT
     );
 
     CREATE INDEX IF NOT EXISTS idx_supervisor_inbox_status_created
@@ -134,6 +145,9 @@ function ensureSupervisorInboxTable() {
   }
   if (!columns.some((column) => column.name === 'repeat_count')) {
     sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN repeat_count INTEGER NOT NULL DEFAULT 1');
+  }
+  if (!columns.some((column) => column.name === 'resolution_lane_id')) {
+    sqlite.exec('ALTER TABLE supervisor_inbox ADD COLUMN resolution_lane_id TEXT');
   }
   sqlite.prepare(
     "UPDATE supervisor_inbox SET project_id = ? WHERE project_id IS NULL OR project_id = ''",
@@ -240,7 +254,11 @@ function statusRank(status: SupervisorInboxStatus): number {
       return 1;
     case 'healing':
       return 1;
+    case 'escalated':
+      return 1;
     case 'self_healed':
+      return 2;
+    case 'resolved':
       return 2;
     case 'dismissed':
       return 3;
@@ -266,10 +284,10 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
     payload: input.payload,
   });
   const existing = sqlite.prepare(`
-    SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
+    SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at, resolution_lane_id
     FROM supervisor_inbox
     WHERE incident_key = ?
-      AND status IN ('pending', 'healing', 'human_required')
+      AND status IN ('pending', 'healing', 'human_required', 'escalated')
     ORDER BY datetime(last_seen_at) DESC, datetime(created_at) DESC
     LIMIT 1
   `).get(incidentKey) as SupervisorInboxRow | undefined;
@@ -346,9 +364,9 @@ export function enqueueInboxItem(input: EnqueueInboxItemInput) {
 export function collapseActiveInboxIncidents(): number {
   ensureSupervisorInboxTable();
   const rows = getSqlite().prepare(`
-    SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
+    SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at, resolution_lane_id
     FROM supervisor_inbox
-    WHERE status IN ('pending', 'healing', 'human_required')
+    WHERE status IN ('pending', 'healing', 'human_required', 'escalated')
   `).all() as SupervisorInboxRow[];
 
   const groups = new Map<string, SupervisorInboxRow[]>();
@@ -424,13 +442,45 @@ export function dismissInboxItem(id: string) {
   `).run('dismissed', new Date().toISOString(), id);
 }
 
+/**
+ * Operator handed this fault to the orchestrator via "Add to orchestrator
+ * chat". No lane exists at this moment (the handoff only drafts a chat
+ * message) — heal-bot's escalated-resolve sweep stamps the resolving lane and
+ * flips the item to 'resolved' once the faulting packet's latest lane merges.
+ * Guard keeps a terminal (dismissed/resolved) item from being re-opened.
+ */
+export function escalateInboxItem(id: string) {
+  ensureSupervisorInboxTable();
+
+  getSqlite().prepare(`
+    UPDATE supervisor_inbox
+    SET status = 'escalated', resolved_at = NULL
+    WHERE id = ?
+      AND status NOT IN ('dismissed', 'resolved')
+  `).run(id);
+}
+
+/**
+ * Auto-close: the fault's packet finally merged. Stamps the resolving lane id
+ * for the audit trail. Called by heal-bot's escalated-resolve sweep.
+ */
+export function resolveInboxItem(id: string, resolutionLaneId: string | null) {
+  ensureSupervisorInboxTable();
+
+  getSqlite().prepare(`
+    UPDATE supervisor_inbox
+    SET status = 'resolved', resolved_at = ?, resolution_lane_id = ?
+    WHERE id = ?
+  `).run(new Date().toISOString(), resolutionLaneId, id);
+}
+
 export function bulkDismissInboxItems(): number {
   ensureSupervisorInboxTable();
   const projectId = getActiveProjectScopeForRepoSync().projectId;
   const result = getSqlite().prepare(`
     UPDATE supervisor_inbox
     SET status = ?, resolved_at = ?
-    WHERE status IN ('pending', 'healing', 'human_required')
+    WHERE status IN ('pending', 'healing', 'human_required', 'escalated')
       AND project_id = ?
   `).run('dismissed', new Date().toISOString(), projectId);
   return result.changes;
@@ -453,7 +503,7 @@ const ORPHANED_WORKTREE_GRACE_MS = 48 * HOUR_MS;
 export function runRetentionSweep(nowMs = Date.now()): number {
   ensureSupervisorInboxTable();
   const rows = getSqlite().prepare(`
-    SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
+    SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at, resolution_lane_id
     FROM supervisor_inbox
     WHERE status IN ('pending', 'human_required')
   `).all() as SupervisorInboxRow[];
@@ -501,14 +551,14 @@ export function listInboxItems(options: {
 
   const rows = options.includeAllProjects
     ? getSqlite().prepare(`
-      SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
+      SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at, resolution_lane_id
       FROM supervisor_inbox
       WHERE 1 = 1
         ${options.includeDismissed ? '' : `AND status != 'dismissed'`}
       ORDER BY datetime(last_seen_at) DESC, datetime(created_at) DESC
     `).all() as SupervisorInboxRow[]
     : getSqlite().prepare(`
-      SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at
+      SELECT id, project_id, incident_key, repo_path, packet_id, kind, payload, created_at, last_seen_at, repeat_count, status, resolved_at, resolution_lane_id
       FROM supervisor_inbox
       WHERE project_id = ?
         ${options.includeDismissed ? '' : `AND status != 'dismissed'`}
@@ -575,6 +625,7 @@ export function listInboxItems(options: {
         repeatCount: Math.max(1, row.repeat_count ?? 1),
         status: row.status,
         resolvedAt: row.resolved_at,
+        resolutionLaneId: row.resolution_lane_id,
         packetTitle,
         packetReferenceLabel,
         sessionKey,
@@ -600,7 +651,9 @@ export interface SupervisorInboxSummary {
   humanRequired: number;
   pending: number;
   healing: number;
+  escalated: number;
   selfHealed: number;
+  resolved: number;
   dismissed: number;
   total: number;
 }
@@ -621,8 +674,15 @@ export function summarizeInboxItems(items: SupervisorInboxItem[]): SupervisorInb
         summary.healing += 1;
         summary.active += 1;
         break;
+      case 'escalated':
+        summary.escalated += 1;
+        summary.active += 1;
+        break;
       case 'self_healed':
         summary.selfHealed += 1;
+        break;
+      case 'resolved':
+        summary.resolved += 1;
         break;
       case 'dismissed':
         summary.dismissed += 1;
@@ -636,7 +696,9 @@ export function summarizeInboxItems(items: SupervisorInboxItem[]): SupervisorInb
     humanRequired: 0,
     pending: 0,
     healing: 0,
+    escalated: 0,
     selfHealed: 0,
+    resolved: 0,
     dismissed: 0,
     total: 0,
   });
