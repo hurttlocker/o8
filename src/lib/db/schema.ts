@@ -566,13 +566,14 @@ export const supervisorInbox = sqliteTable('supervisor_inbox', {
   }).notNull(),
   payload: text('payload').notNull().default('{}'),
   status: text('status', {
-    enum: ['pending', 'healing', 'self_healed', 'human_required', 'dismissed'],
+    enum: ['pending', 'healing', 'self_healed', 'escalated', 'resolved', 'human_required', 'dismissed'],
   }).notNull().default('pending'),
   healAttemptCount: integer('heal_attempt_count').notNull().default(0),
   createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
   lastSeenAt: text('last_seen_at'),
   repeatCount: integer('repeat_count').notNull().default(1),
   resolvedAt: text('resolved_at'),
+  resolutionLaneId: text('resolution_lane_id'),
 }, (table) => ({
   statusCreatedIdx: index('idx_supervisor_inbox_status_created').on(table.status, table.createdAt),
   projectStatusCreatedIdx: index('idx_supervisor_inbox_project_status_created').on(table.projectId, table.status, table.createdAt),

@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { bulkDismissInboxItems, dismissInboxItem, listInboxItems, summarizeInboxItems } from '@/lib/supervisor/inbox';
+import { bulkDismissInboxItems, dismissInboxItem, escalateInboxItem, listInboxItems, summarizeInboxItems } from '@/lib/supervisor/inbox';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -20,6 +20,12 @@ export async function POST(request: Request) {
 
   if (action === 'dismiss' && id) {
     dismissInboxItem(id);
+    return NextResponse.json({ ok: true });
+  }
+  if (action === 'escalate' && id) {
+    // Handed to the orchestrator via "Add to orchestrator chat" — heal-bot
+    // auto-resolves once the faulting packet's lane merges.
+    escalateInboxItem(id);
     return NextResponse.json({ ok: true });
   }
   if (action === 'clear') {

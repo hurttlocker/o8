@@ -469,7 +469,7 @@ export function ControlRoomTab({
 
   const scopedSupervisorIncidents = useMemo(() => (
     supervisorItems
-      .filter((item) => item.status === 'human_required' || item.status === 'pending' || item.status === 'healing')
+      .filter((item) => item.status === 'human_required' || item.status === 'pending' || item.status === 'healing' || item.status === 'escalated')
       .filter((item) => supervisorIncidentMatchesProject(item, repos, selectedRepo))
       .slice(0, 8)
   ), [repos, selectedRepo, supervisorItems]);
