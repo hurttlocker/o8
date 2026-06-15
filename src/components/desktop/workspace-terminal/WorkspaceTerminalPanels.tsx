@@ -1,12 +1,13 @@
 'use client';
 
-import { MutableRefObject, Suspense, lazy, memo } from 'react';
+import { MutableRefObject, Suspense, lazy, memo, useEffect, useState } from 'react';
 import { Terminal as TerminalIcon } from '../lucide-shims';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
 import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-terminal/utils';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
+import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
 // chooser-spawn rewrite routes both orchestrator and llm-chat tabs
@@ -186,10 +187,25 @@ function WorkspaceTerminalPanelsBase({
       ))}
 
       {visibleTabs.length === 0 ? (
-        <EmptyWorkspaceCTA />
+        <EmptyWorkspaceState />
       ) : null}
     </div>
   );
+}
+
+/** While the workspace is still resolving its tabs (the boot window
+ *  before we know whether any session exists), show the calm o8 boot
+ *  loader — NOT the "Start a new session" CTA. The CTA only earns the
+ *  screen if we're still genuinely tab-less after a short grace window;
+ *  this kills the picker flashing for a frame on every cold boot before
+ *  the orchestrator tab's own loader takes over. */
+function EmptyWorkspaceState() {
+  const [showCta, setShowCta] = useState(false);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setShowCta(true), 600);
+    return () => window.clearTimeout(timer);
+  }, []);
+  return showCta ? <EmptyWorkspaceCTA /> : <WorkspaceBootLoader />;
 }
 
 /** Centered three-way CTA for the empty workspace state. Operator
