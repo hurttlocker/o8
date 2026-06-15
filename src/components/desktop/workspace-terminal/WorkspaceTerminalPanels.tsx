@@ -202,7 +202,11 @@ function WorkspaceTerminalPanelsBase({
 function EmptyWorkspaceState() {
   const [showCta, setShowCta] = useState(false);
   useEffect(() => {
-    const timer = window.setTimeout(() => setShowCta(true), 600);
+    // 1.6s grace: long enough to bridge a page-reload's tab rehydration so
+    // the loader stays continuous instead of flashing the CTA between the
+    // boot loader and the orchestrator tab's own restore loader. A genuinely
+    // empty workspace still falls through to the CTA after the grace.
+    const timer = window.setTimeout(() => setShowCta(true), 1600);
     return () => window.clearTimeout(timer);
   }, []);
   return showCta ? <EmptyWorkspaceCTA /> : <WorkspaceBootLoader />;
