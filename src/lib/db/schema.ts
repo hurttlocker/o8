@@ -526,6 +526,26 @@ export const reviewQueue = sqliteTable('review_queue', {
 }));
 
 // ══════════════════════════════════════════════════════════════════
+//  Beta Founding Invites — the operator's set of share-able beta passes
+//  (#beta-referral). Generated + persisted locally; redemption + the public
+//  o8.run/i/<code> landing are the central phase (see docs/beta-invites.md).
+// ══════════════════════════════════════════════════════════════════
+
+export const betaInvites = sqliteTable('beta_invites', {
+  code: text('code').primaryKey(),
+  owner: text('owner').notNull().default('operator'),
+  accent: text('accent').notNull(),
+  position: integer('position').notNull(),
+  status: text('status', { enum: ['available', 'sent', 'redeemed'] }).notNull().default('available'),
+  sentAt: text('sent_at'),
+  redeemedAt: text('redeemed_at'),
+  redeemedBy: text('redeemed_by'),
+  createdAt: text('created_at').notNull().default(sql`(datetime('now'))`),
+}, (table) => ({
+  ownerIdx: index('idx_beta_invites_owner').on(table.owner),
+}));
+
+// ══════════════════════════════════════════════════════════════════
 //  Watched Agents — durable supervisor state (survives restarts)
 // ══════════════════════════════════════════════════════════════════
 
