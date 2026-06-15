@@ -10,6 +10,7 @@ import { env } from './env.js';
 import { mintLicense, type Plan } from './mint.js';
 import { constructEvent, handleStripeEvent } from './stripe-webhook.js';
 import { validateEntitlement } from './validate.js';
+import { redeemInvite, registerInvite, resolveInvite } from './invites.js';
 
 const app = new Hono();
 
@@ -24,6 +25,19 @@ function isAdmin(authHeader: string | undefined): boolean {
   // avoids the early-exit timing leak of === and the length leak of a length check.
   const provided = createHash('sha256').update(token).digest();
   const expected = createHash('sha256').update(env.ADMIN_TOKEN).digest();
+  return timingSafeEqual(provided, expected);
+}
+
+/** Constant-time guard for the invite-registration token — scoped separately
+ *  from ADMIN_TOKEN (the desktop ships this, so a leak can only register
+ *  invites, never mint/revoke licenses). Disabled when the token is unset. */
+function isInviteRegistrar(authHeader: string | undefined): boolean {
+  if (!env.INVITE_REGISTER_TOKEN) return false;
+  if (!authHeader) return false;
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (token.length === 0) return false;
+  const provided = createHash('sha256').update(token).digest();
+  const expected = createHash('sha256').update(env.INVITE_REGISTER_TOKEN).digest();
   return timingSafeEqual(provided, expected);
 }
 
@@ -123,6 +137,61 @@ app.delete('/revoke/:subscriptionId', async (c) => {
   });
 
   return c.json({ revoked: true, subscriptionId });
+});
+
+// ── Beta invites (#beta-referral) ─────────────────────────────────────────────
+
+// Register a shared code so it's redeemable cross-machine. Scoped-token guarded
+// (the desktop sends INVITE_REGISTER_TOKEN). 503 when registration isn't configured.
+app.post('/invites/register', async (c) => {
+  if (!env.INVITE_REGISTER_TOKEN) return c.json({ error: 'registration_not_configured' }, 503);
+  if (!isInviteRegistrar(c.req.header('authorization'))) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+
+  let body: { code?: unknown; owner?: unknown; accent?: unknown; position?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ error: 'invalid JSON body' }, 400);
+  }
+
+  const code = typeof body.code === 'string' ? body.code.trim() : '';
+  const owner = typeof body.owner === 'string' ? body.owner.trim() : '';
+  const accent = typeof body.accent === 'string' ? body.accent.trim() : '#FF5A1F';
+  const position = typeof body.position === 'number' ? body.position : 0;
+  if (!code || !owner) return c.json({ error: 'code and owner required' }, 400);
+
+  const result = await registerInvite({ code, owner, accent, position });
+  if (!result.ok) return c.json({ ok: false, reason: result.reason }, result.reason === 'code_taken' ? 409 : 400);
+  return c.json({ ok: true });
+});
+
+// Resolve a code for the landing (public — no secrets, just owner + colorway + status).
+app.get('/invites/:code', async (c) => {
+  const result = await resolveInvite(c.req.param('code'));
+  return c.json(result, result.valid ? 200 : 404);
+});
+
+// Redeem a code (public, one-time). Captures the invitee email.
+app.post('/invites/redeem', async (c) => {
+  let body: { code?: unknown; email?: unknown };
+  try {
+    body = await c.req.json();
+  } catch {
+    return c.json({ ok: false, reason: 'invalid JSON body' }, 400);
+  }
+
+  const code = typeof body.code === 'string' ? body.code.trim() : '';
+  const email = typeof body.email === 'string' ? body.email.trim() : '';
+  if (!code || !email) return c.json({ ok: false, reason: 'code and email required' }, 400);
+
+  const result = await redeemInvite(code, email);
+  if (!result.ok) {
+    const status = result.reason === 'already_redeemed' ? 409 : result.reason === 'not_found' ? 404 : 400;
+    return c.json({ ok: false, reason: result.reason, owner: result.owner ?? null }, status);
+  }
+  return c.json({ ok: true, owner: result.owner ?? null });
 });
 
 serve({ fetch: app.fetch, port: env.PORT }, (info) => {

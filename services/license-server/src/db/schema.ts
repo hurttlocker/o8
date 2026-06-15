@@ -53,3 +53,29 @@ export type Subscription = typeof subscriptions.$inferSelect;
 export type NewSubscription = typeof subscriptions.$inferInsert;
 export type EntitlementEvent = typeof entitlementEvents.$inferSelect;
 export type NewEntitlementEvent = typeof entitlementEvents.$inferInsert;
+
+/**
+ * `invites` — beta founding-invite codes registered by the desktop app so they
+ * can be redeemed cross-machine (#beta-referral). The desktop generates +
+ * displays codes locally; on share it registers the code here, and the
+ * o8.run/i/<code> landing resolves + redeems against this table.
+ */
+export const invites = pgTable('invites', {
+  /** The invite code (e.g. '528-191') — the bearer secret + landing slug. */
+  code: text('code').primaryKey(),
+  /** Inviter display handle (the "via @handle" on the pass). Display-only, not trusted. */
+  owner: text('owner').notNull(),
+  /** Colorway hex so the landing pass matches the desktop pass. */
+  accent: text('accent').notNull(),
+  /** Serial position (1..N) for the "No. 0X / 0N" line. */
+  position: integer('position').notNull(),
+  /** 'sent' on register, 'redeemed' once claimed. */
+  status: text('status').notNull().default('sent'),
+  /** Invitee email captured at redemption. */
+  redeemedBy: text('redeemed_by'),
+  redeemedAt: timestamp('redeemed_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Invite = typeof invites.$inferSelect;
+export type NewInvite = typeof invites.$inferInsert;

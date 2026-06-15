@@ -51,7 +51,7 @@ const STEPS: TourStep[] = [
   },
 ];
 
-export function CanvasTour({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function CanvasTour({ open, onClose, onComplete }: { open: boolean; onClose: () => void; onComplete?: () => void }) {
   const reduce = useReducedMotion();
   const [step, setStep] = useState(0);
   const [rect, setRect] = useState<{ top: number; left: number; width: number; height: number } | null>(null);
@@ -90,7 +90,10 @@ export function CanvasTour({ open, onClose }: { open: boolean; onClose: () => vo
   }, [open, step]);
 
   const isLast = step >= STEPS.length - 1;
-  const next = () => (isLast ? onClose() : setStep((s) => s + 1));
+  // Reaching "Done" (vs Skip/Esc, which call onClose directly) hands off to
+  // onComplete — the end-of-welcome beat where we surface the beta invite.
+  const finish = () => { onComplete?.(); onClose(); };
+  const next = () => (isLast ? finish() : setStep((s) => s + 1));
 
   if (!open) return null;
   const current = STEPS[step];

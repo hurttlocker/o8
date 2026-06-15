@@ -176,6 +176,10 @@ const GATED_PREFIXES = [
   // Connector imports (ChatGPT export upload) parse large archives in-process
   // and write profile data into the operator's Brain context.
   '/api/connectors/',
+  // Beta founding invites (#beta-referral) — the operator's share-able invite
+  // codes + sent/redeemed state. Leaks codes + the operator handle; loopback-
+  // only. No trailing slash so the bare list route (/api/invites) gates too.
+  '/api/invites',
 ];
 
 function isTrustedLocalRequest(req: NextRequest): boolean {

@@ -61,6 +61,12 @@ export const env = {
   // Admin guard for manual issue/revoke endpoints
   ADMIN_TOKEN: required('ADMIN_TOKEN'),
 
+  // Scoped guard for POST /invites/register (the desktop app sends this when it
+  // shares a beta invite). Optional — when unset, invite registration is
+  // disabled (503) and the rest of the service runs unchanged. Rotate
+  // independently of ADMIN_TOKEN; lower blast radius if it leaks from a build.
+  INVITE_REGISTER_TOKEN: optional('INVITE_REGISTER_TOKEN', ''),
+
   // HTTP
   PORT: Number.parseInt(optional('PORT', '8080'), 10),
 } as const;

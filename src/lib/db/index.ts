@@ -171,6 +171,9 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // Schema v27 — `artifacts` table (visual verification screenshots/video).
   // CREATE TABLE IF NOT EXISTS + indexes, safe on every boot.
   ensureArtifactsTable(sqlite);
+  // #beta-referral — `beta_invites` table (the operator's founding invite set).
+  // CREATE TABLE IF NOT EXISTS + index, safe on every boot.
+  ensureBetaInvitesTable(sqlite);
   migrateProjectsLedgerJsonIfNeeded(sqlite);
 }
 
@@ -239,6 +242,29 @@ function ensureArtifactsTable(sqlite: Database.Database): void {
     CREATE INDEX IF NOT EXISTS idx_artifacts_pr ON artifacts(pr_number, captured_at);
     CREATE INDEX IF NOT EXISTS idx_artifacts_lane ON artifacts(lane_id, captured_at);
     CREATE INDEX IF NOT EXISTS idx_artifacts_thread ON artifacts(thread_id, captured_at);
+  `);
+}
+
+/**
+ * #beta-referral — the operator's founding beta invites. See schema.ts
+ * `betaInvites` for field semantics. Redemption + the public o8.run/i/<code>
+ * landing are the central phase (docs/beta-invites.md); this table is the
+ * local generation + sent/redeemed ledger.
+ */
+function ensureBetaInvitesTable(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS beta_invites (
+      code TEXT PRIMARY KEY,
+      owner TEXT NOT NULL DEFAULT 'operator',
+      accent TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      status TEXT NOT NULL DEFAULT 'available',
+      sent_at TEXT,
+      redeemed_at TEXT,
+      redeemed_by TEXT,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_beta_invites_owner ON beta_invites(owner);
   `);
 }
 
