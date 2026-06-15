@@ -1086,6 +1086,29 @@ function DashboardInner() {
   const setRightPanelMode = (_mode: 'chat' | 'workspace') => { /* v1: right panel is always workspace */ };
   const [workspaceChatTargetKeyByRepoPath, setWorkspaceChatTargetKeyByRepoPath] = useState<Record<string, string>>({});
 
+  // Auto-collapse the left panel while the wide o8.md (Workspace Notes / spec)
+  // tab is open — it's a big reading/writing surface and the left panel is
+  // hover-revealable, so the notes + center get the room. Edge-triggered: we
+  // collapse only on the transition INTO spec (remembering we did it) and
+  // restore on the way out, so a manual re-expand while spec stays open sticks
+  // (we never re-collapse on a later render).
+  const specAutoCollapsedLeftRef = useRef(false);
+  const prevSpecOpenRef = useRef(false);
+  useEffect(() => {
+    const specOpen = chatVisible && rightPanelKind === 'o8' && o8ActiveTab === 'spec';
+    const wasOpen = prevSpecOpenRef.current;
+    prevSpecOpenRef.current = specOpen;
+    if (specOpen && !wasOpen) {
+      if (sidebarVisible) {
+        specAutoCollapsedLeftRef.current = true;
+        setSidebarVisible(false);
+      }
+    } else if (!specOpen && wasOpen && specAutoCollapsedLeftRef.current) {
+      specAutoCollapsedLeftRef.current = false;
+      setSidebarVisible(true);
+    }
+  }, [chatVisible, rightPanelKind, o8ActiveTab, sidebarVisible, setSidebarVisible]);
+
   useEffect(() => {
     try {
       const raw = window.localStorage.getItem(O8_ACTIVE_TAB_STORAGE_KEY);
