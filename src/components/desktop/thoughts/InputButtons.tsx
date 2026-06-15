@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { ComposerChipCompactContext } from './composer-compact-context';
 import { createPortal } from 'react-dom';
 import { AttachFilesButton } from './AttachFilesButton';
 import { SparklesIcon } from './ThoughtsIcons';
@@ -207,6 +208,7 @@ function ModelThinkingChip({
   onEffortChange,
   swarmEnabled = false,
   onSetSwarm,
+  compact = false,
 }: {
   modelLabel: string;
   modelId?: string;
@@ -216,6 +218,7 @@ function ModelThinkingChip({
   onEffortChange?: (effort: ThinkingEffort) => void;
   swarmEnabled?: boolean;
   onSetSwarm?: (enabled: boolean) => void;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -302,9 +305,11 @@ function ModelThinkingChip({
           transition: 'background 160ms cubic-bezier(0.22, 1, 0.36, 1), border-color 160ms cubic-bezier(0.22, 1, 0.36, 1), color 160ms cubic-bezier(0.22, 1, 0.36, 1)',
         }}
       >
+        {compact ? null : (
           <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.1px' }}>
-          {modelLabel}
-        </span>
+            {modelLabel}
+          </span>
+        )}
         {ultraActive ? <SwarmGlyph size={11} /> : null}
         <ThinkingBars effort={effort} active={open || effort === 'max'} />
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: canOpen ? 0.72 : 0 }}>
@@ -887,8 +892,26 @@ export function InputButtons({
   const canSubmit = Boolean(input.trim());
   const showRepoChip = Boolean(repoLabel) && displayMessagesCount === 0;
 
+  // Adaptive composer row: measure available width and, below the threshold,
+  // collapse the in-input pickers (model + agent) to icon-only — matching the
+  // below-composer chip row's COMPACT_CHIP_ROW_WIDTH (440) so both collapse in
+  // lockstep. Measured, not a media query, so it tracks the real panel size.
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setCompact(w < 440);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   return (
-    <div style={{
+    <ComposerChipCompactContext.Provider value={compact}>
+    <div ref={rowRef} style={{
       display: 'flex',
       alignItems: 'center',
       gap: 6,
@@ -897,8 +920,14 @@ export function InputButtons({
       paddingBottom: 6,
       paddingLeft: 10,
     }}>
+      {/* Left controls — the flexible group. As the composer narrows this
+          shrinks and (below the threshold) collapses its pickers to icon-only.
+          The right action cluster stays pinned, so Send/mic/attach are never
+          pushed off the clipped right edge — the bug this fixes. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: '1 1 auto', overflow: 'hidden' }}>
       {modelLabel ? (
         <ModelThinkingChip
+          compact={compact}
           modelLabel={modelLabel}
           modelId={modelId}
           onModelChange={onModelChange}
@@ -915,7 +944,7 @@ export function InputButtons({
           (Codex behavior) and the chip becomes redundant noise. */}
       {showRepoChip ? (
         <>
-          <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+          {compact ? null : <span style={{ color: 'var(--t-text-faint)' }}>·</span>}
           <RepoTargetChip
             repoLabel={repoLabel}
             workspaceTargets={workspaceTargets}
@@ -927,8 +956,8 @@ export function InputButtons({
 
       {inlineLeadingExtras ? (
         <>
-          {modelLabel || showRepoChip ? <span style={{ color: 'var(--t-text-faint)' }}>·</span> : null}
-          <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0, flexShrink: 0 }}>
+          {!compact && (modelLabel || showRepoChip) ? <span style={{ color: 'var(--t-text-faint)' }}>·</span> : null}
+          <span style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
             {inlineLeadingExtras}
           </span>
         </>
@@ -972,9 +1001,10 @@ export function InputButtons({
           </svg>
         )}
       </button>
+      </div>
 
-      <div style={{ flex: 1 }} />
-
+      {/* Right action cluster — pinned, never shrinks or clips. */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
       {inlineMeterSlot ? (
         <span style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
           {inlineMeterSlot}
@@ -1001,7 +1031,9 @@ export function InputButtons({
         onSubmit={onSubmit}
         onStop={onStop}
       />
+      </div>
     </div>
+    </ComposerChipCompactContext.Provider>
   );
 }
 
