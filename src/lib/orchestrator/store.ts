@@ -743,6 +743,11 @@ export interface DomainLaneSummary {
   status: string;
   sessionKey: string | null;
   lastEventLabel: string | null;
+  // Carried through for the footer merge beacon (parked-lane popover rows +
+  // click-to-repoint). Optional — older callers don't set them.
+  branch?: string;
+  repoPath?: string;
+  label?: string;
 }
 
 export function reconcileOrchestratorMissionState(
