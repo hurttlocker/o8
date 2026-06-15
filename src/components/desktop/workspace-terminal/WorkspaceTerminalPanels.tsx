@@ -1,6 +1,6 @@
 'use client';
 
-import { MutableRefObject, Suspense, lazy, memo, useEffect, useState } from 'react';
+import { MutableRefObject, Suspense, lazy, memo, useEffect, useRef, useState } from 'react';
 import { Terminal as TerminalIcon } from '../lucide-shims';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
@@ -79,6 +79,15 @@ function WorkspaceTerminalPanelsBase({
   onSelectCommit,
   onLaunchWorkspaceTask,
 }: WorkspaceTerminalPanelsProps) {
+  // Track whether this workspace has EVER shown a tab. On a fresh mount
+  // (page reload) tabs hydrate async, so visibleTabs is momentarily 0 — that's
+  // the boot window, NOT a genuinely empty workspace. We only let the
+  // "Start a new session" CTA appear once tabs have actually populated and then
+  // been closed; during boot we hold the loader so the picker never flickers.
+  const hasEverHadTabsRef = useRef(false);
+  useEffect(() => {
+    if (visibleTabs.length > 0) hasEverHadTabsRef.current = true;
+  }, [visibleTabs.length]);
   return (
     <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
       {visibleTabs.map((tab) => (
@@ -187,29 +196,29 @@ function WorkspaceTerminalPanelsBase({
       ))}
 
       {visibleTabs.length === 0 ? (
-        <EmptyWorkspaceState />
+        <EmptyWorkspaceState hasEverHadTabs={hasEverHadTabsRef.current} />
       ) : null}
     </div>
   );
 }
 
-/** While the workspace is still resolving its tabs (the boot window
- *  before we know whether any session exists), show the calm o8 boot
- *  loader — NOT the "Start a new session" CTA. The CTA only earns the
- *  screen if we're still genuinely tab-less after a short grace window;
- *  this kills the picker flashing for a frame on every cold boot before
- *  the orchestrator tab's own loader takes over. */
-function EmptyWorkspaceState() {
-  const [showCta, setShowCta] = useState(false);
+/** What renders when the center workspace has no tabs:
+ *  - BOOT / RELOAD: tabs hydrate async, so visibleTabs is briefly 0. This is
+ *    NOT a real empty workspace — show the o8 boot loader and NEVER the CTA,
+ *    so "Start a new session" never flickers before the tabs arrive. The
+ *    moment tabs hydrate this whole branch unmounts.
+ *  - GENUINELY EMPTY: tabs existed and were all closed (hasEverHadTabs) — now
+ *    the "Start a new session" CTA is the right thing to show.
+ *  A long fallback grace covers the rare workspace that truly never spawns a
+ *  tab, so we don't sit on the loader forever. */
+function EmptyWorkspaceState({ hasEverHadTabs }: { hasEverHadTabs: boolean }) {
+  const [graceExpired, setGraceExpired] = useState(false);
   useEffect(() => {
-    // 1.6s grace: long enough to bridge a page-reload's tab rehydration so
-    // the loader stays continuous instead of flashing the CTA between the
-    // boot loader and the orchestrator tab's own restore loader. A genuinely
-    // empty workspace still falls through to the CTA after the grace.
-    const timer = window.setTimeout(() => setShowCta(true), 1600);
+    if (hasEverHadTabs) return;
+    const timer = window.setTimeout(() => setGraceExpired(true), 4000);
     return () => window.clearTimeout(timer);
-  }, []);
-  return showCta ? <EmptyWorkspaceCTA /> : <WorkspaceBootLoader />;
+  }, [hasEverHadTabs]);
+  return (hasEverHadTabs || graceExpired) ? <EmptyWorkspaceCTA /> : <WorkspaceBootLoader />;
 }
 
 /** Centered three-way CTA for the empty workspace state. Operator
