@@ -156,6 +156,7 @@ void main() {
 
 const KIND_TINT: Record<string, string> = {
   term: '#2c313d',
+  video: '#1f242e',
   file: '#8aa0bf',
   browser: '#6f8bd0',
   chat: '#56c0a6',

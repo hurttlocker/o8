@@ -33,6 +33,8 @@ export interface VideoCard {
   name: string;
   /** durable IndexedDB key — the snapshot carries this, not the bytes. */
   mediaId: string;
+  /** first-frame thumbnail (data URL) for the minimap — captured on load. */
+  poster?: string;
 }
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -43,6 +45,7 @@ export function VideoGlassCard({
   onResize,
   onFocus,
   onClose,
+  onPoster,
 }: {
   card: VideoCard;
   onMove: (id: number, x: number, y: number) => void;
@@ -50,10 +53,13 @@ export function VideoGlassCard({
   onResize: (id: number, w: number) => void;
   onFocus: (id: number) => void;
   onClose: (id: number) => void;
+  /** First-frame thumbnail (data URL) captured once on load — feeds the minimap. */
+  onPoster?: (id: number, dataUrl: string) => void;
 }) {
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean; lastX: number; lastY: number } | null>(null);
   const settleRef = useRef<{ stop: () => void } | null>(null);
   const resizeRef = useRef<{ pointerId: number; startX: number; originW: number } | null>(null);
+  const posterDoneRef = useRef(false);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -167,6 +173,28 @@ export function VideoGlassCard({
           onLoadedMetadata={(event) => {
             const el = event.currentTarget;
             if (el.currentTime < 0.05) { try { el.currentTime = 0.05; } catch { /* seek not ready yet */ } }
+          }}
+          // First decoded frame → a small JPEG poster, captured ONCE. The minimap
+          // can't decode the blob video URL as an image, so it renders this still
+          // (like a photo). blob URLs are same-origin, so the canvas isn't tainted.
+          onSeeked={(event) => {
+            if (posterDoneRef.current || !onPoster) return;
+            const el = event.currentTarget;
+            const vw = el.videoWidth;
+            const vh = el.videoHeight;
+            if (!vw || !vh) return;
+            try {
+              const maxEdge = 256;
+              const factor = Math.min(1, maxEdge / Math.max(vw, vh));
+              const canvas = document.createElement('canvas');
+              canvas.width = Math.max(1, Math.round(vw * factor));
+              canvas.height = Math.max(1, Math.round(vh * factor));
+              const ctx = canvas.getContext('2d');
+              if (!ctx) return;
+              ctx.drawImage(el, 0, 0, canvas.width, canvas.height);
+              posterDoneRef.current = true;
+              onPoster(card.id, canvas.toDataURL('image/jpeg', 0.7));
+            } catch { /* frame not drawable yet — leave the placeholder */ }
           }}
           onPointerDownCapture={(event) => event.stopPropagation()}
           style={{

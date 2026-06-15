@@ -1294,12 +1294,13 @@ export default function CanvasGlassPreviewPage() {
     ...termCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'term' })),
     ...fileCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'file' })),
     ...imageCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'image', src: c.items[0]?.src })),
+    ...videoCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'video', src: c.poster })),
     ...browserCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'browser' })),
     ...chatCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'chat' })),
     ...diffCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'diff' })),
     ...specCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'spec' })),
     ...brainCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'brain' })),
-  ], [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+  ], [termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards]);
   // The navigator frames a region ~1.25× the viewport, CENTERED on where you're
   // looking (pan). Framing a bit MORE than the viewport keeps each card a small
   // tile (several tiling the sphere, reference-style) rather than 2-3 big cards
@@ -2143,6 +2144,12 @@ export default function CanvasGlassPreviewPage() {
     )));
   }, []);
 
+  // First-frame thumbnail from the card → stored on the card so the minimap can
+  // render the video as a still (it can't decode the blob video URL as an image).
+  const setVideoPoster = useCallback((id: number, poster: string) => {
+    setVideoCards((previous) => previous.map((card) => (card.id === id ? { ...card, poster } : card)));
+  }, []);
+
   const closeVideoCard = useCallback((id: number) => {
     setVideoCards((previous) => {
       const target = previous.find((card) => card.id === id);
@@ -2481,6 +2488,7 @@ export default function CanvasGlassPreviewPage() {
             onResize={resizeVideoCard}
             onFocus={focusVideoCard}
             onClose={closeVideoCard}
+            onPoster={setVideoPoster}
           />
         ))}
       </AnimatePresence>
