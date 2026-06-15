@@ -4615,10 +4615,18 @@ function DashboardInner() {
               <motion.div
                 key="sidebar-hover-preview"
                 ref={sidebarPreviewOverlayRef}
-                initial={{ y: '-100%', opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: '-100%', opacity: 0 }}
-                transition={{ type: 'spring', stiffness: 400, damping: 30 }}
+                // Fade in place at top:35 (just below the collapsed-sidebar
+                // toggle) — do NOT slide from off-screen-top. That sweep passed
+                // over the toggle mid-animation, stealing its hover (and the
+                // overlay's own onMouseEnter hit-test is unreliable while it's
+                // transforming), so the close timer fired and the panel
+                // flickered open/closed in a loop (operator 2026-06-15). A pure
+                // opacity fade keeps the overlay anchored below the toggle the
+                // whole time, so the toggle's hover is never interrupted.
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.16, ease: [0.22, 1, 0.36, 1] }}
                 onMouseEnter={openSidebarPreview}
                 onMouseLeave={scheduleSidebarPreviewClose}
                 // Clicking ANYWHERE on the overlay pins it → expands the
