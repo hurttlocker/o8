@@ -25,7 +25,6 @@ import {
   GitBranch as IconoirGitBranch,
   InputSearch as IconoirInputSearch,
   Plus as IconoirPlus,
-  Settings as IconoirSettings,
 } from 'iconoir-react';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 
@@ -134,15 +133,19 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
         <h1
           style={{
             // Lighter weight per operator pass — 200 reads as airy
-            // editorial instead of the 300 sidebar weight. Tracking
-            // pulled tighter to keep the 30 px display copy crisp.
-            fontSize: 30,
+            // editorial instead of the 300 sidebar weight. Font scales with
+            // the workspace (cqw — the ThoughtsChatPanel root is a size
+            // container) so it shrinks gracefully as the panel narrows, and
+            // `text-wrap: balance` keeps the line breaks even — no
+            // single-word orphans ("What / should we / build in / o8?").
+            fontSize: 'clamp(19px, 5cqw, 30px)',
             fontWeight: 200,
             color: 'var(--t-text)',
             letterSpacing: '-0.02em',
             lineHeight: 1.2,
             fontFamily: 'var(--font-sans-system)',
             textAlign: 'center',
+            textWrap: 'balance',
             margin: 0,
           }}
         >
@@ -229,9 +232,6 @@ interface OrchestratorComposerBelowProps {
   branch: string;
   repoPath: string | null;
   onBranchChange?: (branch: string) => void;
-  kind: OrchestratorEmptyKind;
-  kindLocked?: boolean;
-  onKindChange?: (kind: OrchestratorEmptyKind) => void;
   onActionClick: (prompt: string) => void;
   // Project chip (moved here from the heading row per operator
   // request 2026-05-27 — sits to the right of Worktree).
@@ -242,13 +242,37 @@ interface OrchestratorComposerBelowProps {
   onWorkWithoutProject?: () => void;
 }
 
+// Below this available width the chip row collapses every chip to an
+// icon-only trigger (Codex/Cursor adaptive behavior). Measured, not a
+// viewport media query, so it tracks the real panel size.
+const COMPACT_CHIP_ROW_WIDTH = 440;
+
 function OrchestratorComposerBelowBase(props: OrchestratorComposerBelowProps) {
+  // Adaptive chip row (operator pass 2026-06-14): a ResizeObserver on the
+  // row's available width drops every chip's label when the workspace
+  // narrows, so the chips become icons that adapt to split panes / window
+  // resize instead of wrapping. Measurement keeps us on the inline-styles
+  // path (no container-query CSS / classes).
+  const rowRef = useRef<HTMLDivElement | null>(null);
+  const [compact, setCompact] = useState(false);
+  useEffect(() => {
+    const el = rowRef.current;
+    if (!el || typeof ResizeObserver === 'undefined') return;
+    const ro = new ResizeObserver((entries) => {
+      const w = entries[0]?.contentRect.width ?? 0;
+      if (w > 0) setCompact(w < COMPACT_CHIP_ROW_WIDTH);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
   return (
     <div
+      ref={rowRef}
       style={{
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
+        width: '100%',
         gap: 14,
         paddingTop: 8,
         paddingBottom: 4,
@@ -271,11 +295,18 @@ function OrchestratorComposerBelowBase(props: OrchestratorComposerBelowProps) {
             onSelectProject={props.onSelectProject}
             onAddProject={props.onAddProject}
             onWorkWithoutProject={props.onWorkWithoutProject}
+            compact={compact}
           />
         ) : null}
-        <WorktreeChip mode={props.worktreeMode} onChange={props.onWorktreeModeChange} />
-        <BranchChip branch={props.branch} repoPath={props.repoPath} onChange={props.onBranchChange} />
-        <KindChip kind={props.kind} locked={props.kindLocked} onChange={props.onKindChange} />
+        <WorktreeChip mode={props.worktreeMode} onChange={props.onWorktreeModeChange} compact={compact} />
+        {/* Branch chip is adaptive: only shown when starting in a NEW
+            worktree (where the branch is the base for the new tree).
+            Working locally inherits the current checkout, which the footer
+            status bar already shows — so we drop the redundant second
+            branch pill (the "two mains" the operator flagged). */}
+        {props.worktreeMode === 'new-worktree' ? (
+          <BranchChip branch={props.branch} repoPath={props.repoPath} onChange={props.onBranchChange} compact={compact} />
+        ) : null}
       </div>
       {/* QUICK_ACTIONS pills moved into OrchestratorEmptyState (above the
           composer) per operator pass 2026-05-27. Composer chip row only
@@ -303,12 +334,14 @@ export function ChipShell({
   onClick,
   open,
   ariaLabel,
+  compact,
 }: {
   icon: ReactNode;
   label: string;
   onClick?: () => void;
   open?: boolean;
   ariaLabel?: string;
+  compact?: boolean;
 }) {
   const [hovered, setHovered] = useState(false);
   const isInteractive = Boolean(onClick);
@@ -320,16 +353,17 @@ export function ChipShell({
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       aria-label={ariaLabel ?? label}
+      title={compact ? (ariaLabel ?? label) : undefined}
       aria-haspopup={isInteractive ? 'menu' : undefined}
       aria-expanded={isInteractive ? Boolean(open) : undefined}
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 7,
+        gap: compact ? 4 : 7,
         paddingTop: 6,
         paddingBottom: 6,
-        paddingLeft: 10,
-        paddingRight: 10,
+        paddingLeft: compact ? 8 : 10,
+        paddingRight: compact ? 8 : 10,
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: 'var(--t-divider-subtle)',
@@ -347,7 +381,7 @@ export function ChipShell({
       <span style={{ display: 'inline-flex', flexShrink: 0, color: 'var(--t-text-faint)' }}>
         {icon}
       </span>
-      <span style={{ whiteSpace: 'nowrap' }}>{label}</span>
+      {compact ? null : <span style={{ whiteSpace: 'nowrap' }}>{label}</span>}
       {isInteractive ? <Caret /> : null}
     </button>
   );
@@ -440,6 +474,10 @@ function ChipPopover({
         top: coords?.top ?? 0,
         left: coords?.left ?? 0,
         opacity: coords ? 1 : 0,
+        // Slide-down entrance (Cursor-style) — the menu reads as a layer
+        // dropping out from under its chip. Opacity stays gated on `coords`
+        // so the pre-measured frame never flashes at the wrong spot.
+        animation: 'o8ChipPopIn 130ms cubic-bezier(0.22, 1, 0.36, 1)',
         minWidth: 232,
         background: 'var(--t-panel-solid, var(--t-panel))',
         borderWidth: 1,
@@ -453,6 +491,7 @@ function ChipPopover({
         fontFamily: 'var(--font-sans-system)',
       }}
     >
+      <style>{`@keyframes o8ChipPopIn { from { transform: translateY(-6px); } to { transform: translateY(0); } }`}</style>
       {children}
     </div>,
     document.body,
@@ -547,6 +586,7 @@ function ProjectChip({
   onSelectProject,
   onAddProject,
   onWorkWithoutProject,
+  compact,
 }: {
   label: string;
   workspaceTargets: OrchestratorWorkspaceTarget[];
@@ -554,6 +594,7 @@ function ProjectChip({
   onSelectProject?: (target: OrchestratorWorkspaceTarget) => void;
   onAddProject?: (mode?: 'scratch' | 'existing') => void;
   onWorkWithoutProject?: () => void;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
@@ -581,6 +622,7 @@ function ProjectChip({
         onClick={() => setOpen((v) => !v)}
         open={open}
         ariaLabel="Pick project"
+        compact={compact}
       />
       <ChipPopover open={open} onClose={() => setOpen(false)} anchorRef={wrapperRef}>
         <div
@@ -712,9 +754,11 @@ function ProjectChip({
 function WorktreeChip({
   mode,
   onChange,
+  compact,
 }: {
   mode: WorktreeMode;
   onChange: (mode: WorktreeMode) => void;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const anchorRef = useRef<HTMLDivElement | null>(null);
@@ -722,13 +766,31 @@ function WorktreeChip({
   return (
     <div ref={anchorRef} style={{ position: 'relative', display: 'inline-flex' }}>
       <ChipShell
-        icon={<IconoirComputer width={13} height={13} color="currentColor" strokeWidth={1.6} />}
+        icon={mode === 'local'
+          ? <IconoirComputer width={13} height={13} color="currentColor" strokeWidth={1.6} />
+          : <IconoirGitBranch width={13} height={13} color="currentColor" strokeWidth={1.6} />}
         label={label}
         onClick={() => setOpen((v) => !v)}
         open={open}
-        ariaLabel="Pick worktree mode"
+        ariaLabel="Start in"
+        compact={compact}
       />
       <ChipPopover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}>
+        <div
+          style={{
+            paddingTop: 6,
+            paddingBottom: 4,
+            paddingLeft: 12,
+            paddingRight: 12,
+            fontSize: 10,
+            fontWeight: 600,
+            letterSpacing: '0.05em',
+            textTransform: 'uppercase',
+            color: 'var(--t-text-faint)',
+          }}
+        >
+          Start in
+        </div>
         <PopoverItem
           icon={<IconoirComputer width={13} height={13} color="currentColor" strokeWidth={1.6} />}
           label="Work locally"
@@ -761,10 +823,12 @@ function BranchChip({
   branch,
   repoPath,
   onChange,
+  compact,
 }: {
   branch: string;
   repoPath: string | null;
   onChange?: (branch: string) => void;
+  compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const [branches, setBranches] = useState<Array<{ name: string; current: boolean }>>([]);
@@ -800,6 +864,7 @@ function BranchChip({
         onClick={interactive ? () => setOpen((v) => !v) : undefined}
         open={open}
         ariaLabel="Pick branch"
+        compact={compact}
       />
       <ChipPopover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}>
         {loading ? (
@@ -829,52 +894,3 @@ function BranchChip({
   );
 }
 
-/* ──────────────────────────────────────────────────────────────────────
- * Kind chip — Orchestrator vs Chat
- * ────────────────────────────────────────────────────────────────────── */
-
-function KindChip({
-  kind,
-  locked,
-  onChange,
-}: {
-  kind: OrchestratorEmptyKind;
-  locked?: boolean;
-  onChange?: (kind: OrchestratorEmptyKind) => void;
-}) {
-  const [open, setOpen] = useState(false);
-  const anchorRef = useRef<HTMLDivElement | null>(null);
-  const label = kind === 'chat' ? 'Chat' : 'Orchestrator';
-  const interactive = !locked && Boolean(onChange);
-  return (
-    <div ref={anchorRef} style={{ position: 'relative', display: 'inline-flex' }}>
-      <ChipShell
-        icon={<IconoirSettings width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-        label={label}
-        onClick={interactive ? () => setOpen((v) => !v) : undefined}
-        open={open}
-        ariaLabel="Pick conversation kind"
-      />
-      <ChipPopover open={open} onClose={() => setOpen(false)} anchorRef={anchorRef}>
-        <PopoverItem
-          icon={<IconoirSettings width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-          label="Orchestrator"
-          selected={kind === 'orchestrator'}
-          onClick={() => {
-            onChange?.('orchestrator');
-            setOpen(false);
-          }}
-        />
-        <PopoverItem
-          icon={<IconoirPlus width={13} height={13} color="currentColor" strokeWidth={1.6} />}
-          label="Chat"
-          selected={kind === 'chat'}
-          onClick={() => {
-            onChange?.('chat');
-            setOpen(false);
-          }}
-        />
-      </ChipPopover>
-    </div>
-  );
-}

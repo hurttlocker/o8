@@ -1,0 +1,119 @@
+'use client';
+
+/**
+ * WorkspaceBootLoader — the calm boot loader shown while a workspace
+ * surface is resolving: OrchestratorTab rehydrating its last thread, or
+ * the workspace panel still figuring out its tabs (the boot window before
+ * the "Start a new session" CTA is allowed to show).
+ *
+ * The "o8" glyph + warm orange diagonal sweep is the DOM twin of the
+ * canvas terminals' xterm spawn-reveal (`spawn-reveal.ts`) — same MARK
+ * block-art, same one-orange leading edge settling to a faint grey — so
+ * the boot identity reads the same on the dashboard as it does in a
+ * terminal. Pure DOM + inline styles (no xterm), and theme-safe: the
+ * settled blocks use a faint ink token while the sweep crest uses the
+ * brand orange, which reads on both light and dark surfaces (a white
+ * crest would vanish on light paper).
+ */
+
+import { memo } from 'react';
+
+// "o8" in five rows of block-art, lifted verbatim from spawn-reveal.ts's
+// MARK so the dashboard loader and the terminal loader paint the same glyph.
+const O8_MARK = [
+  ' ████   ████ ',
+  '██  ██ ██  ██',
+  '██  ██  ████ ',
+  '██  ██ ██  ██',
+  ' ████   ████ ',
+];
+
+const CELL = 9; // px per block
+const GAP = 2; // px between blocks
+
+function WorkspaceBootLoaderBase() {
+  return (
+    <div
+      style={{
+        flex: 1,
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 16,
+      }}
+      aria-label="Loading workspace"
+      aria-live="polite"
+    >
+      <style>{`
+        @keyframes o8MarkSweep {
+          0%   { background: var(--t-text-faint); }
+          10%  { background: rgb(251, 191, 36); }
+          17%  { background: rgb(245, 158, 11); }
+          30%  { background: var(--t-text-faint); }
+          100% { background: var(--t-text-faint); }
+        }
+        @keyframes o8BootFadeIn {
+          from { opacity: 0; transform: translateY(2px); }
+          to   { opacity: 1; transform: translateY(0); }
+        }
+      `}</style>
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 14,
+          animation: 'o8BootFadeIn 280ms ease-out both',
+        }}
+      >
+        <div
+          aria-hidden
+          style={{
+            display: 'grid',
+            gridTemplateColumns: `repeat(${O8_MARK[0].length}, ${CELL}px)`,
+            gridAutoRows: `${CELL}px`,
+            gap: GAP,
+          }}
+        >
+          {O8_MARK.flatMap((row, r) =>
+            row.split('').map((ch, c) =>
+              ch === '█' ? (
+                <div
+                  key={`${r}-${c}`}
+                  style={{
+                    width: CELL,
+                    height: CELL,
+                    borderRadius: 1.5,
+                    background: 'var(--t-text-faint)',
+                    // Diagonal orange sweep, staggered along (col + 0.45·row)
+                    // so the crest wipes left-to-right with the same downward
+                    // skew as the terminal spawn-reveal, then settles + repeats.
+                    animation: 'o8MarkSweep 2s ease-in-out infinite',
+                    animationDelay: `${(c + r * 0.45) * 0.06}s`,
+                  }}
+                />
+              ) : (
+                <div key={`${r}-${c}`} style={{ width: CELL, height: CELL }} />
+              ),
+            ),
+          )}
+        </div>
+        <div
+          style={{
+            fontSize: 11.5,
+            fontWeight: 320,
+            letterSpacing: '0.01em',
+            color: 'var(--t-text-faint)',
+            fontFamily: 'var(--font-sans-system)',
+          }}
+        >
+          Loading workspace…
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export const WorkspaceBootLoader = memo(WorkspaceBootLoaderBase);
