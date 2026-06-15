@@ -4296,6 +4296,14 @@ function DashboardInner() {
           onSidebarHoverLeave={!showSidebarColumn && !compactShell ? scheduleSidebarPreviewClose : undefined}
           rightPanelOpen={showRightPanelColumn}
           onToggleRightPanel={compactShell ? undefined : handleToggleO8Panel}
+          projectContextRailAvailable={workspaceHeaderActive.contextRailAvailable}
+          projectContextRailVisible={workspaceHeaderActive.contextRailVisible}
+          onToggleProjectContextRail={compactShell ? undefined : () => {
+            if (typeof window === 'undefined') return;
+            window.dispatchEvent(new CustomEvent('o8:request-toggle-context-rail', {
+              detail: { workspaceId: workspaceHeaderActive.workspaceId },
+            }));
+          }}
           headerLabel={workspaceHeaderActive.label}
           headerTabs={workspaceHeaderActive.tabs}
           workspaceId={workspaceHeaderActive.workspaceId}
