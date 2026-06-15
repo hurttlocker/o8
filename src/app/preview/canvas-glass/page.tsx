@@ -72,9 +72,11 @@ import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
 import { WelcomeModal } from './welcome-modal';
+import { ShareBetaModal } from './share-beta';
 import { CanvasTour } from './canvas-tour';
 import { useCanvasOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
 import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS, type ComposerImage } from './use-send-buffer';
+import { DispatchDock, type DispatchLane } from './dispatch-dock';
 import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, type TurnTools } from './result-cards';
 import { FONT, IMG_MAX_SPAWN_EDGE, TONE_DOT, canvasZoom, glass, glassPop, relAge, type CardKind, type DockEntry, type MockCard, type NewDockEntry, type CanvasThreadRow, type OrchestratorLane } from './ui';
 
@@ -251,6 +253,7 @@ export default function CanvasGlassPreviewPage() {
   const [orchEffort, setOrchEffort] = useState<ThinkingEffort>('adaptive');
   const [orchMode, setOrchMode] = useState<CanvasMode>('fleet');
   const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [shareBetaOpen, setShareBetaOpen] = useState(false);
   const [tourOpen, setTourOpen] = useState(false);
   const [orchBusy, setOrchBusy] = useState(false);
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
@@ -273,6 +276,17 @@ export default function CanvasGlassPreviewPage() {
   const [chatCards, setChatCards] = useState<ChatCard[]>([]);
   const [topMenu, setTopMenu] = useState<'alerts' | 'agents' | 'profile' | null>(null);
   const [inboxItems, setInboxItems] = useState<InboxRow[]>([]);
+  // Which alerts the operator has already clicked — dims the row + drops it
+  // from the bell's unseen count. Persisted so a reload doesn't re-surface
+  // what you've acted on.
+  const [seenAlerts, setSeenAlerts] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set();
+    try {
+      const raw = window.localStorage.getItem('o8:canvas-alerts-seen');
+      const arr = raw ? JSON.parse(raw) : [];
+      return new Set<string>(Array.isArray(arr) ? arr : []);
+    } catch { return new Set(); }
+  });
   const [activeLanes, setActiveLanes] = useState<LaneRow[]>([]);
   const [recentThreads, setRecentThreads] = useState<CanvasThreadRow[]>([]);
   const [recentCommits, setRecentCommits] = useState<CommitRow[]>([]);
@@ -386,6 +400,13 @@ export default function CanvasGlassPreviewPage() {
     } catch {
       // defaults stand
     }
+  }, []);
+
+  // DEV — quick re-open while iterating on dev-bridge (the real entry is the end
+  // of the welcome tour, wired below): window.__o8OpenShareBeta(). Strip at ship.
+  useEffect(() => {
+    (window as unknown as { __o8OpenShareBeta?: () => void }).__o8OpenShareBeta = () => setShareBetaOpen(true);
+    return () => { delete (window as unknown as { __o8OpenShareBeta?: () => void }).__o8OpenShareBeta; };
   }, []);
 
   // Stamp + persist the zoom — drag handlers read --cnv-zoom for their
@@ -1237,7 +1258,9 @@ export default function CanvasGlassPreviewPage() {
     const zoom = canvasZoom();
     const gap = 26 / zoom;
     const raw = usableCanvasArea();
-    const area = { x: raw.x + gap, y: raw.y + gap, w: raw.w - 2 * gap, h: raw.h - 2 * gap };
+    // Half-gap margin (the side insets already clear the chrome) — fills the
+    // field more generously so grid cells read bigger by default.
+    const area = { x: raw.x + gap / 2, y: raw.y + gap / 2, w: raw.w - gap, h: raw.h - gap };
     if (area.w < 120 || area.h < 120) return;
     const slotMap = computeGrid(Array.from({ length: order.length }, (_, i) => ({ id: i, kind: 'slot' })), area, gap);
     const byId = new Map(gridItemsRef.current.map((it) => [it.id, it]));
@@ -1398,7 +1421,9 @@ export default function CanvasGlassPreviewPage() {
         const cy = (r.top + r.height / 2) / zoom;
         const gap = 26 / zoom;
         const raw = usableCanvasArea();
-        const area = { x: raw.x + gap, y: raw.y + gap, w: raw.w - 2 * gap, h: raw.h - 2 * gap };
+        // Half-gap margin (the side insets already clear the chrome) — fills the
+    // field more generously so grid cells read bigger by default.
+    const area = { x: raw.x + gap / 2, y: raw.y + gap / 2, w: raw.w - gap, h: raw.h - gap };
         const slotMap = computeGrid(Array.from({ length: drag.order.length }, (_, i) => ({ id: i, kind: 'slot' })), area, gap);
         let targetIndex = drag.lastIndex;
         let best = Infinity;
@@ -1637,27 +1662,89 @@ export default function CanvasGlassPreviewPage() {
       .catch(() => {});
   }, [activeRepoPath, findFreeSpot]);
 
+  /** The active review's PR diff as a glass card — what the Alerts
+   *  "Review ready · PR #N" row resolves to. Distinct from the working-tree
+   *  card: this is the review branch vs its base (the PR itself), NOT your
+   *  uncommitted edits in whatever repo the canvas happens to point at —
+   *  that mismatch was the bug this replaced. laneId carries a review:
+   *  prefix so the restore path and dedupe both recognise it. */
+  const spawnReviewDiffCard = useCallback((at?: SnapGeometry) => {
+    // No workspace param — match the inbox alert, which is built from the
+    // GLOBAL review snapshot (not the canvas's active repo). Passing the active
+    // repo here would re-introduce the very mismatch this card fixes.
+    return fetch('/api/review/diff')
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data: { ok?: boolean; branch?: string | null; stat?: string; diff?: string; truncated?: boolean; prNumber?: number | null; prTitle?: string | null } | null) => {
+        const id = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        const spot = at ?? findFreeSpot(560, 356);
+        const pr = data?.ok ? data.prNumber ?? null : null;
+        const title = pr
+          ? `PR #${pr}${data?.prTitle ? ` · ${data.prTitle}` : ''}`
+          : data?.ok
+            ? `Review · ${data.branch ?? 'changes'}`
+            : 'Review';
+        const body = data?.ok
+          ? (data.diff?.trim() ? data.diff : 'No diff is available for this review yet.')
+          : 'No active review workspace is configured.';
+        setDiffCards((previous) => {
+          // One review card at a time — the PR alert always resolves here.
+          if (previous.some((card) => card.laneId.startsWith('review:'))) return previous;
+          return [...previous, {
+            id,
+            x: spot.x,
+            y: spot.y,
+            z: zPeakRef.current,
+            w: at?.w ?? 560,
+            h: at?.h ?? 320,
+            laneId: `review:${pr ?? data?.branch ?? 'active'}`,
+            packetId: null,
+            title,
+            branch: data?.ok ? data.branch ?? null : null,
+            stat: data?.ok ? data.stat ?? '' : '',
+            diff: body,
+            truncated: Boolean(data?.ok && data.truncated),
+          }];
+        });
+      })
+      .catch(() => {});
+  }, [findFreeSpot]);
+
   // Auto-show YOUR working tree the moment the Review picker opens — no
   // hunting for the row. spawnWorktreeDiffCard dedupes, so this never stacks.
   useEffect(() => {
     if (reviewPickerOpen && activeRepoPath) void spawnWorktreeDiffCard();
   }, [reviewPickerOpen, activeRepoPath, spawnWorktreeDiffCard]);
 
-  /** Alerts dropdown → jump to the surface that resolves the row. A review
-   *  opens (or focuses) the working-tree diff card; everything else — the
-   *  mirrored chat, a pending approval, an agent alert — opens the orchestrator
-   *  dock, where those threads and their approvals live. Closes the dropdown. */
+  /** Mark an alert seen — dims the row + drops it from the bell count, and
+   *  persists so a reload doesn't re-surface what you've already acted on. */
+  const acknowledgeAlert = useCallback((id: string) => {
+    setSeenAlerts((previous) => {
+      if (previous.has(id)) return previous;
+      const next = new Set(previous);
+      next.add(id);
+      try { window.localStorage.setItem('o8:canvas-alerts-seen', JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  }, []);
+
+  /** Alerts dropdown → jump to the surface that resolves the row, and mark it
+   *  seen. A review opens (or focuses) the PR diff card — the review branch vs
+   *  its base, NOT the active repo's working tree (that mismatch was the bug).
+   *  Everything else — the mirrored chat, a pending approval, an agent alert —
+   *  opens the orchestrator dock, where those threads and approvals live. */
   const jumpToAlert = useCallback((item: InboxRow) => {
     setTopMenu(null);
+    acknowledgeAlert(item.id);
     if (item.kind === 'review') {
-      const laneId = activeRepoPath ? `worktree:${activeRepoPath}` : null;
-      const open = laneId ? diffCards.find((card) => card.laneId === laneId) : undefined;
+      const open = diffCards.find((card) => card.laneId.startsWith('review:'));
       if (open) focusDiffCard(open.id);
-      else void spawnWorktreeDiffCard();
+      else void spawnReviewDiffCard();
       return;
     }
     setDockOpen(true);
-  }, [activeRepoPath, diffCards, focusDiffCard, spawnWorktreeDiffCard]);
+  }, [acknowledgeAlert, diffCards, focusDiffCard, spawnReviewDiffCard]);
 
   /** The operator's o8.md notes — the REAL spec pane in a glass card.
    *  One card per repo: a second click focuses the open one instead of
@@ -2343,6 +2430,9 @@ export default function CanvasGlassPreviewPage() {
   const activeRepoName = repos?.find((repo) => repo.path === activeRepoPath)?.name ?? null;
   const activeConvo = convos[activeRepoPath ?? ''] ?? [];
   const hasTalked = Object.values(convos).some((entries) => entries.length > 0);
+  // Composer dispatch dock — real dispatched packets, or the dev demo seed when
+  // one is set (so the motion is visible with nothing actually running).
+  const dispatchLanes: DispatchLane[] = activeLanes;
 
   return (
     // In the app the transparent window loses macOS's corner mask — clip the
@@ -2645,7 +2735,7 @@ export default function CanvasGlassPreviewPage() {
         <DockGlyphButton
           label="Alerts"
           active={topMenu === 'alerts'}
-          badge={inboxItems.length}
+          badge={inboxItems.filter((item) => !seenAlerts.has(item.id)).length}
           onClick={() => setTopMenu((value) => (value === 'alerts' ? null : 'alerts'))}
           path="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9M10.3 21a1.94 1.94 0 0 0 3.4 0"
         />
@@ -2760,7 +2850,9 @@ export default function CanvasGlassPreviewPage() {
                   All clear — nothing needs you.
                 </span>
               ) : (
-                inboxItems.slice(0, 10).map((item) => (
+                inboxItems.slice(0, 10).map((item) => {
+                  const seen = seenAlerts.has(item.id);
+                  return (
                   <button
                     type="button"
                     key={item.id}
@@ -2780,6 +2872,7 @@ export default function CanvasGlassPreviewPage() {
                       paddingLeft: 8,
                       paddingRight: 8,
                       fontFamily: FONT,
+                      opacity: seen ? 0.5 : 1,
                     }}
                     onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--cnv-tint)'; }}
                     onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
@@ -2792,11 +2885,13 @@ export default function CanvasGlassPreviewPage() {
                         borderRadius: '50%',
                         flexShrink: 0,
                         marginTop: 4,
-                        background: item.severity === 'critical' || item.severity === 'high'
-                          ? '#ef4444'
-                          : item.kind === 'approval' || item.severity === 'warning'
-                            ? '#f59e0b'
-                            : 'rgba(255,255,255,0.4)',
+                        background: seen
+                          ? 'rgba(255,255,255,0.22)'
+                          : item.severity === 'critical' || item.severity === 'high'
+                            ? '#ef4444'
+                            : item.kind === 'approval' || item.severity === 'warning'
+                              ? '#f59e0b'
+                              : 'rgba(255,255,255,0.4)',
                       }}
                     />
                     <span style={{ display: 'flex', flex: 1, flexDirection: 'column', gap: 1, minWidth: 0, fontFamily: FONT }}>
@@ -2813,7 +2908,8 @@ export default function CanvasGlassPreviewPage() {
                       <path d="m9 18 6-6-6-6" />
                     </svg>
                   </button>
-                ))
+                  );
+                })
               )}
             </motion.div>
           </>
@@ -3642,9 +3738,22 @@ export default function CanvasGlassPreviewPage() {
           alignItems: 'center',
           gap: 6,
           zIndex: 41,
-          pointerEvents: mainQueued.length || mainUndoArmed ? 'auto' : 'none',
+          pointerEvents: dispatchLanes.length || mainQueued.length || mainUndoArmed ? 'auto' : 'none',
         }}
       >
+        {/* Live agents working — grows out of the composer (a creator borrow).
+            Sits ABOVE the queue so the two stack and never collide. */}
+        <div style={{ width: '100%' }}>
+          <AnimatePresence>
+            {dispatchLanes.length ? (
+              <DispatchDock
+                lanes={dispatchLanes}
+                onSelect={(lane) => { if (lane.repoPath) setActiveRepoPath(lane.repoPath); setDockOpen(true); }}
+                onReview={(lane) => { void spawnDiffCard(lane); }}
+              />
+            ) : null}
+          </AnimatePresence>
+        </div>
         <div style={{ width: '100%' }}>
           <QueuedSends items={mainQueued} onCancel={mainCancelQueued} />
         </div>
@@ -3931,7 +4040,8 @@ export default function CanvasGlassPreviewPage() {
       {/* First-run welcome — frosts the canvas behind a hero card. Rendered at
           chrome level (outside the zoom layer) so it sits at device 1:1. */}
       <WelcomeModal open={welcomeOpen} onClose={closeWelcome} onStart={startFromWelcome} tone={settings.tone} />
-      <CanvasTour open={tourOpen} onClose={closeTour} />
+      <ShareBetaModal open={shareBetaOpen} onClose={() => setShareBetaOpen(false)} tone={settings.tone} />
+      <CanvasTour open={tourOpen} onClose={closeTour} onComplete={() => setShareBetaOpen(true)} />
     </SmoothCorners>
   );
 }
