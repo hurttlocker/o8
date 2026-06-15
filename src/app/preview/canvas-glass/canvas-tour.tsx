@@ -120,12 +120,12 @@ export function CanvasTour({ open, onClose }: { open: boolean; onClose: () => vo
           style={{
             position: 'absolute',
             borderRadius: 12,
-            boxShadow: '0 0 0 9999px rgba(8,10,14,0.55), 0 0 0 1.5px rgba(255,255,255,0.5), 0 0 30px 4px rgba(255,90,31,0.3)',
+            boxShadow: '0 0 0 9999px rgba(8,10,14,0.4), 0 0 0 1.5px rgba(255,255,255,0.5), 0 0 30px 4px rgba(255,90,31,0.3)',
             pointerEvents: 'none',
           }}
         />
       ) : (
-        <div aria-hidden style={{ position: 'absolute', inset: 0, background: 'rgba(8,10,14,0.55)', pointerEvents: 'none' }} />
+        <div aria-hidden style={{ position: 'absolute', inset: 0, background: 'rgba(8,10,14,0.4)', pointerEvents: 'none' }} />
       )}
 
       {/* coach card */}
@@ -150,9 +150,12 @@ export function CanvasTour({ open, onClose }: { open: boolean; onClose: () => vo
             paddingLeft: 16,
             paddingRight: 16,
             borderRadius: 16,
-            background: 'linear-gradient(155deg, rgba(26,28,34,0.96), rgba(15,17,21,0.97))',
-            border: '1px solid rgba(255,255,255,0.1)',
-            boxShadow: '0 24px 60px rgba(0,0,0,0.45)',
+            // Translucent glass — the spotlit canvas fogs through behind it.
+            background: 'linear-gradient(155deg, rgba(28,30,38,0.6), rgba(16,18,24,0.66))',
+            backdropFilter: 'blur(30px) saturate(1.4)',
+            WebkitBackdropFilter: 'blur(30px) saturate(1.4)',
+            border: '1px solid rgba(255,255,255,0.12)',
+            boxShadow: '0 24px 60px rgba(0,0,0,0.4)',
             color: '#fff',
           }}
         >
