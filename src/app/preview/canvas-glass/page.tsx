@@ -71,6 +71,8 @@ import { putMedia, getMedia, deleteMedia } from './canvas-media-store';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import { TerminalGlassCard, type TermCard } from './terminal-card';
 import { TunerPanel } from './tuner';
+import { WelcomeModal } from './welcome-modal';
+import { CanvasTour } from './canvas-tour';
 import { useCanvasOrchestrator, type OrcaThreadEvent } from './use-canvas-orchestrator';
 import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS, type ComposerImage } from './use-send-buffer';
 import { emptyTurnTools, recordTool, recordToolResult, synthesizeResultEntries, type TurnTools } from './result-cards';
@@ -181,6 +183,10 @@ const CANVAS_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
 const CANVAS_ORCA_MODEL_KEY = 'o8:canvas-orca-model';
 const CANVAS_ORCA_EFFORT_KEY = 'o8:canvas-orca-effort';
 const CANVAS_ORCA_MODE_KEY = 'o8:canvas-orca-mode';
+/** First-run welcome modal — set once the operator dismisses the hero. */
+const CANVAS_WELCOME_KEY = 'o8:canvas-welcome-seen';
+/** Guided coach-mark tour — set once the operator finishes or skips it. */
+const CANVAS_TOUR_KEY = 'o8:canvas-tour-seen';
 
 /** How the canvas orchestrator runs a turn — mirrors the default composer's
  *  MODE chip so the operator can keep it from spawning Codex workers at all.
@@ -244,6 +250,8 @@ export default function CanvasGlassPreviewPage() {
   const [orcaModel, setOrcaModel] = useState(DEFAULT_ORCHESTRATOR_MODEL);
   const [orcaEffort, setOrcaEffort] = useState<ThinkingEffort>('adaptive');
   const [orchMode, setOrchMode] = useState<CanvasMode>('fleet');
+  const [welcomeOpen, setWelcomeOpen] = useState(false);
+  const [tourOpen, setTourOpen] = useState(false);
   const [orcaBusy, setOrcaBusy] = useState(false);
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
   const [termCards, setTermCards] = useState<TermCard[]>([]);
@@ -367,6 +375,8 @@ export default function CanvasGlassPreviewPage() {
       if (isThinkingEffort(storedEffort)) setOrcaEffort(storedEffort);
       const storedMode = window.localStorage.getItem(CANVAS_ORCA_MODE_KEY);
       if (storedMode === 'fleet' || storedMode === 'single' || storedMode === 'fusion') setOrchMode(storedMode);
+      // First-run welcome — springs in over a frosted canvas until dismissed.
+      if (window.localStorage.getItem(CANVAS_WELCOME_KEY) !== '1') setWelcomeOpen(true);
       const storedZoom = Number.parseFloat(window.localStorage.getItem(ZOOM_KEY) ?? '');
       if (ZOOM_STEPS.some((step) => step.value === storedZoom)) setCanvasZoomLevel(storedZoom);
       // Image cards restore through the canvas snapshot (loadCanvasSnapshot)
@@ -949,6 +959,33 @@ export default function CanvasGlassPreviewPage() {
     setComposerMenu(null);
     try {
       window.localStorage.setItem(CANVAS_ORCA_MODE_KEY, value);
+    } catch {
+      // non-critical
+    }
+  }, []);
+
+  const closeWelcome = useCallback(() => {
+    setWelcomeOpen(false);
+    try {
+      window.localStorage.setItem(CANVAS_WELCOME_KEY, '1');
+    } catch {
+      // non-critical
+    }
+  }, []);
+
+  // Start the journey — dismiss the hero, then run the guided tour (unless it's
+  // already been seen). Skipping the hero (✕/Esc) takes closeWelcome instead.
+  const startFromWelcome = useCallback(() => {
+    closeWelcome();
+    let seen = false;
+    try { seen = window.localStorage.getItem(CANVAS_TOUR_KEY) === '1'; } catch { /* default unseen */ }
+    if (!seen) setTourOpen(true);
+  }, [closeWelcome]);
+
+  const closeTour = useCallback(() => {
+    setTourOpen(false);
+    try {
+      window.localStorage.setItem(CANVAS_TOUR_KEY, '1');
     } catch {
       // non-critical
     }
@@ -3841,6 +3878,11 @@ export default function CanvasGlassPreviewPage() {
           />
         ) : null}
       </AnimatePresence>
+
+      {/* First-run welcome — frosts the canvas behind a hero card. Rendered at
+          chrome level (outside the zoom layer) so it sits at device 1:1. */}
+      <WelcomeModal open={welcomeOpen} onClose={closeWelcome} onStart={startFromWelcome} tone={settings.tone} />
+      <CanvasTour open={tourOpen} onClose={closeTour} />
     </SmoothCorners>
   );
 }
