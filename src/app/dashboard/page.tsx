@@ -71,6 +71,7 @@ import {
   updateOrchestratorMissionState,
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
+import { deriveParkedLanes } from '@/components/desktop/merge-beacon/derive';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import type {
   CanvasTileState,
@@ -3323,12 +3324,12 @@ function DashboardInner() {
   ]);
 
   // ── Domain lanes — reactive query, invalidated by WS lane-lifecycle events ──
-  const { data: domainLanesRaw } = useReactiveQuery<{ lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null; lastEventLabel: string | null }> }>({
+  const { data: domainLanesRaw } = useReactiveQuery<{ lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null; lastEventLabel: string | null; branch?: string; repoPath?: string; label?: string }> }>({
     queryKey: ['lanes', 'active'],
     queryFn: async () => {
       const res = await fetchOnce('/api/lanes?active=true');
       if (!res.ok) return { lanes: [] };
-      return await res.json() as { lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null; lastEventLabel: string | null }> };
+      return await res.json() as { lanes?: Array<{ id: string; packetId: string | null; status: string; sessionKey: string | null; lastEventLabel: string | null; branch?: string; repoPath?: string; label?: string }> };
     },
     wsEvents: ['lane-lifecycle', 'agent-lifecycle'],
     staleTime: 10_000,
@@ -3336,8 +3337,11 @@ function DashboardInner() {
   const domainLanes = useMemo<DomainLaneSummary[]>(() => {
     return (domainLanesRaw?.lanes ?? [])
       .filter((l): l is typeof l & { packetId: string } => Boolean(l.packetId))
-      .map((l) => ({ laneId: l.id, packetId: l.packetId, status: l.status, sessionKey: l.sessionKey, lastEventLabel: l.lastEventLabel }));
+      .map((l) => ({ laneId: l.id, packetId: l.packetId, status: l.status, sessionKey: l.sessionKey, lastEventLabel: l.lastEventLabel, branch: l.branch, repoPath: l.repoPath, label: l.label }));
   }, [domainLanesRaw]);
+  // Footer merge beacon — fleet-wide "parked, needs you" lanes (review +
+  // escalation gates), derived from the same already-live lanes poll.
+  const parkedLanes = useMemo(() => deriveParkedLanes(domainLanes), [domainLanes]);
 
   useEffect(() => {
     if (!tileLayoutHydrated) return;
@@ -4675,6 +4679,7 @@ function DashboardInner() {
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
         compact={compactShell}
+        parkedLanes={parkedLanes}
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
         onOpenBottomPanelSurface={handleOpenBottomPanelSurface}
