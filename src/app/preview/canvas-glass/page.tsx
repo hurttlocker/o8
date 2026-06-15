@@ -1642,6 +1642,22 @@ export default function CanvasGlassPreviewPage() {
     if (reviewPickerOpen && activeRepoPath) void spawnWorktreeDiffCard();
   }, [reviewPickerOpen, activeRepoPath, spawnWorktreeDiffCard]);
 
+  /** Alerts dropdown → jump to the surface that resolves the row. A review
+   *  opens (or focuses) the working-tree diff card; everything else — the
+   *  mirrored chat, a pending approval, an agent alert — opens the orchestrator
+   *  dock, where those threads and their approvals live. Closes the dropdown. */
+  const jumpToAlert = useCallback((item: InboxRow) => {
+    setTopMenu(null);
+    if (item.kind === 'review') {
+      const laneId = activeRepoPath ? `worktree:${activeRepoPath}` : null;
+      const open = laneId ? diffCards.find((card) => card.laneId === laneId) : undefined;
+      if (open) focusDiffCard(open.id);
+      else void spawnWorktreeDiffCard();
+      return;
+    }
+    setDockOpen(true);
+  }, [activeRepoPath, diffCards, focusDiffCard, spawnWorktreeDiffCard]);
+
   /** The operator's o8.md notes — the REAL spec pane in a glass card.
    *  One card per repo: a second click focuses the open one instead of
    *  spawning a duplicate editor against the same file. */
@@ -2694,7 +2710,7 @@ export default function CanvasGlassPreviewPage() {
               } as React.CSSProperties}
             >
               <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '0.08em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingBottom: 4 }}>
-                {topMenu === 'agents' ? 'Running agents' : 'Inbox'}
+                {topMenu === 'agents' ? 'Running agents' : 'Alerts'}
               </span>
               {topMenu === 'agents' ? (
                 activeLanes.length === 0 ? (
@@ -2733,11 +2749,33 @@ export default function CanvasGlassPreviewPage() {
                 )
               ) : inboxItems.length === 0 ? (
                 <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, paddingLeft: 8, paddingTop: 2, paddingBottom: 4 }}>
-                  Inbox zero — nothing needs you.
+                  All clear — nothing needs you.
                 </span>
               ) : (
                 inboxItems.slice(0, 10).map((item) => (
-                  <div key={item.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 8, paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 8 }}>
+                  <button
+                    type="button"
+                    key={item.id}
+                    onClick={() => jumpToAlert(item)}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 8,
+                      width: '100%',
+                      textAlign: 'left',
+                      borderWidth: 0,
+                      background: 'transparent',
+                      cursor: 'pointer',
+                      borderRadius: 8,
+                      paddingTop: 6,
+                      paddingBottom: 6,
+                      paddingLeft: 8,
+                      paddingRight: 8,
+                      fontFamily: FONT,
+                    }}
+                    onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--cnv-tint)'; }}
+                    onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+                  >
                     <span
                       aria-hidden
                       style={{
@@ -2753,7 +2791,7 @@ export default function CanvasGlassPreviewPage() {
                             : 'rgba(255,255,255,0.4)',
                       }}
                     />
-                    <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0, fontFamily: FONT }}>
+                    <span style={{ display: 'flex', flex: 1, flexDirection: 'column', gap: 1, minWidth: 0, fontFamily: FONT }}>
                       <span style={{ fontSize: 11.5, fontWeight: 300, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {item.title}
                       </span>
@@ -2763,7 +2801,10 @@ export default function CanvasGlassPreviewPage() {
                         </span>
                       ) : null}
                     </span>
-                  </div>
+                    <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0, marginTop: 3, opacity: 0.4 }}>
+                      <path d="m9 18 6-6-6-6" />
+                    </svg>
+                  </button>
                 ))
               )}
             </motion.div>
