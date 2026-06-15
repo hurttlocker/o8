@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ComposerChipCompactContext } from './composer-compact-context';
-import { createPortal } from 'react-dom';
+import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { AttachFilesButton } from './AttachFilesButton';
 import { SparklesIcon } from './ThoughtsIcons';
 import { MicButton } from './MicButton';
@@ -223,50 +223,13 @@ function ModelThinkingChip({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
   const selectedLabel = EFFORT_LABELS[effort];
   const ultraActive = Boolean(swarmEnabled);
   const modelSwitchable = Boolean(onModelChange);
   const canOpen = Boolean(onEffortChange || onSetSwarm || onModelChange);
   const showingAffordance = canOpen && (hovered || focused || open);
-
-  useEffect(() => {
-    if (!open) return;
-    const updateMenuPosition = () => {
-      const rect = buttonRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const viewportWidth = window.innerWidth;
-      const viewportHeight = window.innerHeight;
-      const estimatedHeight = modelSwitchable ? 300 : 190;
-      setMenuPosition({
-        left: Math.min(Math.max(8, rect.left - 10), Math.max(8, viewportWidth - MODEL_THINKING_MENU_WIDTH - 8)),
-        top: Math.max(8, Math.min(rect.top - estimatedHeight - 8, viewportHeight - estimatedHeight - 8)),
-      });
-    };
-    const handlePointer = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (target && buttonRef.current?.contains(target)) return;
-      if (target && menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    updateMenuPosition();
-    document.addEventListener('pointerdown', handlePointer);
-    document.addEventListener('keydown', handleKey);
-    window.addEventListener('resize', updateMenuPosition);
-    window.addEventListener('scroll', updateMenuPosition, true);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointer);
-      document.removeEventListener('keydown', handleKey);
-      window.removeEventListener('resize', updateMenuPosition);
-      window.removeEventListener('scroll', updateMenuPosition, true);
-    };
-  }, [open]);
 
   return (
     <>
@@ -317,15 +280,11 @@ function ModelThinkingChip({
         </svg>
       </button>
 
-      {open && menuPosition ? createPortal(
+      <ComposerPopover anchorRef={buttonRef} open={open} onClose={() => setOpen(false)} align="start">
         <div
-          ref={menuRef}
           role="menu"
           aria-label="Model and thinking"
           style={{
-            position: 'fixed',
-            top: menuPosition.top,
-            left: menuPosition.left,
             width: MODEL_THINKING_MENU_WIDTH,
             paddingTop: 7,
             paddingRight: 5,
@@ -341,7 +300,6 @@ function ModelThinkingChip({
             display: 'flex',
             flexDirection: 'column',
             gap: 4,
-            zIndex: 1000,
             fontFamily: 'var(--font-sans-system)',
           }}
         >
@@ -506,9 +464,8 @@ function ModelThinkingChip({
               </button>
             </div>
           ) : null}
-        </div>,
-        document.body,
-      ) : null}
+        </div>
+      </ComposerPopover>
     </>
   );
 }
@@ -554,10 +511,7 @@ function RepoTargetChip({
   const [open, setOpen] = useState(false);
   const [hovered, setHovered] = useState(false);
   const [focused, setFocused] = useState(false);
-  const [menuPosition, setMenuPosition] = useState<{ left: number; top: number } | null>(null);
-  const containerRef = useRef<HTMLDivElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
   const targets = useMemo(() => workspaceTargets ?? [], [workspaceTargets]);
   const targetGroups = useMemo(() => {
     const groups = new Map<string, {
@@ -601,43 +555,10 @@ function RepoTargetChip({
   const canSelect = targets.length > 0 && Boolean(onSelectRepoPath);
   const showingAffordance = canSelect && (hovered || focused || open);
 
-  useEffect(() => {
-    if (!open) return;
-    const updateMenuPosition = () => {
-      const rect = buttonRef.current?.getBoundingClientRect();
-      if (!rect) return;
-      const viewportWidth = window.innerWidth;
-      setMenuPosition({
-        left: Math.min(Math.max(8, rect.left - 12), Math.max(8, viewportWidth - REPO_TARGET_MENU_WIDTH - 8)),
-        top: Math.max(8, rect.top - REPO_TARGET_MENU_HEIGHT - 8),
-      });
-    };
-    const handlePointer = (event: PointerEvent) => {
-      const target = event.target as Node | null;
-      if (target && containerRef.current?.contains(target)) return;
-      if (target && menuRef.current?.contains(target)) return;
-      setOpen(false);
-    };
-    const handleKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    updateMenuPosition();
-    document.addEventListener('pointerdown', handlePointer);
-    document.addEventListener('keydown', handleKey);
-    window.addEventListener('resize', updateMenuPosition);
-    window.addEventListener('scroll', updateMenuPosition, true);
-    return () => {
-      document.removeEventListener('pointerdown', handlePointer);
-      document.removeEventListener('keydown', handleKey);
-      window.removeEventListener('resize', updateMenuPosition);
-      window.removeEventListener('scroll', updateMenuPosition, true);
-    };
-  }, [open]);
-
   if (!label) return null;
 
   return (
-    <div ref={containerRef} style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
+    <div style={{ display: 'inline-flex', alignItems: 'center', minWidth: 0 }}>
       <button
         ref={buttonRef}
         type="button"
@@ -687,15 +608,11 @@ function RepoTargetChip({
         ) : null}
       </button>
 
-      {open && menuPosition ? createPortal(
+      <ComposerPopover anchorRef={buttonRef} open={open} onClose={() => setOpen(false)} align="start">
         <div
-          ref={menuRef}
           role="listbox"
           aria-label="Chat target repo"
           style={{
-            position: 'fixed',
-            top: menuPosition.top,
-            left: menuPosition.left,
             width: REPO_TARGET_MENU_WIDTH,
             maxHeight: REPO_TARGET_MENU_HEIGHT,
             overflowY: 'auto',
@@ -714,7 +631,6 @@ function RepoTargetChip({
             display: 'flex',
             flexDirection: 'column',
             gap: 2,
-            zIndex: 1000,
           }}
         >
           {targetGroups.map((group) => {
@@ -813,9 +729,8 @@ function RepoTargetChip({
               </div>
             );
           })}
-        </div>,
-        document.body,
-      ) : null}
+        </div>
+      </ComposerPopover>
     </div>
   );
 }
