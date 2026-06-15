@@ -20,6 +20,8 @@ const STATUS_LABELS: Record<SupervisorInboxItem['status'], string> = {
   pending: 'Pending',
   healing: 'Healing',
   self_healed: 'Self healed',
+  escalated: 'Escalated',
+  resolved: 'Resolved',
   human_required: 'Human required',
   dismissed: 'Dismissed',
 };
@@ -223,15 +225,27 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
         statusLabel: KIND_LABELS[item.kind],
       },
     }));
-    setActionNote(item.id, 'Added to orchestrator draft.');
-  }, [setActionNote]);
+    // Mark escalated — heal-bot auto-resolves once the faulting packet's lane
+    // merges. Flips the card out of the "awaiting you" rot into "in flight".
+    void fetch('/api/panel/supervisor-inbox', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: 'escalate', id: item.id }),
+    }).then(() => {
+      window.dispatchEvent(new CustomEvent('o8:supervisor-inbox'));
+      refresh();
+    }).catch(() => {});
+    setActionNote(item.id, 'Escalated to orchestrator.');
+  }, [setActionNote, refresh]);
 
   const humanRequired = items.filter((item) => item.status === 'human_required');
+  const escalated = items.filter((item) => item.status === 'escalated');
   const selfHealed = items.filter((item) => item.status === 'self_healed');
   const pending = items.filter((item) => item.status === 'pending');
+  const healing = items.filter((item) => item.status === 'healing');
 
   const visibleItems = filter === 'active'
-    ? [...humanRequired, ...pending]
+    ? [...humanRequired, ...escalated, ...pending]
     : filter === 'self_healed'
       ? selfHealed
       : items;
@@ -269,12 +283,17 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
         <div style={{ fontSize: 15, fontWeight: 350, letterSpacing: '-0.1px', color: 'var(--t-text)', marginBottom: 3 }}>
           Incident Queue
         </div>
-        <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)', marginBottom: 10 }}>
+        <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)', marginBottom: 6 }}>
           Deduped agent failures that still need operator attention.
         </div>
+        {(humanRequired.length + escalated.length + pending.length + healing.length) > 0 ? (
+          <div style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.02em', color: 'var(--t-text-faint)', marginBottom: 10 }}>
+            {escalated.length} escalated · {humanRequired.length} awaiting you · {pending.length + healing.length} open
+          </div>
+        ) : null}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
           <FilterChip
-            label={`Active · ${humanRequired.length + pending.length}`}
+            label={`Active · ${humanRequired.length + escalated.length + pending.length}`}
             active={filter === 'active'}
             onClick={() => setFilter('active')}
             tone="warning"
@@ -315,7 +334,9 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
               ? item.payload.lastCommit as { subject?: string }
               : null;
             const isHumanRequired = item.status === 'human_required';
+            const isEscalated = item.status === 'escalated';
             const isSelfHealed = item.status === 'self_healed';
+            const isResolved = item.status === 'resolved';
             const transcriptPreview = expandedTranscriptById[item.id] ?? null;
             const actionNote = actionNoteById[item.id] ?? null;
 
@@ -341,14 +362,18 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                       borderRadius: 6,
                       background: isHumanRequired
                         ? 'var(--t-warning-soft, rgba(249, 115, 22, 0.12))'
-                        : isSelfHealed
-                          ? 'var(--t-accent-soft)'
-                          : 'var(--t-border)',
+                        : isEscalated
+                          ? 'var(--t-info-soft, rgba(59, 130, 246, 0.12))'
+                          : (isSelfHealed || isResolved)
+                            ? 'var(--t-accent-soft)'
+                            : 'var(--t-border)',
                       color: isHumanRequired
                         ? 'var(--t-warning, #c2410c)'
-                        : isSelfHealed
-                          ? 'var(--t-accent)'
-                          : 'var(--t-text-secondary)',
+                        : isEscalated
+                          ? 'var(--t-info, #2563eb)'
+                          : (isSelfHealed || isResolved)
+                            ? 'var(--t-accent)'
+                            : 'var(--t-text-secondary)',
                       fontSize: 9,
                       fontWeight: 300,
                       letterSpacing: '0.04em',
@@ -435,7 +460,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                   >
                     <ChatGlyph />
                   </InboxActionButton>
-                  {!isSelfHealed ? (
+                  {!isSelfHealed && !isResolved ? (
                     <InboxActionButton
                       title="Dismiss incident"
                       onClick={() => dismiss(item.id)}

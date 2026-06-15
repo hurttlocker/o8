@@ -217,9 +217,21 @@ export function supervisorStatusTone(status: SupervisorInboxItem['status']) {
         color: 'var(--t-brand-orange, #FF5A1F)',
         background: 'rgba(255, 90, 31, 0.08)',
       };
+    case 'escalated':
+      return {
+        label: 'In orchestrator',
+        color: '#2563eb',
+        background: 'rgba(37, 99, 235, 0.08)',
+      };
     case 'self_healed':
       return {
         label: 'Fixed',
+        color: '#16a34a',
+        background: 'rgba(22, 163, 74, 0.08)',
+      };
+    case 'resolved':
+      return {
+        label: 'Resolved',
         color: '#16a34a',
         background: 'rgba(22, 163, 74, 0.08)',
       };
