@@ -2385,6 +2385,13 @@ function DashboardInner() {
     setCommandPaletteOpen(true);
   }, []);
 
+  // A primary left-nav action (new session, search, select session/repo) should
+  // leave the Automations page-takeover — same as the page's back button — so the
+  // center returns to the workspace instead of staying stuck on Automations.
+  const leaveNavTakeover = useCallback(() => {
+    setActiveNavSection('agents');
+  }, [setActiveNavSection]);
+
   const handlePaletteClose = useCallback(() => {
     setCommandPaletteOpen(false);
   }, []);
@@ -3890,17 +3897,17 @@ function DashboardInner() {
           window.dispatchEvent(new CustomEvent('o8:tab-focus-flash', { detail: { tabId } }));
         }
       }}
-      onCreateWorkspaceOrchestrator={handleCreateWorkspaceOrchestrator}
-      onCreateWorkspaceChat={handleCreateWorkspaceChat}
-      onCreateWorkspaceTerminal={handleCreateWorkspaceTerminal}
-      onOpenCommandPalette={handlePaletteOpen}
+      onCreateWorkspaceOrchestrator={() => { leaveNavTakeover(); handleCreateWorkspaceOrchestrator(); }}
+      onCreateWorkspaceChat={() => { leaveNavTakeover(); handleCreateWorkspaceChat(); }}
+      onCreateWorkspaceTerminal={() => { leaveNavTakeover(); handleCreateWorkspaceTerminal(); }}
+      onOpenCommandPalette={() => { leaveNavTakeover(); handlePaletteOpen(); }}
       onOpenProjectManagement={() => handleOpenSettingsTab('projects')}
       selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
       onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
       onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
-      onSelectSession={handleSelectSession}
-      onOpenHistoryChat={handleOpenHistoryChatFromPanel}
-      onSelectRepo={handleAlignToRepo}
+      onSelectSession={(sessionKey) => { leaveNavTakeover(); handleSelectSession(sessionKey); }}
+      onOpenHistoryChat={(...args) => { leaveNavTakeover(); handleOpenHistoryChatFromPanel(...args); }}
+      onSelectRepo={(repoId) => { leaveNavTakeover(); handleAlignToRepo(repoId); }}
       onSelectIssue={handleSelectIssue}
       onSelectCommit={handleSelectCommit}
       onSelectPR={handleSelectPR}
