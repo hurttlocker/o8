@@ -118,14 +118,14 @@ export function DiffGlassCard({
         </div>
 
         {/* The diff — one continuous read, glass tones. */}
-        <div ref={diffScrollRef} style={{ ...scrollFadeY, height: card.h, overflowY: 'auto', overflowX: 'auto', paddingTop: 2, paddingBottom: 8, paddingLeft: 16, paddingRight: 16, scrollbarWidth: 'thin' } as React.CSSProperties}>
+        <div ref={diffScrollRef} style={{ ...scrollFadeY, height: card.h, overflowY: 'auto', overflowX: 'hidden', paddingTop: 2, paddingBottom: 8, paddingLeft: 16, paddingRight: 16, scrollbarWidth: 'thin' } as React.CSSProperties}>
           {card.diff.trim() === '' ? (
             <span style={{ fontSize: 10.5, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT }}>
               Clean worktree — nothing to review on this lane.
             </span>
           ) : (
             card.diff.split('\n').map((line, index) => (
-              <div key={index} style={{ fontFamily: MONO, fontSize: 10, lineHeight: 1.55, whiteSpace: 'pre', paddingLeft: 4, paddingRight: 4, borderRadius: 3, ...diffLineStyle(line) }}>
+              <div key={index} style={{ fontFamily: MONO, fontSize: 10, lineHeight: 1.55, whiteSpace: 'pre-wrap', overflowWrap: 'anywhere', paddingLeft: 'calc(4px + 2ch)', textIndent: '-2ch', paddingRight: 4, borderRadius: 3, ...diffLineStyle(line) }}>
                 {line || ' '}
               </div>
             ))
