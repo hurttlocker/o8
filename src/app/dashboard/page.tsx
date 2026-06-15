@@ -4365,7 +4365,7 @@ function DashboardInner() {
         {activeNavSection === 'automations' && (
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
             <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>Loading automations…</div>}>
-              <LazyAutomationsPage currentOwner="operator" />
+              <LazyAutomationsPage currentOwner="operator" onClose={() => setActiveNavSection('agents')} />
             </Suspense>
           </div>
         )}
