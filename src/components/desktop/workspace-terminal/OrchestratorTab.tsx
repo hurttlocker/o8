@@ -35,6 +35,7 @@ import {
   type WorktreeMode,
   type OrchestratorEmptyKind,
 } from '@/components/desktop/OrchestratorEmptyState';
+import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
 import { ContextMeter } from '@/components/desktop/orchestrator/ContextMeter';
 import { OrchestratorRunStrip } from '@/components/desktop/orchestrator/OrchestratorRunStrip';
 import { QuickActionPalette } from '@/components/desktop/orchestrator/QuickActionPalette';
@@ -702,12 +703,15 @@ function OrchestratorTabInner({
     ? orchestratorRuntimeTone(initialSingleRuntime ?? 'codex').label
     : 'O8 Operator';
 
-  // Worktree mode for the compose-first empty state. Defaults to
-  // 'new-worktree' so the operator's governance ethos (don't dirty main
-  // unless asked) lands by default; flips to 'local' for quick chats.
+  // Worktree mode for the compose-first empty state. Defaults to 'local'
+  // (operator pass 2026-06-14 — "we only work local really"): the
+  // orchestrator drives on the current checkout and the Branch chip stays
+  // hidden until you explicitly pick "New worktree", which drops the
+  // redundant second branch pill vs. the footer status bar. Dispatched
+  // agents still get isolated worktrees at spawn time regardless of this.
   // Local-state for v1 — persistence onto the tab is a follow-up once
   // dispatch reads this on first agent spawn.
-  const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>('new-worktree');
+  const [worktreeMode, setWorktreeMode] = useState<WorktreeMode>('local');
   // Optimistic branch override for the empty-state Branch chip. Real
   // branch checkout fires on first message (when the operator has
   // committed to this conversation); here we just track the operator's
@@ -975,9 +979,6 @@ function OrchestratorTabInner({
           branch={branchLabel}
           repoPath={effectiveRepoPath}
           onBranchChange={setPickedBranch}
-          kind={emptyKind}
-          kindLocked={emptyKindLocked}
-          onKindChange={handleEmptyKindChange}
           onActionClick={handleQuickAction}
           repoLabel={projectLabel}
           workspaceTargets={data?.workspaceTargets ?? []}
@@ -1149,68 +1150,3 @@ function OrchestratorTabInner({
   );
 }
 
-/** Calm, branded boot loader that swaps in for OrchestratorEmptyState while the
- *  last-active thread rehydrates. A single quietly-pulsing o8 wordmark over
- *  "Loading workspace" — no fake conversation shapes. Paired with the minimum
- *  on-screen window in `isRestoringThread` (>=480ms) + a fade-in, so the boot
- *  reads as one smooth loading beat instead of the old empty-state -> shimmer
- *  flicker that flashed by too fast to register. */
-function WorkspaceBootLoader() {
-  return (
-    <div
-      style={{
-        flex: 1,
-        minHeight: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 13,
-      }}
-      aria-label="Loading workspace"
-      aria-live="polite"
-    >
-      <style>{`
-        @keyframes o8BootPulse {
-          0%, 100% { opacity: 0.32; transform: scale(0.99); }
-          50%      { opacity: 1;    transform: scale(1); }
-        }
-        @keyframes o8BootFadeIn { from { opacity: 0; } to { opacity: 1; } }
-      `}</style>
-      <div
-        style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 12,
-          animation: 'o8BootFadeIn 260ms ease-out both',
-        }}
-      >
-        <div
-          style={{
-            fontSize: 34,
-            fontWeight: 300,
-            letterSpacing: '-0.04em',
-            lineHeight: 1,
-            color: 'var(--t-text)',
-            fontFamily: 'var(--font-sans-system)',
-            animation: 'o8BootPulse 1.8s ease-in-out infinite',
-          }}
-        >
-          o8
-        </div>
-        <div
-          style={{
-            fontSize: 11.5,
-            fontWeight: 320,
-            letterSpacing: '0.01em',
-            color: 'var(--t-text-faint)',
-            fontFamily: 'var(--font-sans-system)',
-          }}
-        >
-          Loading workspace…
-        </div>
-      </div>
-    </div>
-  );
-}
