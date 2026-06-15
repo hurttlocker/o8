@@ -117,6 +117,47 @@ function DesktopStatusBarBase({
     };
   }, [settingsDrawerOpen, syncSettingsAnchor]);
 
+  // Center the branch cluster on the composer's REAL measured position. The
+  // column-width props ignored insets/gaps + a hidden right region and drifted
+  // the cluster ~125px off the composer (operator: "not hitting", 2026-06-15).
+  // The composer card carries [data-composer-center]; track it through panel
+  // resizes/animations (ResizeObserver — the card is maxWidth:100% so it
+  // resizes as the column narrows) and remounts/tab-switches (MutationObserver,
+  // rAF-debounced). Null → no composer (e.g. an Automations takeover) → fall
+  // back to the column-width centering.
+  const [composerCenterX, setComposerCenterX] = useState<number | null>(null);
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    let raf = 0;
+    let observed: Element | null = null;
+    const ro = typeof ResizeObserver !== 'undefined' ? new ResizeObserver(() => schedule()) : null;
+    const measure = () => {
+      const el = document.querySelector('[data-composer-center]');
+      if (ro && el !== observed) {
+        if (observed) ro.unobserve(observed);
+        if (el) ro.observe(el);
+        observed = el;
+      }
+      const rect = el?.getBoundingClientRect();
+      const next = rect && rect.width > 0 ? Math.round(rect.left + rect.width / 2) : null;
+      setComposerCenterX((prev) => (prev === next ? prev : next));
+    };
+    const schedule = () => {
+      window.cancelAnimationFrame(raf);
+      raf = window.requestAnimationFrame(measure);
+    };
+    schedule();
+    window.addEventListener('resize', schedule);
+    const mo = new MutationObserver(schedule);
+    mo.observe(document.body, { childList: true, subtree: true });
+    return () => {
+      window.cancelAnimationFrame(raf);
+      window.removeEventListener('resize', schedule);
+      ro?.disconnect();
+      mo.disconnect();
+    };
+  }, []);
+
   // Three-column footer that mirrors the dashboard layout above. Left section
   // takes the AgentPanel's exact width, right section takes the right-panel's
   // width (or 0 when hidden), so the center section spans the same horizontal
@@ -281,12 +322,15 @@ function DesktopStatusBarBase({
           position: 'absolute',
           top: 0,
           bottom: 0,
-          left: leftColumnWidth ?? 0,
-          right: rightColumnWidth ?? 0,
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           pointerEvents: 'none',
+          // Center on the composer's real measured center when present; else
+          // fall back to the column-width span (takeovers with no composer).
+          ...(composerCenterX != null
+            ? { left: composerCenterX, transform: 'translateX(-50%)' }
+            : { left: leftColumnWidth ?? 0, right: rightColumnWidth ?? 0 }),
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
