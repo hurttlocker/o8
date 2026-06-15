@@ -76,6 +76,12 @@ Distill, don't dump — the reel shows the *feeling* of command, not a feature l
 
 ---
 
+## Reference note — the motion is a layer, not a shader (verified frame-by-frame)
+
+The operator's reference (their product's sign-in) does NOT use a full-screen shader. It's a **static photo background + one organic element (a butterfly) animating across on a slow flight path, passing BEHIND the frosted glass card** (the card's backdrop-blur frosts it as it crosses — that's the premium tell). Likely **Rive or Lottie** (vector creature + wing-flap state + path), or a small alpha video. There may be a faint ambient light drift too, but the crossing element is the hero motion.
+
+Apply the *principle*, not the literal butterfly: o8 is a control plane, not a nature app. Give the right pane a subtle element drifting **behind the glass** — an o8 motif (a soft drifting light, a slow-moving node/spark, a faint glass card gliding past) — frosted by the panel as it passes. Keep it whisper-subtle and slow. The Paper Aurora washes can remain as the ambient ground; this adds one tasteful moving layer on top, behind the glass.
+
 ## Voice & acceptance
 
 - **Voice:** first-person-plural confidence, plain and concrete. No hype words, no exclamation, no emoji. The lines above are close to final — tighten, don't inflate.

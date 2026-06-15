@@ -1,66 +1,43 @@
 'use client';
 
 /**
- * O8Reel — the looping "video" in the welcome modal's right pane: it opens on
- * the tagline, then cycles through what o8 does, over a slow drifting aurora.
+ * O8Reel — the right-pane scene of the welcome modal. A calm "Paper Aurora"
+ * ground (soft gradient + slow color washes + dot grid) with the tagline
+ * rising in, plus the hero subtle motion: soft light MOTES that
+ * drift slowly ACROSS the pane behind the text — our control-plane read on the
+ * reference's "element crossing behind the glass" (a butterfly, there). The
+ * capability walkthrough now lives in the guided tour, so this stays calm and
+ * branded, not a feature reel.
  *
- * Originally a Remotion composition, but Remotion's <Player> would not advance
- * frames inside the embedded Tauri WebKit (came up paused, isPlaying never
- * flipped). framer-motion's RAF loop runs fine here (it drives the rest of the
- * canvas), so the reel is driven by it: a beat index on an interval + an
- * AnimatePresence crossfade, with the aurora on infinite motion loops. Same
- * visual design, reliably playing. Tone-aware; reduced-motion safe.
- *
- * (A true baked-video path still exists: render this script with @remotion/
- * renderer to an mp4 per tone and swap a <video> in. Deferred — the live reel
- * themes for free and needs no asset.)
+ * framer-motion (Remotion's Player won't run in the embedded WebKit). Tone-aware,
+ * reduced-motion safe. V1 — tune mote count/speed/hues here.
  */
 
-import { useEffect, useState } from 'react';
-import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 import { FONT } from './ui';
-
-type GlyphName = 'plane' | 'chat' | 'fleet' | 'diff' | 'check';
-
-const BEATS: Array<{ text: string; glyph: GlyphName; hero?: boolean }> = [
-  { text: 'The control plane for your agents.', glyph: 'plane', hero: true },
-  { text: 'Talk to the orchestrator.', glyph: 'chat' },
-  { text: 'Agents build in parallel.', glyph: 'fleet' },
-  { text: 'Review every diff.', glyph: 'diff' },
-  { text: 'Ship on your approval.', glyph: 'check' },
-];
-
-/** The hero line holds a beat longer than the capability lines. */
-const HERO_MS = 3400;
-const BEAT_MS = 2500;
-const ACCENT = '#FF5A1F';
 
 export function O8Reel({ tone }: { tone: 'light' | 'dark' }) {
   const reduce = useReducedMotion();
   const isDark = tone === 'dark';
-  const [i, setI] = useState(0);
-
-  // Advance the beat. Each beat schedules the next (hero holds longer).
-  useEffect(() => {
-    const id = window.setTimeout(() => setI((prev) => (prev + 1) % BEATS.length), BEATS[i].hero ? HERO_MS : BEAT_MS);
-    return () => window.clearTimeout(id);
-  }, [i]);
 
   const ink = isDark ? '#f4f5f7' : '#16181d';
-  const muted = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(15,23,42,0.5)';
-  const dot = isDark ? 'rgba(255,255,255,0.07)' : 'rgba(15,23,42,0.07)';
+  const dot = isDark ? 'rgba(255,255,255,0.06)' : 'rgba(15,23,42,0.06)';
   const bg = isDark ? 'linear-gradient(155deg,#202430 0%,#14171f 100%)' : 'linear-gradient(155deg,#f8f8f6 0%,#ececea 100%)';
-
-  const beat = BEATS[i];
 
   return (
     <div style={{ position: 'absolute', inset: 0, overflow: 'hidden', background: bg, fontFamily: FONT }}>
-      {/* aurora — slow drifting washes; reads on both tones, off under reduced-motion */}
-      <Aurora hue="rgba(255,122,60,0.5)" base={{ top: '30%', left: '38%' }} drift={{ x: 28, y: 20 }} duration={13} dim={isDark ? 0.6 : 0.5} reduce={!!reduce} />
-      <Aurora hue="rgba(132,120,255,0.46)" base={{ top: '66%', left: '70%' }} drift={{ x: 32, y: 24 }} duration={16} dim={isDark ? 0.6 : 0.5} reduce={!!reduce} />
-      <Aurora hue="rgba(86,214,170,0.42)" base={{ top: '74%', left: '28%' }} drift={{ x: 26, y: 22 }} duration={19} dim={isDark ? 0.55 : 0.45} reduce={!!reduce} />
+      {/* aurora ground — slow washes, the ambient bed the motes drift over */}
+      <Aurora hue="rgba(255,122,60,0.42)" base={{ top: '30%', left: '36%' }} drift={{ x: 24, y: 18 }} duration={15} dim={isDark ? 0.5 : 0.4} reduce={!!reduce} />
+      <Aurora hue="rgba(132,120,255,0.4)" base={{ top: '66%', left: '70%' }} drift={{ x: 28, y: 22 }} duration={18} dim={isDark ? 0.5 : 0.4} reduce={!!reduce} />
+      <Aurora hue="rgba(86,214,170,0.36)" base={{ top: '74%', left: '26%' }} drift={{ x: 22, y: 20 }} duration={21} dim={isDark ? 0.45 : 0.36} reduce={!!reduce} />
 
-      {/* dotted grid — the canvas signature */}
+      {/* drifting motes — the hero subtle motion: soft lights crossing the pane,
+          at different sizes/speeds for depth. They pass BEHIND the text. */}
+      <Mote color={isDark ? 'rgba(255,206,166,0.95)' : 'rgba(255,150,90,0.9)'} size={11} yBase={150} duration={17} reduce={!!reduce} />
+      <Mote color={isDark ? 'rgba(196,204,255,0.9)' : 'rgba(140,150,255,0.7)'} size={7} yBase={210} duration={23} reduce={!!reduce} />
+      <Mote color={isDark ? 'rgba(255,255,255,0.75)' : 'rgba(110,200,170,0.7)'} size={5} yBase={96} duration={29} reduce={!!reduce} />
+
+      {/* dot grid — the canvas signature */}
       <div
         style={{
           position: 'absolute',
@@ -72,47 +49,69 @@ export function O8Reel({ tone }: { tone: 'light' | 'dark' }) {
         }}
       />
 
-      {/* persistent o8 wordmark */}
-      <div style={{ position: 'absolute', top: 22, left: 26, fontSize: 22, fontWeight: 500, letterSpacing: '0.01em', color: ink }}>o8</div>
-
-      {/* the beats — one crossfades out as the next slides up */}
-      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingLeft: 36, paddingRight: 36 }}>
-        <AnimatePresence mode="wait">
-          <motion.div
-            key={i}
-            initial={reduce ? { opacity: 0 } : { opacity: 0, y: 18 }}
-            animate={reduce ? { opacity: 1 } : { opacity: 1, y: 0 }}
-            exit={reduce ? { opacity: 0 } : { opacity: 0, y: -14 }}
-            transition={{ duration: 0.46, ease: [0.22, 1, 0.36, 1] }}
-            style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 14, textAlign: 'center' }}
-          >
-            <span style={{ display: 'inline-flex', color: ACCENT }}>
-              <Glyph name={beat.glyph} size={beat.hero ? 38 : 30} />
-            </span>
-            <span style={{ fontSize: beat.hero ? 32 : 27, fontWeight: 500, lineHeight: 1.18, letterSpacing: '-0.03em', color: ink, maxWidth: 320 }}>
-              {beat.text}
-            </span>
-          </motion.div>
-        </AnimatePresence>
-      </div>
-
-      {/* progress dots */}
-      <div style={{ position: 'absolute', bottom: 26, left: 0, right: 0, display: 'flex', justifyContent: 'center', gap: 6 }}>
-        {BEATS.map((_, n) => (
-          <div
-            key={n}
-            style={{
-              width: n === i ? 22 : 6,
-              height: 6,
-              borderRadius: 999,
-              background: n === i ? ACCENT : muted,
-              opacity: n === i ? 1 : 0.4,
-              transition: 'width 240ms ease, background 240ms ease, opacity 240ms ease',
-            }}
-          />
-        ))}
+      {/* tagline — "comes up and says it", then rests. Matches the left
+          pane's headline: weight 300, -0.02em tracking, 1.12 line-height. */}
+      <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', paddingLeft: 40, paddingRight: 40 }}>
+        <motion.div
+          initial={reduce ? { opacity: 0 } : { opacity: 0, y: 14 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ duration: 0.7, delay: 0.25, ease: [0.22, 1, 0.36, 1] }}
+          style={{ textAlign: 'center', fontSize: 31, fontWeight: 300, lineHeight: 1.12, letterSpacing: '-0.02em', color: ink, maxWidth: 340 }}
+        >
+          The control plane for your agents.
+        </motion.div>
       </div>
     </div>
+  );
+}
+
+/** A soft light drifting slowly across the pane (enters left, exits right, with
+ *  a gentle vertical bob + scale breath). Different durations desync the set. */
+function Mote({ color, size, yBase, duration, reduce }: { color: string; size: number; yBase: number; duration: number; reduce: boolean }) {
+  if (reduce) {
+    return (
+      <div
+        aria-hidden
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: yBase,
+          width: size,
+          height: size,
+          borderRadius: '50%',
+          background: color,
+          filter: `blur(${Math.max(1, size * 0.3)}px)`,
+          boxShadow: `0 0 ${size * 3}px ${size}px ${color}`,
+          opacity: 0.5,
+          pointerEvents: 'none',
+        }}
+      />
+    );
+  }
+  return (
+    <motion.div
+      aria-hidden
+      initial={false}
+      animate={{
+        x: [-60, 480],
+        y: [yBase - 14, yBase + 10, yBase - 6, yBase + 14, yBase - 10],
+        opacity: [0, 0.95, 0.95, 0.95, 0],
+        scale: [0.8, 1.1, 0.95, 1.08, 0.82],
+      }}
+      transition={{ duration, repeat: Infinity, ease: 'easeInOut', times: [0, 0.2, 0.5, 0.8, 1] }}
+      style={{
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        width: size,
+        height: size,
+        borderRadius: '50%',
+        background: color,
+        filter: `blur(${Math.max(1, size * 0.3)}px)`,
+        boxShadow: `0 0 ${size * 3}px ${size * 1.2}px ${color}`,
+        pointerEvents: 'none',
+      }}
+    />
   );
 }
 
@@ -152,68 +151,5 @@ function Aurora({
         pointerEvents: 'none',
       }}
     />
-  );
-}
-
-// ── glyphs ───────────────────────────────────────────────────────────────
-function Glyph({ name, size }: { name: GlyphName; size: number }) {
-  const common = {
-    width: size,
-    height: size,
-    viewBox: '0 0 24 24',
-    fill: 'none',
-    stroke: 'currentColor',
-    strokeWidth: 2 as const,
-    strokeLinecap: 'round' as const,
-    strokeLinejoin: 'round' as const,
-    'aria-hidden': true,
-  };
-  if (name === 'chat') {
-    return (
-      <svg {...common}>
-        <path d="M5 5h14a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H9l-5 4v-4H5a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" />
-      </svg>
-    );
-  }
-  if (name === 'fleet') {
-    return (
-      <svg {...common}>
-        <circle cx="12" cy="6" r="2" />
-        <circle cx="6" cy="18" r="2" />
-        <circle cx="18" cy="18" r="2" />
-        <path d="M12 8v4" />
-        <path d="m12 12-6 4" />
-        <path d="m12 12 6 4" />
-      </svg>
-    );
-  }
-  if (name === 'diff') {
-    return (
-      <svg {...common}>
-        <path d="M12 3v6" />
-        <path d="M9 6h6" />
-        <path d="M12 15v6" />
-        <path d="M9 18h6" />
-        <path d="M4 12h16" />
-      </svg>
-    );
-  }
-  if (name === 'check') {
-    return (
-      <svg {...common}>
-        <path d="M20 6 9 17l-5-5" />
-      </svg>
-    );
-  }
-  return (
-    <svg {...common}>
-      <circle cx="12" cy="5" r="2" />
-      <circle cx="5" cy="19" r="2" />
-      <circle cx="19" cy="19" r="2" />
-      <path d="M12 7v3" />
-      <path d="M12 10 6 17" />
-      <path d="m12 10 6 7" />
-      <path d="M7 19h10" />
-    </svg>
   );
 }
