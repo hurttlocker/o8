@@ -1,8 +1,32 @@
 import type { CSSProperties } from 'react';
+import { getCurveBuilder } from '@lisse/core';
 
 /** Shared primitives for the canvas-glass test page (#1232). */
 
 export const FONT = 'var(--font-sans-system)';
+
+/** SVG geometry for a single squircle BOTTOM-RIGHT corner (the Figma curve,
+ *  smoothing 0.6 — same family Lisse's SmoothCorners draws). The arc bulges
+ *  toward bottom-right with its concave side facing top-left, so dropped just
+ *  off a card's bottom-right corner it reads as a curve CONCENTRIC with the
+ *  card's own corner — the off-edge resize affordance on media cards. */
+function squircleCornerArc(radius: number, stroke: number): { d: string; size: number } {
+  const { p, pathSegment } = getCurveBuilder('squircle')({
+    cornerRadius: radius,
+    smoothing: 0.6,
+    exponent: 4,
+    preserveSmoothing: true,
+    roundingAndSmoothingBudget: radius * 4,
+  });
+  const pad = Math.max(1, stroke);
+  const vertex = p + pad; // the sharp-corner vertex the curve bulges toward
+  const d = `M ${vertex} ${vertex - p} ${pathSegment('BR')}`;
+  return { d, size: p + pad * 2 };
+}
+
+/** Resize-handle arc, concentric with a media card's 18px outer corner.
+ *  Computed once (radius is fixed) — cards read `.d` + `.size`. */
+export const RESIZE_ARC = squircleCornerArc(18, 2.5);
 
 /** The one glass recipe — every surface consumes the tunable vars.
  *  `suppressBlur` drops the live `backdrop-filter` (set true WHILE a card is
