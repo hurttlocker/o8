@@ -341,7 +341,13 @@ export function SettingsPage({ initialTab = 'connectors', onClose }: { initialTa
         </div>
         <SectionHeader>Connections</SectionHeader>
         <TabButton label="Connectors" icon={<PlugIcon />} active={activeTab === 'connectors'} onClick={() => setActiveTab('connectors')} />
-        <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
+        {/* BYOK hidden by default (2026-06-16): the managed-inference proxy replaces it —
+            developers use their CLI subs, newcomers have no keys, so nobody's served by a
+            key-paste surface. Set NEXT_PUBLIC_O8_SHOW_BYOK=1 to restore it (the APIKeysTab +
+            /api/v2/keys route still exist; this only hides the nav entry). */}
+        {process.env.NEXT_PUBLIC_O8_SHOW_BYOK === '1' && (
+          <TabButton label="API Keys" icon={<KeyIcon />} active={activeTab === 'api-keys'} onClick={() => setActiveTab('api-keys')} />
+        )}
         <TabButton label="MCP" icon={<PlugIcon />} active={activeTab === 'mcp'} onClick={() => setActiveTab('mcp')} />
         <TabButton label="Mobile" icon={<MobileIcon />} active={activeTab === 'connections'} onClick={() => setActiveTab('connections')} />
 

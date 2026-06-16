@@ -1,21 +1,24 @@
 'use client';
 
 /**
- * BillingTab — Plan & Billing settings surface (monetization M3).
+ * BillingTab — Plan & Billing settings surface.
  *
- * Shows the active plan, the flag matrix (which moats are unlocked), a
- * license-key paste field + Clear, and a PLACEHOLDER Upgrade CTA. License
- * apply/clear POSTs to /api/panel/entitlement (verifies via license.ts).
+ * o8 is free: the whole product (orchestration, governance, the Engineering
+ * Brain, fleet, review, mobile-on-LAN, local voice) runs on the user's OWN CLI
+ * subscriptions — nothing is gated. Paid plans are the cost/reach add-ons
+ * (managed inference, off-network mobile relay, cloud agents) and are NOT live
+ * yet. This tab celebrates what Free includes, previews what's coming, and
+ * accepts a signed license key / founding pass (verified offline via
+ * /api/panel/entitlement → license.ts).
  *
  * The global EntitlementProvider (useEntitlement) loads once on mount and has
  * no refresh hook, so this tab keeps a LOCAL copy fetched from the same route
- * and refreshes it after each POST. A full reload re-syncs the provider — fine
- * for M3 (Clerk + live broadcast land in M5).
+ * and refreshes it after each POST. A full reload re-syncs the provider.
  */
 
 import { useCallback, useEffect, useState } from 'react';
 
-import type { EntitlementFlags, Plan } from '@/lib/entitlement/types';
+import type { Plan } from '@/lib/entitlement/types';
 
 import {
   APP_FONT_STACK,
@@ -41,7 +44,6 @@ type EntitlementSource = 'env' | 'file' | 'default';
 
 interface EntitlementResponse {
   plan?: unknown;
-  flags?: unknown;
   source?: unknown;
 }
 
@@ -57,18 +59,27 @@ const PLAN_LABELS: Record<Plan, string> = {
 };
 
 const PLAN_TAGLINES: Record<Plan, string> = {
-  free: 'Orchestration, dispatch, and review on a single repo. All moats locked.',
-  pro: 'Governance second-pass, Engineering Brain, multi-repo fleet, and mobile control unlocked.',
-  team: 'Everything in Pro, plus shared/team governance.',
+  free: 'The full o8 — orchestration, governance, the Engineering Brain, multi-repo fleet, and review. It all runs on your own CLI subscriptions. Free, forever.',
+  pro: 'Everything in Free, with managed inference (no keys to bring) and off-network mobile.',
+  team: 'Everything in Pro, plus shared team governance and cloud agents.',
 };
 
-// Human labels for each flag in EntitlementFlags. Order is the display order.
-const FLAG_ROWS: Array<{ key: keyof EntitlementFlags; label: string; detail: string }> = [
-  { key: 'governance.secondPass', label: 'Governance second-pass', detail: 'AI second-pass review gate before merge.' },
-  { key: 'memory.brain', label: 'Engineering Brain', detail: 'Organizational memory Q&A across the repo.' },
-  { key: 'fleet.multiRepo', label: 'Multi-repo fleet', detail: 'Run the orchestrator across more than one repo.' },
-  { key: 'mobile.control', label: 'Mobile operator control', detail: 'Drive approvals + dispatch from the mobile app.' },
-  { key: 'team.shared', label: 'Team / shared governance', detail: 'Shared directives + audit across a team.' },
+// What Free includes — i.e. everything. None of this is gated; it runs on the
+// user's own subscriptions, so it costs us nothing and ships free.
+const INCLUDED_ROWS: Array<{ label: string; detail: string }> = [
+  { label: 'Orchestration & dispatch', detail: 'Plan, dispatch, and supervise agents across your repos.' },
+  { label: 'Governance review', detail: 'Single-pass merge gate + AI blind second-pass before merge.' },
+  { label: 'Engineering Brain', detail: 'Cited organizational-memory Q&A across your codebase.' },
+  { label: 'Multi-repo fleet', detail: 'Run the orchestrator across as many repos as you want.' },
+  { label: 'Mobile on your network', detail: 'Drive approvals + dispatch from the app over LAN / Tailscale.' },
+  { label: 'Voice & dictation', detail: 'Local Symon dictation and read-aloud — free forever.' },
+];
+
+// The paid plan covers only what costs us to run on your behalf. Not live yet.
+const COMING_ROWS: Array<{ label: string; detail: string }> = [
+  { label: 'Managed inference', detail: 'Skip bringing your own key — hosted, metered model access for the Brain + voice.' },
+  { label: 'Off-network mobile relay', detail: 'Reach your Mac from anywhere — even asleep or behind NAT.' },
+  { label: 'Cloud agents', detail: 'Agents that keep running while your laptop is closed.' },
 ];
 
 function coercePlan(value: unknown): Plan {
@@ -93,21 +104,21 @@ function CheckGlyph() {
   );
 }
 
-function LockGlyph() {
+function SoonGlyph() {
   return (
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke={RAMS_INK_QUIET} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
-      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+      <circle cx="12" cy="12" r="9" />
     </svg>
   );
 }
 
-function FlagRow({ label, detail, unlocked, isLast }: {
+function PlanRow({ label, detail, state, isLast }: {
   label: string;
   detail: string;
-  unlocked: boolean;
+  state: 'included' | 'soon';
   isLast: boolean;
 }) {
+  const included = state === 'included';
   return (
     <div
       style={{
@@ -128,7 +139,7 @@ function FlagRow({ label, detail, unlocked, isLast }: {
           fontWeight: 300,
           color: 'var(--t-text)',
           letterSpacing: '-0.01em',
-          opacity: unlocked ? 1 : 0.6,
+          opacity: included ? 1 : 0.7,
         }}>
           {label}
         </span>
@@ -137,16 +148,16 @@ function FlagRow({ label, detail, unlocked, isLast }: {
         </span>
       </div>
       <div style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-        {unlocked ? <CheckGlyph /> : <LockGlyph />}
+        {included ? <CheckGlyph /> : <SoonGlyph />}
         <span style={{
           fontFamily: MONO_FONT_STACK,
           fontSize: 10,
           fontWeight: 400,
           letterSpacing: '0.12em',
           textTransform: 'uppercase',
-          color: unlocked ? RAMS_ACCENT : RAMS_INK_QUIET,
+          color: included ? RAMS_ACCENT : RAMS_INK_QUIET,
         }}>
-          {unlocked ? 'Unlocked' : 'Locked'}
+          {included ? 'Included' : 'Soon'}
         </span>
       </div>
     </div>
@@ -155,7 +166,6 @@ function FlagRow({ label, detail, unlocked, isLast }: {
 
 export function BillingTab() {
   const [plan, setPlan] = useState<Plan>('free');
-  const [flags, setFlags] = useState<EntitlementFlags | null>(null);
   const [source, setSource] = useState<EntitlementSource>('default');
   const [loading, setLoading] = useState(true);
   const [licenseInput, setLicenseInput] = useState('');
@@ -163,11 +173,8 @@ export function BillingTab() {
   const [notice, setNotice] = useState<{ tone: 'ok' | 'error'; text: string } | null>(null);
 
   const applyEntitlement = useCallback((data: EntitlementResponse) => {
-    const nextPlan = coercePlan(data.plan);
-    setPlan(nextPlan);
+    setPlan(coercePlan(data.plan));
     setSource(coerceSource(data.source));
-    const f = data.flags && typeof data.flags === 'object' ? (data.flags as EntitlementFlags) : null;
-    setFlags(f);
   }, []);
 
   const load = useCallback(async () => {
@@ -267,7 +274,7 @@ export function BillingTab() {
       <TabBreadcrumb tab="billing" />
       <TabHeading
         title="plan & billing"
-        subtitle="o8 is open-core. Free covers single-repo orchestration; Pro and Team unlock the governance, memory, and fleet moats. Paste a license key to activate a paid plan."
+        subtitle="o8 is free — the whole product runs on your own CLI subscriptions, and nothing here is gated. Paid plans add managed inference, off-network mobile, and cloud agents; they're on the way. Paste a license key or founding pass to activate one."
       />
 
       {notice ? (
@@ -339,19 +346,19 @@ export function BillingTab() {
           <div style={{ flexShrink: 0 }}>
             {!isPaid ? (
               <RamsButton
-                variant="primary"
+                variant="ghost"
                 onClick={() => { window.open(UPGRADE_URL, '_blank', 'noopener,noreferrer'); }}
               >
-                Upgrade
+                What&apos;s coming
               </RamsButton>
             ) : null}
           </div>
         </div>
       </section>
 
-      {/* 02 — UNLOCKED FEATURES (flag matrix) */}
+      {/* 02 — WHAT'S INCLUDED (everything; free) */}
       <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="02">UNLOCKED FEATURES</SectionLabel>
+        <SectionLabel number="02">WHAT&apos;S INCLUDED</SectionLabel>
         <p style={{
           fontSize: 13,
           color: 'var(--t-text-secondary)',
@@ -360,24 +367,50 @@ export function BillingTab() {
           margin: 0,
           marginBottom: 12,
         }}>
-          Each moat below is derived from your plan. Free locks them all; Pro unlocks the first four; Team adds shared governance.
+          Everything in o8 is included on Free and runs on your own subscriptions — none of it is gated.
         </p>
         <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
-          {FLAG_ROWS.map((row, idx) => (
-            <FlagRow
-              key={row.key}
+          {INCLUDED_ROWS.map((row, idx) => (
+            <PlanRow
+              key={row.label}
               label={row.label}
               detail={row.detail}
-              unlocked={Boolean(flags?.[row.key])}
-              isLast={idx === FLAG_ROWS.length - 1}
+              state="included"
+              isLast={idx === INCLUDED_ROWS.length - 1}
             />
           ))}
         </div>
       </section>
 
-      {/* 03 — LICENSE KEY */}
+      {/* 03 — PAID, COMING SOON (cost/reach add-ons) */}
       <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="03">LICENSE KEY</SectionLabel>
+        <SectionLabel number="03">PAID — COMING SOON</SectionLabel>
+        <p style={{
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.55,
+          maxWidth: 580,
+          margin: 0,
+          marginBottom: 12,
+        }}>
+          A paid plan covers only what costs us to run on your behalf — hosted inference, off-network reach, and cloud compute. These are on the way; you&apos;ll activate them right here.
+        </p>
+        <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+          {COMING_ROWS.map((row, idx) => (
+            <PlanRow
+              key={row.label}
+              label={row.label}
+              detail={row.detail}
+              state="soon"
+              isLast={idx === COMING_ROWS.length - 1}
+            />
+          ))}
+        </div>
+      </section>
+
+      {/* 04 — LICENSE KEY */}
+      <section style={{ marginBottom: 32 }}>
+        <SectionLabel number="04">LICENSE KEY</SectionLabel>
         <p style={{
           fontSize: 13,
           color: 'var(--t-text-secondary)',
@@ -386,7 +419,7 @@ export function BillingTab() {
           margin: 0,
           marginBottom: 14,
         }}>
-          Paste the signed license key from your purchase confirmation. It is verified offline and stored locally in{' '}
+          Paste a signed license key or founding pass. It is verified offline and stored locally in{' '}
           <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>~/.o8/entitlement.json</span>.
         </p>
 
@@ -445,9 +478,9 @@ export function BillingTab() {
         </div>
       </section>
 
-      {/* 04 — BILLING (placeholder) */}
+      {/* 05 — BILLING */}
       <section>
-        <SectionLabel number="04">BILLING</SectionLabel>
+        <SectionLabel number="05">BILLING</SectionLabel>
         <p style={{
           fontSize: 13,
           color: 'var(--t-text-secondary)',
@@ -456,9 +489,8 @@ export function BillingTab() {
           margin: 0,
           marginBottom: 14,
         }}>
-          Self-serve checkout and invoice management open on{' '}
-          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>o8.run/pricing</span>. In-app checkout lands in a
-          later release.
+          Paid plans aren&apos;t live yet — managed inference, off-network mobile, and cloud agents are coming. Self-serve checkout will open on{' '}
+          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>o8.run/pricing</span>.
         </p>
         <RamsButton
           variant="ghost"
