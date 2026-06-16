@@ -12,6 +12,7 @@
 //! registry of oneshot senders so the SYNC `agent_confirm` command can resolve
 //! the loop's `await` from a different thread.
 
+pub mod claude;
 pub mod edit_ctx;
 pub mod eval;
 pub mod event_kit;
@@ -34,6 +35,10 @@ use tauri::Emitter;
 use tokio::sync::oneshot;
 
 const CONFIRM_TIMEOUT_SECS: u64 = 120;
+
+/// Default model for the background Claude brain (the async escalation target).
+/// Sonnet: strong tool reasoning, faster than Opus for the planner loop.
+const CLAUDE_BRAIN_MODEL: &str = "claude-sonnet-4-6";
 
 /// Per-task context threaded into the loop + tool dispatch.
 #[derive(Clone)]
@@ -283,8 +288,14 @@ fn take_staged_block() -> Option<String> {
 static TASK_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 fn next_task_id() -> String {
+    next_task_id_with_prefix("task")
+}
+
+/// Task id with a custom prefix — background Claude tasks use `claude-task-` so
+/// the dock can tell a quiet background run from the live voice capsule.
+fn next_task_id_with_prefix(prefix: &str) -> String {
     let n = TASK_COUNTER.fetch_add(1, Ordering::Relaxed);
-    format!("task-{}-{}", store::now_ts(), n)
+    format!("{prefix}-{}-{}", store::now_ts(), n)
 }
 
 // ── confirm registry ─────────────────────────────────────────────────────────
@@ -556,12 +567,29 @@ fn emit_confirm(app: &tauri::AppHandle, payload: Value) {
 /// Run one agent task to completion: persist → run the loop → persist result →
 /// speak it → notify. Called inside a worker thread's current-thread runtime.
 pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, String> {
+    run_agent_inner(app, prompt, None, None).await
+}
+
+/// Core agent run. `model_override` forces a specific brain (the background
+/// Claude task passes the Claude model so it bypasses the config-selected
+/// brain); `task_prefix` tags the task id (e.g. `claude-task`) so the dock can
+/// distinguish a background run. The normal voice path calls this via
+/// `run_agent` with the config brain and the default `task-` prefix.
+async fn run_agent_inner(
+    app: tauri::AppHandle,
+    prompt: String,
+    model_override: Option<String>,
+    task_prefix: Option<&str>,
+) -> Result<String, String> {
     let prompt = prompt.trim().to_string();
     if prompt.is_empty() {
         return Err("Empty request".into());
     }
 
-    let task_id = next_task_id();
+    let task_id = match task_prefix {
+        Some(prefix) => next_task_id_with_prefix(prefix),
+        None => next_task_id(),
+    };
 
     // A new task retires any pointers still on screen — they describe a
     // moment that has passed.
@@ -622,10 +650,14 @@ pub async fn run_agent(app: tauri::AppHandle, prompt: String) -> Result<String, 
         );
     }
 
-    // Route by model id: `/` → OpenRouter (e.g. openai/gpt-4o-mini), else direct
-    // Gemini (e.g. gemini-3-flash-preview). A one-flip change in agent_models.json.
-    let model = router::load_config().mac_native_action;
-    let loop_result = if model.contains('/') {
+    // Route by model id: `claude…` → Claude text-planner brain (subscription
+    // CLI), `/` → OpenRouter (e.g. openai/gpt-4o-mini), else direct Gemini
+    // (e.g. gemini-3-flash-preview). A one-flip change in agent_models.json.
+    // `model_override` (Some for background Claude tasks) wins over the config.
+    let model = model_override.unwrap_or_else(|| router::load_config().mac_native_action);
+    let loop_result = if model.starts_with("claude") {
+        claude::run_loop(&model, &llm_prompt, &ctx).await
+    } else if model.contains('/') {
         openrouter::run_loop(&model, &llm_prompt, &ctx).await
     } else {
         gemini::run_loop(&model, &llm_prompt, &ctx).await
@@ -707,6 +739,34 @@ pub fn spawn_agent(app: tauri::AppHandle, prompt: String) {
         match rt.block_on(async { run_agent(app, prompt).await }) {
             Ok(text) => log::info!("[symon-agent] done: {} chars", text.len()),
             Err(e) => log::warn!("[symon-agent] failed: {e}"),
+        }
+    });
+}
+
+/// Spawn a BACKGROUND task on the Claude brain — the async target of
+/// `escalate(target:"claude_brain")`. Sibling of `spawn_agent`, but forces the
+/// Claude text-planner brain and a `claude-task-` id prefix so the dock can
+/// treat it as a quiet background run distinct from the live voice capsule.
+/// Fire-and-forget: results reach the user via dock events + TTS.
+pub fn spawn_claude_task(app: tauri::AppHandle, task: String) {
+    let task = task.trim().to_string();
+    if task.is_empty() {
+        return;
+    }
+    std::thread::spawn(move || {
+        let rt = match tokio::runtime::Builder::new_current_thread().enable_all().build() {
+            Ok(rt) => rt,
+            Err(e) => {
+                log::error!("[symon-agent] failed to build claude-task runtime: {e}");
+                return;
+            }
+        };
+        log::info!("[symon-agent] claude-task: {} chars", task.len());
+        match rt.block_on(async {
+            run_agent_inner(app, task, Some(CLAUDE_BRAIN_MODEL.to_string()), Some("claude-task")).await
+        }) {
+            Ok(text) => log::info!("[symon-agent] claude-task done: {} chars", text.len()),
+            Err(e) => log::warn!("[symon-agent] claude-task failed: {e}"),
         }
     });
 }
