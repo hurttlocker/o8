@@ -212,34 +212,8 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         }
 
         term.open(containerRef.current);
-        fitAddon.fit();
         termRef.current = term;
         fitAddonRef.current = fitAddon;
-        // The reveal owns the screen until the first PTY byte (writeData
-        // cancels it) — start before attach so no replayed data races it.
-        // With min-play, data queues until the hold point instead.
-        if (spawnReveal) {
-          revealHoldRef.current = revealMinPlay === true;
-          revealCancelRef.current = startSpawnReveal(term, {
-            onHoldPoint: () => {
-              revealHoldRef.current = false;
-              if (pendingChunksRef.current.length === 0) return;
-              const chunks = pendingChunksRef.current;
-              pendingChunksRef.current = [];
-              cancelReveal(true);
-              if (!termRef.current) return;
-              for (const chunk of chunks) {
-                try {
-                  const bytes = Uint8Array.from(atob(chunk), (char) => char.charCodeAt(0));
-                  termRef.current.write(bytes);
-                } catch {
-                  // skip malformed chunk
-                }
-              }
-            },
-          });
-        }
-        sendTerminalAttach(tmuxSession, term.cols, term.rows);
         term.onData((data) => {
           sendTerminalInput(tmuxSession, data);
         });
@@ -254,6 +228,42 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
           }
         });
         if (containerRef.current) observerRef.current.observe(containerRef.current);
+
+        // Fit on the next frame, NOT synchronously at open(). xterm measures its
+        // cell box on the first render, and under the canvas CSS `zoom` a same-
+        // tick fit reads stale metrics → wrong cols/rows. That mis-sized the
+        // spawn reveal (the o8 glyph drew off-center on a stale grid) AND
+        // attached the PTY at the wrong size, so a Claude TUI didn't fill/scroll
+        // until a manual resize forced a refit. Double-rAF lets WebKit apply
+        // layout + zoom before we measure; then we reveal + attach at the REAL
+        // size. Reveal still starts before attach so no replay races it.
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          const liveTerm = termRef.current;
+          if (disposed || !liveTerm || !fitAddonRef.current) return;
+          try { fitAddonRef.current.fit(); } catch { /* disposed mid-fit */ }
+          if (spawnReveal) {
+            revealHoldRef.current = revealMinPlay === true;
+            revealCancelRef.current = startSpawnReveal(liveTerm, {
+              onHoldPoint: () => {
+                revealHoldRef.current = false;
+                if (pendingChunksRef.current.length === 0) return;
+                const chunks = pendingChunksRef.current;
+                pendingChunksRef.current = [];
+                cancelReveal(true);
+                if (!termRef.current) return;
+                for (const chunk of chunks) {
+                  try {
+                    const bytes = Uint8Array.from(atob(chunk), (char) => char.charCodeAt(0));
+                    termRef.current.write(bytes);
+                  } catch {
+                    // skip malformed chunk
+                  }
+                }
+              },
+            });
+          }
+          sendTerminalAttach(tmuxSession, liveTerm.cols, liveTerm.rows);
+        }));
         return () => {
           observerRef.current?.disconnect();
           observerRef.current = null;

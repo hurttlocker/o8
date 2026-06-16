@@ -209,6 +209,7 @@ export function FileGlassCard({
   return (
     <GlassCardShell
       card={card}
+      cornerHandles
       minW={TERM_MIN_W}
       minH={TERM_MIN_H}
       title={card.name}

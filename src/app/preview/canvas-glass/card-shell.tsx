@@ -14,8 +14,9 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, glassChat } from './ui';
+import { canvasZoom, FONT, glassChat, MEDIA_HEADER_H } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
+import { CornerResize } from './corner-resize';
 
 /** Header chrome above the body (grab pill + optional title) — added to card.h
  *  so the bottom boundary clears the composer by the card's TRUE height. */
@@ -72,6 +73,10 @@ export function GlassCardShell({
   onFocus,
   onClose,
   screenMap,
+  cornerHandles,
+  headerStyle = 'pill',
+  icon,
+  framed,
   children,
 }: {
   card: ShellCard;
@@ -96,6 +101,18 @@ export function GlassCardShell({
    *  deltas by canvasZoom() and report layer-local coords, so only the rendered
    *  geometry changes. Off (=1) everywhere else. */
   screenMap?: { zoom: number; panX: number; panY: number } | null;
+  /** Opt in to the unified corner-arc resize affordance (proximity reveal, off
+   *  in grid mode) instead of the legacy invisible 8-zone handles. Rolling out
+   *  one card kind at a time. */
+  cornerHandles?: boolean;
+  /** Header treatment: 'pill' (centered grab pill + title) or 'media' (icon +
+   *  filename left-aligned, the strip drags — matches photo/video cards). */
+  headerStyle?: 'pill' | 'media';
+  /** Leading glyph for the media header (a ~12px svg with stroke currentColor). */
+  icon?: ReactNode;
+  /** Draw the frosted frame outline (the photo/video border) instead of the
+   *  borderless treatment. Opt-in per kind, like the corner handles. */
+  framed?: boolean;
   children: ReactNode;
 }) {
   // Scale factor for a pulled-out card (1 when in-layer — every `* s` is then a
@@ -124,6 +141,49 @@ export function GlassCardShell({
     if (next.x !== resize.start.x || next.y !== resize.start.y) onMove(card.id, next.x, next.y);
   };
   const onResizeUp = () => { resizeRef.current = null; setResizing(false); };
+
+  // Header chrome above the body — shorter for the media strip. Feeds dragBounds
+  // so the bottom boundary clears the composer by the card's TRUE height.
+  const chromeH = headerStyle === 'media' ? MEDIA_HEADER_H : SHELL_CHROME_H;
+  const startDrag = (event: React.PointerEvent) => {
+    if (event.button !== 0) return;
+    settleRef.current?.stop();
+    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
+    dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y, lastX: card.x, lastY: card.y };
+    setDragging(true);
+  };
+  const moveDrag = (event: React.PointerEvent) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const bounds = dragBounds(card.w, card.h + chromeH);
+    const zoom = canvasZoom();
+    const x = resistAxis(drag.originX + (event.clientX - drag.startX) / zoom, bounds.minX, bounds.maxX);
+    const y = resistAxis(drag.originY + (event.clientY - drag.startY) / zoom, bounds.minY, bounds.maxY);
+    drag.lastX = x;
+    drag.lastY = y;
+    onMove(card.id, x, y);
+  };
+  const endDrag = () => {
+    const drag = dragRef.current;
+    if (drag) {
+      settleRef.current = settleInBounds(drag.lastX, drag.lastY, dragBounds(card.w, card.h + chromeH), (x, y) => onMove(card.id, x, y));
+    }
+    dragRef.current = null;
+    setDragging(false);
+  };
+  const closeBtn = (
+    <button
+      type="button"
+      aria-label="Close"
+      onPointerDown={(event) => event.stopPropagation()}
+      onClick={() => onClose(card.id)}
+      style={{ borderWidth: 0, background: 'transparent', padding: 2 * s, paddingLeft: 6 * s, paddingRight: 6 * s, fontSize: 11 * s, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
+      onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+      onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+    >
+      ✕
+    </button>
+  );
 
   return (
     <motion.div
@@ -155,112 +215,119 @@ export function GlassCardShell({
           flexDirection: 'column',
           ...glassChat(dragging || resizing),
           // Locked bench treatment: borderless + lighter shadow (matches the
-          // chat card exactly — no title-bar lines, no heavy frame).
-          border: 'none',
+          // chat card exactly — no title-bar lines, no heavy frame). `framed`
+          // opts into the photo/video frosted-frame outline (terminal for now).
+          border: framed ? '1px solid var(--cnv-edge)' : 'none',
           boxShadow: '0 14px 42px rgba(0, 0, 0, 0.24)',
         }}
       >
-        {/* Header — centered grab pill, the whole strip drags. */}
-        <div
-          onPointerDown={(event) => {
-            if (event.button !== 0) return;
-            settleRef.current?.stop();
-            try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-            dragRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, originX: card.x, originY: card.y, lastX: card.x, lastY: card.y };
-            setDragging(true);
-          }}
-          onPointerMove={(event) => {
-            const drag = dragRef.current;
-            if (!drag || drag.pointerId !== event.pointerId) return;
-            const bounds = dragBounds(card.w, card.h + SHELL_CHROME_H);
-            const zoom = canvasZoom();
-            const x = resistAxis(drag.originX + (event.clientX - drag.startX) / zoom, bounds.minX, bounds.maxX);
-            const y = resistAxis(drag.originY + (event.clientY - drag.startY) / zoom, bounds.minY, bounds.maxY);
-            drag.lastX = x;
-            drag.lastY = y;
-            onMove(card.id, x, y);
-          }}
-          onPointerUp={() => {
-            const drag = dragRef.current;
-            if (drag) {
-              settleRef.current = settleInBounds(drag.lastX, drag.lastY, dragBounds(card.w, card.h + SHELL_CHROME_H), (x, y) => onMove(card.id, x, y));
-            }
-            dragRef.current = null;
-            setDragging(false);
-          }}
-          style={{
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'stretch',
-            paddingTop: 9 * s,
-            cursor: dragging ? 'grabbing' : 'grab',
-            touchAction: 'none',
-            userSelect: 'none',
-            flexShrink: 0,
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: (title ? 7 : 8) * s }}>
-            <span aria-hidden style={{ width: 34 * s, height: 4 * s, borderRadius: 3 * s, background: 'var(--cnv-ink-muted)', opacity: 0.35 }} />
+        {headerStyle === 'media' ? (
+          /* Media header — icon + name left-aligned, the strip drags; actions +
+             close reveal on the right on hover. Matches photo/video cards. */
+          <div
+            onPointerDown={startDrag}
+            onPointerMove={moveDrag}
+            onPointerUp={endDrag}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 7 * s,
+              height: MEDIA_HEADER_H * s,
+              paddingLeft: 11 * s,
+              paddingRight: 9 * s,
+              cursor: dragging ? 'grabbing' : 'grab',
+              touchAction: 'none',
+              userSelect: 'none',
+              flexShrink: 0,
+            }}
+          >
+            {icon ? <span aria-hidden style={{ display: 'flex', flexShrink: 0, color: 'var(--cnv-ink-muted)' }}>{icon}</span> : null}
+            <span style={{ flex: 1, minWidth: 0, fontSize: 11.5 * s, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+              {title}
+            </span>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 1, opacity: hovered ? 1 : 0, pointerEvents: hovered ? 'auto' : 'none', transition: 'opacity 160ms ease', flexShrink: 0 }}>
+              {actions}
+              {closeBtn}
+            </div>
           </div>
-          {title ? (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 * s, paddingLeft: 22 * s, paddingRight: 22 * s, paddingBottom: 11 * s, minWidth: 0 }}>
-              <span style={{ fontSize: 11.5 * s, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
-                {title}
-              </span>
-              {badge ? (
-                <span style={{ fontSize: 9 * s, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0, maxWidth: '45%' }}>
-                  {badge}
-                </span>
+        ) : (
+          <>
+            {/* Header — centered grab pill, the whole strip drags. */}
+            <div
+              onPointerDown={startDrag}
+              onPointerMove={moveDrag}
+              onPointerUp={endDrag}
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'stretch',
+                paddingTop: 9 * s,
+                cursor: dragging ? 'grabbing' : 'grab',
+                touchAction: 'none',
+                userSelect: 'none',
+                flexShrink: 0,
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: (title ? 7 : 8) * s }}>
+                <span aria-hidden style={{ width: 34 * s, height: 4 * s, borderRadius: 3 * s, background: 'var(--cnv-ink-muted)', opacity: 0.35 }} />
+              </div>
+              {title ? (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 * s, paddingLeft: 22 * s, paddingRight: 22 * s, paddingBottom: 11 * s, minWidth: 0 }}>
+                  <span style={{ fontSize: 11.5 * s, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                    {title}
+                  </span>
+                  {badge ? (
+                    <span style={{ fontSize: 9 * s, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0, maxWidth: '45%' }}>
+                      {badge}
+                    </span>
+                  ) : null}
+                </div>
               ) : null}
             </div>
-          ) : null}
-        </div>
 
-        {/* Hover-revealed ghost actions + close — top-right, off when hidden so
-            they never swallow the corner resize zone. */}
-        <div
-          style={{
-            position: 'absolute',
-            top: 7 * s,
-            right: 9 * s,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            opacity: hovered ? 1 : 0,
-            pointerEvents: hovered ? 'auto' : 'none',
-            transition: 'opacity 160ms ease',
-            zIndex: 7,
-          }}
-        >
-          {actions}
-          <button
-            type="button"
-            aria-label="Close"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onClose(card.id)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 2 * s, paddingLeft: 6 * s, paddingRight: 6 * s, fontSize: 11 * s, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            ✕
-          </button>
-        </div>
+            {/* Hover-revealed ghost actions + close — top-right, off when hidden so
+                they never swallow the corner resize zone. */}
+            <div
+              style={{
+                position: 'absolute',
+                top: 7 * s,
+                right: 9 * s,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                opacity: hovered ? 1 : 0,
+                pointerEvents: hovered ? 'auto' : 'none',
+                transition: 'opacity 160ms ease',
+                zIndex: 7,
+              }}
+            >
+              {actions}
+              {closeBtn}
+            </div>
+          </>
+        )}
 
         {children}
       </SmoothCorners>
 
-      {/* Invisible resize handles — all 8 angles. Siblings of SmoothCorners so
-          the slight outward overhang isn't clipped by the corner mask. */}
-      {RESIZE_ZONES.map((zone) => (
-        <div
-          key={zone.key}
-          role="presentation"
-          onPointerDown={onResizeDown(zone.key)}
-          onPointerMove={onResizeMove}
-          onPointerUp={onResizeUp}
-          style={{ position: 'absolute', cursor: zone.cursor, touchAction: 'none', zIndex: zone.key.length === 2 ? 6 : 5, ...zone.style }}
-        />
-      ))}
+      {/* Resize handles. Opt-in: the unified corner-arc affordance (reveals only
+          at the hovered corner, hidden in grid mode) vs the legacy invisible
+          8-zone handles. Siblings of SmoothCorners so the outward overhang isn't
+          clipped by the corner mask. */}
+      {cornerHandles ? (
+        <CornerResize card={card} minW={minW} minH={minH} onMove={onMove} onResize={onResize} onResizingChange={setResizing} />
+      ) : (
+        RESIZE_ZONES.map((zone) => (
+          <div
+            key={zone.key}
+            role="presentation"
+            onPointerDown={onResizeDown(zone.key)}
+            onPointerMove={onResizeMove}
+            onPointerUp={onResizeUp}
+            style={{ position: 'absolute', cursor: zone.cursor, touchAction: 'none', zIndex: zone.key.length === 2 ? 6 : 5, ...zone.style }}
+          />
+        ))
+      )}
     </motion.div>
   );
 }
