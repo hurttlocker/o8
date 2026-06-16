@@ -494,9 +494,10 @@ pub fn polish_with_config_and_stats(
 }
 
 fn polish_with_gemini(ctx: &PolishContext, config: &PolishModelConfig) -> ModelRun {
-    // Direct Gemini API — no proxy, no license token. Key is env-first.
-    let api_key = match crate::stt::keys::get_gemini_key() {
-        Some(key) => key,
+    // local Gemini key → direct Google; else an active o8 plan → managed proxy;
+    // else skip polish and return the raw transcript (never hard-fail dictation).
+    let target = match crate::entitlement::resolve_gemini(&config.model) {
+        Some(t) => t,
         None => {
             return ModelRun {
                 text: ctx.transcript.to_string(),
@@ -504,10 +505,13 @@ fn polish_with_gemini(ctx: &PolishContext, config: &PolishModelConfig) -> ModelR
             };
         }
     };
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{}:generateContent?key={}",
-        config.model, api_key
-    );
+    let (req_url, bearer): (String, Option<String>) = match &target {
+        crate::entitlement::GeminiTarget::Direct { url } => (url.clone(), None),
+        crate::entitlement::GeminiTarget::Proxy { url, token } => {
+            (url.clone(), Some(token.clone()))
+        }
+    };
+    let is_proxy = bearer.is_some();
 
     let audio_input_tokens = ctx.audio_wav.and_then(estimate_audio_input_tokens);
     let mut audio_attached = false;
@@ -625,10 +629,15 @@ fn polish_with_gemini(ctx: &PolishContext, config: &PolishModelConfig) -> ModelR
         })
     };
 
-    let multimodal_body = build_body(multimodal_parts);
-    let text_only_body = build_body(vec![serde_json::json!({
+    let mut multimodal_body = build_body(multimodal_parts);
+    let mut text_only_body = build_body(vec![serde_json::json!({
         "text": build_prompt(ctx, false)
     })]);
+    // The proxy owns the model in the URL — pass it in the body on that path.
+    if is_proxy {
+        multimodal_body["model"] = serde_json::json!(config.model);
+        text_only_body["model"] = serde_json::json!(config.model);
+    }
 
     let client = shared_client();
 
@@ -642,7 +651,10 @@ fn polish_with_gemini(ctx: &PolishContext, config: &PolishModelConfig) -> ModelR
 
     let run_request = |body: &serde_json::Value, label: &str| -> Result<Response, String> {
         for attempt in 1..=PROVIDER_MAX_ATTEMPTS {
-            let req = client.post(&url).json(body);
+            let mut req = client.post(&req_url).json(body);
+            if let Some(token) = &bearer {
+                req = req.bearer_auth(token);
+            }
             match req.send() {
                 Ok(response) if response.status().is_success() => {
                     return response

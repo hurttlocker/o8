@@ -54,8 +54,10 @@ struct GeminiPart {
 /// (selection / on-screen text) appended to the base prompt. Returns the
 /// answer text, or an error string.
 pub async fn ask(question: &str, context: Option<&str>) -> Result<String, String> {
-    let api_key = crate::stt::keys::get_gemini_key()
-        .ok_or_else(|| "Missing GEMINI_API_KEY for Ask".to_string())?;
+    // local Gemini key → direct Google; else an active o8 plan → managed proxy.
+    let target = crate::entitlement::resolve_gemini(DIRECT_MODEL).ok_or_else(|| {
+        "Ask needs a Gemini key or an active o8 plan — add a key or sign in to o8".to_string()
+    })?;
 
     // Fold the system prompt + optional context + question into a single user
     // turn (avoids systemInstruction API-shape uncertainty; matches aqua's
@@ -71,7 +73,7 @@ pub async fn ask(question: &str, context: Option<&str>) -> Result<String, String
     prompt.push_str("\n\n---\n\nQuestion: ");
     prompt.push_str(question.trim());
 
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "contents": [{ "role": "user", "parts": [{ "text": prompt }] }],
         "generationConfig": {
             "maxOutputTokens": MAX_OUTPUT_TOKENS,
@@ -79,13 +81,16 @@ pub async fn ask(question: &str, context: Option<&str>) -> Result<String, String
         }
     });
 
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{DIRECT_MODEL}:generateContent?key={api_key}"
-    );
+    let client = reqwest::Client::new();
+    let request = match &target {
+        crate::entitlement::GeminiTarget::Direct { url } => client.post(url).json(&body),
+        crate::entitlement::GeminiTarget::Proxy { url, token } => {
+            body["model"] = serde_json::json!(DIRECT_MODEL);
+            client.post(url).bearer_auth(token).json(&body)
+        }
+    };
 
-    let response = reqwest::Client::new()
-        .post(&url)
-        .json(&body)
+    let response = request
         .send()
         .await
         .map_err(|e| format!("Ask request failed: {e}"))?;
