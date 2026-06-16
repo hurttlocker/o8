@@ -84,6 +84,11 @@ export const RAMS_CONTROL_BG = 'var(--t-bg-card, rgba(17, 17, 17, 0.035))';
 export const RAMS_CONTROL_BORDER = 'var(--t-panel-border, rgba(17, 17, 17, 0.14))';
 export const RAMS_CONTROL_ACTIVE_BG = 'rgba(29, 78, 216, 0.1)';
 export const RAMS_CONTROL_ACTIVE_BORDER = 'rgba(29, 78, 216, 0.32)';
+// Symon-shape control extras (port of voice-settings primitives, kept on o8's
+// #1D4ED8 accent): focus-ring glow + the iOS-switch off-track. Off-track uses a
+// theme divider so it reads on both cream (light) and graphite (dark) paper.
+export const RAMS_ACCENT_GLOW = 'rgba(29, 78, 216, 0.28)';
+export const RAMS_TOGGLE_OFF = 'var(--t-divider-strong, rgba(17, 17, 17, 0.22))';
 
 // ── Helpers ──
 
@@ -294,7 +299,7 @@ export function SettingsTabSectionHeader({ children }: { children: React.ReactNo
   return (
     <div
       style={{
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 9,
         fontWeight: 300,
         color: RAMS_INK_QUIET,
@@ -356,7 +361,7 @@ export function TabButton({ label, icon, active, onClick, comingSoon = false }: 
       <span style={{ flex: 1 }}>{label}</span>
       {comingSoon ? (
         <span style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 9,
           fontWeight: 400,
           letterSpacing: '0.12em',
@@ -376,7 +381,7 @@ export function TabButton({ label, icon, active, onClick, comingSoon = false }: 
 export function TabBreadcrumb({ tab, scope = 'settings' }: { tab: string; scope?: string }) {
   return (
     <div style={{
-      fontFamily: MONO_FONT_STACK,
+      fontFamily: APP_FONT_STACK,
       fontSize: 10,
       fontWeight: 400,
       letterSpacing: '0.2em',
@@ -396,11 +401,11 @@ export function TabHeading({ title, subtitle }: { title: string; subtitle?: stri
     <div style={{ marginBottom: 32 }}>
       <h1 style={{
         fontFamily: APP_FONT_STACK,
-        fontSize: 28,
-        fontWeight: 300,
+        fontSize: 32,
+        fontWeight: 700,
         color: 'var(--t-text)',
-        letterSpacing: '-0.04em',
-        lineHeight: 1.05,
+        letterSpacing: '-0.045em',
+        lineHeight: 1.08,
         margin: 0,
         marginBottom: subtitle ? 10 : 0,
       }}>
@@ -429,7 +434,7 @@ export function TabHeading({ title, subtitle }: { title: string; subtitle?: stri
 export function FieldLabel({ children }: { children: React.ReactNode }) {
   return (
     <span style={{
-      fontFamily: MONO_FONT_STACK,
+      fontFamily: APP_FONT_STACK,
       fontSize: 10,
       fontWeight: 400,
       letterSpacing: '0.14em',
@@ -449,7 +454,7 @@ export function SectionLabel({ number, children }: { number: string; children: R
       display: 'flex',
       alignItems: 'baseline',
       gap: 10,
-      fontFamily: MONO_FONT_STACK,
+      fontFamily: APP_FONT_STACK,
       fontSize: 10,
       fontWeight: 300,
       letterSpacing: '0.14em',
@@ -477,50 +482,51 @@ export function SettingsToggleButton({
   activeLabel?: string;
   inactiveLabel?: string;
 }) {
+  // iOS-style sliding switch (Symon voice-settings shape) on o8's #1D4ED8
+  // accent. The activeLabel/inactiveLabel props are kept for compat + aria;
+  // the row's own label carries the meaning, so the switch itself is wordless.
+  const [focus, setFocus] = useState(false);
   return (
     <button
       type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={checked ? activeLabel : inactiveLabel}
       onClick={() => { if (!disabled) onChange(!checked); }}
+      onFocus={() => setFocus(true)}
+      onBlur={() => setFocus(false)}
       disabled={disabled}
       style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 8,
-        minHeight: 44,
-        minWidth: 78,
-        paddingLeft: 14,
-        paddingRight: 14,
+        position: 'relative',
+        width: 44,
+        height: 24,
         borderRadius: 12,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: checked ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
-        background: disabled ? 'transparent' : checked ? RAMS_CONTROL_ACTIVE_BG : RAMS_CONTROL_BG,
-        color: disabled ? RAMS_INK_QUIET : checked ? RAMS_ACCENT : 'var(--t-text-secondary)',
+        padding: 0,
+        flexShrink: 0,
+        border: 'none',
+        outline: 'none',
+        background: checked ? RAMS_ACCENT : RAMS_TOGGLE_OFF,
         cursor: disabled ? 'not-allowed' : 'pointer',
-        fontFamily: MONO_FONT_STACK,
-        fontSize: 10,
-        fontWeight: 300,
-        letterSpacing: '0.06em',
-        textTransform: 'uppercase',
-        whiteSpace: 'nowrap',
-        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-        opacity: disabled ? 0.62 : 1,
+        opacity: disabled ? 0.5 : 1,
+        transition: 'background 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+        boxShadow: focus && !disabled ? `0 0 0 2px ${RAMS_ACCENT_GLOW}` : 'none',
       }}
-      aria-pressed={checked}
     >
       <span
         aria-hidden="true"
         style={{
-          width: 7,
-          height: 7,
-          borderRadius: 3.5,
-          background: checked ? RAMS_ACCENT : 'var(--t-text-faint)',
-          boxShadow: checked ? '0 0 0 3px rgba(29, 78, 216, 0.12)' : 'none',
-          flexShrink: 0,
+          position: 'absolute',
+          top: 2,
+          left: 2,
+          width: 20,
+          height: 20,
+          borderRadius: '50%',
+          background: '#ffffff',
+          boxShadow: '0 1px 3px rgba(0, 0, 0, 0.2)',
+          transition: 'transform 200ms cubic-bezier(0.22, 1, 0.36, 1)',
+          transform: checked ? 'translateX(20px)' : 'translateX(0)',
         }}
       />
-      <span>{checked ? activeLabel : inactiveLabel}</span>
     </button>
   );
 }
@@ -555,6 +561,8 @@ export function RamsButton({
       : variant === 'danger'
         ? 'rgba(217, 79, 58, 0.08)'
         : RAMS_CONTROL_ACTIVE_BG;
+  // Symon voice-settings button shape (system sans, sentence case, 32h) kept on
+  // o8's accent + variant colors. Was: mono / 10px / 300 / UPPERCASE / 44h.
   return (
     <button
       type={type}
@@ -563,22 +571,22 @@ export function RamsButton({
       style={{
         display: 'inline-flex',
         alignItems: 'center',
-        gap: 8,
-        minHeight: 44,
+        justifyContent: 'center',
+        gap: 7,
+        height: 32,
         paddingLeft: 14,
         paddingRight: 14,
-        borderRadius: 12,
+        borderRadius: 9,
         borderWidth: 1,
         borderStyle: 'solid',
         borderColor: disabled ? RAMS_HAIRLINE_SOFT : border,
         background: bg,
         color: disabled ? RAMS_INK_QUIET : tone,
         cursor: disabled || busy ? 'default' : 'pointer',
-        fontFamily: MONO_FONT_STACK,
-        fontSize: 10,
-        fontWeight: 300,
-        letterSpacing: '0.04em',
-        textTransform: 'uppercase',
+        fontFamily: APP_FONT_STACK,
+        fontSize: 12,
+        fontWeight: 400,
+        letterSpacing: '-0.01em',
         whiteSpace: 'nowrap',
         flexShrink: 0,
         transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
@@ -587,6 +595,132 @@ export function RamsButton({
     >
       {icon ? <span style={{ display: 'inline-flex', flexShrink: 0 }}>{icon}</span> : null}
       <span>{children}</span>
+    </button>
+  );
+}
+
+// ── Symon-shape selectors (native styled select + segmented), on #1D4ED8 ──
+
+export function SettingsSelect({
+  value,
+  onChange,
+  options,
+  width = 220,
+  disabled = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  width?: number;
+  disabled?: boolean;
+}) {
+  const [focus, setFocus] = useState(false);
+  return (
+    <select
+      value={value}
+      onChange={(e) => onChange(e.target.value)}
+      onFocus={() => setFocus(true)}
+      onBlur={() => setFocus(false)}
+      disabled={disabled}
+      style={{
+        minWidth: width,
+        height: 32,
+        paddingLeft: 10,
+        paddingRight: 26,
+        borderRadius: 8,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: focus ? RAMS_ACCENT : RAMS_CONTROL_BORDER,
+        background: RAMS_CONTROL_BG,
+        color: 'var(--t-text)',
+        fontFamily: APP_FONT_STACK,
+        fontSize: 12,
+        fontWeight: 400,
+        letterSpacing: '-0.01em',
+        outline: 'none',
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        opacity: disabled ? 0.5 : 1,
+        boxShadow: focus ? `0 0 0 2px ${RAMS_ACCENT_GLOW}` : 'none',
+        WebkitAppearance: 'none',
+        appearance: 'none',
+        backgroundImage:
+          "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'%3E%3Cpath d='M1 1l4 4 4-4' stroke='%239A968E' stroke-width='1.5' fill='none' stroke-linecap='round'/%3E%3C/svg%3E\")",
+        backgroundRepeat: 'no-repeat',
+        backgroundPosition: 'right 10px center',
+      } as React.CSSProperties}
+    >
+      {options.map((o) => (
+        <option key={o.value} value={o.value}>{o.label}</option>
+      ))}
+    </select>
+  );
+}
+
+export function SettingsSegmented({
+  value,
+  onChange,
+  options,
+  full = false,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+  options: { value: string; label: string }[];
+  full?: boolean;
+}) {
+  return (
+    <div style={{
+      display: full ? 'grid' : 'inline-grid',
+      gridAutoFlow: 'column',
+      gridAutoColumns: full ? '1fr' : undefined,
+      gap: 2,
+      minHeight: 32,
+      padding: 3,
+      width: full ? '100%' : undefined,
+      borderRadius: 8,
+      borderWidth: 1,
+      borderStyle: 'solid',
+      borderColor: RAMS_CONTROL_BORDER,
+      background: RAMS_CONTROL_BG,
+    }}>
+      {options.map((o) => (
+        <SettingsSegButton key={o.value} active={o.value === value} onClick={() => onChange(o.value)}>
+          {o.label}
+        </SettingsSegButton>
+      ))}
+    </div>
+  );
+}
+
+function SettingsSegButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  const [hover, setHover] = useState(false);
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      onMouseEnter={() => setHover(true)}
+      onMouseLeave={() => setHover(false)}
+      aria-pressed={active}
+      style={{
+        minWidth: 54,
+        height: 24,
+        paddingLeft: 9,
+        paddingRight: 9,
+        border: 'none',
+        borderRadius: 6,
+        fontFamily: APP_FONT_STACK,
+        fontSize: 11,
+        fontWeight: 400,
+        cursor: 'pointer',
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        color: active ? RAMS_ACCENT : hover ? 'var(--t-text)' : 'var(--t-text-secondary)',
+        background: active ? RAMS_CONTROL_ACTIVE_BG : hover ? RAMS_CONTROL_BG : 'transparent',
+        boxShadow: active ? `inset 0 0 0 1px ${RAMS_CONTROL_ACTIVE_BORDER}` : 'none',
+        transition: 'background 160ms ease, color 160ms ease',
+      }}
+    >
+      {children}
     </button>
   );
 }
@@ -615,7 +749,7 @@ export function BracketLabel({ children, tone = 'quiet' }: { children: React.Rea
   const color = tone === 'accent' ? RAMS_ACCENT : tone === 'soon' ? RAMS_INK_QUIET : RAMS_INK_QUIET;
   return (
     <span style={{
-      fontFamily: MONO_FONT_STACK,
+      fontFamily: APP_FONT_STACK,
       fontSize: 10,
       fontWeight: 400,
       letterSpacing: '0.12em',
@@ -642,7 +776,7 @@ export function ComingSoonBanner({ message }: { message: string }) {
       background: 'transparent',
     }}>
       <span style={{
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 10,
         fontWeight: 400,
         letterSpacing: '0.22em',
