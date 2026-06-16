@@ -150,7 +150,7 @@ function PlanRow({ label, detail, state, isLast }: {
       <div style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
         {included ? <CheckGlyph /> : <SoonGlyph />}
         <span style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 10,
           fontWeight: 400,
           letterSpacing: '0.12em',

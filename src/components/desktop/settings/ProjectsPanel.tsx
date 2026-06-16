@@ -25,7 +25,6 @@ import {
 } from './shared';
 import {
   APP_FONT_STACK,
-  MONO_FONT_STACK,
   RAMS_ACCENT,
   RAMS_HAIRLINE,
   RAMS_HAIRLINE_SOFT,
@@ -84,7 +83,7 @@ export function ProjectsPanel() {
       }}>
         <div style={{ minWidth: 0 }}>
           <div style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 10.5,
             fontWeight: 350,
             letterSpacing: '0.2em',
@@ -288,7 +287,7 @@ function RuntimeContextPanel({
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 16 }}>
         <div style={{ minWidth: 0 }}>
           <div style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 10,
             fontWeight: 350,
             letterSpacing: '0.16em',
@@ -309,7 +308,7 @@ function RuntimeContextPanel({
           </div>
         </div>
         <div style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 10,
           fontWeight: 350,
           letterSpacing: '0.1em',
@@ -355,7 +354,7 @@ function RuntimeContextPanel({
                 {repo.name}
                 {repo.isPrimary ? (
                   <span style={{
-                    fontFamily: MONO_FONT_STACK,
+                    fontFamily: APP_FONT_STACK,
                     fontSize: 9,
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase',
@@ -365,7 +364,7 @@ function RuntimeContextPanel({
                   </span>
                 ) : repo.isCurrent ? (
                   <span style={{
-                    fontFamily: MONO_FONT_STACK,
+                    fontFamily: APP_FONT_STACK,
                     fontSize: 9,
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase',
@@ -376,7 +375,7 @@ function RuntimeContextPanel({
                 ) : null}
                 {repo.role ? (
                   <span style={{
-                    fontFamily: MONO_FONT_STACK,
+                    fontFamily: APP_FONT_STACK,
                     fontSize: 9,
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase',
@@ -428,7 +427,7 @@ function ProjectCapability({ label, value, muted }: { label: string; value: stri
       minWidth: 0,
     }}>
       <div style={{
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 9.5,
         fontWeight: 350,
         letterSpacing: '0.14em',
@@ -497,11 +496,10 @@ function ProjectsEmptyState({ onCreate }: { onCreate: () => void }) {
             background: 'transparent',
             borderWidth: 0,
             color: RAMS_ACCENT,
-            fontFamily: MONO_FONT_STACK,
-            fontSize: 11.5,
-            fontWeight: 300,
-            letterSpacing: '0.06em',
-            textTransform: 'uppercase',
+            fontFamily: APP_FONT_STACK,
+            fontSize: 12,
+            fontWeight: 400,
+            letterSpacing: '-0.01em',
             cursor: 'pointer',
           }}
         >

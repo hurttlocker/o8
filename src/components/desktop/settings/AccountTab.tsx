@@ -14,7 +14,6 @@ import { type ReactNode } from 'react';
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
 import {
   APP_FONT_STACK,
-  MONO_FONT_STACK,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
@@ -80,7 +79,7 @@ export function AccountTab() {
               <BracketLabel tone="accent">signed in</BracketLabel>
             </div>
             {user?.email ? (
-              <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12, color: RAMS_INK_QUIET }}>{user.email}</span>
+              <span style={{ fontFamily: APP_FONT_STACK, fontSize: 12, color: RAMS_INK_QUIET, letterSpacing: '-0.01em' }}>{user.email}</span>
             ) : null}
           </div>
         </div>

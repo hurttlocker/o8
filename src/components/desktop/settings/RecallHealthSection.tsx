@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import {
+  APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
@@ -233,7 +234,7 @@ function Row({
         flexShrink: 0,
       }} />
       <span style={{
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 11,
         fontWeight: 400,
         color: RAMS_INK_QUIET,
@@ -259,7 +260,7 @@ function Row({
       </span>
       {hint ? (
         <span style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 11,
           fontWeight: 400,
           letterSpacing: '0.04em',
@@ -287,7 +288,7 @@ function ByLabelTable({
         paddingTop: 6,
         paddingBottom: 6,
         borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 10,
         fontWeight: 400,
         letterSpacing: '0.14em',

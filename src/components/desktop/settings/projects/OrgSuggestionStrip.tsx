@@ -10,7 +10,6 @@
 import { RamsButton } from '../shared';
 import {
   APP_FONT_STACK,
-  MONO_FONT_STACK,
   RAMS_ACCENT,
   RAMS_HAIRLINE,
   type OrgSuggestion,
@@ -50,7 +49,7 @@ export function OrgSuggestionStrip({
       }}
     >
       <span style={{
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 9.5,
         fontWeight: 300,
         letterSpacing: '0.18em',
@@ -69,7 +68,7 @@ export function OrgSuggestionStrip({
         letterSpacing: '-0.005em',
       }}>
         {summary} are both under{' '}
-        <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12, color: 'var(--t-text)' }}>{suggestion.org}</span>
+        <span style={{ fontFamily: APP_FONT_STACK, fontSize: 12, color: 'var(--t-text)' }}>{suggestion.org}</span>
         {' '}— group as a project?
       </span>
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>

@@ -5,6 +5,10 @@ import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_ACCENT,
+  RAMS_CONTROL_BG,
+  RAMS_CONTROL_BORDER,
+  RAMS_CONTROL_ACTIVE_BG,
+  RAMS_CONTROL_ACTIVE_BORDER,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
@@ -12,6 +16,7 @@ import {
   FieldLabel,
   HairlineRule,
   SectionLabel,
+  SettingsToggleButton,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
@@ -602,33 +607,11 @@ export function WorkersTab() {
                 : sourceCopy(remoteFlag.source)}
             </div>
           </div>
-          <button
-            type="button"
-            onClick={() => { if (!envControlled && !flagBusy) { setDraftRemoteEnabled(!draftRemoteEnabled); setNotice(null); } }}
+          <SettingsToggleButton
+            checked={draftRemoteEnabled}
+            onChange={(next) => { if (!envControlled && !flagBusy) { setDraftRemoteEnabled(next); setNotice(null); } }}
             disabled={envControlled || flagBusy}
-            style={{
-              display: 'inline-flex',
-              alignItems: 'center',
-              minHeight: 44,
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 11,
-              fontWeight: 400,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
-              color: draftRemoteEnabled ? RAMS_ACCENT : 'var(--t-text-muted)',
-              background: 'transparent',
-              border: 'none',
-              borderBottom: `1px solid ${draftRemoteEnabled ? RAMS_ACCENT : RAMS_HAIRLINE_SOFT}`,
-              paddingTop: 3,
-              paddingBottom: 3,
-              paddingLeft: 0,
-              paddingRight: 0,
-              cursor: envControlled ? 'not-allowed' : 'pointer',
-              opacity: flagBusy ? 0.6 : 1,
-            }}
-          >
-            {draftRemoteEnabled ? '(on)' : '(off)'}
-          </button>
+          />
         </div>
 
         <div style={{
@@ -749,23 +732,24 @@ function accentLinkStyle(disabled: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
+    justifyContent: 'center',
     gap: 8,
-    minHeight: 44,
+    minHeight: 32,
     paddingLeft: 14,
     paddingRight: 14,
-    borderRadius: 12,
+    borderRadius: 9,
     borderWidth: 1,
     borderStyle: 'solid',
-    borderColor: disabled ? RAMS_HAIRLINE_SOFT : 'rgba(29, 78, 216, 0.32)',
-    background: disabled ? 'transparent' : 'rgba(29, 78, 216, 0.1)',
+    borderColor: disabled ? RAMS_CONTROL_BORDER : RAMS_CONTROL_ACTIVE_BORDER,
+    background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    fontFamily: MONO_FONT_STACK,
-    fontSize: 11.5,
-    fontWeight: 300,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase' as const,
+    fontFamily: APP_FONT_STACK,
+    fontSize: 12,
+    fontWeight: 400,
+    letterSpacing: '-0.01em',
+    textTransform: 'capitalize' as const,
     cursor: disabled ? 'default' : 'pointer',
-    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
     opacity: disabled ? 0.6 : 1,
   };
 }
@@ -774,20 +758,23 @@ function quietLinkStyle(disabled: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
-    minHeight: 44,
+    justifyContent: 'center',
+    minHeight: 32,
+    paddingLeft: 14,
+    paddingRight: 14,
+    borderRadius: 9,
+    borderWidth: 1,
+    borderStyle: 'solid',
+    borderColor: RAMS_CONTROL_BORDER,
+    background: disabled ? 'transparent' : RAMS_CONTROL_BG,
     fontFamily: APP_FONT_STACK,
-    fontSize: 13,
+    fontSize: 12,
     fontWeight: 400,
-    color: 'var(--t-text-muted)',
-    background: 'transparent',
-    border: 'none',
-    borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingLeft: 0,
-    paddingRight: 0,
+    letterSpacing: '-0.01em',
+    textTransform: 'capitalize' as const,
+    color: 'var(--t-text-secondary)',
     cursor: disabled ? 'default' : 'pointer',
-    letterSpacing: '-0.005em',
     opacity: disabled ? 0.6 : 1,
+    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
   };
 }

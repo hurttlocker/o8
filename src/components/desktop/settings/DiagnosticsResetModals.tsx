@@ -69,7 +69,7 @@ export function ResetConfirmModal({
         boxShadow: '0 12px 48px rgba(0, 0, 0, 0.18)',
       }}>
         <div style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 10,
           fontWeight: 300,
           letterSpacing: '0.22em',
@@ -113,7 +113,7 @@ export function ResetConfirmModal({
         </div>
         <div style={{ marginBottom: 14 }}>
           <div style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 10,
             fontWeight: 400,
             letterSpacing: '0.14em',
@@ -226,7 +226,7 @@ export function ResetDoneModal({
         boxShadow: '0 12px 48px rgba(0, 0, 0, 0.18)',
       }}>
         <div style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 10,
           fontWeight: 300,
           letterSpacing: '0.22em',

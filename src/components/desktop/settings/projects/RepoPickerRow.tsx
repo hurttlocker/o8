@@ -159,11 +159,11 @@ export function RepoPickerRow({
             borderColor: isMain ? 'rgba(37, 99, 235, 0.26)' : RAMS_HAIRLINE_SOFT,
             background: isMain ? 'rgba(37, 99, 235, 0.06)' : 'transparent',
             color: isMain ? '#1d4ed8' : RAMS_INK_QUIET,
-            fontFamily: MONO_FONT_STACK,
-            fontSize: 9.5,
-            fontWeight: 350,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
+            fontFamily: APP_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 400,
+            letterSpacing: '-0.01em',
+            textTransform: 'capitalize',
             cursor: isMain ? 'default' : 'pointer',
           }}
         >
@@ -190,11 +190,11 @@ export function RepoPickerRow({
             borderColor: RAMS_HAIRLINE_SOFT,
             background: 'transparent',
             color: role ? roleColor(role) : RAMS_INK_QUIET,
-            fontFamily: MONO_FONT_STACK,
-            fontSize: 10,
-            fontWeight: 350,
-            letterSpacing: '0.08em',
-            textTransform: 'uppercase',
+            fontFamily: APP_FONT_STACK,
+            fontSize: 11,
+            fontWeight: 400,
+            letterSpacing: '-0.01em',
+            textTransform: 'capitalize',
             cursor: 'pointer',
           }}
         >

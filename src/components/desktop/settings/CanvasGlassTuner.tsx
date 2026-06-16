@@ -21,6 +21,15 @@ import {
   writeCanvasGlassSettings,
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
+import {
+  APP_FONT_STACK,
+  MONO_FONT_STACK,
+  RAMS_ACCENT,
+  RAMS_CONTROL_BG,
+  RAMS_CONTROL_BORDER,
+  RAMS_CONTROL_ACTIVE_BG,
+  RAMS_CONTROL_ACTIVE_BORDER,
+} from './shared';
 
 export function CanvasGlassTuner() {
   const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
@@ -62,7 +71,7 @@ export function CanvasGlassTuner() {
           Glass material
         </span>
         <span style={{ fontSize: 11, color: 'var(--t-text-muted)', fontWeight: 300 }}>
-          Preview at <span style={{ fontFamily: 'var(--font-mono, monospace)', fontSize: 10.5 }}>/preview/canvas-glass</span>
+          Preview at <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10.5 }}>/preview/canvas-glass</span>
         </span>
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
@@ -81,18 +90,19 @@ export function CanvasGlassTuner() {
               style={{
                 borderWidth: 1,
                 borderStyle: 'solid',
-                borderColor: active ? 'var(--t-accent)' : 'var(--t-divider)',
-                background: active ? 'var(--t-bg-hover)' : 'transparent',
+                borderColor: active ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
+                background: active ? RAMS_CONTROL_ACTIVE_BG : 'transparent',
                 borderRadius: 999,
                 paddingTop: 3,
                 paddingRight: 12,
                 paddingBottom: 3,
                 paddingLeft: 12,
                 fontSize: 11,
-                fontWeight: active ? 500 : 300,
-                color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                fontWeight: 400,
+                letterSpacing: '-0.01em',
+                color: active ? RAMS_ACCENT : 'var(--t-text-secondary)',
                 cursor: 'pointer',
-                fontFamily: 'var(--font-sans-system)',
+                fontFamily: APP_FONT_STACK,
               }}
             >
               {preset.label}
@@ -116,18 +126,19 @@ export function CanvasGlassTuner() {
                 style={{
                   borderWidth: 1,
                   borderStyle: 'solid',
-                  borderColor: active ? 'var(--t-accent)' : 'var(--t-divider)',
-                  background: active ? 'var(--t-bg-hover)' : 'transparent',
-                  borderRadius: 7,
+                  borderColor: active ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
+                  background: active ? RAMS_CONTROL_ACTIVE_BG : 'transparent',
+                  borderRadius: 8,
                   paddingTop: 4,
                   paddingBottom: 4,
                   paddingLeft: 2,
                   paddingRight: 2,
                   fontSize: 10,
-                  fontWeight: active ? 500 : 300,
-                  color: active ? 'var(--t-text)' : 'var(--t-text-secondary)',
+                  fontWeight: 400,
+                  letterSpacing: '-0.01em',
+                  color: active ? RAMS_ACCENT : 'var(--t-text-secondary)',
                   cursor: 'pointer',
-                  fontFamily: 'var(--font-sans-system)',
+                  fontFamily: APP_FONT_STACK,
                   overflow: 'hidden',
                   textOverflow: 'ellipsis',
                   whiteSpace: 'nowrap',
@@ -212,21 +223,22 @@ export function CanvasGlassTuner() {
           style={{
             borderWidth: 1,
             borderStyle: 'solid',
-            borderColor: 'var(--t-divider)',
-            background: 'transparent',
-            borderRadius: 999,
-            paddingTop: 4,
-            paddingBottom: 4,
-            paddingLeft: 12,
-            paddingRight: 12,
-            fontSize: 11,
+            borderColor: RAMS_CONTROL_BORDER,
+            background: RAMS_CONTROL_BG,
+            borderRadius: 9,
+            paddingTop: 6,
+            paddingBottom: 6,
+            paddingLeft: 14,
+            paddingRight: 14,
+            fontSize: 12,
             fontWeight: 400,
-            color: 'var(--t-text)',
+            letterSpacing: '-0.01em',
+            color: 'var(--t-text-secondary)',
             cursor: 'pointer',
-            fontFamily: 'var(--font-sans-system)',
+            fontFamily: APP_FONT_STACK,
           }}
-          onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-bg-hover)'; }}
-          onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+          onMouseEnter={(event) => { event.currentTarget.style.background = RAMS_CONTROL_ACTIVE_BG; }}
+          onMouseLeave={(event) => { event.currentTarget.style.background = RAMS_CONTROL_BG; }}
         >
           Save as my default
         </button>
@@ -239,9 +251,10 @@ export function CanvasGlassTuner() {
             padding: 0,
             fontSize: 11,
             fontWeight: 300,
+            letterSpacing: '-0.01em',
             color: 'var(--t-text-muted)',
             cursor: 'pointer',
-            fontFamily: 'var(--font-sans-system)',
+            fontFamily: APP_FONT_STACK,
           }}
           onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; }}
           onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-muted)'; }}
@@ -291,7 +304,7 @@ function GlassSlider({
         }}
         style={{
           width: '100%',
-          accentColor: 'var(--t-accent)',
+          accentColor: RAMS_ACCENT,
           cursor: 'pointer',
         }}
       />

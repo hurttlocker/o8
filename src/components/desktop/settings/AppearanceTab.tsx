@@ -17,7 +17,6 @@ import {
 } from '@/lib/appearance/dictation-input-mode';
 import {
   APP_FONT_STACK,
-  MONO_FONT_STACK,
   RAMS_ACCENT,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
@@ -189,7 +188,7 @@ function PalettePreviewCard({
         </div>
         <div
           style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 10,
             fontWeight: 400,
             letterSpacing: '0.14em',
@@ -277,7 +276,7 @@ function TransparencyOptionRow({
       <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
         <span
           style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 11.5,
             fontWeight: 300,
             letterSpacing: '0.04em',
@@ -380,7 +379,7 @@ function DictationInputModeToggle() {
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span
                 style={{
-                  fontFamily: MONO_FONT_STACK,
+                  fontFamily: APP_FONT_STACK,
                   fontSize: 11.5,
                   fontWeight: 300,
                   letterSpacing: '0.04em',
@@ -459,7 +458,7 @@ function TimelineVisibilityToggle() {
             <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
               <span
                 style={{
-                  fontFamily: MONO_FONT_STACK,
+                  fontFamily: APP_FONT_STACK,
                   fontSize: 11.5,
                   fontWeight: 300,
                   letterSpacing: '0.04em',

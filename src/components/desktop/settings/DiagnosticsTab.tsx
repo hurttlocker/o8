@@ -187,7 +187,7 @@ export function DiagnosticsTab() {
         flexWrap: 'wrap',
       }}>
         <div style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 11,
           fontWeight: 400,
           letterSpacing: '0.14em',
@@ -348,7 +348,7 @@ export function DiagnosticsTab() {
                 Prune finished in {formatDuration(pruneResult.durationMs)}
               </span>
               <span style={{
-                fontFamily: MONO_FONT_STACK,
+                fontFamily: APP_FONT_STACK,
                 fontSize: 11,
                 letterSpacing: '0.04em',
                 color: RAMS_INK_QUIET,
@@ -496,7 +496,7 @@ function ToolRow({ tool }: { tool: DiagnosticTool }) {
         flexShrink: 0,
       }} />
       <span style={{
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 11,
         fontWeight: 400,
         color: RAMS_INK_QUIET,
@@ -533,25 +533,27 @@ function ToolRow({ tool }: { tool: DiagnosticTool }) {
   );
 }
 
+// Symon-clean button shape (system, sentence/title case, 32h, radius 9) — match
+// the shared RamsButton + GitHubTab links. Was: mono / 11.5px / 300 / UPPERCASE / 44h.
 function accentLinkStyle(disabled: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 8,
-    minHeight: 44,
+    minHeight: 32,
     paddingLeft: 14,
     paddingRight: 14,
-    borderRadius: 12,
+    borderRadius: 9,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: disabled ? RAMS_HAIRLINE_SOFT : 'rgba(29, 78, 216, 0.32)',
     background: disabled ? 'transparent' : 'rgba(29, 78, 216, 0.1)',
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    fontFamily: MONO_FONT_STACK,
-    fontSize: 11.5,
-    fontWeight: 300,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase' as const,
+    fontFamily: APP_FONT_STACK,
+    fontSize: 12,
+    fontWeight: 400,
+    letterSpacing: '-0.01em',
+    textTransform: 'capitalize' as const,
     cursor: disabled ? 'default' : 'pointer',
     transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
     opacity: disabled ? 0.6 : 1,

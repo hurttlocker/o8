@@ -3,7 +3,6 @@
 import { useCallback, useMemo, useRef, useState, type CSSProperties } from 'react';
 import {
   APP_FONT_STACK,
-  MONO_FONT_STACK,
   RAMS_ACCENT,
   RAMS_INK_QUIET,
   CornerBrackets,
@@ -223,7 +222,7 @@ export function ReportIssueSection({ number }: { number: string }) {
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <span style={{
-              fontFamily: MONO_FONT_STACK,
+              fontFamily: APP_FONT_STACK,
               fontSize: 10,
               fontWeight: 400,
               letterSpacing: '0.14em',
@@ -312,7 +311,7 @@ export function ReportIssueSection({ number }: { number: string }) {
                   {image.name}
                 </div>
                 <div style={{
-                  fontFamily: MONO_FONT_STACK,
+                  fontFamily: APP_FONT_STACK,
                   fontSize: 10,
                   fontWeight: 300,
                   letterSpacing: '0.1em',
@@ -330,11 +329,10 @@ export function ReportIssueSection({ number }: { number: string }) {
                   background: 'transparent',
                   color: 'var(--t-text-muted)',
                   cursor: 'pointer',
-                  fontFamily: MONO_FONT_STACK,
-                  fontSize: 10,
+                  fontFamily: APP_FONT_STACK,
+                  fontSize: 12,
                   fontWeight: 400,
-                  letterSpacing: '0.1em',
-                  textTransform: 'uppercase',
+                  letterSpacing: '-0.01em',
                   padding: 6,
                   flexShrink: 0,
                 }}
@@ -352,7 +350,7 @@ export function ReportIssueSection({ number }: { number: string }) {
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                minHeight: 44,
+                minHeight: 32,
                 paddingTop: 10,
                 paddingBottom: 10,
                 paddingLeft: 14,
@@ -364,11 +362,10 @@ export function ReportIssueSection({ number }: { number: string }) {
                 background: 'transparent',
                 color: 'var(--t-text-muted)',
                 cursor: 'pointer',
-                fontFamily: MONO_FONT_STACK,
-                fontSize: 10,
-                fontWeight: 300,
-                letterSpacing: '0.1em',
-                textTransform: 'uppercase',
+                fontFamily: APP_FONT_STACK,
+                fontSize: 12,
+                fontWeight: 400,
+                letterSpacing: '-0.01em',
               }}
             >
               Attach a screenshot — click, paste, or drop an image
@@ -383,7 +380,7 @@ export function ReportIssueSection({ number }: { number: string }) {
             flexWrap: 'wrap',
           }}>
             <div style={{
-              fontFamily: MONO_FONT_STACK,
+              fontFamily: APP_FONT_STACK,
               fontSize: 10,
               fontWeight: 300,
               letterSpacing: '0.12em',
@@ -456,11 +453,10 @@ function CategoryButton({
         background: active ? 'var(--t-bg-card)' : 'transparent',
         color: active ? RAMS_ACCENT : 'var(--t-text-muted)',
         cursor: 'pointer',
-        fontFamily: MONO_FONT_STACK,
-        fontSize: 10,
-        fontWeight: 300,
-        letterSpacing: '0.08em',
-        textTransform: 'uppercase',
+        fontFamily: APP_FONT_STACK,
+        fontSize: 12,
+        fontWeight: 400,
+        letterSpacing: '-0.01em',
         transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms, border-color 120ms',
       }}
     >

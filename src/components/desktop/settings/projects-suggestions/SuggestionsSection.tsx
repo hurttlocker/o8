@@ -20,7 +20,6 @@
 import { useCallback, useState } from 'react';
 import {
   APP_FONT_STACK,
-  MONO_FONT_STACK,
   RAMS_ACCENT,
   RAMS_HAIRLINE,
   RAMS_HAIRLINE_SOFT,
@@ -246,7 +245,7 @@ export function SuggestionsSection({
         ) : null}
         {result && !loading ? (
           <span style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 10,
             letterSpacing: '0.14em',
             textTransform: 'uppercase',
@@ -332,7 +331,7 @@ function PlausibleStrip({ children }: { children: React.ReactNode }) {
 function StripHeading({ label, tone }: { label: string; tone: 'accent' | 'quiet' }) {
   return (
     <div style={{
-      fontFamily: MONO_FONT_STACK,
+      fontFamily: APP_FONT_STACK,
       fontSize: 10,
       fontWeight: 300,
       letterSpacing: '0.22em',
@@ -390,7 +389,7 @@ function ConfidentCard({
           {suggestion.suggestedName}
         </h3>
         <span style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 10,
           fontWeight: 300,
           letterSpacing: '0.18em',
@@ -482,7 +481,7 @@ function PlausibleCard({
           {suggestion.suggestedName}
         </h3>
         <span style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 9,
           fontWeight: 400,
           letterSpacing: '0.18em',
@@ -572,7 +571,7 @@ function MemberChips({
             <span>{label}</span>
             {role ? (
               <span style={{
-                fontFamily: MONO_FONT_STACK,
+                fontFamily: APP_FONT_STACK,
                 fontSize: 9,
                 fontWeight: 400,
                 letterSpacing: '0.14em',
@@ -614,7 +613,7 @@ function EvidencePanel({
           background: 'transparent',
           border: 'none',
           cursor: 'pointer',
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 10,
           fontWeight: 300,
           letterSpacing: '0.18em',
@@ -667,7 +666,7 @@ function EvidencePanel({
             >
               <span style={{
                 flexShrink: 0,
-                fontFamily: MONO_FONT_STACK,
+                fontFamily: APP_FONT_STACK,
                 fontSize: 9,
                 fontWeight: 300,
                 letterSpacing: '0.14em',
@@ -679,7 +678,7 @@ function EvidencePanel({
               </span>
               <span style={{
                 flexShrink: 0,
-                fontFamily: MONO_FONT_STACK,
+                fontFamily: APP_FONT_STACK,
                 fontSize: 10,
                 color: RAMS_INK_QUIET,
                 minWidth: 80,
@@ -763,7 +762,7 @@ function ErrorStrip({ message, onDismiss }: { message: string; onDismiss: () => 
       background: 'rgba(217, 79, 58, 0.06)',
     }}>
       <span style={{
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 10,
         fontWeight: 300,
         letterSpacing: '0.18em',
@@ -791,7 +790,7 @@ function ErrorStrip({ message, onDismiss }: { message: string; onDismiss: () => 
           background: 'transparent',
           border: 'none',
           cursor: 'pointer',
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 10,
           fontWeight: 300,
           letterSpacing: '0.18em',

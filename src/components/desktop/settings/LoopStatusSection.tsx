@@ -376,7 +376,7 @@ function Row({
         flexShrink: 0,
       }} />
       <span style={{
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 11,
         fontWeight: 400,
         color: RAMS_INK_QUIET,
@@ -467,7 +467,7 @@ function DiscloseRow({
           flexShrink: 0,
         }} />
         <span style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 11,
           fontWeight: 400,
           color: RAMS_INK_QUIET,
@@ -486,17 +486,17 @@ function DiscloseRow({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',
-          fontFamily: MONO_FONT_STACK,
-          letterSpacing: '0.02em',
+          fontFamily: APP_FONT_STACK,
+          letterSpacing: '-0.005em',
         }}>
           {value}
         </span>
         {hint ? (
           <span style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 11,
             fontWeight: 400,
-            letterSpacing: '0.04em',
+            letterSpacing: '-0.005em',
             color: 'var(--t-text-secondary)',
             marginRight: 6,
           }}>

@@ -190,7 +190,7 @@ export function ProjectForm({
         gap: 12,
       }}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
+          <span style={{ fontFamily: APP_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
             Name
           </span>
           <input
@@ -203,7 +203,7 @@ export function ProjectForm({
         </div>
 
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
+          <span style={{ fontFamily: APP_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
             Slug
           </span>
           <input
@@ -216,7 +216,7 @@ export function ProjectForm({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
+        <span style={{ fontFamily: APP_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
           Instructions
         </span>
         <textarea
@@ -229,7 +229,7 @@ export function ProjectForm({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
+        <span style={{ fontFamily: APP_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
           Repositories
         </span>
         {repos.length === 0 ? (
@@ -272,7 +272,7 @@ export function ProjectForm({
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
+        <span style={{ fontFamily: APP_FONT_STACK, fontSize: 10, letterSpacing: '0.14em', textTransform: 'uppercase', color: RAMS_INK_QUIET }}>
           Files
         </span>
         <button
@@ -298,7 +298,7 @@ export function ProjectForm({
           <span aria-hidden style={{ fontSize: 18, lineHeight: 1 }}>+</span>
           Add files
           <span style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 9.5,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
