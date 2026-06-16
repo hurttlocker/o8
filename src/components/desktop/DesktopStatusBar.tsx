@@ -16,6 +16,8 @@
  */
 
 import { memo, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
+import { SmoothCorners } from '@lisse/react';
 import { ChromeButton } from './chrome/ChromeButton';
 import { MergeActionCluster } from './MergeActionCluster';
 import { MergeBeacon } from './merge-beacon/MergeBeacon';
@@ -205,7 +207,17 @@ function DesktopStatusBarBase({
           overflow: 'visible',
         }}
       >
-        <div
+        <SmoothCorners
+          // Squircle bottom corners — the same Lisse "list corners" the
+          // workspace uses — with a flat top so this still merges with the
+          // panel card above into one card. Collapsed → radius 0 (no card).
+          corners={{
+            topLeft: 0,
+            topRight: 0,
+            bottomLeft: { radius: leftFooterCollapsed ? 0 : 14, smoothing: 0.6 },
+            bottomRight: { radius: leftFooterCollapsed ? 0 : 14, smoothing: 0.6 },
+          }}
+          autoEffects={false}
           // Inner card — flat top (merges with panel above), rounded bottom.
           // Centered cluster — buttons sit in the middle of the footer, not
           // crammed left like a traditional status bar.
@@ -229,10 +241,9 @@ function DesktopStatusBarBase({
             paddingLeft: leftFooterCollapsed ? 0 : 10,
             paddingRight: leftFooterCollapsed ? 0 : 10,
             background: leftFooterCollapsed ? 'transparent' : 'var(--t-panel-solid)',
-            borderTopLeftRadius: 0,
-            borderTopRightRadius: 0,
-            borderBottomLeftRadius: leftFooterCollapsed ? 0 : 14,
-            borderBottomRightRadius: leftFooterCollapsed ? 0 : 14,
+            // Corner rounding now lives on the SmoothCorners `corners` prop
+            // above (squircle bottom / flat top) — a plain borderRadius here
+            // would be a circle, not the "list corners" squircle.
             borderTop: leftFooterCollapsed ? 'none' : '0.5px solid var(--t-divider-subtle)',
             boxShadow: leftFooterCollapsed ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
             ['--t-chrome-btn-bg' as string]: 'transparent',
@@ -299,7 +310,7 @@ function DesktopStatusBarBase({
               </div>
             </>
           ) : null}
-        </div>
+        </SmoothCorners>
       </div>
 
       {/* Flow spacer keeps the right-edge chrome (the ? button) pinned right.
@@ -398,11 +409,17 @@ function StatusBottomPanelControl({
   const [hovered, setHovered] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement | null>(null);
+  // Portaled popover (escapes the chrome-surface subtree so it inherits base
+  // content tokens — dark ink on light glass — instead of the chrome flip's
+  // white-on-transparent). Track its node + the anchor rect for positioning.
+  const popoverRef = useRef<HTMLDivElement | null>(null);
+  const [anchorRect, setAnchorRect] = useState<DOMRect | null>(null);
 
   useEffect(() => {
     if (!menuOpen) return;
     const handlePointer = (event: MouseEvent) => {
-      if (menuRef.current?.contains(event.target as Node)) return;
+      const target = event.target as Node;
+      if (menuRef.current?.contains(target) || popoverRef.current?.contains(target)) return;
       setMenuOpen(false);
     };
     const handleKey = (event: KeyboardEvent) => {
@@ -459,7 +476,11 @@ function StatusBottomPanelControl({
         </button>
         <button
           type="button"
-          onClick={() => setMenuOpen((open) => !open)}
+          onClick={() => setMenuOpen((open) => {
+            const next = !open;
+            if (next && menuRef.current) setAnchorRect(menuRef.current.getBoundingClientRect());
+            return next;
+          })}
           aria-label="Choose bottom panel surface"
           title="Choose bottom panel surface"
           style={{
@@ -482,13 +503,14 @@ function StatusBottomPanelControl({
         </button>
       </div>
 
-      {menuOpen ? (
+      {menuOpen && anchorRect && typeof document !== 'undefined' ? createPortal((
         <div
+          ref={popoverRef}
           role="menu"
           style={{
-            position: 'absolute',
-            bottom: 34,
-            left: '50%',
+            position: 'fixed',
+            bottom: typeof window !== 'undefined' ? window.innerHeight - anchorRect.top + 8 : 48,
+            left: anchorRect.left + anchorRect.width / 2,
             transform: 'translateX(-50%)',
             width: 520,
             display: 'grid',
@@ -539,7 +561,7 @@ function StatusBottomPanelControl({
             </button>
           ))}
         </div>
-      ) : null}
+      ), document.body) : null}
     </div>
   );
 }
