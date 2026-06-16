@@ -121,6 +121,11 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "mac_music_previous" => SafetyClass::ReadOnly,
         "mac_music_now_playing" => SafetyClass::ReadOnly,
         "o8_dispatch" => SafetyClass::Reversible,
+        // Escalation handoff (two-tier brain). The spoken ack is free — ReadOnly
+        // so it never cards. The background brain's own tool calls are each gated
+        // normally, and the `orchestrator` target re-imposes the o8_dispatch
+        // confirm INSIDE the handler so a worker spawn still never goes silent.
+        "escalate" => SafetyClass::ReadOnly,
         // Approval triage (magic roadmap #2). Semantically these RELEASE a
         // gated action (a merge, a plan, a command) — Destructive in spirit,
         // but Destructive tools are withheld from the model entirely by
