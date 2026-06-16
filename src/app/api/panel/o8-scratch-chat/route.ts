@@ -1,11 +1,9 @@
 import { NextRequest } from 'next/server';
-import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveOpenRouterRoute, type InferenceRoute } from '@/lib/cortex/qa/llm/inference-route';
 import { TOOLS, executeTool, toolsForOpenAI } from '@/lib/llm/tools';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
-
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const DEFAULT_MODELS = [
   'poolside/laguna-m.1:free',
   'openai/gpt-oss-120b:free',
@@ -129,14 +127,14 @@ function scratchModels(override?: string | null) {
 }
 
 interface OpenRouterRequestOptions {
-  apiKey: string;
+  route: InferenceRoute;
   messages: ScratchMessage[];
   model: string;
   signal: AbortSignal;
   withTools: boolean;
 }
 
-async function openRouterRequest({ apiKey, messages, model, signal, withTools }: OpenRouterRequestOptions) {
+async function openRouterRequest({ route, messages, model, signal, withTools }: OpenRouterRequestOptions) {
   const body: Record<string, unknown> = {
     model,
     stream: true,
@@ -146,14 +144,9 @@ async function openRouterRequest({ apiKey, messages, model, signal, withTools }:
     body.tools = toolsForOpenAI();
     body.tool_choice = 'auto';
   }
-  return fetch(OPENROUTER_URL, {
+  return fetch(route.url, {
     method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-      'HTTP-Referer': 'https://o8.app',
-      'X-Title': 'o8 Scratch Chat',
-    },
+    headers: route.headers,
     body: JSON.stringify(body),
     signal,
   });
@@ -210,14 +203,14 @@ function emitChunkContent(
 }
 
 async function streamRound({
-  apiKey,
+  route,
   messages,
   signal,
   controller,
   withTools,
   modelOverride,
 }: {
-  apiKey: string;
+  route: InferenceRoute;
   messages: ScratchMessage[];
   signal: AbortSignal;
   controller: ReadableStreamDefaultController<Uint8Array>;
@@ -227,7 +220,7 @@ async function streamRound({
   const failures: string[] = [];
   for (const model of scratchModels(modelOverride)) {
     try {
-      const response = await openRouterRequest({ apiKey, messages, model, signal, withTools });
+      const response = await openRouterRequest({ route, messages, model, signal, withTools });
       if (!response.ok) {
         const text = await response.text().catch(() => 'Unknown upstream error.');
         failures.push(`${model}: HTTP ${response.status} ${text.slice(0, 180)}`);
@@ -289,9 +282,9 @@ async function streamRound({
 }
 
 export async function POST(request: NextRequest): Promise<Response> {
-  const apiKey = await resolveOpenRouterKey();
-  if (!apiKey) {
-    return jsonError('OPENROUTER_API_KEY is not configured.', 503);
+  const route = await resolveOpenRouterRoute();
+  if (!route) {
+    return jsonError('No inference route — set an OpenRouter key or apply a plan.', 503);
   }
 
   const rawBody = await request.json().catch(() => null);
@@ -347,7 +340,7 @@ export async function POST(request: NextRequest): Promise<Response> {
       try {
         for (let round = 0; round < MAX_TOOL_ROUNDS; round++) {
           const result = await streamRound({
-            apiKey,
+            route,
             messages: conversation,
             signal: request.signal,
             controller,
@@ -431,7 +424,7 @@ export async function POST(request: NextRequest): Promise<Response> {
           content: `You have used all ${MAX_TOOL_ROUNDS} tool-call rounds. Stop calling tools and answer the user now using only what you already gathered. Be concise — summarize, don't list everything.`,
         });
         const finalResult = await streamRound({
-          apiKey,
+          route,
           messages: conversation,
           signal: request.signal,
           controller,

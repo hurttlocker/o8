@@ -13,12 +13,11 @@
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const SUMMARY_MODELS = [
   'poolside/laguna-m.1:free',
   'openai/gpt-oss-120b:free',
@@ -72,9 +71,9 @@ async function fetchJson<T>(url: string): Promise<T | null> {
 }
 
 async function summarizeWithOpenRouter(prompt: string): Promise<string> {
-  const apiKey = await resolveOpenRouterKey();
-  if (!apiKey) {
-    throw new Error('OPENROUTER_API_KEY is not configured.');
+  const route = await resolveOpenRouterRoute();
+  if (!route) {
+    throw new Error('No inference route — set an OpenRouter key or apply a plan.');
   }
 
   const messages = [
@@ -94,14 +93,9 @@ async function summarizeWithOpenRouter(prompt: string): Promise<string> {
   const failures: string[] = [];
   for (const model of summaryModels()) {
     try {
-      const response = await fetch(OPENROUTER_URL, {
+      const response = await fetch(route.url, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://o8.app',
-          'X-Title': 'o8 Update Summary',
-        },
+        headers: route.headers,
         body: JSON.stringify({ model, messages }),
       });
       const text = await response.text();

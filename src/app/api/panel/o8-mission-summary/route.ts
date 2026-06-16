@@ -17,13 +17,12 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { desc, eq } from 'drizzle-orm';
-import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
 import { getDb, sessionOutcomes } from '@/lib/db';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const SUMMARY_MODELS = [
   'poolside/laguna-m.1:free',
   'openai/gpt-oss-120b:free',
@@ -109,8 +108,8 @@ async function loadPacketLines(packets: InputPacket[]): Promise<PacketLine[]> {
 }
 
 async function summarizeMission(lines: PacketLine[], missionSummary: string | null): Promise<string | null> {
-  const apiKey = await resolveOpenRouterKey();
-  if (!apiKey) return null;
+  const route = await resolveOpenRouterRoute();
+  if (!route) return null;
 
   const material = lines.map((line, idx) => {
     const ref = line.referenceLabel ? `${line.referenceLabel} ` : '';
@@ -142,14 +141,9 @@ async function summarizeMission(lines: PacketLine[], missionSummary: string | nu
 
   for (const model of summaryModels()) {
     try {
-      const response = await fetch(OPENROUTER_URL, {
+      const response = await fetch(route.url, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://o8.app',
-          'X-Title': 'o8 Mission Summary',
-        },
+        headers: route.headers,
         body: JSON.stringify({ model, messages }),
       });
       if (!response.ok) continue;

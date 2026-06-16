@@ -112,3 +112,35 @@ export function resolveEmbedRoute(model: string): InferenceRoute | null {
 
   return null;
 }
+
+/**
+ * Whisper transcription route (OpenRouter audio/transcriptions). Direct (the
+ * user's OpenRouter key) → proxy (plan token) → null. The request body is
+ * identical either way, so the caller only swaps url + headers.
+ */
+export async function resolveTranscribeRoute(): Promise<InferenceRoute | null> {
+  const localKey = await resolveOpenRouterKey();
+  if (localKey) {
+    return {
+      url: 'https://openrouter.ai/api/v1/audio/transcriptions',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${localKey}`,
+        'HTTP-Referer': 'https://o8.app',
+        'X-Title': 'o8 Dictation',
+      },
+      via: 'direct',
+    };
+  }
+
+  const token = planToken();
+  if (token) {
+    return {
+      url: `${proxyBaseUrl()}/v1/transcribe`,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      via: 'proxy',
+    };
+  }
+
+  return null;
+}
