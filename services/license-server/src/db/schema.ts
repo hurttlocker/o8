@@ -79,3 +79,32 @@ export const invites = pgTable('invites', {
 
 export type Invite = typeof invites.$inferSelect;
 export type NewInvite = typeof invites.$inferInsert;
+
+/**
+ * `proxy_usage` — one append-only row per managed-inference call routed through
+ * the o8 proxy (Step 1). It is the per-account meter (today's spend vs the
+ * plan's daily cap) AND the raw COGS ledger we aggregate to set pricing
+ * (monetization plan Step 5). Cost is stored as integer MICRO-USD
+ * (USD * 1_000_000) so daily sums are exact — no float drift across thousands
+ * of sub-cent rows.
+ */
+export const proxyUsage = pgTable('proxy_usage', {
+  id: text('id').primaryKey(),
+  /** Account the call is metered against — the plan-token subject (sub claim). */
+  sub: text('sub').notNull(),
+  /** Plan tier at call time: 'free' | 'pro' | 'team'. */
+  plan: text('plan').notNull(),
+  /** 'inference' (OpenRouter chat) | 'embeddings' (Gemini). */
+  kind: text('kind').notNull(),
+  /** Model actually served (OpenRouter's resolved model, or the embed model). */
+  model: text('model'),
+  /** Exact/estimated cost in micro-USD (USD * 1e6). Inference = OpenRouter's
+   *  reported usage.cost; embeddings = a length-based estimate (no cost field). */
+  costMicroUsd: integer('cost_micro_usd').notNull().default(0),
+  promptTokens: integer('prompt_tokens'),
+  completionTokens: integer('completion_tokens'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type ProxyUsage = typeof proxyUsage.$inferSelect;
+export type NewProxyUsage = typeof proxyUsage.$inferInsert;

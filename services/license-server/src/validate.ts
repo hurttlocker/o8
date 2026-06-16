@@ -31,6 +31,8 @@ export interface ValidationResult {
   expiresAt: number | null;
   revoked: boolean;
   graceDaysLeft: number | null;
+  /** Token subject (account id) — used by the proxy to meter per account. */
+  sub: string | null;
   reason?: string;
 }
 
@@ -54,6 +56,7 @@ export async function validateEntitlement(token: string): Promise<ValidationResu
     expiresAt: null,
     revoked: false,
     graceDaysLeft: null,
+    sub: null,
     reason,
   });
 
@@ -111,14 +114,14 @@ export async function validateEntitlement(token: string): Promise<ValidationResu
   }
 
   if (revoked) {
-    return { valid: false, plan, expiresAt: exp, revoked: true, graceDaysLeft: null, reason: 'revoked' };
+    return { valid: false, plan, expiresAt: exp, revoked: true, graceDaysLeft: null, sub, reason: 'revoked' };
   }
 
   const nowSec = Math.floor(Date.now() / 1000);
   const graceCutoff = exp + DEFAULT_GRACE_DAYS * 24 * 60 * 60;
   const graceDaysLeft = Math.max(0, Math.ceil((graceCutoff - nowSec) / 86400));
 
-  return { valid: true, plan, expiresAt: exp, revoked: false, graceDaysLeft };
+  return { valid: true, plan, expiresAt: exp, revoked: false, graceDaysLeft, sub };
 }
 
 /** Exposed for the keygen/contract-test sanity path. */
