@@ -115,11 +115,11 @@ export function ProjectCard({
             {project.name}
           </div>
           <div style={{
-            fontFamily: MONO_FONT_STACK,
-            fontSize: 10.5,
+            fontFamily: APP_FONT_STACK,
+            fontSize: 11,
             color: RAMS_INK_QUIET,
             marginTop: 4,
-            letterSpacing: '0.04em',
+            letterSpacing: '-0.01em',
           }}>
             {project.slug}
           </div>
@@ -130,7 +130,7 @@ export function ProjectCard({
             {pendingConfirm ? (
               <>
                 <span style={{
-                  fontFamily: MONO_FONT_STACK,
+                  fontFamily: APP_FONT_STACK,
                   fontSize: 10,
                   letterSpacing: '0.14em',
                   textTransform: 'uppercase',
@@ -196,9 +196,9 @@ export function ProjectCard({
                 />
                 {project.mainRepoId === link.repoId ? (
                   <span style={{
-                    fontFamily: MONO_FONT_STACK,
+                    fontFamily: APP_FONT_STACK,
                     fontSize: 9,
-                    fontWeight: 350,
+                    fontWeight: 400,
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase',
                     color: '#1d4ed8',
@@ -281,9 +281,9 @@ export function ProjectCard({
                   </div>
                   <div style={{
                     marginTop: 2,
-                    fontFamily: MONO_FONT_STACK,
-                    fontSize: 9.5,
-                    letterSpacing: '0.04em',
+                    fontFamily: APP_FONT_STACK,
+                    fontSize: 10,
+                    letterSpacing: '-0.01em',
                     color: RAMS_INK_QUIET,
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
@@ -294,9 +294,9 @@ export function ProjectCard({
                 </div>
                 <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
                   <span style={{
-                    fontFamily: MONO_FONT_STACK,
+                    fontFamily: APP_FONT_STACK,
                     fontSize: 9.5,
-                    fontWeight: 350,
+                    fontWeight: 400,
                     letterSpacing: '0.1em',
                     textTransform: 'uppercase',
                     color: lock.stale ? '#b45309' : RAMS_INK_QUIET,
@@ -320,11 +320,11 @@ export function ProjectCard({
                         paddingRight: 7,
                         paddingBottom: 3,
                         paddingLeft: 7,
-                        fontFamily: MONO_FONT_STACK,
-                        fontSize: 9,
-                        fontWeight: 350,
-                        letterSpacing: '0.08em',
-                        textTransform: 'uppercase',
+                        fontFamily: APP_FONT_STACK,
+                        fontSize: 11,
+                        fontWeight: 400,
+                        letterSpacing: '-0.01em',
+                        textTransform: 'capitalize',
                         opacity: archivingLaneId === lock.laneId ? 0.55 : 1,
                       }}
                     >
@@ -361,7 +361,7 @@ export function ProjectCard({
           <PlusGlyph size={11} />
           Add files
           <span style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 9,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
@@ -420,9 +420,9 @@ function ProjectContextSection({
             gap: 7,
             flex: 1,
             minWidth: 0,
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 10,
-            fontWeight: 350,
+            fontWeight: 400,
             letterSpacing: '0.14em',
             textTransform: 'uppercase',
             color: RAMS_INK_QUIET,
@@ -447,11 +447,10 @@ function ProjectContextSection({
               paddingRight: 8,
               paddingBottom: 4,
               paddingLeft: 8,
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 9.5,
-              fontWeight: 350,
-              letterSpacing: '0.1em',
-              textTransform: 'uppercase',
+              fontFamily: APP_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 400,
+              letterSpacing: '-0.01em',
             }}
             onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(29, 78, 216, 0.06)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}

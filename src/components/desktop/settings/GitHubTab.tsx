@@ -162,8 +162,8 @@ export function GitHubTab({
                 fontSize: 12,
                 color: 'var(--t-text-muted)',
                 marginTop: 4,
-                fontFamily: MONO_FONT_STACK,
-                letterSpacing: '0.02em',
+                fontFamily: APP_FONT_STACK,
+                letterSpacing: '-0.01em',
               }}>
                 {activeAccount.protocol} · {activeAccount.scopes.length} {activeAccount.scopes.length === 1 ? 'scope' : 'scopes'}
               </div>
@@ -574,12 +574,12 @@ function DiagnosticRow({
       }} />
       <div style={{ flex: 1, minWidth: 0 }}>
         <div style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 11,
           fontWeight: 400,
           color: RAMS_INK_QUIET,
           textTransform: 'uppercase',
-          letterSpacing: '0.14em',
+          letterSpacing: '0.12em',
           marginBottom: 4,
         }}>
           {title}
@@ -597,24 +597,26 @@ function DiagnosticRow({
   );
 }
 
+// Symon-clean button shapes (system, sentence/title case, 32h, radius 9) —
+// match the shared RamsButton. Was: mono / 11.5px / 350 / UPPERCASE / 44h.
 function primaryLinkStyle(disabled: boolean): React.CSSProperties {
   return {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: 32,
     paddingLeft: 14,
     paddingRight: 14,
-    borderRadius: 12,
+    borderRadius: 9,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: disabled ? RAMS_CONTROL_BORDER : RAMS_CONTROL_ACTIVE_BORDER,
     background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
-    fontFamily: MONO_FONT_STACK,
-    fontSize: 11.5,
-    fontWeight: 350,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
+    fontFamily: APP_FONT_STACK,
+    fontSize: 12,
+    fontWeight: 400,
+    letterSpacing: '-0.01em',
+    textTransform: 'capitalize',
     color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
     textDecoration: 'none',
     cursor: disabled ? 'default' : 'pointer',
@@ -628,19 +630,19 @@ function quietActionStyle(disabled: boolean): React.CSSProperties {
     display: 'inline-flex',
     alignItems: 'center',
     justifyContent: 'center',
-    minHeight: 44,
+    minHeight: 32,
     paddingLeft: 14,
     paddingRight: 14,
-    borderRadius: 12,
+    borderRadius: 9,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: RAMS_CONTROL_BORDER,
     background: disabled ? 'transparent' : RAMS_CONTROL_BG,
-    fontFamily: MONO_FONT_STACK,
-    fontSize: 11.5,
-    fontWeight: 350,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase',
+    fontFamily: APP_FONT_STACK,
+    fontSize: 12,
+    fontWeight: 400,
+    letterSpacing: '-0.01em',
+    textTransform: 'capitalize',
     color: 'var(--t-text-secondary)',
     cursor: disabled ? 'default' : 'pointer',
     opacity: disabled ? 0.6 : 1,

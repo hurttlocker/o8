@@ -173,13 +173,12 @@ function SegmentedControl<T extends string>({ value, options, onChange, disabled
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              minHeight: 44,
+              minHeight: 32,
               minWidth: 44,
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 11,
+              fontFamily: APP_FONT_STACK,
+              fontSize: 12,
               fontWeight: 400,
-              letterSpacing: '0.14em',
-              textTransform: 'uppercase',
+              letterSpacing: '-0.01em',
               color: active ? RAMS_ACCENT : 'var(--t-text-muted)',
               background: active ? 'rgba(29, 78, 216, 0.08)' : 'transparent',
               border: 'none',
@@ -193,7 +192,7 @@ function SegmentedControl<T extends string>({ value, options, onChange, disabled
             }}
           >
             {active ? <CornerBrackets inset={3} armLength={6} /> : null}
-            ({opt.label.toLowerCase()})
+            {opt.label}
           </button>
         );
       })}
@@ -219,7 +218,7 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
         onBlur={() => { window.setTimeout(() => setOpen(false), 120); }}
         style={{
           minWidth: minWidth ?? 140,
-          minHeight: 44,
+          minHeight: 32,
           paddingTop: 0,
           paddingBottom: 0,
           paddingLeft: 14,
@@ -227,11 +226,11 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
           borderWidth: 1,
           borderStyle: 'solid',
           borderColor: open ? RAMS_CONTROL_ACTIVE_BORDER : RAMS_CONTROL_BORDER,
-          borderRadius: 12,
+          borderRadius: 9,
           background: RAMS_CONTROL_BG,
           color: 'var(--t-text)',
-          fontSize: 13,
-          fontWeight: 350,
+          fontSize: 12,
+          fontWeight: 400,
           textAlign: 'left',
           cursor: disabled ? 'not-allowed' : 'pointer',
           fontFamily: APP_FONT_STACK,
@@ -267,7 +266,7 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
             right: 0,
             minWidth: minWidth ?? 220,
             border: `1px solid ${RAMS_CONTROL_BORDER}`,
-            borderRadius: 12,
+            borderRadius: 9,
             background: 'var(--t-panel-solid, var(--t-panel))',
             zIndex: 20,
             paddingTop: 4,
@@ -288,7 +287,7 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
                 type="button"
                 onClick={() => { onChange(opt.value); setOpen(false); }}
                 style={{
-                  minHeight: 44,
+                  minHeight: 36,
                   justifyContent: 'center',
                   paddingTop: 8,
                   paddingBottom: 8,
@@ -297,7 +296,7 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
                   border: 'none',
                   background: 'transparent',
                   color: isActive ? RAMS_ACCENT : 'var(--t-text)',
-                  fontSize: 13,
+                  fontSize: 12,
                   fontWeight: isActive ? 500 : 400,
                   cursor: 'pointer',
                   textAlign: 'left',
@@ -451,9 +450,9 @@ export function OperatorDefaultsTab() {
           lineHeight: 1.55,
         }}>
           <span style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 11,
-            fontWeight: 300,
+            fontWeight: 400,
             letterSpacing: '0.12em',
             textTransform: 'uppercase',
             color: '#ef4444',
@@ -531,8 +530,8 @@ export function OperatorDefaultsTab() {
                   fontSize: 12,
                   fontWeight: 400,
                   color: RAMS_INK_QUIET,
-                  fontFamily: MONO_FONT_STACK,
-                  letterSpacing: '0.04em',
+                  fontFamily: APP_FONT_STACK,
+                  letterSpacing: '-0.01em',
                 }}>
                   {preset.sublabel}
                 </span>

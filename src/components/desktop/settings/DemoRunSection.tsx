@@ -202,12 +202,11 @@ export function DemoRunSection({ sectionNumber }: { sectionNumber: string }) {
           {result ? (
             <div style={{
               marginTop: 8,
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 11,
+              fontFamily: APP_FONT_STACK,
+              fontSize: 12,
               fontWeight: 400,
-              letterSpacing: '0.04em',
+              letterSpacing: '-0.01em',
               color: RAMS_INK_QUIET,
-              textTransform: 'uppercase',
             }}>
               {formatSummaryLine(result)}
             </div>
@@ -325,12 +324,12 @@ function StepRow({
           flexShrink: 0,
         }} />
         <span style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 11,
           fontWeight: 400,
           color: RAMS_INK_QUIET,
           textTransform: 'uppercase',
-          letterSpacing: '0.14em',
+          letterSpacing: '0.12em',
           minWidth: 200,
         }}>
           {formatStepLabel(step.name)}
@@ -411,12 +410,12 @@ function RunDirRow({ runDir }: { runDir: string }) {
         flexShrink: 0,
       }} />
       <span style={{
-        fontFamily: MONO_FONT_STACK,
+        fontFamily: APP_FONT_STACK,
         fontSize: 11,
         fontWeight: 400,
         color: RAMS_INK_QUIET,
         textTransform: 'uppercase',
-        letterSpacing: '0.14em',
+        letterSpacing: '0.12em',
         minWidth: 200,
       }}>
         Run directory
@@ -442,10 +441,10 @@ function RunDirRow({ runDir }: { runDir: string }) {
 function StatusPill({ tone }: { tone: { label: string; pill: string } }) {
   return (
     <span style={{
-      fontFamily: MONO_FONT_STACK,
+      fontFamily: APP_FONT_STACK,
       fontSize: 10,
-      fontWeight: 300,
-      letterSpacing: '0.14em',
+      fontWeight: 400,
+      letterSpacing: '0.12em',
       color: tone.pill,
       paddingTop: 2,
       paddingBottom: 2,
@@ -506,20 +505,20 @@ function runButtonStyle(busy: boolean): React.CSSProperties {
     display: 'inline-flex',
     alignItems: 'center',
     gap: 8,
-    minHeight: 44,
+    minHeight: 32,
     paddingLeft: 14,
     paddingRight: 14,
-    borderRadius: 12,
+    borderRadius: 9,
     borderWidth: 1,
     borderStyle: 'solid',
     borderColor: busy ? RAMS_HAIRLINE_SOFT : 'rgba(29, 78, 216, 0.32)',
     background: busy ? 'transparent' : 'rgba(29, 78, 216, 0.1)',
     color: busy ? RAMS_INK_QUIET : RAMS_ACCENT,
-    fontFamily: MONO_FONT_STACK,
-    fontSize: 11.5,
-    fontWeight: 300,
-    letterSpacing: '0.04em',
-    textTransform: 'uppercase' as const,
+    fontFamily: APP_FONT_STACK,
+    fontSize: 12,
+    fontWeight: 400,
+    letterSpacing: '-0.01em',
+    textTransform: 'capitalize' as const,
     cursor: busy ? 'default' : 'pointer',
     transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
     opacity: busy ? 0.6 : 1,

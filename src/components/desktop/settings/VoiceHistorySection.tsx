@@ -21,7 +21,6 @@ import {
 } from '@/lib/tauri/bridge';
 import {
   APP_FONT_STACK,
-  MONO_FONT_STACK,
   RAMS_INK_QUIET,
   HairlineRule,
   RamsButton,
@@ -75,10 +74,10 @@ function HistoryRow({
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
         <span
           style={{
-            fontFamily: MONO_FONT_STACK,
+            fontFamily: APP_FONT_STACK,
             fontSize: 9,
             fontWeight: 400,
-            letterSpacing: '0.08em',
+            letterSpacing: '0.12em',
             color: entry.mode === 'ask' ? '#8fb8ff' : RAMS_INK_QUIET,
           }}
         >
@@ -96,10 +95,10 @@ function HistoryRow({
             aria-label={copied ? 'Copied' : 'Copy text'}
             onClick={() => onCopy(entry.id, entry.text)}
             style={{
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 9.5,
+              fontFamily: APP_FONT_STACK,
+              fontSize: 11,
               fontWeight: 400,
-              letterSpacing: '0.04em',
+              letterSpacing: '-0.01em',
               color: copied ? '#22c55e' : 'var(--t-text-secondary)',
               background: 'transparent',
               border: '1px solid var(--t-border)',
@@ -111,7 +110,7 @@ function HistoryRow({
               cursor: 'pointer',
             }}
           >
-            {copied ? 'COPIED' : 'COPY'}
+            {copied ? 'Copied' : 'Copy'}
           </button>
           <button
             type="button"

@@ -30,7 +30,6 @@ import {
 } from '@/lib/tauri/bridge';
 import {
   APP_FONT_STACK,
-  MONO_FONT_STACK,
   RAMS_ACCENT,
   RAMS_INK_QUIET,
   HairlineRule,
@@ -118,7 +117,7 @@ function PermissionRow({
       </div>
       <span
         style={{
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           fontSize: 10,
           fontWeight: 400,
           letterSpacing: '0.08em',
@@ -511,7 +510,7 @@ export function VoiceTab() {
           fontSize: 11,
           fontWeight: 300,
           color: RAMS_INK_QUIET,
-          fontFamily: MONO_FONT_STACK,
+          fontFamily: APP_FONT_STACK,
           letterSpacing: '0.04em',
         }}
       >
