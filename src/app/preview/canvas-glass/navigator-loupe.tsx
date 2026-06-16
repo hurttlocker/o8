@@ -12,7 +12,7 @@
  * overview, a dark pill at its lower edge.
  */
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence } from 'framer-motion';
 import { FONT, glass } from './ui';
 import { RefractionBall } from './refraction-ball';
@@ -22,6 +22,11 @@ import type { CanvasTone, OrbSettings } from './orb-settings';
 /** Roll sensitivity — drag the ball N screen-px → pan the view N×this. The ball
  *  is small but represents a big plane, so a drag travels further than the grab. */
 const ROLL_SENS = 4.5;
+
+/** Idle delay before the loupe slides out of the way, and how close to the
+ *  bottom-left corner the cursor must come to call it back. */
+const HIDE_MS = 2800;
+const REVEAL_NEAR_PX = 150;
 
 export interface MinimapCard {
   id: number;
@@ -55,6 +60,7 @@ export function NavigatorLoupe({
   onOrbChange,
   onOrbReset,
   tone,
+  panKey,
 }: {
   cards: MinimapCard[];
   /** The usable workspace in canvas px — the minimap's stable frame. */
@@ -74,6 +80,9 @@ export function NavigatorLoupe({
   onOrbReset: () => void;
   /** Current canvas tone — labels the tuner + scopes the saved dials. */
   tone: CanvasTone;
+  /** Changes whenever the canvas is panned — wakes the auto-hidden loupe so the
+   *  map reappears while you're navigating. */
+  panKey: number;
 }) {
   const rollRef = useRef<{ pointerId: number; lastX: number; lastY: number } | null>(null);
   const [rolling, setRolling] = useState(false);
@@ -98,6 +107,60 @@ export function NavigatorLoupe({
     };
   }, []);
 
+  // ── Auto-hide: the loupe slides out of the way when idle and returns when
+  // you navigate (pan/zoom), hover it, or reach for its corner. The operator
+  // saw a canvas do this and liked it; it keeps the bottom-left clear while you
+  // work without losing the map a flick away.
+  const [revealed, setRevealed] = useState(true);
+  const [hoveredRoot, setHoveredRoot] = useState(false);
+  const idleRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const keepAwakeRef = useRef(false);
+  const reducedRef = useRef(false);
+
+  // Reduced-motion: never auto-hide (no surprise motion). Set first so the
+  // mount-time wake() below reads the right value.
+  useEffect(() => {
+    reducedRef.current = typeof window !== 'undefined'
+      && !!window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+  }, []);
+
+  // Named function expression so the re-arm inside the timeout binds to `schedule`
+  // itself (not the outer const), avoiding an access-before-declaration closure.
+  const scheduleHide = useCallback(function schedule() {
+    if (idleRef.current) clearTimeout(idleRef.current);
+    if (reducedRef.current) return; // stay put under reduced motion
+    idleRef.current = setTimeout(() => {
+      // Don't vanish mid-interaction (hovering it, rolling, tuner open) — wait.
+      if (keepAwakeRef.current) { schedule(); return; }
+      setRevealed(false);
+    }, HIDE_MS);
+  }, []);
+  const wake = useCallback(() => {
+    setRevealed(true);
+    scheduleHide();
+  }, [scheduleHide]);
+
+  useEffect(() => {
+    keepAwakeRef.current = hoveredRoot || rolling || tunerOpen;
+  }, [hoveredRoot, rolling, tunerOpen]);
+
+  // Show on mount, then begin the idle countdown; and wake on any navigation
+  // (zoom step or pan) so the map is there exactly when you're moving around.
+  useEffect(() => { wake(); }, [wake, zoomValue, panKey]);
+
+  // Reach toward the bottom-left corner → it slides back even when fully hidden.
+  useEffect(() => {
+    const onMove = (event: PointerEvent) => {
+      if (event.clientX <= REVEAL_NEAR_PX && event.clientY >= window.innerHeight - REVEAL_NEAR_PX) {
+        wake();
+      }
+    };
+    window.addEventListener('pointermove', onMove, { passive: true });
+    return () => window.removeEventListener('pointermove', onMove);
+  }, [wake]);
+
+  useEffect(() => () => { if (idleRef.current) clearTimeout(idleRef.current); }, []);
+
   // Zoom steps run 100% (most zoomed-in) → 70% (most out). − steps out, + in.
   const idx = Math.max(0, zoomSteps.findIndex((s) => s.value === zoomValue));
   const stepZoom = (delta: number) => {
@@ -109,6 +172,8 @@ export function NavigatorLoupe({
 
   return (
     <div
+      onMouseEnter={() => { setHoveredRoot(true); wake(); }}
+      onMouseLeave={() => { setHoveredRoot(false); scheduleHide(); }}
       style={{
         position: 'absolute',
         left: 16,
@@ -118,6 +183,12 @@ export function NavigatorLoupe({
         alignItems: 'center',
         gap: 8,
         zIndex: 40,
+        // Slide out of the way when idle; spring back on navigation/proximity.
+        // translate down-left tucks the whole widget off the corner.
+        transform: revealed ? 'translate(0, 0)' : 'translate(-122%, 46%)',
+        opacity: revealed ? 1 : 0,
+        pointerEvents: revealed ? 'auto' : 'none',
+        transition: 'transform 460ms cubic-bezier(0.22, 1, 0.36, 1), opacity 300ms ease',
       }}
     >
       {/* Orb-refraction tuner — admin-only (⌥⇧O); opens upward, above the ball. */}

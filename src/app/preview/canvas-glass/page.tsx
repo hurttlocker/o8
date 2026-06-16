@@ -61,6 +61,7 @@ import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-car
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
+import { CanvasFeedbackButton } from './canvas-feedback';
 import { ProximityDock } from './proximity-dock';
 import { AnticipationRing } from './anticipation-ring';
 import { OrchestratorDock } from './dock';
@@ -2948,6 +2949,7 @@ export default function CanvasGlassPreviewPage() {
           ...glass(true),
         }}
       >
+        <CanvasFeedbackButton />
         <button
           type="button"
           aria-label="Search the canvas"
@@ -3282,6 +3284,7 @@ export default function CanvasGlassPreviewPage() {
         onOrbChange={updateOrbSettings}
         onOrbReset={resetOrbSettings}
         tone={settings.tone}
+        panKey={Math.round(pan.x) + Math.round(pan.y)}
       />
 
       {/* ── Terminal cwd drawer — same system as the Sessions drawer:
