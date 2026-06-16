@@ -418,6 +418,20 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["repo", "task"]
             }
         }),
+        // ── Escalation handoff (two-tier brain) ───────────────────────────────
+        json!({
+            "name": "escalate",
+            "description": "Hand a HEAVIER, multi-step task off to a more capable BACKGROUND brain so you can answer the user INSTANTLY instead of making them wait. Two targets: 'claude_brain' for deep personal/Mac tasks that need several steps or careful reasoning (e.g. 'go through my calendar this week and draft a summary email to the team', 'organize my reminders by project') — it runs in the background and reports back when done; 'orchestrator' for work that CHANGES a code repository (pass `repo`). Do NOT escalate quick single-tool asks you can just do yourself. After calling escalate, give a short spoken acknowledgement like 'On it — I'll get that going and let you know.' and do not call more tools.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The full task to hand off, written as a clear standalone instruction with any context the background brain needs." },
+                    "target": { "type": "string", "enum": ["claude_brain", "orchestrator"], "description": "'claude_brain' for heavy personal/Mac tasks; 'orchestrator' for code-repo changes." },
+                    "repo": { "type": "string", "description": "Repo folder name — REQUIRED when target is 'orchestrator' (e.g. 'o8'). Omit for claude_brain." }
+                },
+                "required": ["task", "target"]
+            }
+        }),
         // ── Apple Music (app-control frontier) ────────────────────────────────
         json!({
             "name": "mac_music_playlists",
@@ -778,6 +792,38 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_reject_item" => o8_bridge::reject_item(args).await,
         "o8_ask" => o8_bridge::ask(args).await,
         "o8_dispatch" => o8_bridge::dispatch(args).await,
+        "escalate" => {
+            let task = args
+                .get("task")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if task.is_empty() {
+                return Err("escalate requires a non-empty `task`".to_string());
+            }
+            let is_orchestrator =
+                args.get("target").and_then(|v| v.as_str()) == Some("orchestrator");
+            if is_orchestrator {
+                // Code-repo work → reuse the existing dispatch tool, but re-impose
+                // its confirm card here: `escalate` is ReadOnly, so the loop did
+                // NOT card it, and a worker spawn must never go silent.
+                if !super::confirm_if_needed(ctx, "o8_dispatch", &args).await {
+                    return Ok(json!({ "error": "User declined this action", "declined_by_user": true }));
+                }
+                o8_bridge::dispatch(args).await
+            } else {
+                // Heavy personal/Mac task → hand to the background Claude brain and
+                // let the front brain ack instantly. Fire-and-forget; results reach
+                // the user via the dock + TTS when the background run finishes.
+                super::spawn_claude_task(ctx.app.clone(), task);
+                Ok(json!({
+                    "status": "handed_off",
+                    "target": "claude_brain",
+                    "message": "A more capable background brain is now working on this. Give the user a short spoken acknowledgement (e.g. \"On it — I'll get that going and let you know.\") and do not call more tools."
+                }))
+            }
+        }
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_panel_read" => o8_bridge::panel_read(args).await,
         "o8_recap" => o8_bridge::recap(args).await,
