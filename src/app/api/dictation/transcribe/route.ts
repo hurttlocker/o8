@@ -1,9 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveTranscribeRoute } from '@/lib/cortex/qa/llm/inference-route';
 
-const OPENROUTER_TRANSCRIBE_URL = 'https://openrouter.ai/api/v1/audio/transcriptions';
 const WHISPER_MODEL = 'openai/whisper-large-v3-turbo';
 
 /**
@@ -37,10 +36,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Audio too large (max 10 MB).' }, { status: 413 });
   }
 
-  const apiKey = await resolveOpenRouterKey();
-  if (!apiKey) {
+  const route = await resolveTranscribeRoute();
+  if (!route) {
     return NextResponse.json(
-      { error: 'OPENROUTER_API_KEY is not configured. Set it in Settings → Keys to enable dictation.' },
+      { error: 'Dictation needs an OpenRouter key or an active plan to transcribe.' },
       { status: 503 },
     );
   }
@@ -65,14 +64,9 @@ export async function POST(request: Request) {
 
   let response: Response;
   try {
-    response = await fetch(OPENROUTER_TRANSCRIBE_URL, {
+    response = await fetch(route.url, {
       method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'Content-Type': 'application/json',
-        'HTTP-Referer': 'https://o8.app',
-        'X-Title': 'o8 Dictation',
-      },
+      headers: route.headers,
       body: JSON.stringify({
         model: WHISPER_MODEL,
         input_audio: { data: base64Audio, format: audioFormat },

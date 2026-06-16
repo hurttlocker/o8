@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
 import {
   buildPolishSystemPrompt,
   type DictationPolishContext,
@@ -9,7 +9,6 @@ import {
 } from '@/lib/dictation/polish-prompt';
 import { processVoiceCommands } from '@/lib/dictation/voice-commands';
 
-const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 // Symon uses Gemini Flash Lite for polish; on OpenRouter the matching
 // model is `google/gemini-flash-lite-latest`. Adjust here if a newer
 // preview is named differently — tested values fall through.
@@ -55,10 +54,11 @@ export async function POST(request: Request) {
   const surface: DictationSurface = body.surface ?? 'general';
   const systemPrompt = buildPolishSystemPrompt(surface, body.context ?? {});
 
-  const apiKey = await resolveOpenRouterKey();
-  if (!apiKey) {
-    // Polish is best-effort — without a key, return the pre-cleaned
-    // transcript so the user still gets text inserted, just unpolished.
+  const route = await resolveOpenRouterRoute();
+  if (!route) {
+    // Polish is best-effort — with no key AND no plan token, return the
+    // pre-cleaned transcript so the user still gets text inserted, just
+    // unpolished. A plan token routes this through the proxy.
     return NextResponse.json({ text: preCleaned, polished: false });
   }
 
@@ -70,14 +70,9 @@ export async function POST(request: Request) {
   const failures: string[] = [];
   for (const model of POLISH_MODELS) {
     try {
-      const response = await fetch(OPENROUTER_URL, {
+      const response = await fetch(route.url, {
         method: 'POST',
-        headers: {
-          Authorization: `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-          'HTTP-Referer': 'https://o8.app',
-          'X-Title': 'o8 Dictation Polish',
-        },
+        headers: route.headers,
         body: JSON.stringify({
           model,
           messages,
