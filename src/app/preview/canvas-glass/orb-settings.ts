@@ -36,19 +36,20 @@ export interface OrbSettings {
 
 export type CanvasTone = 'light' | 'dark';
 
-/** Defaults for the sphere-projection rewrite (v2). edge → curvature, wrap →
- *  radial fill toward the rim, magnify → centre swell; clear glass with a
- *  delicate specular + rim chroma (the MaxBlade reference). */
+/** Defaults = the operator's tuned orb, shipped for EVERYONE on every page +
+ *  theme (the orb is universal, not part of a glass theme). A deep, milky
+ *  sphere: max edge-fill + depth + glass body, full chroma, and NO specular
+ *  hotspot or rim glow (the operator's locked look, 2026-06-15). */
 export const ORB_DEFAULTS: OrbSettings = {
   magnify: 0,
   wrap: 1.6,
-  edge: 0.55,
-  chroma: 0.03,
-  specular: 0.5,
-  rim: 0.3,
-  depth: 0.3,
+  edge: 1,
+  chroma: 0.08,
+  specular: 0,
+  rim: 0,
+  depth: 1.4,
   fog: 0,
-  glass: 0.5,
+  glass: 1,
 };
 
 export const ORB_RANGES: Record<keyof OrbSettings, { min: number; max: number; step: number }> = {

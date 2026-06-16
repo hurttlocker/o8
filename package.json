@@ -42,7 +42,7 @@
     "desktop:dev": "npm run dev",
     "predev:cleanup:side": "lsof -ti :3010 -sTCP:LISTEN | xargs kill -9 2>/dev/null; lsof -ti :3011 -sTCP:LISTEN | xargs kill -9 2>/dev/null; true",
     "dev:side": "PORT=3010 O8_API_PORT=3010 O8_WS_PORT=3011 next dev -p 3010",
-    "dev:ws:side": "PORT=3010 O8_API_PORT=3010 O8_WS_PORT=3011 WS_PORT=3011 tsx src/ws-server.ts",
+    "dev:ws:side": "PORT=3010 O8_API_PORT=3010 O8_WS_PORT=3011 WS_PORT=3011 NODE_OPTIONS=\"--import=./scripts/register-server-only-stub.mjs\" tsx src/ws-server.ts",
     "desktop:dev:side": "npm run predev:cleanup:side && concurrently -k -s first \"npm run dev:side\" \"npm run dev:ws:side\"",
     "tunnel": "npx cloudflared tunnel --url http://localhost:3001",
     "tauri:dev": "cargo tauri dev",

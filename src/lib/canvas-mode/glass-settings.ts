@@ -177,6 +177,9 @@ export const CANVAS_GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }
  * Siri = the dark Apple reference; Frost = heavy private glass.
  */
 export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; values: CanvasGlassSettings }> = [
+  // o8 — the operator's signature look, shipped for everyone (the former "Mine").
+  // Dark HUD glass over the ember backdrop; the personal "Mine" slot stays free.
+  { id: 'o8', label: 'o8', values: { frost: 3, tint: 0, ink: 1, vibrance: 2.2, veil: 0.3, material: 'hud', backdropFrost: 0, backdrop: 'ember', chatFrost: 50, chatTint: 0, tone: 'dark', chatTone: 'match', dockTone: 'dark', dockTint: 0.92, textShade: 0.04 } },
   // Slate — the dark Siri reference; the default look.
   { id: 'siri', label: 'Slate', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 34, chatTint: 0.6, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.3, textShade: 0.04 } },
   // Paper — the white canvas: light wash, dark ink, light glass throughout.
