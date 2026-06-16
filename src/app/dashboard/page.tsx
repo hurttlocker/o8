@@ -4,6 +4,7 @@
 import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { AnimatePresence, motion } from 'framer-motion';
+import { SmoothCorners } from '@lisse/react';
 import { DesktopWebSocketProvider, useSharedDesktopWs, useWsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { buildTranscriptWsCallbacks } from '@/lib/transcripts/wireWsBridge';
@@ -579,11 +580,12 @@ function DashboardInner() {
   markDashboardFirstRender();
 
 
-  // Glass vs solid axis: in glass mode the AgentPanel card paints nothing
-  // and shadows its descendants with midnight-palette ink so dark vibrancy
-  // shows through with legible light text (matches the right O8Panel
-  // approach). In solid mode the card keeps --t-panel-solid (the proper
-  // opaque paper) with the normal dark-on-cream tokens.
+  // Glass vs solid axis for the left AgentPanel card. This is the SAME
+  // resolved surface that ThemeProvider writes to <html data-surface>, so the
+  // JS signal and the CSS chrome flip stay in lockstep (no desync). In glass
+  // mode the card paints --t-bg and lets the chrome flip own transparency +
+  // light ink (matches the right O8Panel); in solid mode it keeps the opaque
+  // --t-panel-solid paper + floating shadow with the normal base-token ink.
   const { surface: themeSurface } = useTheme();
   const isGlassSurface = themeSurface === 'glass';
 
@@ -4226,6 +4228,12 @@ function DashboardInner() {
               footer card rendered in DesktopStatusBar (which has flat
               top + rounded bottom). Together they read as one card. */}
           <div
+            // Glass symmetry: drive the panel off the SAME signal as the right
+            // O8Panel — data-chrome-surface. In glass mode the chrome flip turns
+            // --t-panel-solid → transparent and ink → light, so left + right are
+            // both glass and only the center workspace stays beige. In solid mode
+            // the flip is inert, so this keeps cream paper + dark ink (perfect).
+            data-chrome-surface="true"
             style={{
               flex: 1,
               minHeight: 0,
@@ -4236,24 +4244,19 @@ function DashboardInner() {
               borderTopRightRadius: 14,
               borderBottomLeftRadius: 0,
               borderBottomRightRadius: 0,
-              // Surface axis branches here:
-              //   - solid: --t-panel-solid (the proper opaque cream paper)
-              //     so dark-ink text reads on its own surface.
-              //   - glass: paint nothing + shadow descendants with light
-              //     ink tokens so the panel reads as glass over macOS
-              //     vibrancy (matches the right O8Panel approach).
-              background: isGlassSurface ? 'transparent' : 'var(--t-panel-solid)',
+              // Surface axis — ONE source of truth. `isGlassSurface` reads the
+              // same resolved `surface` (useTheme → resolveTheme) that becomes
+              // <html data-surface>, so it can't disagree with the chrome flip.
+              //   - solid: --t-panel-solid (opaque cream / graphite paper) + the
+              //     floating-card drop shadow. Dark-on-paper ink from base tokens.
+              //   - glass: --t-bg, the SAME token the right O8Panel paints. In
+              //     light+glass the chrome flip (data-chrome-surface, above) turns
+              //     --t-bg transparent AND flips ink to light; in dark+glass --t-bg
+              //     is already a translucent dark tint over light base ink. Either
+              //     way the panel reads as glass and ink matches the right panel —
+              //     no inline ink overrides needed.
+              background: isGlassSurface ? 'var(--t-bg)' : 'var(--t-panel-solid)',
               boxShadow: isGlassSurface ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
-              ...(isGlassSurface ? {
-                ['--t-text' as string]: '#e8ecf2',
-                ['--t-text-strong' as string]: '#f5f8fc',
-                ['--t-text-secondary' as string]: '#bcc5d0',
-                ['--t-text-muted' as string]: '#8b95a3',
-                ['--t-text-faint' as string]: '#5f6b7a',
-                ['--t-hover' as string]: 'rgba(255, 255, 255, 0.05)',
-                ['--t-input-bg' as string]: 'rgba(255, 255, 255, 0.06)',
-                ['--t-divider-subtle' as string]: 'rgba(255, 255, 255, 0.06)',
-              } : {}),
             } as React.CSSProperties}
           >
           <LeftHeaderStrip
@@ -4309,10 +4312,14 @@ function DashboardInner() {
         position: 'relative',
         minWidth: 0,
         background: 'transparent',
-        // Apple squircle corners — the workspace floats inside the dashboard
-        // gradient with a small inset so the curve is visible against the
-        // adjacent NavRail / chat columns and the status strip below.
-        borderRadius: 14,
+        // The workspace floats inside the dashboard gradient with a small inset
+        // (workspaceInset). The Apple squircle now lives on the inner content
+        // card below (Lisse SmoothCorners — the same "list corners" the canvas
+        // uses) so the WHITE surface carries the curve on ALL four corners. A
+        // plain borderRadius here only rounded the transparent header strip's
+        // top + clipped the white bottom as a circle, never the white TOP.
+        // overflow:hidden stays to keep the header strip within these bounds.
+        borderRadius: 0,
         marginTop: workspaceInset,
         marginBottom: workspaceInset,
         marginLeft: workspaceInset,
@@ -4344,7 +4351,10 @@ function DashboardInner() {
           onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}
           onTitleShare={titleMenuActive ? handleTitleShare : undefined}
         />
-        <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        {/* The white workspace card. Lisse squircle ("list corners" from the
+            canvas) on all four corners so the TOP rounds too — not just the
+            bottom. autoEffects off = pure clip-path, no injected shadow. */}
+        <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <GuidedDiscoveryHalo active={showCanvasFtux} borderRadius={18} />
         <GuidedDiscoveryCoachmark
           visible={showCanvasFtux}
@@ -4415,7 +4425,7 @@ function DashboardInner() {
           </SettingsOverlay>
         )}
 
-        </div>
+        </SmoothCorners>
       </div>
 
       <AnimatePresence initial={false}>

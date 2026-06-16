@@ -20,7 +20,14 @@ import { useO8Auth, type O8AuthState } from '@/components/auth/O8AuthProvider';
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 const POLL_MS = 30_000;
-const PANEL_BG = 'color-mix(in srgb, var(--t-panel-solid, var(--t-panel, rgba(255,255,255,0.92))) 94%, var(--t-bg, transparent) 6%)';
+// Paint the panel token directly — NOT through color-mix. In glass mode
+// --t-panel-solid is a linear-gradient (an <image>), and color-mix() only
+// accepts <color> args, so the old color-mix() was invalid CSS → the whole
+// background was dropped → the drawer rendered transparent over the dark
+// vibrancy with near-black text (illegible). A gradient is a valid
+// `background`, so this restores the frosted cream/graphite menu card in
+// every palette × surface combo.
+const PANEL_BG = 'var(--t-panel-solid, var(--t-panel, rgba(255,255,255,0.92)))';
 const ROW_HOVER_BG = 'var(--t-panel-hover, rgba(15, 23, 42, 0.04))';
 const SUBTLE_BG = 'var(--t-bg-card, rgba(15, 23, 42, 0.04))';
 const BORDER = 'var(--t-panel-border, rgba(15, 23, 42, 0.1))';
