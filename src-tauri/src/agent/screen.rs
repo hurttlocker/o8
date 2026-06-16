@@ -206,6 +206,66 @@ pub fn capture(app: &tauri::AppHandle) -> Option<ScreenContext> {
     Some(ctx)
 }
 
+/// Capture ONLY the o8 window (not the whole desktop) as a base64 PNG, for the
+/// in-app feedback / error report (operator note, 2026-06-16). Region capture
+/// via `screencapture -R` over the window's logical bounds keeps unrelated apps
+/// out of a report; the operator can still remove the shot before sending.
+/// Downscaled to MAX_IMG_WIDTH so a retina window stays under Discord's webhook
+/// ceiling. Blocking subprocess — Tauri runs commands off the main thread, so
+/// this is safe to call directly from the command. None on any failure → the
+/// feedback flow falls back to a manual paste.
+pub fn capture_window(app: &tauri::AppHandle, label: &str) -> Option<String> {
+    use tauri::Manager;
+    let window = app.get_webview_window(label)?;
+    let scale = window.scale_factor().unwrap_or(1.0).max(1.0);
+    let pos = window.outer_position().ok()?; // physical px, Tauri top-left origin
+    let size = window.outer_size().ok()?;
+    // `screencapture -R x,y,w,h` takes POINTS in the global display space (main
+    // display top-left origin, y down) — same origin Tauri reports, so dividing
+    // physical px by the scale factor yields the region to grab.
+    let x = pos.x as f64 / scale;
+    let y = pos.y as f64 / scale;
+    let w = size.width as f64 / scale;
+    let h = size.height as f64 / scale;
+    if w < 1.0 || h < 1.0 {
+        return None;
+    }
+
+    let path = std::env::temp_dir().join(format!("o8-feedback-{}.png", std::process::id()));
+    let output = std::process::Command::new("screencapture")
+        .arg("-x") // no shutter sound
+        .arg(format!("-R{x:.0},{y:.0},{w:.0},{h:.0}"))
+        .arg(&path)
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        log::warn!(
+            "[feedback-capture] screencapture failed ({}): {} — grant o8 Screen \
+             Recording in System Settings if this is a permission denial",
+            output.status,
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        request_screen_permission();
+        let _ = std::fs::remove_file(&path);
+        return None;
+    }
+
+    if png_dimensions(&path).is_some_and(|(w, _)| w > MAX_IMG_WIDTH) {
+        let _ = std::process::Command::new("sips")
+            .arg("--resampleWidth")
+            .arg(MAX_IMG_WIDTH.to_string())
+            .arg(&path)
+            .output();
+    }
+
+    let bytes = std::fs::read(&path).ok()?;
+    let _ = std::fs::remove_file(&path);
+    if bytes.is_empty() {
+        return None;
+    }
+    Some(base64::engine::general_purpose::STANDARD.encode(&bytes))
+}
+
 fn cleanup(files: &[std::path::PathBuf]) {
     for f in files {
         let _ = std::fs::remove_file(f);

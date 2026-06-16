@@ -1,0 +1,319 @@
+'use client';
+
+/**
+ * CanvasFeedbackButton — a tiny, unobtrusive feedback affordance for the canvas
+ * (operator ask, 2026-06-16; o8.md note line 15). Lives in the top-right chrome
+ * pill beside search/account. Two ways in:
+ *   • Click the speech-bubble → instant popover (type a note, optional paste).
+ *   • Cmd/Ctrl+Shift+E → auto-captures the o8 window (Rust capture_app_window,
+ *     screencapture region), THEN opens the popover with the shot attached —
+ *     the frictionless "screenshot this error" path from the note. Captured
+ *     before the modal opens, so the shot shows the app state, not the modal.
+ * Both → the existing one-way Discord intake at /api/feedback/report (route
+ * "canvas"), and the operator can remove the shot before sending.
+ *
+ * Follow-up (not yet): make it app-wide (dashboard too) + the optional ~5s clip.
+ */
+
+import { useCallback, useEffect, useState } from 'react';
+import { createPortal } from 'react-dom';
+import { isTauri } from '@/lib/tauri/bridge';
+import { FONT, glass } from './ui';
+
+type Category = 'bug' | 'request';
+type SendState = 'idle' | 'sending' | 'sent' | 'error';
+
+const MAX_MESSAGE = 4000;
+const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
+const ACCENT = '#f59e0b'; // the canvas one-orange, used sparingly
+
+export function CanvasFeedbackButton() {
+  const [open, setOpen] = useState(false);
+  const [category, setCategory] = useState<Category>('bug');
+  const [message, setMessage] = useState('');
+  const [image, setImage] = useState<{ dataUrl: string; name: string } | null>(null);
+  const [state, setState] = useState<SendState>('idle');
+  const [error, setError] = useState<string | null>(null);
+
+  const reset = useCallback(() => {
+    setMessage('');
+    setImage(null);
+    setState('idle');
+    setError(null);
+  }, []);
+
+  // The Cmd/Ctrl+Shift+E path: capture the o8 window FIRST (modal still closed,
+  // so the shot is the app state, not this popover), then open with it attached.
+  // Falls back to opening empty if capture is unavailable (web) or denied.
+  const openWithCapture = useCallback(async () => {
+    let shot: { dataUrl: string; name: string } | null = null;
+    try {
+      if (isTauri()) {
+        const { invoke } = await import('@tauri-apps/api/core');
+        const b64 = await invoke<string | null>('capture_app_window');
+        if (typeof b64 === 'string' && b64) {
+          shot = { dataUrl: `data:image/png;base64,${b64}`, name: 'o8-window.png' };
+        }
+      }
+    } catch {
+      /* no capture — the operator can still paste/drop a shot */
+    }
+    setState('idle');
+    setError(null);
+    if (shot) setImage(shot);
+    setOpen(true);
+  }, []);
+
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.shiftKey && (event.key === 'e' || event.key === 'E')) {
+        event.preventDefault();
+        void openWithCapture();
+      }
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [openWithCapture]);
+
+  const attachImage = useCallback((file: File | null | undefined) => {
+    if (!file || !file.type.startsWith('image/')) return;
+    if (file.size > MAX_IMAGE_BYTES) {
+      setState('error');
+      setError('Screenshot too large (max 8 MB).');
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        setImage({ dataUrl: reader.result, name: file.name || 'screenshot.png' });
+        setState((p) => (p === 'sent' || p === 'error' ? 'idle' : p));
+        setError(null);
+      }
+    };
+    reader.readAsDataURL(file);
+  }, []);
+
+  const onPaste = useCallback((event: React.ClipboardEvent) => {
+    const items = event.clipboardData?.items;
+    if (!items) return;
+    for (let i = 0; i < items.length; i += 1) {
+      if (items[i].type.startsWith('image/')) {
+        const file = items[i].getAsFile();
+        if (file) { event.preventDefault(); attachImage(file); return; }
+      }
+    }
+  }, [attachImage]);
+
+  const onDrop = useCallback((event: React.DragEvent) => {
+    const file = event.dataTransfer?.files?.[0];
+    if (file) { event.preventDefault(); attachImage(file); }
+  }, [attachImage]);
+
+  const send = useCallback(async () => {
+    const trimmed = message.trim();
+    if (!trimmed) { setState('error'); setError('Add a short note first.'); return; }
+    setState('sending');
+    setError(null);
+    try {
+      const response = await fetch('/api/feedback/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          category,
+          message: trimmed,
+          route: 'canvas',
+          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
+          image: image ? { dataUrl: image.dataUrl, name: image.name } : undefined,
+        }),
+      });
+      const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
+      if (!response.ok || !body?.ok) {
+        setState('error');
+        setError(body?.error || `Failed (HTTP ${response.status}).`);
+        return;
+      }
+      setState('sent');
+      setMessage('');
+      setImage(null);
+    } catch (sendError) {
+      setState('error');
+      setError(sendError instanceof Error ? sendError.message : 'Send failed.');
+    }
+  }, [category, message, image]);
+
+  const canSend = message.trim().length > 0 && state !== 'sending';
+
+  return (
+    <>
+      {/* Trigger — sits in the top-right chrome pill, same 28px target as search. */}
+      <button
+        type="button"
+        aria-label="Send feedback"
+        title="Send feedback"
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          display: 'inline-flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          width: 28,
+          height: 28,
+          borderWidth: 0,
+          background: 'transparent',
+          borderRadius: 14,
+          color: open ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+          cursor: 'pointer',
+        }}
+        onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+        onMouseLeave={(event) => { if (!open) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+      >
+        {/* speech bubble — width/height inline (attr sizing collapses in flex) */}
+        <svg style={{ width: 13, height: 13, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+        </svg>
+      </button>
+
+      {open && typeof document !== 'undefined' ? createPortal((
+        <>
+          <div role="presentation" onClick={() => setOpen(false)} style={{ position: 'fixed', inset: 0, zIndex: 45 }} />
+          <div
+            onPaste={onPaste}
+            onDrop={onDrop}
+            onDragOver={(event) => { if (event.dataTransfer?.types?.includes('Files')) event.preventDefault(); }}
+            style={{
+              position: 'fixed',
+              top: 66,
+              right: 24,
+              width: 288,
+              zIndex: 46,
+              borderRadius: 16,
+              padding: 14,
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 10,
+              fontFamily: FONT,
+              color: 'var(--cnv-ink)',
+              ...glass(true),
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: 12.5, fontWeight: 500, letterSpacing: '-0.01em' }}>Send feedback</span>
+              <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.12em', textTransform: 'uppercase', color: 'var(--cnv-ink-muted)' }}>beta · one-way</span>
+            </div>
+
+            {/* bug / request */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 3, padding: 3, borderRadius: 9, background: 'var(--cnv-tint)' }}>
+              {(['bug', 'request'] as const).map((c) => (
+                <button
+                  key={c}
+                  type="button"
+                  aria-pressed={category === c}
+                  onClick={() => { setCategory(c); if (state === 'sent') setState('idle'); }}
+                  style={{
+                    minHeight: 28,
+                    borderRadius: 7,
+                    borderWidth: 0,
+                    background: category === c ? 'var(--cnv-tint-deep)' : 'transparent',
+                    color: category === c ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
+                    cursor: 'pointer',
+                    fontFamily: FONT,
+                    fontSize: 11,
+                    fontWeight: category === c ? 400 : 300,
+                    letterSpacing: '0.02em',
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {c}
+                </button>
+              ))}
+            </div>
+
+            <textarea
+              value={message}
+              maxLength={MAX_MESSAGE}
+              placeholder="What's off, or what would help? (⌘⇧E captures the window; or paste a shot)"
+              autoFocus
+              onChange={(event) => {
+                setMessage(event.target.value);
+                if (state === 'sent' || state === 'error') { setState('idle'); setError(null); }
+              }}
+              onPaste={onPaste}
+              rows={4}
+              style={{
+                width: '100%',
+                boxSizing: 'border-box',
+                resize: 'none',
+                padding: 10,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'var(--cnv-edge)',
+                background: 'var(--cnv-tint)',
+                color: 'var(--cnv-ink)',
+                outline: 'none',
+                fontFamily: FONT,
+                fontSize: 12.5,
+                fontWeight: 300,
+                lineHeight: 1.45,
+              }}
+            />
+
+            {image ? (
+              <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: 6, borderRadius: 9, background: 'var(--cnv-tint)' }}>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={image.dataUrl} alt="attachment" style={{ width: 40, height: 30, objectFit: 'cover', borderRadius: 5, flexShrink: 0 }} />
+                <span style={{ flex: 1, minWidth: 0, fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {image.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setImage(null)}
+                  style={{ borderWidth: 0, background: 'transparent', color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, fontSize: 10, letterSpacing: '0.08em', textTransform: 'uppercase', padding: 4, flexShrink: 0 }}
+                >
+                  Remove
+                </button>
+              </div>
+            ) : null}
+
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+              <span style={{ fontSize: 11, fontWeight: 300, color: state === 'error' ? '#ef4444' : state === 'sent' ? ACCENT : 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {state === 'sent' ? 'Sent — thanks ✊🏽' : state === 'error' ? (error ?? 'Send failed.') : `${message.length}/${MAX_MESSAGE}`}
+              </span>
+              <button
+                type="button"
+                onClick={() => { void send(); }}
+                disabled={!canSend}
+                style={{
+                  minHeight: 30,
+                  paddingLeft: 16,
+                  paddingRight: 16,
+                  borderRadius: 8,
+                  borderWidth: 0,
+                  background: canSend ? ACCENT : 'var(--cnv-tint-deep)',
+                  color: canSend ? '#1a1206' : 'var(--cnv-ink-muted)',
+                  cursor: canSend ? 'pointer' : 'default',
+                  fontFamily: FONT,
+                  fontSize: 11.5,
+                  fontWeight: 500,
+                  letterSpacing: '0.02em',
+                  flexShrink: 0,
+                }}
+              >
+                {state === 'sending' ? 'Sending' : state === 'sent' ? 'Sent' : 'Send'}
+              </button>
+            </div>
+
+            {state === 'sent' ? (
+              <button
+                type="button"
+                onClick={reset}
+                style={{ alignSelf: 'flex-start', borderWidth: 0, background: 'transparent', color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, fontSize: 10.5, fontWeight: 300, padding: 0 }}
+              >
+                Send another
+              </button>
+            ) : null}
+          </div>
+        </>
+      ), document.body) : null}
+    </>
+  );
+}

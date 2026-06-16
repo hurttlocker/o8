@@ -3264,6 +3264,15 @@ fn o8_dock_log(msg: String) {
     log::info!("[dock-route] {msg}");
 }
 
+/// Capture the o8 window as a base64 PNG for the in-app feedback / error report
+/// (operator note, 2026-06-16; Cmd+Shift+E). Window-only, downscaled, returns
+/// None on failure so the feedback flow degrades to a manual paste. macOS only.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn capture_app_window(app: tauri::AppHandle) -> Option<String> {
+    agent::screen::capture_window(&app, "main")
+}
+
 /// TEMP/debug: morph the always-on screen dock pill into a sample "listening"
 /// state so the dock can be screenshotted without a live Fn dictation (which
 /// needs TCC perms + a physical Fn press). The dock window is created visible at
@@ -3669,6 +3678,8 @@ pub fn run() {
             o8_dock_log,
             #[cfg(target_os = "macos")]
             o8_debug_show_dock,
+            #[cfg(target_os = "macos")]
+            capture_app_window,
             mac_perms::accessibility_permission_granted_cmd,
             mac_perms::input_monitoring_granted_cmd,
             mac_perms::fn_key_usage_type_cmd,
