@@ -161,6 +161,14 @@ export function TerminalGlassCard({
       minW={TERM_MIN_W}
       minH={TERM_MIN_H}
       title={titleLabel}
+      cornerHandles
+      framed
+      headerStyle="media"
+      icon={(
+        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <polyline points="4 17 10 11 4 5" /><line x1="12" x2="20" y1="19" y2="19" />
+        </svg>
+      )}
       onMove={onMove}
       onResize={onResize}
       onFocus={onFocus}

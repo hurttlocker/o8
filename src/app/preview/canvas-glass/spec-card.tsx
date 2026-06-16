@@ -68,6 +68,7 @@ export function SpecGlassCard({
   return (
     <GlassCardShell
       card={card}
+      cornerHandles
       minW={SPEC_MIN_W}
       minH={SPEC_MIN_H}
       title="o8.md"

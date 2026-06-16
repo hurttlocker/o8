@@ -1267,9 +1267,24 @@ export default function CanvasGlassPreviewPage() {
     const chromeOf = (id: number): number | undefined => {
       const it = byId.get(id);
       const el = typeof document !== 'undefined' ? document.querySelector(`[data-card-id="${id}"]`) : null;
-      if (el && it) {
-        const c = el.getBoundingClientRect().height / zoom - it.h;
-        if (c > 0 && c < 400) return c;
+      if (el instanceof HTMLElement && it) {
+        // Chrome = rendered total − stored body `it.h`, measured with
+        // `offsetHeight` (NOT getBoundingClientRect). Two reasons:
+        //  1. A freshly-spawned card mounts under a motion spring
+        //     (transform: scale .7→1); bcr reflects that transient scale, so
+        //     measuring mid-mount handed back a shrunk height → bogus chrome →
+        //     the card landed at the wrong size ("glitchy most times").
+        //     offsetHeight is pure LAYOUT and ignores the transform.
+        //  2. offsetHeight is already in LAYOUT px (CSS `zoom` isn't applied by
+        //     this WebKit), the same space as the stored body `it.h`.
+        // Accept chrome === 0 (>= 0): image/video cards bind height on the root
+        // (root === body), so their chrome is genuinely 0. The old `c > 0` test
+        // rejected that and fell through to the per-kind estimate (image: 28),
+        // leaving photo/video cards a chrome-height SHORT of their cell — the
+        // dead gap + outlined "wonky" tiles the operator saw. Now they fill the
+        // full grid cell like every borderless shell card.
+        const c = el.offsetHeight - it.h;
+        if (c >= 0 && c < 400) return c;
       }
       return undefined;
     };
@@ -2127,9 +2142,9 @@ export default function CanvasGlassPreviewPage() {
     setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
 
-  const resizeImageCard = useCallback((id: number, w: number) => {
+  const resizeImageCard = useCallback((id: number, w: number, h: number) => {
     setImageCards((previous) => previous.map((card) => (
-      card.id === id ? { ...card, w, h: Math.round(w / card.aspect) } : card
+      card.id === id ? { ...card, w, h } : card
     )));
   }, []);
 
@@ -2225,9 +2240,9 @@ export default function CanvasGlassPreviewPage() {
     setVideoCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
 
-  const resizeVideoCard = useCallback((id: number, w: number) => {
+  const resizeVideoCard = useCallback((id: number, w: number, h: number) => {
     setVideoCards((previous) => previous.map((card) => (
-      card.id === id ? { ...card, w, h: Math.round(w / card.aspect) } : card
+      card.id === id ? { ...card, w, h } : card
     )));
   }, []);
 
