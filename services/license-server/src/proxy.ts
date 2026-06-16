@@ -12,10 +12,13 @@ import { validateEntitlement } from './validate.js';
 /**
  * Managed-inference proxy (monetization Step 1).
  *
- * Two routes the desktop authenticates to with its EdDSA plan token, so users
+ * Routes the desktop authenticates to with its EdDSA plan token, so users
  * don't bring their own keys — "what we give them":
  *   - POST /v1/inference  — OpenRouter chat-completions passthrough
  *   - POST /v1/embeddings — Gemini embedContent passthrough
+ *   - POST /v1/gemini     — Gemini generateContent passthrough (Symon agent,
+ *                           Ask, dictation polish — native functionCall protocol)
+ *   - POST /v1/transcribe — OpenRouter audio/transcriptions passthrough
  *
  * Both: verify the plan token (signature + exp + revocation, via
  * validateEntitlement) → enforce a per-account daily spend cap → forward to the
@@ -47,6 +50,22 @@ const DAILY_CAP_MICRO_USD: Record<Plan, number> = {
 /** Gemini embeddings have no cost field — estimate from input length. */
 const EMBED_PRICE_PER_M_USD = envUsd('PROXY_EMBED_PRICE_PER_M_USD', 0.15);
 const DEFAULT_EMBED_MODEL = 'gemini-embedding-001';
+
+/**
+ * Gemini generateContent has no cost field either — only `usageMetadata` token
+ * counts. Price per 1M tokens (Flash-class default; refine in the Step-5 COGS
+ * pass). Env-overridable; the per-account daily cap is the real guardrail.
+ */
+const GEMINI_IN_PRICE_PER_M_USD = envUsd('PROXY_GEMINI_IN_PER_M_USD', 0.3);
+const GEMINI_OUT_PRICE_PER_M_USD = envUsd('PROXY_GEMINI_OUT_PER_M_USD', 2.5);
+const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
+
+/** Estimate a Gemini generateContent call's cost (micro-USD) from token counts. */
+function geminiCostMicroUsd(promptTokens: number, completionTokens: number): number {
+  const usd =
+    (promptTokens * GEMINI_IN_PRICE_PER_M_USD + completionTokens * GEMINI_OUT_PRICE_PER_M_USD) / 1_000_000;
+  return usdToMicro(usd);
+}
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TRANSCRIBE_URL = 'https://openrouter.ai/api/v1/audio/transcriptions';
@@ -89,7 +108,7 @@ async function todaySpendMicroUsd(sub: string): Promise<number> {
 async function recordUsage(row: {
   sub: string;
   plan: Plan;
-  kind: 'inference' | 'embeddings' | 'transcribe';
+  kind: 'inference' | 'embeddings' | 'transcribe' | 'gemini';
   model?: string | null;
   costMicroUsd: number;
   promptTokens?: number | null;
@@ -324,6 +343,75 @@ export async function handleEmbeddings(c: Context): Promise<Response> {
   const estTokens = Math.ceil(text.length / 4);
   const costMicroUsd = Math.round(estTokens * EMBED_PRICE_PER_M_USD);
   await recordUsage({ sub, plan, kind: 'embeddings', model, costMicroUsd, promptTokens: estTokens });
+  return c.json(json);
+}
+
+/**
+ * POST /v1/gemini — Gemini `generateContent` passthrough (our key).
+ *
+ * Serves the Rust voice surface: the Symon agent (tool-calling functionCall
+ * loop), the Ask path, and dictation polish — all of which speak Gemini's
+ * native REST shape. The desktop sends the EXACT generateContent body it would
+ * send Google (`contents` / `tools` / `generationConfig`) plus a top-level
+ * `model` field (Google puts the model in the URL, which we own here). We strip
+ * `model`, forward the rest verbatim, and meter from `usageMetadata` token
+ * counts (generateContent reports no cost field).
+ */
+export async function handleGeminiGenerate(c: Context): Promise<Response> {
+  const auth = await authPlan(c);
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status);
+  const { plan, sub } = auth;
+
+  if (!env.GEMINI_API_KEY) {
+    return c.json({ error: 'gemini upstream not configured' }, 503);
+  }
+
+  const spent = await todaySpendMicroUsd(sub);
+  const cap = DAILY_CAP_MICRO_USD[plan];
+  if (spent >= cap) return overCap(c, plan, spent, cap);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: 'invalid JSON body' }, 400);
+  }
+
+  const model =
+    typeof body.model === 'string' && body.model.trim() ? body.model.trim() : DEFAULT_GEMINI_MODEL;
+  // `model` is our routing field — Google wants it in the URL, not the body.
+  delete body.model;
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(
+      `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${env.GEMINI_API_KEY}`,
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      },
+    );
+  } catch (err) {
+    return c.json({ error: `upstream fetch failed: ${(err as Error).message}` }, 502);
+  }
+
+  if (!upstream.ok) return forwardUpstreamError(upstream);
+
+  const json = (await upstream.json()) as {
+    usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number };
+  };
+  const promptTokens = json.usageMetadata?.promptTokenCount ?? 0;
+  const completionTokens = json.usageMetadata?.candidatesTokenCount ?? 0;
+  await recordUsage({
+    sub,
+    plan,
+    kind: 'gemini',
+    model,
+    costMicroUsd: geminiCostMicroUsd(promptTokens, completionTokens),
+    promptTokens,
+    completionTokens,
+  });
   return c.json(json);
 }
 

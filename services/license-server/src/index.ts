@@ -11,7 +11,7 @@ import { mintLicense, type Plan } from './mint.js';
 import { constructEvent, handleStripeEvent } from './stripe-webhook.js';
 import { validateEntitlement } from './validate.js';
 import { redeemInvite, registerInvite, resolveInvite } from './invites.js';
-import { handleEmbeddings, handleInference, handleTranscribe } from './proxy.js';
+import { handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscribe } from './proxy.js';
 
 const app = new Hono();
 
@@ -90,6 +90,7 @@ app.post('/validate-entitlement', async (c) => {
 // ── Managed-inference proxy (Step 1) — plan-token auth + per-account cap ──────
 app.post('/v1/inference', handleInference);
 app.post('/v1/embeddings', handleEmbeddings);
+app.post('/v1/gemini', handleGeminiGenerate);
 app.post('/v1/transcribe', handleTranscribe);
 
 // ── Manual issuance (ADMIN-guarded) — for testing before live Stripe ──────────
