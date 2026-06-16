@@ -95,7 +95,22 @@ interface OrchestratorEmptyStateProps {
 }
 
 function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
-  const { onActionClick, repoLabel } = props;
+  const { onActionClick, repoLabel, repoPath, workspaceTargets, onAddProject, kind } = props;
+
+  // No active workspace → the orchestrator has nothing to act on, and sends are
+  // silently dropped (useOrchestratorStream bails when repoPath is null). A new
+  // user otherwise types into the void and the message vanishes. Lead with an
+  // explicit "add a repo" CTA instead of a compose prompt so that can't happen.
+  // (Only for the orchestrator — the plain chat kind works without a repo.)
+  if (kind !== 'chat' && !repoPath) {
+    const noReposAtAll = (workspaceTargets?.length ?? 0) === 0;
+    return (
+      <NoWorkspaceCallout
+        noReposAtAll={noReposAtAll}
+        onAddProject={onAddProject}
+      />
+    );
+  }
 
   const titleProject = repoLabel ?? 'your workspace';
   const title = `What should we build in ${titleProject}?`;
@@ -213,6 +228,129 @@ function QuickActionPills({ onActionClick }: { onActionClick: (prompt: string) =
           ) : null}
         </span>
       ))}
+    </div>
+  );
+}
+
+/**
+ * NoWorkspaceCallout — shown in the orchestrator empty state when there is no
+ * active repo. Replaces the "What should we build…" compose prompt with an
+ * explicit "Add a repo" CTA so a brand-new user is funneled into picking a
+ * workspace instead of typing a message the orchestrator silently drops.
+ */
+function NoWorkspaceCallout({
+  noReposAtAll,
+  onAddProject,
+}: {
+  noReposAtAll: boolean;
+  onAddProject?: (mode?: 'scratch' | 'existing') => void;
+}) {
+  const [hovered, setHovered] = useState(false);
+  const title = noReposAtAll ? 'Add a repo to get started' : 'Pick a repo to get started';
+  const sub = noReposAtAll
+    ? 'The orchestrator builds inside a repo. Add one and I can start working with you.'
+    : 'The orchestrator builds inside a repo. Choose one below, or add another to begin.';
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flex: 1,
+        minHeight: 0,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingTop: 24,
+        paddingRight: 24,
+        paddingBottom: 24,
+        paddingLeft: 24,
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          gap: 14,
+          width: '100%',
+          maxWidth: 460,
+          textAlign: 'center',
+        }}
+      >
+        <div
+          aria-hidden
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 44,
+            height: 44,
+            borderRadius: 14,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-divider-subtle)',
+            color: 'var(--t-text-faint)',
+          }}
+        >
+          <IconoirFolderPlus width={20} height={20} color="currentColor" strokeWidth={1.6} />
+        </div>
+        <h1
+          style={{
+            fontSize: 'clamp(19px, 5cqw, 28px)',
+            fontWeight: 200,
+            color: 'var(--t-text)',
+            letterSpacing: '-0.02em',
+            lineHeight: 1.2,
+            fontFamily: 'var(--font-sans-system)',
+            textWrap: 'balance',
+            margin: 0,
+          }}
+        >
+          {title}
+        </h1>
+        <p
+          style={{
+            margin: 0,
+            maxWidth: 380,
+            fontSize: 13,
+            fontWeight: 360,
+            lineHeight: 1.5,
+            color: 'var(--t-text-muted)',
+            fontFamily: 'var(--font-sans-system)',
+            textWrap: 'balance',
+          }}
+        >
+          {sub}
+        </p>
+        <button
+          type="button"
+          onClick={() => onAddProject?.('existing')}
+          onMouseEnter={() => setHovered(true)}
+          onMouseLeave={() => setHovered(false)}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            marginTop: 4,
+            paddingTop: 9,
+            paddingBottom: 9,
+            paddingLeft: 16,
+            paddingRight: 16,
+            borderWidth: 0,
+            borderRadius: 999,
+            background: 'var(--t-text)',
+            color: 'var(--t-bg-card)',
+            opacity: hovered ? 0.88 : 1,
+            cursor: 'pointer',
+            fontFamily: 'var(--font-sans-system)',
+            fontSize: 13,
+            fontWeight: 460,
+            letterSpacing: '-0.005em',
+            transition: 'opacity 120ms ease',
+          }}
+        >
+          <IconoirFolderPlus width={15} height={15} color="currentColor" strokeWidth={1.8} />
+          Add a repo
+        </button>
+      </div>
     </div>
   );
 }
