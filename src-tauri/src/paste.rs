@@ -798,10 +798,14 @@ pub fn activate_frontmost_app() -> bool {
 /// Clipboard is saved before and restored after (plain-text only) so we
 /// don't clobber whatever the user had copied previously.
 #[cfg(target_os = "macos")]
-pub fn paste_text(text: &str) {
+/// Paste `text` into the focused field. Returns `true` if the synthetic Cmd+V
+/// was actually posted, `false` if it was skipped (empty text, clipboard error,
+/// or — importantly — Accessibility not granted). On `false` the text is still
+/// on the clipboard, so the caller can tell the user to press ⌘V.
+pub fn paste_text(text: &str) -> bool {
     if text.is_empty() {
         tracing::debug!("paste: skipping — empty text");
-        return;
+        return false;
     }
 
     // Step 0: Save current clipboard for later restoration.
@@ -812,9 +816,25 @@ pub fn paste_text(text: &str) {
         Ok(change_count) => change_count,
         Err(e) => {
             tracing::error!("paste: failed to copy to clipboard: {e}");
-            return;
+            return false;
         }
     };
+
+    // Accessibility gate: the synthetic Cmd+V below is a CGEvent the OS silently
+    // ignores unless o8 is a trusted Accessibility client. When untrusted — e.g.
+    // running translocated from a disk image (the app never appears in the
+    // Accessibility list), or simply not granted yet — skip the doomed keystroke.
+    // The text is already on the clipboard, so the caller surfaces "copied —
+    // press ⌘V" instead of a false "pasted".
+    if !crate::mac_perms::accessibility_permission_granted(false) {
+        tracing::warn!(
+            "paste: Accessibility not granted — {} chars copied to clipboard but synthetic Cmd+V skipped \
+             (grant o8 in System Settings → Privacy & Security → Accessibility, or move o8 to /Applications if it is running from a disk image)",
+            text.len()
+        );
+        restore_clipboard_delayed(saved_clipboard, injected_change_count, 5000);
+        return false;
+    }
 
     // Step 2: Activate the correct paste target. If the user clicked a
     // different app during dictation, smart_activate() detects this and
@@ -847,6 +867,7 @@ pub fn paste_text(text: &str) {
     // workflows. If someone hits Cmd+C on something else during those 5s, the
     // change_count guard in restore_clipboard_if_match skips the restore.
     restore_clipboard_delayed(saved_clipboard, injected_change_count, 5000);
+    true
 }
 
 /// Write text to the system clipboard.
@@ -1087,8 +1108,9 @@ pub(crate) fn grab_selection() -> Option<String> {
 
 /// No-op on non-macOS platforms.
 #[cfg(not(target_os = "macos"))]
-pub fn paste_text(_text: &str) {
+pub fn paste_text(_text: &str) -> bool {
     tracing::warn!("paste: not supported on this platform");
+    false
 }
 
 #[cfg(not(target_os = "macos"))]

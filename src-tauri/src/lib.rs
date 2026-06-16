@@ -1074,6 +1074,34 @@ fn load_ai_keys_from_login_shell() -> Vec<(String, String)> {
     Vec::new()
 }
 
+/// Warn (non-fatal) when o8 is running translocated / from a disk image instead
+/// of /Applications. macOS App Translocation runs quarantined apps from a
+/// randomized read-only path, which (a) keeps o8 out of the Accessibility list
+/// so dictation paste silently fails, and (b) blocks the auto-updater from
+/// replacing the app. The remedy is always "move o8 to /Applications".
+#[cfg(target_os = "macos")]
+fn warn_if_translocated() {
+    let exe = match std::env::current_exe() {
+        Ok(p) => p,
+        Err(_) => return,
+    };
+    let path = exe.to_string_lossy().to_string();
+    let translocated = path.contains("/AppTranslocation/");
+    let from_dmg = path.starts_with("/Volumes/");
+    if !translocated && !from_dmg {
+        return;
+    }
+    log::warn!(
+        "[translocation] o8 is running from a non-Applications location ({path}) — dictation paste, \
+         Accessibility, and auto-update will not work until o8 is moved to /Applications"
+    );
+    let msg = "o8 is running from a temporary copy, so dictation, permissions, and automatic updates won't work yet.\\n\\nQuit o8, drag it into your Applications folder, eject the disk image, then reopen o8 from Applications.";
+    let script = format!(
+        r#"display dialog "{msg}" with title "Move o8 to Applications" buttons {{"OK"}} default button "OK" with icon caution"#
+    );
+    let _ = Command::new("osascript").args(["-e", &script]).output();
+}
+
 /// Returns Some((major, raw_version)) on success, None on failure.
 fn check_node_version(node_bin: &str) -> Option<(u32, String)> {
     let out = Command::new(node_bin).arg("--version").output().ok()?;
@@ -2712,7 +2740,7 @@ mod stt_engine {
                     let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", idle.clone());
                     let _ = app.emit("o8:stt-event", idle);
                 } else {
-                    crate::paste::paste_text(&polished);
+                    let did_paste = crate::paste::paste_text(&polished);
                     // Persist to dictation history so the operator can retrieve
                     // what they said if the paste landed in the wrong place.
                     crate::dictation_history::record(
@@ -2738,6 +2766,11 @@ mod stt_engine {
                         "sessionId": session_id,
                         "text": polished,
                         "chars": char_count,
+                        // Accessibility ungranted (e.g. a translocated build): the
+                        // text is on the clipboard but Cmd+V couldn't be posted.
+                        // Flag it so the surface can say "copied — press ⌘V" rather
+                        // than a false "pasted".
+                        "clipboardOnly": !did_paste,
                     });
                     let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:stt-event", pasted.clone());
                     let _ = app.emit("o8:stt-event", pasted);
@@ -3696,6 +3729,12 @@ pub fn run() {
             background::open_system_settings,
         ])
         .setup(move |app| {
+            // Nudge the user to move o8 to /Applications when it's running
+            // translocated / from a DMG — otherwise dictation paste, Accessibility,
+            // and auto-update silently break (#fresh-user). Off-thread so the
+            // blocking osascript dialog doesn't delay window creation.
+            #[cfg(target_os = "macos")]
+            std::thread::spawn(warn_if_translocated);
             // ── System Tray (issue #731) ──
             // Menu items: Show / Quit.
             let show = MenuItem::with_id(app, "show", "Show o8", true, None::<&str>)?;
