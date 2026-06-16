@@ -1595,22 +1595,31 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       return;
     }
 
-    setInput('');
-
     if (isOrchestratorMode) {
       const attachments = attachedImages.length > 0
         ? attachedImages.map((img) => ({ dataUri: img.dataUri, name: img.name }))
         : undefined;
-      orchStream.send(msg, {
+      const orchOptions = {
         permissionMode,
         thinkingEffort,
         model: orchestratorModel,
         swarm: swarmEnabled,
         ...(attachments ? { attachments } : {}),
-      });
+      };
+      if (!resolvedRepoPath) {
+        // No workspace — orchStream.send() appends a guiding "add a repo" notice.
+        // KEEP the composer text so the user's message isn't lost to the void
+        // (the fresh-user "I typed and nothing happened" trap).
+        orchStream.send(msg, orchOptions);
+        return;
+      }
+      setInput('');
+      orchStream.send(msg, orchOptions);
       clearAttachments();
       return;
     }
+
+    setInput('');
 
     const userMsg: MobileTranscriptEntry = {
       id: `local-user-${Date.now()}`,
