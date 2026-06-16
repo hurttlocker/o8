@@ -61,6 +61,13 @@ export const env = {
   // Admin guard for manual issue/revoke endpoints
   ADMIN_TOKEN: required('ADMIN_TOKEN'),
 
+  // Managed-inference proxy upstream keys (Step 1). OPTIONAL at boot so the
+  // service still runs without them — the /v1/* proxy routes return 503 until
+  // they're set. These are OUR funded keys; they live ONLY here, never in the
+  // desktop build. GEMINI_API_KEY also accepts the GOOGLE_AI_API_KEY alias.
+  OPENROUTER_API_KEY: optional('OPENROUTER_API_KEY', ''),
+  GEMINI_API_KEY: optional('GEMINI_API_KEY', '') || optional('GOOGLE_AI_API_KEY', ''),
+
   // Scoped guard for POST /invites/register (the desktop app sends this when it
   // shares a beta invite). Optional — when unset, invite registration is
   // disabled (503) and the rest of the service runs unchanged. Rotate
