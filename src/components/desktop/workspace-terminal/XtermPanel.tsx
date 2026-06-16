@@ -415,8 +415,17 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         ref={containerRef}
         className="cortex-terminal-fade"
         style={{
+          // minHeight:0 lets this flex child shrink below the xterm's intrinsic
+          // content height. Without it the terminal keeps its full row-count
+          // height and the parent's overflow:hidden clips the bottom rows (the
+          // "cut off" trust prompt in the canvas terminal card). With it, the
+          // ResizeObserver re-fits to the actual visible height — which also
+          // fixes the spawn glyph centering, since spawn-reveal centers on
+          // term.rows and stale (too-many) rows pushed the glyph below center.
           flex: 1,
+          minHeight: 0,
           width: '100%',
+          overflow: 'hidden',
           background: transparent ? 'transparent' : 'var(--t-terminal-bg, #16191e)',
           paddingTop: 2,
           paddingLeft: 2,
