@@ -53,7 +53,7 @@ import {
   recordBrainOpenRouterSpend,
   type OpenRouterUsage,
 } from '@/lib/cortex/qa/llm/brain-spend';
-import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
+import { resolveOpenRouterRoute } from '@/lib/cortex/qa/llm/inference-route';
 
 // ── Public API ───────────────────────────────────────────────────────────────
 
@@ -161,17 +161,19 @@ export async function callOpenRouter(
     );
   }
 
-  // Daily spend cap (Tier-1 guardrail) — throws when today's brain OpenRouter
-  // spend hits O8_QA_OPENROUTER_DAILY_CAP_USD; cascade falls to free tiers.
-  await assertUnderBrainDailyCap();
-
-  // BYOK (#960): resolve from stored user key first, then process.env.
-  // Smoke path always has process.env.OPENROUTER_API_KEY set, so it
-  // resolves immediately without hitting the file.
-  const apiKey = await resolveOpenRouterKey();
-  if (!apiKey) {
-    throw new Error('[qa][openrouter] OPENROUTER_API_KEY missing');
+  // Resolve the route (#monetization Step 2): the user's own OpenRouter key
+  // (direct) or, when there's no local key but a plan token is present, the o8
+  // proxy (our key, metered server-side). Null = no route → the caller falls
+  // through to the next CLI tier, exactly as a missing key did before.
+  const route = await resolveOpenRouterRoute();
+  if (!route) {
+    throw new Error('[qa][openrouter] no route (no local key, no plan token)');
   }
+
+  // The daily spend cap is the DESKTOP guardrail on the USER's own key/credits.
+  // In proxy mode the user isn't spending their own OpenRouter $ (we are) and
+  // the proxy enforces its own per-account cap, so skip it there.
+  if (route.via === 'direct') await assertUnderBrainDailyCap();
 
   const timeoutMs = opts.timeoutMs ?? 10_000;
   const primary = opts.model ?? OPENROUTER_PRIMARY_MODEL;
@@ -193,15 +195,9 @@ export async function callOpenRouter(
 
   let res: Response;
   try {
-    res = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+    res = await fetch(route.url, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey}`,
-        // OpenRouter recommends these for analytics; harmless if dropped.
-        'HTTP-Referer': 'https://o8.run',
-        'X-Title': 'o8 Cortex Q&A',
-      },
+      headers: route.headers,
       body: JSON.stringify(body),
       signal: AbortSignal.timeout(timeoutMs),
     });
@@ -230,7 +226,11 @@ export async function callOpenRouter(
   }
 
   recordSuccess();
-  recordBrainOpenRouterSpend(json.model ?? primary, json.usage ?? {});
+  // Only the user's OWN spend is recorded to the desktop ledger; proxy spend is
+  // metered server-side (the proxy_usage ledger), not on this machine.
+  if (route.via === 'direct') {
+    recordBrainOpenRouterSpend(json.model ?? primary, json.usage ?? {});
+  }
   return text;
 }
 
