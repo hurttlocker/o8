@@ -16,6 +16,7 @@ import { BrainConversation } from './brain-card';
 import { CardComposer } from './card-composer';
 import { canvasZoom, FONT, chatVocabularyRebind, glassChat, scrollFadeY, type DockEntry } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
+import { CornerResize } from './corner-resize';
 import { useThreadOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
 import { useSendBuffer, UndoSendPill, QueuedSends, SEND_UNDO_GRACE_MS } from './use-send-buffer';
 import { useScrollBlurFade } from './use-scroll-blur-fade';
@@ -43,39 +44,6 @@ const CHAT_MIN_H = 140;
 /** Header chrome above the body (grab pill + tabs) — added to card.h so the
  *  bottom drag boundary clears the composer by the card's TRUE height. */
 const CHAT_CHROME_H = 63;
-
-type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
-interface Geom { x: number; y: number; w: number; h: number; }
-
-/** Invisible resize zones — all 8 angles, hidden handles (Q's bench
- *  reference). Edges are thin strips inset from the corners; corners are small
- *  squares that mostly extend OUTWARD so they don't swallow the title-bar
- *  buttons. The top strip stays a hair (10px) so the rest of the title bar
- *  still drags. */
-const RESIZE_ZONES: Array<{ key: Edge; cursor: string; style: React.CSSProperties }> = [
-  { key: 'n', cursor: 'ns-resize', style: { top: -5, left: 16, right: 16, height: 10 } },
-  { key: 's', cursor: 'ns-resize', style: { bottom: -5, left: 16, right: 16, height: 10 } },
-  { key: 'e', cursor: 'ew-resize', style: { top: 16, bottom: 16, right: -5, width: 10 } },
-  { key: 'w', cursor: 'ew-resize', style: { top: 16, bottom: 16, left: -5, width: 10 } },
-  { key: 'ne', cursor: 'nesw-resize', style: { top: -8, right: -8, width: 16, height: 16 } },
-  { key: 'nw', cursor: 'nwse-resize', style: { top: -8, left: -8, width: 16, height: 16 } },
-  { key: 'se', cursor: 'nwse-resize', style: { bottom: -8, right: -8, width: 16, height: 16 } },
-  { key: 'sw', cursor: 'nesw-resize', style: { bottom: -8, left: -8, width: 16, height: 16 } },
-];
-
-/** New geometry for a resize drag. card.h is the BODY height (chrome sits on
- *  top), so a top/left grab repositions x/y while the opposite edge stays
- *  put — y += dy with h -= dy keeps the bottom fixed. */
-function resizeGeom(edge: Edge, dx: number, dy: number, start: Geom): Geom {
-  let { x, y, w, h } = start;
-  if (edge.includes('e')) w = start.w + dx;
-  if (edge.includes('s')) h = start.h + dy;
-  if (edge.includes('w')) { w = start.w - dx; x = start.x + dx; }
-  if (edge.includes('n')) { h = start.h - dy; y = start.y + dy; }
-  if (w < CHAT_MIN_W) { if (edge.includes('w')) x -= CHAT_MIN_W - w; w = CHAT_MIN_W; }
-  if (h < CHAT_MIN_H) { if (edge.includes('n')) y -= CHAT_MIN_H - h; h = CHAT_MIN_H; }
-  return { x, y, w, h };
-}
 
 export function ChatGlassCard({
   card,
@@ -109,7 +77,6 @@ export function ChatGlassCard({
 }) {
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; lastX: number; lastY: number } | null>(null);
   const settleRef = useRef<{ stop: () => void } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; edge: Edge; startX: number; startY: number; start: Geom } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
   // Dock + close ride as hover-revealed ghost icons so the bench header (grab
@@ -155,23 +122,6 @@ export function ChatGlassCard({
     // Queues if the card is mid-turn; arms undo if it goes out now.
     if (cardBuffer.send(draft)) setDraft('');
   };
-
-  const onResizeDown = (edge: Edge) => (event: React.PointerEvent) => {
-    if (event.button !== 0) return;
-    event.stopPropagation();
-    try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-    resizeRef.current = { pointerId: event.pointerId, edge, startX: event.clientX, startY: event.clientY, start: { x: card.x, y: card.y, w: card.w, h: card.h } };
-    setResizing(true);
-  };
-  const onResizeMove = (event: React.PointerEvent) => {
-    const resize = resizeRef.current;
-    if (!resize || resize.pointerId !== event.pointerId) return;
-    const zoom = canvasZoom();
-    const next = resizeGeom(resize.edge, (event.clientX - resize.startX) / zoom, (event.clientY - resize.startY) / zoom, resize.start);
-    onResize(card.id, next.w, next.h);
-    if (next.x !== resize.start.x || next.y !== resize.start.y) onMove(card.id, next.x, next.y);
-  };
-  const onResizeUp = () => { resizeRef.current = null; setResizing(false); };
 
   // The orchestrator tab wears the chat's NAME instead of the generic
   // "Orchestrator" (Q: save space + identify the card — the name is the only
@@ -372,19 +322,9 @@ export function ChatGlassCard({
 
       </SmoothCorners>
 
-      {/* Invisible resize handles — all 8 angles, hidden (Q's bench reference).
-          Siblings of SmoothCorners so the slight outward overhang isn't clipped
-          by the smooth-corner mask. */}
-      {RESIZE_ZONES.map((zone) => (
-        <div
-          key={zone.key}
-          role="presentation"
-          onPointerDown={onResizeDown(zone.key)}
-          onPointerMove={onResizeMove}
-          onPointerUp={onResizeUp}
-          style={{ position: 'absolute', cursor: zone.cursor, touchAction: 'none', zIndex: zone.key.length === 2 ? 6 : 5, ...zone.style }}
-        />
-      ))}
+      {/* Unified corner-arc resize — reveals only at the hovered corner, hidden
+          in grid mode; free 2-axis from any corner/edge. */}
+      <CornerResize card={card} minW={CHAT_MIN_W} minH={CHAT_MIN_H} onMove={onMove} onResize={onResize} onResizingChange={setResizing} />
     </motion.div>
   );
 }

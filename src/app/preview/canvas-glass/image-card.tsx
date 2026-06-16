@@ -15,8 +15,9 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, RESIZE_ARC, glassMedia } from './ui';
+import { canvasZoom, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, glassMedia } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
+import { CornerResize } from './corner-resize';
 
 export interface ImageItem {
   src: string;
@@ -49,8 +50,8 @@ export function ImageGlassCard({
 }: {
   card: ImageCard;
   onMove: (id: number, x: number, y: number) => void;
-  /** Aspect-locked — width drives, the card computes height. */
-  onResize: (id: number, w: number) => void;
+  /** Aspect-locked corner resize — CornerResize derives h from w; both land. */
+  onResize: (id: number, w: number, h: number) => void;
   onFocus: (id: number) => void;
   /** Pointer released after a real drag — page hit-tests for stacking. */
   onDrop: (id: number, centerX: number, centerY: number) => void;
@@ -60,7 +61,6 @@ export function ImageGlassCard({
 }) {
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean; lastX: number; lastY: number } | null>(null);
   const settleRef = useRef<{ stop: () => void } | null>(null);
-  const resizeRef = useRef<{ pointerId: number; startX: number; originW: number } | null>(null);
   const [dragging, setDragging] = useState(false);
   const [resizing, setResizing] = useState(false);
   const [hovered, setHovered] = useState(false);
@@ -215,41 +215,10 @@ export function ImageGlassCard({
         </span>
       ) : null}
 
-      {/* Off-edge resize handle — a squircle corner arc CONCENTRIC with the
-          card's own corner (lisse-generated so the curve matches), sitting just
-          outside the bottom-right. Drag it to resize (aspect-locked). */}
-      <div
-        role="presentation"
-        onPointerDown={(event) => {
-          if (event.button !== 0) return;
-          event.stopPropagation();
-          try { event.currentTarget.setPointerCapture(event.pointerId); } catch { /* synthetic/stale pointer */ }
-          resizeRef.current = { pointerId: event.pointerId, startX: event.clientX, originW: card.w };
-          setResizing(true);
-        }}
-        onPointerMove={(event) => {
-          const resize = resizeRef.current;
-          if (!resize || resize.pointerId !== event.pointerId) return;
-          onResize(card.id, Math.max(IMG_MIN_W, resize.originW + (event.clientX - resize.startX) / canvasZoom()));
-        }}
-        onPointerUp={() => { resizeRef.current = null; setResizing(false); }}
-        style={{
-          position: 'absolute',
-          left: '100%',
-          top: '100%',
-          width: RESIZE_ARC.size,
-          height: RESIZE_ARC.size,
-          transform: 'translate(-7px, -7px)',
-          cursor: 'nwse-resize',
-          touchAction: 'none',
-          opacity: resizing || hovered ? 1 : 0,
-          transition: 'opacity 140ms ease',
-        }}
-      >
-        <svg width={RESIZE_ARC.size} height={RESIZE_ARC.size} viewBox={`0 0 ${RESIZE_ARC.size} ${RESIZE_ARC.size}`} fill="none" aria-hidden style={{ display: 'block', overflow: 'visible' }}>
-          <path d={RESIZE_ARC.d} stroke="var(--cnv-media-rim)" strokeWidth={7} strokeLinecap="round" />
-        </svg>
-      </div>
+      {/* Unified corner-arc resize — reveals only at the hovered corner, hidden
+          in grid mode. Aspect-LOCKED (photos read best at their natural ratio),
+          so corners only — no edges, which can't change a locked ratio. */}
+      <CornerResize card={card} minW={IMG_MIN_W} minH={90} aspect={card.aspect} edges={false} onMove={onMove} onResize={onResize} onResizingChange={setResizing} />
     </motion.div>
   );
 }

@@ -100,6 +100,7 @@ export function DiffGlassCard({
   return (
     <GlassCardShell
       card={card}
+      cornerHandles
       minW={DIFF_MIN_W}
       minH={DIFF_MIN_H}
       title={card.title}

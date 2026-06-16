@@ -300,6 +300,7 @@ export function BrowserGlassCard({
   return (
     <GlassCardShell
       card={card}
+      cornerHandles
       minW={TERM_MIN_W}
       minH={TERM_MIN_H}
       title={tabLabel(activeUrl)}

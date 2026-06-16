@@ -282,6 +282,7 @@ export function BrainGlassCard({
   return (
     <GlassCardShell
       card={card}
+      cornerHandles
       minW={BRAIN_MIN_W}
       minH={BRAIN_MIN_H}
       title="Brain"
