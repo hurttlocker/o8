@@ -17,6 +17,7 @@
  */
 
 import { memo } from 'react';
+import { createPortal } from 'react-dom';
 
 // "o8" in five rows of block-art, lifted verbatim from spawn-reveal.ts's
 // MARK so the dashboard loader and the terminal loader paint the same glyph.
@@ -32,21 +33,40 @@ const CELL = 9; // px per block
 const GAP = 2; // px between blocks
 
 function WorkspaceBootLoaderBase() {
-  return (
+  // Portal to <body> as a FIXED, viewport-centered splash. The loader used to
+  // live in-flow inside the workspace card, so the glyph "jumped": the center
+  // card renders full-width, then the right panel mounts late and the card
+  // reflows to a narrow column — dragging the centered glyph with it. Worse,
+  // the card carries a Lisse clip-path (squircle corners) which is a
+  // containing block for position:fixed, so a plain fixed element would be
+  // trapped + clipped. Portaling escapes that and pins the glyph dead-center
+  // over the workspace's own paper surface, masking the panel-settle churn
+  // until the real UI is ready. Fades in so a sub-200ms rehydration barely
+  // shows it.
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <div
       style={{
-        flex: 1,
-        minHeight: 0,
+        position: 'fixed',
+        inset: 0,
+        zIndex: 180,
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'center',
         justifyContent: 'center',
         gap: 16,
+        background: 'var(--t-chat-surface-bg)',
+        animation: 'o8BootBackdropIn 200ms ease-out both',
       }}
       aria-label="Loading workspace"
       aria-live="polite"
     >
       <style>{`
+        @keyframes o8BootBackdropIn {
+          from { opacity: 0; }
+          to   { opacity: 1; }
+        }
         /* The sweep drives OPACITY (GPU-composited) instead of
            background-color (a main-thread paint property). On a page reload
            the main thread is slammed hydrating the dashboard; a color
@@ -129,7 +149,8 @@ function WorkspaceBootLoaderBase() {
           Loading workspace…
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
