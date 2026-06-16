@@ -49,6 +49,7 @@ const EMBED_PRICE_PER_M_USD = envUsd('PROXY_EMBED_PRICE_PER_M_USD', 0.15);
 const DEFAULT_EMBED_MODEL = 'gemini-embedding-001';
 
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
+const OPENROUTER_TRANSCRIBE_URL = 'https://openrouter.ai/api/v1/audio/transcriptions';
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
@@ -88,7 +89,7 @@ async function todaySpendMicroUsd(sub: string): Promise<number> {
 async function recordUsage(row: {
   sub: string;
   plan: Plan;
-  kind: 'inference' | 'embeddings';
+  kind: 'inference' | 'embeddings' | 'transcribe';
   model?: string | null;
   costMicroUsd: number;
   promptTokens?: number | null;
@@ -323,5 +324,56 @@ export async function handleEmbeddings(c: Context): Promise<Response> {
   const estTokens = Math.ceil(text.length / 4);
   const costMicroUsd = Math.round(estTokens * EMBED_PRICE_PER_M_USD);
   await recordUsage({ sub, plan, kind: 'embeddings', model, costMicroUsd, promptTokens: estTokens });
+  return c.json(json);
+}
+
+/**
+ * POST /v1/transcribe — OpenRouter audio/transcriptions passthrough (our key).
+ * The desktop sends the same JSON body it would send to OpenRouter directly
+ * ({ model, input_audio, language, temperature }), so this forwards verbatim.
+ * OpenRouter does not report a cost for transcription, so it is logged at 0
+ * (Whisper Turbo is the cheapest path) — refine in the Step-5 telemetry pass.
+ */
+export async function handleTranscribe(c: Context): Promise<Response> {
+  const auth = await authPlan(c);
+  if (!auth.ok) return c.json({ error: auth.error }, auth.status);
+  const { plan, sub } = auth;
+
+  if (!env.OPENROUTER_API_KEY) {
+    return c.json({ error: 'transcribe upstream not configured' }, 503);
+  }
+
+  const spent = await todaySpendMicroUsd(sub);
+  const cap = DAILY_CAP_MICRO_USD[plan];
+  if (spent >= cap) return overCap(c, plan, spent, cap);
+
+  let body: Record<string, unknown>;
+  try {
+    body = (await c.req.json()) as Record<string, unknown>;
+  } catch {
+    return c.json({ error: 'invalid JSON body' }, 400);
+  }
+
+  let upstream: Response;
+  try {
+    upstream = await fetch(OPENROUTER_TRANSCRIBE_URL, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${env.OPENROUTER_API_KEY}`,
+        'HTTP-Referer': 'https://o8.run',
+        'X-Title': 'o8 managed inference',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    return c.json({ error: `upstream fetch failed: ${(err as Error).message}` }, 502);
+  }
+
+  if (!upstream.ok) return forwardUpstreamError(upstream);
+
+  const json = (await upstream.json()) as Record<string, unknown>;
+  const model = typeof body.model === 'string' ? body.model : null;
+  await recordUsage({ sub, plan, kind: 'transcribe', model, costMicroUsd: 0 });
   return c.json(json);
 }
