@@ -75,6 +75,12 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
       try {
         fitAddonRef.current?.fit();
         sendTerminalResize(tmuxSession, termRef.current.cols, termRef.current.rows);
+        // Pin to the latest output. While the panel is hidden (display:none)
+        // the buffer keeps growing but the viewport doesn't track the bottom,
+        // so on re-show it lands mid-scroll. A second deferred call catches
+        // any tmux replay that streams in just after the fit.
+        termRef.current?.scrollToBottom();
+        setTimeout(() => termRef.current?.scrollToBottom(), 200);
       } catch { /* ignore */ }
     }, 50);
     return () => clearTimeout(timer);
@@ -235,7 +241,12 @@ export const BottomXtermPanel = forwardRef<XtermPanelHandle, {
         </div>
       ))}
       <div ref={containerRef} className="cortex-terminal-fade" style={{
-        flex: 1, width: '100%', background: 'var(--t-terminal-bg, #16191e)', paddingTop: 2, paddingLeft: 2,
+        // minHeight:0 lets this flex child shrink below the xterm's intrinsic
+        // content height. Without it the terminal keeps its full row-count
+        // height and the parent's overflow:hidden clips the bottom rows (the
+        // "cut off" trust prompt). With it, the ResizeObserver re-fits the
+        // xterm to the actual visible height so nothing is clipped.
+        flex: 1, minHeight: 0, width: '100%', overflow: 'hidden', background: 'var(--t-terminal-bg, #16191e)', paddingTop: 2, paddingLeft: 2,
       }} />
     </div>
   );
