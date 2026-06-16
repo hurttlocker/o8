@@ -14,6 +14,8 @@
 
 import 'server-only';
 
+import { resolveEmbedRoute } from '@/lib/cortex/qa/llm/inference-route';
+
 // text-embedding-004 was RETIRED (404, verified live 2026-06-11) — same
 // model-rot failure mode as grok-4.1-fast. gemini-embedding-001 is the GA
 // replacement; 768-dim truncation (re-normalized below) keeps entries at
@@ -22,12 +24,6 @@ import 'server-only';
 const EMBED_MODEL = 'gemini-embedding-001';
 const EMBED_DIMS = 768;
 const EMBED_TIMEOUT_MS = 5_000;
-
-function resolveGeminiKey(): string | undefined {
-  return process.env.GOOGLE_AI_API_KEY
-    ?? process.env.GOOGLE_GENERATIVE_AI_API_KEY
-    ?? process.env.GEMINI_API_KEY;
-}
 
 /** Unit-normalize in place; returns null for zero vectors. */
 export function unitNormalize(values: number[]): number[] | null {
@@ -47,18 +43,24 @@ export function dot(a: number[], b: number[]): number {
 }
 
 export async function embedQuestion(text: string): Promise<number[] | null> {
-  const apiKey = resolveGeminiKey();
-  if (!apiKey || !text.trim()) return null;
+  if (!text.trim()) return null;
+  // Direct (local Gemini key) or proxy (plan token) — see inference-route.ts.
+  const route = resolveEmbedRoute(EMBED_MODEL);
+  if (!route) return null;
   try {
-    const res = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/${EMBED_MODEL}:embedContent?key=${apiKey}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: { parts: [{ text }] }, outputDimensionality: EMBED_DIMS }),
-        signal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
-      },
-    );
+    // The direct Gemini API takes the native `content.parts` shape; the proxy
+    // takes a flat `{ text }` (and builds the Gemini body server-side). Both
+    // return `{ embedding: { values } }`, so parsing below is identical.
+    const body =
+      route.via === 'proxy'
+        ? { text, outputDimensionality: EMBED_DIMS }
+        : { content: { parts: [{ text }] }, outputDimensionality: EMBED_DIMS };
+    const res = await fetch(route.url, {
+      method: 'POST',
+      headers: route.headers,
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(EMBED_TIMEOUT_MS),
+    });
     if (!res.ok) return null;
     const json = await res.json() as { embedding?: { values?: number[] } };
     const values = json.embedding?.values;
