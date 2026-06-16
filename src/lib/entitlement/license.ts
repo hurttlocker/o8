@@ -65,26 +65,24 @@ export interface VerifyLicenseOptions {
 }
 
 /**
- * PLACEHOLDER dev public key.
+ * The license-signing PUBLIC key (Ed25519 SPKI).
  *
- * TODO(M5): replace with the REAL license-signing public key. The matching
- * private key lives only on the Railway license server — it is NEVER baked
- * into this app. For dev/testing, override this via the O8_LICENSE_PUBKEY env
- * var (PEM SPKI), which takes precedence over this constant.
- *
- * This is a freshly-generated, throwaway Ed25519 SPKI public key. Tokens
- * signed by the real server will NOT validate against it — that is intentional
- * until M5 swaps in the production key.
+ * This key only VERIFIES license tokens, so it is safe to ship. The matching
+ * PRIVATE key lives ONLY on the Railway license server (env LICENSE_PRIVATE_KEY)
+ * and is NEVER baked into this app. Tokens minted by that server validate
+ * against this key (proven by services/license-server/scripts/contract-test.ts).
+ * For dev/testing, override via the O8_LICENSE_PUBKEY env var (PEM SPKI), which
+ * takes precedence over this constant.
  */
-const PLACEHOLDER_DEV_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
-MCowBQYDK2VwAyEA+nc4CHeajprz78180cWP0sF0omcFtIFr9eiztlgv0Ks=
+const LICENSE_PUBLIC_KEY_PEM = `-----BEGIN PUBLIC KEY-----
+MCowBQYDK2VwAyEAbKznVejaYq8fRULz2v1DMPOwDDw6kPVMG+Q8s5/m5q8=
 -----END PUBLIC KEY-----`;
 
 function resolvePublicKeyPem(override?: string): string {
   if (override && override.trim()) return override;
   const envKey = process.env.O8_LICENSE_PUBKEY;
   if (envKey && envKey.trim()) return envKey;
-  return PLACEHOLDER_DEV_PUBLIC_KEY_PEM;
+  return LICENSE_PUBLIC_KEY_PEM;
 }
 
 function coercePlan(value: unknown): Plan | null {
