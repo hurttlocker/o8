@@ -19,6 +19,10 @@ mod tts;
 mod ai;
 #[cfg(target_os = "macos")]
 mod agent;
+// Plan-token + managed-inference proxy routing. macOS-only: reads keys via the
+// (macOS-gated) stt module, consumed by the macOS-gated agent / ai / stt paths.
+#[cfg(target_os = "macos")]
+mod entitlement;
 mod webview_latch;
 
 use rusqlite::{Connection, OpenFlags};
@@ -4108,8 +4112,17 @@ pub fn run() {
                 let ws_log = open_child_log("ws-server.log");
                 let ai_keys = load_ai_keys_from_login_shell();
                 if !ai_keys.is_empty() {
+                    // #935 follow-up: also apply the keys to THIS (Tauri/Rust)
+                    // process — the Rust-side Symon agent + Ask path read
+                    // GEMINI_API_KEY via std::env::var, and a Finder launch
+                    // doesn't inherit ~/.zshenv. Without this, voice features
+                    // failed with "Missing GEMINI_API_KEY" while the Node sidecar
+                    // (which gets the keys forwarded below) worked fine.
+                    for (k, v) in &ai_keys {
+                        std::env::set_var(k, v);
+                    }
                     log::info!(
-                        "Forwarded {} AI provider key(s) from login shell to ws-server",
+                        "Applied {} AI provider key(s) from login shell to this process + ws-server",
                         ai_keys.len()
                     );
                 }

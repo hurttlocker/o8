@@ -13,11 +13,11 @@ const MAX_TURNS: usize = 10;
 const REQUEST_TIMEOUT_SECS: u64 = 60;
 
 pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopResult, String> {
-    let api_key = crate::stt::keys::get_gemini_key()
-        .ok_or_else(|| "Missing GEMINI_API_KEY for the Symon agent".to_string())?;
-    let url = format!(
-        "https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={api_key}"
-    );
+    // local Gemini key → direct Google; else an active o8 plan → managed proxy.
+    let target = crate::entitlement::resolve_gemini(model).ok_or_else(|| {
+        "Symon's agent needs a Gemini key or an active o8 plan — add a key or sign in to o8"
+            .to_string()
+    })?;
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
@@ -60,15 +60,21 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     let mut spoke_filler = false;
 
     for _turn in 0..MAX_TURNS {
-        let body = json!({
+        let mut body = json!({
             "contents": contents,
             "tools": [{ "function_declarations": tool_specs }],
             "generationConfig": { "temperature": 0.3, "maxOutputTokens": 2048 },
         });
 
-        let resp = client
-            .post(&url)
-            .json(&body)
+        let req = match &target {
+            crate::entitlement::GeminiTarget::Direct { url } => client.post(url).json(&body),
+            crate::entitlement::GeminiTarget::Proxy { url, token } => {
+                // The proxy owns the model in the URL — pass it in the body.
+                body["model"] = json!(model);
+                client.post(url).bearer_auth(token).json(&body)
+            }
+        };
+        let resp = req
             .send()
             .await
             .map_err(|e| format!("Gemini request failed: {e}"))?;

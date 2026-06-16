@@ -17,7 +17,6 @@ use std::time::{Duration, Instant};
 
 pub const WHISPER_TURBO_MODEL: &str = "openai/whisper-large-v3-turbo";
 
-const DIRECT_OPENROUTER_ENDPOINT: &str = "https://openrouter.ai/api/v1/audio/transcriptions";
 const TIMEOUT_SECS: u64 = 30;
 
 static CLIENT: OnceLock<reqwest::blocking::Client> = OnceLock::new();
@@ -107,10 +106,11 @@ fn audio_format(path: &str) -> String {
 }
 
 pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
-    let api_key = match crate::stt::keys::get_openrouter_key() {
-        Some(key) => key,
+    // local OpenRouter key → direct; else an active o8 plan → managed proxy.
+    let target = match crate::entitlement::resolve_transcribe() {
+        Some(t) => t,
         None => {
-            tracing::warn!("Whisper Turbo STT skipped: missing OPENROUTER_API_KEY");
+            tracing::warn!("Whisper Turbo STT skipped: no OpenRouter key and no active o8 plan");
             return None;
         }
     };
@@ -142,9 +142,9 @@ pub fn transcribe_file(path: &str) -> Option<WhisperTranscription> {
 
     let start = Instant::now();
     let request = client()
-        .post(DIRECT_OPENROUTER_ENDPOINT)
+        .post(&target.url)
         .header("Content-Type", "application/json")
-        .header("Authorization", format!("Bearer {api_key}"))
+        .header("Authorization", format!("Bearer {}", target.bearer))
         .header("HTTP-Referer", "https://github.com/hurttlocker/o8")
         .header("X-Title", "o8")
         .json(&body);
