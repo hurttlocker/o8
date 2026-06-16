@@ -1,6 +1,7 @@
 'use client';
 
 import type { ReactNode, RefObject } from 'react';
+import { createPortal } from 'react-dom';
 
 const SETTINGS_OVERLAY_INSET = 8;
 
@@ -11,14 +12,18 @@ export function SettingsOverlay({
   children: ReactNode;
   panelRef: RefObject<HTMLDivElement | null>;
 }) {
-  return (
+  // Portal to <body>. This overlay is position:fixed so it can span the FULL
+  // app viewport, but `position: fixed` is resolved against the nearest
+  // ancestor carrying a transform / filter / clip-path — and the center
+  // workspace card it mounts under now has a clip-path (Lisse squircle
+  // corners). Without the portal that clip-path traps + clips the panel to
+  // the workspace column. Portaling escapes any such ancestor and matches the
+  // app's other overlays (createPortal is the house pattern for fixed UI).
+  if (typeof document === 'undefined') return null;
+
+  return createPortal(
     <div
       style={{
-        // Fixed so the panel spans the FULL app viewport regardless of
-        // which column it was mounted in. Previously this was position:
-        // absolute inside the workspace column, leaving the AgentPanel
-        // and right O8Panel rails visible alongside settings — wasteful
-        // on wide monitors. 2026-05-27.
         position: 'fixed',
         top: 0,
         right: 0,
@@ -56,6 +61,7 @@ export function SettingsOverlay({
       >
         {children}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

@@ -255,6 +255,25 @@ function applyThemeVars(theme: ResolvedTheme, animate: boolean) {
         --t-accent-soft-strong: rgba(143, 180, 255, 0.22);
         --t-accent-border: rgba(143, 180, 255, 0.28);
         --t-accent-ring: rgba(143, 180, 255, 0.14);
+        /* Semantic status colors — the LIGHT_BASE values (#16a34a green,
+           #ef4444 red, #f97316 amber) are tuned for cream paper and read
+           dark/low-contrast over the dark vibrancy a glass chrome panel
+           bleeds. Adopt the DARK_BASE (brightened) set here so any element
+           using var(--t-success|warning|danger) inside a chrome panel lifts
+           to a legible value. Token-based surfaces (e.g. the footer ports
+           badge) brighten for free; cream surfaces keep the dark variant. */
+        --t-success: #86efac;
+        --t-success-soft: rgba(134, 239, 172, 0.14);
+        --t-success-border: rgba(134, 239, 172, 0.24);
+        --t-success-contrast: #0f1216;
+        --t-warning: #fbbf24;
+        --t-warning-soft: rgba(251, 191, 36, 0.14);
+        --t-warning-border: rgba(251, 191, 36, 0.26);
+        --t-warning-contrast: #0f1216;
+        --t-danger: #f87171;
+        --t-danger-soft: rgba(248, 113, 113, 0.14);
+        --t-danger-border: rgba(248, 113, 113, 0.26);
+        --t-danger-contrast: #0f1216;
       }
     `;
   } else if (chromeScopeStyle) {
