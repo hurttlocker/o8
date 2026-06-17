@@ -58,8 +58,15 @@ export const env = {
   // Issuance
   ISSUER: optional('ISSUER', 'o8-license'),
 
-  // Admin guard for manual issue/revoke endpoints
+  // Admin guard for manual issue/revoke endpoints (mint + revoke licenses).
   ADMIN_TOKEN: required('ADMIN_TOKEN'),
+
+  // Scoped READ-ONLY token for the usage-analytics dashboard (GET
+  // /admin/analytics). Separate from ADMIN_TOKEN so the desktop only ever holds
+  // a credential that can read aggregate stats — never mint/revoke a license.
+  // Optional: when unset, the analytics endpoint falls back to requiring the
+  // full ADMIN_TOKEN. Lower blast radius if it ever leaks from a machine.
+  ANALYTICS_TOKEN: optional('ANALYTICS_TOKEN', ''),
 
   // Managed-inference proxy upstream keys (Step 1). OPTIONAL at boot so the
   // service still runs without them — the /v1/* proxy routes return 503 until
