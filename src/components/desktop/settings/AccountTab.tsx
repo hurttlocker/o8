@@ -9,9 +9,10 @@
  * account-less with your own API keys; signing in unlocks managed tokens + Pro.
  */
 
-import { type ReactNode } from 'react';
+import { type ReactNode, useEffect, useState } from 'react';
 
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
+import { isTelemetryOptedOut, setTelemetryOptOut } from '@/lib/analytics/track';
 import {
   APP_FONT_STACK,
   RAMS_HAIRLINE_SOFT,
@@ -19,6 +20,7 @@ import {
   BracketLabel,
   RamsButton,
   SectionLabel,
+  SettingsToggleButton,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
@@ -26,6 +28,14 @@ import {
 
 export function AccountTab() {
   const auth = useO8Auth();
+
+  // Usage-data sharing (telemetry). Default on; the toggle persists an opt-out
+  // flag honored by track() (analytics epic #1249). Read on mount so the switch
+  // reflects the stored preference.
+  const [shareUsage, setShareUsage] = useState(true);
+  useEffect(() => {
+    setShareUsage(!isTelemetryOptedOut());
+  }, []);
 
   let body: ReactNode;
   if (!auth.clerkEnabled) {
@@ -102,6 +112,34 @@ export function AccountTab() {
       <section>
         <SectionLabel number="01">IDENTITY</SectionLabel>
         {body}
+      </section>
+
+      <section style={{ marginTop: 32 }}>
+        <SectionLabel number="02">PRIVACY</SectionLabel>
+        <div style={{
+          paddingTop: 16,
+          borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+          display: 'flex',
+          alignItems: 'flex-start',
+          justifyContent: 'space-between',
+          gap: 20,
+        }}>
+          <div style={{ minWidth: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span style={{ fontSize: 14, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+              Share anonymous usage data
+            </span>
+            <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5, maxWidth: 520 }}>
+              Coarse counts only — which features get used, and how often. Never your code, prompts, repo names, or file
+              contents. Helps us improve o8.
+            </span>
+          </div>
+          <div style={{ flexShrink: 0, paddingTop: 2 }}>
+            <SettingsToggleButton
+              checked={shareUsage}
+              onChange={(next) => { setShareUsage(next); setTelemetryOptOut(!next); }}
+            />
+          </div>
+        </div>
       </section>
     </div>
   );
