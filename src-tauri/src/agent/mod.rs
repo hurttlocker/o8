@@ -202,8 +202,12 @@ pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
          click to do something (\"where do I click to reply?\", \"I can't find \
          the save button\"), use [GUIDE:x,y:label] instead, with exactly ONE \
          target — that pointer lands and stays pulsing until they move to it. \
-         One short, plain sentence naming the target; never narrate the whole \
-         screen."
+         To DRAW on the screen instead of just pointing — box a region or draw \
+         an arrow toward it — use [DRAW:rect:x1,y1,x2,y2:label] (two opposite \
+         corners) or [DRAW:arrow:x1,y1,x2,y2:label] (tail then head), all in \
+         screenshot pixels; reach for this on \"highlight/circle the error\", \
+         \"box the total\", or \"show me which button\". One short, plain \
+         sentence naming the target; never narrate the whole screen."
     )
 }
 

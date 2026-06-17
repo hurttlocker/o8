@@ -23,35 +23,64 @@
 #[cfg(target_os = "macos")]
 pub const POINT_LABEL: &str = "point-overlay";
 
-/// One parsed `[POINT:...]` / `[GUIDE:...]` tag, still in screenshot-pixel space.
+/// What a tag draws. `Point` is the original pointer dot (POINT/GUIDE);
+/// `Rect`/`Arrow` are the "Symon Draws" annotations — a box around, or an arrow
+/// to, a region — using the SAME screenshot→screen transform, applied to two
+/// points instead of one.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Shape {
+    Point,
+    Rect,
+    Arrow,
+}
+
+/// One parsed tag, still in screenshot-pixel space. For `Point` only (x, y) are
+/// meaningful; `Rect`/`Arrow` also use (x2, y2) as the opposite corner / arrow
+/// head.
 pub struct ParsedTag {
     pub x: f64,
     pub y: f64,
+    /// Second point for Rect/Arrow (opposite corner / arrow head). Unused (0)
+    /// for Point.
+    pub x2: f64,
+    pub y2: f64,
     pub label: String,
     /// GUIDE tags (magic roadmap #3): the marker lands and DWELLS pulsing
     /// until the user's cursor reaches it (or a long cap) instead of the
-    /// 8s auto-fade — the un-lost button.
+    /// 8s auto-fade — the un-lost button. Point-only.
     pub dwell: bool,
+    pub shape: Shape,
 }
 
-/// Parse and STRIP `[POINT:x,y:label]` and `[GUIDE:x,y:label]` tags (optionally
-/// `...:screenN` — the screen suffix is accepted and ignored in v1,
-/// single-monitor capture). Returns the cleaned text (what gets spoken/stored)
-/// plus the tags in order. Malformed tags are stripped but skipped — garbage
-/// never reaches TTS.
+/// Which family a recognized prefix belongs to.
+#[derive(Clone, Copy)]
+enum TagKind {
+    Point { dwell: bool },
+    Draw,
+}
+
+/// Parse and STRIP `[POINT:x,y:label]`, `[GUIDE:x,y:label]`, and
+/// `[DRAW:rect|arrow:x1,y1,x2,y2:label]` tags (each optionally `...:screenN` —
+/// the screen suffix is accepted and ignored in v1, single-monitor capture).
+/// Returns the cleaned text (what gets spoken/stored) plus the tags in order.
+/// Malformed tags are stripped but skipped — garbage never reaches TTS.
 pub fn parse_point_tags(text: &str) -> (String, Vec<ParsedTag>) {
-    const PREFIXES: [(&str, bool); 2] = [("[POINT:", false), ("[GUIDE:", true)];
+    const PREFIXES: [(&str, TagKind); 3] = [
+        ("[POINT:", TagKind::Point { dwell: false }),
+        ("[GUIDE:", TagKind::Point { dwell: true }),
+        ("[DRAW:", TagKind::Draw),
+    ];
     let mut clean = String::with_capacity(text.len());
     let mut tags: Vec<ParsedTag> = Vec::new();
     let mut rest = text;
 
     loop {
-        // Earliest occurrence of either prefix wins.
+        // Earliest occurrence of any prefix wins.
         let found = PREFIXES
             .iter()
-            .filter_map(|(p, dwell)| rest.find(p).map(|i| (i, *p, *dwell)))
+            .filter_map(|(p, kind)| rest.find(p).map(|i| (i, *p, *kind)))
             .min_by_key(|(i, _, _)| *i);
-        let Some((start, prefix, dwell)) = found else {
+        let Some((start, prefix, kind)) = found else {
             break;
         };
         let (before, tail) = rest.split_at(start);
@@ -63,8 +92,11 @@ pub fn parse_point_tags(text: &str) -> (String, Vec<ParsedTag>) {
             break;
         };
         let inner = &tail[prefix.len()..end];
-        if let Some(mut tag) = parse_tag_inner(inner) {
-            tag.dwell = dwell;
+        let parsed = match kind {
+            TagKind::Point { dwell } => parse_point_inner(inner, dwell),
+            TagKind::Draw => parse_draw_inner(inner),
+        };
+        if let Some(tag) = parsed {
             tags.push(tag);
         }
         rest = &tail[end + 1..];
@@ -76,14 +108,8 @@ pub fn parse_point_tags(text: &str) -> (String, Vec<ParsedTag>) {
     (clean, tags)
 }
 
-/// `x,y:label` or `x,y:label:screenN` → ParsedTag. Labels may contain ':'
-/// (everything between the coords and a trailing screenN is the label).
-fn parse_tag_inner(inner: &str) -> Option<ParsedTag> {
-    let mut segments: Vec<&str> = inner.split(':').collect();
-    if segments.len() < 2 {
-        return None;
-    }
-    // Drop a trailing `screenN` qualifier if present.
+/// Drop a trailing `screenN` qualifier from the segment list, in place.
+fn strip_screen_suffix(segments: &mut Vec<&str>) {
     if segments.len() > 2 {
         if let Some(last) = segments.last() {
             let l = last.trim().to_ascii_lowercase();
@@ -92,6 +118,16 @@ fn parse_tag_inner(inner: &str) -> Option<ParsedTag> {
             }
         }
     }
+}
+
+/// `x,y:label` or `x,y:label:screenN` → a Point tag. Labels may contain ':'
+/// (everything between the coords and a trailing screenN is the label).
+fn parse_point_inner(inner: &str, dwell: bool) -> Option<ParsedTag> {
+    let mut segments: Vec<&str> = inner.split(':').collect();
+    if segments.len() < 2 {
+        return None;
+    }
+    strip_screen_suffix(&mut segments);
     let coords = segments.remove(0);
     let label = segments.join(":").trim().to_string();
     let (x_str, y_str) = coords.split_once(',')?;
@@ -100,7 +136,39 @@ fn parse_tag_inner(inner: &str) -> Option<ParsedTag> {
     if !x.is_finite() || !y.is_finite() {
         return None;
     }
-    Some(ParsedTag { x, y, label, dwell: false })
+    Some(ParsedTag { x, y, x2: 0.0, y2: 0.0, label, dwell, shape: Shape::Point })
+}
+
+/// `rect|arrow:x1,y1,x2,y2:label` (optionally `...:screenN`) → a Rect/Arrow tag.
+fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
+    let mut segments: Vec<&str> = inner.split(':').collect();
+    if segments.len() < 2 {
+        return None;
+    }
+    strip_screen_suffix(&mut segments);
+    let shape = match segments.remove(0).trim().to_ascii_lowercase().as_str() {
+        "rect" | "box" | "rectangle" => Shape::Rect,
+        "arrow" => Shape::Arrow,
+        _ => return None,
+    };
+    let coords = segments.remove(0);
+    let label = segments.join(":").trim().to_string();
+    let nums: Vec<f64> = coords
+        .split(',')
+        .filter_map(|s| s.trim().parse::<f64>().ok())
+        .collect();
+    if nums.len() != 4 || !nums.iter().all(|n| n.is_finite()) {
+        return None;
+    }
+    Some(ParsedTag {
+        x: nums[0],
+        y: nums[1],
+        x2: nums[2],
+        y2: nums[3],
+        label,
+        dwell: false,
+        shape,
+    })
 }
 
 #[cfg(test)]
@@ -165,13 +233,71 @@ mod parse_tests {
         assert!(tags[1].dwell);
         assert_eq!(tags[1].x, 3.0);
     }
+
+    #[test]
+    fn point_tags_default_to_point_shape() {
+        let (_, tags) = parse_point_tags("[POINT:1,2:a]");
+        assert!(tags[0].shape == Shape::Point);
+    }
+
+    #[test]
+    fn draw_rect_parses_both_corners() {
+        let (clean, tags) =
+            parse_point_tags("Here's the bug. [DRAW:rect:100,120,300,260:error banner]");
+        assert_eq!(clean, "Here's the bug.");
+        assert_eq!(tags.len(), 1);
+        assert!(tags[0].shape == Shape::Rect);
+        assert_eq!(tags[0].x, 100.0);
+        assert_eq!(tags[0].y, 120.0);
+        assert_eq!(tags[0].x2, 300.0);
+        assert_eq!(tags[0].y2, 260.0);
+        assert_eq!(tags[0].label, "error banner");
+    }
+
+    #[test]
+    fn draw_arrow_parses_with_screen_suffix() {
+        let (clean, tags) = parse_point_tags("[DRAW:arrow:10,10,90,90:to Save:screen1] go");
+        assert_eq!(clean, "go");
+        assert!(tags[0].shape == Shape::Arrow);
+        assert_eq!(tags[0].x2, 90.0);
+        assert_eq!(tags[0].label, "to Save");
+    }
+
+    #[test]
+    fn draw_box_alias_maps_to_rect() {
+        let (_, tags) = parse_point_tags("[DRAW:box:1,2,3,4:x]");
+        assert!(tags[0].shape == Shape::Rect);
+    }
+
+    #[test]
+    fn draw_bad_shape_or_arity_stripped() {
+        // unknown shape
+        let (c1, t1) = parse_point_tags("a [DRAW:blob:1,2,3,4:x] b");
+        assert_eq!(c1, "a b");
+        assert!(t1.is_empty());
+        // only two coords (needs four)
+        let (c2, t2) = parse_point_tags("a [DRAW:rect:1,2:x] b");
+        assert_eq!(c2, "a b");
+        assert!(t2.is_empty());
+    }
+
+    #[test]
+    fn mixed_point_and_draw_in_order() {
+        let (clean, tags) =
+            parse_point_tags("First [POINT:1,2:a] then [DRAW:rect:5,6,7,8:b] done");
+        assert_eq!(clean, "First then done");
+        assert_eq!(tags.len(), 2);
+        assert!(tags[0].shape == Shape::Point);
+        assert!(tags[1].shape == Shape::Rect);
+        assert_eq!(tags[1].y2, 8.0);
+    }
 }
 
 // ── macOS implementation ─────────────────────────────────────────────────────
 
 #[cfg(target_os = "macos")]
 mod overlay {
-    use super::ParsedTag;
+    use super::{ParsedTag, Shape};
     use crate::agent::screen::ScreenContext;
     use serde_json::json;
     use std::sync::atomic::{AtomicU64, Ordering};
@@ -200,12 +326,26 @@ mod overlay {
         // Screenshot px → window-local logical points. The overlay window is
         // positioned at the monitor origin with the monitor's logical size, so
         // local = (tag / image_px) * monitor_logical, clamped into bounds.
+        let map_x = |v: f64| (v / screen.img_w as f64 * screen.mon_w).clamp(0.0, screen.mon_w);
+        let map_y = |v: f64| (v / screen.img_h as f64 * screen.mon_h).clamp(0.0, screen.mon_h);
         let points: Vec<serde_json::Value> = tags
             .iter()
             .map(|t| {
-                let x = (t.x / screen.img_w as f64 * screen.mon_w).clamp(0.0, screen.mon_w);
-                let y = (t.y / screen.img_h as f64 * screen.mon_h).clamp(0.0, screen.mon_h);
-                json!({ "x": x, "y": y, "label": t.label, "dwell": t.dwell })
+                let x = map_x(t.x);
+                let y = map_y(t.y);
+                match t.shape {
+                    Shape::Point => {
+                        json!({ "shape": "point", "x": x, "y": y, "label": t.label, "dwell": t.dwell })
+                    }
+                    Shape::Rect => json!({
+                        "shape": "rect", "x": x, "y": y,
+                        "x2": map_x(t.x2), "y2": map_y(t.y2), "label": t.label
+                    }),
+                    Shape::Arrow => json!({
+                        "shape": "arrow", "x": x, "y": y,
+                        "x2": map_x(t.x2), "y2": map_y(t.y2), "label": t.label
+                    }),
+                }
             })
             .collect();
         // GUIDE targets in window-local logical px — the proximity watcher

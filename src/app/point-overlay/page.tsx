@@ -29,7 +29,18 @@ export const dynamic = 'force-dynamic';
 
 const ORANGE = '#FF5A1F';
 
-type OverlayPoint = { x: number; y: number; label: string; dwell?: boolean };
+type OverlayShape = 'point' | 'rect' | 'arrow';
+type OverlayPoint = {
+  x: number;
+  y: number;
+  label: string;
+  dwell?: boolean;
+  /** 'point' (default) is the pointer dot; 'rect'/'arrow' are Symon Draws
+   * annotations that also use (x2, y2). */
+  shape?: OverlayShape;
+  x2?: number;
+  y2?: number;
+};
 type ShowPayload = { gen: number; points: OverlayPoint[]; tour: boolean; durationMs: number };
 
 /** Travel time scales with distance so short hops feel quick and a cross-screen
@@ -266,6 +277,114 @@ function Flight({ point, screenW, screenH }: { point: OverlayPoint; screenW: num
   );
 }
 
+/** Symon Draws: a rect (box a region) or arrow (point toward one), both in the
+ * dot's glass+orange vocabulary, that "draw on" — the stroke reveals along its
+ * own path, then the arrowhead/label settles. Coords arrive window-local (Rust
+ * owns the screenshot→screen transform, same as points). */
+function DrawShape({ point, screenH }: { point: OverlayPoint; screenH: number }) {
+  const [drawn, setDrawn] = useState(false);
+  useEffect(() => {
+    // Double-rAF so the dash-offset start commits before the transition runs.
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => setDrawn(true));
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+  }, []);
+
+  const x2 = point.x2 ?? point.x;
+  const y2 = point.y2 ?? point.y;
+  const svgBase: React.CSSProperties = {
+    position: 'fixed',
+    inset: 0,
+    width: '100%',
+    height: '100%',
+    pointerEvents: 'none',
+    overflow: 'visible',
+  };
+
+  if (point.shape === 'arrow') {
+    const len = Math.max(1, Math.hypot(x2 - point.x, y2 - point.y));
+    const ang = Math.atan2(y2 - point.y, x2 - point.x);
+    const head = 15;
+    const spread = Math.PI / 7;
+    const a1x = x2 - head * Math.cos(ang - spread);
+    const a1y = y2 - head * Math.sin(ang - spread);
+    const a2x = x2 - head * Math.cos(ang + spread);
+    const a2y = y2 - head * Math.sin(ang + spread);
+    const labelAbove = y2 > 60;
+    return (
+      <>
+        <svg style={svgBase}>
+          <line
+            x1={point.x}
+            y1={point.y}
+            x2={x2}
+            y2={y2}
+            stroke={ORANGE}
+            strokeWidth={3}
+            strokeLinecap="round"
+            style={{
+              filter: `drop-shadow(0 0 6px ${ORANGE}80)`,
+              strokeDasharray: len,
+              strokeDashoffset: drawn ? 0 : len,
+              transition: 'stroke-dashoffset 0.42s cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+          />
+          <polygon
+            points={`${x2},${y2} ${a1x},${a1y} ${a2x},${a2y}`}
+            fill={ORANGE}
+            style={{
+              filter: `drop-shadow(0 0 5px ${ORANGE}80)`,
+              opacity: drawn ? 1 : 0,
+              transition: 'opacity 0.18s ease 0.38s',
+            }}
+          />
+        </svg>
+        <div style={{ position: 'fixed', left: x2, top: y2, width: 0, height: 0, pointerEvents: 'none' }}>
+          <LabelChip text={point.label} above={labelAbove} />
+        </div>
+      </>
+    );
+  }
+
+  // rect — outline + faint orange tint + soft glow, drawing on around the box.
+  const minX = Math.min(point.x, x2);
+  const minY = Math.min(point.y, y2);
+  const w = Math.abs(x2 - point.x);
+  const h = Math.abs(y2 - point.y);
+  const perim = 2 * (w + h);
+  const labelAbove = minY > 40;
+  return (
+    <>
+      <svg style={svgBase}>
+        <rect
+          x={minX}
+          y={minY}
+          width={w}
+          height={h}
+          rx={10}
+          fill={`${ORANGE}12`}
+          stroke={ORANGE}
+          strokeWidth={2.5}
+          style={{
+            filter: `drop-shadow(0 0 8px ${ORANGE}66)`,
+            strokeDasharray: perim,
+            strokeDashoffset: drawn ? 0 : perim,
+            transition: 'stroke-dashoffset 0.55s cubic-bezier(0.22, 1, 0.36, 1)',
+          }}
+        />
+      </svg>
+      <div style={{ position: 'fixed', left: minX + w / 2, top: minY, width: 0, height: 0, pointerEvents: 'none' }}>
+        <LabelChip text={point.label} above={labelAbove} />
+      </div>
+    </>
+  );
+}
+
 export default function PointOverlayPage() {
   const [show, setShow] = useState<ShowPayload | null>(null);
   const [fading, setFading] = useState(false);
@@ -371,27 +490,34 @@ export default function PointOverlayPage() {
           to { opacity: 1; transform: translateX(-50%) translateY(0); }
         }
       `}</style>
-      {show ? (
-        show.tour ? (
-          show.points.map((p, i) => (
-            <Marker
-              key={`${show.gen}-${i}`}
-              point={p}
-              index={i}
-              numbered
-              delayMs={i * 120}
-              screenH={viewport.h}
-            />
-          ))
-        ) : (
-          <Flight
-            key={show.gen}
-            point={show.points[0]}
-            screenW={viewport.w}
-            screenH={viewport.h}
-          />
-        )
-      ) : null}
+      {show
+        ? (() => {
+            const shapes = show.points.filter((p) => p.shape === 'rect' || p.shape === 'arrow');
+            const pts = show.points.filter((p) => !p.shape || p.shape === 'point');
+            const numbered = pts.length > 1;
+            return (
+              <>
+                {shapes.map((p, i) => (
+                  <DrawShape key={`${show.gen}-s${i}`} point={p} screenH={viewport.h} />
+                ))}
+                {pts.length === 1 && shapes.length === 0 ? (
+                  <Flight key={show.gen} point={pts[0]} screenW={viewport.w} screenH={viewport.h} />
+                ) : (
+                  pts.map((p, i) => (
+                    <Marker
+                      key={`${show.gen}-p${i}`}
+                      point={p}
+                      index={i}
+                      numbered={numbered}
+                      delayMs={i * 120}
+                      screenH={viewport.h}
+                    />
+                  ))
+                )}
+              </>
+            );
+          })()
+        : null}
     </div>
   );
 }
