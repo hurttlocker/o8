@@ -9,15 +9,25 @@
 export type Plan = 'free' | 'pro' | 'team';
 
 /**
- * The Pro/Team feature flags. Each key maps to a moat surface that the free
- * tier does not unlock. `resolveFlags()` (flags.ts) is the single place that
- * derives these from a Plan — never branch on `plan` directly elsewhere.
+ * Cost/reach entitlement levers — NOT feature gates.
+ *
+ * The model is "monetize cost, not capability"
+ * (docs/monetization-and-free-tier-plan.md §1, §6, §11): every moat —
+ * governance, the Engineering Brain, multi-repo fleet, mobile-on-LAN, local
+ * voice — is FREE and ungated, so it is intentionally NOT represented here.
+ * These flags track only the paid cost/reach levers. Access is additionally
+ * enforced at call time (account token + server-side spend cap), never by a
+ * flag alone. `resolveFlags()` (flags.ts) is the single place that derives
+ * these from a Plan — never branch on `plan` directly elsewhere.
  */
 export interface EntitlementFlags {
-  'governance.secondPass': boolean;
-  'memory.brain': boolean;
-  'fleet.multiRepo': boolean;
-  'mobile.control': boolean;
+  /** Managed-inference proxy — hosted, metered model access (o8 Brain + Symon). Live. */
+  'proxy.inference': boolean;
+  /** Off-network mobile relay — reach the Mac outside the LAN. Not built yet. */
+  'relay.offNetwork': boolean;
+  /** Cloud agents — run while the laptop is closed. Not built yet. */
+  'cloud.runners': boolean;
+  /** Shared team governance (team plan only). */
   'team.shared': boolean;
 }
 

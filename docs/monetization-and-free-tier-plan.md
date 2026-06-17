@@ -3,6 +3,8 @@
 **Status:** canonical as of 2026-06-16. Written for the public free launch.
 **Supersedes the *framing*** (not the code) of `monetization-tiers.md`, `monetization-build-plan.md`, `monetization-issues.md` — those describe the M1–M6 "gate the moats behind Pro" plan. The directive changed: **o8 ships free; we monetize cost, not capability.** Those docs remain accurate as the history of what was *built*; this doc is what we *do*.
 
+**Refined 2026-06-16 (PM):** this release ships **100% free with no Stripe in the loop** — no checkout, no paywall. The entitlement token is a **free account credential** (proxy-auth + usage attribution), *not* a receipt. We **gather usage data first, price later**. New near-term deliverable: a **usage-analytics dashboard** on the o8 front-end (§11). The paid levers in §5 stay designed-but-dormant until the data tells us what to charge for.
+
 Grounded in a full codebase map (6-domain workflow, 2026-06-16). Every claim here traces to a file; key files are listed per section.
 
 ---
@@ -215,6 +217,8 @@ Deduped from all six domain maps. My recommendation in **bold**.
 - ✅ **BYOK hidden now** — env-gated (`NEXT_PUBLIC_O8_SHOW_BYOK`), restorable for askers without a logic change. The assistant-chat casualty is moot (it's deprecated). (§5.1)
 - ✅ **ElevenLabs is founder-only at launch** (premium voice later). Default Symon voice is free — Google Neural2 → macOS `say` fallback. Voice-COGS landmine defused: no per-user voice cost at launch. (§5.2)
 - ✅ **Assistant chat (`llm-chat`) deprecated** — the Engineering Brain (ScratchChat / Cortex on canvas) is "the chat." It leads with the user's own sub, so it's free to us. (§5.5)
+- ✅ **This release is free — no Stripe in the loop.** No checkout/paywall ships now. The account token is a *free* credential (proxy-auth + usage attribution), not a payment receipt; the paid levers stay dormant. Price later, once data says what to charge for. (§11)
+- ✅ **Data-first.** Gather who-uses-what-how before pricing. Deliverable: a usage-analytics dashboard on the o8 front-end, fed by a license-server aggregate read API + coarse desktop telemetry (counts + account id only, never code/prompts). (§11.2)
 
 ### Open — your call
 - **Proxy pricing.** **Rec: $19 unified (o8 + Symon) with a per-account fair-use cap; a cheap default voice ships free, premium voice is a later add-on.** (§5.5)
@@ -260,6 +264,34 @@ Deduped from all six domain maps. My recommendation in **bold**.
 - **o8 → Settings → API Keys** (`APIKeysTab`, registered in `SettingsPage.tsx`). Currently offers **OpenRouter, DeepSeek, Anthropic**. Stored AES-256-GCM encrypted in `~/.o8/.env.local`; master key in the macOS Keychain. (`src/app/api/v2/keys/route.ts`, `PROVIDERS` array.)
 - **Gap:** **Gemini-direct is not in that tab** — a BYO user reaches Gemini only via OpenRouter routing or a shell var. If free-tier Gemini features should be BYO-able, add a `google`/`gemini` entry to `PROVIDERS` in `keys/route.ts`.
 - **Symon → voice settings window** — its keys (incl. ElevenLabs) live in `~/.o8/dictation.json`, separate from the o8 BYOK tab. (Matches "ElevenLabs is Symon, experimental.")
+
+---
+
+## 11. This release: free, data-first (Stripe deferred) — 2026-06-16 (PM)
+
+**This version ships 100% free with no Stripe in the loop.** No checkout, no paywall, no payment to install or to use anything. The point of the current release is **adoption + data**: get o8 onto real machines and learn *who uses it and how* before we price anything. The levers in §5 stay designed-but-dormant until the data says what to charge for.
+
+**The account token is a free credential, not a receipt.** The EdDSA entitlement JWT (in `~/.o8/entitlement.json`, applied via `/api/panel/entitlement` → `license.ts`) is issued **without payment** in this phase. Its two jobs:
+1. **Proxy auth** — the bearer the managed-inference proxy needs to meter spend per account, so keyless machines get Brain/voice through our gateway (§5.1, the laptop test proved this path end-to-end).
+2. **Usage attribution** — a stable per-install `sub` so the telemetry below can count distinct users and tie usage to an account.
+
+It is **not** a feature key — the entitlement flags carry no moat-gating (see §6 + the `flags.ts`/`types.ts` fix). A future paid plan reuses the *same* token plumbing; today every token is effectively a free account. **There is no shipped issuance path yet** (neither free-on-signup nor paid-via-Stripe is end-to-end) — tokens are minted via the license-server admin endpoint for now; auto-issuing a free account token at first run is part of the work below.
+
+### 11.1 What we gather (and where it already lives)
+- **Proxy spend ledger** — `proxy_usage` (license server; integer micro-USD per call, per account, per `kind`: inference / embeddings / transcribe / gemini). Already capturing real COGS per account.
+- **Account roster** — `subscriptions` / entitlement rows on the license server (distinct `sub`s = user count).
+- **Product usage — TO BUILD.** Which surfaces get used (orchestrator turns, dispatches, Brain asks, canvas, Symon, mobile), how often, success/merge rates. No product-event pipeline exists today — only proxy COGS + account rows are captured.
+
+### 11.2 Deliverable — usage-analytics dashboard (o8 front-end)
+A founder/operator view answering **how many users, what they're using, how they're using it.** It lives on the **o8 front-end** as an operator-only surface, fed by an aggregate read API on the license server — the only place with cross-user data (the desktop app only knows itself).
+
+- **Server** (`services/license-server`): a new aggregate/admin read endpoint (Bearer `ADMIN_TOKEN`) over `proxy_usage` + accounts → user counts, DAU/WAU, per-`kind` spend, top surfaces. Plus a lightweight **product-event ingest** (`POST /v1/telemetry`: account `sub`, event name, coarse props) so usage beyond raw inference is visible.
+- **Desktop emit**: a thin telemetry client that posts coarse events (surface opened, dispatch started, Brain asked, merge approved) with the account token — opt-out-able, no payload content.
+- **Front-end**: an operator-gated analytics surface in o8 (count cards + per-surface usage + spend), reading the aggregate API. Not shown to normal users.
+
+**Privacy guardrail:** telemetry is **coarse counts + account id only** — never code, repo names, prompts, or file contents. The "no secrets / personal-lane" posture applies.
+
+*Tracked as issues filed 2026-06-16 (entitlement repurpose + analytics-dashboard epic).*
 
 ---
 
