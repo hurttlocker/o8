@@ -65,6 +65,7 @@ import { CanvasFeedbackButton } from './canvas-feedback';
 import { ProximityDock } from './proximity-dock';
 import { AnticipationRing } from './anticipation-ring';
 import { OrchestratorDock } from './dock';
+import type { SwarmScoutView } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
 import { FileGlassCard, type FileCard } from './file-card';
 import { ImageGlassCard, type ImageCard } from './image-card';
 import { VideoGlassCard, type VideoCard } from './video-card';
@@ -258,6 +259,10 @@ export default function CanvasGlassPreviewPage() {
   const [tourOpen, setTourOpen] = useState(false);
   const [orchBusy, setOrchBusy] = useState(false);
   const [convos, setConvos] = useState<Record<string, DockEntry[]>>({});
+  // Live native-Claude scouts (Task-tool fan-out) per lane — surfaced in the
+  // dock's crew card while the turn runs, cleared when it settles. Without this
+  // the scouts vanish into the collapsed "N actions" tool cluster.
+  const [liveScouts, setLiveScouts] = useState<Record<string, SwarmScoutView[]>>({});
   const [termCards, setTermCards] = useState<TermCard[]>([]);
   const [fileCards, setFileCards] = useState<FileCard[]>([]);
   const [imageCards, setImageCards] = useState<ImageCard[]>([]);
@@ -775,6 +780,18 @@ export default function CanvasGlassPreviewPage() {
       // "Edited N files" card at turn end), then surface the live activity line.
       recordTool(ensureTurnTools(lane), event.name, event.args);
       noteToolUse(lane, event.name);
+      // Native Claude scouts (Task-tool sub-agents) — surface them as a live
+      // crew instead of letting them disappear into the tool-count cluster.
+      if (event.name === 'Task' || event.name.toLowerCase() === 'task') {
+        const args = event.args ?? {};
+        const description = typeof args.description === 'string' ? args.description.trim() : '';
+        const subagentType = typeof args.subagent_type === 'string' ? args.subagent_type.trim() : '';
+        setLiveScouts((previous) => {
+          const existing = previous[lane] ?? [];
+          const label = description || subagentType || `Scout ${existing.length + 1}`;
+          return { ...previous, [lane]: [...existing, { id: `${lane}-scout-${existing.length}`, label, status: 'running' }] };
+        });
+      }
     } else if (event.type === 'tool-result') {
       // Only `gh pr create` output matters (the PR card). MUST stay above the
       // `else` — that reads event.error, which a tool-result lacks (would throw).
@@ -783,6 +800,7 @@ export default function CanvasGlassPreviewPage() {
       if (event.status === 'dead') {
         turnToolsRef.current.delete(lane);
         turnTextRef.current.delete(lane);
+        setLiveScouts((previous) => ({ ...previous, [lane]: [] }));
         resolveStatus(lane, 'Session ended');
       } else if (event.status === 'ready') {
         // Roll the turn's edits / PR / captured screenshots into result cards.
@@ -795,6 +813,7 @@ export default function CanvasGlassPreviewPage() {
         if (said) toAppend.push({ role: 'playback', text: said });
         if (toAppend.length) appendEntries(lane, toAppend);
         turnToolsRef.current.delete(lane);
+        setLiveScouts((previous) => ({ ...previous, [lane]: [] }));
         resolveStatus(lane, 'Done');
       }
     } else {
@@ -3638,6 +3657,7 @@ export default function CanvasGlassPreviewPage() {
             lanes={runningLanes}
             entries={activeConvo}
             activeLane={activeRepoPath ?? ''}
+            scouts={liveScouts[activeRepoPath ?? ''] ?? []}
             activeLabel={activeRepoName ?? '…'}
             activeTone={orchBusy ? 'working' : 'idle'}
             onSelectLane={setActiveRepoPath}

@@ -182,7 +182,16 @@ export function createOrchestratorMessageHandler(
         }
 
         const current = options.currentAssistantRef.current;
-        const toolCall = { name: toolName, status: 'running' as const };
+        // Capture args (the tool input — e.g. a Task scout's description/type)
+        // and the tool id. The desktop handler used to drop both, which is why
+        // native Claude scouts reached the transcript unlabeled. The SwarmStatusCard
+        // reads args.description to label each scout in the live crew.
+        const toolArgs =
+          typeof msg.data?.args === 'object' && msg.data?.args !== null
+            ? (msg.data.args as Record<string, unknown>)
+            : undefined;
+        const toolUseId = typeof msg.data?.toolUseId === 'string' ? msg.data.toolUseId : null;
+        const toolCall = { id: toolUseId, name: toolName, status: 'running' as const, args: toolArgs };
         options.setMessages((prev) => {
           const idx = prev.findIndex((message) => message.id === current.id);
           if (idx >= 0) {

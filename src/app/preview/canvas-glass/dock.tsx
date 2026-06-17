@@ -15,6 +15,7 @@ import { SmoothCorners } from '@lisse/react';
 import { FONT, TONE_DOT, glassPop, scrollFadeY, type DockEntry, type OrchestratorLane } from './ui';
 import { useScrollBlurFade } from './use-scroll-blur-fade';
 import { ReasoningView } from './reasoning';
+import { SwarmStatusCard, type SwarmScoutView } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
 import { BrainConversation } from './brain-card';
 import { CardComposer } from './card-composer';
 import { FilesResult, PrResult, ScreenshotResult } from './response-blocks';
@@ -46,11 +47,14 @@ export function OrchestratorDock({
   undoArmed,
   onUndoSend,
   onClose,
+  scouts = [],
 }: {
   /** Lanes with a running conversation — the dropdown's contents. */
   lanes: OrchestratorLane[];
   entries: DockEntry[];
   activeLane: string;
+  /** Live native-Claude scouts (Task-tool fan-out) for the active lane. */
+  scouts?: SwarmScoutView[];
   activeLabel: string;
   activeTone: OrchestratorLane['tone'];
   onSelectLane: (id: string) => void;
@@ -366,6 +370,7 @@ export function OrchestratorDock({
                   <DockEntryView key={entry.id} entry={entry} />
                 ))}
               </AnimatePresence>
+              {scouts.length > 0 ? <SwarmStatusCard packets={[]} scouts={scouts} /> : null}
               {entries.length === 0 ? (
                 <span style={{ fontSize: 11, fontWeight: 300, color: 'var(--cnv-ink-muted)', lineHeight: 1.6 }}>
                   No conversation on this lane yet — message the orchestrator below.
