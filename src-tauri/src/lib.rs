@@ -1035,6 +1035,10 @@ fn load_ai_keys_from_login_shell() -> Vec<(String, String)> {
         "OPENAI_API_KEY",
         "OPENROUTER_API_KEY",
         "XAI_API_KEY",
+        // Read-only token for the founder usage-analytics dashboard (epic #1249).
+        // Only present in the founder's login shell — a normal user's shell has
+        // none, so nothing is forwarded and the dashboard stays hidden.
+        "O8_ANALYTICS_TOKEN",
     ];
     // Shell-print the keys we care about; absent vars print as empty so we
     // can skip them. Wrapped in `:;` so a missing var doesn't make the
