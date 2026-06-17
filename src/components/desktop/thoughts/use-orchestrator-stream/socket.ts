@@ -25,6 +25,8 @@ interface CreateOrchestratorMessageHandlerOptions {
   firstTurnPlanChunksRef: RefLike<string[]>;
   firstTurnPlanStartedRef: RefLike<boolean>;
   flushCurrentAssistant: () => void;
+  /** Coalesced (rAF-batched) flush for the streaming-text path — one re-render per frame. */
+  scheduleFlushCurrentAssistant: () => void;
   lastEventAtRef: RefLike<number>;
   messagesRef: RefLike<MobileTranscriptEntry[]>;
   resetEpochRef: RefLike<number>;
@@ -127,7 +129,9 @@ export function createOrchestratorMessageHandler(
         } else {
           options.currentAssistantRef.current.chunks.push(text);
         }
-        options.flushCurrentAssistant();
+        // Coalesced rAF flush for streaming deltas (see useOrchestratorStream) —
+        // one re-render per frame instead of one per token.
+        options.scheduleFlushCurrentAssistant();
 
         if (options.statusRef.current !== 'busy') options.setStatus('busy');
         break;
