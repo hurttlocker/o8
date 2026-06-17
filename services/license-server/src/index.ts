@@ -13,6 +13,7 @@ import { validateEntitlement } from './validate.js';
 import { redeemInvite, registerInvite, resolveInvite } from './invites.js';
 import { handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscribe } from './proxy.js';
 import { handleAnalytics, handleTelemetry } from './analytics.js';
+import { handleIssueFree } from './free-issue.js';
 
 const app = new Hono();
 
@@ -111,6 +112,10 @@ app.post('/v1/transcribe', handleTranscribe);
 
 // ── Telemetry ingest (analytics epic #1249) — plan-token auth, coarse events ──
 app.post('/v1/telemetry', handleTelemetry);
+
+// ── First-run free issuance (epic #1249) — PUBLIC: fresh installs have no creds.
+//    Mints a free-plan token bound to the install id (stable account `sub`). ──
+app.post('/issue-free', handleIssueFree);
 
 // ── Manual issuance (ADMIN-guarded) — for testing before live Stripe ──────────
 app.post('/issue-entitlement', async (c) => {
