@@ -351,6 +351,57 @@ fn take_staged_block() -> Option<String> {
     Some(block)
 }
 
+// ── live drawing memory (teaching mode #1251) ────────────────────────────────
+// The brain draws additively by RE-EMITTING its whole prior drawing each turn
+// and appending — verified live with Opus 4.8. But the app spawns a fresh
+// planner process per voice command and stores only the tag-STRIPPED reply, so
+// the brain never sees the coordinates it just drew. We hold the last drawing's
+// canonical tags here and feed them back into the next turn, so "go deeper"
+// continues the same figure instead of starting over.
+
+/// A drawing session stays "live" for 2 min; each new draw resets the clock.
+/// Matches the teaching-overlay linger in `point_overlay::show_points`.
+const DRAW_SESSION_TTL_SECS: u64 = 120;
+
+static LAST_DRAWING: Mutex<Option<(std::time::Instant, String)>> = Mutex::new(None);
+
+/// Record the tags just drawn (canonical `[...]` form, space-joined) as the live
+/// drawing. Called right after `show_points` fires.
+pub fn record_last_drawing(tags: String) {
+    if tags.trim().is_empty() {
+        return;
+    }
+    let mut slot = LAST_DRAWING.lock().unwrap_or_else(|p| p.into_inner());
+    *slot = Some((std::time::Instant::now(), tags));
+}
+
+/// The live drawing's tags, if a session is still fresh (else None).
+fn last_drawing_tags() -> Option<String> {
+    let slot = LAST_DRAWING.lock().unwrap_or_else(|p| p.into_inner());
+    slot.as_ref().and_then(|(at, tags)| {
+        (at.elapsed().as_secs() <= DRAW_SESSION_TTL_SECS).then(|| tags.clone())
+    })
+}
+
+/// True while a drawing session is live — keeps the screen captured on follow-
+/// ups so a bare "go deeper" continues the drawing without an explicit draw cue.
+pub(crate) fn drawing_session_fresh() -> bool {
+    last_drawing_tags().is_some()
+}
+
+/// Prompt block fed to the brain when continuing a live drawing: the prior tags
+/// plus the instruction to re-emit them unchanged and append. None when idle.
+pub(crate) fn last_drawing_feedback() -> Option<String> {
+    let tags = last_drawing_tags()?;
+    Some(format!(
+        "\n\nCONTINUING a live drawing already on the user's screen. You drew these tags a \
+         moment ago:\n{tags}\nThis is the same teaching session. To add to the picture, \
+         RE-EMIT every one of those tags UNCHANGED (identical coordinates) and then APPEND \
+         your new [DRAW]/[POINT] tags. Do not move, rescale, or drop what is already there. \
+         Only start a blank drawing if the user has clearly changed the subject."
+    ))
+}
+
 // ── task ids ─────────────────────────────────────────────────────────────────
 
 static TASK_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -734,7 +785,10 @@ async fn run_agent_inner(
     // Intent-gated screen context (dossier #2): only prompts that talk ABOUT
     // the screen pay the ~0.5s capture + image tokens. Runs after the
     // "running" emit so the dock's working capsule covers the capture beat.
-    let screen_wanted = screen::wants_screen(&prompt);
+    // Keep capturing while a teaching drawing is live so a bare follow-up
+    // ("go deeper", "now add the angles") continues the same figure even with
+    // no explicit draw cue in the words (#1251).
+    let screen_wanted = screen::wants_screen(&prompt) || drawing_session_fresh();
     let screen_ctx = if screen_wanted {
         screen::capture(&app).map(std::sync::Arc::new)
     } else {
@@ -826,6 +880,14 @@ async fn run_agent_inner(
             if !point_tags.is_empty() {
                 if let Some(screen) = &ctx.screen {
                     crate::point_overlay::show_points(&app, screen, &point_tags);
+                    // Remember what we drew so the next turn can re-emit + extend
+                    // it (additive teaching diagrams, #1251).
+                    let tag_src = point_tags
+                        .iter()
+                        .map(crate::point_overlay::tag_to_string)
+                        .collect::<Vec<_>>()
+                        .join(" ");
+                    record_last_drawing(tag_src);
                 } else {
                     log::warn!("[symon-agent] model emitted POINT tags without screen context — ignored");
                 }
