@@ -258,6 +258,11 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     let mut spoke_filler = false;
 
     for _turn in 0..MAX_TURNS {
+        // User interrupted (Escape / tap-to-stop) — stop before the next turn.
+        // run_agent_inner sees the cancel flag and goes quiet.
+        if ctx.is_cancelled() {
+            break;
+        }
         let (b, m, c, t) = (bin.clone(), model.to_string(), mcp_cfg.clone(), transcript.clone());
         let raw = tokio::time::timeout(
             Duration::from_secs(TURN_TIMEOUT_SECS),

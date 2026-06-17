@@ -140,6 +140,12 @@ export default function DictationPillPage() {
   // the dual-emit (emit_to dock + broadcast both reach the dock window) from
   // appending the answer twice.
   const agentDoneRef = useRef<string>('');
+  // The set of currently-running task ids. A heavy ask runs TWO tasks at once:
+  // the fast foreground voice turn (`task-*`, which acks "on it" and finishes
+  // almost immediately) and the slow background brain (`claude-task-*`). The
+  // working capsule must stay lit until BOTH drain, so `agentWorking` is driven
+  // by this set being non-empty — not by any single task's terminal event.
+  const runningTasksRef = useRef<Set<string>>(new Set());
 
   // Chat continuity: an agent-lane dictation that starts while the conversation
   // panel is open renders as a pending turn INSIDE the panel — the dock never
@@ -364,6 +370,8 @@ export default function DictationPillPage() {
 
   const handleTogglePause = useCallback(() => { invokeCmd('tts_toggle_pause'); }, []);
   const handleStop = useCallback(() => { invokeCmd('tts_stop'); }, []);
+  // Tap-to-stop on the working capsule: cancel the running task(s) + any speech.
+  const handleInterrupt = useCallback(() => { invokeCmd('agent_interrupt'); }, []);
 
   // Symon speaking speed (dock slider + durable). Seed from the persisted
   // reading_speed pref so the slider shows the real default on first paint;
@@ -575,11 +583,27 @@ export default function DictationPillPage() {
           if (kind !== 'status') return;
           const status = e.payload?.status;
           const tid = e.payload?.taskId;
+          if (status === 'cancelled') {
+            // User interrupted (Escape / tap-to-stop). Drain the task and clear
+            // the capsule if nothing else is running — no panel turn, no voice.
+            if (tid) runningTasksRef.current.delete(tid);
+            const stillWorking = runningTasksRef.current.size > 0;
+            setAgentWorking(stillWorking);
+            agentWorkingRef.current = stillWorking;
+            if (!stillWorking) setAgentTool('');
+            if (panelPendingRef.current?.phase === 'handoff') updatePanelPending(null);
+            setAgentConfirm((c) => (c && c.taskId === tid ? null : c));
+            return;
+          }
           if (status === 'running') {
+            // Start the timer only on the idle→working edge so a background task
+            // spawning behind a still-visible foreground ack doesn't reset it.
+            const wasIdle = runningTasksRef.current.size === 0;
+            if (tid) runningTasksRef.current.add(tid);
             setAgentWorking(true);
             agentWorkingRef.current = true;
             setAgentTool('');
-            setAgentStartedAt(Date.now());
+            if (wasIdle) setAgentStartedAt(Date.now());
             if (e.payload?.intent) agentIntentRef.current = e.payload.intent;
             // The agent claimed the pending in-panel turn: lock its text to
             // the polished intent and cancel the discard timeout.
@@ -598,9 +622,13 @@ export default function DictationPillPage() {
             // (emit_to dock + broadcast). Handle each task's done once.
             if (tid && agentDoneRef.current === tid) return;
             if (tid) agentDoneRef.current = tid;
-            setAgentWorking(false);
-            agentWorkingRef.current = false;
-            setAgentTool('');
+            // Drain this task; keep the capsule lit if another (e.g. the
+            // background brain behind a foreground ack) is still running.
+            if (tid) runningTasksRef.current.delete(tid);
+            const stillWorking = runningTasksRef.current.size > 0;
+            setAgentWorking(stillWorking);
+            agentWorkingRef.current = stillWorking;
+            if (!stillWorking) setAgentTool('');
             // The real turns replace the pending in-panel rows in place — but
             // ONLY a handed-off pending. A listening/polishing pending belongs
             // to a NEWER dictation the user already started over this task.
@@ -765,6 +793,7 @@ export default function DictationPillPage() {
             ttsState={ttsState}
             onTogglePause={handleTogglePause}
             onStop={handleStop}
+            onInterrupt={handleInterrupt}
             speechSpeed={speechSpeed}
             onSpeechSpeed={handleSpeechSpeed}
             askOpen={askOpen}
