@@ -46,6 +46,7 @@ import { performWorktreeSideMerge } from '@/lib/lane/worktree-side-merge';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import { emitProductEvent } from '@/lib/analytics/server';
 import { buildConflictZonesFromDiffFiles, extractReviewFindings, extractReviewPatterns } from '@/lib/orchestrator/review-lessons';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { fetchWorkerRun } from '@/lib/worker/runs';
@@ -381,6 +382,12 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           updateLane(command.laneId, { worktreePath: result.worktree.path }, 'system');
         }
         setLaneStatus(command.laneId, 'running', actor, 'session_launched');
+
+        // Coarse product signal — an agent actually started working (#1249).
+        // Runtime enum only; never the prompt/repo. Most dispatches come from the
+        // orchestrator via MCP, not a UI button, so this server emit is the only
+        // place the signal is observable. Fire-and-forget, never blocks dispatch.
+        void emitProductEvent('dispatch.started', { runtime: lane.runtime });
 
         // Register with supervisor for completion detection + stuck monitoring.
         // The supervisor runs in the ws-server process — use HTTP, not direct import.

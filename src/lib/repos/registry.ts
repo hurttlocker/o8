@@ -13,6 +13,7 @@ import type {
   ValidatedRepoCandidate,
 } from './types';
 import { isRepoWorkspaceIsolationPreference } from './types';
+import { emitProductEvent } from '@/lib/analytics/server';
 
 const execFileAsync = promisify(execFile);
 
@@ -441,6 +442,11 @@ export async function addRepo(localPath: string) {
   // out-of-band so addRepo's response isn't blocked on disk scans. Errors
   // are logged but never raised; the registry write already succeeded.
   void scheduleSpecIngest(entry.localPath, entry.name);
+
+  // Coarse product signal — a new repo was connected (#1249). hasRemote tells
+  // local-only vs GitHub-connected; never the name/path/URL. Only the genuinely
+  // new branch fires (the `existing` re-open above does not). Fire-and-forget.
+  void emitProductEvent('repo.added', { hasRemote: !!candidate.remoteUrl, isGitRepo: candidate.isGitRepo ?? true });
 
   return entry;
 }
