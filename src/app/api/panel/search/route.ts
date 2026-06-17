@@ -20,7 +20,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, basename } from 'node:path';
@@ -142,22 +142,28 @@ async function searchIssues(
 
 function searchFiles(query: string, workspace: string | null): SearchResult[] {
   const root = safeRoot(workspace);
-  const escaped = query.replace(/"/g, '');
-  if (!escaped) return [];
-
-  const cmd = `find . -maxdepth 5 -type f -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/target/*' -not -path '*/dist/*' -not -path '*/out/*' | grep -i "${escaped}" | head -10`;
+  const needle = query.toLowerCase();
+  if (!needle) return [];
 
   try {
-    const stdout = execSync(cmd, {
-      cwd: root,
-      encoding: 'utf-8',
-      timeout: 2500,
-      maxBuffer: 256 * 1024,
-    }).trim();
+    const stdout = execFileSync(
+      'find',
+      [
+        '.', '-maxdepth', '5', '-type', 'f',
+        '-not', '-path', '*/.git/*',
+        '-not', '-path', '*/node_modules/*',
+        '-not', '-path', '*/.next/*',
+        '-not', '-path', '*/target/*',
+        '-not', '-path', '*/dist/*',
+        '-not', '-path', '*/out/*',
+      ],
+      { cwd: root, encoding: 'utf-8', timeout: 2500, maxBuffer: 256 * 1024, stdio: ['ignore', 'pipe', 'ignore'] },
+    ).trim();
 
     return stdout
       .split('\n')
-      .filter(Boolean)
+      .filter((line) => line && line.toLowerCase().includes(needle))
+      .slice(0, 10)
       .map<SearchResult>((line, index) => {
         const cleaned = line.startsWith('./') ? line.slice(2) : line;
         const basename = cleaned.split('/').pop() ?? cleaned;

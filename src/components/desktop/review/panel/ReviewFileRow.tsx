@@ -293,13 +293,18 @@ function RichPreviewBody({ payload }: { payload: PreviewPayload }) {
   }
   if (payload.kind === 'svg') {
     return (
-      <div
-        style={{ display: 'flex', justifyContent: 'center', paddingTop: 12, paddingBottom: 16, paddingLeft: 16, paddingRight: 16 }}
-        // SVG markup comes from a loopback-gated read of a file inside the
-        // operator's repo, so it's trusted relative to the same threat model
-        // as the rest of the desktop shell.
-        dangerouslySetInnerHTML={{ __html: payload.markup }}
-      />
+      <div style={{ display: 'flex', justifyContent: 'center', paddingTop: 12, paddingBottom: 16, paddingLeft: 16, paddingRight: 16 }}>
+        {/* Render SVG as a data URL rather than dangerouslySetInnerHTML: a
+            file from the branch under review is untrusted input, and an <img>
+            loads SVG in script-disabled static mode (no inline scripts/handlers
+            execute), unlike raw HTML injection. */}
+        {/* eslint-disable-next-line @next/next/no-img-element -- data URL, not a remote asset */}
+        <img
+          src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(payload.markup)}`}
+          alt=""
+          style={{ maxWidth: '100%', height: 'auto' }}
+        />
+      </div>
     );
   }
   return <RowMessage text="File deleted — no preview." />;

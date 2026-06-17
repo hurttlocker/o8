@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'node:child_process';
 import os from 'node:os';
 import { ensureGitHubIssues, resolveRepoSlug } from '@/lib/github-broker';
 
@@ -26,13 +26,14 @@ interface UniversalResult {
 
 // ── Helpers ──
 
-function execQuiet(cmd: string, opts?: { cwd?: string; timeout?: number }): string {
+function execFileQuiet(file: string, args: string[], opts?: { cwd?: string; timeout?: number }): string {
   try {
-    return execSync(cmd, {
+    return execFileSync(file, args, {
       encoding: 'utf-8',
       timeout: opts?.timeout ?? 4000,
       maxBuffer: 512 * 1024,
       cwd: opts?.cwd,
+      stdio: ['ignore', 'pipe', 'ignore'],
     }).trim();
   } catch {
     return '';
@@ -97,13 +98,26 @@ function searchFiles(query: string, workspace?: string): UniversalResult[] {
     : DEFAULT_ROOT;
 
   const results: UniversalResult[] = [];
+  const needle = query.toLowerCase();
 
-  // Filename matches
-  const findOut = execQuiet(
-    `find . -maxdepth 5 -type f -not -path '*/.git/*' -not -path '*/node_modules/*' -not -path '*/.next/*' -not -path '*/target/*' -not -path '*/dist/*' | grep -i "${query.replace(/"/g, '')}" | head -8`,
+  // Filename matches — run `find` with no shell, then filter by query in JS.
+  const findOut = execFileQuiet(
+    'find',
+    [
+      '.', '-maxdepth', '5', '-type', 'f',
+      '-not', '-path', '*/.git/*',
+      '-not', '-path', '*/node_modules/*',
+      '-not', '-path', '*/.next/*',
+      '-not', '-path', '*/target/*',
+      '-not', '-path', '*/dist/*',
+    ],
     { cwd: root, timeout: 3000 },
   );
-  for (const line of findOut.split('\n').filter(Boolean)) {
+  const findMatches = findOut
+    .split('\n')
+    .filter((line) => line && line.toLowerCase().includes(needle))
+    .slice(0, 8);
+  for (const line of findMatches) {
     const clean = line.startsWith('./') ? line.slice(2) : line;
     results.push({
       kind: 'file',
@@ -115,11 +129,12 @@ function searchFiles(query: string, workspace?: string): UniversalResult[] {
   }
 
   // Content matches via ripgrep
-  const rgOut = execQuiet(
-    `rg --json -i -m 2 --max-filesize 500K -g '!*.lock' -g '!*.min.*' -- "${query.replace(/"/g, '\\"')}" | head -40`,
+  const rgOut = execFileQuiet(
+    'rg',
+    ['--json', '-i', '-m', '2', '--max-filesize', '500K', '-g', '!*.lock', '-g', '!*.min.*', '--', query],
     { cwd: root, timeout: 4000 },
   );
-  for (const rawLine of rgOut.split('\n').filter(Boolean)) {
+  for (const rawLine of rgOut.split('\n').filter(Boolean).slice(0, 40)) {
     try {
       const parsed = JSON.parse(rawLine);
       if (parsed.type === 'match' && parsed.data) {

@@ -300,8 +300,12 @@ function ImagePreviewBase({ filePath, workspace }: { filePath: string; workspace
         }}
       >
         {imageData.type === 'svg' && imageData.content ? (
-          <div
-            dangerouslySetInnerHTML={{ __html: imageData.content }}
+          // Render SVG as a data URL, not via dangerouslySetInnerHTML — an <img>
+          // loads SVG in script-disabled static mode, so repo/agent-authored
+          // markup can't run inline scripts or event handlers in our origin.
+          <img
+            src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(imageData.content)}`}
+            alt={fileName}
             style={{ maxWidth: '100%', maxHeight: '100%' }}
           />
         ) : imageData.dataUrl ? (
