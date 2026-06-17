@@ -17,7 +17,8 @@
  * - commands.ts: final hard gate before merge execution
  */
 
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { isSafeGitRef } from '@/lib/git/refs';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { checkUntrackedImports } from './check-untracked-imports';
 import { hasScopePartitionToken } from './review-risk';
@@ -125,8 +126,9 @@ function parseGitDiffFilePath(line: string): string | null {
 }
 
 function getAddedLines(cwd: string, baseBranch: string): AddedDiffLine[] {
+  if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const diff = execSync(`git diff ${baseBranch}...HEAD --no-color`, {
+    const diff = execFileSync('git', ['diff', `${baseBranch}...HEAD`, '--no-color'], {
       cwd,
       timeout: 15_000,
       encoding: 'utf-8',
@@ -159,8 +161,9 @@ interface DiffNumstat {
 }
 
 function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
+  if (!isSafeGitRef(baseBranch)) return [];
   try {
-    const output = execSync(`git diff --numstat ${baseBranch}...HEAD`, {
+    const output = execFileSync('git', ['diff', '--numstat', `${baseBranch}...HEAD`], {
       cwd,
       timeout: 10_000,
       encoding: 'utf-8',
@@ -188,6 +191,7 @@ function getDiffNumstat(cwd: string, baseBranch: string): DiffNumstat[] {
 }
 
 function getChangedFiles(cwd: string, baseBranch: string): string[] {
+  if (!isSafeGitRef(baseBranch)) return [];
   try {
     const output = execFileSync('git', ['diff', '--name-only', `${baseBranch}...HEAD`], {
       cwd,

@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'node:child_process';
 
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 
@@ -10,7 +10,7 @@ export async function GET(request: Request) {
   const filePath = searchParams.get('path') ?? searchParams.get('file');
   const workspaceParam = searchParams.get('workspace') ?? searchParams.get('repoPath');
   // #1081 — the "Hide whitespace" overflow toggle maps to `git diff -w`.
-  const wsFlag = searchParams.get('ignoreWhitespace') === '1' ? ' -w' : '';
+  const wsArgs = searchParams.get('ignoreWhitespace') === '1' ? ['-w'] : [];
 
   if (!filePath) {
     return NextResponse.json({ error: 'path param required' }, { status: 400 });
@@ -27,7 +27,7 @@ export async function GET(request: Request) {
     let diff = '';
     try {
       // Staged + unstaged changes against HEAD.
-      diff = execSync(`git diff --no-color${wsFlag} HEAD -- "${filePath}"`, {
+      diff = execFileSync('git', ['diff', '--no-color', ...wsArgs, 'HEAD', '--', filePath], {
         cwd: root,
         encoding: 'utf-8',
         timeout: 5000,
@@ -38,7 +38,7 @@ export async function GET(request: Request) {
     // Also check staged changes
     let stagedDiff = '';
     try {
-      stagedDiff = diff ? '' : execSync(`git diff --no-color${wsFlag} --cached -- "${filePath}"`, {
+      stagedDiff = diff ? '' : execFileSync('git', ['diff', '--no-color', ...wsArgs, '--cached', '--', filePath], {
         cwd: root,
         encoding: 'utf-8',
         timeout: 5000,
@@ -49,7 +49,7 @@ export async function GET(request: Request) {
     // Check if file is untracked
     let isUntracked = false;
     try {
-      const status = execSync(`git status --porcelain -- "${filePath}"`, {
+      const status = execFileSync('git', ['status', '--porcelain', '--', filePath], {
         cwd: root,
         encoding: 'utf-8',
         timeout: 5000,
@@ -62,7 +62,7 @@ export async function GET(request: Request) {
     let untrackedDiff = '';
     if (isUntracked && !diff && !stagedDiff) {
       try {
-        execSync(`git diff --no-color${wsFlag} --no-index /dev/null "${filePath}"`, {
+        execFileSync('git', ['diff', '--no-color', ...wsArgs, '--no-index', '/dev/null', filePath], {
           cwd: root,
           encoding: 'utf-8',
           timeout: 5000,

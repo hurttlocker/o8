@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'node:child_process';
+import { isSafeGitRef } from '@/lib/git/refs';
 
 const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
 
@@ -18,11 +19,17 @@ export async function GET(request: Request) {
   }
 
   try {
-    const branchArg = branch ? ` ${branch}` : '';
-    const logOutput = execSync(
-      `git log --format='{"hash":"%H","shortHash":"%h","author":"%an","authorEmail":"%ae","date":"%aI","subject":"%s","refs":"%D"}' -n ${limit}${branchArg}`,
-      { cwd: root, encoding: 'utf-8', timeout: 10000 },
-    );
+    if (branch && !isSafeGitRef(branch)) {
+      return NextResponse.json({ error: 'Invalid branch name', commits: [], currentBranch: 'main', branches: [] });
+    }
+    const logArgs = [
+      'log',
+      '--format={"hash":"%H","shortHash":"%h","author":"%an","authorEmail":"%ae","date":"%aI","subject":"%s","refs":"%D"}',
+      '-n',
+      String(limit),
+    ];
+    if (branch) logArgs.push(branch);
+    const logOutput = execFileSync('git', logArgs, { cwd: root, encoding: 'utf-8', timeout: 10000 });
 
     const commits = logOutput.trim().split('\n').filter(Boolean).map(line => {
       try {
@@ -51,7 +58,7 @@ export async function GET(request: Request) {
     // Get current branch
     let currentBranch = 'main';
     try {
-      currentBranch = execSync('git rev-parse --abbrev-ref HEAD', {
+      currentBranch = execFileSync('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
         cwd: root, encoding: 'utf-8', timeout: 3000,
       }).trim();
     } catch { /* silent */ }
@@ -59,9 +66,9 @@ export async function GET(request: Request) {
     // Get branch list
     let branches: string[] = [];
     try {
-      branches = execSync('git branch --format="%(refname:short)" | head -20', {
+      branches = execFileSync('git', ['branch', '--format=%(refname:short)'], {
         cwd: root, encoding: 'utf-8', timeout: 3000,
-      }).trim().split('\n').filter(Boolean);
+      }).trim().split('\n').map((b) => b.trim()).filter(Boolean).slice(0, 20);
     } catch { /* silent */ }
 
     return NextResponse.json({ commits, currentBranch, branches });
