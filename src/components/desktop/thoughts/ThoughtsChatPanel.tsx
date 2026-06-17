@@ -49,6 +49,7 @@ import { useDictationHostOptional } from '@/components/desktop/dictation/Dictati
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
 import { SwarmStatusCard } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
+import { track } from '@/lib/analytics/track';
 import type { TurnSummary } from './chat-panel/TurnSummaryCard';
 import { ChatToastStack } from './chat-panel/ChatToastStack';
 import { ComposerArea } from './chat-panel/ComposerArea';
@@ -1427,6 +1428,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const handleTaskSend = useCallback(async (explicitText?: string) => {
     const msg = (explicitText ?? input).trim();
     if (!msg) return;
+
+    track('orchestrator.message'); // coarse usage signal (analytics epic #1249) — no content
 
     // Mode-routing slash prefix (`/chat ...`, `/codex ...`, `/gemini ...`,
     // `/opencode ...`) — peel the prefix, stash the body for the spawned
