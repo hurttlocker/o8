@@ -64,6 +64,15 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
+  it('gates /api/v2/context/files (chat context git-exec sink) against cross-origin', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/v2/context/files?q=x', {
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('gates /api/panel/file-io (arbitrary-path canvas file card) against LAN', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/panel/file-io?path=/etc/hosts', {

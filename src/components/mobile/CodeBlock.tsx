@@ -61,7 +61,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code }: { code: string }) 
         mermaid.initialize({
           startOnLoad: false,
           ...MERMAID_THEME,
-          securityLevel: 'loose',
+          securityLevel: 'strict',
         });
 
         const id = `mermaid-m-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

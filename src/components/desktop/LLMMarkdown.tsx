@@ -410,7 +410,7 @@ const MermaidBlock = memo(function MermaidBlock({ code }: { code: string }) {
     (async () => {
       try {
         const mermaid = (await import('mermaid')).default;
-        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+        mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'strict' });
         // Render in an offscreen container to prevent DOM pollution on error
         const offscreen = document.createElement('div');
         offscreen.style.position = 'absolute';

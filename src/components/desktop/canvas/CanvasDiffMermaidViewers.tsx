@@ -59,7 +59,7 @@ function MermaidViewerBase({ code }: { code: string }) {
             fontFamily: 'var(--font-sans-system)',
             fontSize: '14px',
           },
-          securityLevel: 'loose',
+          securityLevel: 'strict',
         });
         const id = `mermaid-canvas-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
         const { svg } = await mermaid.render(id, code);
