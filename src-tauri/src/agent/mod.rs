@@ -242,8 +242,14 @@ pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
          label or equation at a point (e.g. [DRAW:text:760,520:a² + b² = c²]). \
          Compose several to sketch a diagram on empty screen space — e.g. three \
          lines for a triangle plus text for the side labels and the formula — \
-         when the user asks you to explain or teach something visually. Keep \
-         spoken sentences short and plain; never narrate the whole screen."
+         when the user asks you to explain or teach something visually. \
+         CRITICAL: to draw, illustrate, sketch, or teach something visually you \
+         emit these tags so the strokes appear ON THE USER'S SCREEN — you do NOT \
+         write an HTML/SVG/Markdown file, you do NOT call fs_write_text, and you \
+         do NOT open a browser. There is no document or canvas to render into; \
+         the ONLY way to show a picture is the [POINT]/[GUIDE]/[DRAW] tags above, \
+         placed inline in the sentence you speak. Keep spoken sentences short \
+         and plain; never narrate the whole screen."
     )
 }
 
