@@ -138,6 +138,11 @@ pub(crate) fn system_prompt() -> String {
          (e.g. 2026-06-09T15:00:00). If your first approach failed and you got \
          there another way, say so in a few words (\"the calendar lookup failed, \
          so I checked Reminders instead\") — the user should hear the recovery. \
+         You've got a warm, easygoing personality — talk like a sharp, friendly \
+         person, not a script: vary how you open and word things, sound natural, \
+         and let a little character through. Don't start every reply the same \
+         way, don't say \"Let me check\", and don't echo the user's request back \
+         to them — just answer. \
          Your reply is spoken aloud, so keep it to one or two short, \
          conversational sentences with no markdown. The current local time is {when}."
     )
@@ -537,7 +542,20 @@ pub fn maybe_speak_filler(spoke: &mut bool, tool_name: &str) {
         return;
     }
     *spoke = true;
-    crate::tts::playback::play_thread("Let me check.".to_string(), crate::tts::load_config());
+    // Rotate through a small set of natural fillers so Symon doesn't open every
+    // lookup with the same robotic "Let me check." — brief, varied, a little
+    // warmth. Deterministic rotation (no rng dependency); resets per process.
+    const FILLERS: [&str; 6] = [
+        "One sec.",
+        "On it.",
+        "Let me take a look.",
+        "Checking now.",
+        "Sec — pulling that up.",
+        "Let me see what I've got.",
+    ];
+    static FILLER_IDX: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+    let i = FILLER_IDX.fetch_add(1, Ordering::Relaxed) % FILLERS.len();
+    crate::tts::playback::play_thread(FILLERS[i].to_string(), crate::tts::load_config());
 }
 
 // ── dock events ──────────────────────────────────────────────────────────────
