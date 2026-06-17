@@ -76,8 +76,9 @@ type AuthResult =
   | { ok: true; plan: Plan; sub: string }
   | { ok: false; status: 401; error: string };
 
-/** Verify the Bearer plan token and resolve { plan, sub } for metering. */
-async function authPlan(c: Context): Promise<AuthResult> {
+/** Verify the Bearer plan token and resolve { plan, sub } for metering. Shared
+ *  with the telemetry ingest (analytics.ts) so both authenticate identically. */
+export async function authPlan(c: Context): Promise<AuthResult> {
   const header = c.req.header('authorization');
   const token = header?.replace(/^Bearer\s+/i, '').trim();
   if (!token) return { ok: false, status: 401, error: 'missing plan token' };
