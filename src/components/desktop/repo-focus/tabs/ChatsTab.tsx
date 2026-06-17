@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import {
   normalizeRepoPath,
   packetBelongsToRepo,
@@ -210,9 +211,13 @@ export function ChatsTab({
   ), [patchHistoryItem, withHistoryBusy]);
 
   const deleteHistoryItem = useCallback((item: ChatHistoryItem) => {
-    const confirmed = window.confirm(`Delete "${item.title}" from chat history?`);
-    if (!confirmed) return;
     void (async () => {
+      const confirmed = await requestConfirm({
+        title: `Delete "${item.title}" from chat history?`,
+        confirmLabel: 'Delete',
+        danger: true,
+      });
+      if (!confirmed) return;
       try {
         await withHistoryBusy(item.tabId, async () => {
           const response = await fetch(`/api/v2/chat-history?tabId=${encodeURIComponent(item.tabId)}`, { method: 'DELETE' });
@@ -226,7 +231,7 @@ export function ChatsTab({
         });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'Delete failed';
-        window.alert(`Couldn't delete "${item.title}":\n\n${message}\n\nTry again — if Codex was busy on this thread the file may have been locked.`);
+        toast(`Couldn't delete "${item.title}": ${message}. Try again — if Codex was busy on this thread the file may have been locked.`);
       }
     })();
   }, [withHistoryBusy]);

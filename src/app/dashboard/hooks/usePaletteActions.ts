@@ -1,4 +1,5 @@
 import { useMemo, type Dispatch, type SetStateAction } from 'react';
+import { requestConfirm } from '@/components/shared/ConfirmToastHost';
 import type { SettingsTab } from '@/components/desktop/SettingsPage';
 import type { WsConnectionState } from '@/components/desktop/hooks/DesktopWebSocketContext';
 import type { CommandPaletteAction } from '@/components/shared/UniversalSearch';
@@ -393,9 +394,12 @@ export function usePaletteActions({
           keywords: ['prune stale worktrees', 'cleanup worktrees', 'stale worktree', globalRepoEntry.name],
           priority: 345,
           run: async () => {
-            const confirmed = window.confirm(
-              `Prune ${staleSelectedRepoWorktrees.length} stale worktree${staleSelectedRepoWorktrees.length === 1 ? '' : 's'} for ${globalRepoEntry.name}?\n\nThis removes the stale worktree directories and their branches.`,
-            );
+            const confirmed = await requestConfirm({
+              title: `Prune ${staleSelectedRepoWorktrees.length} stale worktree${staleSelectedRepoWorktrees.length === 1 ? '' : 's'} for ${globalRepoEntry.name}?`,
+              message: 'This removes the stale worktree directories and their branches.',
+              confirmLabel: 'Prune',
+              danger: true,
+            });
             if (!confirmed) {
               return;
             }

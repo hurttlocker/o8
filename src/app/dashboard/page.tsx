@@ -22,6 +22,7 @@ import { EntitlementProvider } from '@/lib/entitlement/context';
 // ConnectionBanner retired — ConnectionPill in AgentPanel surfaces WS state.
 import { ThemeProvider, useTheme } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
+import { ConfirmToastHost } from '@/components/shared/ConfirmToastHost';
 import type { BottomPanelSurfaceKind, ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
@@ -4614,6 +4615,9 @@ function DashboardInner() {
 
       {/* ── Alert Toast (desktop only — urgent alerts slide in bottom-left near bell) ── */}
       <AlertToast alerts={activeAlerts} compact={compactShell} onAction={handleAlertAction} />
+
+      {/* ── Branded confirm / prompt / toast host (replaces native window.confirm/prompt/alert) ── */}
+      <ConfirmToastHost />
 
       {/* ── Sidebar hover-preview trigger + drop overlay (collapsed only) ──
           When the AgentPanel column is hidden, we keep a thin invisible hot

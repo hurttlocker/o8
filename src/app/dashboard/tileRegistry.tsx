@@ -1,6 +1,7 @@
 'use client';
 
 import { Suspense, lazy, type Dispatch, type SetStateAction } from 'react';
+import { toast } from '@/components/shared/ConfirmToastHost';
 import type { CanvasRepoTaskLaunchRequest } from '@/components/desktop/Canvas';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from '@/components/desktop/ContextualPanel';
 import { LocalhostPreviewTabs } from '@/components/desktop/LocalhostPreviewTabs';
@@ -343,7 +344,7 @@ export function createTileRegistry({
                 repoPath: repo.localPath,
                 createNew: true,
               }).catch((error) => {
-                window.alert(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
+                toast(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
               });
             }}
             onOpenRepoGitLog={(repo) => handleOpenGitLog(repo.localPath)}

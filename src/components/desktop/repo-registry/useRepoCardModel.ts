@@ -1,6 +1,7 @@
 'use client';
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { requestConfirm, toast } from '@/components/shared/ConfirmToastHost';
 import {
   FOCUS_REPO_SETUP_EVENT,
   formatBytes,
@@ -286,9 +287,12 @@ export function useRepoCardModel({
   );
 
   const handleCleanupWorktree = useCallback(async (worktree: WorktreeInfo) => {
-    const confirmed = window.confirm(
-      `Clean up ${worktree.branch}?\n\nThis removes the workspace directory and deletes the branch if possible.`,
-    );
+    const confirmed = await requestConfirm({
+      title: `Clean up ${worktree.branch}?`,
+      message: 'This removes the workspace directory and deletes the branch if possible.',
+      confirmLabel: 'Clean up',
+      danger: true,
+    });
     if (!confirmed) return;
 
     try {
@@ -306,15 +310,18 @@ export function useRepoCardModel({
       refreshBranches();
       await refreshWorktreeSummary();
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : `Unable to clean up ${worktree.branch}.`);
+      toast(error instanceof Error ? error.message : `Unable to clean up ${worktree.branch}.`);
     }
   }, [refreshBranches, refreshWorktreeSummary, repo.localPath]);
 
   const handlePruneStaleWorktrees = useCallback(async () => {
     if (staleWorktrees.length === 0) return;
-    const confirmed = window.confirm(
-      `Prune ${staleWorktrees.length} stale workspace${staleWorktrees.length === 1 ? '' : 's'} for ${repo.name}?\n\nThis removes the stale worktree directories and their branches.`,
-    );
+    const confirmed = await requestConfirm({
+      title: `Prune ${staleWorktrees.length} stale workspace${staleWorktrees.length === 1 ? '' : 's'} for ${repo.name}?`,
+      message: 'This removes the stale worktree directories and their branches.',
+      confirmLabel: 'Prune',
+      danger: true,
+    });
     if (!confirmed) return;
 
     try {
@@ -329,7 +336,7 @@ export function useRepoCardModel({
       refreshBranches();
       await refreshWorktreeSummary();
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Unable to prune stale workspaces.');
+      toast(error instanceof Error ? error.message : 'Unable to prune stale workspaces.');
     }
   }, [refreshBranches, refreshWorktreeSummary, repo.localPath, repo.name, staleWorktrees.length]);
 
@@ -642,7 +649,7 @@ export function useRepoCardModel({
         body: JSON.stringify({ editor, repo: targetPath }),
       });
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : `Unable to open ${shortenPath(targetPath)}.`);
+      toast(error instanceof Error ? error.message : `Unable to open ${shortenPath(targetPath)}.`);
     }
   }, []);
 
@@ -650,7 +657,7 @@ export function useRepoCardModel({
     try {
       await navigator.clipboard.writeText(targetPath);
     } catch {
-      window.alert(`Unable to copy the ${label}.`);
+      toast(`Unable to copy the ${label}.`);
     }
   }, []);
 
