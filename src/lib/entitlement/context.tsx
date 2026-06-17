@@ -51,6 +51,7 @@ export function useEntitlement() {
 interface EntitlementResponse {
   plan?: unknown;
   flags?: unknown;
+  source?: unknown;
 }
 
 function coercePlan(value: unknown): Plan {
@@ -76,6 +77,13 @@ export function EntitlementProvider({ children }: { children: React.ReactNode })
         // Re-derive flags from the plan so the client always agrees with the
         // single source of truth (flags.ts), even if the payload is partial.
         setFlags(resolveFlags(nextPlan));
+        // First-run: no token yet (source 'default') → issue a free account
+        // token in the background so this install has a stable `sub` for usage
+        // attribution + can reach the managed proxy. Idempotent + fail-soft;
+        // the plan stays free, so there's nothing to re-render on success.
+        if (data.source === 'default') {
+          void fetch('/api/panel/entitlement/bootstrap', { method: 'POST' }).catch(() => {});
+        }
       } catch (error) {
         // Never crash the dashboard — fall back to free.
         console.error('[entitlement] client fetch failed, defaulting to free:', error);
