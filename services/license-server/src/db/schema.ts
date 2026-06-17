@@ -108,3 +108,31 @@ export const proxyUsage = pgTable('proxy_usage', {
 
 export type ProxyUsage = typeof proxyUsage.$inferSelect;
 export type NewProxyUsage = typeof proxyUsage.$inferInsert;
+
+/**
+ * `product_events` — coarse, append-only product-usage events (analytics epic
+ * #1249, monetization plan §11.2). Distinct from `proxy_usage`, which only sees
+ * calls that hit our proxy: this fires on ANY install carrying an account token,
+ * so it captures usage even when the work runs on the user's own sub/keys (the
+ * common case). It's how we answer "what are people using, and how" beyond raw
+ * inference spend.
+ *
+ * COARSE ONLY — an event name + small structured props (counts / flags /
+ * surface ids). NEVER code, repo names, prompts, or file contents (privacy
+ * guardrail). Props are size-capped at ingest; oversized payloads are dropped.
+ */
+export const productEvents = pgTable('product_events', {
+  id: text('id').primaryKey(),
+  /** Account the event is attributed to — the plan-token subject (sub claim). */
+  sub: text('sub').notNull(),
+  /** Plan tier at event time: 'free' | 'pro' | 'team'. */
+  plan: text('plan').notNull(),
+  /** Coarse event name, e.g. 'surface.opened' | 'dispatch.started' | 'brain.asked'. */
+  event: text('event').notNull(),
+  /** Coarse structured props only (size-capped at ingest). No content. */
+  props: jsonb('props'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type ProductEvent = typeof productEvents.$inferSelect;
+export type NewProductEvent = typeof productEvents.$inferInsert;

@@ -12,6 +12,7 @@ import { constructEvent, handleStripeEvent } from './stripe-webhook.js';
 import { validateEntitlement } from './validate.js';
 import { redeemInvite, registerInvite, resolveInvite } from './invites.js';
 import { handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscribe } from './proxy.js';
+import { handleAnalytics, handleTelemetry } from './analytics.js';
 
 const app = new Hono();
 
@@ -93,6 +94,9 @@ app.post('/v1/embeddings', handleEmbeddings);
 app.post('/v1/gemini', handleGeminiGenerate);
 app.post('/v1/transcribe', handleTranscribe);
 
+// ── Telemetry ingest (analytics epic #1249) — plan-token auth, coarse events ──
+app.post('/v1/telemetry', handleTelemetry);
+
 // ── Manual issuance (ADMIN-guarded) — for testing before live Stripe ──────────
 app.post('/issue-entitlement', async (c) => {
   if (!isAdmin(c.req.header('authorization'))) {
@@ -144,6 +148,14 @@ app.delete('/revoke/:subscriptionId', async (c) => {
   });
 
   return c.json({ revoked: true, subscriptionId });
+});
+
+// ── Usage analytics (ADMIN-guarded) — founder dashboard data (epic #1249) ─────
+app.get('/admin/analytics', async (c) => {
+  if (!isAdmin(c.req.header('authorization'))) {
+    return c.json({ error: 'unauthorized' }, 401);
+  }
+  return handleAnalytics(c);
 });
 
 // ── Beta invites (#beta-referral) ─────────────────────────────────────────────
