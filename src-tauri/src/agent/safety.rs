@@ -87,6 +87,9 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // mutations (worker spawn, merge) stay gated downstream by o8's
         // review/approval pipeline — so no extra confirm card here.
         "o8_canvas" => SafetyClass::ReadOnly,
+        // Reading the screen is pure observation; capture is permission-gated by
+        // macOS Screen Recording, so no confirm card.
+        "read_screen" => SafetyClass::ReadOnly,
         "o8_panel_read" => SafetyClass::ReadOnly,
         "o8_recap" => SafetyClass::ReadOnly,
         "o8_usage" => SafetyClass::ReadOnly,
