@@ -451,6 +451,18 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["verb"]
             }
         }),
+        // ── Screen reading (give the brain sight) ─────────────────────────────
+        json!({
+            "name": "read_screen",
+            "description": "Look at the user's Mac screen and read it back. Use for 'read me what's on screen', 'what does this say', 'what's the error', or when you need to SEE the screen to act on it. Optional `focus` narrows what to extract ('the error message', 'the third paragraph'). Returns the screen's text/description.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "focus": { "type": "string", "description": "Optional — what to look for or extract (e.g. 'the error dialog', 'the meeting time'). Omit to describe the whole screen." }
+                },
+                "required": []
+            }
+        }),
         // ── Apple Music (app-control frontier) ────────────────────────────────
         json!({
             "name": "mac_music_playlists",
@@ -870,6 +882,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
             }
             o8_bridge::canvas_intent(&verb, args).await
         }
+        "read_screen" => crate::agent::screen::read_screen(ctx, args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_panel_read" => o8_bridge::panel_read(args).await,
         "o8_recap" => o8_bridge::recap(args).await,

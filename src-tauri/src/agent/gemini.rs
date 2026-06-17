@@ -201,3 +201,84 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         brain_sources,
     })
 }
+
+/// One-shot Gemini VISION call — no tools, no loop. Given a PNG (base64) and an
+/// extract prompt, returns the model's text. This is how the text-only Claude
+/// background brain (and any caller) gets SIGHT: the `read_screen` tool routes a
+/// screenshot through here. Reuses `resolve_gemini` so it honors the user's
+/// Direct key or the managed o8-plan proxy exactly like the front-brain loop.
+pub async fn vision_extract(model: &str, prompt: &str, png_base64: &str) -> Result<String, String> {
+    let target = crate::entitlement::resolve_gemini(model).ok_or_else(|| {
+        "Reading the screen needs a Gemini key or an active o8 plan — add a key or sign in to o8"
+            .to_string()
+    })?;
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+        .build()
+        .map_err(|e| format!("reqwest build failed: {e}"))?;
+
+    let mut body = json!({
+        "contents": [{
+            "role": "user",
+            "parts": [
+                { "text": prompt },
+                { "inline_data": { "mime_type": "image/png", "data": png_base64 } }
+            ]
+        }],
+        "generationConfig": { "temperature": 0.2, "maxOutputTokens": 1024 },
+    });
+
+    let req = match &target {
+        crate::entitlement::GeminiTarget::Direct { url } => client.post(url).json(&body),
+        crate::entitlement::GeminiTarget::Proxy { url, token } => {
+            body["model"] = json!(model);
+            client.post(url).bearer_auth(token).json(&body)
+        }
+    };
+
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("Gemini vision request failed: {e}"))?;
+
+    let status = resp.status();
+    if !status.is_success() {
+        let err_body = resp.text().await.unwrap_or_default();
+        return Err(format!(
+            "Gemini vision error ({status}): {}",
+            crate::utf8_head(&err_body, 300)
+        ));
+    }
+
+    let resp_json: Value = resp
+        .json()
+        .await
+        .map_err(|e| format!("Failed to parse Gemini vision response: {e}"))?;
+
+    // Concatenate every text part (Gemini may split a long read).
+    let text = resp_json
+        .pointer("/candidates/0/content/parts")
+        .and_then(|v| v.as_array())
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|p| p.get("text").and_then(|t| t.as_str()))
+                .collect::<Vec<_>>()
+                .join("")
+        })
+        .unwrap_or_default()
+        .trim()
+        .to_string();
+
+    if text.is_empty() {
+        let finish = resp_json
+            .pointer("/candidates/0/finishReason")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown");
+        return Err(format!(
+            "Gemini returned no text from the screen (finishReason: {finish})"
+        ));
+    }
+    Ok(text)
+}
