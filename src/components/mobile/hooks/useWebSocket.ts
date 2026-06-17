@@ -1,5 +1,5 @@
 /**
- * Unified WebSocket hook for Cortex IDE mobile.
+ * Unified WebSocket hook for o8 mobile.
  *
  * Connects to the WS server (port 3002) and receives all real-time data
  * over a single connection. Falls back to polling if WS is unavailable.

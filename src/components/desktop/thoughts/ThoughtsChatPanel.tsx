@@ -619,7 +619,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             runtime: 'claude-code',
-            prompt: 'You are the orchestrator for Cortex IDE. Acknowledge ready.',
+            prompt: 'You are the orchestrator for o8. Acknowledge ready.',
             repoPath,
             cwd: repoPath,
             skipSetup: true,

@@ -240,8 +240,8 @@ function geminiParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
         kind: 'event',
         label: 'Run started',
         text: run.mode === 'launch'
-          ? 'Owned Gemini run launched from Cortex IDE.'
-          : 'Owned Gemini session resumed from Cortex IDE.',
+          ? 'Owned Gemini run launched from o8.'
+          : 'Owned Gemini session resumed from o8.',
         timestamp: fallbackIso,
         timestampLabel: fallbackLabel,
       });

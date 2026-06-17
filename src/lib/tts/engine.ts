@@ -1,5 +1,5 @@
 /**
- * TTSEngine — unified TTS playback for Cortex IDE.
+ * TTSEngine — unified TTS playback for o8.
  *
  * Layer 1: Server-side edge-tts via /api/tts (en-US-SteffanNeural = Mister voice)
  * Layer 2: Browser SpeechSynthesis (offline fallback, device voice)

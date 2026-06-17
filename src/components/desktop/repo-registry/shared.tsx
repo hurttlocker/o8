@@ -172,7 +172,7 @@ export function formatRelativeTime(value: string | null) {
 }
 
 /**
- * Strips the `worktree/<runtime>/` prefix that Cortex IDE uses to namespace
+ * Strips the `worktree/<runtime>/` prefix that o8 uses to namespace
  * agent-spawned branches. The full name stays available as a tooltip — this
  * is purely a display-density helper so the branch row can show the slug
  * portion (the part humans actually care about) instead of the prefix.

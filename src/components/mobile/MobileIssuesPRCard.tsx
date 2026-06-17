@@ -25,7 +25,7 @@ export interface IssuesPagePR {
 
 export function repoShortLabel(repo: string): string {
   const map: Record<string, string> = {
-    '': 'Cortex IDE',
+    '': 'o8',
     'hurttlocker/cortex': 'Cortex',
     'LavonTMCQ/spear-production': 'Spear',
     'LavonTMCQ/mybeautifulwife': 'Antiflammi',

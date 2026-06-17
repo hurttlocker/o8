@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     }
 
     // Add a comment noting the assignment
-    const comment = `🤖 Assigned to **${agent}** via Cortex IDE timeline drill-down.`;
+    const comment = `🤖 Assigned to **${agent}** via o8 timeline drill-down.`;
     try {
       await commentOnGitHubIssue(repoSlug, issue, comment);
     } catch { /* comment failed, continue anyway */ }

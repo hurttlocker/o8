@@ -293,7 +293,7 @@ function codexParseRunLog(raw: string, run: OwnedRunRecord): ParsedRunLog {
           id: `${run.id}:turn-start:${entries.length}`,
           kind: 'event',
           label: 'Run started',
-          text: run.mode === 'launch' ? 'Owned Codex run launched from Cortex IDE.' : 'Owned Codex session resumed from Cortex IDE.',
+          text: run.mode === 'launch' ? 'Owned Codex run launched from o8.' : 'Owned Codex session resumed from o8.',
           timestamp,
           timestampLabel,
         });
