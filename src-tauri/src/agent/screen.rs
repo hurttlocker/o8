@@ -92,6 +92,20 @@ const SCREEN_CUES: &[&str] = &[
     "walk me through",
     "what does this say",
     "read this",
+    // Draw / teach intents. These MUST capture the screen — not because the
+    // model needs to read it, but because the overlay needs a coordinate system
+    // (image dims + monitor geometry) to place [DRAW]/[POINT] tags, and the draw
+    // protocol is only taught to the model when a ScreenContext rides the turn.
+    // Without a capture here the model has no way to draw and falls back to
+    // writing an HTML file. Bias toward capturing: easy drawing outweighs the
+    // rare wasted screenshot on a non-visual "teach me" (honesty-guarded).
+    "draw",
+    "illustrate",
+    "illustration",
+    "sketch",
+    "diagram",
+    "teach me",
+    "annotate",
 ];
 
 /// Should this prompt get a screenshot? Lowercased substring match against the
@@ -357,6 +371,16 @@ mod wants_screen_tests {
         assert!(wants_screen("Where do I click to export?"));
         assert!(wants_screen("Can you see this dialog?"));
         assert!(wants_screen("Point to the save button"));
+    }
+
+    #[test]
+    fn draw_and_teach_intents_trigger() {
+        // These need a capture so the overlay has a coordinate system to draw in.
+        assert!(wants_screen("Can you draw that as an illustration?"));
+        assert!(wants_screen("Teach me the Pythagorean theorem"));
+        assert!(wants_screen("Sketch a triangle for me"));
+        assert!(wants_screen("Draw a diagram of how this works"));
+        assert!(wants_screen("Annotate the chart"));
     }
 
     #[test]
