@@ -2,10 +2,11 @@
 //!
 //! The tool-calling loop's model is config-driven so the brain is a one-flip
 //! change: edit `~/.o8/agent_models.json` and set `mac_native_action`. The
-//! default ships on `gemini-3-flash-preview` via the DIRECT Google API (o8
-//! already holds a working Gemini key for Ask; cheap, fast, no proxy). A model
-//! id containing `/` routes to OpenRouter (e.g. `openai/gpt-4o-mini`) once that
-//! account has credits — the one-flip A/B.
+//! default ships on `claude-opus-4-8` — the strongest model, and it SEES the
+//! screenshot directly via the CLI stream-json image block (#1252), sub-billed
+//! on the user's Claude subscription. Set `gemini-3-flash-preview` for the
+//! fast-path (lower latency, no vision-on-the-front). A model id containing `/`
+//! routes to OpenRouter — the one-flip A/B.
 
 use serde::{Deserialize, Serialize};
 
@@ -30,7 +31,7 @@ pub struct AgentModelConfig {
 impl Default for AgentModelConfig {
     fn default() -> Self {
         Self {
-            mac_native_action: "gemini-3-flash-preview".to_string(),
+            mac_native_action: "claude-opus-4-8".to_string(),
             voice_escalation: "auto".to_string(),
             intent_classification: "gemini-3-flash-preview".to_string(),
             result_summarization: "gemini-3-flash-preview".to_string(),

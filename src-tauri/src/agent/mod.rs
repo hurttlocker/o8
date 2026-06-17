@@ -36,9 +36,11 @@ use tokio::sync::oneshot;
 
 const CONFIRM_TIMEOUT_SECS: u64 = 120;
 
-/// Default model for the background Claude brain (the async escalation target).
-/// Sonnet: strong tool reasoning, faster than Opus for the planner loop.
-const CLAUDE_BRAIN_MODEL: &str = "claude-sonnet-4-6";
+/// The Claude brain model — front voice brain AND the async escalation target.
+/// Opus 4.8 (adaptive reasoning): strongest model, and it SEES the screenshot
+/// directly via the CLI's stream-json image block (#1252), sub-billed on the
+/// user's Claude subscription. Slower than Gemini — masked by spoken fillers.
+const CLAUDE_BRAIN_MODEL: &str = "claude-opus-4-8";
 
 /// Per-task context threaded into the loop + tool dispatch.
 #[derive(Clone)]
@@ -613,9 +615,15 @@ pub fn maybe_speak_filler(spoke: &mut bool, tool_name: &str) {
         return;
     }
     *spoke = true;
-    // Rotate through a small set of natural fillers so Symon doesn't open every
-    // lookup with the same robotic "Let me check." — brief, varied, a little
-    // warmth. Deterministic rotation (no rng dependency); resets per process.
+    speak_filler_now();
+}
+
+/// Speak one rotating filler immediately (fire-and-forget) — brief, varied, a
+/// little warmth, no robotic "Let me check." Used before a slow tool runs AND
+/// at the start of a slow front-brain turn (the all-Claude/Opus voice path, so
+/// the live mic isn't dead air while Opus thinks). Deterministic rotation (no
+/// rng dependency); resets per process.
+pub fn speak_filler_now() {
     const FILLERS: [&str; 6] = [
         "One sec.",
         "On it.",

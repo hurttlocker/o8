@@ -82,11 +82,11 @@ fn ensure_empty_mcp_config() -> Result<String, String> {
     Ok(path.to_string_lossy().to_string())
 }
 
-/// Build the first planner prompt: persona + (conversation / edit) context +
-/// the tool schema + the JSON-action contract + the user's request. NOTE: the
-/// screen section is intentionally omitted — the text brain can't see the
-/// screenshot image (no `inline_data` path), so claiming it could would be a
-/// lie. Screen vision stays on the Gemini path / a later MCP-native upgrade.
+/// Build the first planner prompt: persona + (conversation / edit / SCREEN)
+/// context + the tool schema + the JSON-action contract + the user's request.
+/// When a screenshot rides the turn it is sent as an image block (see
+/// `claude_text_turn_blocking`) and this prompt teaches the screen + draw
+/// protocol — Opus 4.8 sees the screen directly (#1252), no Gemini middleman.
 fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
     let mut s = super::system_prompt();
     if let Some(convo) = super::conversation_context() {
@@ -96,6 +96,18 @@ fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
     if let Some(edit) = &ctx.edit {
         s.push_str("\n\n");
         s.push_str(&super::edit_prompt_section(edit));
+    }
+    if let Some(screen) = &ctx.screen {
+        s.push_str("\n\n");
+        s.push_str(&super::screen_prompt_section(screen.img_w, screen.img_h));
+        // Planner-path rule: the [POINT]/[DRAW] tags must ride INSIDE the `say`
+        // string of the final {"done": true, "say": "..."} action — never as
+        // loose text outside the JSON, or extract_action won't see them.
+        s.push_str(
+            "\n\n(You CAN see the attached screenshot. When you point or draw, put the \
+             [POINT]/[GUIDE]/[DRAW] tags INSIDE the \"say\" string of your final \
+             {\"done\": true, \"say\": \"...\"} action — never outside the JSON object.)",
+        );
     }
     // The background brain DOES the work — strip `escalate` so it can't re-hand
     // the task back to another Claude task (infinite-handoff guard).
@@ -145,6 +157,9 @@ fn claude_text_turn_blocking(
     model: &str,
     mcp_cfg: &str,
     prompt: &str,
+    // base64 PNG of the screen, present ONLY on the first turn (the image is
+    // seen once; re-sending on follow-ups wastes tokens + latency). #1252.
+    image_b64: Option<String>,
 ) -> Result<String, String> {
     use std::io::{BufRead, BufReader, Write};
     use std::process::{Command, Stdio};
@@ -168,6 +183,9 @@ fn claude_text_turn_blocking(
         .env("NO_COLOR", "1")
         // Same subscription-billing posture as the chat tab / warm pool: no
         // `--print`, so this draws the user's Claude pool, not the SDK pool.
+        // Scrub ANTHROPIC_API_KEY from the child so an env key can't silently
+        // flip billing to the API pool (it takes precedence over the sub).
+        .env_remove("ANTHROPIC_API_KEY")
         .env("O8_MANAGED_SESSION", "1")
         // Neutral cwd — a project `.claude/` / `.mcp.json` would otherwise bleed
         // tools back in, defeating `--strict-mcp-config`.
@@ -183,7 +201,16 @@ fn claude_text_turn_blocking(
     // Hold stdin OPEN until after the result is read (closing at EOF makes the
     // CLI run session hooks and exit without processing the turn).
     let mut stdin = child.stdin.take().ok_or("claude: no stdin handle")?;
-    let frame = json!({ "type": "user", "message": { "role": "user", "content": prompt } });
+    // Text-only string content by default; on the first turn with a screenshot,
+    // a content ARRAY carrying the image block so Opus sees the screen (#1252).
+    let content = match &image_b64 {
+        Some(b64) => json!([
+            { "type": "text", "text": prompt },
+            { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": b64 } },
+        ]),
+        None => json!(prompt),
+    };
+    let frame = json!({ "type": "user", "message": { "role": "user", "content": content } });
     writeln!(stdin, "{frame}").map_err(|e| format!("claude stdin write: {e}"))?;
     let _ = stdin.flush();
 
@@ -254,8 +281,19 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     let mut tool_call_log: Vec<Value> = Vec::new();
     let mut brain_sources: Vec<Value> = Vec::new();
     let mut result_text = String::new();
-    // Spoken-filler latch — "Let me check." before the first read tool runs.
+    // Spoken-filler latch — a quick "one sec" so the slow tool/turn isn't dead air.
     let mut spoke_filler = false;
+    // Opus is slower than Gemini, so the all-Claude FRONT voice path opens with
+    // an immediate filler (the live mic shouldn't sit silent while Opus thinks).
+    // Background escalation tasks (`claude-task-*`) already had a front ack, so
+    // they stay quiet here. #1252.
+    if !ctx.task_id.starts_with("claude-task") {
+        super::speak_filler_now();
+        spoke_filler = true;
+    }
+    // The screenshot rides the FIRST turn only (Opus sees it once); `.take()`
+    // hands it to turn 1 and leaves None for every follow-up. #1252.
+    let mut first_image: Option<String> = ctx.screen.as_ref().map(|s| s.png_base64.clone());
 
     for _turn in 0..MAX_TURNS {
         // User interrupted (Escape / tap-to-stop) — stop before the next turn.
@@ -264,9 +302,10 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
             break;
         }
         let (b, m, c, t) = (bin.clone(), model.to_string(), mcp_cfg.clone(), transcript.clone());
+        let img = first_image.take();
         let raw = tokio::time::timeout(
             Duration::from_secs(TURN_TIMEOUT_SECS),
-            tokio::task::spawn_blocking(move || claude_text_turn_blocking(&b, &m, &c, &t)),
+            tokio::task::spawn_blocking(move || claude_text_turn_blocking(&b, &m, &c, &t, img)),
         )
         .await
         .map_err(|_| "claude turn timed out".to_string())?
