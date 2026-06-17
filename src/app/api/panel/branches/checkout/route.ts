@@ -1,7 +1,8 @@
 export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'node:child_process';
+import { isSafeGitRef } from '@/lib/git/refs';
 
 export async function POST(req: NextRequest) {
   try {
@@ -16,6 +17,9 @@ export async function POST(req: NextRequest) {
     if (!repoPath || !branch) {
       return NextResponse.json({ error: 'repoPath and branch required' }, { status: 400 });
     }
+    if (!isSafeGitRef(branch)) {
+      return NextResponse.json({ error: 'Invalid branch name' }, { status: 400 });
+    }
 
     const cwd = repoPath.replace(/^~/, process.env.HOME || require('os').homedir());
 
@@ -23,7 +27,7 @@ export async function POST(req: NextRequest) {
     let dirty = false;
     let dirtyFiles: string[] = [];
     try {
-      const status = execSync('git status --porcelain', { cwd, timeout: 5000 }).toString().trim();
+      const status = execFileSync('git', ['status', '--porcelain'], { cwd, timeout: 5000 }).toString().trim();
       if (status) {
         dirty = true;
         dirtyFiles = status.split('\n').slice(0, 10); // First 10 files
@@ -46,7 +50,7 @@ export async function POST(req: NextRequest) {
     // Stash if requested
     if (dirty && stash) {
       try {
-        execSync(`git stash push -m "o8: auto-stash before switching to ${branch}"`, {
+        execFileSync('git', ['stash', 'push', '-m', `o8: auto-stash before switching to ${branch}`], {
           cwd, timeout: 10000,
         });
       } catch (err) {
@@ -58,8 +62,7 @@ export async function POST(req: NextRequest) {
 
     // Checkout
     try {
-      const forceFlag = force ? ' -f' : '';
-      execSync(`git checkout${forceFlag} ${JSON.stringify(branch)}`, {
+      execFileSync('git', ['checkout', ...(force ? ['-f'] : []), branch], {
         cwd, timeout: 10000,
       });
     } catch (err) {
@@ -72,7 +75,7 @@ export async function POST(req: NextRequest) {
     // Verify current branch
     let currentBranch = branch;
     try {
-      currentBranch = execSync('git branch --show-current', { cwd, timeout: 5000 }).toString().trim();
+      currentBranch = execFileSync('git', ['branch', '--show-current'], { cwd, timeout: 5000 }).toString().trim();
     } catch { /* use requested branch */ }
 
     return NextResponse.json({

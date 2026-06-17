@@ -10,7 +10,8 @@
  */
 
 import { randomUUID } from 'node:crypto';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { isSafeGitRef } from '@/lib/git/refs';
 import { capturePacketCompletionContext, readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { runMergeGate, formatMergeGateForReview, type MergeGateResult } from './merge-gate';
@@ -248,22 +249,23 @@ function getDiffSummary(lane: Lane, depth: ReviewDepth): ReviewDiffSummary {
   const maxDiffLines = REVIEW_DIFF_LINES[depth];
   try {
     const facts = getLaneDiffFacts(lane);
+    const safeBase = isSafeGitRef(lane.baseBranch) ? lane.baseBranch : null;
     let stat = '';
     try {
-      stat = execSync(`git diff --stat ${lane.baseBranch}...HEAD`, { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+      stat = execFileSync('git', ['diff', '--stat', safeBase ? `${safeBase}...HEAD` : 'HEAD~1'], { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
     } catch {
       try {
-        stat = execSync('git diff --stat HEAD~1', { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+        stat = execFileSync('git', ['diff', '--stat', 'HEAD~1'], { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
       } catch { /* no commits yet */ }
     }
 
     let diff = '';
     try {
-      const rawDiff = execSync(`git diff ${lane.baseBranch}...HEAD --no-color -U2`, { cwd, timeout: 10_000, encoding: 'utf-8' });
+      const rawDiff = execFileSync('git', ['diff', safeBase ? `${safeBase}...HEAD` : 'HEAD~1', '--no-color', '-U2'], { cwd, timeout: 10_000, encoding: 'utf-8' });
       diff = rawDiff.split('\n').slice(0, maxDiffLines).join('\n').trim();
     } catch {
       try {
-        const rawDiff = execSync('git diff HEAD~1 --no-color -U2', { cwd, timeout: 10_000, encoding: 'utf-8' });
+        const rawDiff = execFileSync('git', ['diff', 'HEAD~1', '--no-color', '-U2'], { cwd, timeout: 10_000, encoding: 'utf-8' });
         diff = rawDiff.split('\n').slice(0, maxDiffLines).join('\n').trim();
       } catch { /* no commits yet */ }
     }
@@ -311,15 +313,16 @@ const SECURITY_PATTERNS: Array<{ pattern: RegExp; label: string; severity: 'high
 
 function runMechanicalChecks(lane: Lane): { findings: MechanicalFinding[]; summary: string } {
   const cwd = lane.worktreePath || lane.repoPath;
+  const safeBase = isSafeGitRef(lane.baseBranch) ? lane.baseBranch : null;
   const findings: MechanicalFinding[] = [];
 
   // ── Diff stats check ──
   let stat = '';
   try {
-    stat = execSync(`git diff --stat ${lane.baseBranch}...HEAD`, { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+    stat = execFileSync('git', ['diff', '--stat', safeBase ? `${safeBase}...HEAD` : 'HEAD~1'], { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
   } catch {
     try {
-      stat = execSync('git diff --stat HEAD~1', { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
+      stat = execFileSync('git', ['diff', '--stat', 'HEAD~1'], { cwd, timeout: 10_000, encoding: 'utf-8' }).trim();
     } catch { /* no commits */ }
   }
 
@@ -348,10 +351,10 @@ function runMechanicalChecks(lane: Lane): { findings: MechanicalFinding[]; summa
   // ── Security pattern scan ──
   let rawDiff = '';
   try {
-    rawDiff = execSync(`git diff ${lane.baseBranch}...HEAD --no-color`, { cwd, timeout: 10_000, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+    rawDiff = execFileSync('git', ['diff', safeBase ? `${safeBase}...HEAD` : 'HEAD~1', '--no-color'], { cwd, timeout: 10_000, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
   } catch {
     try {
-      rawDiff = execSync('git diff HEAD~1 --no-color', { cwd, timeout: 10_000, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
+      rawDiff = execFileSync('git', ['diff', 'HEAD~1', '--no-color'], { cwd, timeout: 10_000, encoding: 'utf-8', maxBuffer: 10 * 1024 * 1024 });
     } catch { /* no commits */ }
   }
 

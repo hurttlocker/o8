@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execFileSync, execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
+import { isSafeGitRef } from '@/lib/git/refs';
 
 export const dynamic = 'force-dynamic';
 
@@ -45,12 +46,26 @@ function parseShortstat(raw: string): { additions: number; deletions: number } {
   };
 }
 
+/** Run `git -C <repoPath> <args>` with no shell. repoPath and every arg is a
+ *  literal argv entry, so branch/path values can't inject. stderr is dropped —
+ *  callers treat a throw as "command failed". */
+function git(repoPath: string, args: string[], timeout = 5000): string {
+  return execFileSync('git', ['-C', repoPath, ...args], {
+    encoding: 'utf-8',
+    timeout,
+    stdio: ['ignore', 'pipe', 'ignore'],
+  }).trim();
+}
+
 function diskSizeForPath(targetPath: string): string | undefined {
   try {
-    return execSync(
-      `du -sh "${targetPath}" 2>/dev/null | cut -f1`,
-      { encoding: 'utf-8', timeout: 3000 },
-    ).trim();
+    const out = execFileSync('du', ['-sh', targetPath], {
+      encoding: 'utf-8',
+      timeout: 3000,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    // `du -sh` prints "<size>\t<path>" — keep the size column only.
+    return out.split('\t')[0] || undefined;
   } catch {
     return undefined;
   }
@@ -71,33 +86,27 @@ export async function GET(req: NextRequest) {
     // Prefer origin/HEAD symbolic ref; fall back to main, then master.
     let defaultBranch = 'main';
     try {
-      const symbolic = execSync(
-        `git -C "${repoPath}" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null`,
-        { encoding: 'utf-8', timeout: 2000 },
-      ).trim();
+      const symbolic = git(repoPath, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], 2000);
       if (symbolic.startsWith('origin/')) {
         defaultBranch = symbolic.slice('origin/'.length);
       }
     } catch {
       try {
-        execSync(`git -C "${repoPath}" rev-parse --verify master 2>/dev/null`, { encoding: 'utf-8', timeout: 2000 });
+        git(repoPath, ['rev-parse', '--verify', 'master'], 2000);
         defaultBranch = 'master';
       } catch { /* keep 'main' */ }
     }
 
     // Get all local branches with details
-    const branchRaw = execSync(
-      `git -C "${repoPath}" for-each-ref --sort=-committerdate refs/heads/ --format='%(refname:short)|||%(committerdate:relative)|||%(subject)|||%(HEAD)|||%(committerdate:unix)'`,
-      { encoding: 'utf-8', timeout: 5000 },
-    ).trim();
+    const branchRaw = git(repoPath, [
+      'for-each-ref', '--sort=-committerdate', 'refs/heads/',
+      '--format=%(refname:short)|||%(committerdate:relative)|||%(subject)|||%(HEAD)|||%(committerdate:unix)',
+    ]);
 
     // Get worktree list
     const worktrees: Map<string, string> = new Map();
     try {
-      const wtRaw = execSync(
-        `git -C "${repoPath}" worktree list --porcelain`,
-        { encoding: 'utf-8', timeout: 5000 },
-      ).trim();
+      const wtRaw = git(repoPath, ['worktree', 'list', '--porcelain']);
       let currentPath = '';
       for (const line of wtRaw.split('\n')) {
         if (line.startsWith('worktree ')) currentPath = line.slice(9);
@@ -166,10 +175,7 @@ export async function GET(req: NextRequest) {
       // 128 on missing ref. Treat exit 0 as "merged → drop".
       if (!isCurrent && !isWt && trimmedName !== defaultBranch) {
         try {
-          execSync(
-            `git -C "${repoPath}" diff --quiet "${defaultBranch}".."${trimmedName}"`,
-            { encoding: 'utf-8', timeout: 3000, stdio: 'pipe' },
-          );
+          git(repoPath, ['diff', '--quiet', `${defaultBranch}..${trimmedName}`], 3000);
           // Exit 0 → no diff → branch is fully landed on default.
           continue;
         } catch {
@@ -180,10 +186,7 @@ export async function GET(req: NextRequest) {
       // Get ahead/behind vs origin
       let ahead = 0, behind = 0;
       try {
-        const ab = execSync(
-          `git -C "${repoPath}" rev-list --left-right --count origin/${trimmedName}...${trimmedName} 2>/dev/null`,
-          { encoding: 'utf-8', timeout: 3000 },
-        ).trim();
+        const ab = git(repoPath, ['rev-list', '--left-right', '--count', `origin/${trimmedName}...${trimmedName}`], 3000);
         const [b, a] = ab.split('\t').map(Number);
         ahead = a || 0;
         behind = b || 0;
@@ -194,10 +197,7 @@ export async function GET(req: NextRequest) {
       let additions = 0, deletions = 0;
       if (trimmedName !== defaultBranch) {
         try {
-          const stats = execSync(
-            `git -C "${repoPath}" diff --shortstat ${defaultBranch}...${trimmedName} 2>/dev/null`,
-            { encoding: 'utf-8', timeout: 3000 },
-          ).trim();
+          const stats = git(repoPath, ['diff', '--shortstat', `${defaultBranch}...${trimmedName}`], 3000);
           if (stats) ({ additions, deletions } = parseShortstat(stats));
         } catch { /* no merge base / missing ref */ }
       }
@@ -252,6 +252,9 @@ export async function DELETE(req: NextRequest) {
     if (!repoPath || !branch) {
       return NextResponse.json({ error: 'path and branch required' }, { status: 400 });
     }
+    if (!isSafeGitRef(branch)) {
+      return NextResponse.json({ error: 'Invalid branch name' }, { status: 400 });
+    }
     if (!isGitRepo(repoPath)) {
       return NextResponse.json({ error: 'This folder is not a Git repository.' }, { status: 400 });
     }
@@ -265,19 +268,13 @@ export async function DELETE(req: NextRequest) {
     // Check if it's a worktree — remove worktree first
     let worktreeRemoved = false;
     try {
-      const wtRaw = execSync(
-        `git -C "${repoPath}" worktree list --porcelain`,
-        { encoding: 'utf-8', timeout: 5000 },
-      ).trim();
+      const wtRaw = git(repoPath, ['worktree', 'list', '--porcelain']);
       let currentPath = '';
       for (const line of wtRaw.split('\n')) {
         if (line.startsWith('worktree ')) currentPath = line.slice(9);
         if (line.startsWith('branch refs/heads/') && line.slice(18) === branch && currentPath !== repoPath) {
           // Remove the worktree
-          execSync(`git -C "${repoPath}" worktree remove "${currentPath}" ${force ? '--force' : ''}`, {
-            encoding: 'utf-8',
-            timeout: 10000,
-          });
+          git(repoPath, ['worktree', 'remove', currentPath, ...(force ? ['--force'] : [])], 10000);
           worktreeRemoved = true;
           break;
         }
@@ -286,10 +283,7 @@ export async function DELETE(req: NextRequest) {
 
     // Delete the branch
     const flag = force ? '-D' : '-d';
-    execSync(`git -C "${repoPath}" branch ${flag} "${branch}"`, {
-      encoding: 'utf-8',
-      timeout: 5000,
-    });
+    git(repoPath, ['branch', flag, branch]);
 
     // Optionally delete the remote branch — opt-in only. Local prune does not
     // touch origin so a YC-reviewer-style "tidy my sidebar" click can't
@@ -297,10 +291,7 @@ export async function DELETE(req: NextRequest) {
     let remoteDeleted = false;
     if (deleteRemote) {
       try {
-        execSync(`git -C "${repoPath}" push origin --delete "${branch}" 2>/dev/null`, {
-          encoding: 'utf-8',
-          timeout: 10000,
-        });
+        git(repoPath, ['push', 'origin', '--delete', branch], 10000);
         remoteDeleted = true;
       } catch { /* no remote branch or no permission */ }
     }
@@ -336,21 +327,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'This folder is not a Git repository.' }, { status: 400 });
     }
 
-    // Validate branch name
-    const safeNameRe = /^[a-zA-Z0-9._\-/]+$/;
-    if (!safeNameRe.test(branch)) {
+    // Validate branch + base — both become positional git args.
+    if (!isSafeGitRef(branch)) {
       return NextResponse.json({ error: 'Invalid branch name' }, { status: 400 });
     }
 
     const base = baseBranch || 'main';
+    if (!isSafeGitRef(base)) {
+      return NextResponse.json({ error: 'Invalid base branch' }, { status: 400 });
+    }
 
     if (worktree) {
       // Create worktree with new branch
       const worktreePath = `${repoPath}/../.worktrees/${branch.replace(/\//g, '-')}`;
-      execSync(
-        `git -C "${repoPath}" worktree add "${worktreePath}" -b "${branch}" "${base}"`,
-        { encoding: 'utf-8', timeout: 10000 },
-      );
+      git(repoPath, ['worktree', 'add', worktreePath, '-b', branch, base], 10000);
       return NextResponse.json({
         created: branch,
         baseBranch: base,
@@ -359,10 +349,7 @@ export async function POST(req: NextRequest) {
       });
     } else {
       // Just create branch
-      execSync(
-        `git -C "${repoPath}" branch "${branch}" "${base}"`,
-        { encoding: 'utf-8', timeout: 5000 },
-      );
+      git(repoPath, ['branch', branch, base]);
       return NextResponse.json({
         created: branch,
         baseBranch: base,
