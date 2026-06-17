@@ -24,7 +24,8 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         .build()
         .map_err(|e| format!("reqwest build failed: {e}"))?;
 
-    let tool_specs = tools::enabled_tools();
+    let escalation = super::router::load_config().voice_escalation;
+    let tool_specs = tools::enabled_tools_for(&escalation);
 
     // Gemini folds the system prompt into the first user turn (matches
     // gemini_ask.rs — avoids systemInstruction shape uncertainty). When the
@@ -32,6 +33,9 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     // turn as inline_data and the prompt gains the POINT-tag teaching section.
     let mut first_parts: Vec<Value> = Vec::new();
     let mut first_text = super::system_prompt();
+    if let Some(suffix) = super::escalation_prompt_suffix(&escalation) {
+        first_text.push_str(suffix);
+    }
     if let Some(convo) = super::conversation_context() {
         first_text.push_str("\n\n");
         first_text.push_str(&convo);
