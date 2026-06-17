@@ -15,6 +15,7 @@ import {
 import { CircleSpark } from 'iconoir-react';
 import { MarkdownRender } from '../markdown-render';
 import { useOrchestratorData } from '../../orchestrator-data-context';
+import { track } from '@/lib/analytics/track';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -613,6 +614,8 @@ export function O8ScratchChat({
     // as one blob after the full pipeline; citation pills land underneath.
     const question = input.trim();
     if (!question || askLoading) return;
+
+    track('brain.asked'); // coarse usage signal (analytics epic #1249) — no content
 
     const userMessage: ScratchMessage = {
       id: `o8-ask-brain-user-${Date.now()}`,
