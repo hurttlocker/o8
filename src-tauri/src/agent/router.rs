@@ -12,8 +12,15 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AgentModelConfig {
-    /// The tool-calling loop brain. `/`-in-id → OpenRouter, else Gemini.
+    /// The tool-calling loop brain. `/`-in-id → OpenRouter, `claude…` → Claude
+    /// text-planner brain, else Gemini.
     pub mac_native_action: String,
+    /// Two-tier escalation policy: "off" (front brain handles everything inline,
+    /// the `escalate` handoff is withheld), "auto" (escalate heavy multi-step
+    /// tasks — default), or "deep" (also bias medium tasks to the background
+    /// brain). Read by the front brains (gemini/openrouter); the Claude brain is
+    /// the background target and never escalates.
+    pub voice_escalation: String,
     /// Reserved for later lanes (not read by the V1 loop). Kept so an existing
     /// aqua-shaped `agent_models.json` parses unchanged.
     pub intent_classification: String,
@@ -24,6 +31,7 @@ impl Default for AgentModelConfig {
     fn default() -> Self {
         Self {
             mac_native_action: "gemini-3-flash-preview".to_string(),
+            voice_escalation: "auto".to_string(),
             intent_classification: "gemini-3-flash-preview".to_string(),
             result_summarization: "gemini-3-flash-preview".to_string(),
         }
