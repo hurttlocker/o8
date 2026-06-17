@@ -80,9 +80,17 @@ const LOG_PREFIX = '[orchestrator-rehydrate]';
 // hit the wall mid-investigation on #1113 — 83 tool calls deep into the
 // tile-system exploration when the kill fired. The narrate-and-exit failure
 // mode noted above is now mostly closed at this budget; architectural work
-// fits comfortably. If a turn legitimately needs more, the operator can
-// re-prompt with a tighter brief that pre-supplies the file pointers.
-const PROCESS_TIMEOUT_MS = 1_800_000;
+// fits comfortably.
+//
+// Bumped 1_800_000 → 14_400_000 (30min → 4hr) on 2026-06-17 — the 30min
+// watchdog was SIGKILLing legitimate long turns where the orchestrator does
+// deep direct work (a single turn doing an 11-file execFileSync hardening
+// sweep blew past 30min and got killed mid-stream). This is a HANG watchdog,
+// not a work budget: it clears the instant a turn closes normally (see the
+// clearTimeout in the 'close'/'error' handlers), so a turn still alive at 4hr
+// is wedged, not productive. The operator actively watches turns and can
+// interrupt manually — this only reaps unattended hangs.
+const PROCESS_TIMEOUT_MS = 14_400_000;
 
 /**
  * Steer-Now / preempt settle window. A follow-up send fired while a turn is
@@ -643,7 +651,7 @@ export async function sendToOrchestrator(
       const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
       onEvent({
         type: 'error',
-        error: `Orchestrator hit the ${minutes}-minute turn limit and was terminated. Re-send your message to continue — or break the task into a tighter brief so it fits.`,
+        error: `Orchestrator hit the ${minutes}-minute watchdog limit and was terminated — a turn running this long has almost certainly hung. Re-send your message to continue.`,
       });
       proc.kill('SIGTERM');
       // Force kill after 5s if SIGTERM doesn't work
