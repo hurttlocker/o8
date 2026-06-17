@@ -31,6 +31,7 @@ import {
   TabHeading,
 } from './settings/shared';
 import { AnalyticsMoatSections, type AutonomyMetrics, type GovernanceMetrics } from './analytics/AnalyticsMoatSections';
+import { OperatorAnalyticsSection } from './analytics/OperatorAnalyticsSection';
 
 // ── Types ──
 
@@ -783,6 +784,11 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
             </button>
           </div>
         </div>
+
+        {/* Operator-only cross-user view (founder dashboard, epic #1249).
+            Renders nothing on a normal install — gated by the availability of
+            /api/operator/analytics (no token in env → hidden). */}
+        <OperatorAnalyticsSection />
 
         {/* ── Loading / empty / data ── */}
 
