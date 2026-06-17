@@ -108,6 +108,12 @@ fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
              [POINT]/[GUIDE]/[DRAW] tags INSIDE the \"say\" string of your final \
              {\"done\": true, \"say\": \"...\"} action — never outside the JSON object.)",
         );
+        // Additive teaching diagrams (#1251): if a drawing session is live, give
+        // the brain back the exact tags it just drew so it re-emits + extends
+        // them instead of starting a fresh figure.
+        if let Some(feedback) = super::last_drawing_feedback() {
+            s.push_str(&feedback);
+        }
     }
     // The background brain DOES the work — strip `escalate` so it can't re-hand
     // the task back to another Claude task (infinite-handoff guard).
