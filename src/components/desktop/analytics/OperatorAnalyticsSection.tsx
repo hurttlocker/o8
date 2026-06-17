@@ -50,7 +50,7 @@ interface BridgeResponse {
 function fmtUsd(micro: number): string {
   const usd = (micro ?? 0) / 1_000_000;
   if (usd === 0) return '$0';
-  if (usd < 0.01) return `$${usd.toFixed(6)}`;
+  if (usd < 0.01) return `$${Number(usd.toFixed(6))}`; // trim trailing zeros ($0.0012, not $0.001200)
   return `$${usd.toFixed(2)}`;
 }
 
