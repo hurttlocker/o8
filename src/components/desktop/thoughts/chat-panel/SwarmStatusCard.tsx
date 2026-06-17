@@ -3,20 +3,30 @@
 /**
  * SwarmStatusCard — live, inline crew monitor.
  *
- * When the orchestrator fans a turn out to a parallel Claude + Codex swarm
- * (UltraCode), this card surfaces the o8-visible crew directly in the chat
- * transcript at the live edge and updates as packets move through their
- * lifecycle. It reads `missionState.packets` (handed down through
- * ThoughtsChatPanel) so it tracks status in real time without its own fetch.
- * Native Claude sub-agents run inside the workflow runtime and aren't packets,
- * so only the o8 Codex workers surface here. No modal — the crew lives in the
- * conversation, matching the operator's "beautiful cards, inline" direction.
+ * When the orchestrator fans a turn out to a parallel crew, this card surfaces
+ * the live crew directly in the chat transcript at the live edge and updates as
+ * work moves through its lifecycle. It reads `missionState.packets` (handed
+ * down through ThoughtsChatPanel) for the o8 Codex workers, and an explicit
+ * `scouts` list for the native Claude sub-agents the orchestrator spawns via its
+ * Task tool (research fan-out). Native scouts run inside the orchestrator's own
+ * process and aren't packets — without this they'd vanish into the collapsed
+ * tool-call cluster, which is exactly the "5 scouts fired but nothing's shown"
+ * gap. No modal — the crew lives in the conversation, matching the operator's
+ * "beautiful cards, inline" direction.
  */
 
 import { resolveDisplayRuntime, orchestratorRuntimeTone } from '@/lib/orchestrator/display';
 import type { OrchestratorPacket, OrchestratorPacketStatus, OrchestratorRuntime } from '@/lib/orchestrator/types';
 
 const SWARM_ACCENT = '#FF5A1F';
+
+/** A native Claude sub-agent (Task-tool scout) surfaced in the live crew. */
+export interface SwarmScoutView {
+  id: string;
+  /** Human label — the sub-agent's task description, falling back to its type. */
+  label: string;
+  status: 'running' | 'done';
+}
 
 // Statuses that mean a packet is genuinely in-flight as part of the LIVE crew.
 // The card mirrors the operator's "cards while it's working" intent, so only
@@ -60,6 +70,12 @@ function statusTone(status: OrchestratorPacketStatus): StatusTone {
   }
 }
 
+function scoutStatusTone(status: SwarmScoutView['status']): StatusTone {
+  return status === 'running'
+    ? { label: 'Running', color: '#16a34a', pulse: true }
+    : { label: 'Done', color: 'var(--t-text-faint)', pulse: false };
+}
+
 function SwarmGlyph({ size = 13, color = SWARM_ACCENT }: { size?: number; color?: string }) {
   return (
     <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'center', width: size, height: size, flexShrink: 0 }}>
@@ -72,7 +88,76 @@ function SwarmGlyph({ size = 13, color = SWARM_ACCENT }: { size?: number; color?
   );
 }
 
-export function SwarmStatusCard({ packets }: { packets: OrchestratorPacket[] }) {
+/** One crew row — shared geometry for both scouts and Codex packets. */
+function CrewRow({
+  dotColor,
+  dotGlow,
+  title,
+  sub,
+  status,
+  showTopBorder,
+}: {
+  dotColor: string;
+  dotGlow?: string;
+  title: string;
+  sub: string;
+  status: StatusTone;
+  showTopBorder: boolean;
+}) {
+  return (
+    <div
+      style={{
+        display: 'grid',
+        gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+        alignItems: 'center',
+        gap: 10,
+        paddingTop: 7,
+        paddingRight: 12,
+        paddingBottom: 7,
+        paddingLeft: 12,
+        borderTopWidth: showTopBorder ? 1 : 0,
+        borderTopStyle: 'solid',
+        borderTopColor: 'var(--t-divider-subtle)',
+      }}
+    >
+      {/* Role dot */}
+      <span
+        aria-hidden="true"
+        style={{ width: 7, height: 7, borderRadius: 999, background: dotColor, flexShrink: 0, boxShadow: dotGlow ? `0 0 0 3px ${dotGlow}` : undefined }}
+      />
+
+      {/* Title + sub */}
+      <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+        <span style={{ color: 'var(--t-text)', fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {title}
+        </span>
+        <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {sub}
+        </span>
+      </span>
+
+      {/* Status chip */}
+      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+        <span
+          aria-hidden="true"
+          style={{
+            width: 6,
+            height: 6,
+            borderRadius: 999,
+            background: status.color,
+            flexShrink: 0,
+            animation: status.pulse ? 'swarmDotPulse 1.6s ease-in-out infinite' : 'none',
+          }}
+        />
+        <span style={{ color: status.color, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, whiteSpace: 'nowrap' }}>
+          {status.label}
+        </span>
+      </span>
+    </div>
+  );
+}
+
+export function SwarmStatusCard({ packets, scouts = [] }: { packets: OrchestratorPacket[]; scouts?: SwarmScoutView[] }) {
   const active = packets.filter((packet) => {
     if (!ACTIVE_STATUSES.has(packet.status)) return false;
     if (packet.archivedAt) return false;
@@ -85,22 +170,31 @@ export function SwarmStatusCard({ packets }: { packets: OrchestratorPacket[] }) 
     }
     return true;
   });
-  if (active.length === 0) return null;
+  if (active.length === 0 && scouts.length === 0) return null;
 
-  // Runtime breakdown for the header ("Codex 3").
+  const crewCount = active.length + scouts.length;
+
+  // Runtime breakdown for the header ("Scouts 5 · Codex 3").
   const byRuntime = new Map<OrchestratorRuntime, number>();
   for (const packet of active) {
     const runtime = resolveDisplayRuntime(packet);
     byRuntime.set(runtime, (byRuntime.get(runtime) ?? 0) + 1);
   }
-  const breakdown = Array.from(byRuntime.entries())
-    .map(([runtime, count]) => `${orchestratorRuntimeTone(runtime).label} ${count}`)
+  const breakdown = [
+    scouts.length > 0 ? `Scouts ${scouts.length}` : null,
+    ...Array.from(byRuntime.entries()).map(([runtime, count]) => `${orchestratorRuntimeTone(runtime).label} ${count}`),
+  ]
+    .filter(Boolean)
     .join(' · ');
+
+  // Native scouts ARE claude-code sub-agents — color their dot with the same
+  // tone the app already uses for claude-code so the role reads consistently.
+  const scoutTone = orchestratorRuntimeTone('claude-code');
 
   return (
     <div
       role="group"
-      aria-label={`Swarm — ${active.length} ${active.length === 1 ? 'agent' : 'agents'}`}
+      aria-label={`Swarm — ${crewCount} ${crewCount === 1 ? 'agent' : 'agents'}`}
       style={{
         display: 'flex',
         flexDirection: 'column',
@@ -135,7 +229,7 @@ export function SwarmStatusCard({ packets }: { packets: OrchestratorPacket[] }) 
           Swarm
         </span>
         <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25 }}>
-          {active.length} {active.length === 1 ? 'agent' : 'agents'}
+          {crewCount} {crewCount === 1 ? 'agent' : 'agents'}
         </span>
         <div style={{ flex: 1 }} />
         {breakdown ? (
@@ -145,66 +239,34 @@ export function SwarmStatusCard({ packets }: { packets: OrchestratorPacket[] }) 
         ) : null}
       </div>
 
-      {/* Agent rows */}
+      {/* Crew rows — native scouts first (research fan-out), then Codex workers. */}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
+        {scouts.map((scout, index) => (
+          <CrewRow
+            key={scout.id}
+            dotColor={scoutTone.color}
+            dotGlow={scoutTone.background}
+            title={scout.label}
+            sub={`${scoutTone.label} · scout`}
+            status={scoutStatusTone(scout.status)}
+            showTopBorder={index > 0}
+          />
+        ))}
         {active.map((packet, index) => {
           const runtime = resolveDisplayRuntime(packet);
           const tone = orchestratorRuntimeTone(runtime);
-          const status = statusTone(packet.status);
           const eventLabel = packet.lane?.lastEventLabel?.trim() || packet.lastEventLabel?.trim() || null;
           const title = packet.title?.trim() || packet.referenceLabel?.trim() || 'Agent';
           return (
-            <div
+            <CrewRow
               key={packet.id}
-              style={{
-                display: 'grid',
-                gridTemplateColumns: 'auto minmax(0, 1fr) auto',
-                alignItems: 'center',
-                gap: 10,
-                paddingTop: 7,
-                paddingRight: 12,
-                paddingBottom: 7,
-                paddingLeft: 12,
-                borderTopWidth: index === 0 ? 0 : 1,
-                borderTopStyle: 'solid',
-                borderTopColor: 'var(--t-divider-subtle)',
-              }}
-            >
-              {/* Runtime dot */}
-              <span
-                aria-hidden="true"
-                title={tone.label}
-                style={{ width: 7, height: 7, borderRadius: 999, background: tone.color, flexShrink: 0, boxShadow: `0 0 0 3px ${tone.background}` }}
-              />
-
-              {/* Title + event sub */}
-              <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                <span style={{ color: 'var(--t-text)', fontSize: 12.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {title}
-                </span>
-                <span style={{ color: 'var(--t-text-faint)', fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                  {tone.label}{eventLabel ? ` · ${eventLabel}` : ''}
-                </span>
-              </span>
-
-              {/* Status chip */}
-              <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
-                <span
-                  aria-hidden="true"
-                  style={{
-                    width: 6,
-                    height: 6,
-                    borderRadius: 999,
-                    background: status.color,
-                    flexShrink: 0,
-                    animation: status.pulse ? 'swarmDotPulse 1.6s ease-in-out infinite' : 'none',
-                  }}
-                />
-                <span style={{ color: status.color, fontSize: 10, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, whiteSpace: 'nowrap' }}>
-                  {status.label}
-                </span>
-              </span>
-            </div>
+              dotColor={tone.color}
+              dotGlow={tone.background}
+              title={title}
+              sub={`${tone.label}${eventLabel ? ` · ${eventLabel}` : ''}`}
+              status={statusTone(packet.status)}
+              showTopBorder={index > 0 || scouts.length > 0}
+            />
           );
         })}
         <style>{`@keyframes swarmDotPulse { 0%,100% { opacity: 1 } 50% { opacity: 0.35 } }`}</style>
