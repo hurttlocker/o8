@@ -114,6 +114,28 @@ pub fn parse_point_tags(text: &str) -> (String, Vec<ParsedTag>) {
     (clean, tags)
 }
 
+/// Render a parsed tag back to its canonical `[...]` source form. Used to feed
+/// a prior drawing's tags back to the brain so it can re-emit them unchanged and
+/// append new ones — the mechanism behind additive teaching diagrams (#1251).
+/// Coords print as integers when whole (how the model emits them).
+pub fn tag_to_string(t: &ParsedTag) -> String {
+    let c = |v: f64| -> String {
+        if v.fract() == 0.0 {
+            format!("{}", v as i64)
+        } else {
+            format!("{v}")
+        }
+    };
+    match t.shape {
+        Shape::Point if t.dwell => format!("[GUIDE:{},{}:{}]", c(t.x), c(t.y), t.label),
+        Shape::Point => format!("[POINT:{},{}:{}]", c(t.x), c(t.y), t.label),
+        Shape::Rect => format!("[DRAW:rect:{},{},{},{}:{}]", c(t.x), c(t.y), c(t.x2), c(t.y2), t.label),
+        Shape::Arrow => format!("[DRAW:arrow:{},{},{},{}:{}]", c(t.x), c(t.y), c(t.x2), c(t.y2), t.label),
+        Shape::Line => format!("[DRAW:line:{},{},{},{}:{}]", c(t.x), c(t.y), c(t.x2), c(t.y2), t.label),
+        Shape::Text => format!("[DRAW:text:{},{}:{}]", c(t.x), c(t.y), t.label),
+    }
+}
+
 /// Drop a trailing `screenN` qualifier from the segment list, in place.
 fn strip_screen_suffix(segments: &mut Vec<&str>) {
     if segments.len() > 2 {
@@ -356,6 +378,29 @@ mod parse_tests {
         assert!(tags[1].shape == Shape::Rect);
         assert_eq!(tags[1].y2, 8.0);
     }
+
+    #[test]
+    fn tag_to_string_round_trips_through_parse() {
+        // Every shape the brain can re-emit must survive to_string -> reparse so
+        // fed-back drawings stay valid (additive teaching, #1251).
+        let src = "[POINT:1,2:a] [GUIDE:3,4:b] [DRAW:rect:5,6,7,8:c] \
+                   [DRAW:arrow:9,10,11,12:d] [DRAW:line:13,14,15,16:e] \
+                   [DRAW:text:17,18:a² + b² = c²]";
+        let (_, tags) = parse_point_tags(src);
+        assert_eq!(tags.len(), 6);
+        let rebuilt = tags.iter().map(tag_to_string).collect::<Vec<_>>().join(" ");
+        let (_, reparsed) = parse_point_tags(&rebuilt);
+        assert_eq!(reparsed.len(), tags.len());
+        for (a, b) in tags.iter().zip(reparsed.iter()) {
+            assert!(a.shape == b.shape);
+            assert_eq!(a.x, b.x);
+            assert_eq!(a.y, b.y);
+            assert_eq!(a.x2, b.x2);
+            assert_eq!(a.y2, b.y2);
+            assert_eq!(a.dwell, b.dwell);
+            assert_eq!(a.label, b.label);
+        }
+    }
 }
 
 // ── macOS implementation ─────────────────────────────────────────────────────
@@ -470,12 +515,17 @@ mod overlay {
 
         let gen = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
         let count = points.len();
-        // Singles linger 8s; tours earn 2.5s per extra marker, capped at 20s.
-        // A GUIDE dwells much longer — it waits for the user, capped at 90s.
-        let duration_ms: u64 = if dwell_targets.is_empty() {
-            (8_000 + 2_500 * (count as u64 - 1)).min(20_000)
-        } else {
+        // A teaching diagram (freehand line/text) must persist across the back-
+        // and-forth of a lesson — each "go deeper" turn supersedes it and resets
+        // this timer, so 2 min keeps the picture up between turns (#1251). GUIDE
+        // dwells until the user acts (90s). Plain point/box tours fade fast.
+        let teaching = tags.iter().any(|t| matches!(t.shape, Shape::Line | Shape::Text));
+        let duration_ms: u64 = if !dwell_targets.is_empty() {
             90_000
+        } else if teaching {
+            120_000
+        } else {
+            (8_000 + 2_500 * (count as u64 - 1)).min(20_000)
         };
         let payload = json!({
             "gen": gen,
