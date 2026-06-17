@@ -1832,6 +1832,13 @@ button.workflow-file-item.workflow-file-item-active {
   40%           { opacity: 1;    transform: scale(1); }
 }
 
+/* Gentle "this tool is in flight" breathe for the running ToolCallChip glyph.
+   Opacity-only (no scale) so a 22px chip icon reads as alive, not jittery. */
+@keyframes o8ToolChipPulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+
 .o8-dot-shimmer {
   display: inline-flex;
   align-items: center;

@@ -82,7 +82,13 @@ function ToolCallChipBase({ verb, argument, kind = 'generic', status = 'done', o
         maxWidth: '100%',
       }}
     >
-      <ToolCallGlyph kind={kind} accent={accent} />
+      {status === 'running' && !reducedMotion ? (
+        <span style={{ display: 'inline-flex', animation: 'o8ToolChipPulse 1.6s ease-in-out infinite' }}>
+          <ToolCallGlyph kind={kind} accent={accent} />
+        </span>
+      ) : (
+        <ToolCallGlyph kind={kind} accent={accent} />
+      )}
       <span
         style={{
           fontWeight: 600,

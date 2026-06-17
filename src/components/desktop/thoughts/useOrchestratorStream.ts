@@ -159,6 +159,8 @@ export function useOrchestratorStream(
   const wsRef = useRef<WebSocket | null>(null);
   const resetEpochRef = useRef(0);
   const currentAssistantRef = useRef<CurrentAssistantStreamState | null>(null);
+  // rAF handle coalescing streaming-text flushes — see scheduleFlushCurrentAssistant.
+  const flushFrameRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const tokenRefreshTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const telemetrySessionKeyRef = useRef<string | null>(null);
@@ -442,6 +444,12 @@ export function useOrchestratorStream(
   }, [endTurn]);
 
   const flushCurrentAssistant = useCallback(() => {
+    // An immediate flush supersedes any queued frame — cancel it so a late
+    // frame can't fire a redundant setMessages after a terminal flush.
+    if (flushFrameRef.current !== null) {
+      if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(flushFrameRef.current);
+      flushFrameRef.current = null;
+    }
     const current = currentAssistantRef.current;
     if (!current || (current.chunks.length === 0 && current.thinkingChunks.length === 0)) return;
 
@@ -470,6 +478,24 @@ export function useOrchestratorStream(
       }];
     });
   }, []);
+
+  // Coalesced flush for the streaming-text path: at most one setMessages per
+  // animation frame (≤60fps) regardless of delta rate. Each delta used to fire
+  // its own flush — a full re-render + markdown re-parse per token — which made
+  // streaming choppy and starved the WS read loop, letting backpressure drop
+  // narration between tool pills. Terminal flushes (turn 'ready', heal) still
+  // call flushCurrentAssistant directly for a synchronous final paint. 2026-06-17.
+  const scheduleFlushCurrentAssistant = useCallback(() => {
+    if (flushFrameRef.current !== null) return;
+    if (typeof requestAnimationFrame === 'undefined') {
+      flushCurrentAssistant();
+      return;
+    }
+    flushFrameRef.current = requestAnimationFrame(() => {
+      flushFrameRef.current = null;
+      flushCurrentAssistant();
+    });
+  }, [flushCurrentAssistant]);
 
   const connect = useCallback(() => {
     if (!repoPathRef.current) return;
@@ -527,6 +553,7 @@ export function useOrchestratorStream(
       firstTurnPlanChunksRef,
       firstTurnPlanStartedRef,
       flushCurrentAssistant,
+      scheduleFlushCurrentAssistant,
       lastEventAtRef,
       messagesRef,
       resetEpochRef,
@@ -552,7 +579,7 @@ export function useOrchestratorStream(
     ws.onerror = () => {
       // onclose will fire after this
     };
-  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, healStaleBusyState]);
+  }, [finalizeFirstTurnPlanCapture, flushCurrentAssistant, scheduleFlushCurrentAssistant, healStaleBusyState]);
 
   useEffect(() => {
     if (!repoPath || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
@@ -581,6 +608,10 @@ export function useOrchestratorStream(
 
     return () => {
       mountedRef.current = false;
+      if (flushFrameRef.current !== null) {
+        if (typeof cancelAnimationFrame !== 'undefined') cancelAnimationFrame(flushFrameRef.current);
+        flushFrameRef.current = null;
+      }
       if (tokenRefreshTimerRef.current) {
         clearTimeout(tokenRefreshTimerRef.current);
         tokenRefreshTimerRef.current = null;
