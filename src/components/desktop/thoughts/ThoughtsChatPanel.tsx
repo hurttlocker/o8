@@ -47,7 +47,7 @@ import { getPendingMissionCards } from './mission-complete-detector';
 import { useOrchestratorContextResidency } from '@/components/desktop/orchestrator/context-residency';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
 import { ProfiledChatMessageList as ChatMessageList } from './chat-panel/ProfiledChatMessageList';
-import { SwarmStatusCard } from './chat-panel/SwarmStatusCard';
+import { SwarmStatusCard, type SwarmScoutView } from './chat-panel/SwarmStatusCard';
 import { ipcFetch } from '@/lib/tauri/ipc-fetch';
 import { track } from '@/lib/analytics/track';
 import type { TurnSummary } from './chat-panel/TurnSummaryCard';
@@ -1889,6 +1889,29 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     handleCopyMarkdownRef.current = handleCopyMarkdown;
   }, [handleCopyMarkdown]);
 
+  // Native Claude scouts (Task-tool sub-agents) fanned out this turn. They
+  // aren't packets, so we surface them in the live crew card by reading the
+  // active assistant turn's Task tool calls. Status is tied to the turn
+  // (busy → running) rather than per-tool completion: parallel scouts fire
+  // together and the serial tool-done heuristic can't track them individually.
+  const orchestratorScouts: SwarmScoutView[] = (() => {
+    if (!isOrchestratorMode) return [];
+    const assistants = displayMessages.filter((message) => message.role === 'assistant');
+    const lastAssistant = assistants[assistants.length - 1];
+    const tasks = (lastAssistant?.toolCalls ?? []).filter(
+      (tool) => tool.name === 'Task' || tool.name.toLowerCase() === 'task',
+    );
+    return tasks.map((tool, index) => {
+      const args = tool.args ?? {};
+      const description = typeof args.description === 'string' ? args.description.trim() : '';
+      const subagentType = typeof args.subagent_type === 'string' ? args.subagent_type.trim() : '';
+      const label = description || subagentType || `Scout ${index + 1}`;
+      const status: SwarmScoutView['status'] =
+        tool.status === 'done' ? 'done' : displayWaiting ? 'running' : 'done';
+      return { id: tool.id ?? `scout-${index}`, label, status };
+    });
+  })();
+
   return (
     <div
       style={{
@@ -1949,7 +1972,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           emptyStateOverride={emptyStateOverride}
           emptyStateFallback={fallbackEmptyState}
           topContent={transcriptTopContent}
-          bottomContent={isOrchestratorMode && displayMessages.length > 0 ? <SwarmStatusCard packets={missionState?.packets ?? []} /> : null}
+          bottomContent={isOrchestratorMode && displayMessages.length > 0 ? <SwarmStatusCard packets={missionState?.packets ?? []} scouts={orchestratorScouts} /> : null}
           isOrchestratorMode={isOrchestratorMode}
           suggestedReplyMessageId={suggestedReplyMessageId}
           suggestedReplies={chipsForLastAssistant}
