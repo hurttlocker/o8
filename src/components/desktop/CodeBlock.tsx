@@ -297,7 +297,7 @@ const MermaidDiagram = memo(function MermaidDiagram({ code, onOpenMermaid }: { c
         mermaid.initialize({
           startOnLoad: false,
           ...MERMAID_THEME,
-          securityLevel: 'loose',
+          securityLevel: 'strict',
         });
 
         const id = `mermaid-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;

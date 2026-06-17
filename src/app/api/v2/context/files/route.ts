@@ -6,7 +6,7 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextRequest, NextResponse } from 'next/server';
-import { execSync } from 'node:child_process';
+import { execFileSync } from 'node:child_process';
 import { readFileSync, statSync } from 'node:fs';
 import { join, relative } from 'node:path';
 import { resolveRepoScopeFromHeaders } from '@/lib/llm/repo-scope';
@@ -27,16 +27,25 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    // Use git ls-files for fast, gitignore-aware search
-    const raw = execSync(
-      `git ls-files | grep -i "${q.replace(/"/g, '')}" | head -20`,
-      { cwd: repoRoot, encoding: 'utf-8', timeout: 3000 },
-    ).trim();
+    // git ls-files for a fast, gitignore-aware listing — run via execFileSync
+    // (NO shell) and do the case-insensitive match + cap in JS. The query is
+    // never interpolated into a command, so there is no shell to inject into.
+    // (The old `git ls-files | grep -i "${q}" | head -20` form was an RCE sink:
+    // only `"` was stripped, so $(), backticks, ; and | all survived.) `-z`
+    // keeps paths with spaces/newlines intact.
+    const out = execFileSync('git', ['ls-files', '-z'], {
+      cwd: repoRoot,
+      encoding: 'utf-8',
+      timeout: 3000,
+      maxBuffer: 16 * 1024 * 1024,
+    });
 
-    const files = raw ? raw.split('\n').map(f => ({
-      path: f,
-      name: f.split('/').pop() || f,
-    })) : [];
+    const needle = q.toLowerCase();
+    const files = out
+      .split('\0')
+      .filter((f) => f && f.toLowerCase().includes(needle))
+      .slice(0, 20)
+      .map((f) => ({ path: f, name: f.split('/').pop() || f }));
 
     return NextResponse.json({ files });
   } catch {
