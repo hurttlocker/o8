@@ -143,6 +143,21 @@ pub(crate) fn system_prompt() -> String {
     )
 }
 
+/// Optional system-prompt suffix for the escalation policy. "deep" loosens the
+/// handoff threshold; "off"/"auto" add nothing (and "off" also hides the tool).
+/// Shared by the front brains so the wording stays in one place.
+pub(crate) fn escalation_prompt_suffix(escalation: &str) -> Option<&'static str> {
+    if escalation == "deep" {
+        Some(
+            "\n\n(Escalation policy: DEEP — lean toward handing even MEDIUM \
+             multi-step tasks to your background brain via escalate; favor not \
+             making the user wait.)",
+        )
+    } else {
+        None
+    }
+}
+
 /// Rolling conversation context — the last few voice exchanges, so "remind me
 /// about that" or "add it to the same list" two asks later resolves. A gap
 /// longer than the window is a NEW conversation (matches how people talk to a
@@ -785,4 +800,52 @@ fn notify_done(app: &tauri::AppHandle, result: &str) {
     use tauri_plugin_notification::NotificationExt;
     let body: String = result.chars().take(160).collect();
     let _ = app.notification().builder().title("Symon").body(&body).show();
+}
+
+#[cfg(test)]
+mod confirm_registry_tests {
+    use super::*;
+    use tokio::sync::oneshot;
+
+    /// Two concurrent tasks (e.g. a live foreground voice turn + a `claude-task-`
+    /// background run) each with a pending confirm card. Resolving one must NOT
+    /// disturb the other — the registry is keyed by task_id (#1d two-tier safety).
+    #[test]
+    fn resolving_one_task_leaves_a_concurrent_task_pending() {
+        let (tx_a, mut rx_a) = oneshot::channel::<bool>();
+        let (tx_b, mut rx_b) = oneshot::channel::<bool>();
+        {
+            let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+            chans.retain(|(id, _)| id != "test-task-a" && id != "test-task-b");
+            chans.push(("test-task-a".to_string(), tx_a));
+            chans.push(("test-task-b".to_string(), tx_b));
+        }
+
+        // Resolve only A.
+        resolve_confirm("test-task-a", true);
+
+        // A received its decision; B is still waiting.
+        assert!(matches!(rx_a.try_recv(), Ok(true)));
+        assert!(matches!(
+            rx_b.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+
+        // B's sender is still registered (A's resolution didn't drop it).
+        {
+            let chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+            assert!(chans.iter().any(|(id, _)| id == "test-task-b"));
+            assert!(!chans.iter().any(|(id, _)| id == "test-task-a"));
+        }
+
+        // Resolving B completes it and clears the registry entry (cleanup).
+        resolve_confirm("test-task-b", false);
+        assert!(matches!(rx_b.try_recv(), Ok(false)));
+        {
+            let chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+            assert!(!chans
+                .iter()
+                .any(|(id, _)| id == "test-task-a" || id == "test-task-b"));
+        }
+    }
 }

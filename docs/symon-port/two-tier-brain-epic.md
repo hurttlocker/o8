@@ -60,9 +60,11 @@ Brainstormer design pass locked Option A. This doc is the output.
 ### Phase 2 — Two-tier routing polish
 - ✅ DONE (2026-06-16). Added a "TWO-SPEED" instruction to `system_prompt()`: heavy multi-step tasks (combing many events/reminders, multi-app workflows, careful drafting) → `escalate(claude_brain)` + a quick ack; quick single-step asks → handle inline. **Verified against the live Gemini model** (API probe, `escalate_probe.py`): "calendar→summary email" and "organize+dedupe reminders" both chose `escalate`; "weather?" and "remind me to call mom" both chose the direct tool — no over/under-escalation.
 - Quieter dock treatment for background Claude tasks ("working in the background") so they don't fight the live voice capsule. → *verify:* a background task + a new foreground Gemini turn coexist without visual collision.
-- Concurrent-task safety: test two active `task_id`s (foreground confirm + background confirm) through the `confirm_if_needed` registry. → *verify:* `cargo test` two-active-tasks case.
+- ✅ Concurrent-task safety DONE (2026-06-16): `confirm_registry_tests::resolving_one_task_leaves_a_concurrent_task_pending` — resolving one task's confirm leaves a concurrent task's pending (registry keyed by task_id). Quieter background-dock treatment is the remaining P2 item (needs the dock surface; can ride a UI pass with Phase 3).
 
-### Phase 3 — Settings toggle (user control) — SCOPED 2026-06-16
+### Phase 3 — Settings toggle (user control) — BACKEND DONE 2026-06-16, UI PENDING
+> **✅ Backend landed (2026-06-16):** `voice_escalation: "off"|"auto"|"deep"` added to `AgentModelConfig` (`router.rs`, serde-default "auto"); `tools::enabled_tools_for(escalation)` withholds `escalate` when "off"; both front brains (`gemini.rs`, `openrouter.rs`) read the policy → filter the tool + append `escalation_prompt_suffix()` ("deep" loosens the threshold). Unit-tested (`escalation_tests`). **Remaining: the VoiceTab UI + the Pro-gating decision.**
+
 **It's an escalation-POLICY toggle, not a brain-swap.** The two-tier design keeps Gemini as the always-on front; the toggle gates whether/when it hands off to the background Claude brain. Three states:
 - **Off** — Gemini handles everything inline; `escalate(claude_brain)` is hidden from the tool schema (filter it out in the prompt builder, the same place `claude.rs` already filters it).
 - **Auto** (default) — escalate heavy multi-step tasks (today's behavior).

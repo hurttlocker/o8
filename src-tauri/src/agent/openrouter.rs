@@ -28,12 +28,16 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
 
     // Gemini-format specs {name, description, parameters} wrap cleanly into
     // OpenAI's {type:"function", function:{...}} — `parameters` == the schema.
-    let tools_json: Vec<Value> = tools::enabled_tools()
+    let escalation = super::router::load_config().voice_escalation;
+    let tools_json: Vec<Value> = tools::enabled_tools_for(&escalation)
         .iter()
         .map(|spec| json!({ "type": "function", "function": spec }))
         .collect();
 
     let mut system_text = super::system_prompt();
+    if let Some(suffix) = super::escalation_prompt_suffix(&escalation) {
+        system_text.push_str(suffix);
+    }
     if let Some(convo) = super::conversation_context() {
         system_text.push_str("\n\n");
         system_text.push_str(&convo);

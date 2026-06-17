@@ -737,6 +737,21 @@ pub fn enabled_tools() -> Vec<Value> {
         .collect()
 }
 
+/// Front-brain tool list honoring the escalation policy (`voice_escalation`).
+/// "off" withholds the `escalate` handoff so the front brain handles everything
+/// inline (the background Claude brain is disabled); "auto"/"deep" keep it.
+/// The background Claude brain strips `escalate` itself (see `claude.rs`), so
+/// this is only consulted by the front brains.
+pub fn enabled_tools_for(escalation: &str) -> Vec<Value> {
+    enabled_tools()
+        .into_iter()
+        .filter(|tool| {
+            escalation != "off"
+                || tool.get("name").and_then(|n| n.as_str()) != Some("escalate")
+        })
+        .collect()
+}
+
 /// Dispatch a parsed tool call to its handler. `args` is already JSON-decoded.
 pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Result<Value, String> {
     // Hard refuse list (defense in depth — the V1 schema exposes none of these).
@@ -964,4 +979,29 @@ pub(crate) fn date_setter_block(var: &str, (y, mo, d, h, mi): (i32, u32, u32, u3
          set minutes of {var} to {mi}\n\
          set seconds of {var} to 0\n"
     )
+}
+
+#[cfg(test)]
+mod escalation_tests {
+    use super::*;
+
+    fn has_escalate(tools: &[Value]) -> bool {
+        tools
+            .iter()
+            .any(|t| t.get("name").and_then(|n| n.as_str()) == Some("escalate"))
+    }
+
+    #[test]
+    fn off_withholds_escalate_other_policies_keep_it() {
+        assert!(!has_escalate(&enabled_tools_for("off")), "off must hide escalate");
+        assert!(has_escalate(&enabled_tools_for("auto")), "auto must offer escalate");
+        assert!(has_escalate(&enabled_tools_for("deep")), "deep must offer escalate");
+    }
+
+    #[test]
+    fn escalate_is_in_the_base_enabled_set() {
+        // escalate is ReadOnly, so enabled_tools() (which only drops Destructive)
+        // must include it — the off-filter is the ONLY thing that removes it.
+        assert!(has_escalate(&enabled_tools()));
+    }
 }
