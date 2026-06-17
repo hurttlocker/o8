@@ -98,6 +98,42 @@ extern "C" {
         attribute: core_foundation::string::CFStringRef,
         settable: *mut u8,
     ) -> i32;
+    // Hit-test: the deepest AX element at a global screen point (top-left
+    // origin, points) — the basis for snapping Symon's draw box to the real UI
+    // element under the model's guessed pixel (Clicky-style precision).
+    fn AXUIElementCopyElementAtPosition(
+        application: AXUIElementRef,
+        x: f32,
+        y: f32,
+        element: *mut AXUIElementRef,
+    ) -> i32;
+    // Unwrap an AXValueRef (CGPoint / CGSize) into a plain C struct. Returns
+    // false (0) if the value isn't the requested type.
+    fn AXValueGetValue(
+        value: core_foundation::base::CFTypeRef,
+        the_type: u32,
+        value_ptr: *mut std::ffi::c_void,
+    ) -> u8;
+}
+
+// AXValueType discriminants (AXValueConstants.h): CGPoint = 1, CGSize = 2.
+#[cfg(target_os = "macos")]
+const K_AX_VALUE_TYPE_CGPOINT: u32 = 1;
+#[cfg(target_os = "macos")]
+const K_AX_VALUE_TYPE_CGSIZE: u32 = 2;
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct CGPoint {
+    x: f64,
+    y: f64,
+}
+
+#[cfg(target_os = "macos")]
+#[repr(C)]
+struct CGSize {
+    width: f64,
+    height: f64,
 }
 
 // ─── Main-thread dispatch for AX / NSRunningApplication calls ────────────────
@@ -300,6 +336,59 @@ fn ax_copy_attribute_value(
         return None;
     }
     Some(unsafe { CFType::wrap_under_create_rule(value) })
+}
+
+/// Hit-test the AX element at a global screen point and return its frame as
+/// `(x, y, w, h)` in global logical points (top-left origin) — the same space
+/// as a captured monitor's bounds. `None` when Accessibility is denied, nothing
+/// resolves, or the element exposes no position/size (e.g. raw web/canvas
+/// content) — the caller then falls back to the model's guessed pixel.
+///
+/// This is how Symon snaps its draw box to the real button/field/label under
+/// the model's guess instead of trusting the vision-estimated pixel.
+#[cfg(target_os = "macos")]
+pub(crate) fn ax_frame_at_screen_point(gx: f64, gy: f64) -> Option<(f64, f64, f64, f64)> {
+    use core_foundation::base::TCFType;
+    run_on_main_thread(move || {
+        let system = OwnedAxElement::new(unsafe { AXUIElementCreateSystemWide() })?;
+        // Cap blocking AX messaging — an unresponsive target must not hang the
+        // overlay (same 0.2s budget as native_raise_front_window).
+        unsafe {
+            let _ = AXUIElementSetMessagingTimeout(system.as_ptr(), 0.2);
+        }
+        let mut hit: AXUIElementRef = std::ptr::null();
+        let err = unsafe {
+            AXUIElementCopyElementAtPosition(system.as_ptr(), gx as f32, gy as f32, &mut hit)
+        };
+        if err != AX_ERROR_SUCCESS || hit.is_null() {
+            return None;
+        }
+        let element = OwnedAxElement::new(hit)?;
+
+        let pos_val = ax_copy_attribute_value(element.as_ptr(), ax_name("AXPosition").as_concrete_TypeRef())?;
+        let size_val = ax_copy_attribute_value(element.as_ptr(), ax_name("AXSize").as_concrete_TypeRef())?;
+
+        let mut pt = CGPoint { x: 0.0, y: 0.0 };
+        let mut sz = CGSize { width: 0.0, height: 0.0 };
+        let got_pos = unsafe {
+            AXValueGetValue(
+                pos_val.as_CFTypeRef(),
+                K_AX_VALUE_TYPE_CGPOINT,
+                &mut pt as *mut _ as *mut std::ffi::c_void,
+            )
+        };
+        let got_size = unsafe {
+            AXValueGetValue(
+                size_val.as_CFTypeRef(),
+                K_AX_VALUE_TYPE_CGSIZE,
+                &mut sz as *mut _ as *mut std::ffi::c_void,
+            )
+        };
+        if got_pos == 0 || got_size == 0 || sz.width <= 0.0 || sz.height <= 0.0 {
+            return None;
+        }
+        Some((pt.x, pt.y, sz.width, sz.height))
+    })
 }
 
 #[cfg(target_os = "macos")]
@@ -737,6 +826,15 @@ fn smart_activate() -> ActivationOutcome {
     let saved = get_frontmost_bundle_id();
 
     match (&current, &saved) {
+        // The user is in o8's OWN window (real prod bundle id) — they clicked an
+        // o8 input (canvas composer, orchestrator field) and want to dictate
+        // THERE. Paste into o8; do NOT bounce focus back to the previous app.
+        // (The dev binary reports an invalid bundle id and keeps the old
+        // reactivate-previous behavior below.)
+        (Some(cur), _) if cur == O8_BUNDLE_ID => {
+            tracing::info!("paste: o8 is frontmost — pasting into o8's own focused field");
+            ActivationOutcome::FocusUnchanged
+        }
         // Current frontmost is a real app (not o8) and differs from saved:
         // user clicked somewhere new during dictation — paste there.
         (Some(cur), Some(sav)) if cur != sav && !is_o8_or_invalid(cur) => {
@@ -745,9 +843,9 @@ fn smart_activate() -> ActivationOutcome {
             );
             ActivationOutcome::FocusUnchanged
         }
-        // Current frontmost IS o8 (or invalid/dev binary) — use saved app.
+        // Current frontmost is the dev binary (invalid bundle id) — use saved app.
         (Some(cur), _) if is_o8_or_invalid(cur) => {
-            tracing::debug!("paste: frontmost is o8 ({cur}) — reactivating saved app");
+            tracing::debug!("paste: frontmost is the dev binary ({cur}) — reactivating saved app");
             reactivate_previous_app()
         }
         // Current already matches the saved target — keep the app where it is.
@@ -774,6 +872,9 @@ pub fn activate_frontmost_app() -> bool {
     let saved = get_frontmost_bundle_id();
 
     match (&current, &saved) {
+        // o8's own window is frontmost — user wants to dictate into an o8 field.
+        // Don't pre-activate anything; paste_text() keeps focus on o8.
+        (Some(cur), _) if cur == O8_BUNDLE_ID => true,
         (Some(cur), Some(sav)) if cur != sav && !is_o8_or_invalid(cur) => {
             tracing::info!("paste: skipping pre-activate — user clicked {cur} (saved was {sav})");
             true

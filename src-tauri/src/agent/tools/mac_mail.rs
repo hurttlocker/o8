@@ -99,10 +99,14 @@ pub async fn draft(args: Value) -> Result<Value, String> {
     let subject_esc = as_escape(&subject);
     let body_esc = as_escape(&body);
 
+    // visible:true + activate so the operator SEES the composed email on screen
+    // (full to/subject/body, editable, ready to send) instead of a silent Drafts
+    // entry they have to go hunting for. `save` still persists it to Drafts.
     let script = format!(
         r#"
 tell application "Mail"
-    set newMessage to make new outgoing message with properties {{subject:"{subject_esc}", content:"{body_esc}", visible:false}}
+    activate
+    set newMessage to make new outgoing message with properties {{subject:"{subject_esc}", content:"{body_esc}", visible:true}}
     tell newMessage
         make new to recipient at end of to recipients with properties {{address:"{to_esc}"}}
     end tell
