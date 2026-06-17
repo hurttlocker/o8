@@ -182,7 +182,7 @@ async function createPR(
     fileList,
     ``,
     `---`,
-    `*Created by Cortex IDE WorktreeManager*`,
+    `*Created by o8 WorktreeManager*`,
   ].join('\n');
 
   try {

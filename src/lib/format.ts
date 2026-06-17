@@ -1,5 +1,5 @@
 /**
- * Shared formatting utilities for Cortex IDE.
+ * Shared formatting utilities for o8.
  */
 
 export function formatModelLabel(model: string): string {

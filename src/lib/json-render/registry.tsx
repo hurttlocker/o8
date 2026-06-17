@@ -1,5 +1,5 @@
 /**
- * json-render React registry for Cortex IDE mobile
+ * json-render React registry for o8 mobile
  *
  * Maps catalog component types to actual React rendering.
  * Styled to match the existing mobile design language (red accent, Apple-inspired).

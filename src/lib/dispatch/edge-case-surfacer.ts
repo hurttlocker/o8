@@ -47,7 +47,7 @@ export interface SurfaceEdgeCasesResult {
 // ── Cache layer ──
 
 const CACHE_ROOT = join(
-  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.cortex-ide'),
+  process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
   'cache',
   'edge-case-sites',
 );

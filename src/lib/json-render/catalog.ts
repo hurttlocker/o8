@@ -1,5 +1,5 @@
 /**
- * json-render catalog for Cortex IDE mobile
+ * json-render catalog for o8 mobile
  *
  * Defines the component + action vocabulary that agents can use
  * to generate dynamic UI surfaces (approval cards, status panels, etc.)

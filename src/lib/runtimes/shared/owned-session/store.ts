@@ -630,7 +630,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       createdAt: nowIso(),
       updatedAt: nowIso(),
       latestPrompt: prompt,
-      latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from Cortex IDE.`,
+      latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from o8.`,
       model: request.model?.trim() || adapter.defaultModel || undefined,
       reviewDisposition: 'watching',
       reviewDispositionUpdatedAt: nowIso(),
@@ -648,7 +648,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       surfaceId: session.surfaceId,
       note: failedBeforeLaunch
         ? session.latestSummary
-        : `Owned ${adapter.squadShortName} run launched for ${repo.title}. It will become mutable through resume/interrupt only because Cortex IDE owns this surface.`,
+        : `Owned ${adapter.squadShortName} run launched for ${repo.title}. It will become mutable through resume/interrupt only because o8 owns this surface.`,
     };
   }
 
