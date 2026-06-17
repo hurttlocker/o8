@@ -20,6 +20,7 @@ import {
 import { runLaneRebaseTypecheck } from '@/lib/lane/rebase-typecheck';
 import type { Lane, LaneCommand, LaneCommandResult, LaneEventActor } from '@/lib/lane/types';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
+import { emitProductEvent } from '@/lib/analytics/server';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import {
   WorktreeFetchUnreachableError,
@@ -746,6 +747,12 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     void mgr.prune().catch(() => {});
     updateLane(command.laneId, { worktreePath: null }, 'system');
     setLaneStatus(command.laneId, 'completed', actor, pushedToOrigin ? 'merged_pushed' : 'merged');
+
+    // Coarse product signal — the governance loop closed: an agent's work merged
+    // (#1249). Runtime enum + whether it reached origin; never the diff/repo.
+    // Merges land via MCP approve_and_merge far more than a UI click, so this is
+    // the only chokepoint that sees them all. Fire-and-forget.
+    void emitProductEvent('merge.approved', { runtime: lane.runtime, pushed: pushedToOrigin });
 
     const decompositionNote = await enqueueDecompositions(lane.repoPath, lane.runtime);
     const updated = getLane(command.laneId);
