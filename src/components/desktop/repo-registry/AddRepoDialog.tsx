@@ -1,5 +1,7 @@
 'use client';
 
+import { requestPrompt } from '@/components/shared/ConfirmToastHost';
+
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import type { ProjectRole } from '@/lib/projects/types';
 import { AlertCircle, CheckCircle2, FolderOpen, GitBranch, Globe, Loader2 } from '../lucide-shims';
@@ -72,7 +74,7 @@ async function pickFolderPath() {
       const data = await response.json() as { path?: string | null };
       if (typeof data.path === 'string') folderPath = data.path;
     } catch {
-      folderPath = window.prompt('Enter repository folder path:');
+      folderPath = await requestPrompt({ title: 'Add repository', message: 'Enter the repository folder path.', placeholder: '/path/to/repo' });
     }
   }
 

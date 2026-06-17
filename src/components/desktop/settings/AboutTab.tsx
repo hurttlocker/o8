@@ -1,6 +1,7 @@
 'use client';
 
 import packageJson from '../../../../package.json';
+import { toast } from '@/components/shared/ConfirmToastHost';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
@@ -198,7 +199,8 @@ export function AboutTab() {
               onClick={async () => {
                 const res = await fetch('/api/setup/detect');
                 const data = await res.json();
-                alert(JSON.stringify(data, null, 2));
+                console.log('[setup/detect]', data);
+                toast('Detection result logged to the console.', 'info');
               }}
               style={quietLinkStyle(false)}
             >

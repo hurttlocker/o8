@@ -6,6 +6,7 @@ import type {
   SetStateAction,
 } from 'react';
 import type { RuntimeReviewPacket } from '@/lib/fleet/types';
+import { requestConfirm } from '@/components/shared/ConfirmToastHost';
 import type {
   MobileActionRequest,
   MobileActionResponse,
@@ -307,7 +308,7 @@ export async function stopActiveRunFromSurface({
     setSurfaceNote('No active run to interrupt right now.');
     return;
   }
-  if (!window.confirm(isOwnedCodexSession ? 'Interrupt the active owned Codex run?' : 'Stop the active run for this session?')) return;
+  if (!(await requestConfirm({ title: isOwnedCodexSession ? 'Interrupt the active owned Codex run?' : 'Stop the active run for this session?', confirmLabel: isOwnedCodexSession ? 'Interrupt' : 'Stop', danger: true }))) return;
 
   try {
     const result = await runAction({ action: 'stop', sessionKey: selectedSessionKey });

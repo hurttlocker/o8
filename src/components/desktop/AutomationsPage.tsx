@@ -13,6 +13,7 @@
  */
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
+import { requestConfirm } from '@/components/shared/ConfirmToastHost';
 import { useExperimentalGeminiFlag } from '@/lib/operator/use-experimental-gemini';
 import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
 
@@ -653,7 +654,7 @@ function RowActions({
         title="Delete"
         disabled={busy === 'delete'}
         onClick={async () => {
-          if (!confirm(`Delete automation "${row.name}"?`)) return;
+          if (!(await requestConfirm({ title: `Delete automation "${row.name}"?`, confirmLabel: 'Delete', danger: true }))) return;
           setBusy('delete');
           try { await onDelete(row.id); } finally { setBusy(null); }
         }}

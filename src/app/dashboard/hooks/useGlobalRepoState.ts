@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState, type Dispatch, type SetStateAction } from 'react';
+import { requestConfirm, requestPrompt, toast } from '@/components/shared/ConfirmToastHost';
 import type { NavSection } from '@/app/dashboard/types';
 import { FOCUS_REPO_SETUP_EVENT, OPEN_REPO_WORKSPACE_EVENT } from '@/lib/desktop/events';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
@@ -196,9 +197,12 @@ export function useGlobalRepoState({
     const target = globalRepoEntries.find((repo) => repo.id === repoId);
     if (!target) return;
 
-    const confirmed = window.confirm(
-      `Remove ${target.name} from Cortex?\n\nThis only removes it from the local repo list. It does not delete the folder on disk.`,
-    );
+    const confirmed = await requestConfirm({
+      title: `Remove ${target.name} from o8?`,
+      message: 'This only removes it from the local repo list. It does not delete the folder on disk.',
+      confirmLabel: 'Remove',
+      danger: true,
+    });
     if (!confirmed) return;
 
     const response = await fetch('/api/panel/repos', {
@@ -298,7 +302,7 @@ export function useGlobalRepoState({
         const data = await response.json() as { path?: string | null };
         if (data.path) folderPath = data.path;
       } catch {
-        folderPath = window.prompt('Enter folder path:');
+        folderPath = await requestPrompt({ title: 'Open folder', message: 'Enter the folder path to add as a repository.', placeholder: '/path/to/folder' });
       }
     }
 
@@ -329,7 +333,7 @@ export function useGlobalRepoState({
         sessionStorage.setItem('cortex-global-repo-id', selected.id);
       }
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'Unable to open folder.');
+      toast(error instanceof Error ? error.message : 'Unable to open folder.');
     }
   }, [loadRegisteredRepos]);
 
