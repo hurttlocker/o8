@@ -417,7 +417,7 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                     }}
                   >
                     {transcriptPreview.length === 0 ? (
-                      <div style={{ fontSize: 10, color: 'var(--t-text-secondary)' }}>No transcript rows found.</div>
+                      <div style={{ fontSize: 10, color: 'var(--t-text-secondary)' }}>No transcript yet.</div>
                     ) : transcriptPreview.map((entry) => (
                       <div key={entry.id} style={{ marginBottom: 7 }}>
                         <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 2 }}>

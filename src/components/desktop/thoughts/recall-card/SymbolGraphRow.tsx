@@ -35,7 +35,7 @@ interface SymbolGraphRowProps {
 export function SymbolGraphRow({ open, onToggle, loading, edges }: SymbolGraphRowProps) {
   const summary = (() => {
     if (loading) return 'Tracing call paths…';
-    if (edges.length === 0) return 'No symbols matched the index';
+    if (edges.length === 0) return 'No matching symbols';
     const first = edges[0];
     const extra = edges.length - 1;
     return extra > 0 ? `${first.symbol} + ${extra} more` : first.symbol;
