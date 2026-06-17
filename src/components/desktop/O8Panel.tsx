@@ -557,21 +557,27 @@ export function O8Panel({
     }
 
     if (tab === 'side-chat') {
+      // Opaque chat-surface wrapper: without it the OrchestratorTab's empty
+      // state bleeds through translucent over the layer behind (the ghosted
+      // "What should we build" hero). --t-chat-surface-bg is pinned solid in
+      // every palette × surface, so the side chat always reads as paper.
       return (
-        <Suspense fallback={<SurfaceEmptyState icon={<ChatIcon size={18} />} title="Loading side chat" detail="Preparing a repo-aware conversation in the right panel." />}>
-          <LazyOrchestratorTab
-            tabId="right-side-chat"
-            active={active}
-            repoPath={repoPath ?? null}
-            repoLabel={repoLabel}
-            initialMode="fleet"
-            acceptHistoryThreadLoads={false}
-            restoreLastThread={false}
-            publishWorkspaceThread={false}
-            persistLastThread={false}
-            projectContextRailVisible={false}
-          />
-        </Suspense>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg)' }}>
+          <Suspense fallback={<SurfaceEmptyState icon={<ChatIcon size={18} />} title="Loading side chat" detail="Preparing a repo-aware conversation in the right panel." />}>
+            <LazyOrchestratorTab
+              tabId="right-side-chat"
+              active={active}
+              repoPath={repoPath ?? null}
+              repoLabel={repoLabel}
+              initialMode="fleet"
+              acceptHistoryThreadLoads={false}
+              restoreLastThread={false}
+              publishWorkspaceThread={false}
+              persistLastThread={false}
+              projectContextRailVisible={false}
+            />
+          </Suspense>
+        </div>
       );
     }
 
