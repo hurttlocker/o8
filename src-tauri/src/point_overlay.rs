@@ -316,6 +316,24 @@ mod overlay {
         let _ = API_PORT.set(api_port);
     }
 
+    /// Snap a guessed global screen point to the real AX element under it,
+    /// returned as `(x, y, w, h)` in MONITOR-LOCAL logical points. `None` when
+    /// Accessibility can't resolve a usable element or the hit is implausible
+    /// (covers >55% of the monitor = a window/group, not a control; or is
+    /// degenerate) — the caller then keeps the model's vision-estimated pixel.
+    /// This is what makes Symon's box land ON the button instead of near it.
+    fn ax_snap_frame(screen: &ScreenContext, gx: f64, gy: f64) -> Option<(f64, f64, f64, f64)> {
+        let (fx, fy, fw, fh) = crate::paste::ax_frame_at_screen_point(gx, gy)?;
+        if fw < 8.0 || fh < 8.0 || fw * fh > 0.55 * screen.mon_w * screen.mon_h {
+            return None;
+        }
+        let lx = (fx - screen.mon_x).clamp(0.0, screen.mon_w);
+        let ly = (fy - screen.mon_y).clamp(0.0, screen.mon_h);
+        let lw = fw.min(screen.mon_w - lx);
+        let lh = fh.min(screen.mon_h - ly);
+        Some((lx, ly, lw, lh))
+    }
+
     /// Map screenshot-pixel tags onto the captured monitor and animate them.
     /// Fire-and-forget: spawns a worker thread that ensures the window (first
     /// use pays a route-load wait), emits `o8:point-show`, then auto-hides.
@@ -328,6 +346,9 @@ mod overlay {
         // local = (tag / image_px) * monitor_logical, clamped into bounds.
         let map_x = |v: f64| (v / screen.img_w as f64 * screen.mon_w).clamp(0.0, screen.mon_w);
         let map_y = |v: f64| (v / screen.img_h as f64 * screen.mon_h).clamp(0.0, screen.mon_h);
+        // Monitor-local → global screen point (for the AX hit-test).
+        let to_global = |lx: f64, ly: f64| (screen.mon_x + lx, screen.mon_y + ly);
+        let center = |(x, y, w, h): (f64, f64, f64, f64)| (x + w / 2.0, y + h / 2.0);
         let points: Vec<serde_json::Value> = tags
             .iter()
             .map(|t| {
@@ -335,16 +356,35 @@ mod overlay {
                 let y = map_y(t.y);
                 match t.shape {
                     Shape::Point => {
-                        json!({ "shape": "point", "x": x, "y": y, "label": t.label, "dwell": t.dwell })
+                        // Snap the dot to the center of the element under the
+                        // guess; keep the vision pixel if AX can't help.
+                        let (gx, gy) = to_global(x, y);
+                        let (px, py) = ax_snap_frame(screen, gx, gy).map(center).unwrap_or((x, y));
+                        json!({ "shape": "point", "x": px, "y": py, "label": t.label, "dwell": t.dwell })
                     }
-                    Shape::Rect => json!({
-                        "shape": "rect", "x": x, "y": y,
-                        "x2": map_x(t.x2), "y2": map_y(t.y2), "label": t.label
-                    }),
-                    Shape::Arrow => json!({
-                        "shape": "arrow", "x": x, "y": y,
-                        "x2": map_x(t.x2), "y2": map_y(t.y2), "label": t.label
-                    }),
+                    Shape::Rect => {
+                        // Hit-test the center of the guessed box; snap the whole
+                        // box to that element's frame (the precision win).
+                        let (x2, y2) = (map_x(t.x2), map_y(t.y2));
+                        let (gcx, gcy) = to_global((x + x2) / 2.0, (y + y2) / 2.0);
+                        match ax_snap_frame(screen, gcx, gcy) {
+                            Some((lx, ly, lw, lh)) => json!({
+                                "shape": "rect", "x": lx, "y": ly,
+                                "x2": lx + lw, "y2": ly + lh, "label": t.label
+                            }),
+                            None => json!({
+                                "shape": "rect", "x": x, "y": y, "x2": x2, "y2": y2, "label": t.label
+                            }),
+                        }
+                    }
+                    Shape::Arrow => {
+                        // Snap the arrow HEAD onto the target element's center;
+                        // the tail stays where the model drew it.
+                        let (x2, y2) = (map_x(t.x2), map_y(t.y2));
+                        let (ghx, ghy) = to_global(x2, y2);
+                        let (hx, hy) = ax_snap_frame(screen, ghx, ghy).map(center).unwrap_or((x2, y2));
+                        json!({ "shape": "arrow", "x": x, "y": y, "x2": hx, "y2": hy, "label": t.label })
+                    }
                 }
             })
             .collect();
