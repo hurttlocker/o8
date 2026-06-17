@@ -51,10 +51,13 @@ function dispatchEval(verb: string, args: Record<string, unknown>): string {
 }
 
 async function probeDispatch(client: O8WebviewClient, verb: string, args: Record<string, unknown>): Promise<DispatchProbe> {
-  const result = await client.evalJs(dispatchEval(verb, args));
   try {
+    const result = await client.evalJs(dispatchEval(verb, args));
     return JSON.parse(result.result) as DispatchProbe;
   } catch {
+    // evalJs can throw transiently while the webview is mid-navigation (the
+    // full reload below tears down the JS context for a beat) — treat that as
+    // "not ready yet" so the poll loop keeps waiting instead of aborting.
     return { ready: false };
   }
 }
@@ -75,7 +78,13 @@ export async function POST(request: NextRequest) {
 
     if (!probe.ready && ensure) {
       if (probe.route && probe.route !== CANVAS_ROUTE) {
-        await client.navigate(CANVAS_ROUTE);
+        // FULL navigation, not client.navigate() — that drives the SPA router
+        // (__o8Navigate__), which does not reliably cross from /dashboard to
+        // the /preview/canvas-glass route segment, so the canvas never loads
+        // and the intent listener never mounts (o8_canvas then fails every
+        // time). window.location.assign is exactly what o8's own "enter canvas"
+        // button uses for this hop.
+        await client.evalJs(`window.location.assign(${JSON.stringify(CANVAS_ROUTE)})`);
         navigated = true;
       }
       const deadline = Date.now() + READY_TIMEOUT_MS;
