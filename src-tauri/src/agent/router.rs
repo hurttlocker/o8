@@ -51,3 +51,19 @@ pub fn load_config() -> AgentModelConfig {
         Err(_) => AgentModelConfig::default(),
     }
 }
+
+/// Persist a new escalation policy into `agent_models.json`, preserving the
+/// rest of the config (writes a full config from defaults if the file is
+/// absent). Accepts "off" | "auto" | "deep".
+pub fn set_voice_escalation(policy: &str) -> Result<(), String> {
+    let mut cfg = load_config();
+    cfg.voice_escalation = policy.to_string();
+    let path = super::agent_data_dir().join("agent_models.json");
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let json =
+        serde_json::to_string_pretty(&cfg).map_err(|e| format!("serialize agent config: {e}"))?;
+    std::fs::write(&path, json).map_err(|e| format!("write agent_models.json: {e}"))?;
+    Ok(())
+}

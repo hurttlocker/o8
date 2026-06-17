@@ -3222,6 +3222,23 @@ fn agent_confirm(task_id: String, allow: bool) {
     agent::resolve_confirm(&task_id, allow);
 }
 
+/// Read the current voice escalation policy ("off" | "auto" | "deep") — the
+/// two-tier brain's hand-off behavior, persisted in agent_models.json.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_get_escalation() -> String {
+    agent::router::load_config().voice_escalation
+}
+
+/// Set the voice escalation policy. "off" disables the background Claude brain
+/// (front brain handles everything inline); "auto" escalates heavy tasks;
+/// "deep" also escalates medium ones.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_set_escalation(policy: String) -> Result<(), String> {
+    agent::router::set_voice_escalation(&policy)
+}
+
 /// One-tap revert of the last in-place text edit (the dock Revert chip —
 /// the governance surface for `apply_text_edit`, see agent/edit_ctx.rs).
 #[cfg(target_os = "macos")]
@@ -3697,6 +3714,10 @@ pub fn run() {
             agent_run,
             #[cfg(target_os = "macos")]
             agent_confirm,
+            #[cfg(target_os = "macos")]
+            agent_get_escalation,
+            #[cfg(target_os = "macos")]
+            agent_set_escalation,
             #[cfg(target_os = "macos")]
             agent_edit_revert,
             #[cfg(target_os = "macos")]

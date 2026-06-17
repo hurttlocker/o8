@@ -27,6 +27,8 @@ import {
   backgroundModeSet,
   voicePrefsGet,
   voicePrefsSet,
+  agentGetEscalation,
+  agentSetEscalation,
 } from '@/lib/tauri/bridge';
 import {
   APP_FONT_STACK,
@@ -205,6 +207,8 @@ export function VoiceTab() {
   const [sounds, setSounds] = useState(true);
   const [dictionary, setDictionary] = useState('');
   const [instructions, setInstructions] = useState('');
+  // Two-tier brain escalation policy (~/.o8/agent_models.json via the router).
+  const [escalation, setEscalation] = useState<'off' | 'auto' | 'deep'>('auto');
 
   const refreshPermissions = useCallback(async () => {
     if (!tauri) return;
@@ -220,11 +224,12 @@ export function VoiceTab() {
 
   const loadAll = useCallback(async () => {
     if (!tauri) return;
-    const [, auto, bg, prefs] = await Promise.all([
+    const [, auto, bg, prefs, esc] = await Promise.all([
       refreshPermissions(),
       autostartIsEnabled(),
       backgroundModeIsEnabled(),
       voicePrefsGet(),
+      agentGetEscalation().catch(() => 'auto'),
     ]);
     setAutostart(auto);
     setBgMode(bg);
@@ -234,6 +239,7 @@ export function VoiceTab() {
       setDictionary(Array.isArray(prefs.dictionary) ? (prefs.dictionary as string[]).join('\n') : '');
       setInstructions(typeof prefs.polish_instructions === 'string' ? prefs.polish_instructions : '');
     }
+    if (esc === 'off' || esc === 'auto' || esc === 'deep') setEscalation(esc);
   }, [tauri, refreshPermissions]);
 
   useEffect(() => { void loadAll(); }, [loadAll]);
@@ -265,6 +271,11 @@ export function VoiceTab() {
   const handleSounds = useCallback((next: boolean) => {
     setSounds(next);
     void voicePrefsSet('sounds_enabled', next);
+  }, []);
+
+  const handleEscalation = useCallback((next: 'off' | 'auto' | 'deep') => {
+    setEscalation(next);
+    void agentSetEscalation(next);
   }, []);
 
   // Persist on blur — the prefs file is mtime-cached so the next dictation picks
@@ -497,6 +508,80 @@ export function VoiceTab() {
                   style={textareaStyle}
                 />
               </div>
+            </div>
+          </section>
+
+          <section style={{ marginTop: 32 }}>
+            <SectionLabel number="05">VOICE BRAIN</SectionLabel>
+            <p
+              style={{
+                margin: 0,
+                marginTop: 4,
+                marginBottom: 12,
+                fontSize: 13,
+                lineHeight: 1.55,
+                color: 'var(--t-text-secondary)',
+                maxWidth: 620,
+              }}
+            >
+              When a request is heavy or multi-step, o8 can hand it to a deeper background brain and answer you instantly — it keeps working while you talk, then reports back. Uses your Claude subscription.
+            </p>
+            <div style={{ display: 'flex', gap: 10, maxWidth: 620, flexWrap: 'wrap' }}>
+              {([
+                { value: 'off', label: 'Off', detail: 'o8 handles every request itself — no hand-off.' },
+                { value: 'auto', label: 'Auto', detail: 'Hand heavy, multi-step tasks to the background brain. Recommended.' },
+                { value: 'deep', label: 'Deep', detail: 'Also hand off medium tasks — lean on the deeper brain.' },
+              ] as const).map((opt) => {
+                const active = escalation === opt.value;
+                return (
+                  <button
+                    key={opt.value}
+                    type="button"
+                    onClick={() => handleEscalation(opt.value)}
+                    style={{
+                      flex: '1 1 0',
+                      minWidth: 168,
+                      textAlign: 'left',
+                      paddingTop: 12,
+                      paddingBottom: 12,
+                      paddingLeft: 14,
+                      paddingRight: 14,
+                      borderRadius: 12,
+                      border: `1px solid ${active ? RAMS_ACCENT : 'var(--t-border)'}`,
+                      background: 'var(--t-bg-card)',
+                      cursor: 'pointer',
+                      fontFamily: APP_FONT_STACK,
+                      transition: 'border-color 140ms ease',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: active ? RAMS_ACCENT : 'var(--t-text-faint)',
+                          flexShrink: 0,
+                        }}
+                      />
+                      <span
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 600,
+                          letterSpacing: '0.04em',
+                          textTransform: 'uppercase',
+                          color: 'var(--t-text)',
+                        }}
+                      >
+                        {opt.label}
+                      </span>
+                    </div>
+                    <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
+                      {opt.detail}
+                    </div>
+                  </button>
+                );
+              })}
             </div>
           </section>
 
