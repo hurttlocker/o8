@@ -68,8 +68,8 @@ let openclawRealtimeMutationSeq = 0;
 
 /** Dedicated openclaw profile — isolates state/config under ~/.openclaw-o8. */
 const OPENCLAW_PROFILE = 'o8';
-/** Mirror of the other orchestrator backends' 30-minute process budget. */
-const PROCESS_TIMEOUT_MS = 1_800_000;
+/** Mirror of the other orchestrator backends' 4-hour process budget (hang watchdog, not a work budget). */
+const PROCESS_TIMEOUT_MS = 14_400_000;
 
 const OPENCLAW_SOURCE_HOME = join(homedir(), '.openclaw');
 const OPENCLAW_SOURCE_CONFIG = join(OPENCLAW_SOURCE_HOME, 'openclaw.json');
@@ -676,7 +676,7 @@ async function sendToOpenclawOrchestrator(
       const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
       emitEvent({
         type: 'error',
-        error: `Orchestrator hit the ${minutes}-minute turn limit and was terminated. Re-send your message to continue — or break the task into a tighter brief so it fits.`,
+        error: `Orchestrator hit the ${minutes}-minute watchdog limit and was terminated — a turn running this long has almost certainly hung. Re-send your message to continue.`,
       });
       proc.kill('SIGTERM');
       setTimeout(() => {

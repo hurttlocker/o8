@@ -50,8 +50,8 @@ export interface SendToCodexOrchestratorOptions {
 // ── Constants ────────────────────────────────────────────────────────────────
 
 const DEFAULT_CODEX_MODEL = 'gpt-5.5';
-/** Mirror of orchestrator-session.ts PROCESS_TIMEOUT_MS (30 min). */
-const PROCESS_TIMEOUT_MS = 1_800_000;
+/** Mirror of orchestrator-session.ts PROCESS_TIMEOUT_MS (4 hr — hang watchdog, not a work budget). */
+const PROCESS_TIMEOUT_MS = 14_400_000;
 /** Mirror of orchestrator-session.ts PREEMPT_SETTLE_MS — see that file for why. */
 const PREEMPT_SETTLE_MS = 4_000;
 
@@ -441,7 +441,7 @@ export async function sendToCodexOrchestrator(
       const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
       onEvent({
         type: 'error',
-        error: `Orchestrator hit the ${minutes}-minute turn limit and was terminated. Re-send your message to continue — or break the task into a tighter brief so it fits.`,
+        error: `Orchestrator hit the ${minutes}-minute watchdog limit and was terminated — a turn running this long has almost certainly hung. Re-send your message to continue.`,
       });
       proc.kill('SIGTERM');
       setTimeout(() => {
