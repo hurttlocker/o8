@@ -902,7 +902,11 @@ pub fn start(app: tauri::AppHandle) {
                         let long_form = LONG_FORM_ACTIVE.load(Ordering::SeqCst);
                         let agent_long_form = AGENT_LONG_FORM_ACTIVE.load(Ordering::SeqCst);
                         let tts_active = crate::tts::playback::is_active();
-                        if long_form || agent_long_form || tts_active {
+                        // A running agent task that isn't (yet) speaking still
+                        // needs Escape to stop it — else it grinds on and talks
+                        // over the user when it finishes.
+                        let agent_task = crate::agent::any_task_running();
+                        if long_form || agent_long_form || tts_active || agent_task {
                             let keycode =
                                 event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                             if keycode == ESCAPE_KEYCODE {
@@ -914,6 +918,11 @@ pub fn start(app: tauri::AppHandle) {
                                 if agent_long_form {
                                     AGENT_LONG_FORM_ACTIVE.store(false, Ordering::SeqCst);
                                     std::thread::spawn(discard_agent_dictation);
+                                }
+                                if agent_task {
+                                    std::thread::spawn(|| {
+                                        crate::agent::cancel_all_tasks();
+                                    });
                                 }
                                 if tts_active {
                                     std::thread::spawn(crate::tts::playback::stop);

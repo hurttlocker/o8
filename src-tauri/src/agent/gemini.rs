@@ -64,6 +64,11 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     let mut spoke_filler = false;
 
     for _turn in 0..MAX_TURNS {
+        // User interrupted (Escape / tap-to-stop) — stop before the next model
+        // call. run_agent_inner sees the cancel flag and goes quiet.
+        if ctx.is_cancelled() {
+            break;
+        }
         let mut body = json!({
             "contents": contents,
             "tools": [{ "function_declarations": tool_specs }],

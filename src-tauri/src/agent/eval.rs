@@ -68,7 +68,13 @@ pub async fn run_eval(app: tauri::AppHandle, models: Vec<String>) -> String {
         let mut total_ms = 0u128;
 
         for (i, f) in fx.iter().enumerate() {
-            let ctx = TaskCtx { task_id: format!("eval-{i}-{model}"), app: app.clone(), screen: None, edit: None };
+            let ctx = TaskCtx {
+                task_id: format!("eval-{i}-{model}"),
+                app: app.clone(),
+                screen: None,
+                edit: None,
+                cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            };
             let started = Instant::now();
             let result = if model.contains('/') {
                 super::openrouter::run_loop(model, f.intent, &ctx).await

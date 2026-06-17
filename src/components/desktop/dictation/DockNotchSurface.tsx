@@ -263,6 +263,19 @@ function NotchOrbit({ size = 13, color = '#fff' }: { size?: number; color?: stri
   );
 }
 
+/** Rounded stop square shown on the working capsule on hover — the tap-to-stop
+ * affordance (raw SVG; React icon components don't render in the Tauri
+ * webview). */
+function NotchStopGlyph({ size = 11 }: { size?: number }) {
+  return (
+    <span aria-hidden style={{ display: 'inline-flex', width: size, height: size, flexShrink: 0 }}>
+      <svg width={size} height={size} viewBox="0 0 12 12" fill="none">
+        <rect x="2" y="2" width="8" height="8" rx="2" fill="#fff" />
+      </svg>
+    </span>
+  );
+}
+
 /** Live elapsed timer for the working capsule — ticks each second from when the
  * task started, so a long synthesis reads as "still going". Compact: `7s` under
  * a minute, `1:23` over. */
@@ -442,6 +455,10 @@ interface DockNotchSurfaceProps {
   ttsState?: 'idle' | 'playing' | 'paused';
   onTogglePause?: () => void;
   onStop?: () => void;
+  /** Tap-to-stop on the "Working…" capsule — interrupts the running agent
+   * task(s) AND any speech (the dedicated agent_interrupt, distinct from the
+   * TTS-only onStop). Mirrors the Escape key. */
+  onInterrupt?: () => void;
   /** Ask answer panel (voice P4 C3) — when open (and not dictating/speaking)
    * the dock grows into the Q/o8 thread panel. */
   askOpen?: boolean;
@@ -494,6 +511,7 @@ export function DockNotchSurface({
   ttsState = 'idle',
   onTogglePause,
   onStop,
+  onInterrupt,
   askOpen = false,
   askMode = 'idle',
   askThread = [],
@@ -563,6 +581,8 @@ export function DockNotchSurface({
   // settings shell — null until the user tunes (falls back to the dock default).
   const [dockTheme, setDockTheme] = useState<'symon' | 'glass'>('symon');
   const [tunedBlur, setTunedBlur] = useState<React.CSSProperties | null>(null);
+  // Hover on the "Working…" capsule swaps it to a "Stop" affordance.
+  const [workingHover, setWorkingHover] = useState(false);
   useEffect(() => {
     const read = () => {
       try {
@@ -970,6 +990,12 @@ export function DockNotchSurface({
     const synthesizing = agentTool === 'o8_ask';
     body = (
       <div
+        role="button"
+        aria-label="Stop (Esc)"
+        title="Stop"
+        onClick={() => onInterrupt?.()}
+        onMouseEnter={() => setWorkingHover(true)}
+        onMouseLeave={() => setWorkingHover(false)}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -980,9 +1006,14 @@ export function DockNotchSurface({
           paddingLeft: 14,
           paddingRight: 14,
           overflow: 'hidden',
+          cursor: 'pointer',
         }}
       >
-        <NotchOrbit size={13} />
+        {workingHover ? (
+          <NotchStopGlyph size={11} />
+        ) : (
+          <NotchOrbit size={13} />
+        )}
         <span
           style={{
             fontSize: 11,
@@ -993,9 +1024,9 @@ export function DockNotchSurface({
             whiteSpace: 'nowrap',
           }}
         >
-          {synthesizing ? 'Synthesizing…' : 'Working…'}
+          {workingHover ? 'Stop' : synthesizing ? 'Synthesizing…' : 'Working…'}
         </span>
-        {agentStartedAt ? <WorkingTimer startedAt={agentStartedAt} /> : null}
+        {!workingHover && agentStartedAt ? <WorkingTimer startedAt={agentStartedAt} /> : null}
       </div>
     );
   } else if (isWorkersInfo) {

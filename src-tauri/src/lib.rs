@@ -3226,6 +3226,17 @@ fn agent_confirm(task_id: String, allow: bool) {
     agent::resolve_confirm(&task_id, allow);
 }
 
+/// Interrupt Symon: stop every running agent task (the reasoning loops bail
+/// between turns and go quiet) AND halt any in-progress speech. Triggered by the
+/// dock's tap-to-stop and by Escape. Safe no-op when nothing is running.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn agent_interrupt() {
+    let live = agent::cancel_all_tasks();
+    tts::playback::stop();
+    log::info!("[symon-agent] interrupt: cancelled {live} task(s) + stopped TTS");
+}
+
 /// Read the current voice escalation policy ("off" | "auto" | "deep") — the
 /// two-tier brain's hand-off behavior, persisted in agent_models.json.
 #[cfg(target_os = "macos")]
@@ -3718,6 +3729,8 @@ pub fn run() {
             agent_run,
             #[cfg(target_os = "macos")]
             agent_confirm,
+            #[cfg(target_os = "macos")]
+            agent_interrupt,
             #[cfg(target_os = "macos")]
             agent_get_escalation,
             #[cfg(target_os = "macos")]

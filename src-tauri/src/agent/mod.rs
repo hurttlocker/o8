@@ -29,8 +29,8 @@ pub mod worker_pulse;
 
 use serde_json::{json, Value};
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use tauri::Emitter;
 use tokio::sync::oneshot;
 
@@ -53,6 +53,18 @@ pub struct TaskCtx {
     /// — the noun for `apply_text_edit`. None unless the prompt was an edit
     /// verb (magic roadmap #1).
     pub edit: Option<std::sync::Arc<edit_ctx::EditContext>>,
+    /// Set true by `agent_interrupt` (Escape / tap-to-stop). The reasoning loops
+    /// check it between turns and bail; `run_agent_inner` skips the spoken
+    /// result so a cancelled task goes quiet instead of talking over the user.
+    pub cancel: Arc<AtomicBool>,
+}
+
+impl TaskCtx {
+    /// True once the user has interrupted this task (or all tasks). The loops
+    /// poll this between turns to stop fast.
+    pub fn is_cancelled(&self) -> bool {
+        self.cancel.load(Ordering::SeqCst)
+    }
 }
 
 /// Result of one agent reasoning loop (shared by both providers).
@@ -83,6 +95,16 @@ pub(crate) fn system_prompt() -> String {
          o8_ask returns titled `sources` — when one clearly backs your answer, \
          name it naturally in ONE short phrase (\"per the CLAUDE.md rules\"); \
          never read IDs or list every source aloud. \
+         \"The orchestrator\" is the live agent actually BUILDING in o8 — a \
+         different thing from the Brain (which only ANSWERS questions). When the \
+         user wants to talk to, ASK, or tell the orchestrator (\"ask the \
+         orchestrator about the velocity work\", \"tell the orchestrator to fix \
+         the test\"), use `o8_canvas` with verb send-prompt — that puts your \
+         message to the orchestrator in the Canvas, where its reply appears; \
+         then say you've passed it along and the reply is coming up on the \
+         Canvas. Do NOT reach for o8_ask there — o8_ask is ONLY for questions \
+         ABOUT the code or history, never for messages addressed to the \
+         orchestrator. \
          `o8_needs_me` lists what's waiting on the user — pending approval cards \
          and stuck agents (\"what needs me?\", \"anything waiting on me?\"). To \
          approve or reject one by voice, call o8_needs_me FIRST, read the queue \
@@ -394,6 +416,48 @@ pub fn resolve_confirm(task_id: &str, allow: bool) {
     }
 }
 
+// ── cancel registry ──────────────────────────────────────────────────────────
+// Every running task registers an Arc<AtomicBool> here keyed by task id. The
+// loops poll their own flag between turns; `agent_interrupt` raises ALL of them
+// for a one-shot "stop everything" (the natural meaning of "interrupt him").
+
+static CANCEL_FLAGS: Mutex<Vec<(String, Arc<AtomicBool>)>> = Mutex::new(Vec::new());
+
+/// Register a fresh cancel flag for `task_id` and hand back the shared handle
+/// for the TaskCtx. Replaces any stale entry for the same id.
+fn register_cancel(task_id: &str) -> Arc<AtomicBool> {
+    let flag = Arc::new(AtomicBool::new(false));
+    let mut flags = CANCEL_FLAGS.lock().unwrap_or_else(|p| p.into_inner());
+    flags.retain(|(id, _)| id != task_id);
+    flags.push((task_id.to_string(), flag.clone()));
+    flag
+}
+
+/// Drop a task's cancel flag once it finishes (success, error, or cancel).
+fn unregister_cancel(task_id: &str) {
+    let mut flags = CANCEL_FLAGS.lock().unwrap_or_else(|p| p.into_inner());
+    flags.retain(|(id, _)| id != task_id);
+}
+
+/// Raise the cancel flag on every running task. Returns how many were live —
+/// lets the caller skip the TTS-stop churn when nothing was running.
+pub fn cancel_all_tasks() -> usize {
+    let flags = CANCEL_FLAGS.lock().unwrap_or_else(|p| p.into_inner());
+    for (_, flag) in flags.iter() {
+        flag.store(true, Ordering::SeqCst);
+    }
+    flags.len()
+}
+
+/// Whether any agent task is currently running — gates the Escape-to-cancel
+/// path so the keycode read stays off the hot path when Symon is idle.
+pub fn any_task_running() -> bool {
+    !CANCEL_FLAGS
+        .lock()
+        .unwrap_or_else(|p| p.into_inner())
+        .is_empty()
+}
+
 /// Human phrasing for a confirm card.
 fn confirm_summary(tool_name: &str, args: &Value) -> String {
     let s = |k: &str| args.get(k).and_then(|v| v.as_str()).unwrap_or("").to_string();
@@ -664,7 +728,13 @@ async fn run_agent_inner(
     } else {
         None
     };
-    let ctx = TaskCtx { task_id: task_id.clone(), app: app.clone(), screen: screen_ctx, edit };
+    let ctx = TaskCtx {
+        task_id: task_id.clone(),
+        app: app.clone(),
+        screen: screen_ctx,
+        edit,
+        cancel: register_cancel(&task_id),
+    };
 
     // Dropped-file context rides the LLM prompt only — the task store keeps
     // the user's spoken words.
@@ -706,6 +776,24 @@ async fn run_agent_inner(
     } else {
         gemini::run_loop(&model, &llm_prompt, &ctx).await
     };
+
+    // Drop the cancel flag no matter how the loop ended.
+    let was_cancelled = ctx.is_cancelled();
+    unregister_cancel(&task_id);
+
+    // Interrupted by the user (Escape / tap-to-stop): go quiet. Retire the
+    // overlay, mark the ledger, and emit a terminal "cancelled" event the dock
+    // treats as done-without-speaking. No TTS, no notification — talking over
+    // the user is exactly the wonkiness this kills.
+    if was_cancelled {
+        crate::point_overlay::hide_now(&app);
+        store::finish_task(&task_id, "cancelled", "", &model, "[]");
+        emit_agent_event(
+            &app,
+            json!({ "taskId": task_id, "kind": "status", "status": "cancelled" }),
+        );
+        return Ok(String::new());
+    }
 
     match loop_result {
         Ok(result) => {
