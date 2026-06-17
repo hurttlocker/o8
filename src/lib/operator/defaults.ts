@@ -182,7 +182,7 @@ const OPERATOR_DEFAULTS_FILE = 'operator-defaults.json';
 
 function getOperatorDefaultsPath() {
   return path.join(
-    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.cortex-ide'),
+    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
     OPERATOR_DEFAULTS_FILE,
   );
 }

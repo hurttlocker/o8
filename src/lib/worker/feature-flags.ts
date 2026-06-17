@@ -16,7 +16,7 @@ const FEATURE_FLAGS_FILE = 'feature-flags.json';
 
 function getFeatureFlagsPath() {
   return path.join(
-    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.cortex-ide'),
+    process.env.CORTEX_IDE_DATA_DIR || path.join(os.homedir(), '.o8'),
     FEATURE_FLAGS_FILE,
   );
 }

@@ -52,7 +52,7 @@ const KEY_PREFIX = 'cwk_';
 
 function dataDir(): string {
   return process.env.CORTEX_IDE_DATA_DIR
-    || join(process.env.HOME || homedir(), '.cortex-ide');
+    || join(process.env.HOME || homedir(), '.o8');
 }
 
 export function cloudWorkersDir(): string {

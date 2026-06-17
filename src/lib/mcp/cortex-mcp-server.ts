@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Cortex IDE MCP Server — stdio JSON-RPC 2.0 server that exposes
+ * o8 MCP Server — stdio JSON-RPC 2.0 server that exposes
  * Cortex operations as tools for the orchestrator Claude Code process.
  *
  * Spawned as a child process by orchestrator-session.ts via --mcp-config.

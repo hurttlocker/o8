@@ -6,7 +6,7 @@
  *
  * Features:
  * - Collapsible with header bar (language label, line count, copy button)
- * - Mermaid diagrams render inline with Cortex IDE theme
+ * - Mermaid diagrams render inline with o8 theme
  * - Syntax-highlighted text with monospace font
  * - Separate from mobile CodeBlock (per our component rule)
  */
@@ -38,7 +38,7 @@ function formatLabel(lang?: string): string {
   return LANG_ALIASES[lang.toLowerCase()] ?? lang;
 }
 
-// Cortex IDE mermaid theme — glass white / frost with red accent
+// o8 mermaid theme — glass white / frost with red accent
 // Brand: clear glass, super light blue frost, bright red accents
 const MERMAID_THEME = {
   theme: 'base' as const,

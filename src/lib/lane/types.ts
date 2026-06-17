@@ -1,7 +1,7 @@
 /**
  * Lane Domain Model
  *
- * A lane is the durable operator-facing unit in Cortex IDE.
+ * A lane is the durable operator-facing unit in o8.
  * It binds purpose + repo + optional worktree + runtime + current session.
  *
  * Entity hierarchy:
