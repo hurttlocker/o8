@@ -82,7 +82,7 @@ export function RepoFocusContextTab({ repoPath, symbolText }: RepoFocusContextTa
         {outcomes === null && !outcomesError ? (
           <Empty>Loading outcomes...</Empty>
         ) : outcomesError ? (
-          <Empty>Outcomes unavailable.</Empty>
+          <Empty>Couldn’t load outcomes.</Empty>
         ) : (outcomes ?? []).length === 0 ? (
           <Empty>No recent outcomes recorded.</Empty>
         ) : outcomes?.map((outcome) => {
@@ -109,7 +109,7 @@ export function RepoFocusContextTab({ repoPath, symbolText }: RepoFocusContextTa
         ) : symbolHint ? (
           <Empty>{symbolHint}</Empty>
         ) : (symbols ?? []).length === 0 ? (
-          <Empty>No symbols matched the current index.</Empty>
+          <Empty>No matching symbols.</Empty>
         ) : symbols?.slice(0, 10).map((edge) => (
           <div key={edge.symbol} style={{ display: 'flex', flexDirection: 'column', gap: 3, minWidth: 0 }}>
             <div style={{ display: 'flex', alignItems: 'baseline', gap: 8, minWidth: 0 }}>

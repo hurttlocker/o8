@@ -430,7 +430,6 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
               <div style={{ width: '100%', aspectRatio: '16 / 10', borderRadius: 14, background: 'var(--t-glass-muted)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', border: '1px solid var(--t-glass-border-strong)', boxShadow: 'var(--t-glass-shadow)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' } as React.CSSProperties}>
                 <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 32 }}>
                   <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text-secondary)', textAlign: 'center' }}>{FEATURES[activeSlide].previewLabel}</div>
-                  <div style={{ fontSize: 11, color: 'var(--t-text-faint)' }}>Preview coming soon</div>
                 </div>
                 <div style={{ position: 'absolute', bottom: 16, left: 24, right: 24, height: 4, borderRadius: 2, background: 'var(--t-divider)', overflow: 'hidden' }}>
                   <div key={activeSlide} style={{ height: '100%', borderRadius: 2, background: 'var(--t-text-faint)', animation: `onboardingProgress ${SLIDE_MS}ms linear forwards` }} />
@@ -612,12 +611,6 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
                 </GlassCard>
 
                 <input ref={fileInputRef} type="file" accept=".zip,.json" onChange={handleImportFile} style={{ display: 'none' }} />
-
-                {/* Claude import (placeholder) */}
-                <GlassCard style={{ opacity: 0.5, padding: '14px 20px' }}>
-                  <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text-secondary)' }}>Claude export</div>
-                  <div style={{ fontSize: 11, color: 'var(--t-text-faint)', marginTop: 2 }}>Coming soon</div>
-                </GlassCard>
               </>
             )}
 
