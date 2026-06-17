@@ -233,8 +233,15 @@ pub(crate) fn screen_prompt_section(img_w: u32, img_h: u32) -> String {
          an arrow toward it — use [DRAW:rect:x1,y1,x2,y2:label] (two opposite \
          corners) or [DRAW:arrow:x1,y1,x2,y2:label] (tail then head), all in \
          screenshot pixels; reach for this on \"highlight/circle the error\", \
-         \"box the total\", or \"show me which button\". One short, plain \
-         sentence naming the target; never narrate the whole screen."
+         \"box the total\", or \"show me which button\". You can also TEACH by \
+         drawing freehand on the screen: [DRAW:line:x1,y1,x2,y2:label] is a plain \
+         segment (the optional label sits at its midpoint — use it for the sides \
+         of a shape, axes, connectors) and [DRAW:text:x,y:the text] writes a \
+         label or equation at a point (e.g. [DRAW:text:760,520:a² + b² = c²]). \
+         Compose several to sketch a diagram on empty screen space — e.g. three \
+         lines for a triangle plus text for the side labels and the formula — \
+         when the user asks you to explain or teach something visually. Keep \
+         spoken sentences short and plain; never narrate the whole screen."
     )
 }
 

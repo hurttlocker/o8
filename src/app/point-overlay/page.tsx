@@ -29,7 +29,7 @@ export const dynamic = 'force-dynamic';
 
 const ORANGE = '#FF5A1F';
 
-type OverlayShape = 'point' | 'rect' | 'arrow';
+type OverlayShape = 'point' | 'rect' | 'arrow' | 'line' | 'text';
 type OverlayPoint = {
   x: number;
   y: number;
@@ -351,6 +351,64 @@ function DrawShape({ point, screenH }: { point: OverlayPoint; screenH: number })
     );
   }
 
+  if (point.shape === 'line') {
+    // Teaching primitive (#1251): a plain segment that draws on; the label (if
+    // any) sits at the midpoint — triangle edges, axes, connectors.
+    const len = Math.max(1, Math.hypot(x2 - point.x, y2 - point.y));
+    return (
+      <>
+        <svg style={svgBase}>
+          <line
+            x1={point.x}
+            y1={point.y}
+            x2={x2}
+            y2={y2}
+            stroke={ORANGE}
+            strokeWidth={3}
+            strokeLinecap="round"
+            style={{
+              filter: `drop-shadow(0 0 6px ${ORANGE}80)`,
+              strokeDasharray: len,
+              strokeDashoffset: drawn ? 0 : len,
+              transition: 'stroke-dashoffset 0.42s cubic-bezier(0.22, 1, 0.36, 1)',
+            }}
+          />
+        </svg>
+        {point.label ? (
+          <div style={{ position: 'fixed', left: (point.x + x2) / 2, top: (point.y + y2) / 2, width: 0, height: 0, pointerEvents: 'none' }}>
+            <LabelChip text={point.label} above />
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  if (point.shape === 'text') {
+    // Teaching primitive (#1251): a glowing label / equation anchored at (x, y),
+    // fading in. The label IS the rendered string ("a", "a² + b² = c²").
+    return (
+      <div
+        style={{
+          position: 'fixed',
+          left: point.x,
+          top: point.y,
+          transform: 'translate(-50%, -50%)',
+          pointerEvents: 'none',
+          whiteSpace: 'nowrap',
+          color: '#fff',
+          fontSize: 22,
+          fontWeight: 600,
+          letterSpacing: '0.3px',
+          textShadow: `0 0 9px ${ORANGE}, 0 2px 6px rgba(0, 0, 0, 0.65)`,
+          opacity: drawn ? 1 : 0,
+          transition: 'opacity 0.3s ease',
+        }}
+      >
+        {point.label}
+      </div>
+    );
+  }
+
   // rect — outline + faint orange tint + soft glow, drawing on around the box.
   const minX = Math.min(point.x, x2);
   const minY = Math.min(point.y, y2);
@@ -492,7 +550,7 @@ export default function PointOverlayPage() {
       `}</style>
       {show
         ? (() => {
-            const shapes = show.points.filter((p) => p.shape === 'rect' || p.shape === 'arrow');
+            const shapes = show.points.filter((p) => p.shape === 'rect' || p.shape === 'arrow' || p.shape === 'line' || p.shape === 'text');
             const pts = show.points.filter((p) => !p.shape || p.shape === 'point');
             const numbered = pts.length > 1;
             return (

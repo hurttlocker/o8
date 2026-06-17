@@ -32,6 +32,12 @@ pub enum Shape {
     Point,
     Rect,
     Arrow,
+    /// Teaching mode (#1251): a freehand line segment (x,y)→(x2,y2) — triangle
+    /// edges, axes, connectors. Drawn on blank space, so no AX snap.
+    Line,
+    /// Teaching mode (#1251): a text label / equation anchored at (x,y); the
+    /// label IS the rendered text ("a", "a² + b² = c²"). Point-arity coords.
+    Text,
 }
 
 /// One parsed tag, still in screenshot-pixel space. For `Point` only (x, y) are
@@ -149,6 +155,8 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
     let shape = match segments.remove(0).trim().to_ascii_lowercase().as_str() {
         "rect" | "box" | "rectangle" => Shape::Rect,
         "arrow" => Shape::Arrow,
+        "line" => Shape::Line,
+        "text" | "label" => Shape::Text,
         _ => return None,
     };
     let coords = segments.remove(0);
@@ -157,6 +165,22 @@ fn parse_draw_inner(inner: &str) -> Option<ParsedTag> {
         .split(',')
         .filter_map(|s| s.trim().parse::<f64>().ok())
         .collect();
+    // Text anchors at ONE point and the label is the rendered string; rect /
+    // arrow / line take TWO points.
+    if shape == Shape::Text {
+        if nums.len() != 2 || !nums.iter().all(|n| n.is_finite()) || label.is_empty() {
+            return None;
+        }
+        return Some(ParsedTag {
+            x: nums[0],
+            y: nums[1],
+            x2: 0.0,
+            y2: 0.0,
+            label,
+            dwell: false,
+            shape,
+        });
+    }
     if nums.len() != 4 || !nums.iter().all(|n| n.is_finite()) {
         return None;
     }
@@ -282,6 +306,47 @@ mod parse_tests {
     }
 
     #[test]
+    fn draw_line_parses_two_points() {
+        let (clean, tags) = parse_point_tags("The hypotenuse: [DRAW:line:100,400,300,200:c]");
+        assert_eq!(clean, "The hypotenuse:");
+        assert_eq!(tags.len(), 1);
+        assert!(tags[0].shape == Shape::Line);
+        assert_eq!(tags[0].x, 100.0);
+        assert_eq!(tags[0].y2, 200.0);
+        assert_eq!(tags[0].label, "c");
+    }
+
+    #[test]
+    fn draw_text_parses_single_point_and_label() {
+        let (clean, tags) = parse_point_tags("[DRAW:text:150,300:a² + b² = c²] there");
+        assert_eq!(clean, "there");
+        assert_eq!(tags.len(), 1);
+        assert!(tags[0].shape == Shape::Text);
+        assert_eq!(tags[0].x, 150.0);
+        assert_eq!(tags[0].y, 300.0);
+        assert_eq!(tags[0].label, "a² + b² = c²");
+    }
+
+    #[test]
+    fn draw_text_requires_label_and_point_arity() {
+        // text with 4 coords (wrong arity for text) is stripped
+        let (c1, t1) = parse_point_tags("a [DRAW:text:1,2,3,4:x] b");
+        assert_eq!(c1, "a b");
+        assert!(t1.is_empty());
+        // text with no label is stripped
+        let (c2, t2) = parse_point_tags("a [DRAW:text:1,2:] b");
+        assert_eq!(c2, "a b");
+        assert!(t2.is_empty());
+    }
+
+    #[test]
+    fn label_alias_maps_to_text() {
+        let (_, tags) = parse_point_tags("[DRAW:label:5,6:side a]");
+        assert!(tags[0].shape == Shape::Text);
+        assert_eq!(tags[0].label, "side a");
+    }
+
+    #[test]
     fn mixed_point_and_draw_in_order() {
         let (clean, tags) =
             parse_point_tags("First [POINT:1,2:a] then [DRAW:rect:5,6,7,8:b] done");
@@ -385,6 +450,13 @@ mod overlay {
                         let (hx, hy) = ax_snap_frame(screen, ghx, ghy).map(center).unwrap_or((x2, y2));
                         json!({ "shape": "arrow", "x": x, "y": y, "x2": hx, "y2": hy, "label": t.label })
                     }
+                    // Teaching primitives (#1251) draw on blank space — straight
+                    // vision→monitor mapping, no AX snap.
+                    Shape::Line => json!({
+                        "shape": "line", "x": x, "y": y,
+                        "x2": map_x(t.x2), "y2": map_y(t.y2), "label": t.label
+                    }),
+                    Shape::Text => json!({ "shape": "text", "x": x, "y": y, "label": t.label }),
                 }
             })
             .collect();
