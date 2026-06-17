@@ -1,5 +1,7 @@
 'use client';
 
+import { toast } from '@/components/shared/ConfirmToastHost';
+
 import { memo } from 'react';
 import {
   AlertCircle,
@@ -438,7 +440,7 @@ function RepoRegistryListBase({
                 workspaceNotice={workspaceNotice[repo.id] ?? null}
                 onLaunchAgent={(targetRepo) => {
                   void launchIntoWorkspace(targetRepo).catch((error) => {
-                    window.alert(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
+                    toast(error instanceof Error ? error.message : 'Unable to launch workspace agent.');
                   });
                 }}
                 onOpenWorkspace={openWorkspaceModal}

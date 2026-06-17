@@ -2,6 +2,7 @@
 
 import dynamic from 'next/dynamic';
 import type { MobileInboxSnapshot } from '@/lib/mobile/types';
+import { ConfirmToastHost } from '@/components/shared/ConfirmToastHost';
 
 const MobileRemoteShell = dynamic(
   () => import('@/components/mobile-remote-shell').then((m) => ({ default: m.MobileRemoteShell })),
@@ -10,11 +11,14 @@ const MobileRemoteShell = dynamic(
 
 export function MobilePageClient({ initialSnapshot }: { initialSnapshot: MobileInboxSnapshot }) {
   return (
-    <MobileRemoteShell
-      initialSnapshot={initialSnapshot}
-      initialTranscript={undefined}
-      initialReviewFile={undefined}
-      initialOwnedReviewPacket={undefined}
-    />
+    <>
+      <MobileRemoteShell
+        initialSnapshot={initialSnapshot}
+        initialTranscript={undefined}
+        initialReviewFile={undefined}
+        initialOwnedReviewPacket={undefined}
+      />
+      <ConfirmToastHost />
+    </>
   );
 }

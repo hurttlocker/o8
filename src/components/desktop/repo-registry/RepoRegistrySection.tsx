@@ -1,5 +1,7 @@
 'use client';
 
+import { requestPrompt } from '@/components/shared/ConfirmToastHost';
+
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { openExternalUrl } from '@/lib/desktop/open-external';
@@ -373,7 +375,7 @@ function RepoRegistrySectionBase({
         const data = await response.json() as { path?: string | null };
         if (typeof data.path === 'string') folderPath = data.path;
       } catch {
-        folderPath = window.prompt('Enter folder path:');
+        folderPath = await requestPrompt({ title: 'Open folder', message: 'Enter the folder path to add as a repository.', placeholder: '/path/to/folder' });
       }
     }
 

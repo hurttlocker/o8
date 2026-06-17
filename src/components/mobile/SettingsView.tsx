@@ -1,6 +1,7 @@
 'use client';
 
 import { memo, useCallback, useEffect, useState, type ReactNode } from 'react';
+import { requestConfirm } from '@/components/shared/ConfirmToastHost';
 import { initSounds, isSoundEnabled, setSoundEnabled } from '@/lib/mobile/sounds';
 import { useTheme } from './ThemeContext';
 
@@ -512,8 +513,8 @@ export const SettingsView = memo(function SettingsView({ onBack }: SettingsViewP
         <SettingsRow
           label="Reset All Settings"
           destructive
-          action={() => {
-            if (confirm('Reset all settings to defaults?')) {
+          action={async () => {
+            if (await requestConfirm({ title: 'Reset all settings to defaults?', confirmLabel: 'Reset', danger: true })) {
               localStorage.clear();
               sessionStorage.clear();
               window.location.reload();
