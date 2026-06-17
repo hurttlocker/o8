@@ -432,6 +432,25 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["task", "target"]
             }
         }),
+        // ── o8 Canvas control (drive the operator's screen) ───────────────────
+        json!({
+            "name": "o8_canvas",
+            "description": "Drive o8's Canvas (the spatial workspace) by voice. Use when the user wants to SEE or arrange something in o8 itself: 'tell the orchestrator to fix the failing test' (send-prompt), 'ask the brain why the merge gate exists' (ask-brain), 'open the browser on localhost 3000' (open-browser), 'pull up the spec' (open-spec), 'open a terminal' (spawn-terminal), 'search the canvas for the tooltip card' (search), 'zoom out' (zoom), 'open/close the dock' (dock). It opens the Canvas automatically if it isn't already up. This only changes what's on screen — it never edits code itself (use o8_dispatch/escalate for that).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "verb": { "type": "string", "enum": ["send-prompt", "ask-brain", "open-browser", "open-spec", "spawn-terminal", "search", "zoom", "dock"], "description": "Which canvas action to run." },
+                    "text": { "type": "string", "description": "send-prompt: the message for the orchestrator." },
+                    "question": { "type": "string", "description": "ask-brain: the question for the Engineering Brain." },
+                    "url": { "type": "string", "description": "open-browser: the URL to open (omit for the app dashboard)." },
+                    "query": { "type": "string", "description": "search: text to pre-fill the canvas search." },
+                    "level": { "type": "number", "description": "zoom: an explicit level (1, 0.85, or 0.7)." },
+                    "direction": { "type": "string", "enum": ["in", "out"], "description": "zoom: step in or out." },
+                    "open": { "type": "boolean", "description": "dock: true opens, false closes (omit to toggle)." }
+                },
+                "required": ["verb"]
+            }
+        }),
         // ── Apple Music (app-control frontier) ────────────────────────────────
         json!({
             "name": "mac_music_playlists",
@@ -838,6 +857,18 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
                     "message": "A more capable background brain is now working on this. Give the user a short spoken acknowledgement (e.g. \"On it — I'll get that going and let you know.\") and do not call more tools."
                 }))
             }
+        }
+        "o8_canvas" => {
+            let verb = args
+                .get("verb")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .trim()
+                .to_string();
+            if verb.is_empty() {
+                return Err("o8_canvas requires a `verb`".to_string());
+            }
+            o8_bridge::canvas_intent(&verb, args).await
         }
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_panel_read" => o8_bridge::panel_read(args).await,

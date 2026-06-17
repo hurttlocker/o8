@@ -81,6 +81,12 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // o8 UI control — showing a surface of o8's own window has no
         // destructive side effect (same reasoning as open_app).
         "o8_ui_open" => SafetyClass::ReadOnly,
+        // Canvas control — only changes what's on the operator's SCREEN, never
+        // repo state. `send-prompt` reaches the orchestrator, but that's the
+        // same path as typing in the composer, and the orchestrator's own
+        // mutations (worker spawn, merge) stay gated downstream by o8's
+        // review/approval pipeline — so no extra confirm card here.
+        "o8_canvas" => SafetyClass::ReadOnly,
         "o8_panel_read" => SafetyClass::ReadOnly,
         "o8_recap" => SafetyClass::ReadOnly,
         "o8_usage" => SafetyClass::ReadOnly,

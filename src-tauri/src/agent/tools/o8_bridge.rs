@@ -917,3 +917,121 @@ pub async fn add_repo(args: Value) -> Result<Value, String> {
         })),
     }
 }
+
+/// Canvas verbs Symon can drive — the enum the `/api/canvas/intent` route accepts
+/// (kept in lockstep with `docs/symon-port/canvas-intent-bus.md`).
+const CANVAS_VERBS: &[&str] = &[
+    "send-prompt",
+    "ask-brain",
+    "open-browser",
+    "open-spec",
+    "spawn-terminal",
+    "search",
+    "zoom",
+    "dock",
+];
+
+/// Build the `/api/canvas/intent` POST body from the model's FLAT params.
+///
+/// The model sees one verb-enum'd tool with flat properties (`text`, `question`,
+/// `url`, `query`, `level`, `direction`, `open`); the route wants `{ verb, args,
+/// ensure }` with the verb-specific params nested under `args`. This pure mapper
+/// makes that translation unit-testable (no I/O).
+pub fn canvas_intent_body(verb: &str, args: &Value) -> Value {
+    let mut inner = json!({});
+    let mut carry = |key: &str| {
+        if let Some(v) = args.get(key) {
+            if !v.is_null() {
+                inner[key] = v.clone();
+            }
+        }
+    };
+    match verb {
+        "send-prompt" => carry("text"),
+        "ask-brain" => carry("question"),
+        "open-browser" => carry("url"),
+        "search" => carry("query"),
+        "zoom" => {
+            carry("level");
+            carry("direction");
+        }
+        "dock" => carry("open"),
+        // open-spec / spawn-terminal take no args.
+        _ => {}
+    }
+    json!({ "verb": verb, "args": inner, "ensure": true })
+}
+
+/// `o8_canvas` — drive o8's Canvas surface by voice. POSTs to the SAME
+/// `/api/canvas/intent` route the canvas rail buttons call, so behavior never
+/// forks from a click: message the orchestrator (`send-prompt`), ask the
+/// Engineering Brain (`ask-brain`), open the browser/spec/terminal, search,
+/// zoom, or toggle the dock. Classed ReadOnly in `super::super::safety` — it
+/// only changes what's on the operator's SCREEN, never repo state; the
+/// orchestrator's own mutations (worker spawn, merge) stay gated downstream by
+/// o8's review/approval pipeline, exactly as when the operator types in the
+/// composer.
+pub async fn canvas_intent(verb: &str, args: Value) -> Result<Value, String> {
+    if !CANVAS_VERBS.contains(&verb) {
+        return Err(format!(
+            "o8_canvas verb must be one of {} — got '{verb}'.",
+            CANVAS_VERBS.join(", ")
+        ));
+    }
+    let body = canvas_intent_body(verb, &args);
+    // The route SPA-navigates to the canvas and waits (≤10s) for the intent
+    // listener to mount before dispatching — give it headroom past that.
+    let resp = o8_http::post_json_timeout("/api/canvas/intent", body, 15).await?;
+
+    if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
+        // Soft page-side failure (`note`) or hard miss (`error`, e.g. the canvas
+        // never mounted) — relay the page's reason for the model to speak.
+        let why = resp
+            .get("note")
+            .and_then(|v| v.as_str())
+            .or_else(|| resp.get("error").and_then(|v| v.as_str()))
+            .unwrap_or("the canvas didn't accept that");
+        return Err(format!("Couldn't run the canvas {verb}: {why}"));
+    }
+
+    Ok(json!({
+        "ok": true,
+        "verb": verb,
+        "navigated": resp.get("navigated").and_then(|v| v.as_bool()).unwrap_or(false),
+    }))
+}
+
+#[cfg(test)]
+mod canvas_tests {
+    use super::*;
+
+    #[test]
+    fn maps_send_prompt_text_under_args() {
+        let body = canvas_intent_body("send-prompt", &json!({ "text": "fix the failing test" }));
+        assert_eq!(body["verb"], "send-prompt");
+        assert_eq!(body["args"]["text"], "fix the failing test");
+        assert_eq!(body["ensure"], true);
+    }
+
+    #[test]
+    fn ask_brain_carries_only_question() {
+        let body = canvas_intent_body("ask-brain", &json!({ "question": "why the merge gate?", "text": "ignored" }));
+        assert_eq!(body["args"]["question"], "why the merge gate?");
+        assert!(body["args"].get("text").is_none(), "unrelated keys must not leak through");
+    }
+
+    #[test]
+    fn zoom_carries_both_level_and_direction() {
+        let body = canvas_intent_body("zoom", &json!({ "direction": "out" }));
+        assert_eq!(body["args"]["direction"], "out");
+        assert!(body["args"].get("level").is_none());
+    }
+
+    #[test]
+    fn argless_verbs_send_empty_args() {
+        let body = canvas_intent_body("open-spec", &json!({ "text": "nope" }));
+        assert_eq!(body["verb"], "open-spec");
+        assert_eq!(body["args"], json!({}));
+        assert_eq!(body["ensure"], true);
+    }
+}
