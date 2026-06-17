@@ -140,6 +140,12 @@ const GATED_PREFIXES = [
   // File read/WRITE inside registered repos (LLM chat "Apply to File").
   // Was ungated — a LAN client could edit repo files without the token.
   '/api/v2/files',
+  // File-path autocomplete + content read for chat context injection. Was
+  // ungated and, with no repo header, defaulted repoRoot to process.cwd() and
+  // shelled out to git — so a cross-origin page could reach it with zero
+  // knowledge (CSRF). Gate it loopback/token-only (the sink is also now
+  // shell-free; see api/v2/context/files/route.ts).
+  '/api/v2/context',
   // Cortex memory/directive surface — local-only by design. Even read-only
   // endpoints leak operator preferences and repo names; gate them too.
   '/api/cortex/',
