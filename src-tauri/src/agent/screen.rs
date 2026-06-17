@@ -287,6 +287,66 @@ fn png_dimensions(path: &std::path::Path) -> Option<(u32, u32)> {
     Some((w, h))
 }
 
+/// Which Gemini model reads the screen. Vision must hit Gemini (the Claude
+/// text-planner can't see, and OpenRouter ids here aren't assumed multimodal),
+/// so reuse the user's configured front-brain model when it IS a Gemini id, else
+/// fall back to the proven default the front brain already sends screenshots to.
+fn vision_model() -> String {
+    let configured = super::router::load_config().mac_native_action;
+    if !configured.contains('/') && configured.starts_with("gemini") {
+        configured
+    } else {
+        "gemini-3-flash-preview".to_string()
+    }
+}
+
+/// `read_screen` tool — give the (text-only) brain SIGHT. The Gemini front brain
+/// already sees the screen inline, but the Claude background text-planner can't;
+/// this routes a screenshot through `gemini::vision_extract` and returns the
+/// extracted text to WHICHEVER brain called it (no MCP surface needed). Prefers
+/// the screenshot already captured for this task (intent-gated), else grabs one
+/// on demand. ReadOnly in `safety` — observation only; capture is permission-
+/// gated by macOS Screen Recording.
+pub async fn read_screen(ctx: &super::TaskCtx, args: serde_json::Value) -> Result<serde_json::Value, String> {
+    let focus = args
+        .get("focus")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.to_string());
+
+    let png = if let Some(screen) = &ctx.screen {
+        screen.png_base64.clone()
+    } else {
+        let app = ctx.app.clone();
+        let captured = tokio::task::spawn_blocking(move || capture(&app))
+            .await
+            .map_err(|e| format!("screen capture task failed: {e}"))?;
+        match captured {
+            Some(s) => s.png_base64,
+            None => {
+                return Err("I couldn't capture the screen — turn on Screen Recording for o8 in \
+                            System Settings → Privacy & Security."
+                    .to_string())
+            }
+        }
+    };
+
+    let prompt = match &focus {
+        Some(f) => format!(
+            "You are reading the user's Mac screen for a voice assistant. Focus on: {f}. \
+             Answer concisely and spoken-ready (no markdown). If that isn't visible, say so."
+        ),
+        None => "You are reading the user's Mac screen for a voice assistant. Describe what's on \
+                 screen — the active app/window and the key text or state the user would care \
+                 about. Concise and spoken-ready (no markdown, a few sentences)."
+            .to_string(),
+    };
+
+    let text = super::gemini::vision_extract(&vision_model(), &prompt, &png).await?;
+    Ok(serde_json::json!({ "screen_text": text }))
+}
+
 #[cfg(test)]
 mod wants_screen_tests {
     use super::wants_screen;
