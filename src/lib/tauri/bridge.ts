@@ -318,6 +318,17 @@ export async function voicePrefsSet(key: string, value: unknown): Promise<void> 
   await invoke('voice_prefs_set', { key, value });
 }
 
+/** Two-tier brain escalation policy ("off" | "auto" | "deep"), persisted in
+ * ~/.o8/agent_models.json via the agent router. Controls whether/when the front
+ * voice brain hands heavy tasks to the background Claude brain. macOS + Tauri. */
+export async function agentGetEscalation(): Promise<string> {
+  return (await invoke<string>('agent_get_escalation')) ?? 'auto';
+}
+
+export async function agentSetEscalation(policy: string): Promise<void> {
+  await invoke('agent_set_escalation', { policy });
+}
+
 /** Apply the native recognizer locale live (e.g. "en-US"). Pairs with persisting
  * `dictation_locale` via voicePrefsSet so the choice survives relaunch. */
 export async function sttSetLocale(locale: string): Promise<void> {
