@@ -43,6 +43,21 @@ function isInviteRegistrar(authHeader: string | undefined): boolean {
   return timingSafeEqual(provided, expected);
 }
 
+/** Constant-time guard for the analytics dashboard — a READ-ONLY token scoped
+ *  separately from ADMIN_TOKEN, so the credential the founder's desktop holds
+ *  can only read aggregate stats, never mint/revoke. Full admins also pass.
+ *  When ANALYTICS_TOKEN is unset, only the full ADMIN_TOKEN is accepted. */
+function isAnalyticsReader(authHeader: string | undefined): boolean {
+  if (isAdmin(authHeader)) return true;
+  if (!env.ANALYTICS_TOKEN) return false;
+  if (!authHeader) return false;
+  const token = authHeader.replace(/^Bearer\s+/i, '').trim();
+  if (token.length === 0) return false;
+  const provided = createHash('sha256').update(token).digest();
+  const expected = createHash('sha256').update(env.ANALYTICS_TOKEN).digest();
+  return timingSafeEqual(provided, expected);
+}
+
 // ── Health ──────────────────────────────────────────────────────────────────
 app.get('/health', (c) => c.json({ ok: true, service: 'o8-license-server', issuer: env.ISSUER }));
 
@@ -150,9 +165,10 @@ app.delete('/revoke/:subscriptionId', async (c) => {
   return c.json({ revoked: true, subscriptionId });
 });
 
-// ── Usage analytics (ADMIN-guarded) — founder dashboard data (epic #1249) ─────
+// ── Usage analytics — founder dashboard data (epic #1249). Read-only token
+//    (ANALYTICS_TOKEN) OR full admin; never mint/revoke scope. ───────────────
 app.get('/admin/analytics', async (c) => {
-  if (!isAdmin(c.req.header('authorization'))) {
+  if (!isAnalyticsReader(c.req.header('authorization'))) {
     return c.json({ error: 'unauthorized' }, 401);
   }
   return handleAnalytics(c);
