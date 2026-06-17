@@ -126,7 +126,7 @@ export function AccountTab() {
         }}>
           <div style={{ minWidth: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span style={{ fontSize: 14, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-              Share anonymous usage data
+              Share usage data
             </span>
             <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5, maxWidth: 520 }}>
               Coarse counts only — which features get used, and how often. Never your code, prompts, repo names, or file

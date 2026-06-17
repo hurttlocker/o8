@@ -421,7 +421,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
 
               <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12 }}>
                 <button type="button" onClick={() => goNext()} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Skip for now</button>
-                <span style={{ fontSize: 12, color: 'var(--t-text-faint)' }}>Privacy</span>
+                <button type="button" onClick={() => openExternalUrl('https://o8.run/privacy')} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0, textDecoration: 'underline', textUnderlineOffset: 3 }}>Privacy</button>
               </div>
             </div>
 
