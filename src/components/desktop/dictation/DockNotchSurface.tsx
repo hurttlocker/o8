@@ -80,7 +80,11 @@ const GLASS_CAPSULE_BG = 'linear-gradient(rgba(20,24,34,0.52), rgba(14,18,28,0.4
 // Translucent glass for the read panels (answer + confirm card) — transparent
 // like every other dock mode (the closed/idle sliver, the capsules). The dock
 // stays glass in ALL modes; backdrop blur + saturate carry the frost.
-const GLASS_PANEL_BG = 'linear-gradient(rgba(16,20,30,0.52), rgba(12,16,26,0.46))';
+// Glass-dock answer panel base. Kept dark enough (0.52/0.46 → 0.66/0.60) that
+// the answer stays legible even if the backdrop blur drops a frame — the glass
+// theme is see-through, so without this floor a dropped frost shows the raw
+// desktop through and the white ink washes out.
+const GLASS_PANEL_BG = 'linear-gradient(rgba(16,20,30,0.66), rgba(12,16,26,0.60))';
 const GLASS_BLUR: React.CSSProperties = {
   backdropFilter: 'blur(26px) saturate(150%)', WebkitBackdropFilter: 'blur(26px) saturate(150%)',
 };
@@ -688,14 +692,24 @@ export function DockNotchSurface({
         width: 420,
         height: 380,
         borderRadius: '0 0 26px 26px',
+        // Darker base (0.62 → 0.74) so the answer text stays legible even if the
+        // backdrop blur momentarily drops — the warm gradient otherwise shows
+        // through bright and washes the white ink out ("frost goes away, hard to
+        // read"). The HudWindow vibrancy under the window still carries frost.
         background: glassDock
           ? GLASS_PANEL_BG
-          : 'linear-gradient(rgba(13, 11, 26, 0.62), rgba(13, 11, 26, 0.62)),'
+          : 'linear-gradient(rgba(13, 11, 26, 0.74), rgba(13, 11, 26, 0.74)),'
             + ' linear-gradient(100deg, #aecdff 0%, #d7c2f1 46%, #f7d9bf 100%)',
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 16px 34px rgba(0, 0, 0, 0.34)',
         backdropFilter: 'blur(34px) saturate(140%)',
         WebkitBackdropFilter: 'blur(34px) saturate(140%)',
+        // Promote the big answer panel to its own GPU layer so its large
+        // backdrop-filter keeps a stable backing and stops blinking on/off under
+        // repaints (the working orbit, the 248→420 size morph) on the transparent
+        // vibrancy dock window. Same-element transform — safe for backdrop-filter.
+        transform: 'translateZ(0)',
+        isolation: 'isolate',
       } as React.CSSProperties;
     }
     if (isSpeaking) {
