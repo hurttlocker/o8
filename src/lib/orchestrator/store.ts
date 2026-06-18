@@ -953,6 +953,21 @@ export function reconcileOrchestratorMissionState(
     ...normalized,
     packets: reconciledPackets,
   });
+  // Compare only SEMANTIC fields. The raw heartbeat timestamps
+  // (`lane.lastHeartbeatAt`, `lane.lastEventAt`, top-level `lastEventAt`) advance
+  // on every agent inventory tick — including within a single render commit — so
+  // including them here made `changed` perpetually true, which minted a fresh
+  // `updatedAt` (nowIso) on every reconcile and drove the dashboard reconcile
+  // effect into a `Maximum update depth exceeded` storm on every heartbeat
+  // (~2.5s). These are display-only metadata and must never drive a state write.
+  // `lastEventLabel` (what the agent is DOING) is kept — it's a real signal and
+  // changes only on actual progress, so it updates the UI without looping.
+  const stripVolatile = (packets: OrchestratorMissionState['packets']) =>
+    packets.map((p) => ({
+      ...p,
+      lastEventAt: null,
+      lane: p.lane ? { ...p.lane, lastHeartbeatAt: null, lastEventAt: null } : p.lane,
+    }));
   const changed = JSON.stringify({
     missionId: normalized.missionId,
     prompt: normalized.prompt,
@@ -960,7 +975,7 @@ export function reconcileOrchestratorMissionState(
     repoPath: normalized.repoPath,
     runtime: normalized.runtime,
     constraints: normalized.constraints,
-    packets: normalized.packets,
+    packets: stripVolatile(normalized.packets),
   }) !== JSON.stringify({
     missionId: nextState.missionId,
     prompt: nextState.prompt,
@@ -968,7 +983,7 @@ export function reconcileOrchestratorMissionState(
     repoPath: nextState.repoPath,
     runtime: nextState.runtime,
     constraints: nextState.constraints,
-    packets: nextState.packets,
+    packets: stripVolatile(nextState.packets),
   });
 
   return changed

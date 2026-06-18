@@ -1484,6 +1484,15 @@ let runtimeRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let runtimeRefreshFreshRequested = false;
 let mobileRefreshTimer: ReturnType<typeof setTimeout> | null = null;
 let mobileRefreshFreshRequested = false;
+// Single-flight guards. The snapshot/inbox fetches take 3-5s in dev; the debounce
+// schedulers null their timer the instant they fire (BEFORE the fetch resolves),
+// so overlapping callers (client mutation/refresh POSTs) used to launch concurrent
+// fetches that piled up into a timeout spiral. These cap each channel at one
+// in-flight fetch plus one trailing re-fire — trigger-agnostic, covers every caller.
+let globalSnapshotInFlight = false;
+let globalSnapshotRerequest: { fresh: boolean; reason?: string } | null = null;
+let mobileSnapshotInFlight = false;
+let mobileSnapshotRerequest: { fresh: boolean } | null = null;
 const sessionHistoryTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let browserDiscoveryTimer: ReturnType<typeof setInterval> | null = null;
 let attachedBrowserRefreshTimer: ReturnType<typeof setInterval> | null = null;
@@ -1914,6 +1923,16 @@ function deriveRuntimeHealth(fleet: CommandCenterSnapshot['fleet']): RealtimeHea
 }
 
 async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?: string } = {}) {
+  // Single-flight: fold an overlapping call into one trailing re-fire instead of
+  // launching a second concurrent fetch (which is how the timeout spiral started).
+  if (globalSnapshotInFlight) {
+    globalSnapshotRerequest = {
+      fresh: Boolean(globalSnapshotRerequest?.fresh) || Boolean(options.fresh),
+      reason: options.reason ?? globalSnapshotRerequest?.reason,
+    };
+    return;
+  }
+  globalSnapshotInFlight = true;
   try {
     const snapshot = await fetchCommandCenterSnapshot(Boolean(options.fresh));
     const runtimeHealth = deriveRuntimeHealth(snapshot.fleet);
@@ -1982,10 +2001,25 @@ async function publishGlobalRealtimeSnapshot(options: { fresh?: boolean; reason?
     // exists but Next.js may not have compiled/rendered it yet.
     if (typeof msg === 'string' && msg.includes('(404)')) return;
     console.error('[ws-server] realtime global snapshot failed:', msg);
+  } finally {
+    globalSnapshotInFlight = false;
+    if (globalSnapshotRerequest) {
+      const next = globalSnapshotRerequest;
+      globalSnapshotRerequest = null;
+      void publishGlobalRealtimeSnapshot(next);
+    }
   }
 }
 
 async function publishMobileInboxRealtimeSnapshot(fresh = false) {
+  // Single-flight: fold an overlapping call into one trailing re-fire (see above).
+  if (mobileSnapshotInFlight) {
+    mobileSnapshotRerequest = {
+      fresh: Boolean(mobileSnapshotRerequest?.fresh) || fresh,
+    };
+    return;
+  }
+  mobileSnapshotInFlight = true;
   try {
     const inbox = await getMobileInboxSnapshot({ fresh });
     void import('@/lib/mobile/live-activity-push')
@@ -2012,6 +2046,13 @@ async function publishMobileInboxRealtimeSnapshot(fresh = false) {
     ]);
   } catch (error) {
     console.error('[ws-server] realtime mobile inbox snapshot failed:', error instanceof Error ? error.message : 'unknown');
+  } finally {
+    mobileSnapshotInFlight = false;
+    if (mobileSnapshotRerequest) {
+      const next = mobileSnapshotRerequest;
+      mobileSnapshotRerequest = null;
+      void publishMobileInboxRealtimeSnapshot(next.fresh);
+    }
   }
 }
 
