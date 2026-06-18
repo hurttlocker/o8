@@ -552,6 +552,18 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "o8_ui_set",
+            "description": "Change an o8 UI preference by voice — flips the SAME control the operator would toggle in Settings. 'switch to dark mode' / 'go light' (key 'theme'), 'make it glass' / 'make it solid / opaque' (key 'surface'), 'turn on / off canvas mode' (key 'canvas_mode'). Changes a display preference only — never code or repo state. To OPEN a surface use o8_ui_open; to open the canvas use o8_canvas with verb 'enter'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "key": { "type": "string", "enum": ["theme", "surface", "canvas_mode"], "description": "Which preference to change." },
+                    "value": { "type": "string", "description": "theme: 'dark' or 'light'; surface: 'glass' or 'solid'; canvas_mode: 'on' or 'off'." }
+                },
+                "required": ["key", "value"]
+            }
+        }),
+        json!({
             "name": "o8_recap",
             "description": "What happened across o8's agent fleet recently — packets completed / failed / sent to review, what's still running, approvals resolved. Use for 'what happened while I was gone?', 'what did I miss?', 'how did the day go?'. Default window 8 hours.",
             "parameters": {
@@ -884,6 +896,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         }
         "read_screen" => crate::agent::screen::read_screen(ctx, args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
+        "o8_ui_set" => o8_ui::set_setting(&ctx.app, args),
         "o8_panel_read" => o8_bridge::panel_read(args).await,
         "o8_recap" => o8_bridge::recap(args).await,
         "o8_usage" => o8_bridge::usage(args).await,

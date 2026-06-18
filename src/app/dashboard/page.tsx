@@ -588,7 +588,7 @@ function DashboardInner() {
   // mode the card paints --t-bg and lets the chrome flip own transparency +
   // light ink (matches the right O8Panel); in solid mode it keeps the opaque
   // --t-panel-solid paper + floating shadow with the normal base-token ink.
-  const { surface: themeSurface } = useTheme();
+  const { surface: themeSurface, setPalette, setReduceTransparency } = useTheme();
   const isGlassSurface = themeSurface === 'glass';
 
   const [inTauri, setInTauri] = useState(false);
@@ -3782,6 +3782,32 @@ function DashboardInner() {
           if (text) setThoughtsDraftInjection({ id: `symon-${Date.now()}`, text });
           return;
         }
+        if (surface === 'set') {
+          // Symon's o8_ui_set — flip a UI preference through the SAME setter the
+          // Settings control uses. theme/surface are client-side (ThemeProvider);
+          // canvas_mode is the experimentalCanvas operator default (same POST as
+          // the Settings toggle — loopback webview passes the gate).
+          const { key, value } = (event.payload as { key?: string; value?: string });
+          if (key === 'theme' && (value === 'dark' || value === 'light')) {
+            setPalette(value);
+            toast(`Theme set to ${value}.`, 'success');
+          } else if (key === 'surface' && (value === 'glass' || value === 'solid')) {
+            setReduceTransparency(value === 'solid' ? 'on' : 'off');
+            toast(`Surface set to ${value}.`, 'success');
+          } else if (key === 'canvas_mode' && (value === 'on' || value === 'off')) {
+            fetch('/api/panel/operator-defaults', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ experimentalCanvas: value === 'on' }),
+            })
+              .then((r) => { if (!r.ok) throw new Error('rejected'); toast(`Canvas mode ${value}.`, 'success'); })
+              .catch(() => toast('Could not change Canvas mode.', 'error'));
+          } else {
+            console.warn(`[symon-o8ui] bad set: key="${key}" value="${value}"`);
+            toast(`I can't set ${key ?? '?'} to ${value ?? '?'}.`, 'error');
+          }
+          return;
+        }
         const tab = O8_TAB_SURFACES[surface];
         if (!tab) {
           // Fail loud on tool-vocab↔UI drift — a surface Symon's o8_ui_open
@@ -3812,7 +3838,7 @@ function DashboardInner() {
       disposed = true;
       if (unlisten) { try { unlisten(); } catch { /* noop */ } }
     };
-  }, [handleOpenSettingsTab, openMobilePairing, openRightPanelFromUser, setThoughtsDraftInjection]);
+  }, [handleOpenSettingsTab, openMobilePairing, openRightPanelFromUser, setThoughtsDraftInjection, setPalette, setReduceTransparency]);
 
   // ── Voice P3: ⌘⇧, global shortcut → open the settings overlay ──
   // The Rust global-shortcut handler emits `o8:open-settings` (o8 settings is an
