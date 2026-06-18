@@ -483,6 +483,24 @@ pub fn resolve_confirm(task_id: &str, allow: bool) {
     }
 }
 
+/// Decline EVERY pending confirm card — the confirm half of `agent_interrupt`.
+/// Drains the registry and sends `false` so any task blocked in
+/// `confirm_if_needed` unblocks immediately (treated as declined) instead of
+/// hanging on its card until the 2-min timeout. The task then bails on the
+/// between-turn cancel check and finalizes `cancelled` (which clears the dock
+/// card). Returns how many cards were declined.
+pub fn decline_all_confirms() -> usize {
+    let senders: Vec<oneshot::Sender<bool>> = {
+        let mut chans = CONFIRM_CHANNELS.lock().unwrap_or_else(|p| p.into_inner());
+        std::mem::take(&mut *chans).into_iter().map(|(_, tx)| tx).collect()
+    };
+    let n = senders.len();
+    for tx in senders {
+        let _ = tx.send(false);
+    }
+    n
+}
+
 // ── cancel registry ──────────────────────────────────────────────────────────
 // Every running task registers an Arc<AtomicBool> here keyed by task id. The
 // loops poll their own flag between turns; `agent_interrupt` raises ALL of them
@@ -783,6 +801,14 @@ async fn run_agent_inner(
     );
     crate::sound::play_sound("Pop");
 
+    // Register the interrupt flag the INSTANT the task is live — before the
+    // (~0.5s) screen/edit capture below, not after. Otherwise an interrupt
+    // fired inside the capture window raises no flag for this task (it isn't
+    // in CANCEL_FLAGS yet), so it's silently lost and the task runs to
+    // completion + talks over the user. The post-capture checkpoint (before
+    // the model loop) honors a flag set during the capture.
+    let cancel = register_cancel(&task_id);
+
     // Intent-gated screen context (dossier #2): only prompts that talk ABOUT
     // the screen pay the ~0.5s capture + image tokens. Runs after the
     // "running" emit so the dock's working capsule covers the capture beat.
@@ -809,7 +835,7 @@ async fn run_agent_inner(
         app: app.clone(),
         screen: screen_ctx,
         edit,
-        cancel: register_cancel(&task_id),
+        cancel: cancel.clone(),
     };
 
     // Dropped-file context rides the LLM prompt only — the task store keeps
@@ -838,6 +864,20 @@ async fn run_agent_inner(
              so briefly and suggest selecting the text or clicking into the \
              field first.)",
         );
+    }
+
+    // Interrupt landed during the pre-loop capture window — bail before
+    // spinning up the model so a cancelled task never speaks. Mirrors the
+    // post-loop cancelled path (overlay hidden, ledger marked, quiet event).
+    if ctx.is_cancelled() {
+        crate::point_overlay::hide_now(&app);
+        unregister_cancel(&task_id);
+        store::finish_task(&task_id, "cancelled", "", "", "[]");
+        emit_agent_event(
+            &app,
+            json!({ "taskId": task_id, "kind": "status", "status": "cancelled" }),
+        );
+        return Ok(String::new());
     }
 
     // Route by model id: `claude…` → Claude text-planner brain (subscription
