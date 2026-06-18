@@ -27,6 +27,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getBrowserWsPort } from '@/lib/panel/ws-port-client';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
+import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import type {
   MobileOrchestratorThread,
   MobileOrchestratorTranscriptEntry,
@@ -144,6 +145,10 @@ export function useOrchestratorMobile({
   // connection effect.
   const subscribedRepoRef = useRef<string | null>(null);
   const repoPathRef = useRef<string | null>(activeThread?.repoPath ?? null);
+  // Replay cursor — highest orchestrator event seq applied for the current
+  // session view. Sent as `since` on (re)subscribe so a reconnect recovers the
+  // in-flight turn's missed tokens; reset to 0 on a repo switch.
+  const lastSeqRef = useRef(0);
 
   // Streaming buffer for the current assistant turn. Output deltas append to
   // .text and we flush to the React transcript on a 60ms interval to keep
@@ -315,10 +320,13 @@ export function useOrchestratorMobile({
     if (prev && prev !== next) {
       ws.send(JSON.stringify({ type: 'orchestrator-unsubscribe' }));
       subscribedRepoRef.current = null;
+      lastSeqRef.current = 0; // repo switch → new session view, fresh cursor
     }
     if (!next) return;
     if (prev !== next) {
-      ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: next }));
+      // since=lastSeq: 0 on a repo switch (reset above), or the live cursor on a
+      // reconnect (onclose nulls subscribedRepoRef) so we replay the missed tail.
+      ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: next, since: lastSeqRef.current }));
       ws.send(JSON.stringify({ type: 'orchestrator-status', repoPath: next }));
       subscribedRepoRef.current = next;
     } else {
@@ -353,6 +361,8 @@ export function useOrchestratorMobile({
         setTimeout(() => drainQueueRef.current?.(), 0);
       }
       if (channel !== 'orchestrator') return;
+      // Skip replayed events we've already applied (no double tokens).
+      if (skipDuplicateBySeq(raw, lastSeqRef)) return;
 
       const eventType = raw.event as string;
       const data = (raw.data as Record<string, unknown> | undefined) ?? {};

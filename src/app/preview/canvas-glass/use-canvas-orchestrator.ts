@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getWsUrl } from '@/components/desktop/thoughts/use-orchestrator-stream/shared';
+import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 
 export type CanvasOrchStatus = 'idle' | 'connecting' | 'ready' | 'busy' | 'dead';
 
@@ -72,6 +73,8 @@ export type CanvasThreadEvent =
 
 export function useCanvasOrchestrator(repoPath: string | null, callbacks: CanvasOrchCallbacks) {
   const wsRef = useRef<WebSocket | null>(null);
+  // Replay cursor — highest event seq applied for the current session view.
+  const lastSeqRef = useRef(0);
   const cbRef = useRef(callbacks);
   cbRef.current = callbacks;
   const threadIdsRef = useRef<Map<string, string> | null>(null);
@@ -81,6 +84,8 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
 
   useEffect(() => {
     if (!repoPath) return;
+    // New repo = new session view → reset the replay cursor.
+    lastSeqRef.current = 0;
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     setStatus('connecting');
@@ -104,10 +109,13 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
           type: 'orchestrator-subscribe',
           repoPath,
           threadId: threadIds.get(repoPath) ?? null,
+          // Replay anything missed since our cursor — recovers in-flight tokens
+          // on a reconnect instead of stalling with no stream.
+          since: lastSeqRef.current,
         }));
       };
       ws.onmessage = (event) => {
-        let msg: { channel?: string; event?: string; data?: Record<string, unknown> };
+        let msg: { channel?: string; event?: string; data?: Record<string, unknown>; seq?: number };
         try {
           msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
         } catch {
@@ -118,6 +126,8 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
           return;
         }
         if (msg.channel !== 'orchestrator' || !msg.data) return;
+        // Skip replayed events we've already applied (no double tokens).
+        if (skipDuplicateBySeq(msg, lastSeqRef)) return;
         const data = msg.data;
         if (msg.event === 'output' && typeof data.text === 'string') {
           cbRef.current.onOutput?.(repoPath, data.text, data.thinking === true);
@@ -164,6 +174,12 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
       threadId = `thoughts-${Date.now()}`;
       threadIds.set(repoPath, threadId);
       saveThreadMap(threadIds);
+      // First turn on this repo: the connect-time subscribe used the null-thread
+      // route, but the turn runs under the thread route. Re-subscribe onto it
+      // BEFORE sending so the dock actually receives this turn's stream
+      // (otherwise it streamed nothing until a reload re-loaded the threadId).
+      lastSeqRef.current = 0;
+      ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath, threadId, since: 0 }));
     }
     ws.send(JSON.stringify({
       type: 'orchestrator-send',
@@ -196,7 +212,10 @@ export function useCanvasOrchestrator(repoPath: string | null, callbacks: Canvas
     saveThreadMap(threadIds);
     const ws = wsRef.current;
     if (repo === repoPath && ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: repo, threadId }));
+      // Switching threads = new session view → reset the cursor and pull the
+      // adopted thread's in-flight turn from the start.
+      lastSeqRef.current = 0;
+      ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: repo, threadId, since: 0 }));
     }
   }, [repoPath, threadIds]);
 
@@ -217,12 +236,15 @@ export function useThreadOrchestrator(
   onEvent: (event: CanvasThreadEvent) => void,
 ) {
   const wsRef = useRef<WebSocket | null>(null);
+  const lastSeqRef = useRef(0);
   const onEventRef = useRef(onEvent);
   onEventRef.current = onEvent;
   const [status, setStatus] = useState<CanvasOrchStatus>('idle');
 
   useEffect(() => {
     if (!repoPath || !threadId) return;
+    // New thread = new session view → reset the replay cursor.
+    lastSeqRef.current = 0;
     let disposed = false;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     setStatus('connecting');
@@ -242,16 +264,18 @@ export function useThreadOrchestrator(
           return;
         }
         wsRef.current = ws;
-        ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath, threadId }));
+        ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath, threadId, since: lastSeqRef.current }));
       };
       ws.onmessage = (event) => {
-        let msg: { channel?: string; event?: string; data?: Record<string, unknown> };
+        let msg: { channel?: string; event?: string; data?: Record<string, unknown>; seq?: number };
         try {
           msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
         } catch {
           return;
         }
         if (msg.channel !== 'orchestrator' || !msg.data) return;
+        // Skip replayed events we've already applied (no double tokens).
+        if (skipDuplicateBySeq(msg, lastSeqRef)) return;
         const data = msg.data;
         if (msg.event === 'output' && typeof data.text === 'string') {
           onEventRef.current({ type: 'output', text: data.text, thinking: data.thinking === true });

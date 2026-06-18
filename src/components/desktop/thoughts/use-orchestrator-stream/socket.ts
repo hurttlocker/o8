@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import {
   formatTimestampLabel,
   type OrchestratorStreamStatus,
@@ -86,13 +87,9 @@ export function createOrchestratorMessageHandler(
     if (msg.channel !== 'orchestrator') return;
 
     // Replay de-dup: live + replayed events carry a monotonic per-session seq.
-    // Skip anything at or below the highest seq we've already applied so a
-    // replay overlap (or a re-subscribe) can't double-apply tokens. The
-    // subscribe-ack snapshot and notice sends have no seq and pass through.
-    if (typeof msg.seq === 'number') {
-      if (msg.seq <= options.lastSeqRef.current) return;
-      options.lastSeqRef.current = msg.seq;
-    }
+    // Skip anything we've already applied so a replay overlap (or a re-
+    // subscribe) can't double-apply tokens. Snapshot/notice sends have no seq.
+    if (skipDuplicateBySeq(msg, options.lastSeqRef)) return;
 
     options.eventCountRef.current += 1;
     options.lastEventAtRef.current = Date.now();
