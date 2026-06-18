@@ -12,6 +12,21 @@ use serde_json::{json, Value};
 const MAX_TURNS: usize = 10;
 const REQUEST_TIMEOUT_SECS: u64 = 60;
 
+/// Shared keep-alive HTTP client — built once and reused across calls so each
+/// Gemini request (vision / front-brain) skips a fresh TLS handshake.
+/// `reqwest::Client` is internally Arc'd, so cloning is cheap. (#1252 speed pass)
+fn http_client() -> reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
+                .build()
+                .unwrap_or_default()
+        })
+        .clone()
+}
+
 pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopResult, String> {
     // local Gemini key → direct Google; else an active o8 plan → managed proxy.
     let target = crate::entitlement::resolve_gemini(model).ok_or_else(|| {
@@ -19,10 +34,7 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
             .to_string()
     })?;
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("reqwest build failed: {e}"))?;
+    let client = http_client();
 
     let escalation = super::router::load_config().voice_escalation;
     let tool_specs = tools::enabled_tools_for(&escalation);
@@ -218,10 +230,7 @@ pub async fn vision_extract(model: &str, prompt: &str, png_base64: &str) -> Resu
             .to_string()
     })?;
 
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(REQUEST_TIMEOUT_SECS))
-        .build()
-        .map_err(|e| format!("reqwest build failed: {e}"))?;
+    let client = http_client();
 
     let mut body = json!({
         "contents": [{
