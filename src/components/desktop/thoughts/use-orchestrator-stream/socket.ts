@@ -117,7 +117,16 @@ export function createOrchestratorMessageHandler(
         }
 
         if (!options.currentAssistantRef.current) {
-          if (options.statusRef.current !== 'busy') break;
+          // Output arriving IS proof the turn is live — never drop it on a
+          // status mismatch. The first-turn re-subscribe race (threadId mints
+          // mid-turn → re-subscribe → the server's snapshot status can land as
+          // non-'busy' right as the first tokens arrive) used to `break` here
+          // and silently kill the entire stream until a reload. Promote to busy
+          // and render instead. 2026-06-18.
+          if (options.statusRef.current !== 'busy') {
+            options.statusRef.current = 'busy';
+            options.setStatus('busy');
+          }
           options.currentAssistantRef.current = createAssistantState(options.resetEpochRef);
         } else if (options.currentAssistantRef.current.epoch !== options.resetEpochRef.current) {
           options.currentAssistantRef.current = null;
@@ -139,7 +148,24 @@ export function createOrchestratorMessageHandler(
 
       case 'status': {
         const newStatus = msg.data?.status as string | undefined;
+        // A subscribe-ack carries a point-in-time SNAPSHOT of the session
+        // status (ws-server tags it `snapshot:true`), NOT a live turn
+        // transition. On the first turn of a fresh tab the threadId mints
+        // mid-turn, forcing a re-subscribe whose snapshot can arrive as 'ready'
+        // right after `send()` optimistically set 'busy' — adopting it would
+        // clobber the in-flight turn, and the output guard above would then
+        // silently drop every token (dead until reload). So a snapshot may
+        // resync an idle client (settle 'ready', or move UP to 'busy' on a
+        // reload into an active turn) but must NEVER downgrade or finalize a
+        // live local 'busy'. 2026-06-18.
+        const isSnapshot = msg.data?.snapshot === true;
         if (newStatus === 'ready' || newStatus === 'busy' || newStatus === 'dead') {
+          if (isSnapshot) {
+            if (options.statusRef.current === 'busy' && newStatus !== 'busy') break;
+            options.statusRef.current = newStatus;
+            options.setStatus(newStatus);
+            break;
+          }
           if (
             newStatus === 'busy'
             && options.statusRef.current !== 'busy'
@@ -177,7 +203,12 @@ export function createOrchestratorMessageHandler(
         options.finalizeFirstTurnPlanCapture();
 
         if (!options.currentAssistantRef.current) {
-          if (options.statusRef.current !== 'busy') break;
+          // A tool-use event is also proof of a live turn — same rationale as
+          // the output case: promote to busy instead of dropping the pill.
+          if (options.statusRef.current !== 'busy') {
+            options.statusRef.current = 'busy';
+            options.setStatus('busy');
+          }
           options.currentAssistantRef.current = createAssistantState(options.resetEpochRef);
         }
 
