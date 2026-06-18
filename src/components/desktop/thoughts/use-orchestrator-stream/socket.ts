@@ -21,6 +21,8 @@ interface CreateOrchestratorMessageHandlerOptions {
   currentWs: WebSocket;
   currentAssistantRef: RefLike<CurrentAssistantStreamState | null>;
   eventCountRef: RefLike<number>;
+  /** Highest event seq applied for this session — drives replay de-dup. */
+  lastSeqRef: RefLike<number>;
   finalizeFirstTurnPlanCapture: () => void;
   firstTurnPlanChunksRef: RefLike<string[]>;
   firstTurnPlanStartedRef: RefLike<boolean>;
@@ -51,7 +53,7 @@ export function createOrchestratorMessageHandler(
   return (event: MessageEvent) => {
     if (options.currentWs !== options.wsRef.current) return;
 
-    let msg: { channel?: string; event?: string; data?: Record<string, unknown> };
+    let msg: { channel?: string; event?: string; data?: Record<string, unknown>; seq?: number };
     try {
       msg = JSON.parse(typeof event.data === 'string' ? event.data : '');
     } catch {
@@ -82,6 +84,15 @@ export function createOrchestratorMessageHandler(
     }
 
     if (msg.channel !== 'orchestrator') return;
+
+    // Replay de-dup: live + replayed events carry a monotonic per-session seq.
+    // Skip anything at or below the highest seq we've already applied so a
+    // replay overlap (or a re-subscribe) can't double-apply tokens. The
+    // subscribe-ack snapshot and notice sends have no seq and pass through.
+    if (typeof msg.seq === 'number') {
+      if (msg.seq <= options.lastSeqRef.current) return;
+      options.lastSeqRef.current = msg.seq;
+    }
 
     options.eventCountRef.current += 1;
     options.lastEventAtRef.current = Date.now();

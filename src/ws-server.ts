@@ -73,6 +73,7 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
+import { orchestratorReplay } from './lib/orchestrator/replay-buffer';
 import {
   rehydrateOrchestratorSessions,
 } from './lib/lane/orchestrator-session';
@@ -804,16 +805,30 @@ function resolveMsgAgentId(msg: Record<string, unknown>, backendId: Orchestrator
 
 /** Send a raw WS message to every client subscribed to `sessionName`. */
 function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): void {
+  // Stamp the event with a monotonic seq and buffer it so a (re)subscribing
+  // client can replay what it missed (reload / reconnect / first-turn re-
+  // subscribe). On a parse miss we fall back to the unstamped raw — no
+  // buffering, but delivery is unchanged.
+  let outMsg = rawMsg;
+  try {
+    const parsed = JSON.parse(rawMsg);
+    if (parsed && parsed.channel === 'orchestrator') {
+      outMsg = orchestratorReplay.record(sessionName, parsed);
+    }
+  } catch {
+    // non-JSON payload — deliver as-is
+  }
+
   let matched = 0;
   let delivered = 0;
   for (const sub of orchestratorSubscriptions.values()) {
     if (sub.sessionName !== sessionName) continue;
     matched++;
     const c = clients.get(sub.clientId);
-    if (c) { sendRaw(c, rawMsg); delivered++; }
+    if (c) { sendRaw(c, outMsg); delivered++; }
   }
   if (sessionName.includes('openclaw')) {
-    console.log(`[openclaw-diag] broadcast session=${sessionName} matchedSubs=${matched} delivered=${delivered} totalSubs=${orchestratorSubscriptions.size} msg=${rawMsg.slice(0, 110)}`);
+    console.log(`[openclaw-diag] broadcast session=${sessionName} matchedSubs=${matched} delivered=${delivered} totalSubs=${orchestratorSubscriptions.size} msg=${outMsg.slice(0, 110)}`);
   }
 }
 
@@ -2296,6 +2311,13 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
   const agentId = resolveMsgAgentId(msg, backend.id);
   const agentTag = agentId || undefined;
   const threadId = resolveMsgThreadId(msg);
+  // Replay cursor: the highest event seq this client has already seen for the
+  // session. Replay is OPT-IN — only clients that send `since` (and de-dup by
+  // seq, like the desktop orchestrator) get a backfill; canvas/mobile omit it
+  // and keep their existing no-replay behavior. since=0 means "I've seen
+  // nothing — replay the whole in-flight turn." See lib/orchestrator/replay-buffer.
+  const hasSince = typeof msg.since === 'number' && Number.isFinite(msg.since);
+  const since = hasSince ? (msg.since as number) : 0;
 
   try {
     const session = backend.ensureSession(repoPath, agentTag, threadId);
@@ -2325,6 +2347,19 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
       // what silently killed first-turn streaming until a reload.
       data: { status: session.status, snapshot: true, repoPath, sessionName: routeSessionName, threadId, backend: backend.id, agent: agentTag },
     });
+
+    // Replay anything this client missed on the in-flight turn (reload /
+    // reconnect / the first-turn threadId-mint re-subscribe). Opt-in via
+    // `since`. The subscription was registered just above and this handler body
+    // runs synchronously, so no live broadcast can interleave between the
+    // snapshot and this replay.
+    if (hasSince) {
+      const replay = orchestratorReplay.since(routeSessionName, since);
+      for (const raw of replay) sendRaw(client, raw);
+      if (replay.length) {
+        console.log(`[ws-server] Replayed ${replay.length} orchestrator events to ${client.id} (since=${since}, ${backend.id}${threadId ? ` thread ${threadId}` : ''})`);
+      }
+    }
     console.log(`[ws-server] Client ${client.id} subscribed to orchestrator (${backend.id}${agentId ? `/${agentId}` : ''}${threadId ? ` thread ${threadId}` : ''}) for ${repoPath}`);
   } catch (err) {
     send(client, {
