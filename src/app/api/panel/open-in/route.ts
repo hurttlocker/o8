@@ -1,23 +1,26 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { execSync } from 'child_process';
-import { existsSync } from 'fs';
+import { execFileSync } from 'child_process';
+import { existsSync, statSync } from 'fs';
 import os from 'os';
 import { buildErrorPayload, sanitizeErrorMessage } from '@/lib/api/error-format';
 import { listRepos } from '@/lib/repos/registry';
 
 export const dynamic = 'force-dynamic';
 
-const EDITORS: Record<string, { command: string }> = {
-  'finder':       { command: 'open "{path}"' },
-  'terminal':     { command: 'open -a Terminal "{path}"' },
-  'vscode':       { command: 'code "{path}"' },
-  'cursor':       { command: 'cursor "{path}"' },
-  'zed':          { command: 'zed "{path}"' },
-  'sublime':      { command: 'subl "{path}"' },
-  'xcode':        { command: 'open -a Xcode "{path}"' },
-  'jetbrains':    { command: 'idea "{path}"' },
-  'windsurf':     { command: 'windsurf "{path}"' },
-  'claude-code':  { command: 'claude "{path}"' },
+// argv form (bin + fixed args) — the resolved path is appended as a final
+// positional arg and run via execFileSync (no shell), so a path can never be
+// shell-interpreted.
+const EDITORS: Record<string, { bin: string; args: string[] }> = {
+  'finder':       { bin: 'open', args: [] },
+  'terminal':     { bin: 'open', args: ['-a', 'Terminal'] },
+  'vscode':       { bin: 'code', args: [] },
+  'cursor':       { bin: 'cursor', args: [] },
+  'zed':          { bin: 'zed', args: [] },
+  'sublime':      { bin: 'subl', args: [] },
+  'xcode':        { bin: 'open', args: ['-a', 'Xcode'] },
+  'jetbrains':    { bin: 'idea', args: [] },
+  'windsurf':     { bin: 'windsurf', args: [] },
+  'claude-code':  { bin: 'claude', args: [] },
 };
 
 // GET — return available editors (checks which CLIs exist)
@@ -41,7 +44,7 @@ export async function GET() {
 
     for (const editor of editors) {
       try {
-        execSync(`which ${editor.bin} 2>/dev/null`, { encoding: 'utf-8' });
+        execFileSync('which', [editor.bin], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
         available.push({ id: editor.id, name: editor.name, available: true });
       } catch {
         available.push({ id: editor.id, name: editor.name, available: false });
@@ -98,9 +101,10 @@ export async function POST(req: NextRequest) {
       ];
       for (const c of candidates) {
         try {
-          execSync(`test -d "${c}"`, { encoding: 'utf-8' });
-          localPath = c;
-          break;
+          if (existsSync(c) && statSync(c).isDirectory()) {
+            localPath = c;
+            break;
+          }
         } catch { /* not found */ }
       }
     }
@@ -109,8 +113,8 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Could not resolve repo path' }, { status: 404 });
     }
 
-    const cmd = EDITORS[editor].command.replace('{path}', localPath);
-    execSync(cmd, { encoding: 'utf-8', timeout: 5000 });
+    const { bin, args } = EDITORS[editor];
+    execFileSync(bin, [...args, localPath], { encoding: 'utf-8', timeout: 5000 });
     return NextResponse.json({ ok: true, editor, path: localPath });
   } catch (err) {
     console.error('[panel/open-in] Failed to open repo', err);

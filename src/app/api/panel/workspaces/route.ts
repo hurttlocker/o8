@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execSync, execFileSync } from 'child_process';
 import os from 'node:os';
 import path from 'node:path';
 import { fetchGitHubPullRequestSummaries, normalizeRepoSlug } from '@/lib/github-broker';
@@ -154,9 +154,10 @@ function resolveGitBranch(repoPath: string) {
 
   try {
     const resolved = resolveWorkspacePath(repoPath);
-    const branch = execSync(`git -C "${resolved}" branch --show-current 2>/dev/null`, {
+    const branch = execFileSync('git', ['-C', resolved, 'branch', '--show-current'], {
       encoding: 'utf-8',
       timeout: 3000,
+      stdio: ['ignore', 'pipe', 'ignore'],
     }).trim() || 'main';
     branchCache.set(repoPath, { branch, ts: now });
     return branch;
@@ -180,9 +181,10 @@ function getActiveWorktreeBranches(repoPath: string): Set<string> {
   const branches = new Set<string>();
   try {
     const resolved = resolveWorkspacePath(repoPath);
-    const output = execSync(`git -C "${resolved}" worktree list --porcelain 2>/dev/null`, {
+    const output = execFileSync('git', ['-C', resolved, 'worktree', 'list', '--porcelain'], {
       encoding: 'utf-8',
       timeout: 3000,
+      stdio: ['ignore', 'pipe', 'ignore'],
     });
     // Parser: entries are separated by blank lines. Each entry has `worktree
     // <path>` and optionally `branch refs/heads/<name>`. Detached worktrees

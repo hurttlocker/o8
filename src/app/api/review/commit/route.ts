@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 import { homedir } from 'node:os';
 
 export const runtime = 'nodejs';
@@ -35,7 +35,7 @@ export async function POST(request: Request) {
 
   try {
     // Check if there are changes to commit
-    const status = execSync('git status --porcelain', {
+    const status = execFileSync('git', ['status', '--porcelain'], {
       encoding: 'utf-8',
       timeout: 5000,
       cwd: root,
@@ -46,17 +46,18 @@ export async function POST(request: Request) {
     }
 
     // Stage all changes
-    execSync('git add -A', { encoding: 'utf-8', timeout: 10000, cwd: root });
+    execFileSync('git', ['add', '-A'], { encoding: 'utf-8', timeout: 10000, cwd: root });
 
-    // Commit with the provided message (use --message flag with array form to avoid injection)
-    execSync(`git commit -m ${JSON.stringify(message)}`, {
+    // Commit with the provided message — argv form (no shell), so backticks/$()
+    // in the message are passed literally, never interpreted by a shell.
+    execFileSync('git', ['commit', '-m', message], {
       encoding: 'utf-8',
       timeout: 15000,
       cwd: root,
     });
 
     // Get the commit hash
-    const hash = execSync('git rev-parse --short HEAD', {
+    const hash = execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
       encoding: 'utf-8',
       timeout: 5000,
       cwd: root,
