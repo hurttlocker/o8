@@ -2317,7 +2317,13 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
     send(client, {
       channel: 'orchestrator',
       event: 'status',
-      data: { status: session.status, repoPath, sessionName: routeSessionName, threadId, backend: backend.id, agent: agentTag },
+      // `snapshot: true` marks this as a point-in-time resync of the session
+      // status on (re)subscribe — NOT a live turn transition. The client must
+      // not let it downgrade or finalize an in-flight turn (see socket.ts):
+      // the first-turn threadId mint forces a mid-turn re-subscribe, and a
+      // snapshot 'ready' landing right after the client set 'busy' is exactly
+      // what silently killed first-turn streaming until a reload.
+      data: { status: session.status, snapshot: true, repoPath, sessionName: routeSessionName, threadId, backend: backend.id, agent: agentTag },
     });
     console.log(`[ws-server] Client ${client.id} subscribed to orchestrator (${backend.id}${agentId ? `/${agentId}` : ''}${threadId ? ` thread ${threadId}` : ''}) for ${repoPath}`);
   } catch (err) {
