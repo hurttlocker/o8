@@ -1,8 +1,9 @@
 # Canvas Intent Bus — Symon → o8 contract (#1232 phase 2)
 
 **What this is:** the loopback HTTP contract that lets Symon (or any local agent
-surface) drive o8's Canvas mode by voice — open the browser, ask the Brain a
-question, message the orchestrator, zoom, dock. One POST per intent; the verb
+surface) drive o8's Canvas mode by voice — enter the canvas, open the browser,
+ask the Brain a question, message the orchestrator, zoom, dock. One POST per
+intent; the verb
 executes through the **same handlers the canvas rail buttons call**, so behavior
 never forks from what the operator gets by clicking.
 
@@ -47,6 +48,7 @@ off, navigation timed out).
 
 | Verb | Args | What it does |
 |---|---|---|
+| `enter` | — | Just bring the Canvas up — "open / enter / show / go to the canvas". No further action; the `ensure:true` navigation IS the action (a no-op when already on the canvas). The bare open verb so "open canvas" never falls through to a panel. |
 | `send-prompt` | `{ text }` | Message the orchestrator, scoped to the canvas's active repo — same path as the bottom composer. The dock opens when the reply streams. **The marquee voice verb.** |
 | `ask-brain` | `{ question? }` | Spawn (or focus) the Engineering Brain card; with `question`, the card asks it immediately and streams the cited answer. |
 | `open-browser` | `{ url? }` | Reveal the embedded browser — new tab per URL, reuses an exact match. No URL → app dashboard. |
@@ -63,11 +65,11 @@ One tool, verb-enum'd — keeps Gemini Flash's schema small:
 ```json
 {
   "name": "o8_canvas",
-  "description": "Drive o8's Canvas: message the orchestrator (send-prompt), ask the Engineering Brain (ask-brain), open the browser/spec/terminal, search, zoom, toggle the dock.",
+  "description": "Drive o8's Canvas: open the canvas itself (enter), message the orchestrator (send-prompt), ask the Engineering Brain (ask-brain), open the browser/spec/terminal, search, zoom, toggle the dock.",
   "parameters": {
     "type": "object",
     "properties": {
-      "verb": { "type": "string", "enum": ["send-prompt", "ask-brain", "open-browser", "open-spec", "spawn-terminal", "search", "zoom", "dock"] },
+      "verb": { "type": "string", "enum": ["enter", "send-prompt", "ask-brain", "open-browser", "open-spec", "spawn-terminal", "search", "zoom", "dock"] },
       "text": { "type": "string", "description": "send-prompt: the message for the orchestrator" },
       "question": { "type": "string", "description": "ask-brain: the question" },
       "url": { "type": "string", "description": "open-browser: target URL" },
@@ -85,6 +87,7 @@ by o8's review/approval pipeline, so no extra confirm card is needed beyond
 Symon's normal trust settings.
 
 Voice grammar examples:
+- "open the canvas" / "go to the canvas" / "show me the canvas" → `enter`
 - "ask the brain why the merge gate exists" → `ask-brain {question}`
 - "tell the orchestrator to fix the failing test" → `send-prompt {text}`
 - "open the browser on localhost three thousand" → `open-browser {url}`

@@ -22,7 +22,7 @@ import { EntitlementProvider } from '@/lib/entitlement/context';
 // ConnectionBanner retired — ConnectionPill in AgentPanel surfaces WS state.
 import { ThemeProvider, useTheme } from '@/lib/theme/context';
 import { AlertToast } from '@/components/shared/AlertToast';
-import { ConfirmToastHost } from '@/components/shared/ConfirmToastHost';
+import { ConfirmToastHost, toast } from '@/components/shared/ConfirmToastHost';
 import type { BottomPanelSurfaceKind, ContextualPanelHandle } from '@/components/desktop/ContextualPanel';
 import { LeftHeaderStrip } from '@/components/desktop/shell/LeftHeaderStrip';
 import { WorkspaceHeaderStrip } from '@/components/desktop/shell/WorkspaceHeaderStrip';
@@ -3783,7 +3783,15 @@ function DashboardInner() {
           return;
         }
         const tab = O8_TAB_SURFACES[surface];
-        if (!tab) return;
+        if (!tab) {
+          // Fail loud on tool-vocab↔UI drift — a surface Symon's o8_ui_open
+          // enum knows but the dashboard has no handler for. A silent return is
+          // exactly how "open canvas" used to vanish into nothing; surface it so
+          // the gap is visible instead of guessed-around.
+          console.warn(`[symon-o8ui] no dashboard handler for surface "${surface}"`);
+          toast(`I don't know the o8 surface "${surface}".`, 'error');
+          return;
+        }
         setRightPanelKind('o8');
         openRightPanelFromUser();
         setO8ActiveTab(tab);

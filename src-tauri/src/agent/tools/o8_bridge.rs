@@ -921,6 +921,7 @@ pub async fn add_repo(args: Value) -> Result<Value, String> {
 /// Canvas verbs Symon can drive — the enum the `/api/canvas/intent` route accepts
 /// (kept in lockstep with `docs/symon-port/canvas-intent-bus.md`).
 const CANVAS_VERBS: &[&str] = &[
+    "enter",
     "send-prompt",
     "ask-brain",
     "open-browser",
@@ -956,7 +957,8 @@ pub fn canvas_intent_body(verb: &str, args: &Value) -> Value {
             carry("direction");
         }
         "dock" => carry("open"),
-        // open-spec / spawn-terminal take no args.
+        // enter / open-spec / spawn-terminal take no args — for `enter`, the
+        // route's `ensure:true` navigation IS the action (just bring the Canvas up).
         _ => {}
     }
     json!({ "verb": verb, "args": inner, "ensure": true })
@@ -1033,5 +1035,20 @@ mod canvas_tests {
         assert_eq!(body["verb"], "open-spec");
         assert_eq!(body["args"], json!({}));
         assert_eq!(body["ensure"], true);
+    }
+
+    #[test]
+    fn enter_navigates_with_no_args() {
+        // "open / enter / show the canvas" — navigation IS the action, so the
+        // body carries an empty args bag and relies on ensure:true.
+        let body = canvas_intent_body("enter", &json!({ "text": "ignored" }));
+        assert_eq!(body["verb"], "enter");
+        assert_eq!(body["args"], json!({}));
+        assert_eq!(body["ensure"], true);
+    }
+
+    #[test]
+    fn enter_is_a_known_verb() {
+        assert!(CANVAS_VERBS.contains(&"enter"));
     }
 }
