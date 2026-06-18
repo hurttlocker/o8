@@ -22,6 +22,7 @@ import type {
 import { formatStreamingPreview } from '../utils';
 import { sameMobileInboxSnapshot } from '@/lib/mobile/inbox-signature';
 import { getMobileWsToken } from '@/lib/mobile/ws-token-client';
+import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import type {
   MobileInboxRealtimeSnapshotPayload,
   RealtimeEventEnvelope,
@@ -109,6 +110,10 @@ export function useWebSocket({
   const sessionKeyRef = useRef(selectedSessionKey);
   const repoPathRef = useRef<string | null>(selectedRepoPath ?? null);
   const subscribedRepoPathRef = useRef<string | null>(null);
+  // Replay cursor for the orchestrator channel — sent as `since` on
+  // (re)subscribe; reset to 0 on a repo switch. (Distinct from the realtime
+  // channel's per-stream seq tracked in realtimeSeqByStreamRef.)
+  const lastOrchSeqRef = useRef(0);
   const realtimeSeqByStreamRef = useRef<Record<string, number>>({});
 
   // Stable refs for state setters so the connection effect never re-fires
@@ -203,6 +208,7 @@ export function useWebSocket({
     if (currentRepoPath && currentRepoPath !== nextRepoPath) {
       wsRef.current.send(JSON.stringify({ type: 'orchestrator-unsubscribe' }));
       subscribedRepoPathRef.current = null;
+      lastOrchSeqRef.current = 0; // repo switch → new session view
     }
 
     if (!nextRepoPath) {
@@ -220,7 +226,7 @@ export function useWebSocket({
 
     setOrchestratorStatus('connecting');
     setOrchestratorNote('Linking mobile to the desktop orchestrator.');
-    wsRef.current.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: nextRepoPath }));
+    wsRef.current.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: nextRepoPath, since: lastOrchSeqRef.current }));
     wsRef.current.send(JSON.stringify({ type: 'orchestrator-status', repoPath: nextRepoPath }));
     subscribedRepoPathRef.current = nextRepoPath;
   }, [selectedRepoPath]);
@@ -387,6 +393,9 @@ export function useWebSocket({
           break;
 
         case 'orchestrator':
+          // Skip replayed events already applied. This surface is ambient
+          // status only, but a reconnect replay shouldn't re-show stale notes.
+          if (skipDuplicateBySeq(msg, lastOrchSeqRef)) break;
           if (eventType === 'status') {
             const nextStatus = data?.status;
             if (
@@ -461,7 +470,7 @@ export function useWebSocket({
         if (repoPathRef.current) {
           setOrchestratorStatus('connecting');
           setOrchestratorNote('Linking mobile to the desktop orchestrator.');
-          ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: repoPathRef.current }));
+          ws.send(JSON.stringify({ type: 'orchestrator-subscribe', repoPath: repoPathRef.current, since: lastOrchSeqRef.current }));
           ws.send(JSON.stringify({ type: 'orchestrator-status', repoPath: repoPathRef.current }));
           subscribedRepoPathRef.current = repoPathRef.current;
         } else {
