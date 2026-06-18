@@ -590,6 +590,15 @@ function DashboardInner() {
   // --t-panel-solid paper + floating shadow with the normal base-token ink.
   const { surface: themeSurface, setPalette, setReduceTransparency } = useTheme();
   const isGlassSurface = themeSurface === 'glass';
+  // Mount gate for surface-dependent INLINE styles. SSR can't read the client's
+  // localStorage surface preference, so it always renders the 'solid' default;
+  // a client that has 'glass' stored would otherwise paint a different
+  // background/boxShadow on the first render → hydration mismatch (the chrome
+  // card below). Match SSR for the first client paint, then flip after mount —
+  // one invisible frame on chrome.
+  const [chromeMounted, setChromeMounted] = useState(false);
+  useEffect(() => { setChromeMounted(true); }, []);
+  const effectiveGlassSurface = chromeMounted && isGlassSurface;
 
   const [inTauri, setInTauri] = useState(false);
   useEffect(() => {
@@ -3383,7 +3392,16 @@ function DashboardInner() {
     if (!tileLayoutHydrated) return;
     if (workspaceTerminalHandlesRef.current.size === 0) return;
     if (!areWorkspaceTerminalRestoresSettled()) return;
-    const reconciled = reconcileOrchestratorMissionState(thoughtsMissionState, {
+    // Reconcile INPUTS (lane snapshots + runtime truth) INTO the mission state.
+    // Read the current state through the ref — NOT as a dependency — because this
+    // effect WRITES the same state. Depending on thoughtsMissionState created a
+    // self-trigger storm: each write minted a fresh `updatedAt` (nowIso) and the
+    // live heartbeat timestamps inside the reconcile inputs kept the change-guard
+    // perpetually true, so the effect re-armed itself on its own write and fired
+    // `Maximum update depth exceeded` on every agent heartbeat (~2.5s). Driving
+    // it off the inputs alone makes it reconcile ONCE per heartbeat (correct).
+    const current = thoughtsMissionStateRef.current;
+    const reconciled = reconcileOrchestratorMissionState(current, {
       laneSnapshots: collectOrchestratorLaneSnapshots(),
       runtimeTruth: orchestratorRuntimeTruth,
       domainLanes,
@@ -3394,10 +3412,10 @@ function DashboardInner() {
       packets: reconciled.packets,
       updatedAt: reconciled.updatedAt,
     }) !== JSON.stringify({
-      prompt: thoughtsMissionState.prompt,
-      summary: thoughtsMissionState.summary,
-      packets: thoughtsMissionState.packets,
-      updatedAt: thoughtsMissionState.updatedAt,
+      prompt: current.prompt,
+      summary: current.summary,
+      packets: current.packets,
+      updatedAt: current.updatedAt,
     });
     if (changed) {
       const updated = updateOrchestratorMissionState(reconciled);
@@ -3411,7 +3429,6 @@ function DashboardInner() {
     orchestratorRuntimeTruth,
     scheduleThoughtsMissionPersist,
     setThoughtsMissionState,
-    thoughtsMissionState,
     tileLayoutHydrated,
     workspaceChatSessionsByTileId,
     workspaceTerminalHandlesRef,
@@ -4293,8 +4310,8 @@ function DashboardInner() {
               //     is already a translucent dark tint over light base ink. Either
               //     way the panel reads as glass and ink matches the right panel —
               //     no inline ink overrides needed.
-              background: isGlassSurface ? 'var(--t-bg)' : 'var(--t-panel-solid)',
-              boxShadow: isGlassSurface ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+              background: effectiveGlassSurface ? 'var(--t-bg)' : 'var(--t-panel-solid)',
+              boxShadow: effectiveGlassSurface ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
             } as React.CSSProperties}
           >
           <LeftHeaderStrip
