@@ -1,6 +1,6 @@
 # Symon o8-UI control — tuning to 98%
 
-**Status:** Phases 1–3 **BUILT + shipping (0.1.384)** — the `enter` verb (canvas now has a home), fail-loud drift guard on unknown o8 surfaces, and synonym vocabulary in both tool descriptions. Phase 4 (manipulation verbs: setTheme / surface / canvas-mode) is still **pending — second ship**. The warm-CLI agent-speedup this was gated behind shipped in 0.1.383.
+**Status:** **ALL PHASES BUILT.** Phases 1–3 shipped + live-verified in **0.1.384** (the `enter` verb so canvas has a home, fail-loud drift guard on unknown o8 surfaces, synonym vocabulary). Phase 4 (manipulation verbs) **BUILT + shipping in 0.1.385** — new `o8_ui_set` tool (keys: `theme` dark/light, `surface` glass/solid, `canvas_mode` on/off) routed through the same event bridge to the same setters the Settings controls call. The warm-CLI agent-speedup this was gated behind shipped in 0.1.383.
 
 **Problem:** Symon controls o8's own UI by voice via a **semantic event bridge** (not clicking). The bridge is correct and should stay — but "open canvas" opened the o8 right panel. Root cause: "canvas" has no home in either control tool, and every miss is silent. Goal: ≥98% correct surface selection, plus extend from *reveal-only* to *operate*.
 
@@ -43,6 +43,8 @@ Audit real phrasings against the enum + verbs; add **synonyms to descriptions**,
 - Sweep operator phrasings: "open canvas", "enter canvas mode", "go to the diff", "show me changes", "pull up settings".
 
 ## Phase 4 — Manipulation verbs (the 98% unlock; second ship)
+
+**BUILT (0.1.385)** as a new `o8_ui_set` tool (chose the separate-tool option below — keeps `o8_ui_open` = reveal, `o8_ui_set` = operate, mirroring the o8_canvas split). Keys: `theme` (dark/light) → `setPalette`; `surface` (glass/solid) → `setReduceTransparency('on'|'off')` (solid=on); `canvas_mode` (on/off) → POST `/api/panel/operator-defaults` `{experimentalCanvas}` (same call as the Settings toggle). `value` is a string for all keys (OpenAI strict-mode: plain object, validated in the handler). ReadOnly in `safety` (runs immediately, no confirm). Each maps to the SAME setter the Settings control calls. The plan below is the original spec.
 
 Today Symon can only **reveal** surfaces — confirmed there is **no** `set-setting`/`toggle`/`setTheme` voice path anywhere. Add *operate*:
 
