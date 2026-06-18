@@ -159,6 +159,9 @@ export function useOrchestratorStream(
   const wsRef = useRef<WebSocket | null>(null);
   const resetEpochRef = useRef(0);
   const currentAssistantRef = useRef<CurrentAssistantStreamState | null>(null);
+  // Highest orchestrator event seq applied for the current session view —
+  // drives the replay `since` cursor + client-side de-dup (see socket.ts).
+  const lastSeqRef = useRef(0);
   // rAF handle coalescing streaming-text flushes — see scheduleFlushCurrentAssistant.
   const flushFrameRef = useRef<number | null>(null);
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -341,6 +344,7 @@ export function useOrchestratorStream(
   const reset = useCallback(() => {
     const nextStatus = connected ? 'ready' : 'connecting';
     resetEpochRef.current += 1;
+    lastSeqRef.current = 0;
     syncMessages([]);
     planTextRef.current = null;
     setPlanText(null);
@@ -520,6 +524,10 @@ export function useOrchestratorStream(
         type: 'orchestrator-subscribe',
         repoPath: repoPathRef.current,
         ...(threadIdRef.current ? { threadId: threadIdRef.current } : {}),
+        // Replay anything we missed since the last event we applied — on a
+        // reconnect mid-turn this recovers the in-flight tokens instead of
+        // leaving us stuck on a "Working" pill with no stream.
+        since: lastSeqRef.current,
       }));
 
       console.log('[orchestrator-stream] Connected, subscribing...');
@@ -554,6 +562,7 @@ export function useOrchestratorStream(
       firstTurnPlanStartedRef,
       flushCurrentAssistant,
       scheduleFlushCurrentAssistant,
+      lastSeqRef,
       lastEventAtRef,
       messagesRef,
       resetEpochRef,
@@ -583,10 +592,16 @@ export function useOrchestratorStream(
 
   useEffect(() => {
     if (!repoPath || !wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    // repoPath/threadId changed → this is a new session view (e.g. the
+    // first-turn threadId mint, which re-subscribes onto the turn's real
+    // session). Reset the replay cursor and ask for the whole in-flight turn so
+    // a clobbered/raced status can't leave us with no stream.
+    lastSeqRef.current = 0;
     wsRef.current.send(JSON.stringify({
       type: 'orchestrator-subscribe',
       repoPath,
       ...(threadId ? { threadId } : {}),
+      since: 0,
     }));
   }, [repoPath, threadId]);
 
