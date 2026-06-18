@@ -349,7 +349,7 @@ function OrbitPulse() {
         const bx = cx + Math.cos(angle) * radius * breath;
         const by = cy + Math.sin(angle) * radius * breath;
         // Sunlit pass — this body's angle vs the fixed sun spot.
-        let delta = Math.atan2(Math.sin(angle - SUN_ANGLE), Math.cos(angle - SUN_ANGLE));
+        const delta = Math.atan2(Math.sin(angle - SUN_ANGLE), Math.cos(angle - SUN_ANGLE));
         const glow = Math.exp(-((delta / SUN_WIDTH) ** 2));
         // Each body reads as a dot but is built from dither — a bright
         // stippled core inside an airy halo.
