@@ -3233,8 +3233,14 @@ fn agent_confirm(task_id: String, allow: bool) {
 #[tauri::command]
 fn agent_interrupt() {
     let live = agent::cancel_all_tasks();
+    // Unblock any task waiting on a confirm card — without this it hangs on the
+    // pending card until the 2-min timeout, ignoring the interrupt. Cancel flags
+    // are set first, so the freed task bails on the next between-turn check.
+    let declined = agent::decline_all_confirms();
     tts::playback::stop();
-    log::info!("[symon-agent] interrupt: cancelled {live} task(s) + stopped TTS");
+    log::info!(
+        "[symon-agent] interrupt: cancelled {live} task(s), declined {declined} confirm card(s) + stopped TTS"
+    );
 }
 
 /// Read the current voice escalation policy ("off" | "auto" | "deep") — the

@@ -192,7 +192,11 @@ pub async fn complete(args: Value) -> Result<Value, String> {
          \t\tset completed of r to true\n\
          \t\tset found to true\n\
          \tend repeat\n\
-         \tif found then \"done\" else \"not found\"\n\
+         \tif found then\n\
+         \t\treturn \"done\"\n\
+         \telse\n\
+         \t\treturn \"not found\"\n\
+         \tend if\n\
          end tell"
     );
 
