@@ -73,6 +73,67 @@ pub fn open(app: &tauri::AppHandle, args: Value) -> Result<Value, String> {
     Ok(json!({ "opened": surface }))
 }
 
+/// The o8 UI preferences Symon can FLIP (not just reveal) and their allowed
+/// values. Each maps to the SAME setter the Settings control calls — the
+/// dashboard `o8:ui-command` listener routes `theme`/`surface` to ThemeProvider
+/// and `canvas_mode` to the `experimentalCanvas` operator default.
+fn allowed_values(key: &str) -> Option<&'static [&'static str]> {
+    match key {
+        "theme" => Some(&["dark", "light"]),
+        "surface" => Some(&["glass", "solid"]),
+        "canvas_mode" => Some(&["on", "off"]),
+        _ => None,
+    }
+}
+
+/// `o8_ui_set` — change an o8 UI preference by voice ("switch to dark mode",
+/// "make it solid", "turn on canvas mode"). Emits `o8:ui-command` with
+/// `{ surface: "set", key, value }`; the dashboard listener flips the same
+/// control the operator would toggle in Settings. ReadOnly in `safety` — a
+/// preference flip is reversible and non-destructive (same rationale as `open`).
+pub fn set_setting(app: &tauri::AppHandle, args: Value) -> Result<Value, String> {
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    let value = args
+        .get("value")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
+    let Some(allowed) = allowed_values(&key) else {
+        return Err(
+            "I can't set that — the o8 preferences I can change are: theme, surface, canvas_mode."
+                .to_string(),
+        );
+    };
+    if !allowed.contains(&value.as_str()) {
+        return Err(format!(
+            "'{value}' isn't a valid {key} — try one of: {}.",
+            allowed.join(", ")
+        ));
+    }
+
+    // A spoken "switch to …" implies "show me" — bring the window forward so the
+    // change is visible, same as `open`.
+    if let Some(win) = app.get_webview_window("main") {
+        let _ = win.show();
+        let _ = win.unminimize();
+        let _ = win.set_focus();
+    }
+
+    let _ = app.emit_to(
+        "main",
+        "o8:ui-command",
+        json!({ "surface": "set", "key": key, "value": value }),
+    );
+    log::info!("[symon-o8ui] set {key}={value}");
+    Ok(json!({ "set": key, "value": value }))
+}
+
 /// `o8_orchestrator_draft` — drop a spoken message into the orchestrator
 /// composer as a DRAFT. Never sends: the user reviews and presses Enter, so
 /// this stays ReadOnly — the draft IS the governance (same contract as the
@@ -111,12 +172,20 @@ fn normalize_url(u: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::normalize_url;
+    use super::{allowed_values, normalize_url};
 
     #[test]
     fn bare_hosts_get_https() {
         assert_eq!(normalize_url("anthropic.com"), "https://anthropic.com");
         assert_eq!(normalize_url("http://localhost:3001"), "http://localhost:3001");
         assert_eq!(normalize_url("https://o8.run"), "https://o8.run");
+    }
+
+    #[test]
+    fn settable_keys_have_value_allowlists() {
+        assert_eq!(allowed_values("theme"), Some(&["dark", "light"][..]));
+        assert_eq!(allowed_values("surface"), Some(&["glass", "solid"][..]));
+        assert_eq!(allowed_values("canvas_mode"), Some(&["on", "off"][..]));
+        assert_eq!(allowed_values("nonsense"), None);
     }
 }

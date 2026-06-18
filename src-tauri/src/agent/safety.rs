@@ -81,6 +81,9 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // o8 UI control — showing a surface of o8's own window has no
         // destructive side effect (same reasoning as open_app).
         "o8_ui_open" => SafetyClass::ReadOnly,
+        // Flipping a UI preference (theme / surface / canvas mode) is reversible
+        // and non-destructive — runs immediately, same as showing a surface.
+        "o8_ui_set" => SafetyClass::ReadOnly,
         // Canvas control — only changes what's on the operator's SCREEN, never
         // repo state. `send-prompt` reaches the orchestrator, but that's the
         // same path as typing in the composer, and the orchestrator's own
