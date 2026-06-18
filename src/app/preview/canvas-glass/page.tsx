@@ -2407,6 +2407,11 @@ export default function CanvasGlassPreviewPage() {
             }
             break;
           }
+          case 'enter':
+            // "open / enter / show the canvas" — the route's ensure:true already
+            // navigated here before dispatching, so the Canvas is up. Nothing
+            // else to do; ack ok so Symon can confirm "the canvas is up".
+            break;
           case 'dock':
             if (typeof args.open === 'boolean') setDockOpen(args.open);
             else setDockOpen((previous) => !previous);
