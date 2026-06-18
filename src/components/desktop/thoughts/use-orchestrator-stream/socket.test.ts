@@ -16,11 +16,13 @@ function makeHarness(initial: {
   status: OrchestratorStreamStatus;
   messages?: MobileTranscriptEntry[];
   current?: CurrentAssistantStreamState | null;
+  lastSeq?: number;
 }) {
   const ws = {} as WebSocket;
   const statusRef = { current: initial.status };
   const currentAssistantRef = { current: initial.current ?? null };
   const messagesRef = { current: initial.messages ?? [] };
+  const lastSeqRef = { current: initial.lastSeq ?? 0 };
   const setStatus = vi.fn();
   const setMessages = vi.fn();
   const scheduleFlushCurrentAssistant = vi.fn();
@@ -31,6 +33,7 @@ function makeHarness(initial: {
     currentWs: ws,
     currentAssistantRef,
     eventCountRef: { current: 0 },
+    lastSeqRef,
     finalizeFirstTurnPlanCapture: vi.fn(),
     firstTurnPlanChunksRef: { current: [] as string[] },
     firstTurnPlanStartedRef: { current: false },
@@ -52,6 +55,7 @@ function makeHarness(initial: {
     fire,
     statusRef,
     currentAssistantRef,
+    lastSeqRef,
     setStatus,
     setMessages,
     scheduleFlushCurrentAssistant,
@@ -130,5 +134,34 @@ describe('orchestrator socket — first-turn streaming race', () => {
 
     h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'dead', snapshot: true } });
     expect(h.statusRef.current).toBe('busy');
+  });
+});
+
+describe('orchestrator socket — replay seq cursor', () => {
+  it('advances the cursor on a seq-stamped event and renders it', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'a' }, seq: 5 });
+    expect(h.lastSeqRef.current).toBe(5);
+    expect(h.currentAssistantRef.current?.chunks).toContain('a');
+  });
+
+  it('drops a replayed event at or below the cursor (no double-apply), still takes the next', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg], lastSeq: 5 });
+
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'dup' }, seq: 5 });
+    expect(h.currentAssistantRef.current).toBeNull(); // dropped — nothing rendered
+
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'next' }, seq: 6 });
+    expect(h.currentAssistantRef.current?.chunks).toContain('next');
+    expect(h.lastSeqRef.current).toBe(6);
+  });
+
+  it('a snapshot (no seq) is never de-duped and does not move the cursor', () => {
+    const h = makeHarness({ status: 'connecting', lastSeq: 9 });
+
+    h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'busy', snapshot: true } });
+    expect(h.statusRef.current).toBe('busy');
+    expect(h.lastSeqRef.current).toBe(9); // unchanged
   });
 });
