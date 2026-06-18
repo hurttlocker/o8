@@ -49,24 +49,36 @@ export function useReactiveQuery<T>(options: ReactiveQueryOptions<T>) {
     ...queryOptions,
   });
 
+  // Stabilize the effect by CONTENT, not array identity. Callers pass inline
+  // array literals (`['lanes','active']`, `wsEvents: ['lane-lifecycle']`) that get
+  // a fresh reference every render — which otherwise tore down and re-added EVERY
+  // window listener on every render of every consumer (pure waste fleet-wide).
+  // The live queryKey rides a ref into the handler; the joined-string deps make
+  // the effect re-subscribe only when the actual channels change.
+  const queryKeyRef = useRef(queryKey);
+  useEffect(() => { queryKeyRef.current = queryKey; });
+  const wsEventsKey = wsEvents?.join('|') ?? '';
+  const customEventsKey = customEvents?.join('|') ?? '';
+
   // Invalidate on WS events
   useEffect(() => {
-    if (!wsEvents?.length && !customEvents?.length) return;
+    if (!wsEventsKey && !customEventsKey) return;
     mountedRef.current = true;
 
     const handler = (e: Event) => {
       if (!mountedRef.current) return;
       const detail = (e as CustomEvent).detail;
+      const currentKey = queryKeyRef.current;
       // If the event has a queryKey filter, only invalidate matching queries
-      if (detail?.queryKey && !queryKey.every((k, i) => detail.queryKey[i] === k)) {
+      if (detail?.queryKey && !currentKey.every((k, i) => detail.queryKey[i] === k)) {
         return;
       }
-      void queryClient.invalidateQueries({ queryKey });
+      void queryClient.invalidateQueries({ queryKey: currentKey });
     };
 
     const eventNames = [
-      ...(wsEvents ?? []).map((ch) => `o8:${ch}`),
-      ...(customEvents ?? []),
+      ...(wsEventsKey ? wsEventsKey.split('|').map((ch) => `o8:${ch}`) : []),
+      ...(customEventsKey ? customEventsKey.split('|') : []),
       'o8:invalidate', // global invalidation bus
     ];
 
@@ -80,7 +92,7 @@ export function useReactiveQuery<T>(options: ReactiveQueryOptions<T>) {
         window.removeEventListener(name, handler);
       }
     };
-  }, [wsEvents, customEvents, queryKey, queryClient]);
+  }, [wsEventsKey, customEventsKey, queryClient]);
 
   return result;
 }
