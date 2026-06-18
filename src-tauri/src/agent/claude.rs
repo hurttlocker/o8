@@ -51,9 +51,20 @@ no markdown, no code fences:\n\
   • To call a tool:  {\"tool\": \"<tool_name>\", \"args\": { ... }}\n\
   • When the request is fully handled:  {\"done\": true, \"say\": \"<one short spoken sentence>\"}\n\
 The system executes the tool you name and replies with its result; then you \
-choose the next action the same way. Call ONE tool per reply. Your `say` is \
-spoken aloud — one or two short conversational sentences, no markdown. If no \
-tool fits the request, reply with a `done` action that briefly says so.";
+choose the next action the same way. Call ONE tool per reply.\n\
+CRITICAL: your ENTIRE reply is that one JSON object — STOP at its closing brace. \
+Do NOT write the tool's result yourself, do NOT simulate the system's reply, and \
+do NOT add a second action or a 'system'/'assistant' turn. The real system runs \
+the tool and sends you the result, so wait for it. NEVER invent or guess the \
+user's real data: for ANYTHING about their actual reminders, calendar, notes, \
+mail, files, terminals, screen, or the o8 fleet you MUST call the matching tool \
+and use ITS result — never answer from memory or assumption.\n\
+If the request has SEVERAL parts (e.g. \"switch to dark mode AND make it glass\"), \
+make a SEPARATE tool call for EACH part across turns, and only say done once \
+every part is actually done — never claim a change you did not make a tool call for.\n\
+Your `say` is spoken aloud — one or two short conversational sentences, no \
+markdown. If no tool fits the request, reply with a `done` action that briefly \
+says so.";
 
 /// Resolve the `claude` binary — mirrors `one-shot-repl.ts::defaultClaudeBin`.
 pub(crate) fn claude_bin() -> String {
@@ -144,13 +155,43 @@ fn extract_action(text: &str) -> Option<Value> {
     if let Ok(v) = serde_json::from_str::<Value>(t) {
         return Some(v);
     }
-    // Fall back to the first {...last} span.
+    // Fall back to the FIRST complete brace-balanced object — NOT first '{'..last '}'.
+    // When the model "runs ahead" and emits the whole turn in one reply
+    // ({"tool":..} system{..} assistant{"done":..}), a first..last span is invalid
+    // JSON (bare `system`/`assistant`/`main` words between objects) and parsing it
+    // fails — dropping the real action and causing a silent false success. Taking the
+    // first balanced object recovers the action so the loop dispatches it for real.
+    let bytes = t.as_bytes();
     let start = t.find('{')?;
-    let end = t.rfind('}')?;
-    if end <= start {
-        return None;
+    let mut depth = 0usize;
+    let mut in_str = false;
+    let mut escaped = false;
+    let mut end = None;
+    for (i, &c) in bytes.iter().enumerate().skip(start) {
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if c == b'\\' {
+                escaped = true;
+            } else if c == b'"' {
+                in_str = false;
+            }
+        } else {
+            match c {
+                b'"' => in_str = true,
+                b'{' => depth += 1,
+                b'}' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        end = Some(i);
+                        break;
+                    }
+                }
+                _ => {}
+            }
+        }
     }
-    serde_json::from_str::<Value>(&t[start..=end]).ok()
+    serde_json::from_str::<Value>(&t[start..=end?]).ok()
 }
 
 /// A LIVE `claude` planner process kept open across a task's turns. Spawned once
@@ -304,6 +345,65 @@ impl Drop for ClaudeSession {
     }
 }
 
+/// Corrective injected ONCE when the planner says `done` on an action request
+/// without ever dispatching a tool — the signature-B fabrication guard. Forces a
+/// real tool call or an honest "I didn't do it" instead of a fabricated success.
+const PREMATURE_DONE_NUDGE: &str = "You replied done, but you have NOT called any \
+tool yet — so NOTHING has actually happened on the user's Mac. Never claim something \
+is done that you did not do. If this needs an action, reply NOW with the tool call \
+({\"tool\": \"...\", \"args\": { ... }}) to really perform it. If you genuinely cannot \
+with the available tools, reply done with a `say` that HONESTLY states you did not do \
+it (and why) — not a success claim.";
+
+/// Verbs that mean "DO something on the Mac / in o8" — a mutation or action that
+/// REQUIRES a tool. Lowercased substring match (same cheap style as
+/// `screen::wants_screen`). Pure questions ("how many reminders") aren't here —
+/// those reliably call their tool already; the fabrication risk is on actions.
+const ACTION_CUES: &[&str] = &[
+    "create", "add ", "make ", "set a", "set up", "set my", "set the", "schedule",
+    "remind ", "delete", "remove", "clear ", "complete", "mark ", "check off",
+    "finish", "rename", "reschedule", "move ", "update", "change", "edit ",
+    "send", "draft", "turn on", "turn off", "enable", "disable", "switch", "toggle",
+    "open ", "launch", "run ", "save ", "write ",
+];
+
+/// Does the request ask Symon to take an ACTION (not just answer)? Gates the
+/// anti-fabrication nudge so pure Q&A is never second-guessed. Questions are
+/// excluded FIRST — they reliably call their own tool, and the question-gate
+/// also dodges verb/noun collisions ("how many REMINDers", "what's my SCHEDULE")
+/// that a bare substring match would trip on.
+fn looks_like_action_request(intent: &str) -> bool {
+    let p = intent.trim().to_lowercase();
+    const QUESTION_STARTS: &[&str] = &[
+        "how ", "how many", "how much", "what", "when ", "where", "who ", "whose",
+        "why", "which", "is ", "are ", "am ", "do ", "does ", "did ", "can ",
+        "could ", "would ", "will ", "should ", "have ", "has ", "was ", "were ",
+        "tell me", "show me", "list ", "give me",
+    ];
+    if p.contains('?') || QUESTION_STARTS.iter().any(|q| p.starts_with(q)) {
+        return false;
+    }
+    ACTION_CUES.iter().any(|cue| p.contains(cue))
+}
+
+/// True when a `done` say is plainly an honest non-completion — a question
+/// (clarification) or a refusal / inability. Suppresses the nudge for these:
+/// they are legitimate no-tool dones, not fabricated success claims.
+fn say_is_question_or_refusal(say: &str) -> bool {
+    if say.contains('?') {
+        return true;
+    }
+    let s = say.to_lowercase();
+    const NONCLAIM: &[&str] = &[
+        "can't", "cannot", "won't", "will not", "not going to", "unable",
+        "not able", "don't have", "do not have", "there's no", "there is no",
+        "i need", "need more", "let me know", "just say", "which one",
+        "what would you like", "didn't catch", "not sure what", "couldn't find",
+        "no developer mode",
+    ];
+    NONCLAIM.iter().any(|t| s.contains(t))
+}
+
 /// Run the Claude planner loop to completion. Same `LoopResult` contract as
 /// `gemini::run_loop` / `openrouter::run_loop`.
 pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopResult, String> {
@@ -336,6 +436,13 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     // with just the tool-result block built at the loop foot.
     let mut next_message = build_first_prompt(intent, ctx);
     let mut next_image: Option<String> = ctx.screen.as_ref().map(|s| s.png_base64.clone());
+
+    // Anti-fabrication guard state: does the request ask Symon to DO something
+    // (an action, not a pure question)? If so and the loop ends `done` with ZERO
+    // tools dispatched, the model is about to claim a success it never performed
+    // — nudge it once (in the done branch below). Fires at most once per task.
+    let action_intent = looks_like_action_request(intent);
+    let mut nudged_premature_done = false;
 
     for _turn in 0..MAX_TURNS {
         // User interrupted (Escape / tap-to-stop) — stop before the next turn.
@@ -371,12 +478,31 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         };
 
         if action.get("done").and_then(|d| d.as_bool()) == Some(true) {
-            result_text = action
+            let say = action
                 .get("say")
                 .and_then(|s| s.as_str())
                 .unwrap_or("Done.")
                 .trim()
                 .to_string();
+            // The model said done on an ACTION request but dispatched no tool —
+            // it's about to claim something it didn't do (signature-B fabrication).
+            // Nudge ONCE to force a real tool call (or an honest "I can't"). Skip
+            // when the say is plainly a question or refusal — those are legit
+            // no-tool dones (clarification / safety refusal), not fabrications.
+            if action_intent
+                && tool_call_log.is_empty()
+                && !nudged_premature_done
+                && !say_is_question_or_refusal(&say)
+            {
+                nudged_premature_done = true;
+                log::warn!(
+                    "[symon-agent] premature done (no tool on an action request) — nudging once to prevent a fabricated success"
+                );
+                next_message = PREMATURE_DONE_NUDGE.to_string();
+                next_image = None;
+                continue;
+            }
+            result_text = say;
             break;
         }
 
@@ -478,5 +604,55 @@ mod tests {
     #[test]
     fn extract_action_garbage_is_none() {
         assert!(extract_action("no json here at all").is_none());
+    }
+
+    #[test]
+    fn extract_action_salvages_run_ahead() {
+        // The model "runs ahead" and emits the whole turn in one reply. We must
+        // recover the FIRST action object (with its nested args braces intact),
+        // not choke on the first..last span — otherwise the tool never dispatches
+        // and the fabricated `say` is spoken as a silent false success.
+        let raw = "{\"tool\": \"o8_ui_set\", \"args\": {\"key\": \"surface\", \"value\": \"solid\"}} \
+                   system{\"ok\": true, \"applied\": true, \"previous\": \"glass\"} \
+                   assistant{\"done\": true, \"say\": \"Done — switched to solid.\"}";
+        let a = extract_action(raw).unwrap();
+        assert_eq!(a.get("tool").unwrap(), "o8_ui_set");
+        assert_eq!(a.get("args").unwrap().get("key").unwrap(), "surface");
+        assert!(a.get("done").is_none(), "must take the first action, not the run-ahead done");
+    }
+
+    #[test]
+    fn extract_action_ignores_brace_inside_string() {
+        // A `}` inside a string value must not be mistaken for the object's close.
+        let a = extract_action("{\"tool\":\"mac_notes_create\",\"args\":{\"body\":\"a } brace\"}}").unwrap();
+        assert_eq!(a.get("tool").unwrap(), "mac_notes_create");
+        assert_eq!(a.get("args").unwrap().get("body").unwrap(), "a } brace");
+    }
+
+    #[test]
+    fn action_request_detects_mutations_not_questions() {
+        // Mutations / actions → gated for the anti-fabrication nudge.
+        assert!(looks_like_action_request("Create a reminder to call mom at 5"));
+        assert!(looks_like_action_request("switch to dark mode"));
+        assert!(looks_like_action_request("delete that note"));
+        assert!(looks_like_action_request("schedule a meeting tomorrow"));
+        assert!(looks_like_action_request("open Safari"));
+        // Pure questions → never nudged (they reliably call their own tool).
+        assert!(!looks_like_action_request("how many reminders do I have"));
+        assert!(!looks_like_action_request("what time is it"));
+        assert!(!looks_like_action_request("what's on my calendar today"));
+    }
+
+    #[test]
+    fn question_or_refusal_suppresses_the_nudge() {
+        // Clarifications + refusals are legit no-tool dones — must NOT be nudged.
+        assert!(say_is_question_or_refusal("When should I remind you?"));
+        assert!(say_is_question_or_refusal("I'm not going to do that."));
+        assert!(say_is_question_or_refusal("I can't run that command."));
+        assert!(say_is_question_or_refusal("There's no developer mode."));
+        assert!(say_is_question_or_refusal("Which one did you mean?"));
+        // A bare success claim with no tool dispatched IS a fabrication → nudge.
+        assert!(!say_is_question_or_refusal("Done — I set it for tomorrow at 5 PM."));
+        assert!(!say_is_question_or_refusal("All set, added to your list."));
     }
 }
