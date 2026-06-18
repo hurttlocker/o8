@@ -435,11 +435,11 @@ pub fn all_tools() -> Vec<Value> {
         // ── o8 Canvas control (drive the operator's screen) ───────────────────
         json!({
             "name": "o8_canvas",
-            "description": "Drive o8's Canvas (the spatial workspace) by voice. Use when the user wants to SEE or arrange something in o8 itself: 'tell the orchestrator to fix the failing test' (send-prompt), 'ask the brain why the merge gate exists' (ask-brain), 'open the browser on localhost 3000' (open-browser), 'pull up the spec' (open-spec), 'open a terminal' (spawn-terminal), 'search the canvas for the tooltip card' (search), 'zoom out' (zoom), 'open/close the dock' (dock). It opens the Canvas automatically if it isn't already up. This only changes what's on screen — it never edits code itself (use o8_dispatch/escalate for that).",
+            "description": "Drive o8's Canvas (the spatial workspace) by voice — this is the ONLY tool that opens the Canvas (do NOT use o8_ui_open for the canvas). Use when the user wants to SEE or arrange something in o8 itself: 'open / enter / show / go to / pull up the canvas' (enter — just bring the Canvas up, no other action), 'tell the orchestrator to fix the failing test' (send-prompt), 'ask the brain why the merge gate exists' (ask-brain), 'open the browser on localhost 3000' (open-browser), 'pull up the spec' (open-spec), 'open a terminal' (spawn-terminal), 'search the canvas for the tooltip card' (search), 'zoom out' (zoom), 'open/close the dock' (dock). Every verb opens the Canvas automatically if it isn't already up. This only changes what's on screen — it never edits code itself (use o8_dispatch/escalate for that).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "verb": { "type": "string", "enum": ["send-prompt", "ask-brain", "open-browser", "open-spec", "spawn-terminal", "search", "zoom", "dock"], "description": "Which canvas action to run." },
+                    "verb": { "type": "string", "enum": ["enter", "send-prompt", "ask-brain", "open-browser", "open-spec", "spawn-terminal", "search", "zoom", "dock"], "description": "Which canvas action to run. 'enter' just brings the Canvas up (open/show/go to the canvas) with no further action." },
                     "text": { "type": "string", "description": "send-prompt: the message for the orchestrator." },
                     "question": { "type": "string", "description": "ask-brain: the question for the Engineering Brain." },
                     "url": { "type": "string", "description": "open-browser: the URL to open (omit for the app dashboard)." },
@@ -541,7 +541,7 @@ pub fn all_tools() -> Vec<Value> {
         // ── o8 UI control (the o8-control frontier v1) ────────────────────────
         json!({
             "name": "o8_ui_open",
-            "description": "Open a surface of the o8 window itself by voice — 'open my settings', 'show the mobile QR code', 'open my automations', 'show the inbox / PRs / activity / review panel', 'open the o8.md page', 'open the browser to anthropic.com'. Brings the o8 window forward and opens the named surface.",
+            "description": "Open a surface of the o8 window itself by voice — 'open my settings', 'show the mobile QR code', 'open my automations', 'show the inbox / PRs / activity / review panel', 'open the o8.md page / the spec' (o8md), 'show me the changes / the diff' (review or workspace), 'open the files panel', 'open a terminal', 'open the browser to anthropic.com'. Brings the o8 window forward and opens the named surface. NOTE: this does NOT open the Canvas — for 'open / enter / show / go to the canvas' use the o8_canvas tool with verb 'enter', never this tool.",
             "parameters": {
                 "type": "object",
                 "properties": {
