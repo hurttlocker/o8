@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { execSync } from 'child_process';
+import { execFileSync } from 'child_process';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -24,7 +24,7 @@ export async function POST(request: Request) {
 
   try {
     // Check if file is untracked (needs rm) vs modified (needs checkout)
-    const statusOutput = execSync(`git status --porcelain -- ${JSON.stringify(filePath)}`, {
+    const statusOutput = execFileSync('git', ['status', '--porcelain', '--', filePath], {
       encoding: 'utf-8',
       timeout: 5000,
     }).trim();
@@ -37,13 +37,13 @@ export async function POST(request: Request) {
 
     if (statusCode === '??' || statusCode === 'A') {
       // Untracked or newly added — remove from index and working tree
-      execSync(`git clean -f -- ${JSON.stringify(filePath)}`, {
+      execFileSync('git', ['clean', '-f', '--', filePath], {
         encoding: 'utf-8',
         timeout: 5000,
       });
     } else {
       // Modified/deleted — restore from HEAD
-      execSync(`git checkout HEAD -- ${JSON.stringify(filePath)}`, {
+      execFileSync('git', ['checkout', 'HEAD', '--', filePath], {
         encoding: 'utf-8',
         timeout: 5000,
       });
