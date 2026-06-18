@@ -4541,12 +4541,19 @@ function DashboardInner() {
                 display: 'flex',
                 flexDirection: 'column',
                 overflow: 'hidden',
-                borderRadius: 14,
+                // borderRadius:0 — the corner shape is owned by the inner Lisse
+                // SmoothCorners below (same squircle as the center workspace card).
+                // A plain rounded-rect clip here would shave the squircle's bulge
+                // at the 45° diagonal, breaking the continuity with everything else.
+                borderRadius: 0,
                 marginTop: 4,
                 marginBottom: 4,
                 marginRight: 4,
               }}
             >
+              {/* Lisse squircle on all four corners so the right panel's TOP
+                  edges match the center workspace + canvas "list corners". */}
+              <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <PanelHeaderStrip
                 o8PanelVisible={rightPanelKind === 'o8'}
                 workspacePanelVisible={rightPanelKind === 'review'}
@@ -4658,6 +4665,7 @@ function DashboardInner() {
                   </motion.div>
                 )}
               </AnimatePresence>
+              </SmoothCorners>
             </motion.div>
           </motion.div>
         ) : null}
