@@ -13,6 +13,7 @@
 //! the loop's `await` from a different thread.
 
 pub mod claude;
+pub mod claude_pool;
 pub mod edit_ctx;
 pub mod eval;
 pub mod event_kit;
