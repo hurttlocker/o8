@@ -663,6 +663,11 @@ fn discard_ask_dictation() {
 /// Mirror of `begin_ask_dictation`. Worker thread, never the tap.
 #[cfg(target_os = "macos")]
 fn begin_agent_dictation() {
+    // Pre-warm a `claude` session NOW (the Option down edge) so the CLI bootstrap
+    // overlaps speech-to-text — by the time the prompt is assembled the proc is
+    // booted and waiting, killing the turn-1 wait (#1252 speed pass). No-op when
+    // the front brain isn't a Claude model.
+    crate::agent::claude_pool::prewarm_agent();
     crate::audio_ducker::duck();
     crate::sound::play_sound("Tink");
     // The three voice modes share ONE recognizer — abandon any in-flight session.

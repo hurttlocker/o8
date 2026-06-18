@@ -18,17 +18,17 @@
 //! draws the user's Claude subscription pool, not the metered SDK pool).
 //!
 //! ## Spawn gotcha (from the fixtures)
-//! stdin must stay OPEN until the `result` event arrives — closing it at EOF
-//! immediately makes the CLI run its SessionStart hooks and exit WITHOUT
-//! processing the turn. The per-turn helper holds the stdin handle across the
-//! whole read, then drops it.
+//! stdin must stay OPEN for the proc's whole life — closing it at EOF makes the
+//! CLI run its SessionStart hooks and exit WITHOUT processing. `ClaudeSession`
+//! holds the stdin handle until the session is dropped at task end.
 //!
-//! ## V1 shape / known follow-ups
-//! One fresh `claude` process per loop turn (stateless), re-sending the running
-//! transcript — mirrors how `gemini.rs` re-sends `contents`. Simple + robust;
-//! the cost is a per-turn bootstrap + re-sent tool schema. The documented
-//! optimization is a persistent REPL (one spawn, schema sent once) — deferred
-//! until the path is proven. Built-in tools are held off by the planner
+//! ## Process shape (#1252 speed pass)
+//! ONE persistent `claude` session per task — not a fresh spawn per turn. The
+//! proc boots once (pre-warmed on the Option keydown via `claude_pool`, so even
+//! turn 1 skips the ~1-2s CLI bootstrap), and each turn sends a single user
+//! frame while the model keeps its context. Turn 1 carries the full system
+//! prompt + tool schema + screenshot; follow-ups carry only the tool result — no
+//! re-boot, no transcript re-prefill. Built-in tools are held off by the planner
 //! contract (a `--disallowed-tools` hard lock is a follow-up).
 
 use super::{tools, LoopResult, TaskCtx};
@@ -56,7 +56,7 @@ spoken aloud — one or two short conversational sentences, no markdown. If no \
 tool fits the request, reply with a `done` action that briefly says so.";
 
 /// Resolve the `claude` binary — mirrors `one-shot-repl.ts::defaultClaudeBin`.
-fn claude_bin() -> String {
+pub(crate) fn claude_bin() -> String {
     if let Ok(b) = std::env::var("O8_CLAUDE_CODE_BIN") {
         if !b.is_empty() {
             return b;
@@ -73,7 +73,7 @@ fn claude_bin() -> String {
 
 /// Write (once) an empty MCP config so `--strict-mcp-config` gives Claude NO
 /// tools — the same "brain never uses tools" posture as the QA warm pool.
-fn ensure_empty_mcp_config() -> Result<String, String> {
+pub(crate) fn ensure_empty_mcp_config() -> Result<String, String> {
     let path = super::agent_data_dir().join("claude-empty-mcp.json");
     if !path.exists() {
         std::fs::write(&path, "{\"mcpServers\":{}}")
@@ -85,7 +85,7 @@ fn ensure_empty_mcp_config() -> Result<String, String> {
 /// Build the first planner prompt: persona + (conversation / edit / SCREEN)
 /// context + the tool schema + the JSON-action contract + the user's request.
 /// When a screenshot rides the turn it is sent as an image block (see
-/// `claude_text_turn_blocking`) and this prompt teaches the screen + draw
+/// `ClaudeSession::send_turn`) and this prompt teaches the screen + draw
 /// protocol — Opus 4.8 sees the screen directly (#1252), no Gemini middleman.
 fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
     let mut s = super::system_prompt();
@@ -153,125 +153,155 @@ fn extract_action(text: &str) -> Option<Value> {
     serde_json::from_str::<Value>(&t[start..=end]).ok()
 }
 
-/// One planner turn: spawn `claude` (tools OFF), send `prompt` as a single user
-/// frame, read stream-json until the `result` event, return its text. Fully
-/// synchronous — runs inside `spawn_blocking` so it never blocks the runtime.
-/// Holds stdin open across the read (the spawn gotcha), then tears the process
-/// down.
-fn claude_text_turn_blocking(
-    bin: &str,
-    model: &str,
-    mcp_cfg: &str,
-    prompt: &str,
-    // base64 PNG of the screen, present ONLY on the first turn (the image is
-    // seen once; re-sending on follow-ups wastes tokens + latency). #1252.
-    image_b64: Option<String>,
-) -> Result<String, String> {
-    use std::io::{BufRead, BufReader, Write};
-    use std::process::{Command, Stdio};
+/// A LIVE `claude` planner process kept open across a task's turns. Spawned once
+/// (tools OFF, stream-json), it holds stdin + a persistent reader so each turn is
+/// one user frame in / `result` out WITHOUT re-spawning or re-sending the system
+/// prompt + tool schema — the model keeps its own context between turns (#1252
+/// speed pass; replaces the old spawn-per-turn helper). The warm pool
+/// (`claude_pool`) pre-boots these on the Option keydown so turn 1 skips the
+/// ~1-2s CLI bootstrap. Same flags + subscription billing as before (no `--print`).
+pub(crate) struct ClaudeSession {
+    child: std::process::Child,
+    stdin: std::process::ChildStdin,
+    reader: std::io::BufReader<std::process::ChildStdout>,
+    /// Model this proc booted for — the pool keys warm reuse on it.
+    pub(crate) model: String,
+}
 
-    let mut child = Command::new(bin)
-        .args([
-            "--input-format",
-            "stream-json",
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--permission-mode",
-            "bypassPermissions",
-            "--strict-mcp-config",
-            "--mcp-config",
-            mcp_cfg,
-            "--model",
-            model,
-        ])
-        .env("FORCE_COLOR", "0")
-        .env("NO_COLOR", "1")
-        // Same subscription-billing posture as the chat tab / warm pool: no
-        // `--print`, so this draws the user's Claude pool, not the SDK pool.
-        // Scrub ANTHROPIC_API_KEY from the child so an env key can't silently
-        // flip billing to the API pool (it takes precedence over the sub).
-        .env_remove("ANTHROPIC_API_KEY")
-        .env("O8_MANAGED_SESSION", "1")
-        // Neutral cwd — a project `.claude/` / `.mcp.json` would otherwise bleed
-        // tools back in, defeating `--strict-mcp-config`.
-        .current_dir(std::env::temp_dir())
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        // Drop stderr — keeps the pipe from filling and deadlocking the read;
-        // the `result` event carries success/error.
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|e| format!("claude spawn failed: {e}"))?;
+impl ClaudeSession {
+    /// Boot a `claude` proc ready to receive turns. Returns as soon as the
+    /// process is started; the CLI bootstrap runs in the child (overlap it via
+    /// the warm pool). stdin stays OPEN for the proc's life — closing at EOF
+    /// makes the CLI run its SessionStart hooks and exit without processing.
+    pub(crate) fn spawn(bin: &str, model: &str, mcp_cfg: &str) -> Result<Self, String> {
+        use std::process::{Command, Stdio};
+        let mut child = Command::new(bin)
+            .args([
+                "--input-format",
+                "stream-json",
+                "--output-format",
+                "stream-json",
+                "--verbose",
+                "--permission-mode",
+                "bypassPermissions",
+                "--strict-mcp-config",
+                "--mcp-config",
+                mcp_cfg,
+                "--model",
+                model,
+            ])
+            .env("FORCE_COLOR", "0")
+            .env("NO_COLOR", "1")
+            // No `--print` → draws the user's Claude subscription pool, not the
+            // metered SDK pool. Scrub ANTHROPIC_API_KEY so an env key can't flip
+            // billing to the API pool (it takes precedence over the sub).
+            .env_remove("ANTHROPIC_API_KEY")
+            .env("O8_MANAGED_SESSION", "1")
+            // Neutral cwd — a project `.claude/` / `.mcp.json` would otherwise
+            // bleed tools back in, defeating `--strict-mcp-config`.
+            .current_dir(std::env::temp_dir())
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            // Drop stderr — keeps the pipe from filling and deadlocking the read;
+            // the `result` event carries success/error.
+            .stderr(Stdio::null())
+            .spawn()
+            .map_err(|e| format!("claude spawn failed: {e}"))?;
+        let stdin = child.stdin.take().ok_or("claude: no stdin handle")?;
+        let stdout = child.stdout.take().ok_or("claude: no stdout handle")?;
+        Ok(Self {
+            child,
+            stdin,
+            reader: std::io::BufReader::new(stdout),
+            model: model.to_string(),
+        })
+    }
 
-    // Hold stdin OPEN until after the result is read (closing at EOF makes the
-    // CLI run session hooks and exit without processing the turn).
-    let mut stdin = child.stdin.take().ok_or("claude: no stdin handle")?;
-    // Text-only string content by default; on the first turn with a screenshot,
-    // a content ARRAY carrying the image block so Opus sees the screen (#1252).
-    let content = match &image_b64 {
-        Some(b64) => json!([
-            { "type": "text", "text": prompt },
-            { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": b64 } },
-        ]),
-        None => json!(prompt),
-    };
-    let frame = json!({ "type": "user", "message": { "role": "user", "content": content } });
-    writeln!(stdin, "{frame}").map_err(|e| format!("claude stdin write: {e}"))?;
-    let _ = stdin.flush();
+    /// Still running? The pool discards dead warm sessions instead of handing
+    /// one out (a stale CLI may have idle-exited).
+    pub(crate) fn is_alive(&mut self) -> bool {
+        matches!(self.child.try_wait(), Ok(None))
+    }
 
-    let stdout = child.stdout.take().ok_or("claude: no stdout handle")?;
-    let reader = BufReader::new(stdout);
-    let mut answer = String::new();
-    let mut got_result = false;
-
-    for line in reader.lines() {
-        let Ok(line) = line else { break };
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Ok(ev) = serde_json::from_str::<Value>(line) else {
-            continue;
+    /// Send ONE planner turn and read stream-json until the `result` event;
+    /// return its text. The proc STAYS ALIVE for the next turn (the model keeps
+    /// its context, so follow-ups send only the tool result — no re-prefill). On
+    /// the first turn a screenshot may ride along as an image block; later turns
+    /// pass None. Blocking — call from `spawn_blocking`.
+    pub(crate) fn send_turn(
+        &mut self,
+        prompt: &str,
+        image_b64: Option<&str>,
+    ) -> Result<String, String> {
+        use std::io::{BufRead, Write};
+        let content = match image_b64 {
+            Some(b64) => json!([
+                { "type": "text", "text": prompt },
+                { "type": "image", "source": { "type": "base64", "media_type": "image/png", "data": b64 } },
+            ]),
+            None => json!(prompt),
         };
-        match ev.get("type").and_then(|t| t.as_str()) {
-            Some("result") => {
-                answer = ev
-                    .get("result")
-                    .and_then(|r| r.as_str())
-                    .unwrap_or("")
-                    .to_string();
-                got_result = true;
-                break;
+        let frame = json!({ "type": "user", "message": { "role": "user", "content": content } });
+        writeln!(self.stdin, "{frame}").map_err(|e| format!("claude stdin write: {e}"))?;
+        self.stdin.flush().map_err(|e| format!("claude stdin flush: {e}"))?;
+
+        let mut answer = String::new();
+        let mut got_result = false;
+        let mut line = String::new();
+        loop {
+            line.clear();
+            match self.reader.read_line(&mut line) {
+                Ok(0) => break, // EOF — the proc exited
+                Ok(_) => {}
+                Err(e) => return Err(format!("claude read: {e}")),
             }
-            // Fallback: if the `result` text is ever empty, the last assistant
-            // text block is the answer.
-            Some("assistant") => {
-                if let Some(content) = ev.pointer("/message/content").and_then(|c| c.as_array()) {
-                    for block in content {
-                        if block.get("type").and_then(|t| t.as_str()) == Some("text") {
-                            if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
-                                if !t.trim().is_empty() {
-                                    answer = t.to_string();
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                continue;
+            }
+            let Ok(ev) = serde_json::from_str::<Value>(trimmed) else {
+                continue;
+            };
+            match ev.get("type").and_then(|t| t.as_str()) {
+                Some("result") => {
+                    answer = ev
+                        .get("result")
+                        .and_then(|r| r.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    got_result = true;
+                    break;
+                }
+                // Fallback: if the `result` text is ever empty, the last assistant
+                // text block is the answer.
+                Some("assistant") => {
+                    if let Some(blocks) = ev.pointer("/message/content").and_then(|c| c.as_array()) {
+                        for block in blocks {
+                            if block.get("type").and_then(|t| t.as_str()) == Some("text") {
+                                if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
+                                    if !t.trim().is_empty() {
+                                        answer = t.to_string();
+                                    }
                                 }
                             }
                         }
                     }
                 }
+                _ => {}
             }
-            _ => {}
         }
+        if !got_result && answer.trim().is_empty() {
+            return Err("claude produced no result for this turn".to_string());
+        }
+        Ok(answer)
     }
+}
 
-    // Read done — close stdin and reap the process.
-    drop(stdin);
-    let _ = child.kill();
-    let _ = child.wait();
-
-    if !got_result && answer.trim().is_empty() {
-        return Err("claude produced no result for this turn".to_string());
+impl Drop for ClaudeSession {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
     }
-    Ok(answer)
 }
 
 /// Run the Claude planner loop to completion. Same `LoopResult` contract as
@@ -280,9 +310,13 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
     let bin = claude_bin();
     let mcp_cfg = ensure_empty_mcp_config()?;
 
-    // The running transcript re-sent each turn (V1; a persistent REPL would
-    // send the schema once — deferred).
-    let mut transcript = build_first_prompt(intent, ctx);
+    // ONE live session for the whole task (#1252 speed pass): turn 1 sends the
+    // full planner prompt (system + tool schema + screen), follow-ups send ONLY
+    // the tool result — the model keeps its context, so no per-turn re-boot and
+    // no growing-transcript re-prefill. The pool hands back a warm proc that was
+    // pre-booted on the Option keydown, so even turn 1 skips the CLI bootstrap.
+    let mut session = super::claude_pool::acquire(&bin, model, &mcp_cfg)
+        .ok_or_else(|| "claude session unavailable (spawn failed)".to_string())?;
 
     let mut tool_call_log: Vec<Value> = Vec::new();
     let mut brain_sources: Vec<Value> = Vec::new();
@@ -297,9 +331,11 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         super::speak_filler_now();
         spoke_filler = true;
     }
-    // The screenshot rides the FIRST turn only (Opus sees it once); `.take()`
-    // hands it to turn 1 and leaves None for every follow-up. #1252.
-    let mut first_image: Option<String> = ctx.screen.as_ref().map(|s| s.png_base64.clone());
+    // Turn 1 carries the full planner prompt; the screenshot rides it ONCE (Opus
+    // sees it then keeps it in context). Each follow-up replaces `next_message`
+    // with just the tool-result block built at the loop foot.
+    let mut next_message = build_first_prompt(intent, ctx);
+    let mut next_image: Option<String> = ctx.screen.as_ref().map(|s| s.png_base64.clone());
 
     for _turn in 0..MAX_TURNS {
         // User interrupted (Escape / tap-to-stop) — stop before the next turn.
@@ -307,15 +343,25 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         if ctx.is_cancelled() {
             break;
         }
-        let (b, m, c, t) = (bin.clone(), model.to_string(), mcp_cfg.clone(), transcript.clone());
-        let img = first_image.take();
-        let raw = tokio::time::timeout(
+        // Move the session into the blocking turn and get it back with the reply
+        // (it must stay alive across turns). On timeout the session is lost to
+        // the orphaned blocking task and reaped when that finishes — the task
+        // errors out either way.
+        let msg = next_message;
+        let img = next_image.take();
+        let mut sess = session;
+        let joined = tokio::time::timeout(
             Duration::from_secs(TURN_TIMEOUT_SECS),
-            tokio::task::spawn_blocking(move || claude_text_turn_blocking(&b, &m, &c, &t, img)),
+            tokio::task::spawn_blocking(move || {
+                let r = sess.send_turn(&msg, img.as_deref());
+                (sess, r)
+            }),
         )
         .await
         .map_err(|_| "claude turn timed out".to_string())?
-        .map_err(|e| format!("claude turn join error: {e}"))??;
+        .map_err(|e| format!("claude turn join error: {e}"))?;
+        session = joined.0;
+        let raw = joined.1?;
 
         let Some(action) = extract_action(&raw) else {
             // Not parseable as an action — take the reply as the final answer
@@ -380,15 +426,17 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
             json!({ "taskId": ctx.task_id, "kind": "tool_result", "tool": tool_name, "result": tool_result }),
         );
 
-        // Feed the result back into the transcript and ask for the next action.
+        // Feed ONLY the result back — the live session still holds the system
+        // prompt, the tool schema, and every prior turn, so this is all the model
+        // needs for the next action (no transcript re-send → smaller prefill).
         let result_str =
             serde_json::to_string(&tool_result).unwrap_or_else(|_| "{}".to_string());
-        transcript.push_str(&format!(
-            "\n\n[SYSTEM] You called `{tool_name}`. It returned:\n{result_str}\n\n\
+        next_message = format!(
+            "[SYSTEM] You called `{tool_name}`. It returned:\n{result_str}\n\n\
              Now respond with your NEXT action as a single JSON object — a tool \
              call, or {{\"done\": true, \"say\": \"...\"}} when the request is \
              fully handled."
-        ));
+        );
     }
 
     if result_text.is_empty() {
