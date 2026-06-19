@@ -49,6 +49,7 @@ export function RightPanelMorphButton({
       style={{
         // Matched to HeaderIconPill: 26 tall, 7px radius, flat hover.
         // The state indicator is the icon morph, not the button bg.
+        position: 'relative',
         display: 'inline-flex',
         alignItems: 'center',
         justifyContent: 'center',
@@ -65,6 +66,9 @@ export function RightPanelMorphButton({
         ['WebkitAppRegion' as string]: 'no-drag',
       }}
     >
+      {/* Transparent hit-extender — ~44px tall click target, visible pill
+          unchanged (#1259). Upward-dominant so it never steals content clicks. */}
+      <span aria-hidden style={{ position: 'absolute', top: -14, bottom: -4, left: 0, right: 0 }} />
       <span style={{ position: 'relative', width: 16, height: 16, display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
         {/* Review (changes) icon */}
         <motion.span
