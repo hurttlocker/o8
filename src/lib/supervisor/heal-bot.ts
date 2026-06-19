@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import type Database from 'better-sqlite3';
 import { getSqlite } from '@/lib/db';
@@ -510,6 +511,15 @@ async function markSelfHealed(
   triggerAutoReview(refreshedLane);
 }
 
+async function directoryExists(dir: string): Promise<boolean> {
+  try {
+    await access(dir);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function healInboxItem(item: SupervisorInboxItem): Promise<void> {
   const payload = parsePayload(item.payload);
   const attemptedAt = nowIso();
@@ -518,11 +528,16 @@ async function healInboxItem(item: SupervisorInboxItem): Promise<void> {
     attemptedAt,
   };
 
-  const cwd = payload.worktreePath?.trim() || item.repo_path;
-  if (!cwd) {
-    await markHumanRequired(item, payload, 'no worktree path was available for heal-bot');
+  // A reaped worktree (worktreePath null/empty, or the directory already cleaned
+  // up) has nothing to heal. The old fallback to item.repo_path ran heal-bot
+  // against the MAIN checkout, spawning zombie review sessions that never
+  // converged (#1256). Treat a missing worktree as terminal instead of looping.
+  const worktreePath = payload.worktreePath?.trim();
+  if (!worktreePath || !(await directoryExists(worktreePath))) {
+    await markHumanRequired(item, payload, 'no recoverable worktree (reaped) — cannot heal');
     return;
   }
+  const cwd = worktreePath;
 
   if (!FIXABLE_KINDS.has(item.kind)) {
     await markHumanRequired(item, payload, `${item.kind} requires manual triage`);
