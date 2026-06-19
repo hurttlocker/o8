@@ -161,6 +161,10 @@ const GATED_PREFIXES = [
   // Dictation (transcribe + polish) hits paid OpenRouter endpoints with
   // the operator's key. Loopback-only so a LAN client can't drain credits.
   '/api/dictation/',
+  // Voice realtime — mints OpenAI gpt-realtime ephemeral session tokens from
+  // the operator's (BYOK) key. Loopback-only so a LAN client can't mint tokens
+  // that bill the operator's OpenAI account. (src/lib/voice/realtime-access.ts)
+  '/api/voice/',
   // One-way beta feedback intake posts operator reports to the private team
   // webhook. Keep it same-origin/loopback so the webhook can't be abused.
   '/api/feedback/',

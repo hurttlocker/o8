@@ -7,7 +7,7 @@
  * library is a list of named presets persisted as `voice_library`. All via
  * voice_prefs_set + round-trip through voice_prefs_get.
  */
-import { useState, type CSSProperties } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import {
   ACCENT, ACCENT_GLOW, ACCENT_LIGHT, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER_SUBTLE, OK_GREEN, SF,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, ICONS, SECTION_BORDER,
@@ -155,7 +155,118 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
             : <AccentButton label="Preview voice" onClick={() => { void onPreview(); }} />}
         </div>
       </SectionCard>
+
+      <RealtimeSection />
     </div>
+  );
+}
+
+/**
+ * Realtime voice (Symon S2S, beta) — Track B P2. Bring your own OpenAI key
+ * (free; bills OpenAI directly) and Test that it mints a gpt-realtime session.
+ * The live conversation loop ships next (P3); the always-on toggle lands with
+ * it so there's no control that does nothing here. Managed (proxied, paid) is
+ * the entitlement lever and surfaces when wired.
+ */
+function RealtimeSection() {
+  const [masked, setMasked] = useState<string | null>(null);
+  const [keyInput, setKeyInput] = useState('');
+  const [keyFocus, setKeyFocus] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
+  const [testing, setTesting] = useState(false);
+  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetch('/api/v2/keys', { credentials: 'same-origin' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { providers?: Array<{ id: string; configured: boolean; maskedKey: string | null }> } | null) => {
+        if (cancelled || !d?.providers) return;
+        const openai = d.providers.find((p) => p.id === 'openai');
+        if (openai?.configured) setMasked(openai.maskedKey);
+      })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, []);
+
+  const saveKey = async () => {
+    const key = keyInput.trim();
+    if (!key || saving) return;
+    setSaving(true);
+    setSaveMsg(null);
+    try {
+      const r = await fetch('/api/v2/keys', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({ provider: 'openai', key }),
+      });
+      const d = await r.json().catch(() => null) as { maskedKey?: string; error?: string } | null;
+      if (r.ok && d?.maskedKey) {
+        setMasked(d.maskedKey);
+        setKeyInput('');
+        setSaveMsg({ ok: true, text: 'Saved — encrypted at rest.' });
+      } else {
+        setSaveMsg({ ok: false, text: d?.error || `Couldn't save (${r.status}).` });
+      }
+    } catch {
+      setSaveMsg({ ok: false, text: 'Save failed — is the app running?' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const testConnection = async () => {
+    if (testing) return;
+    setTesting(true);
+    setTestMsg(null);
+    try {
+      const r = await fetch('/api/voice/realtime/session', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        body: JSON.stringify({}),
+      });
+      const d = await r.json().catch(() => null) as { ok?: boolean; model?: string; reason?: string } | null;
+      if (r.ok && d?.ok) {
+        setTestMsg({ ok: true, text: `Connected — minted a ${d.model || 'realtime'} session.` });
+      } else {
+        setTestMsg({ ok: false, text: d?.reason || `Realtime not ready (${r.status}).` });
+      }
+    } catch {
+      setTestMsg({ ok: false, text: 'Test failed — is the app running?' });
+    } finally {
+      setTesting(false);
+    }
+  };
+
+  return (
+    <SectionCard>
+      <SectionTitle icon={ICONS.sparkle}>Realtime voice · beta</SectionTitle>
+      <SectionHint>
+        Voice-to-voice with gpt-realtime. Bring your own OpenAI key and it&apos;s free — you pay OpenAI directly. (Managed, metered realtime is the paid path and arrives later.) The live conversation loop ships next; this is where you wire the key.
+      </SectionHint>
+      <ControlRow label="OpenAI API key" detail={masked ? `Saved: ${masked}. Enter a new key to replace it.` : 'Bring your own key — encrypted at rest, billed to you.'}>
+        <input
+          type="password" value={keyInput} onChange={(e) => setKeyInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); void saveKey(); } }}
+          onFocus={() => setKeyFocus(true)} onBlur={() => setKeyFocus(false)}
+          placeholder={masked ? '•••• replace' : 'sk-...'}
+          style={{ ...INPUT_BASE, ...focusRing(keyFocus) }}
+        />
+      </ControlRow>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
+        <AccentButton label={saving ? 'Saving…' : 'Save key'} onClick={() => { void saveKey(); }} />
+        <GhostButton label={testing ? 'Testing…' : 'Test connection'} onClick={() => { void testConnection(); }} />
+      </div>
+      {saveMsg ? (
+        <p style={{ fontSize: 12, color: saveMsg.ok ? OK_GREEN : '#f08a8a', marginTop: 10, marginBottom: 0 }}>{saveMsg.text}</p>
+      ) : null}
+      {testMsg ? (
+        <p style={{ fontSize: 12, color: testMsg.ok ? OK_GREEN : '#f08a8a', marginTop: 8, marginBottom: 0 }}>{testMsg.text}</p>
+      ) : null}
+    </SectionCard>
   );
 }
 

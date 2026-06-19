@@ -119,6 +119,28 @@ export async function resolveOpenRouterKey(): Promise<string | null> {
 }
 
 /**
+ * Resolve the OpenAI API key — the BYOK key for Symon Realtime mode
+ * (gpt-realtime). Same env-first → encrypted ~/.o8/.env.local precedence as
+ * resolveOpenRouterKey: the /api/v2/keys POST route sets process.env on save,
+ * so env wins; on a cold start we fall through to the encrypted file. Returns
+ * null when neither source has a value (→ the Realtime access resolver treats
+ * the user as having no BYOK key).
+ */
+export async function resolveOpenAIKey(): Promise<string | null> {
+  const envKey = process.env.OPENAI_API_KEY?.trim();
+  if (envKey) return envKey;
+
+  const raw = parseRawEnvFileSync().get('OPENAI_API_KEY');
+  if (!raw) return null;
+  const plain = await decodeStoredValue(raw);
+  if (plain?.trim()) {
+    process.env.OPENAI_API_KEY = plain.trim();
+    return plain.trim();
+  }
+  return null;
+}
+
+/**
  * Returns true when O8_BYOK_REQUIRED=1 AND no stored OpenRouter key exists.
  * When true, tier 3 (OpenRouter) should be skipped in the compose chain.
  */

@@ -110,6 +110,16 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
+  it('gates /api/voice/realtime/session (mints OpenAI realtime tokens on the operator key) against LAN', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/voice/realtime/session', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('gates /api/invites (beta founding-invite codes) against LAN', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/invites', {
