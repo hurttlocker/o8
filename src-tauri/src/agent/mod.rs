@@ -429,6 +429,21 @@ static CONFIRM_CHANNELS: Mutex<Vec<(String, oneshot::Sender<bool>)>> = Mutex::ne
 /// immediately. Otherwise emit a confirm card to the dock and block on a oneshot
 /// the user resolves via `agent_confirm` — declining on cancel / 2-min timeout.
 pub async fn confirm_if_needed(ctx: &TaskCtx, tool_name: &str, args: &Value) -> bool {
+    // Cascaded (push-to-talk) path: speak the proposal aloud — there's no other
+    // voice in the loop, so the spoken confirm is the audible cue.
+    confirm_if_needed_opts(ctx, tool_name, args, true).await
+}
+
+/// Like [`confirm_if_needed`] but `speak` controls the spoken proposal. The
+/// realtime bridge passes `false`: gpt-realtime announces its own intent in its
+/// own voice, so a second ElevenLabs voice reading the proposal would talk over
+/// the conversation. The dock card remains the binding gate either way.
+pub async fn confirm_if_needed_opts(
+    ctx: &TaskCtx,
+    tool_name: &str,
+    args: &Value,
+    speak: bool,
+) -> bool {
     let class = safety::tool_safety_class(tool_name);
     if !safety::requires_confirmation(class, safety::reversible_silent_consent()) {
         return true;
@@ -445,7 +460,9 @@ pub async fn confirm_if_needed(ctx: &TaskCtx, tool_name: &str, args: &Value) -> 
     // Speak the proposal aloud before showing the card (fire-and-forget). The
     // card remains the binding gate — this just lets the user hear what's about
     // to happen (esp. the repo on an o8_dispatch) and catch a mishear by ear.
-    crate::tts::playback::play_thread(confirm_spoken(tool_name, args), crate::tts::load_config());
+    if speak {
+        crate::tts::playback::play_thread(confirm_spoken(tool_name, args), crate::tts::load_config());
+    }
 
     emit_confirm(
         &ctx.app,

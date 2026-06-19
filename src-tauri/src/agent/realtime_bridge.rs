@@ -20,7 +20,7 @@ use std::sync::Arc;
 
 use serde_json::{json, Value};
 
-use super::{confirm_if_needed, tools, TaskCtx};
+use super::{confirm_if_needed_opts, tools, TaskCtx};
 
 /// Monotonic per-call id source — keeps each realtime tool call's confirm card
 /// addressable without pulling in `uuid` (not a dependency) or `Date`.
@@ -54,10 +54,12 @@ pub async fn realtime_invoke_tool(
     };
 
     // Same safety gate as the cascaded loop: ReadOnly passes straight through,
-    // Reversible honors the silent-consent toggle, Destructive always asks
-    // (spoken proposal + dock Allow/Cancel card). Unknown tools default to
+    // Reversible honors the silent-consent toggle, Destructive always asks via
+    // the dock Allow/Cancel card. `speak=false` — the realtime model announces
+    // its own intent in its own voice, so we don't read the proposal with a
+    // second (ElevenLabs) voice over the conversation. Unknown tools default to
     // Destructive, so a typo can't silently act.
-    if !confirm_if_needed(&ctx, &name, &args).await {
+    if !confirm_if_needed_opts(&ctx, &name, &args, false).await {
         return Ok(json!({ "error": "User declined this action", "declined_by_user": true }));
     }
 
