@@ -35,6 +35,7 @@ import { ApprovalBanner } from '@/components/desktop/ApprovalBanner';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
+import { UiZoomLayer } from '@/components/desktop/UiZoomLayer';
 import {
   OPEN_MOBILE_PAIRING_EVENT,
   OPEN_SETTINGS_TAB_EVENT,
@@ -3976,6 +3977,7 @@ function DashboardInner() {
     <DictationHost>
       <AttendanceHeartbeat />
       <FileOpenBridge />
+      <UiZoomLayer />
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
       height: '100vh',
       display: 'flex',
