@@ -441,6 +441,18 @@ async function handlePostRebaseTypecheckFailure(
   const feedback = formatTypecheckFeedback(lane, output);
   void (async () => {
     try {
+      // Guard the reset_packet race (#1257): the operator may have held this
+      // packet during the async gap before this rerun launches. A held packet
+      // must never auto-dispatch — re-read the authoritative state and bail
+      // rather than spawn a fresh session that makes reset_packet "not stick".
+      const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+      const currentPacket = readOrchestratorControlPlaneState().packets.find((p) => p.id === lane.packetId);
+      if (!currentPacket || currentPacket.queueState === 'held') {
+        console.log(
+          `[lane-merge] Skipping auto-rerun for packet ${lane.packetId} — ${currentPacket ? 'packet is held (reset_packet)' : 'packet no longer exists'} (#1257).`,
+        );
+        return;
+      }
       const { rerunWithFeedback } = await import('@/lib/orchestrator/operator-mission-service');
       await rerunWithFeedback({ packetId: lane.packetId!, feedback });
       console.log(
