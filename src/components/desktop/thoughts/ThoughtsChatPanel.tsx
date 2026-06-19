@@ -2054,9 +2054,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         isChatMode={isChatMode}
         isSingleMode={isSingleMode}
         displayWaiting={displayWaiting}
-        chatMessages={chatMessages}
+        chatMessages={displayMessages}
         activeTargetLabel={activeTargetLabel}
         targetAgentExists={Boolean(targetAgent)}
+        // Feed the EFFECTIVE transcript (orchestrator streams live into
+        // orchStream.messages, not the raw chatMessages state). The status bar's
+        // awaitingReply / runningTools / latestUserMessageId derive from this —
+        // with raw chatMessages the streamed reply never lands here, so
+        // awaitingReply stays true forever and the Working latch never releases
+        // (#stuck-working-indicator, 2026-06-19). displayMessagesCount below
+        // already used displayMessages; this aligns the list with it.
         thoughtsBodyBackground={thoughtsBodyBackground}
         enhancing={enhancing}
         preEnhanceInput={preEnhanceInput}
