@@ -150,6 +150,7 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
               <DesktopAgentMessage
                 entry={msg}
                 isLast={index === displayMessages.length - 1 && !displayWaiting}
+                isStreaming={isLatestAssistant && !!displayWaiting}
                 repoPath={repoPath}
               />
               {turnSummary && msg.id === turnSummary.assistantMessageId ? (

@@ -100,27 +100,26 @@ function ComposerStatusBar({
         display: 'inline-flex',
         alignItems: 'center',
         gap: 7,
-        height: 24,
+        height: 22,
         marginBottom: 8,
         paddingTop: 0,
-        paddingRight: 10,
+        paddingRight: 0,
         paddingBottom: 0,
-        paddingLeft: 9,
-        borderRadius: 999,
-        background: 'var(--t-accent-soft)',
-        border: '1px solid var(--t-accent-border)',
+        paddingLeft: 2,
+        background: 'transparent',
+        border: 'none',
       }}
     >
       {/* Shared status vocabulary — accent pulse while working, flips to the
           binary orbit once this turn crosses the long-running threshold (7 min).
           startedAtRef holds the real turn-start (Date.now ms), so a genuinely
           long orchestrator turn surfaces the orbit. */}
-      <AgentStatusDot state="running" startedAt={turnStart} />
+      <AgentStatusDot state="running" startedAt={turnStart} color="var(--t-text-muted)" />
       <span style={{
         fontSize: 12,
-        fontWeight: 600,
+        fontWeight: 500,
         letterSpacing: '-0.01em',
-        color: 'var(--t-accent)',
+        color: 'var(--t-text-muted)',
       }}>
         Working
       </span>
@@ -129,8 +128,7 @@ function ComposerStatusBar({
         fontWeight: 500,
         fontFamily: '"SF Mono", ui-monospace, monospace',
         letterSpacing: '0',
-        color: 'var(--t-accent)',
-        opacity: 0.8,
+        color: 'var(--t-text-faint)',
       }}>
         {formatElapsed(elapsed)}
       </span>

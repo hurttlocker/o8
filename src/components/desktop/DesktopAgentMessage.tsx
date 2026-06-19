@@ -14,6 +14,7 @@ import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
 import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
+import { useSmoothText } from '@/components/desktop/thoughts/chat-panel/use-smooth-text';
 import { OrchestratorStatusCard } from '@/components/desktop/thoughts/chat-panel/OrchestratorStatusCard';
 import { detectOrchestratorStatusEvent } from '@/lib/orchestrator/status-events';
 import { useOrchestratorEntryEvicted } from '@/components/desktop/orchestrator/context-residency';
@@ -26,6 +27,9 @@ import {
 interface DesktopAgentMessageProps {
   entry: MobileTranscriptEntry;
   isLast?: boolean;
+  /** True only for the in-flight assistant message — drives the smooth
+   *  (typewriter) text reveal so bursts of tokens flow in instead of popping. */
+  isStreaming?: boolean;
   repoPath?: string | null;
   onApplyToFile?: (code: string, language: string) => void;
   onOpenInCanvas?: (code: string, language: string) => void;
@@ -168,6 +172,7 @@ const MediaGrid = memo(function MediaGrid({
 export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   entry,
   isLast = false,
+  isStreaming = false,
   repoPath,
   onApplyToFile,
   onOpenInCanvas,
@@ -177,6 +182,9 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // Sanitize regex chain runs on every render unless memoized — heavy on
   // long transcripts where entry text is stable but parent re-renders fire.
   const displayText = useMemo(() => sanitizeTranscriptText(entry.text), [entry.text]);
+  // Smooth (typewriter) reveal for the in-flight assistant reply — paces out
+  // bursty deltas so words flow in. No-op (returns full text) for user/history.
+  const revealedText = useSmoothText(displayText, entry.role === 'assistant' && isStreaming);
   const sanitizedThinking = useMemo(
     () => entry.thinking ? sanitizeTranscriptText(entry.thinking) : '',
     [entry.thinking],
@@ -250,13 +258,13 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   // triggered by sibling state (e.g. hover on meta row) skip re-parsing.
   // Hook must live before any early returns to keep call order stable.
   const renderedMarkdown = useMemo(
-    () => hasText ? renderLLMMarkdown(displayText, {
+    () => hasText ? renderLLMMarkdown(revealedText, {
       onApplyToFile,
       onApplyDiff: repoPath ? handleApplyDiff : undefined,
       onOpenInCanvas,
       onRunInTerminal,
     }) : null,
-    [hasText, displayText, onApplyToFile, onOpenInCanvas, onRunInTerminal, repoPath, handleApplyDiff],
+    [hasText, revealedText, onApplyToFile, onOpenInCanvas, onRunInTerminal, repoPath, handleApplyDiff],
   );
 
   const handlePinToggle = useCallback(() => {
