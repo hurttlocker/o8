@@ -48,28 +48,40 @@ function prefersReducedMotion(): boolean {
  * stale closure's text.
  */
 export function useSmoothText(text: string, streaming: boolean): string {
-  const active = streaming && !prefersReducedMotion();
-  const [revealed, setRevealed] = useState(active ? 0 : text.length);
-  const idxRef = useRef(active ? 0 : text.length);
+  const reduced = prefersReducedMotion();
+  // Once a message has streamed, keep PACING the leftover tail even after
+  // `streaming` flips false — the orchestrator often ends a turn (status→ready)
+  // while the reveal is still catching up to a big one-shot reply, and snapping
+  // the remainder in a single frame is exactly the end-of-turn burst we're
+  // avoiding. So animate on (streaming OR ever-streamed); the loop drains to the
+  // end and then settles. A never-streamed history message shows full at once.
+  const everStreamedRef = useRef(false);
+  const animate = (streaming || everStreamedRef.current) && !reduced;
+  const [revealed, setRevealed] = useState(animate ? 0 : text.length);
+  const idxRef = useRef(animate ? 0 : text.length);
   const targetRef = useRef(text);
   targetRef.current = text;
   const rafRef = useRef<number | null>(null);
   const runningRef = useRef(false);
 
-  // Not animating (history / finished / reduced-motion) → show everything now.
   useEffect(() => {
-    if (active) return;
+    if (streaming) everStreamedRef.current = true;
+  }, [streaming]);
+
+  // Not animating (history / reduced-motion) → show everything now.
+  useEffect(() => {
+    if (animate) return;
     if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     runningRef.current = false;
     idxRef.current = targetRef.current.length;
     setRevealed(targetRef.current.length);
-  }, [active, text]);
+  }, [animate, text]);
 
-  // Drive the reveal. Re-runs whenever `text` grows (a new burst); the loop
-  // self-stops when caught up and the next burst restarts it. Reads target via
-  // ref → no stale closure.
+  // Drive the reveal. Re-runs whenever `text` grows (a new burst) or `streaming`
+  // ends (drain the tail); the loop self-stops when caught up and the next burst
+  // restarts it. Reads target via ref → no stale closure.
   useEffect(() => {
-    if (!active) return;
+    if (!animate) return;
     if (idxRef.current > targetRef.current.length) { idxRef.current = 0; setRevealed(0); } // hook reused by a new stream
     const tick = () => {
       const next = nextRevealIndex(idxRef.current, targetRef.current);
@@ -86,7 +98,7 @@ export function useSmoothText(text: string, streaming: boolean): string {
       runningRef.current = true;
       rafRef.current = requestAnimationFrame(tick);
     }
-  }, [active, text]);
+  }, [animate, text, streaming]);
 
   useEffect(() => () => {
     if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
@@ -94,5 +106,5 @@ export function useSmoothText(text: string, streaming: boolean): string {
     runningRef.current = false;
   }, []);
 
-  return active ? targetRef.current.slice(0, revealed) : text;
+  return animate ? targetRef.current.slice(0, revealed) : text;
 }
