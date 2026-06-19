@@ -496,6 +496,18 @@ pub fn all_tools() -> Vec<Value> {
                 "required": []
             }
         }),
+        // ── Conductor delegation (hand a task to the live agent engine) ────────
+        json!({
+            "name": "o8_delegate",
+            "description": "Hand an arbitrary, multi-step task to o8's LIVE agent engine (the in-app Claude REPL orchestrator / 'agent mode') so it works on it RIGHT NOW — acting on the canvas/screen — while you keep talking and narrate what's happening. This is your conductor move: you're a great voice but a weaker doer, so send deep / multi-step / 'figure this out' / show-on-screen / coding-in-the-open work to the agent engine and narrate the result instead of trying to do it yourself. Use for 'have the agent add a dark mode toggle', 'get the agent to explain the Pythagorean theorem on my screen', 'tell the agent to investigate why the build is failing'. Differs from o8_dispatch (which spawns a SEPARATE tracked coding worker in a worktree for a reviewable coding packet) — o8_delegate drives the live session for immediate, arbitrary action. The agent's own changes stay gated by o8's approval pipeline.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "task": { "type": "string", "description": "The task to hand to the live agent, in plain language — exactly what you'd tell a teammate to go do." }
+                },
+                "required": ["task"]
+            }
+        }),
         // ── Screen reading (give the brain sight) ─────────────────────────────
         json!({
             "name": "read_screen",
@@ -942,6 +954,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_browser_read" => o8_bridge::browser_read(args).await,
         "o8_browser_act" => o8_bridge::browser_act(args).await,
         "o8_review_diff" => o8_bridge::review_diff(args).await,
+        "o8_delegate" => o8_bridge::delegate(args).await,
         "read_screen" => crate::agent::screen::read_screen(ctx, args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_ui_set" => o8_ui::set_setting(&ctx.app, args),
