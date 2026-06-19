@@ -130,6 +130,11 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // Packet verbs reach a live worker / spawn a fresh one → carded.
         "o8_packet_steer" => SafetyClass::Reversible,
         "o8_packet_rerun" => SafetyClass::Reversible,
+        // Reset wipes the worktree + relaunches (compute) → carded. (Destructive
+        // in spirit, but Destructive tools are withheld from the model entirely,
+        // so Reversible keeps it available + always cards in V1.) Wait just polls.
+        "o8_packet_reset" => SafetyClass::Reversible,
+        "o8_packet_wait" => SafetyClass::ReadOnly,
         // Drafts only — the user presses send, so the draft IS the gate.
         "o8_orchestrator_draft" => SafetyClass::ReadOnly,
         // Writes to the public tracker → carded.

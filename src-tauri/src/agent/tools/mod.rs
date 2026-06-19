@@ -527,6 +527,31 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["verb"]
             }
         }),
+        // ── Mission control recovery (reset / wait for a packet) ──────────────
+        json!({
+            "name": "o8_packet_reset",
+            "description": "Recover a STUCK coding packet — 'reset the stuck packet and try again'. Wipes the packet's worktree, archives its lane, and relaunches it. Use when a packet is wedged (stuck launching, session lost, the worktree itself is broken) and a plain rerun won't help. Set keep_worktree:true to RETRY instead (preserve the worktree and resume). For a normal 'try again with feedback', prefer o8_packet_rerun. Name the packet, or omit for the only active one.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "packet": { "type": "string", "description": "Which packet/lane to reset (fuzzy match on its label). Omit for the only active lane." },
+                    "keep_worktree": { "type": "boolean", "description": "true = retry (keep the worktree and resume); false or omitted = reset (wipe the worktree)." },
+                    "reason": { "type": "string", "description": "Optional short reason for the reset (for the audit trail)." }
+                },
+                "required": []
+            }
+        }),
+        json!({
+            "name": "o8_packet_wait",
+            "description": "Wait for a coding packet to finish and report where it landed — 'tell me when the auth packet is ready'. Polls briefly (~12s) and reports its review state (working / ready-to-merge / needs-revision / merged / failed). If it's still working, say so — ask again to keep waiting. Name the packet, or omit for the only active one.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "packet": { "type": "string", "description": "Which packet/lane to wait on (fuzzy match on its label). Omit for the only active lane." }
+                },
+                "required": []
+            }
+        }),
         // ── Screen reading (give the brain sight) ─────────────────────────────
         json!({
             "name": "read_screen",
@@ -975,6 +1000,8 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_review_diff" => o8_bridge::review_diff(args).await,
         "o8_delegate" => o8_bridge::delegate(args).await,
         "o8_spec_annotate" => o8_bridge::spec_annotate(args).await,
+        "o8_packet_reset" => o8_bridge::packet_reset(args).await,
+        "o8_packet_wait" => o8_bridge::packet_wait(args).await,
         "read_screen" => crate::agent::screen::read_screen(ctx, args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_ui_set" => o8_ui::set_setting(&ctx.app, args),
