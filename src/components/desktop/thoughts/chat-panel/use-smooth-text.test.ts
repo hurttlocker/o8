@@ -51,6 +51,25 @@ describe('nextRevealIndex (smooth streaming reveal stepping)', () => {
     expect(nextRevealIndex(0, text)).toBeLessThan(text.length);
   });
 
+  it('never bursts more than ~30 chars in one frame, even draining a huge backlog', () => {
+    // Regression: a whole reply arriving as one chunk used to drain with a
+    // front-loaded spike (185, 145, 115 chars/frame) — the "shoots in" jolt.
+    // The per-frame advance must stay bounded so it flows in steadily.
+    const text = Array.from({ length: 600 }, (_, i) => `word${i}`).join(' '); // ~4KB at once
+    let i = 0;
+    let maxDelta = 0;
+    let frames = 0;
+    while (i < text.length && frames < 4000) {
+      const next = nextRevealIndex(i, text);
+      maxDelta = Math.max(maxDelta, next - i);
+      i = next;
+      frames += 1;
+    }
+    expect(i).toBe(text.length);
+    // 18 step cap + 12 word-snap = 30 hard ceiling; nothing should exceed it.
+    expect(maxDelta).toBeLessThanOrEqual(30);
+  });
+
   it('always moves by at least the minimum step on a slow trickle', () => {
     const text = 'abcdefghij';
     expect(nextRevealIndex(0, text)).toBeGreaterThanOrEqual(2);
