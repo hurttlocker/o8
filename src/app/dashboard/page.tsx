@@ -4240,6 +4240,27 @@ function DashboardInner() {
         // the workspace. The width is animated; the focus content renders
         // inline inside AgentPanel.
         const effectiveLeftWidth = leftPanelFocus.active ? (controlRoomWide ? CONTROL_ROOM_WIDTH : FOCUS_LEFT_PANEL_WIDTH) : leftWidth;
+        // Shared header + content — composed differently per surface (see below):
+        // glass floats the panel as a Lisse card with the header/footer
+        // transparent; solid keeps the merged paper card with the header inside.
+        const leftHeader = (
+          <LeftHeaderStrip
+            sidebarVisible={sidebarVisible}
+            onToggleSidebar={toggleSidebarFromChrome}
+          />
+        );
+        const leftContent = (
+          <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+            <GuidedDiscoveryHalo active={showAgentPanelFtux} borderRadius={20} />
+            <GuidedDiscoveryCoachmark
+              visible={showAgentPanelFtux}
+              position="top-left"
+              title="Live agent sessions appear here"
+              body="When you dispatch work, Cortex expands this rail and keeps the active session card within reach."
+            />
+            {agentPanelElement}
+          </div>
+        );
         return (
         <motion.div
           animate={{ width: effectiveLeftWidth }}
@@ -4265,70 +4286,64 @@ function DashboardInner() {
             overflow: 'visible',
             position: 'relative',
             // Claude-style floating card. 5px buffer on top/left/right.
-            // Bottom stays 0 because the DesktopStatusBar's left section
-            // renders directly below as the second half of the SAME
-            // visual card (flat-bottom panel + flat-top footer, divider
-            // between them) — adding a gap here would break the
-            // merged-card design. (The +4px breathing-room bump from
-            // 2026-05-27 was reverted same day — it shifted the toggle
-            // pill 4px right when sidebar opens, breaking header alignment.)
+            // SOLID: paddingBottom 0 so the panel merges flush with the
+            // DesktopStatusBar footer (flat-bottom panel + flat-top footer)
+            // into one continuous card. GLASS: 5px gap so the panel floats as
+            // a self-contained Lisse card above the now-transparent footer.
             paddingTop: 5,
             paddingLeft: 5,
             paddingRight: 5,
-            paddingBottom: 0,
+            paddingBottom: effectiveGlassSurface ? 5 : 0,
           }}
         >
-          {/* Floating card — paper over vibrancy. Top corners rounded;
-              bottom corners flat so this card merges flush with the
-              footer card rendered in DesktopStatusBar (which has flat
-              top + rounded bottom). Together they read as one card. */}
-          <div
-            // Glass symmetry: drive the panel off the SAME signal as the right
-            // O8Panel — data-chrome-surface. In glass mode the chrome flip turns
-            // --t-panel-solid → transparent and ink → light, so left + right are
-            // both glass and only the center workspace stays beige. In solid mode
-            // the flip is inert, so this keeps cream paper + dark ink (perfect).
-            data-chrome-surface="true"
-            style={{
-              flex: 1,
-              minHeight: 0,
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              borderTopLeftRadius: 14,
-              borderTopRightRadius: 14,
-              borderBottomLeftRadius: 0,
-              borderBottomRightRadius: 0,
-              // Surface axis — ONE source of truth. `isGlassSurface` reads the
-              // same resolved `surface` (useTheme → resolveTheme) that becomes
-              // <html data-surface>, so it can't disagree with the chrome flip.
-              //   - solid: --t-panel-solid (opaque cream / graphite paper) + the
-              //     floating-card drop shadow. Dark-on-paper ink from base tokens.
-              //   - glass: --t-bg, the SAME token the right O8Panel paints. In
-              //     light+glass the chrome flip (data-chrome-surface, above) turns
-              //     --t-bg transparent AND flips ink to light; in dark+glass --t-bg
-              //     is already a translucent dark tint over light base ink. Either
-              //     way the panel reads as glass and ink matches the right panel —
-              //     no inline ink overrides needed.
-              background: effectiveGlassSurface ? 'var(--t-bg)' : 'var(--t-panel-solid)',
-              boxShadow: effectiveGlassSurface ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
-            } as React.CSSProperties}
-          >
-          <LeftHeaderStrip
-            sidebarVisible={sidebarVisible}
-            onToggleSidebar={toggleSidebarFromChrome}
-          />
-          <div style={{ flex: 1, minHeight: 0, position: 'relative', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-          <GuidedDiscoveryHalo active={showAgentPanelFtux} borderRadius={20} />
-          <GuidedDiscoveryCoachmark
-            visible={showAgentPanelFtux}
-            position="top-left"
-            title="Live agent sessions appear here"
-            body="When you dispatch work, Cortex expands this rail and keeps the active session card within reach."
-          />
-          {agentPanelElement}
-          </div>
-          </div>
+          {effectiveGlassSurface ? (
+            // GLASS — mirror the center workspace + right O8Panel: the header
+            // strip and the footer below are transparent vibrancy, and the
+            // panel itself is a self-contained floating Lisse squircle card
+            // (all four corners). data-chrome-surface flips ink to light so the
+            // tinted --t-bg surface reads the same as the other glass panels.
+            <>
+              {leftHeader}
+              <SmoothCorners
+                data-chrome-surface="true"
+                corners={{ radius: 14, smoothing: 0.6 }}
+                autoEffects={false}
+                style={{
+                  flex: 1,
+                  minHeight: 0,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                  background: 'var(--t-bg)',
+                }}
+              >
+                {leftContent}
+              </SmoothCorners>
+            </>
+          ) : (
+            // SOLID — keep the merged-card design: panel rounded-top /
+            // flat-bottom meets the DesktopStatusBar footer (flat-top /
+            // rounded-bottom) as one continuous paper card, header inside.
+            <div
+              data-chrome-surface="true"
+              style={{
+                flex: 1,
+                minHeight: 0,
+                display: 'flex',
+                flexDirection: 'column',
+                overflow: 'hidden',
+                borderTopLeftRadius: 14,
+                borderTopRightRadius: 14,
+                borderBottomLeftRadius: 0,
+                borderBottomRightRadius: 0,
+                background: 'var(--t-panel-solid)',
+                boxShadow: '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+              } as React.CSSProperties}
+            >
+              {leftHeader}
+              {leftContent}
+            </div>
+          )}
         </motion.div>
       );
       })()}
@@ -4741,22 +4756,10 @@ function DashboardInner() {
                   height: 'calc(100vh - 81px)',
                   display: 'flex',
                   flexDirection: 'column',
-                  overflow: 'hidden',
-                  borderRadius: 14,
-                  // Surface-aware paint — mirrors the AgentPanel card in
-                  // dashboard so the preview reads consistently in both
-                  // glass and solid modes. In glass we scope light ink on
-                  // the subtree (matches commit 53f13374); in solid we
-                  // paint cream paper + keep the dark-ink palette.
-                  background: isGlassSurface ? 'rgba(20, 24, 32, 0.78)' : 'var(--t-panel-solid)',
-                  backdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
-                  WebkitBackdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
-                  boxShadow: '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)',
-                  border: isGlassSurface
-                    ? '1px solid rgba(255, 255, 255, 0.08)'
-                    : '1px solid var(--t-divider-subtle)',
                   zIndex: 200,
                   fontFamily: 'var(--font-sans-system)',
+                  // Ink vars live on the positioned container so they cascade
+                  // to the SmoothCorners subtree below.
                   ...(isGlassSurface ? {
                     ['--t-text' as string]: '#e8ecf2',
                     ['--t-text-strong' as string]: '#f5f8fc',
@@ -4769,7 +4772,33 @@ function DashboardInner() {
                   } : {}),
                 } as React.CSSProperties}
               >
-                {agentPanelElement}
+                {/* Lisse squircle edges so the hover preview's corners overlay
+                    the SAME curve as the open AgentPanel / center workspace —
+                    not a plain rounded rect (operator OCD fix). autoEffects
+                    traces the border + drop shadow to the squircle;
+                    shadowStrategy="box-shadow" keeps the soft shadow
+                    WebKit-safe (its rounded-rect silhouette is invisible under
+                    the 48px blur). backdrop-filter is clipped to the squircle. */}
+                <SmoothCorners
+                  corners={{ radius: 14, smoothing: 0.6 }}
+                  shadowStrategy="box-shadow"
+                  style={{
+                    flex: 1,
+                    minHeight: 0,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    overflow: 'hidden',
+                    background: isGlassSurface ? 'rgba(20, 24, 32, 0.78)' : 'var(--t-panel-solid)',
+                    backdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
+                    WebkitBackdropFilter: isGlassSurface ? 'blur(18px) saturate(1.15)' : undefined,
+                    boxShadow: '0 18px 48px rgba(15, 23, 42, 0.32), 0 4px 14px rgba(15, 23, 42, 0.16)',
+                    border: isGlassSurface
+                      ? '1px solid rgba(255, 255, 255, 0.08)'
+                      : '1px solid var(--t-divider-subtle)',
+                  } as React.CSSProperties}
+                >
+                  {agentPanelElement}
+                </SmoothCorners>
               </motion.div>
             )}
           </AnimatePresence>
@@ -4801,6 +4830,7 @@ function DashboardInner() {
         repoName={globalRepoEntry?.name ?? workspaceTerminalPreferredRepo?.name ?? null}
         repoRemoteUrl={globalRepoEntry?.remoteUrl ?? workspaceTerminalPreferredRepo?.remoteUrl ?? null}
         compact={compactShell}
+        glassSurface={effectiveGlassSurface}
         parkedLanes={parkedLanes}
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
