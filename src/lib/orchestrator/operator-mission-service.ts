@@ -28,3 +28,9 @@ export { resetPacket } from './operator-mission-service/reset';
 
 export { rerunWithFeedback } from './operator-mission-service/rerun-with-feedback';
 export type { RerunWithFeedbackInput } from './operator-mission-service/rerun-with-feedback';
+
+export {
+  buildInlineIssuesFromPrompt,
+  clampSpawnCount,
+  SPAWN_PROMPT_MAX_AGENTS,
+} from './operator-mission-service/spawn-prompt';

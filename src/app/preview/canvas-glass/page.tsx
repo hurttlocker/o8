@@ -58,6 +58,7 @@ import { SpecGlassCard, type SpecCard } from './spec-card';
 import { BrainGlassCard, type BrainCard } from './brain-card';
 import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
 import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
+import { AgentGlassCard, type AgentCard } from './agent-card';
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
@@ -275,6 +276,7 @@ export default function CanvasGlassPreviewPage() {
   const [diffCards, setDiffCards] = useState<DiffCard[]>([]);
   const [specCards, setSpecCards] = useState<SpecCard[]>([]);
   const [brainCards, setBrainCards] = useState<BrainCard[]>([]);
+  const [agentCards, setAgentCards] = useState<AgentCard[]>([]);
   const [reviewPickerOpen, setReviewPickerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -329,6 +331,14 @@ export default function CanvasGlassPreviewPage() {
   // Terminals + file cards share one z band (10–39, chrome at 40+) so
   // clicking ANY card brings it above every other card kind.
   const zPeakRef = useRef(9);
+  // Agent-card bloom: lanes already carded (so a lane blooms exactly once), the
+  // monotonic address number ("agent two"), and a one-shot seed flag — the first
+  // lanes refresh seeds the set WITHOUT blooming, so opening the canvas over an
+  // already-running fleet doesn't explode into cards. Only lanes that go live
+  // AFTER the canvas is watching (i.e. what you just spawned) bloom.
+  const cardedLaneIdsRef = useRef<Set<string>>(new Set());
+  const lanesSeededRef = useRef(false);
+  const agentNumberRef = useRef(1);
 
   // Real terminals ride the production WebSocket — same transport, tmux
   // sessions and XtermPanel as the dashboard tabs.
@@ -1048,8 +1058,9 @@ export default function CanvasGlassPreviewPage() {
       ...diffCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
       ...specCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
       ...brainCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 92 })),
+      ...agentCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
     ];
-  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, agentCards]);
 
   /** First clear spot scanning reading-order; least-covered cell when the
    *  canvas is genuinely full. */
@@ -1265,6 +1276,7 @@ export default function CanvasGlassPreviewPage() {
       setDiffCards((p) => p.map((c) => lerp(c, t)));
       setSpecCards((p) => p.map((c) => lerp(c, t)));
       setBrainCards((p) => p.map((c) => lerp(c, t)));
+      setAgentCards((p) => p.map((c) => lerp(c, t)));
     };
     gridAnimRef.current = animate(0, 1, { duration: 0.18, ease: [0.22, 0.61, 0.36, 1], onUpdate: writeAll });
   }, []);
@@ -1549,7 +1561,7 @@ export default function CanvasGlassPreviewPage() {
 
   /** Clicked card comes forward. Terminals + files + images + browsers +
    *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain', id: number) => {
+  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'agent', id: number) => {
     const current = kind === 'term'
       ? termCards.find((card) => card.id === id)
       : kind === 'file'
@@ -1566,7 +1578,9 @@ export default function CanvasGlassPreviewPage() {
                   ? diffCards.find((card) => card.id === id)
                   : kind === 'spec'
                     ? specCards.find((card) => card.id === id)
-                    : brainCards.find((card) => card.id === id);
+                    : kind === 'brain'
+                      ? brainCards.find((card) => card.id === id)
+                      : agentCards.find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
@@ -1580,6 +1594,7 @@ export default function CanvasGlassPreviewPage() {
         ...diffCards.map((card) => ({ kind: 'diff' as const, id: card.id, z: card.z })),
         ...specCards.map((card) => ({ kind: 'spec' as const, id: card.id, z: card.z })),
         ...brainCards.map((card) => ({ kind: 'brain' as const, id: card.id, z: card.z })),
+        ...agentCards.map((card) => ({ kind: 'agent' as const, id: card.id, z: card.z })),
       ].sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
       const top = 10 + combined.length;
@@ -1592,6 +1607,7 @@ export default function CanvasGlassPreviewPage() {
       setDiffCards((previous) => previous.map((card) => ({ ...card, z: kind === 'diff' && card.id === id ? top : remap.get(`diff:${card.id}`) ?? card.z })));
       setSpecCards((previous) => previous.map((card) => ({ ...card, z: kind === 'spec' && card.id === id ? top : remap.get(`spec:${card.id}`) ?? card.z })));
       setBrainCards((previous) => previous.map((card) => ({ ...card, z: kind === 'brain' && card.id === id ? top : remap.get(`brain:${card.id}`) ?? card.z })));
+      setAgentCards((previous) => previous.map((card) => ({ ...card, z: kind === 'agent' && card.id === id ? top : remap.get(`agent:${card.id}`) ?? card.z })));
       zPeakRef.current = top;
       return;
     }
@@ -1613,10 +1629,12 @@ export default function CanvasGlassPreviewPage() {
       setDiffCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'spec') {
       setSpecCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
-    } else {
+    } else if (kind === 'brain') {
       setBrainCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else {
+      setAgentCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [brainCards, browserCards, chatCards, diffCards, fileCards, imageCards, videoCards, specCards, termCards]);
+  }, [agentCards, brainCards, browserCards, chatCards, diffCards, fileCards, imageCards, videoCards, specCards, termCards]);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
@@ -1627,6 +1645,79 @@ export default function CanvasGlassPreviewPage() {
   const focusDiffCard = useCallback((id: number) => focusCard('diff', id), [focusCard]);
   const focusSpecCard = useCallback((id: number) => focusCard('spec', id), [focusCard]);
   const focusBrainCard = useCallback((id: number) => focusCard('brain', id), [focusCard]);
+  const focusAgentCard = useCallback((id: number) => focusCard('agent', id), [focusCard]);
+
+  /** Bloom an agent card for a freshly-live lane — the spawn → card-appears
+   *  moment. Deduped by laneId so a lane is only ever carded once; the card then
+   *  tracks that lane's phase live from activeLanes. */
+  const bloomAgentCard = useCallback((lane: LaneRow) => {
+    setAgentCards((previous) => {
+      if (previous.some((card) => card.laneId === lane.id)) return previous;
+      const id = nextIdRef.current;
+      nextIdRef.current += 1;
+      zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+      const number = agentNumberRef.current;
+      agentNumberRef.current += 1;
+      const spot = findFreeSpot(280, 128);
+      const repoTail = lane.repoPath?.split('/').filter(Boolean).pop() ?? null;
+      return [...previous, {
+        id,
+        x: spot.x,
+        y: spot.y,
+        z: zPeakRef.current,
+        w: 280,
+        h: 92,
+        laneId: lane.id,
+        number,
+        title: lane.label?.trim() || repoTail || lane.id,
+        runtime: lane.runtime ?? null,
+      }];
+    });
+  }, [findFreeSpot]);
+
+  /** Watch live lanes: seed the carded-set on first read (no bloom over an
+   *  already-running fleet), then bloom a card for every NEW lane — i.e. exactly
+   *  what voice/canvas just spawned. Cards read their phase live from activeLanes
+   *  thereafter; a lane leaving the set settles its card to "done". */
+  useEffect(() => {
+    if (!canvasEnabled) return;
+    if (!lanesSeededRef.current) {
+      for (const lane of activeLanes) cardedLaneIdsRef.current.add(lane.id);
+      lanesSeededRef.current = true;
+      return;
+    }
+    for (const lane of activeLanes) {
+      if (cardedLaneIdsRef.current.has(lane.id)) continue;
+      cardedLaneIdsRef.current.add(lane.id);
+      bloomAgentCard(lane);
+    }
+  }, [activeLanes, bloomAgentCard, canvasEnabled]);
+
+  /** Voice/canvas "spawn N agents on <task>" — the gateless worktree spawn. Hits
+   *  the governed create+dispatch seam (/api/orchestrator/spawn-prompt); the new
+   *  lanes go live and bloom as cards via the watcher above. Returns an ack note
+   *  on a synchronous validation failure, else null (ok). */
+  const spawnAgents = useCallback((task: string, count: number, repoOverride?: string | null): string | null => {
+    const repoPath = repoOverride ?? activeRepoPath;
+    if (!task.trim()) return 'spawn-agents needs args.task';
+    if (!repoPath) return 'no repo scoped — pick a repo first';
+    const n = Math.max(1, Math.min(5, Math.floor(count) || 1));
+    fetch('/api/orchestrator/spawn-prompt', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ repoPath, task: task.trim(), count: n }),
+    })
+      .then((response) => response.json().catch(() => null))
+      .then(() => {
+        // The lane-lifecycle push usually beats these, but a couple of nudges
+        // catch the lanes as the worktrees + sessions come up (~1–3s).
+        refreshLanes();
+        timersRef.current.push(setTimeout(refreshLanes, 1200));
+        timersRef.current.push(setTimeout(refreshLanes, 3000));
+      })
+      .catch(() => {});
+    return null;
+  }, [activeRepoPath, refreshLanes]);
 
   /** A lane's review diff lands as a glass card — the governance moat
    *  as a canvas object. */
@@ -2427,6 +2518,22 @@ export default function CanvasGlassPreviewPage() {
             }
             break;
           }
+          case 'spawn-agents': {
+            // Gateless worktree spawn — "spawn two agents on the auth refactor".
+            // The created lanes bloom as numbered cards via the lane watcher.
+            const task = typeof args.task === 'string' ? args.task : (typeof args.text === 'string' ? args.text : '');
+            const count = typeof args.count === 'number' ? args.count : 1;
+            const repo = typeof args.repo === 'string' ? args.repo : null;
+            const failure = spawnAgents(task, count, repo);
+            if (failure) {
+              ok = false;
+              note = failure;
+            } else {
+              const n = Math.max(1, Math.min(5, Math.floor(count) || 1));
+              note = `spawning ${n} agent${n === 1 ? '' : 's'}`;
+            }
+            break;
+          }
           default:
             ok = false;
             note = `unknown intent verb: ${String(detail.verb)}`;
@@ -2443,7 +2550,7 @@ export default function CanvasGlassPreviewPage() {
       window.removeEventListener('o8:canvas-intent', onIntent);
       (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
     };
-  }, [activeRepoPath, canvasEnabled, repos, sendPrompt, spawnBrainCard, spawnSpecCard, spawnTerminal]);
+  }, [activeRepoPath, canvasEnabled, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnSpecCard, spawnTerminal]);
 
   if (!canvasEnabled) {
     return (
@@ -2651,6 +2758,25 @@ export default function CanvasGlassPreviewPage() {
             onRequestChanges={(diffCard) => {
               setComposerValue(`Request changes on ${diffCard.title}${diffCard.branch ? ` (${diffCard.branch})` : ''}: `);
               composerInputRef.current?.focus();
+            }}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* ── Agent cards — dispatched workers as canvas objects (voice spawn) ─ */}
+      <AnimatePresence>
+        {agentCards.map((card) => (
+          <AgentGlassCard
+            key={card.id}
+            card={card}
+            lane={activeLanes.find((lane) => lane.id === card.laneId) ?? null}
+            onMove={(id, x, y) => setAgentCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
+            onResize={(id, w, h) => setAgentCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+            onFocus={focusAgentCard}
+            onClose={(id) => setAgentCards((previous) => previous.filter((c) => c.id !== id))}
+            onReview={(laneId) => {
+              const lane = activeLanes.find((row) => row.id === laneId);
+              if (lane) void spawnDiffCard(lane);
             }}
           />
         ))}
