@@ -1101,28 +1101,11 @@ function DashboardInner() {
   const setRightPanelMode = (_mode: 'chat' | 'workspace') => { /* v1: right panel is always workspace */ };
   const [workspaceChatTargetKeyByRepoPath, setWorkspaceChatTargetKeyByRepoPath] = useState<Record<string, string>>({});
 
-  // Auto-collapse the left panel while the wide o8.md (Workspace Notes / spec)
-  // tab is open — it's a big reading/writing surface and the left panel is
-  // hover-revealable, so the notes + center get the room. Edge-triggered: we
-  // collapse only on the transition INTO spec (remembering we did it) and
-  // restore on the way out, so a manual re-expand while spec stays open sticks
-  // (we never re-collapse on a later render).
-  const specAutoCollapsedLeftRef = useRef(false);
-  const prevSpecOpenRef = useRef(false);
-  useEffect(() => {
-    const specOpen = chatVisible && rightPanelKind === 'o8' && o8ActiveTab === 'spec';
-    const wasOpen = prevSpecOpenRef.current;
-    prevSpecOpenRef.current = specOpen;
-    if (specOpen && !wasOpen) {
-      if (sidebarVisible) {
-        specAutoCollapsedLeftRef.current = true;
-        setSidebarVisible(false);
-      }
-    } else if (!specOpen && wasOpen && specAutoCollapsedLeftRef.current) {
-      specAutoCollapsedLeftRef.current = false;
-      setSidebarVisible(true);
-    }
-  }, [chatVisible, rightPanelKind, o8ActiveTab, sidebarVisible, setSidebarVisible]);
+  // (Removed per operator request, 2026-06-18) The o8.md / spec tab used to
+  // auto-collapse the left panel for reading room. The left panel now stays put
+  // when any o8-panel tab (including o8.md) opens — it's resizable and
+  // hover-revealable, so the operator collapses it manually when they want the
+  // extra space. Both panels can be open at once.
 
   useEffect(() => {
     try {
@@ -4567,8 +4550,14 @@ function DashboardInner() {
               }}
             >
               {/* Lisse squircle on all four corners so the right panel's TOP
-                  edges match the center workspace + canvas "list corners". */}
-              <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+                  edges match the center workspace + canvas "list corners". In
+                  glass the header strip is transparent vibrancy, so without a
+                  fill on the clip itself the squircle's TOP corners read as
+                  empty vibrancy (no visible curve). Paint var(--t-bg) behind
+                  everything so the tint fills the whole squircle — top corners
+                  included — matching the content + the left panel. Solid keeps
+                  no fill (opaque children already paint the squircle). */}
+              <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: effectiveGlassSurface ? 'var(--t-bg)' : undefined }}>
               <PanelHeaderStrip
                 o8PanelVisible={rightPanelKind === 'o8'}
                 workspacePanelVisible={rightPanelKind === 'review'}
