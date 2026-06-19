@@ -91,3 +91,26 @@ Their app is literally **"CNVS"** — do **not** brand ours "CNVS." Our surface 
 
 ## Sources (realtime pass, 2026-06)
 OpenAI *Introducing gpt-realtime* + *Realtime conversations/tools/MCP* guides + client-events reference; webrtcHacks latency measurements; `parakeet-mlx` / FluidInference CoreML / arXiv 2509.14128 + Soniqo benchmarks; Anthropic Claude Code voice-mode (STT-only) coverage; Google Gemini Live API docs + 3.1 Flash Live blog; ElevenLabs client-tools docs. Uncertain/verify: exact gpt-realtime-2 date (May 7 vs 8) + per-token pricing (secondary aggregators; confirm on platform.openai.com), Gemini Live callable model id, Anthropic offline-voice roadmap rumor.
+
+## Track B — build plan + gating (locked 2026-06-19)
+
+Operator framing: *"Track B is where Symon becomes a real agent — all the tools to work with the human how the human wants, tunable interactions. Gate behind Founder, we proxy it, super-paid — but you can add your own OpenAI key so the devs of the world can have it too."*
+
+### Gating (reconciled with o8's entitlement model — NOT a capability paywall)
+o8's entitlement is **"monetize cost, not capability"** (`src/lib/entitlement/{types,flags}.ts`): every moat (incl. local voice) is free; the only paid lever is `proxy.inference` (pro/team). Realtime maps onto that, three paths (`src/lib/voice/realtime-access.ts`, `resolveRealtimeAccessWith`):
+- **`byok` (FREE, everyone)** — user's own OpenAI key; they pay OpenAI, o8 never spends → no gate. *The path that works first.*
+- **`managed` (paid "super-paid")** — no key + `proxy.inference` lever → o8 proxies + meters the realtime session. Gated by the existing flag + the server spend cap; `MANAGED_REALTIME_READY=false` until the proxy ships (route returns "coming").
+- **`locked`** — neither → "add a key (free) or upgrade." Capability isn't withheld, only the cost path.
+- **"Founder"** = the advanced voice tab (`src/app/voice-settings/tabs/FounderTab.tsx`, where ElevenLabs already lives), NOT an entitlement tier. Realtime mode's UI lives there.
+
+### Architecture (recommended — confirm before Phase 3)
+**Webview-WebRTC** session (OpenAI's blessed browser path), owned by the dock webview (`crate::dock_window`), NOT Rust `webrtc-rs`. Why: WebKit has getUserMedia + WebRTC + audio out; OpenAI realtime is designed for browser WebRTC with an ephemeral key. The hard part — the 41 Symon tools + the `confirm_if_needed` governance gate — already live in Rust (`src-tauri/src/agent/`); the webview session bridges `function_call`s back to Rust via a single Tauri command that reuses `dispatch_tool_call` + the confirm gate (the realtime model only *emits* a function_call; we hold it at the gate before returning the result — governance maps cleanly, per §Track B above).
+
+### Phases
+- **P1 — access resolver (DONE 2026-06-19):** `src/lib/voice/realtime-access.ts` + tests. The gating core, no I/O, no post-cutoff-API risk.
+- **P2 — session-mint seam + Founder UI:** gated `POST /api/voice/realtime/session` (add `/api/voice/` to `GATED_PREFIXES` + a middleware-gate test); resolve the OpenAI key (extend the BYOK store, `byok-keys.ts` pattern, encrypted `~/.o8/.env.local`); **verify the current gpt-realtime ephemeral-session endpoint + model id on platform.openai.com (post-cutoff — do NOT guess)** then mint a `client_secret`; Founder-tab "Realtime voice (beta)" section (toggle + BYOK key field via `/api/v2/keys` + a Test-connection button). Managed path → 501 "coming".
+- **P3 — live audio loop:** dock-webview RTCPeerConnection to gpt-realtime using the minted token; mic in, audio out, barge-in (WebRTC auto-truncates). Trigger switch: when realtime is on, the Option-hold agent path opens/holds the realtime session instead of the cascaded one (`src-tauri/src/fn_hotkey.rs` `begin/end_agent_dictation`).
+- **P4 — tool bridge + governance:** realtime `function_call` → Tauri command → `agent::confirm_if_needed` (visual/spoken gate for the irreversible few) → `agent::tools::dispatch_tool_call` → return result on the data channel. Reuses the whole existing Symon tool surface.
+- **P5 — managed proxy:** the metered `proxy.inference` path (flip `MANAGED_REALTIME_READY`); depends on the managed-inference proxy build.
+
+Don't ship a dead toggle — hold the ship until P3 makes it actually talk (per the "UI in dev, backend ships" rule).
