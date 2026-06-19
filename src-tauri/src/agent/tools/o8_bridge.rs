@@ -930,6 +930,7 @@ const CANVAS_VERBS: &[&str] = &[
     "search",
     "zoom",
     "dock",
+    "spawn-agents",
 ];
 
 /// Build the `/api/canvas/intent` POST body from the model's FLAT params.
@@ -957,6 +958,11 @@ pub fn canvas_intent_body(verb: &str, args: &Value) -> Value {
             carry("direction");
         }
         "dock" => carry("open"),
+        "spawn-agents" => {
+            carry("task");
+            carry("count");
+            carry("repo");
+        }
         // enter / open-spec / spawn-terminal take no args — for `enter`, the
         // route's `ensure:true` navigation IS the action (just bring the Canvas up).
         _ => {}
@@ -1050,5 +1056,23 @@ mod canvas_tests {
     #[test]
     fn enter_is_a_known_verb() {
         assert!(CANVAS_VERBS.contains(&"enter"));
+    }
+
+    #[test]
+    fn spawn_agents_carries_task_count_and_repo() {
+        let body = canvas_intent_body(
+            "spawn-agents",
+            &json!({ "task": "the auth refactor", "count": 2, "repo": "o8", "text": "ignored" }),
+        );
+        assert_eq!(body["verb"], "spawn-agents");
+        assert_eq!(body["args"]["task"], "the auth refactor");
+        assert_eq!(body["args"]["count"], 2);
+        assert_eq!(body["args"]["repo"], "o8");
+        assert!(body["args"].get("text").is_none(), "unrelated keys must not leak through");
+    }
+
+    #[test]
+    fn spawn_agents_is_a_known_verb() {
+        assert!(CANVAS_VERBS.contains(&"spawn-agents"));
     }
 }
