@@ -37,7 +37,7 @@ export interface DispatchLane {
 
 type PhaseKey = 'working' | 'finalizing' | 'review' | 'blocked' | 'done' | 'error';
 
-interface Phase {
+export interface Phase {
   key: PhaseKey;
   label: string;
   color: string;
@@ -73,7 +73,7 @@ function laneTitle(lane: DispatchLane): string {
 
 /** The phase mark. Working/finalizing = the o8 binary orbit (OUR motion);
  *  review/done/blocked/error = a static glyph. 14px, at the row head. */
-function PhaseRing({ phase }: { phase: Phase }) {
+export function PhaseRing({ phase }: { phase: Phase }) {
   const c = phase.color;
   if (phase.ring === 'orbit') {
     // Motion vocabulary C — two dots 180° apart circling a center (globals.css
