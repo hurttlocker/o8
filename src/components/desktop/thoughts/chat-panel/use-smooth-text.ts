@@ -1,20 +1,29 @@
 import { useEffect, useRef, useState } from 'react';
 
 /**
- * Advance the reveal index by ~20% of the remaining backlog per frame (min 2
- * chars), then extend to the next whitespace so whole WORDS appear instead of
- * splitting mid-word. Exponential catch-up keeps the lag bounded (~0.5s) no
- * matter how large a burst arrives, while staying smooth. Pure + synchronous so
- * it's unit-testable without rAF.
+ * Advance the reveal index a steady ~few words per frame, then extend to the
+ * next whitespace so whole WORDS appear instead of splitting mid-word.
+ *
+ * The step is ~13% of the remaining backlog BUT HARD-CAPPED at 18 chars/frame.
+ * The cap is the important part: orchestrator replies often arrive as one big
+ * chunk (the backend buffers, or the rAF-coalesce batches a whole paragraph
+ * into one update), and an uncapped percentage drains that backlog with a
+ * front-loaded spike — 185, 145, 115 chars in the first frames — which reads as
+ * the text "shooting in" rather than flowing. Capping the per-frame advance
+ * turns that single chunk into a steady stream (~18 chars/frame ≈ 1000 chars/s
+ * at 60fps: fast, but continuous). The percentage only kicks in for the last
+ * ~140 chars, easing the tail to a stop. Pure + synchronous so it's
+ * unit-testable without rAF.
  */
 export function nextRevealIndex(current: number, text: string): number {
   const len = text.length;
   if (current >= len) return len;
   const remaining = len - current;
-  let next = Math.min(len, current + Math.max(2, Math.ceil(remaining * 0.2)));
+  const step = Math.min(18, Math.max(3, Math.ceil(remaining * 0.13)));
+  let next = Math.min(len, current + step);
   // Extend to the next whitespace so whole words appear — but cap the search so
   // a giant unbroken token (URL, base64 blob) can't dump in a single frame.
-  const cap = next + 40;
+  const cap = next + 12;
   while (next < len && next < cap && !/\s/.test(text[next]!)) next += 1;
   return next;
 }
