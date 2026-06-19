@@ -45,6 +45,10 @@ interface DesktopStatusBarProps {
   rightColumnWidth?: number;
   /** Narrow desktop mode: keep durable status text and collapse action chrome. */
   compact?: boolean;
+  /** Glass surface active. In glass mode the left footer drops its paper card
+   *  (transparent bg, no shadow/border/rounding) so the panel above floats as
+   *  a self-contained Lisse card — the icons sit directly on the vibrancy. */
+  glassSurface?: boolean;
   /** Lanes parked in the review/escalation gates — drives the merge beacon
    *  (fleet-wide "something's ready to merge / needs you" pill). */
   parkedLanes?: ParkedLane[];
@@ -74,6 +78,7 @@ function DesktopStatusBarBase({
   leftColumnWidth,
   rightColumnWidth,
   compact = false,
+  glassSurface = false,
   parkedLanes = [],
   onOpenSettings,
   onAddRepo,
@@ -85,6 +90,11 @@ function DesktopStatusBarBase({
   const [settingsAnchorRect, setSettingsAnchorRect] = useState<DOMRect | null>(null);
   const experimentalCanvas = useExperimentalCanvasFlag();
   const leftFooterCollapsed = !compact && (leftColumnWidth ?? 0) <= 0;
+  // Drop the footer's paper card when collapsed OR in glass mode — glass wants
+  // the panel above to float as its own Lisse card with the icons on vibrancy.
+  // Icon spacing (gap/padding) still keys off leftFooterCollapsed so the glass
+  // footer keeps its centered cluster.
+  const footerCardHidden = leftFooterCollapsed || glassSurface;
   const leftFooterWidth = compact
     ? 'auto'
     : leftFooterCollapsed
@@ -214,8 +224,8 @@ function DesktopStatusBarBase({
           corners={{
             topLeft: 0,
             topRight: 0,
-            bottomLeft: { radius: leftFooterCollapsed ? 0 : 14, smoothing: 0.6 },
-            bottomRight: { radius: leftFooterCollapsed ? 0 : 14, smoothing: 0.6 },
+            bottomLeft: { radius: footerCardHidden ? 0 : 14, smoothing: 0.6 },
+            bottomRight: { radius: footerCardHidden ? 0 : 14, smoothing: 0.6 },
           }}
           autoEffects={false}
           // Inner card — flat top (merges with panel above), rounded bottom.
@@ -240,12 +250,12 @@ function DesktopStatusBarBase({
             gap: leftFooterCollapsed ? 0 : 6,
             paddingLeft: leftFooterCollapsed ? 0 : 10,
             paddingRight: leftFooterCollapsed ? 0 : 10,
-            background: leftFooterCollapsed ? 'transparent' : 'var(--t-panel-solid)',
+            background: footerCardHidden ? 'transparent' : 'var(--t-panel-solid)',
             // Corner rounding now lives on the SmoothCorners `corners` prop
             // above (squircle bottom / flat top) — a plain borderRadius here
             // would be a circle, not the "list corners" squircle.
-            borderTop: leftFooterCollapsed ? 'none' : '0.5px solid var(--t-divider-subtle)',
-            boxShadow: leftFooterCollapsed ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
+            borderTop: footerCardHidden ? 'none' : '0.5px solid var(--t-divider-subtle)',
+            boxShadow: footerCardHidden ? 'none' : '0 8px 28px rgba(15, 23, 42, 0.10), 0 2px 6px rgba(15, 23, 42, 0.06)',
             ['--t-chrome-btn-bg' as string]: 'transparent',
             ['--t-chrome-btn-shadow' as string]: 'none',
             ['--t-chrome-btn-hover-bg' as string]: 'var(--t-hover)',
