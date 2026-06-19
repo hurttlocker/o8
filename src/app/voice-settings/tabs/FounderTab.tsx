@@ -7,7 +7,7 @@
  * library is a list of named presets persisted as `voice_library`. All via
  * voice_prefs_set + round-trip through voice_prefs_get.
  */
-import { useEffect, useState, type CSSProperties } from 'react';
+import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import {
   ACCENT, ACCENT_GLOW, ACCENT_LIGHT, GLASS_BG, GLASS_BG_HOVER, GLASS_BORDER_SUBTLE, OK_GREEN, SF,
   TEXT_PRIMARY, TEXT_SECONDARY, TEXT_TERTIARY, TRANS_FAST, ICONS, SECTION_BORDER,
@@ -17,6 +17,7 @@ import {
 } from '../primitives';
 import { prefBool, prefStr, prefNum, prefVoiceLibrary, type VoicePreset, type TabProps } from '../helpers';
 import { ttsSpeak, ttsStop } from '@/lib/tauri/bridge';
+import { startRealtimeSession, type RealtimeStatus, type RealtimeSessionHandle } from '@/lib/voice/realtime-client';
 
 const INPUT_BASE: CSSProperties = {
   width: 220, boxSizing: 'border-box', height: 32, paddingLeft: 10, paddingRight: 10,
@@ -37,6 +38,25 @@ const MODEL_OPTS = [
   { value: 'eleven_multilingual_v2', label: 'Multilingual v2' },
   { value: 'eleven_monolingual_v1', label: 'Monolingual v1' },
 ];
+// OpenAI realtime voices (gpt-realtime) — distinct from the ElevenLabs voices above.
+const REALTIME_VOICE_OPTS = [
+  { value: 'marin', label: 'Marin' },
+  { value: 'cedar', label: 'Cedar' },
+  { value: 'alloy', label: 'Alloy' },
+  { value: 'echo', label: 'Echo' },
+  { value: 'shimmer', label: 'Shimmer' },
+  { value: 'verse', label: 'Verse' },
+];
+const REALTIME_VOICE_KEY = 'o8:realtime-voice';
+
+const REALTIME_STATUS_LABEL: Record<RealtimeStatus, string> = {
+  idle: '',
+  'requesting-mic': 'Asking for the microphone…',
+  connecting: 'Connecting to Symon…',
+  live: 'Live — just talk. Symon is listening.',
+  stopping: 'Ending…',
+  error: '',
+};
 
 export default function FounderTab({ prefs, setPref }: TabProps) {
   const [voiceFocus, setVoiceFocus] = useState(false);
@@ -162,11 +182,10 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
 }
 
 /**
- * Realtime voice (Symon S2S, beta) — Track B P2. Bring your own OpenAI key
- * (free; bills OpenAI directly) and Test that it mints a gpt-realtime session.
- * The live conversation loop ships next (P3); the always-on toggle lands with
- * it so there's no control that does nothing here. Managed (proxied, paid) is
- * the entitlement lever and surfaces when wired.
+ * Realtime voice (Symon S2S, beta) — Track B P3. Bring your own OpenAI key
+ * (free; bills OpenAI directly), then "Start conversation" opens a live WebRTC
+ * talk↔hear loop with gpt-realtime: mic in, Symon's voice out, barge-in on.
+ * Managed (proxied, paid) is the entitlement lever and surfaces when wired.
  */
 function RealtimeSection() {
   const [masked, setMasked] = useState<string | null>(null);
@@ -174,8 +193,11 @@ function RealtimeSection() {
   const [keyFocus, setKeyFocus] = useState(false);
   const [saving, setSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<{ ok: boolean; text: string } | null>(null);
-  const [testing, setTesting] = useState(false);
-  const [testMsg, setTestMsg] = useState<{ ok: boolean; text: string } | null>(null);
+
+  const [voice, setVoice] = useState('marin');
+  const [convStatus, setConvStatus] = useState<RealtimeStatus>('idle');
+  const [convError, setConvError] = useState<string | null>(null);
+  const sessionRef = useRef<RealtimeSessionHandle | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -187,8 +209,15 @@ function RealtimeSection() {
         if (openai?.configured) setMasked(openai.maskedKey);
       })
       .catch(() => {});
+    try {
+      const saved = window.localStorage.getItem(REALTIME_VOICE_KEY);
+      if (saved) setVoice(saved);
+    } catch { /* private mode */ }
     return () => { cancelled = true; };
   }, []);
+
+  // Tear the live session down if the window/tab unmounts.
+  useEffect(() => () => { void sessionRef.current?.stop(); }, []);
 
   const saveKey = async () => {
     const key = keyInput.trim();
@@ -217,35 +246,34 @@ function RealtimeSection() {
     }
   };
 
-  const testConnection = async () => {
-    if (testing) return;
-    setTesting(true);
-    setTestMsg(null);
-    try {
-      const r = await fetch('/api/voice/realtime/session', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        credentials: 'same-origin',
-        body: JSON.stringify({}),
-      });
-      const d = await r.json().catch(() => null) as { ok?: boolean; model?: string; reason?: string } | null;
-      if (r.ok && d?.ok) {
-        setTestMsg({ ok: true, text: `Connected — minted a ${d.model || 'realtime'} session.` });
-      } else {
-        setTestMsg({ ok: false, text: d?.reason || `Realtime not ready (${r.status}).` });
-      }
-    } catch {
-      setTestMsg({ ok: false, text: 'Test failed — is the app running?' });
-    } finally {
-      setTesting(false);
-    }
+  const onVoiceChange = (v: string) => {
+    setVoice(v);
+    try { window.localStorage.setItem(REALTIME_VOICE_KEY, v); } catch { /* */ }
   };
+
+  const startConversation = () => {
+    if (sessionRef.current && convStatus !== 'idle' && convStatus !== 'error') return;
+    setConvError(null);
+    sessionRef.current = startRealtimeSession({
+      voice,
+      onStatus: (s) => setConvStatus(s),
+      onError: (msg) => setConvError(msg),
+    });
+  };
+
+  const stopConversation = () => {
+    void sessionRef.current?.stop();
+    sessionRef.current = null;
+  };
+
+  const live = convStatus !== 'idle' && convStatus !== 'error';
+  const statusLabel = REALTIME_STATUS_LABEL[convStatus];
 
   return (
     <SectionCard>
       <SectionTitle icon={ICONS.sparkle}>Realtime voice · beta</SectionTitle>
       <SectionHint>
-        Voice-to-voice with gpt-realtime. Bring your own OpenAI key and it&apos;s free — you pay OpenAI directly. (Managed, metered realtime is the paid path and arrives later.) The live conversation loop ships next; this is where you wire the key.
+        Voice-to-voice with gpt-realtime — talk and Symon talks back, no push-to-talk. Bring your own OpenAI key and it&apos;s free; you pay OpenAI directly. (Managed, metered realtime is the paid path and arrives later.)
       </SectionHint>
       <ControlRow label="OpenAI API key" detail={masked ? `Saved: ${masked}. Enter a new key to replace it.` : 'Bring your own key — encrypted at rest, billed to you.'}>
         <input
@@ -256,16 +284,38 @@ function RealtimeSection() {
           style={{ ...INPUT_BASE, ...focusRing(keyFocus) }}
         />
       </ControlRow>
+      <ControlRow label="Voice" detail="Which gpt-realtime voice Symon speaks with.">
+        <Select value={voice} onChange={onVoiceChange} options={REALTIME_VOICE_OPTS} width={200} />
+      </ControlRow>
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 12 }}>
         <AccentButton label={saving ? 'Saving…' : 'Save key'} onClick={() => { void saveKey(); }} />
-        <GhostButton label={testing ? 'Testing…' : 'Test connection'} onClick={() => { void testConnection(); }} />
+        {live
+          ? <GhostButton label="Stop" tone="danger" onClick={stopConversation} />
+          : <GhostButton label="Start conversation" onClick={startConversation} />}
       </div>
+
+      {/* Live status — a calm pulse while connected, plain text otherwise. */}
+      {statusLabel ? (
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginTop: 12 }}>
+          <span style={{
+            width: 8, height: 8, borderRadius: '50%',
+            background: convStatus === 'live' ? OK_GREEN : ACCENT_LIGHT,
+            boxShadow: convStatus === 'live' ? `0 0 0 4px ${ACCENT_GLOW}` : 'none',
+            animation: convStatus === 'live' ? 'o8RtPulse 1.8s ease-in-out infinite' : 'none',
+          }} />
+          <span style={{ fontSize: 12.5, color: convStatus === 'live' ? TEXT_PRIMARY : TEXT_SECONDARY }}>{statusLabel}</span>
+        </div>
+      ) : null}
+
       {saveMsg ? (
         <p style={{ fontSize: 12, color: saveMsg.ok ? OK_GREEN : '#f08a8a', marginTop: 10, marginBottom: 0 }}>{saveMsg.text}</p>
       ) : null}
-      {testMsg ? (
-        <p style={{ fontSize: 12, color: testMsg.ok ? OK_GREEN : '#f08a8a', marginTop: 8, marginBottom: 0 }}>{testMsg.text}</p>
+      {convError ? (
+        <p style={{ fontSize: 12, color: '#f08a8a', marginTop: 8, marginBottom: 0 }}>{convError}</p>
       ) : null}
+
+      <style>{'@keyframes o8RtPulse { 0%,100% { opacity: 1 } 50% { opacity: 0.45 } }'}</style>
     </SectionCard>
   );
 }
