@@ -59,6 +59,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
   let dc: RTCDataChannel | null = null;
   let micStream: MediaStream | null = null;
   let audioEl: HTMLAudioElement | null = null;
+  let toolDefs: Array<Record<string, unknown>> = [];
 
   const setStatus = (s: RealtimeStatus, detail?: string) => {
     status = s;
@@ -91,6 +92,51 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
     void teardown();
   };
 
+  const sendEvent = (obj: Record<string, unknown>) => {
+    try { dc?.send(JSON.stringify(obj)); }
+    catch (e) { console.warn(`${LOG} send failed:`, e); }
+  };
+
+  // gpt-realtime surfaces function calls as items in response.done. Run each
+  // through the Rust bridge (which applies the same confirm gate the cascaded
+  // agent uses), return the output, then response.create so the model speaks
+  // the result. Same 64-tool catalog — true parity with push-to-talk.
+  const handleFunctionCalls = async (response: Record<string, unknown>) => {
+    const output = response['output'];
+    if (!Array.isArray(output)) return;
+    const calls = output.filter(
+      (it): it is { name?: string; call_id?: string; arguments?: string } =>
+        !!it && typeof it === 'object' && (it as { type?: string }).type === 'function_call',
+    );
+    if (!calls.length) return;
+
+    let mod: typeof import('@tauri-apps/api/core') | null = null;
+    try { mod = await import('@tauri-apps/api/core'); } catch { /* not in a Tauri webview */ }
+
+    for (const call of calls) {
+      const name = call.name || '';
+      const callId = call.call_id || '';
+      let args: Record<string, unknown> = {};
+      try { args = call.arguments ? JSON.parse(call.arguments) as Record<string, unknown> : {}; }
+      catch { /* model sent malformed args — pass {} */ }
+      console.log(`${LOG} function_call: ${name}`, args);
+
+      let result: unknown = { error: 'tool bridge unavailable' };
+      if (mod) {
+        try { result = await mod.invoke('realtime_invoke_tool', { name, args }); }
+        catch (e) { result = { error: (e as Error)?.message || String(e) }; }
+      }
+      const errored = !!(result && typeof result === 'object' && 'error' in (result as Record<string, unknown>));
+      console.log(`${LOG} tool ${name} → ${errored ? 'error' : 'ok'}`);
+
+      sendEvent({
+        type: 'conversation.item.create',
+        item: { type: 'function_call_output', call_id: callId, output: JSON.stringify(result) },
+      });
+    }
+    sendEvent({ type: 'response.create' });
+  };
+
   const handle: RealtimeSessionHandle = {
     get status() { return status; },
     stop: async () => {
@@ -120,6 +166,20 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
 
     // 2. Peer connection + audio sink.
     setStatus('connecting');
+
+    // Load the native tool catalog so the model can act (P4). Same tools the
+    // cascaded agent uses; each runs through the Rust confirm gate. If we're
+    // not in a Tauri webview, this stays empty → conversation-only, no error.
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      const raw = await invoke('realtime_tools') as Array<Record<string, unknown>>;
+      if (Array.isArray(raw)) toolDefs = raw.map((t) => ({ type: 'function', ...t }));
+      console.log(`${LOG} loaded ${toolDefs.length} tools`);
+    } catch (e) {
+      console.warn(`${LOG} tool catalog unavailable (conversation-only):`, e);
+    }
+    if (aborted) return teardown();
+
     pc = new RTCPeerConnection();
 
     audioEl = document.createElement('audio');
@@ -144,7 +204,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
     dc = pc.createDataChannel('oai-events');
     dc.onopen = () => {
       console.log(`${LOG} data channel open — sending session.update`);
-      const update = {
+      const update: Record<string, unknown> = {
         type: 'session.update',
         session: {
           type: 'realtime',
@@ -153,10 +213,10 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
             input: { transcription: { model: 'whisper-1' } },
             output: { voice: opts.voice || 'marin' },
           },
+          ...(toolDefs.length ? { tools: toolDefs, tool_choice: 'auto' } : {}),
         },
       };
-      try { dc!.send(JSON.stringify(update)); }
-      catch (e) { console.warn(`${LOG} session.update send failed:`, e); }
+      sendEvent(update);
     };
     dc.onmessage = (ev) => {
       let parsed: Record<string, unknown> | null = null;
@@ -166,6 +226,12 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
         // Surface errors loudly; everything else is fine at log level.
         if (parsed.type === 'error') console.error(`${LOG} oai error:`, parsed);
         else console.log(`${LOG} event: ${parsed.type}`);
+      }
+      if (parsed.type === 'response.done') {
+        const response = parsed['response'];
+        if (response && typeof response === 'object') {
+          void handleFunctionCalls(response as Record<string, unknown>);
+        }
       }
       try { opts.onEvent?.(parsed); } catch { /* */ }
     };

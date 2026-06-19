@@ -3738,6 +3738,10 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             agent_interrupt,
             #[cfg(target_os = "macos")]
+            agent::realtime_bridge::realtime_tools,
+            #[cfg(target_os = "macos")]
+            agent::realtime_bridge::realtime_invoke_tool,
+            #[cfg(target_os = "macos")]
             agent_get_escalation,
             #[cfg(target_os = "macos")]
             agent_set_escalation,

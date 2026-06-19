@@ -20,6 +20,7 @@ pub mod event_kit;
 pub mod gemini;
 pub mod o8_http;
 pub mod openrouter;
+pub mod realtime_bridge;
 pub mod router;
 pub mod safety;
 pub mod screen;
