@@ -66,8 +66,9 @@ describe('nextRevealIndex (smooth streaming reveal stepping)', () => {
       frames += 1;
     }
     expect(i).toBe(text.length);
-    // 18 step cap + 12 word-snap = 30 hard ceiling; nothing should exceed it.
-    expect(maxDelta).toBeLessThanOrEqual(30);
+    // 32 step cap + 10 word-snap = 42 hard ceiling; fast, but never the
+    // 100+-char single-frame dump that reads as "shooting in".
+    expect(maxDelta).toBeLessThanOrEqual(42);
   });
 
   it('always moves by at least the minimum step on a slow trickle', () => {
