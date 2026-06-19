@@ -40,6 +40,18 @@ export interface StartRealtimeOptions {
 
 const LOG = '[realtime]';
 
+/**
+ * Mirror a key realtime event into the Rust app log (record_realtime_event →
+ * o8.log) so a live voice test is observable from outside the webview — the
+ * webview only forwards console.error otherwise. Fire-and-forget; a no-op
+ * outside a Tauri webview.
+ */
+function forwardLog(line: string): void {
+  import('@tauri-apps/api/core')
+    .then((m) => m.invoke('record_realtime_event', { line }))
+    .catch(() => { /* not in a Tauri webview */ });
+}
+
 const DEFAULT_INSTRUCTIONS =
   "You are Symon, the voice of o8 — the operator's desktop command surface. " +
   'Speak naturally and concisely, like a sharp teammate who is easy to talk to; ' +
@@ -70,6 +82,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
   const setStatus = (s: RealtimeStatus, detail?: string) => {
     status = s;
     console.log(`${LOG} status → ${s}${detail ? `: ${detail}` : ''}`);
+    forwardLog(`status → ${s}${detail ? `: ${detail}` : ''}`);
     try { opts.onStatus?.(s, detail); } catch { /* listener threw — ignore */ }
   };
 
@@ -126,6 +139,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
       try { args = call.arguments ? JSON.parse(call.arguments) as Record<string, unknown> : {}; }
       catch { /* model sent malformed args — pass {} */ }
       console.log(`${LOG} function_call: ${name}`, args);
+      forwardLog(`function_call: ${name}`);
 
       let result: unknown = { error: 'tool bridge unavailable' };
       if (mod) {
@@ -181,6 +195,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
       const raw = await invoke('realtime_tools') as Array<Record<string, unknown>>;
       if (Array.isArray(raw)) toolDefs = raw.map((t) => ({ type: 'function', ...t }));
       console.log(`${LOG} loaded ${toolDefs.length} tools`);
+      forwardLog(`loaded ${toolDefs.length} tools`);
     } catch (e) {
       console.warn(`${LOG} tool catalog unavailable (conversation-only):`, e);
     }
@@ -230,8 +245,10 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
       if (!parsed) return;
       if (typeof parsed.type === 'string') {
         // Surface errors loudly; everything else is fine at log level.
-        if (parsed.type === 'error') console.error(`${LOG} oai error:`, parsed);
-        else console.log(`${LOG} event: ${parsed.type}`);
+        if (parsed.type === 'error') {
+          console.error(`${LOG} oai error:`, parsed);
+          forwardLog(`oai error: ${JSON.stringify(parsed).slice(0, 300)}`);
+        } else console.log(`${LOG} event: ${parsed.type}`);
       }
       if (parsed.type === 'response.done') {
         const response = parsed['response'];

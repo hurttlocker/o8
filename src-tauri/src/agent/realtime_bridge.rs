@@ -45,6 +45,10 @@ pub async fn realtime_invoke_tool(
     args: Value,
 ) -> Result<Value, String> {
     let seq = REALTIME_TASK_SEQ.fetch_add(1, Ordering::SeqCst);
+    // Observability: every voice tool call + outcome lands in the app log
+    // (`[symon-rt]`) so the operator's live tests are visible from the shell.
+    let args_preview: String = args.to_string().chars().take(200).collect();
+    log::info!("[symon-rt] tool → {name} {args_preview}");
     let ctx = TaskCtx {
         task_id: format!("realtime-{seq}"),
         app,
@@ -60,11 +64,32 @@ pub async fn realtime_invoke_tool(
     // second (ElevenLabs) voice over the conversation. Unknown tools default to
     // Destructive, so a typo can't silently act.
     if !confirm_if_needed_opts(&ctx, &name, &args, false).await {
+        log::info!("[symon-rt] tool {name} = declined");
         return Ok(json!({ "error": "User declined this action", "declined_by_user": true }));
     }
 
     match tools::dispatch_tool_call(&name, args, &ctx).await {
-        Ok(output) => Ok(output),
-        Err(e) => Ok(json!({ "error": e })),
+        Ok(output) => {
+            log::info!(
+                "[symon-rt] tool {name} = {}",
+                if output.get("error").is_some() { "error" } else { "ok" }
+            );
+            Ok(output)
+        }
+        Err(e) => {
+            log::warn!("[symon-rt] tool {name} = err: {e}");
+            Ok(json!({ "error": e }))
+        }
     }
+}
+
+/// Mirror a client-side realtime lifecycle event (status changes, function-call
+/// intents, OpenAI errors) into the app log. The webview only forwards
+/// `console.error` otherwise, so without this the `[realtime]` trace is invisible
+/// outside the voice-settings window — this makes a live voice test observable
+/// from the shell (`[symon-rt]` in `~/Library/Logs/ai.o8.desktop/o8.log`).
+#[tauri::command]
+pub fn record_realtime_event(line: String) {
+    let trimmed: String = line.chars().take(400).collect();
+    log::info!("[symon-rt] {trimmed}");
 }
