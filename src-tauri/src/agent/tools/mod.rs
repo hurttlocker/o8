@@ -454,6 +454,48 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["verb"]
             }
         }),
+        // ── o8 Browser driving (drive a web page by voice) ────────────────────
+        json!({
+            "name": "o8_browser_read",
+            "description": "Read what o8's browser is showing, or wait for an element to appear — 'read the page', 'what's on this page', 'wait for the login form'. ReadOnly: never changes the page. Open a page first with o8_canvas verb 'open-browser' or o8_browser_act 'open'. Returns the page text plus a list of interactive elements (each with a CSS selector) you can then act on via o8_browser_act.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "verb": { "type": "string", "enum": ["read", "wait"], "description": "'read' the visible page text, or 'wait' for a selector to appear (polls ~8s)." },
+                    "selector": { "type": "string", "description": "read: optional CSS selector to read just one element. wait: the CSS selector to wait for (required)." },
+                    "text": { "type": "string", "description": "wait: optional text the element must contain." },
+                    "max_chars": { "type": "number", "description": "read: cap the returned text length (default 6000)." }
+                },
+                "required": ["verb"]
+            }
+        }),
+        json!({
+            "name": "o8_browser_act",
+            "description": "Act on the page o8's browser is showing — 'click the sign-in button', 'type my email into the search box', 'open localhost 3000'. Each action shows a confirm card first (the page can be a real logged-in site). Find selectors with o8_browser_read. Drives only o8's own browser surfaces (localhost / proxied pages).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "verb": { "type": "string", "enum": ["click", "type", "open"], "description": "'click' an element, 'type' into a field, or 'open' a URL." },
+                    "selector": { "type": "string", "description": "click/type: the CSS selector of the target element (get it from o8_browser_read)." },
+                    "text": { "type": "string", "description": "type: the text to enter." },
+                    "submit": { "type": "boolean", "description": "type: press Enter after typing to submit the form." },
+                    "url": { "type": "string", "description": "open: the URL to open, e.g. 'localhost:3000'." }
+                },
+                "required": ["verb"]
+            }
+        }),
+        // ── o8 Review (inspect a packet's diff before approving) ───────────────
+        json!({
+            "name": "o8_review_diff",
+            "description": "Inspect what a coding agent (packet) changed before approving — 'what did the auth packet change?', 'show me the diff before I approve'. Returns the diffstat (files + lines changed) and the review state (working / ready-to-merge / needs-revision / merged). ReadOnly — to actually release the merge use o8_approve_item. Name the packet, or omit for the only active one.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "packet": { "type": "string", "description": "Which packet/lane to inspect (fuzzy match on its label). Omit for the only active lane." }
+                },
+                "required": []
+            }
+        }),
         // ── Screen reading (give the brain sight) ─────────────────────────────
         json!({
             "name": "read_screen",
@@ -897,6 +939,9 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
             }
             o8_bridge::canvas_intent(&verb, args).await
         }
+        "o8_browser_read" => o8_bridge::browser_read(args).await,
+        "o8_browser_act" => o8_bridge::browser_act(args).await,
+        "o8_review_diff" => o8_bridge::review_diff(args).await,
         "read_screen" => crate::agent::screen::read_screen(ctx, args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_ui_set" => o8_ui::set_setting(&ctx.app, args),
