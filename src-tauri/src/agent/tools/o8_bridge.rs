@@ -1009,6 +1009,171 @@ pub async fn canvas_intent(verb: &str, args: Value) -> Result<Value, String> {
     }))
 }
 
+// ── Browser driving (drive a web page by voice) ───────────────────────────────
+
+/// POST one verb to o8's browser-agent bridge (`/api/browser/agent`) — the same
+/// gated route the `o8 browser` CLI and the operator MCP browser tools use. The
+/// route runs the verb against o8's embedded browser surface (or the headless
+/// engine tier for external URLs); we shape the body and relay the parsed result
+/// for the model to speak. An explicit page-side `error` surfaces as a spoken
+/// failure; probe's `ok:false`+`pending` (element not present yet) is NOT an
+/// error — callers that care inspect the envelope themselves.
+async fn browser_verb(verb: &str, inner: Value) -> Result<Value, String> {
+    let resp = o8_http::post_json_timeout(
+        "/api/browser/agent",
+        json!({ "verb": verb, "args": inner }),
+        20,
+    )
+    .await?;
+    if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        if let Some(err) = resp.get("error").and_then(|v| v.as_str()) {
+            return Err(format!("Browser {verb} failed: {err}"));
+        }
+    }
+    Ok(resp)
+}
+
+/// `o8_browser_read` — read what o8's browser is showing, or wait for an element
+/// to appear. ReadOnly: never changes the page, so it never shows a confirm card.
+pub async fn browser_read(args: Value) -> Result<Value, String> {
+    let verb = args.get("verb").and_then(|v| v.as_str()).unwrap_or("read").trim();
+    match verb {
+        "" | "read" => {
+            let mut inner = json!({});
+            if let Some(sel) = args
+                .get("selector")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                inner["selector"] = json!(sel);
+            }
+            if let Some(n) = args.get("max_chars").and_then(|v| v.as_u64()) {
+                inner["maxChars"] = json!(n);
+            }
+            let resp = browser_verb("read", inner).await?;
+            Ok(json!({
+                "ok": true,
+                "url": resp.get("url").cloned().unwrap_or(Value::Null),
+                "title": resp.get("title").cloned().unwrap_or(Value::Null),
+                "text": resp.get("text").cloned().unwrap_or(Value::Null),
+                "interactive": resp.get("interactive").cloned().unwrap_or(Value::Null),
+            }))
+        }
+        "wait" => {
+            let selector = args.get("selector").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if selector.is_empty() {
+                return Err("o8_browser_read verb 'wait' needs a 'selector'.".into());
+            }
+            let mut inner = json!({ "selector": selector });
+            if let Some(t) = args
+                .get("text")
+                .and_then(|v| v.as_str())
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+            {
+                inner["text"] = json!(t);
+            }
+            // Bounded poll (~8s) so "wait for the login form" actually waits.
+            // probe returns {ok:true, found} when present, {ok:false, pending}
+            // while absent (a hard error still aborts via browser_verb).
+            for attempt in 0..10u32 {
+                let resp = browser_verb("probe", inner.clone()).await?;
+                if resp.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+                    return Ok(json!({ "ok": true, "found": true, "selector": selector, "attempts": attempt + 1 }));
+                }
+                tokio::time::sleep(std::time::Duration::from_millis(800)).await;
+            }
+            Ok(json!({ "ok": true, "found": false, "selector": selector, "note": "still not present after ~8s of waiting" }))
+        }
+        other => Err(format!("o8_browser_read verb must be 'read' or 'wait' — got '{other}'.")),
+    }
+}
+
+/// `o8_browser_act` — act on the page o8's browser is showing: click an element,
+/// type into a field, or open a URL. Reversible: each action shows a confirm card
+/// (the page can be a real logged-in site), the same posture as term_send.
+pub async fn browser_act(args: Value) -> Result<Value, String> {
+    let verb = args.get("verb").and_then(|v| v.as_str()).unwrap_or("").trim();
+    match verb {
+        "click" => {
+            let selector = args.get("selector").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if selector.is_empty() {
+                return Err("o8_browser_act verb 'click' needs a 'selector'.".into());
+            }
+            let resp = browser_verb("click", json!({ "selector": selector })).await?;
+            Ok(json!({
+                "ok": true,
+                "clicked": resp.get("clicked").cloned().unwrap_or(json!(selector)),
+                "label": resp.get("label").cloned().unwrap_or(Value::Null),
+            }))
+        }
+        "type" => {
+            let selector = args.get("selector").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
+            if selector.is_empty() {
+                return Err("o8_browser_act verb 'type' needs a 'selector'.".into());
+            }
+            let mut inner = json!({ "selector": selector, "text": text });
+            if args.get("submit").and_then(|v| v.as_bool()) == Some(true) {
+                inner["submit"] = json!(true);
+            }
+            let resp = browser_verb("type", inner).await?;
+            Ok(json!({
+                "ok": true,
+                "typed": resp.get("typed").cloned().unwrap_or(Value::Null),
+                "into": resp.get("into").cloned().unwrap_or(json!(selector)),
+            }))
+        }
+        "open" => {
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if url.is_empty() {
+                return Err("o8_browser_act verb 'open' needs a 'url'.".into());
+            }
+            let resp = browser_verb("open", json!({ "url": url })).await?;
+            Ok(json!({ "ok": true, "opened": resp.get("url").cloned().unwrap_or(json!(url)) }))
+        }
+        other => Err(format!("o8_browser_act verb must be 'click', 'type', or 'open' — got '{other}'.")),
+    }
+}
+
+// ── Review (inspect a packet's diff before approving) ──────────────────────────
+
+/// `o8_review_diff` — inspect what a packet's worktree changed before approving:
+/// the diffstat (files + insertions/deletions, speakable) plus the canonical
+/// review state (working / ready-to-merge / needs-revision / merged / failed).
+/// ReadOnly — the operator still releases the merge via o8_approve_item; this
+/// just lets voice SEE the diff instead of approving blind. `packet` matches a
+/// lane the same fuzzy way o8_packet_steer does (omit for the only active lane).
+pub async fn review_diff(args: Value) -> Result<Value, String> {
+    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
+    let (packet_id, _session, label) = resolve_lane(which).await?;
+
+    // Diffstat only — small cap; we want the spoken summary, not the full patch.
+    // packet_id is a url-safe slug (pkt-…), so direct interpolation is safe.
+    let diff = o8_http::get_json(&format!("/api/lanes/{packet_id}/diff?maxBytes=2000")).await?;
+    if diff.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        let note = diff.get("note").and_then(|v| v.as_str()).unwrap_or("no diff available");
+        return Err(format!("Couldn't read the diff for \u{201c}{label}\u{201d}: {note}"));
+    }
+    let stat = diff.get("stat").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let branch = diff.get("branch").and_then(|v| v.as_str()).unwrap_or("").to_string();
+
+    // Review state — best-effort; the diffstat is the primary payload.
+    let state = o8_http::get_json(&format!("/api/orchestrator/review-state?packetId={packet_id}"))
+        .await
+        .ok()
+        .and_then(|r| r.get("state").and_then(|v| v.as_str()).map(str::to_string));
+
+    Ok(json!({
+        "ok": true,
+        "packet": label,
+        "branch": branch,
+        "state": state,
+        "stat": if stat.is_empty() { "no changes".to_string() } else { stat },
+    }))
+}
+
 #[cfg(test)]
 mod canvas_tests {
     use super::*;
