@@ -560,6 +560,16 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             cwd: reviewCwd,
             maxBuffer: 10 * 1024 * 1024,
           });
+          // Unstage o8-injected worktree artifacts so they never land in the review
+          // commit: the safety-hook `.claude/settings.json` (otherwise blows the
+          // diff-budget merge gate) and the `node_modules` symlink (otherwise pollutes
+          // the target repo's main). Use `git reset` to unstage rather than a negative
+          // `git add` pathspec — the latter errors ("paths are ignored") when an ignored
+          // dir like node_modules exists in the worktree.
+          await execFileAsync('git', ['reset', '-q', '--', '.claude', 'node_modules'], {
+            cwd: reviewCwd,
+            maxBuffer: 10 * 1024 * 1024,
+          });
           await execFileAsync('git', ['commit', '-m', 'auto-commit: agent work before review'], {
             cwd: reviewCwd,
             maxBuffer: 10 * 1024 * 1024,
