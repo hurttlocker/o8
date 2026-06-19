@@ -99,6 +99,12 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // Reading a packet's diff + review state is read-through; releasing the
         // merge stays on o8_approve_item (carded there).
         "o8_review_diff" => SafetyClass::ReadOnly,
+        // Conductor delegation — hands a task to the EXISTING live orchestrator
+        // (same path as o8_canvas send-prompt / typing in the composer), it does
+        // not spawn a new worker like o8_dispatch. The agent's own mutations stay
+        // gated downstream by o8's review/approval pipeline, so handing off is
+        // ReadOnly — and that keeps the voice conductor flow fluid.
+        "o8_delegate" => SafetyClass::ReadOnly,
         // Reading the screen is pure observation; capture is permission-gated by
         // macOS Screen Recording, so no confirm card.
         "read_screen" => SafetyClass::ReadOnly,

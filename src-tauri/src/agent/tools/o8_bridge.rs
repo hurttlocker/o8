@@ -1174,6 +1174,38 @@ pub async fn review_diff(args: Value) -> Result<Value, String> {
     }))
 }
 
+// ── Conductor delegation (hand a task to the live agent engine) ────────────────
+
+/// `o8_delegate` — hand an arbitrary, multi-step task to o8's LIVE in-app agent
+/// (the Claude REPL / orchestrator "agent mode") so it ACTS on it now — on the
+/// canvas / screen — while Symon keeps talking. This is the conductor move:
+/// gpt-realtime is a great voice but a weaker doer, so deep / multi-step /
+/// on-screen / "figure this out" work goes to the agent engine and Symon
+/// narrates. Distinct from o8_dispatch (which spawns a tracked Codex CODING
+/// worker in a worktree); delegate drives the LIVE session for immediate,
+/// arbitrary action. Reuses the canvas send-prompt path the operator's composer
+/// uses — so the canvas is the stage the operator watches, and the agent's own
+/// mutations stay gated downstream by o8's review/approval pipeline.
+pub async fn delegate(args: Value) -> Result<Value, String> {
+    let task = args.get("task").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    if task.is_empty() {
+        return Err("o8_delegate needs a 'task' — what should the agent do?".into());
+    }
+    // Bring the Canvas up and inject the task into the live orchestrator, which
+    // runs it as a real turn (tools + screen actions). canvas_intent surfaces a
+    // spoken-friendly error if the orchestrator isn't ready (no repo scoped /
+    // busy / not connected).
+    let resp = canvas_intent("send-prompt", json!({ "text": task })).await?;
+    let navigated = resp.get("navigated").and_then(|v| v.as_bool()).unwrap_or(false);
+    Ok(json!({
+        "ok": true,
+        "delegated": true,
+        "task": task,
+        "to": "the live agent (in-app orchestrator)",
+        "note": if navigated { "opened the canvas and handed it to the agent — it's working on it now" } else { "handed it to the agent on the canvas — it's working on it now" },
+    }))
+}
+
 #[cfg(test)]
 mod canvas_tests {
     use super::*;
