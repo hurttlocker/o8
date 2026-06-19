@@ -177,11 +177,20 @@ export function OrchestratorDock({
       transition={{ type: 'spring', stiffness: 300, damping: 32 }}
       data-glass-surface
       style={{
-        position: 'absolute',
+        // Pin to the VIEWPORT, not the nearest positioned ancestor. As an
+        // absolute child the dock anchored to a SmoothCorners wrapper whose box
+        // could sit wider than the window, so right:24 landed off-screen and the
+        // Cortex tab + ✕ undock were unreachable ("cut off at all times, can't
+        // undock"). The dock lives OUTSIDE the zoom/pan canvas layer, so fixed is
+        // safe (no transformed ancestor) and tracks the window edge exactly.
+        position: 'fixed',
         top: 74,
         right: 24,
         bottom: 96,
         width: 400,
+        // Never wider than the window — on a narrow window the dock shrinks
+        // instead of pushing its right edge (and the undock ✕) off-screen.
+        maxWidth: 'calc(100vw - 48px)',
         zIndex: 43,
         fontFamily: FONT,
         // SmoothCorners (autoEffects) wraps our surface in an extra unstyled
