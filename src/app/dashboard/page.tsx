@@ -33,6 +33,7 @@ import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalet
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
 import { ApprovalBanner } from '@/components/desktop/ApprovalBanner';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
+import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
 import { UiZoomLayer } from '@/components/desktop/UiZoomLayer';
@@ -3978,6 +3979,7 @@ function DashboardInner() {
       <AttendanceHeartbeat />
       <FileOpenBridge />
       <UiZoomLayer />
+      <RealtimeVoiceHost />
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
       height: '100vh',
       display: 'flex',

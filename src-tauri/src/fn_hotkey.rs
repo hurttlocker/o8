@@ -208,6 +208,40 @@ static LAST_OPTION_BRUSH: Mutex<Option<std::time::Instant>> = Mutex::new(None);
 #[cfg(target_os = "macos")]
 static AGENT_SESSION_ID: AtomicU64 = AtomicU64::new(0);
 
+/// NSEventModifierFlagCommand = 1 << 20.
+#[cfg(target_os = "macos")]
+const COMMAND_FLAG: u64 = 0x100000;
+
+/// Virtual keycode for the RIGHT Command key (Left Command = 55). Right ⌘ is
+/// unused by o8's other gestures (Fn + Option both drive dictation/agent), so a
+/// clean DOUBLE-TAP of it toggles voice-to-voice (realtime) mode without
+/// colliding with anything — the chosen trigger (operator, 2026-06-19).
+#[cfg(target_os = "macos")]
+const RIGHT_COMMAND_KEYCODE: i64 = 54;
+
+/// Max hold for a right-⌘ press to count as a TAP (not a held shortcut modifier).
+#[cfg(target_os = "macos")]
+const CMD_BRUSH_MS: u64 = 300;
+
+/// Edge latch for the right-Command key (the voice-toggle gesture).
+#[cfg(target_os = "macos")]
+static RIGHT_CMD_HELD: AtomicBool = AtomicBool::new(false);
+
+/// Set true when any key is pressed while right-⌘ is held — i.e. a ⌘-shortcut
+/// chord (⌘C, ⌘V, …), NOT a clean double-tap brush. The ⌘-release then no-ops,
+/// so normal shortcuts never toggle voice mode.
+#[cfg(target_os = "macos")]
+static RIGHT_CMD_CHORDED: AtomicBool = AtomicBool::new(false);
+
+/// Press time of the current right-⌘ hold, to classify brush vs hold.
+#[cfg(target_os = "macos")]
+static RIGHT_CMD_PRESS_TIME: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
+/// Timestamp of the last clean right-⌘ brush release. A second brush within
+/// `LONG_FORM_FN_DOUBLE_TAP_MS` is a double-tap → toggle realtime voice mode.
+#[cfg(target_os = "macos")]
+static LAST_RIGHT_CMD_BRUSH: Mutex<Option<std::time::Instant>> = Mutex::new(None);
+
 /// Whether a Right-Option Ask dictation is currently recording. Read by
 /// `run_finalize` (via take_ask_mode) to route the result to Gemini.
 #[cfg(target_os = "macos")]
@@ -309,6 +343,22 @@ fn consume_double_tap_brush() -> bool {
 #[cfg(target_os = "macos")]
 fn consume_option_double_tap_brush() -> bool {
     let mut guard = match LAST_OPTION_BRUSH.lock() {
+        Ok(g) => g,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    let matched = matches!(
+        *guard,
+        Some(t) if t.elapsed() <= std::time::Duration::from_millis(LONG_FORM_FN_DOUBLE_TAP_MS)
+    );
+    *guard = None;
+    matched
+}
+
+/// Whether the just-released right-⌘ brush completes a double-tap (voice toggle).
+/// Mirror of `consume_option_double_tap_brush` for the Command gesture.
+#[cfg(target_os = "macos")]
+fn consume_right_cmd_double_tap() -> bool {
+    let mut guard = match LAST_RIGHT_CMD_BRUSH.lock() {
         Ok(g) => g,
         Err(poisoned) => poisoned.into_inner(),
     };
@@ -884,6 +934,12 @@ pub fn start(app: tauri::AppHandle) {
                     // LONG_FORM_ACTIVE so the common case (no long-form) stays the
                     // same cheap early return as before.
                     if matches!(event_type, CGEventType::KeyDown) {
+                        // A key pressed while right-⌘ is held is a ⌘-shortcut chord
+                        // (⌘C, ⌘V, ⌘Z, …), not a clean double-tap — mark it so the
+                        // eventual ⌘-release isn't counted as a voice-toggle brush.
+                        if RIGHT_CMD_HELD.load(Ordering::SeqCst) {
+                            RIGHT_CMD_CHORDED.store(true, Ordering::SeqCst);
+                        }
                         // Option+<key> chords (⌥-arrow word jumps, ⌥S say, special
                         // characters) are NOT push-to-talk: any KeyDown while the
                         // Option hold-gesture is recording cancels it. Clearing the
@@ -1078,6 +1134,63 @@ pub fn start(app: tauri::AppHandle) {
                                     std::thread::spawn(discard_agent_dictation);
                                 } else {
                                     std::thread::spawn(end_agent_dictation);
+                                }
+                            }
+                        }
+                    }
+
+                    // ── Right Command (double-tap) → voice-to-voice toggle ──
+                    // Right ⌘ is unused by o8's Fn/Option gestures, so a clean
+                    // DOUBLE-TAP flips realtime voice mode on/off (the dashboard's
+                    // RealtimeVoiceHost listens for `o8:realtime-toggle`). Guards: a
+                    // hold ≥CMD_BRUSH_MS (held modifier) or a ⌘-shortcut chord (a key
+                    // pressed while ⌘ is down) is NOT a brush — so ⌘C/⌘V and held
+                    // shortcuts never toggle. Left ⌘ (keycode 55) is ignored entirely.
+                    {
+                        let keycode =
+                            event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
+                        if keycode == RIGHT_COMMAND_KEYCODE {
+                            let cmd_down = (flags & COMMAND_FLAG) != 0;
+                            let cmd_down_edge = cmd_down
+                                && RIGHT_CMD_HELD
+                                    .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+                                    .is_ok();
+                            let cmd_up_edge = !cmd_down
+                                && RIGHT_CMD_HELD
+                                    .compare_exchange(true, false, Ordering::SeqCst, Ordering::SeqCst)
+                                    .is_ok();
+                            if cmd_down_edge {
+                                RIGHT_CMD_CHORDED.store(false, Ordering::SeqCst);
+                                if let Ok(mut t) = RIGHT_CMD_PRESS_TIME.lock() {
+                                    *t = Some(std::time::Instant::now());
+                                }
+                            } else if cmd_up_edge {
+                                let press = RIGHT_CMD_PRESS_TIME
+                                    .lock()
+                                    .ok()
+                                    .and_then(|t| *t)
+                                    .unwrap_or_else(std::time::Instant::now);
+                                let hold = std::time::Instant::now().duration_since(press);
+                                let chorded = RIGHT_CMD_CHORDED.load(Ordering::SeqCst);
+                                if !chorded
+                                    && hold < std::time::Duration::from_millis(CMD_BRUSH_MS)
+                                {
+                                    if consume_right_cmd_double_tap() {
+                                        // Double-tap → toggle realtime voice mode.
+                                        // Off-tap: the callback must return fast.
+                                        std::thread::spawn(|| {
+                                            if let Some(app) = APP_HANDLE.get() {
+                                                let _ = app.emit(
+                                                    "o8:realtime-toggle",
+                                                    serde_json::json!({ "origin": "double-tap-right-cmd" }),
+                                                );
+                                            }
+                                        });
+                                    } else if let Ok(mut g) = LAST_RIGHT_CMD_BRUSH.lock() {
+                                        // First clean brush — stamp it; a second
+                                        // within the window completes the double-tap.
+                                        *g = Some(std::time::Instant::now());
+                                    }
                                 }
                             }
                         }
