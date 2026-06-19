@@ -109,11 +109,28 @@ export async function autoCommitCompletionWorktree(cwd: string): Promise<boolean
 
   // `git status --porcelain` does not include ignored directories by default.
   // Passing explicit negative pathspecs for ignored dirs makes Git error when
-  // those dirs exist, which is exactly what automation worktrees contain.
+  // those dirs exist, which is exactly what automation worktrees contain — so we
+  // stage everything and then UNSTAGE o8-injected artifacts with `git reset`:
+  // the safety-hook `.claude/settings.json` (otherwise blows the diff-budget merge
+  // gate) and the `node_modules` symlink (otherwise pollutes the target repo's main).
   await execFileAsync('git', ['add', '-A', '--', '.'], {
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
   });
+  await execFileAsync('git', ['reset', '-q', '--', '.claude', 'node_modules'], {
+    cwd,
+    maxBuffer: COMMAND_MAX_BUFFER,
+  });
+  // If only o8-injected artifacts were dirty, nothing real remains to commit.
+  try {
+    await execFileAsync('git', ['diff', '--cached', '--quiet'], {
+      cwd,
+      maxBuffer: COMMAND_MAX_BUFFER,
+    });
+    return false; // exit 0 => no staged changes left after unstaging injected files
+  } catch {
+    // non-zero exit => staged changes exist, proceed to commit
+  }
   await execFileAsync('git', ['commit', '--no-verify', '-m', 'auto-commit: agent work before review'], {
     cwd,
     maxBuffer: COMMAND_MAX_BUFFER,
