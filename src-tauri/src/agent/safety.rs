@@ -90,6 +90,15 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // mutations (worker spawn, merge) stay gated downstream by o8's
         // review/approval pipeline — so no extra confirm card here.
         "o8_canvas" => SafetyClass::ReadOnly,
+        // Browser driving. Reading the page / waiting for an element is pure
+        // observation. Acting (click / type / open) can submit a form on a real
+        // logged-in site → Reversible so it ALWAYS cards (same posture as
+        // term_send); if blanket consent ever ships, EXCLUDE o8_browser_act.
+        "o8_browser_read" => SafetyClass::ReadOnly,
+        "o8_browser_act" => SafetyClass::Reversible,
+        // Reading a packet's diff + review state is read-through; releasing the
+        // merge stays on o8_approve_item (carded there).
+        "o8_review_diff" => SafetyClass::ReadOnly,
         // Reading the screen is pure observation; capture is permission-gated by
         // macOS Screen Recording, so no confirm card.
         "read_screen" => SafetyClass::ReadOnly,
