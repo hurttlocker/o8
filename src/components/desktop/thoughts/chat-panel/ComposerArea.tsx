@@ -24,11 +24,13 @@ function ComposerStatusBar({
   runningTools,
   activeTargetLabel,
   latestUserMessageId,
+  awaitingReply,
 }: {
   displayWaiting: boolean;
   runningTools: MobileTranscriptToolCall[];
   activeTargetLabel: string;
   latestUserMessageId: string | null;
+  awaitingReply: boolean;
 }) {
   const startedAtRef = useRef<number | null>(null);
   const [elapsed, setElapsed] = useState(0);
@@ -39,7 +41,16 @@ function ComposerStatusBar({
   const prevDisplayWaitingRef = useRef(displayWaiting);
   const prevLatestUserMessageIdRef = useRef<string | null>(latestUserMessageId);
   const hasRunningTools = runningTools.length > 0;
-  const active = displayWaiting || hasRunningTools;
+  // Turn-in-flight latch. orchStream.status flickers busy→ready→busy across a
+  // single turn (it drops to 'ready' for the whole "thinking" gap between
+  // accepting the send and the first streamed token), which made the indicator
+  // vanish mid-turn. Latch ON when a turn starts (a new user message, or
+  // displayWaiting rising on a tool-initiated cycle) and OFF only once the reply
+  // has landed AND streaming has settled — so the bar stays put for the whole
+  // turn. The rising-edge trigger means a reload whose last message is a user
+  // message does NOT light the bar. 2026-06-18.
+  const [turnLatched, setTurnLatched] = useState(false);
+  const active = displayWaiting || hasRunningTools || turnLatched;
 
   // Reset the elapsed anchor on turn boundaries — either the user sent a new
   // message (which includes steer messages fired while a previous turn is
@@ -55,12 +66,23 @@ function ComposerStatusBar({
     prevLatestUserMessageIdRef.current = latestUserMessageId;
     if (risingEdge || newUserMessage) {
       startedAtRef.current = Date.now();
+      setTurnLatched(true);
       const frame = window.requestAnimationFrame(() => {
         setElapsed(0);
       });
       return () => window.cancelAnimationFrame(frame);
     }
   }, [displayWaiting, latestUserMessageId]);
+
+  // Release the latch once the turn is genuinely done: the reply (or an error
+  // note) has landed (awaitingReply false) AND we're no longer streaming
+  // (displayWaiting false) AND no tools are running. Until all three hold, the
+  // bar stays visible — bridging the thinking gap and any mid-turn flicker.
+  useEffect(() => {
+    if (turnLatched && !awaitingReply && !displayWaiting && !hasRunningTools) {
+      setTurnLatched(false);
+    }
+  }, [turnLatched, awaitingReply, displayWaiting, hasRunningTools]);
 
   useEffect(() => {
     if (!active) {
@@ -285,6 +307,11 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
     }
     return null;
   }, [chatMessages]);
+  // True while the latest message is the user's own — the orchestrator has been
+  // handed the turn but hasn't streamed a reply yet (the "thinking" gap). The
+  // working indicator must persist through this gap even though orchStream.status
+  // drops to non-busy between accepting the send and the first token. 2026-06-18.
+  const awaitingReply = chatMessages[chatMessages.length - 1]?.role === 'user';
   const slashSuggestions = useMemo(() => {
     const normalizedInput = input.trimStart();
     if (!isOrchestratorMode || dismissedSlashInput === input || !normalizedInput.startsWith('/')) {
@@ -422,6 +449,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           runningTools={runningTools}
           activeTargetLabel={activeTargetLabel}
           latestUserMessageId={latestUserMessageId}
+          awaitingReply={awaitingReply}
         />
       ) : null}
       <div style={{ position: 'relative' }}>
