@@ -16,6 +16,7 @@ import { FONT, TONE_DOT, glassPop, scrollFadeY, type DockEntry, type Orchestrato
 import { useScrollBlurFade } from './use-scroll-blur-fade';
 import { ReasoningView } from './reasoning';
 import { SwarmStatusCard, type SwarmScoutView } from '@/components/desktop/thoughts/chat-panel/SwarmStatusCard';
+import { useSmoothText } from '@/components/desktop/thoughts/chat-panel/use-smooth-text';
 import { BrainConversation } from './brain-card';
 import { CardComposer } from './card-composer';
 import { FilesResult, PrResult, ScreenshotResult } from './response-blocks';
@@ -450,6 +451,14 @@ export function DockTab({ label, active, onClick }: { label: string; active: boo
  *  Borderless throughout (Q's reference): user = soft pill, result + prose flow
  *  on the glass, no boxed cards or divider lines. */
 export function DockEntryView({ entry }: { entry: DockEntry }) {
+  // Smooth streaming reveal for the assistant's prose — same hook the desktop
+  // chat uses (DesktopAgentMessage). Called unconditionally (rules of hooks);
+  // it only animates while a 'text' entry is live, otherwise returns the full
+  // text immediately. revealedText is consumed only in the text branch below.
+  const revealedText = useSmoothText(
+    entry.role === 'text' ? entry.text : '',
+    entry.role === 'text' && entry.live === true,
+  );
   return (
     <motion.div
       initial={{ opacity: 0, y: 10 }}
@@ -564,8 +573,9 @@ export function DockEntryView({ entry }: { entry: DockEntry }) {
       ) : null}
       {entry.role === 'text' ? (
         // Borderless prose — the assistant's turn flows on the glass, no boxed
-        // card (Q's reference: smooth, no extra lines).
-        <CanvasMarkdown text={entry.text} />
+        // card (Q's reference: smooth, no extra lines). revealedText paces the
+        // reveal while live (matches the desktop chat); settles to full on done.
+        <CanvasMarkdown text={revealedText} />
       ) : null}
       {entry.role === 'playback' ? (
         // Pops up at the end of a turn — play back the full answer aloud.
