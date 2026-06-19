@@ -72,6 +72,17 @@ const PROVIDERS: ProviderKeyConfig[] = [
     docsUrl: 'https://console.anthropic.com/keys',
     validateUrl: 'https://api.anthropic.com/v1/messages',
   },
+  {
+    // BYOK for Symon Realtime mode (gpt-realtime). Free path — the user's key
+    // bills OpenAI directly, o8 never spends (the managed/proxied path is the
+    // paid lever). See src/lib/voice/realtime-access.ts.
+    id: 'openai',
+    label: 'OpenAI',
+    envVar: 'OPENAI_API_KEY',
+    placeholder: 'sk-...',
+    docsUrl: 'https://platform.openai.com/api-keys',
+    validateUrl: 'https://api.openai.com/v1/models',
+  },
 ];
 
 /**
