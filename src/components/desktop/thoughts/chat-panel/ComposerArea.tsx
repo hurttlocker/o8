@@ -445,7 +445,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             borderRadius: 14,
             border: '1px solid var(--t-input-border)',
             background: 'var(--t-input-bg)',
-            boxShadow: '0 14px 30px rgba(15, 23, 42, 0.08)',
+            // Flat on the workspace — no drop shadow (operator request,
+            // 2026-06-18). The border + input bg already define the composer.
             overflow: 'hidden',
             opacity: isDisabled ? 0.6 : 1,
             outline: dragOver ? '2px solid var(--t-accent)' : 'none',
