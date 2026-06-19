@@ -788,6 +788,81 @@ pub async fn packet_rerun(args: Value) -> Result<Value, String> {
     Ok(json!({ "restarted": true, "packet": label }))
 }
 
+/// `o8_packet_reset` — recover a STUCK packet by wiping its worktree + archiving
+/// the lane, then relaunching ("reset the stuck packet and try again"). Distinct
+/// from o8_packet_rerun, which KEEPS the worktree — reset is for when the
+/// worktree itself is wedged. `keep_worktree:true` = "retry" (preserve + resume).
+/// Reuses the operator's reset-packet → dispatch flow.
+pub async fn packet_reset(args: Value) -> Result<Value, String> {
+    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
+    let keep_worktree = args.get("keep_worktree").and_then(|v| v.as_bool()).unwrap_or(false);
+    let (packet_id, _session, label) = resolve_lane(which).await?;
+
+    let mut body = json!({ "packetId": packet_id, "clearWorktree": !keep_worktree });
+    if let Some(r) = args.get("reason").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+        body["reason"] = json!(r);
+    }
+    // o8_http returns Err on a non-2xx, so a clean return means the lane was
+    // archived (+ worktree wiped unless kept).
+    o8_http::post_json("/api/orchestrator/reset-packet", body)
+        .await
+        .map_err(|e| format!("Couldn't reset \u{201c}{label}\u{201d}: {e}"))?;
+
+    // Relaunch via the standard reset → dispatch flow (mission-level dispatch
+    // re-runs the now-pending packet). Best-effort — the archive already
+    // succeeded, so report partial success if the relaunch hiccups.
+    let redispatched = o8_http::post_json("/api/orchestrator/dispatch", json!({})).await.is_ok();
+    crate::agent::worker_pulse::nudge();
+
+    Ok(json!({
+        "ok": true,
+        "packet": label,
+        "worktree": if keep_worktree { "kept" } else { "wiped" },
+        "redispatched": redispatched,
+        "note": if redispatched {
+            "reset and relaunched it"
+        } else {
+            "reset it — say 'dispatch' or tell the orchestrator to relaunch"
+        },
+    }))
+}
+
+/// `o8_packet_wait` — wait for a packet to leave the "working" state and report
+/// where it landed (ready-to-merge / needs-revision / merged / failed). A short
+/// bounded poll (~12s) so a live voice turn doesn't hang; if it's still working,
+/// say so and the model can ask again. ReadOnly.
+pub async fn packet_wait(args: Value) -> Result<Value, String> {
+    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
+    let (packet_id, _session, label) = resolve_lane(which).await?;
+
+    let mut last = String::from("working");
+    for _ in 0..6u32 {
+        if let Ok(resp) =
+            o8_http::get_json(&format!("/api/orchestrator/review-state?packetId={packet_id}")).await
+        {
+            if let Some(state) = resp.get("state").and_then(|v| v.as_str()) {
+                last = state.to_string();
+                if state != "working" {
+                    return Ok(json!({
+                        "ok": true,
+                        "packet": label,
+                        "state": state,
+                        "ready": state == "ready-to-merge",
+                    }));
+                }
+            }
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(2000)).await;
+    }
+    Ok(json!({
+        "ok": true,
+        "packet": label,
+        "state": last,
+        "ready": false,
+        "note": "still working after ~12s — ask again to keep waiting",
+    }))
+}
+
 /// Resolve a repo folder name (or an absolute path) to a registered absolute
 /// path via `/api/panel/repos`. Exact name match wins; otherwise a substring
 /// match. Returns a spoken-friendly error when nothing matches. Shared with the
