@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { detectTypecheckSkip, isMissingTscOutput } from './typecheck-availability';
+
 const execFileAsync = promisify(execFile);
 
 const TYPECHECK_TIMEOUT_MS = 120_000;
@@ -24,6 +26,14 @@ export async function runLaneRebaseTypecheck(input: {
   actualBranch: string;
   logPrefix: string;
 }): Promise<LaneRebaseTypecheckResult> {
+  const skip = await detectTypecheckSkip(input.cwd);
+  if (skip.skip) {
+    console.warn(
+      `[${input.logPrefix}] Skipping typecheck for ${input.actualBranch}: ${skip.reason}. ` +
+        'Treating as pass so the merge does not loop the layer-1 auto-retry (#1255).',
+    );
+    return { ok: true };
+  }
   try {
     await execFileAsync('npx', ['tsc', '--noEmit'], {
       cwd: input.cwd,
@@ -34,6 +44,17 @@ export async function runLaneRebaseTypecheck(input: {
     return { ok: true };
   } catch (error) {
     const output = extractTypecheckOutput(error);
+
+    // Safety net: if node_modules existed but `npx tsc` still resolved to the
+    // squatter package, the pre-check missed it — never treat that as a type
+    // error (it would loop the auto-retry).
+    if (isMissingTscOutput(output)) {
+      console.warn(
+        `[${input.logPrefix}] No local TypeScript compiler in ${input.actualBranch} worktree; skipping typecheck (#1255).`,
+      );
+      return { ok: true };
+    }
+
     const diagnostics = splitDiagnosticBlocks(output);
     const ignorableDiagnostics = diagnostics.filter(isIgnorableGhostFileDiagnostic);
 

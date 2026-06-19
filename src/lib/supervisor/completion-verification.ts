@@ -1,6 +1,8 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 
+import { detectTypecheckSkip, isMissingTscOutput } from '@/lib/lane/typecheck-availability';
+
 import { buildRuleCheckFailureMessage, runRuleCheck } from './rule-check';
 
 const execFileAsync = promisify(execFile);
@@ -22,6 +24,11 @@ export interface CompletionVerificationResult {
 }
 
 export async function runCompletionTypecheck(cwd: string): Promise<CompletionTypecheckResult> {
+  const skip = await detectTypecheckSkip(cwd);
+  if (skip.skip) {
+    console.warn(`[completion-verification] Skipping typecheck: ${skip.reason} (#1255).`);
+    return { ok: true, output: '' };
+  }
   try {
     const { stdout, stderr } = await execFileAsync('npx', ['tsc', '--noEmit'], {
       cwd,
@@ -46,6 +53,14 @@ export async function runCompletionTypecheck(cwd: string): Promise<CompletionTyp
       bufferToString(execError.stdout),
       bufferToString(execError.stderr),
     );
+
+    // node_modules existed but `npx tsc` hit the squatter package — skip rather
+    // than report a phantom type error that would loop the retry (#1255).
+    if (isMissingTscOutput(commandOutput)) {
+      console.warn('[completion-verification] No local TypeScript compiler; skipping typecheck (#1255).');
+      return { ok: true, output: '' };
+    }
+
     const failureSummary = execError.signal
       ? `Process terminated by ${execError.signal}.`
       : typeof execError.status === 'number'
