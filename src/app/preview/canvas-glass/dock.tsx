@@ -202,6 +202,13 @@ export function OrchestratorDock({
         // height:100% surface resolves, the transcript scrolls, composer stays.
         display: 'grid',
         gridTemplateRows: 'minmax(0, 1fr)',
+        // SAME minmax(0,1fr) trick on the COLUMN axis — the row pin alone left
+        // the implicit column `auto`, so a wide child (the SmoothCorners shape
+        // SVG / a long unbroken transcript line) grew the track to its
+        // min-content width (~814px), overflowing the 400px panel to the RIGHT
+        // and shoving the ✕ undock + Cortex tab off-screen. The 0-floor caps the
+        // column at the panel width so content wraps/clips inside it instead.
+        gridTemplateColumns: 'minmax(0, 1fr)',
       }}
     >
       {/* No hard panel — the dock FADES into the canvas on its left; the solid
