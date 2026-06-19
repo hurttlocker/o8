@@ -508,6 +508,25 @@ pub fn all_tools() -> Vec<Value> {
                 "required": ["task"]
             }
         }),
+        // ── o8.md spec annotation (annotate the operator's living spec) ────────
+        json!({
+            "name": "o8_spec_annotate",
+            "description": "Annotate the operator's o8.md — the living spec / scratchpad for a repo — by voice. Leave a comment ('add a note to the spec that we should revisit the merge gate'), reply to an existing thread, or resolve an item. You only ANNOTATE — never overwrite the operator's prose. Names a repo, or uses the only registered one. Each write shows a confirm card.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "verb": { "type": "string", "enum": ["comment", "reply", "resolve"], "description": "'comment' a new note, 'reply' to a thread, or 'resolve' an item." },
+                    "repo": { "type": "string", "description": "Which repo's o8.md (name or path). Omit to use the only registered repo." },
+                    "body": { "type": "string", "description": "comment: the comment text." },
+                    "anchor": { "type": "string", "description": "comment: optional literal text in o8.md to attach the comment to." },
+                    "parentId": { "type": "string", "description": "reply: the id of the thread to reply to (e.g. 'c1')." },
+                    "message": { "type": "string", "description": "reply: the reply text." },
+                    "targetId": { "type": "string", "description": "resolve: the id of the item to resolve." },
+                    "summary": { "type": "string", "description": "resolve: optional one-line resolution note." }
+                },
+                "required": ["verb"]
+            }
+        }),
         // ── Screen reading (give the brain sight) ─────────────────────────────
         json!({
             "name": "read_screen",
@@ -955,6 +974,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_browser_act" => o8_bridge::browser_act(args).await,
         "o8_review_diff" => o8_bridge::review_diff(args).await,
         "o8_delegate" => o8_bridge::delegate(args).await,
+        "o8_spec_annotate" => o8_bridge::spec_annotate(args).await,
         "read_screen" => crate::agent::screen::read_screen(ctx, args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
         "o8_ui_set" => o8_ui::set_setting(&ctx.app, args),

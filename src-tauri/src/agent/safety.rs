@@ -105,6 +105,8 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // gated downstream by o8's review/approval pipeline, so handing off is
         // ReadOnly — and that keeps the voice conductor flow fluid.
         "o8_delegate" => SafetyClass::ReadOnly,
+        // Annotating the operator's living spec (o8.md) is a write → cards.
+        "o8_spec_annotate" => SafetyClass::Reversible,
         // Reading the screen is pure observation; capture is permission-gated by
         // macOS Screen Recording, so no confirm card.
         "read_screen" => SafetyClass::ReadOnly,

@@ -1206,6 +1206,105 @@ pub async fn delegate(args: Value) -> Result<Value, String> {
     }))
 }
 
+// ── o8.md spec annotation (annotate the operator's living spec by voice) ───────
+
+/// Percent-encode a query-string VALUE per RFC 3986 (everything except the
+/// unreserved set ALPHA / DIGIT / - . _ ~). Needed for the `repoPath` query param
+/// on /api/repo-spec, which can contain '/' and spaces. std-only, no dep.
+fn qenc(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() * 3);
+    for b in s.bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(b as char),
+            _ => out.push_str(&format!("%{b:02X}")),
+        }
+    }
+    out
+}
+
+/// Resolve the repo path for a spec action: an explicit `repo` (name or path) via
+/// resolve_repo_path, else the single registered repo, else ask which.
+async fn resolve_spec_repo(args: &Value) -> Result<String, String> {
+    if let Some(repo) = args
+        .get("repo")
+        .and_then(|v| v.as_str())
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+    {
+        return resolve_repo_path(repo).await;
+    }
+    let resp = o8_http::get_json("/api/panel/repos").await?;
+    let paths: Vec<String> = resp
+        .get("repos")
+        .and_then(|v| v.as_array())
+        .map(|arr| {
+            arr.iter()
+                .filter_map(|r| {
+                    r.get("localPath").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string)
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+    match paths.len() {
+        1 => Ok(paths.into_iter().next().unwrap()),
+        0 => Err("No repos are registered in o8 yet.".into()),
+        _ => Err("Which repo's spec? You have more than one — name the repo.".into()),
+    }
+}
+
+fn spec_ok(resp: Value, done: &str) -> Result<Value, String> {
+    if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
+        return Err(format!("Couldn't annotate the spec: {err}"));
+    }
+    Ok(json!({ "ok": true, "done": done }))
+}
+
+/// `o8_spec_annotate` — annotate the operator's o8.md (the living spec/scratchpad)
+/// by voice: leave a comment, reply to a thread, or resolve an item. Reversible —
+/// each writes to the spec, so it cards first. Per the o8 review inversion the
+/// operator AUTHORS o8.md; voice only ANNOTATES (no overwrite verb). Thin call to
+/// /api/repo-spec, the same route the o8_spec_* MCP tools + the spec panel use.
+pub async fn spec_annotate(args: Value) -> Result<Value, String> {
+    let verb = args.get("verb").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let repo_path = resolve_spec_repo(&args).await?;
+    let base = format!("/api/repo-spec?repoPath={}", qenc(&repo_path));
+    match verb {
+        "comment" => {
+            let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if body.is_empty() {
+                return Err("o8_spec_annotate verb 'comment' needs a 'body' — what's the comment?".into());
+            }
+            let mut payload = json!({ "body": body, "author": "Symon" });
+            if let Some(a) = args.get("anchor").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+                payload["anchor"] = json!(a);
+            }
+            spec_ok(o8_http::post_json(&format!("{base}&action=comment"), payload).await?, "commented on the spec")
+        }
+        "reply" => {
+            let parent = args.get("parentId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if parent.is_empty() || message.is_empty() {
+                return Err("o8_spec_annotate verb 'reply' needs 'parentId' and 'message'.".into());
+            }
+            let payload = json!({ "parentId": parent, "message": message, "author": "Symon" });
+            spec_ok(o8_http::post_json(&format!("{base}&action=reply"), payload).await?, "replied on the spec")
+        }
+        "resolve" => {
+            let target = args.get("targetId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            if target.is_empty() {
+                return Err("o8_spec_annotate verb 'resolve' needs a 'targetId'.".into());
+            }
+            let mut payload = json!({ "targetId": target });
+            if let Some(s) = args.get("summary").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
+                payload["summary"] = json!(s);
+            }
+            spec_ok(o8_http::post_json(&format!("{base}&action=resolve"), payload).await?, "resolved the spec item")
+        }
+        other => Err(format!("o8_spec_annotate verb must be 'comment', 'reply', or 'resolve' — got '{other}'.")),
+    }
+}
+
 #[cfg(test)]
 mod canvas_tests {
     use super::*;
@@ -1271,5 +1370,13 @@ mod canvas_tests {
     #[test]
     fn spawn_agents_is_a_known_verb() {
         assert!(CANVAS_VERBS.contains(&"spawn-agents"));
+    }
+
+    #[test]
+    fn qenc_encodes_path_query_value() {
+        // Slashes + spaces must percent-encode for the repoPath query param;
+        // RFC 3986 unreserved chars pass through untouched.
+        assert_eq!(qenc("/Users/q/My Repo"), "%2FUsers%2Fq%2FMy%20Repo");
+        assert_eq!(qenc("a-b_c.d~e"), "a-b_c.d~e");
     }
 }
