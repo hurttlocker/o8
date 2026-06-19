@@ -43,7 +43,11 @@ const REALTIME_VOICE_OPTS = [
   { value: 'marin', label: 'Marin' },
   { value: 'cedar', label: 'Cedar' },
   { value: 'alloy', label: 'Alloy' },
+  { value: 'ash', label: 'Ash' },
+  { value: 'ballad', label: 'Ballad' },
+  { value: 'coral', label: 'Coral' },
   { value: 'echo', label: 'Echo' },
+  { value: 'sage', label: 'Sage' },
   { value: 'shimmer', label: 'Shimmer' },
   { value: 'verse', label: 'Verse' },
 ];
