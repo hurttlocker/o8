@@ -19,6 +19,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
 
 use serde_json::{json, Value};
+use tauri::Emitter;
 
 use super::{confirm_if_needed_opts, tools, TaskCtx};
 
@@ -92,4 +93,21 @@ pub async fn realtime_invoke_tool(
 pub fn record_realtime_event(line: String) {
     let trimmed: String = line.chars().take(400).collect();
     log::info!("[symon-rt] {trimmed}");
+}
+
+/// Push the live realtime-voice PRESENCE to the screen dock — the always-on
+/// Symon pill — so "voice is live" shows up where Symon already lives, not only
+/// inside the IDE window. The client maps its fine-grained `RealtimeStatus` down
+/// to a simple `off | connecting | live | error` before calling this.
+///
+/// `emit_to(DOCK_LABEL, …)` is the reliable second-window path (a plain
+/// broadcast has been seen to miss the dock webview — see the dock-route note in
+/// `dictation-pill/page.tsx`); the broadcast twin is belt-and-suspenders for the
+/// main window. Fire-and-forget.
+#[tauri::command]
+pub fn realtime_status_changed(app: tauri::AppHandle, status: String) {
+    log::info!("[symon-rt] presence → {status}");
+    let payload = json!({ "status": status });
+    let _ = app.emit_to(crate::dock_window::DOCK_LABEL, "o8:realtime-status", payload.clone());
+    let _ = app.emit("o8:realtime-status", payload);
 }
