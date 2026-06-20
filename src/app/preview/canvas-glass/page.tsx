@@ -56,6 +56,7 @@ import { CanvasBackdropLayer } from './backdrops';
 import { BrowserGlassCard, type BrowserCard, type BrowserTab } from './browser-card';
 import { SpecGlassCard, type SpecCard } from './spec-card';
 import { BrainGlassCard, type BrainCard } from './brain-card';
+import { MarkdownGlassCard, type MarkdownCard } from './markdown-card';
 import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
 import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
 import { AgentGlassCard, type AgentCard } from './agent-card';
@@ -276,6 +277,10 @@ export default function CanvasGlassPreviewPage() {
   const [diffCards, setDiffCards] = useState<DiffCard[]>([]);
   const [specCards, setSpecCards] = useState<SpecCard[]>([]);
   const [brainCards, setBrainCards] = useState<BrainCard[]>([]);
+  // Render-on-screen (#1270) — ephemeral markdown explainer cards the
+  // orchestrator paints via the `render` intent. Not persisted (content IS the
+  // card), so they live only for the session.
+  const [markdownCards, setMarkdownCards] = useState<MarkdownCard[]>([]);
   const [agentCards, setAgentCards] = useState<AgentCard[]>([]);
   const [reviewPickerOpen, setReviewPickerOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
@@ -1058,9 +1063,10 @@ export default function CanvasGlassPreviewPage() {
       ...diffCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
       ...specCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h })),
       ...brainCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 92 })),
+      ...markdownCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
       ...agentCards.map((c) => ({ x: c.x, y: c.y, w: c.w, h: c.h + 36 })),
     ];
-  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, agentCards]);
+  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
 
   /** First clear spot scanning reading-order; least-covered cell when the
    *  canvas is genuinely full. */
@@ -1245,8 +1251,9 @@ export default function CanvasGlassPreviewPage() {
       ...diffCards.map((c) => ({ kind: 'diff', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...specCards.map((c) => ({ kind: 'spec', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
       ...brainCards.map((c) => ({ kind: 'brain', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
+      ...markdownCards.map((c) => ({ kind: 'markdown', id: c.id, x: c.x, y: c.y, w: c.w, h: c.h })),
     ];
-  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+  }, [termCards, fileCards, imageCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards]);
 
   const gridAnimRef = useRef<{ stop: () => void } | null>(null);
   const [gridPlaceholder, setGridPlaceholder] = useState<Slot | null>(null);
@@ -1276,6 +1283,7 @@ export default function CanvasGlassPreviewPage() {
       setDiffCards((p) => p.map((c) => lerp(c, t)));
       setSpecCards((p) => p.map((c) => lerp(c, t)));
       setBrainCards((p) => p.map((c) => lerp(c, t)));
+      setMarkdownCards((p) => p.map((c) => lerp(c, t)));
       setAgentCards((p) => p.map((c) => lerp(c, t)));
     };
     gridAnimRef.current = animate(0, 1, { duration: 0.18, ease: [0.22, 0.61, 0.36, 1], onUpdate: writeAll });
@@ -1356,7 +1364,7 @@ export default function CanvasGlassPreviewPage() {
   // it lands before this reads usableCanvasArea().
   const gridCardCount =
     termCards.length + fileCards.length + imageCards.length + browserCards.length +
-    chatCards.length + diffCards.length + specCards.length + brainCards.length;
+    chatCards.length + diffCards.length + specCards.length + brainCards.length + markdownCards.length;
 
   // Navigator loupe minimap (#1239) — every card as a scaled rect; image cards
   // carry their thumbnail. The usable area is the minimap's stable frame.
@@ -1370,7 +1378,8 @@ export default function CanvasGlassPreviewPage() {
     ...diffCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'diff' })),
     ...specCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'spec' })),
     ...brainCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'brain' })),
-  ], [termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards]);
+    ...markdownCards.map((c) => ({ id: c.id, x: c.x, y: c.y, w: c.w, h: c.h, kind: 'markdown' })),
+  ], [termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards]);
   // The navigator frames a region ~1.25× the viewport, CENTERED on where you're
   // looking (pan). Framing a bit MORE than the viewport keeps each card a small
   // tile (several tiling the sphere, reference-style) rather than 2-3 big cards
@@ -1561,7 +1570,7 @@ export default function CanvasGlassPreviewPage() {
 
   /** Clicked card comes forward. Terminals + files + images + browsers +
    *  chats share the 10–39 band — above mock cards (3), below chrome (40+). */
-  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'agent', id: number) => {
+  const focusCard = useCallback((kind: 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'markdown' | 'agent', id: number) => {
     const current = kind === 'term'
       ? termCards.find((card) => card.id === id)
       : kind === 'file'
@@ -1580,7 +1589,9 @@ export default function CanvasGlassPreviewPage() {
                     ? specCards.find((card) => card.id === id)
                     : kind === 'brain'
                       ? brainCards.find((card) => card.id === id)
-                      : agentCards.find((card) => card.id === id);
+                      : kind === 'markdown'
+                        ? markdownCards.find((card) => card.id === id)
+                        : agentCards.find((card) => card.id === id);
     if (!current || current.z === zPeakRef.current) return;
     if (zPeakRef.current + 1 > 38) {
       // Renormalize the whole band, keeping order, with the target on top.
@@ -1594,6 +1605,7 @@ export default function CanvasGlassPreviewPage() {
         ...diffCards.map((card) => ({ kind: 'diff' as const, id: card.id, z: card.z })),
         ...specCards.map((card) => ({ kind: 'spec' as const, id: card.id, z: card.z })),
         ...brainCards.map((card) => ({ kind: 'brain' as const, id: card.id, z: card.z })),
+        ...markdownCards.map((card) => ({ kind: 'markdown' as const, id: card.id, z: card.z })),
         ...agentCards.map((card) => ({ kind: 'agent' as const, id: card.id, z: card.z })),
       ].sort((a, b) => a.z - b.z);
       const remap = new Map(combined.map((entry, index) => [`${entry.kind}:${entry.id}`, 10 + index]));
@@ -1607,6 +1619,7 @@ export default function CanvasGlassPreviewPage() {
       setDiffCards((previous) => previous.map((card) => ({ ...card, z: kind === 'diff' && card.id === id ? top : remap.get(`diff:${card.id}`) ?? card.z })));
       setSpecCards((previous) => previous.map((card) => ({ ...card, z: kind === 'spec' && card.id === id ? top : remap.get(`spec:${card.id}`) ?? card.z })));
       setBrainCards((previous) => previous.map((card) => ({ ...card, z: kind === 'brain' && card.id === id ? top : remap.get(`brain:${card.id}`) ?? card.z })));
+      setMarkdownCards((previous) => previous.map((card) => ({ ...card, z: kind === 'markdown' && card.id === id ? top : remap.get(`markdown:${card.id}`) ?? card.z })));
       setAgentCards((previous) => previous.map((card) => ({ ...card, z: kind === 'agent' && card.id === id ? top : remap.get(`agent:${card.id}`) ?? card.z })));
       zPeakRef.current = top;
       return;
@@ -1631,10 +1644,12 @@ export default function CanvasGlassPreviewPage() {
       setSpecCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else if (kind === 'brain') {
       setBrainCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
+    } else if (kind === 'markdown') {
+      setMarkdownCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     } else {
       setAgentCards((previous) => previous.map((card) => (card.id === id ? { ...card, z } : card)));
     }
-  }, [agentCards, brainCards, browserCards, chatCards, diffCards, fileCards, imageCards, videoCards, specCards, termCards]);
+  }, [agentCards, brainCards, markdownCards, browserCards, chatCards, diffCards, fileCards, imageCards, videoCards, specCards, termCards]);
 
   const focusTermCard = useCallback((id: number) => focusCard('term', id), [focusCard]);
   const focusFileCard = useCallback((id: number) => focusCard('file', id), [focusCard]);
@@ -1645,6 +1660,7 @@ export default function CanvasGlassPreviewPage() {
   const focusDiffCard = useCallback((id: number) => focusCard('diff', id), [focusCard]);
   const focusSpecCard = useCallback((id: number) => focusCard('spec', id), [focusCard]);
   const focusBrainCard = useCallback((id: number) => focusCard('brain', id), [focusCard]);
+  const focusMarkdownCard = useCallback((id: number) => focusCard('markdown', id), [focusCard]);
   const focusAgentCard = useCallback((id: number) => focusCard('agent', id), [focusCard]);
 
   /** Bloom an agent card for a freshly-live lane — the spawn → card-appears
@@ -1927,6 +1943,26 @@ export default function CanvasGlassPreviewPage() {
       ...(question?.trim() ? { initialQuestion: question.trim() } : {}),
     }]);
   }, [activeRepoPath, brainCards, findFreeSpot, focusBrainCard]);
+
+  /** Render-on-screen (#1270) — bloom a markdown explainer the orchestrator
+   *  authored. Each call is a fresh card (you can show several), sized for a
+   *  comfortable read; the content is static + ephemeral. */
+  const spawnMarkdownCard = useCallback((title: string, markdown: string) => {
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    const spot = findFreeSpot(380, 460);
+    setMarkdownCards((previous) => [...previous, {
+      id,
+      x: spot.x,
+      y: spot.y,
+      z: zPeakRef.current,
+      w: 380,
+      h: 360,
+      title: title.trim() || 'Note',
+      markdown,
+    }]);
+  }, [findFreeSpot]);
 
   /** A REAL browser pane — defaults to the app's own dashboard. */
   const spawnBrowserCard = useCallback(() => {
@@ -2470,6 +2506,20 @@ export default function CanvasGlassPreviewPage() {
           case 'ask-brain':
             spawnBrainCard(typeof args.question === 'string' ? args.question : undefined);
             break;
+          case 'render': {
+            // Render-on-screen (#1270) — the orchestrator paints a markdown
+            // explainer onto the canvas ("explain X on my screen").
+            const title = typeof args.title === 'string' ? args.title.trim() : '';
+            const markdown = typeof args.markdown === 'string' ? args.markdown : '';
+            if (!markdown.trim()) {
+              ok = false;
+              note = 'render needs args.markdown';
+            } else {
+              spawnMarkdownCard(title, markdown);
+              note = title ? `rendered "${title}"` : 'rendered note';
+            }
+            break;
+          }
           case 'open-spec':
             spawnSpecCard();
             break;
@@ -2550,7 +2600,7 @@ export default function CanvasGlassPreviewPage() {
       window.removeEventListener('o8:canvas-intent', onIntent);
       (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
     };
-  }, [activeRepoPath, canvasEnabled, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnSpecCard, spawnTerminal]);
+  }, [activeRepoPath, canvasEnabled, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal]);
 
   if (!canvasEnabled) {
     return (
@@ -2796,6 +2846,20 @@ export default function CanvasGlassPreviewPage() {
             onResize={(id, w, h) => setBrainCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
             onFocus={focusBrainCard}
             onClose={(id) => setBrainCards((previous) => previous.filter((c) => c.id !== id))}
+          />
+        ))}
+      </AnimatePresence>
+
+      {/* ── Markdown cards — orchestrator-rendered explainers (#1270) ── */}
+      <AnimatePresence>
+        {markdownCards.map((card) => (
+          <MarkdownGlassCard
+            key={card.id}
+            card={card}
+            onMove={(id, x, y) => setMarkdownCards((previous) => previous.map((c) => (c.id === id ? { ...c, x, y } : c)))}
+            onResize={(id, w, h) => setMarkdownCards((previous) => previous.map((c) => (c.id === id ? { ...c, w, h } : c)))}
+            onFocus={focusMarkdownCard}
+            onClose={(id) => setMarkdownCards((previous) => previous.filter((c) => c.id !== id))}
           />
         ))}
       </AnimatePresence>
