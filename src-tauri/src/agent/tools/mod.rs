@@ -785,6 +785,18 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "o8_agent_task",
+            "description": "Address a WORKING agent by the memorable name on its Canvas card — 'Atlas, also run the tests', 'tell Nova to focus on the migration', 'Comet, check the types'. Agents spawned onto the Canvas (via o8_canvas spawn-agents) each get a short name like Atlas / Nova / Comet / Sage shown on their card; this steers the one you name with a follow-up instruction (reuses its warm session). Use this when the user calls an agent by a NAME like that. Use o8_packet_steer instead when they identify the work by its TASK ('the tooltip packet'). If no agent has that name, o8 tells you who IS working so you can read the roster back.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": { "type": "string", "description": "The agent's Canvas name, e.g. 'Atlas'." },
+                    "task": { "type": "string", "description": "What to tell that agent to do." }
+                },
+                "required": ["name", "task"]
+            }
+        }),
+        json!({
             "name": "o8_packet_rerun",
             "description": "Restart a packet fresh — 'retry the failed packet', 'run the tooltip work again'. Optionally include spoken feedback about what went wrong last time. Identify the packet by part of its name. The user confirms first.",
             "parameters": {
@@ -1017,6 +1029,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "term_new" => terminal_ctl::new(args).await,
         "term_watch" => terminal_ctl::watch(&ctx.app, args),
         "o8_packet_steer" => o8_bridge::packet_steer(args).await,
+        "o8_agent_task" => o8_bridge::agent_task(args).await,
         "o8_packet_rerun" => o8_bridge::packet_rerun(args).await,
         "o8_orchestrator_draft" => o8_ui::orchestrator_draft(&ctx.app, args),
         "gh_issue_create" => git_github::issue_create(args).await,

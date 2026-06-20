@@ -763,6 +763,44 @@ pub async fn packet_steer(args: Value) -> Result<Value, String> {
     Ok(json!({ "steered": true, "packet": label, "how": "fresh worker with the message as feedback" }))
 }
 
+/// `o8_agent_task` — address a WORKING agent by the memorable codename on its
+/// canvas card (Atlas, Nova…) and steer it: "Atlas, also run the tests". The
+/// name is resolved SERVER-side against the live lanes (codename.ts is the single
+/// source of truth — the name on the card is the name you say), so there is no
+/// codename table to keep in lockstep here. The route returns 200 for every
+/// spoken outcome (steered / no-such-agent / ambiguous), so a clean message
+/// rides back for Symon to read instead of a raw HTTP error string.
+pub async fn agent_task(args: Value) -> Result<Value, String> {
+    let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let task = args
+        .get("task")
+        .and_then(|v| v.as_str())
+        .or_else(|| args.get("message").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .trim();
+    if name.is_empty() {
+        return Err("o8_agent_task needs the agent's canvas name (e.g. 'Atlas')".into());
+    }
+    if task.is_empty() {
+        return Err("o8_agent_task needs a 'task' — what to tell the agent".into());
+    }
+    let resp = o8_http::post_json(
+        "/api/orchestrator/agent-task",
+        json!({ "name": name, "task": task }),
+    )
+    .await?;
+    // Spoken-ready failure (no match / ambiguous / no session) → surface the
+    // message as the tool error so Symon reads it back verbatim.
+    if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
+        let msg = resp
+            .get("error")
+            .and_then(|e| e.get("message").and_then(|v| v.as_str()))
+            .unwrap_or("o8 could not steer that agent");
+        return Err(msg.to_string());
+    }
+    Ok(resp.get("result").cloned().unwrap_or(resp))
+}
+
 /// `o8_packet_rerun` — restart a packet fresh ("retry the failed packet"),
 /// optionally with spoken feedback about what went wrong.
 pub async fn packet_rerun(args: Value) -> Result<Value, String> {
