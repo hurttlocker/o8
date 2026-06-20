@@ -52,6 +52,24 @@ function forwardLog(line: string): void {
     .catch(() => { /* not in a Tauri webview */ });
 }
 
+/**
+ * Mirror the session PRESENCE to the screen dock (the always-on Symon pill) so
+ * "voice is live" shows up where Symon lives — not only in the IDE window. Maps
+ * the fine-grained {@link RealtimeStatus} down to the dock's simple set
+ * (`off | connecting | live | error`). Fire-and-forget; a no-op outside a Tauri
+ * webview.
+ */
+function forwardPresence(status: RealtimeStatus): void {
+  const simple =
+    status === 'live' ? 'live'
+      : status === 'requesting-mic' || status === 'connecting' ? 'connecting'
+        : status === 'error' ? 'error'
+          : 'off'; // idle | stopping → gone
+  import('@tauri-apps/api/core')
+    .then((m) => m.invoke('realtime_status_changed', { status: simple }))
+    .catch(() => { /* not in a Tauri webview */ });
+}
+
 const DEFAULT_INSTRUCTIONS =
   "You are Symon, the voice of o8 — the operator's desktop command surface. " +
   'Speak naturally and concisely, like a sharp teammate who is easy to talk to; ' +
@@ -93,6 +111,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
     status = s;
     console.log(`${LOG} status → ${s}${detail ? `: ${detail}` : ''}`);
     forwardLog(`status → ${s}${detail ? `: ${detail}` : ''}`);
+    forwardPresence(s);
     try { opts.onStatus?.(s, detail); } catch { /* listener threw — ignore */ }
   };
 

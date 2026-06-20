@@ -502,6 +502,14 @@ interface DockNotchSurfaceProps {
   /** Symon's speaking speed (1×–3×) — the speaking capsule's live slider. */
   speechSpeed?: number;
   onSpeechSpeed?: (rate: number) => void;
+  /** Realtime voice-to-voice presence (Track B). `live` shows the brand
+   * waveform + a "Voice live" tag in the dock; `connecting` shows a spinner.
+   * `off` is invisible. This is the SAME Symon, just in voice mode — it belongs
+   * up here in the dock, not only in the IDE window. */
+  realtimeVoice?: 'off' | 'connecting' | 'live';
+  /** Tap the voice-live capsule to end the session (mirrors the in-window pill
+   * + the double-tap right ⌘ toggle). */
+  onStopRealtime?: () => void;
 }
 
 /**
@@ -535,6 +543,8 @@ export function DockNotchSurface({
   panelPending = null,
   speechSpeed = 1,
   onSpeechSpeed,
+  realtimeVoice = 'off',
+  onStopRealtime,
 }: DockNotchSurfaceProps) {
   const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
@@ -573,6 +583,14 @@ export function DockNotchSurface({
   const isWorkersInfo =
     showWorkers && workerCount > 0 && dictationMode === 'idle' && !isConfirming
     && !isAsking && !isSpeaking && !isAgentWorking && !isDropTarget && !isStagedChips;
+  // Realtime voice-to-voice presence — the persistent "Symon is live, listening"
+  // capsule. Ambient: it yields to any active dictation, a confirm gate, the ask
+  // panel, speaking, an agent working, a drag, and the transient
+  // staged/workers capsules — then resumes. It replaces the idle sliver while on.
+  const isRealtimeVoice =
+    realtimeVoice !== 'off' && dictationMode === 'idle' && !isConfirming
+    && !isAsking && !isSpeaking && !isAgentWorking && !isDropTarget
+    && !isStagedChips && !isWorkersInfo;
 
   // Live ref for the canvas RAF loop (avoid re-running the effect per frame).
   const levelRef = useRef<number>(audioLevel);
@@ -717,6 +735,19 @@ export function DockNotchSurface({
       // the speed slider (1×–3×). Wider than the bare play/stop capsule.
       return {
         width: 280,
+        height: 40,
+        borderRadius: '0 0 20px 20px',
+        background: capsuleBg, ...capsuleBlur,
+        borderColor: 'rgba(255, 255, 255, 0.4)',
+        boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
+      } as React.CSSProperties;
+    }
+    if (isRealtimeVoice) {
+      // Voice-to-voice — the brand capsule (same footprint as listening), the
+      // live EQ on the left + a "Voice live" tag. Slightly wider than 248 so the
+      // tag never crowds the waveform.
+      return {
+        width: 268,
         height: 40,
         borderRadius: '0 0 20px 20px',
         background: capsuleBg, ...capsuleBlur,
@@ -1091,6 +1122,63 @@ export function DockNotchSurface({
         </span>
       </div>
     );
+  } else if (isRealtimeVoice) {
+    const connecting = realtimeVoice === 'connecting';
+    body = (
+      <div
+        role="button"
+        aria-label={connecting ? 'Connecting voice' : 'Voice live — tap to stop'}
+        title={connecting ? 'Connecting…' : 'Voice-to-voice is live — tap to stop'}
+        onClick={(e) => { e.stopPropagation(); if (!connecting) onStopRealtime?.(); }}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 10,
+          width: '100%',
+          height: '100%',
+          paddingLeft: 14,
+          paddingRight: 14,
+          overflow: 'hidden',
+          cursor: connecting ? 'default' : 'pointer',
+        }}
+      >
+        {connecting ? (
+          <NotchOrbit size={13} />
+        ) : (
+          <div style={{ width: INNER_W, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+            <NotchWaveCanvas listening levelRef={levelRef} />
+          </div>
+        )}
+        <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          {!connecting ? (
+            <span
+              aria-hidden
+              style={{
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: '#34d399',
+                boxShadow: '0 0 8px #34d399',
+                animation: 'o8VoicePulse 1.6s ease-in-out infinite',
+              }}
+            />
+          ) : null}
+          <span
+            style={{
+              fontSize: 11,
+              fontWeight: 300,
+              letterSpacing: '-0.1px',
+              color: '#fff',
+              textShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            {connecting ? 'Connecting…' : 'Voice live'}
+          </span>
+        </span>
+      </div>
+    );
   } else if (isAsking) {
     if (askListening) {
       body = (
@@ -1340,7 +1428,8 @@ export function DockNotchSurface({
       <style>{
         '@keyframes o8DockSquiggle { 0% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: -64; } }'
         + '@keyframes o8DockOrbit { to { transform: rotate(360deg); } }'
-        + '@media (prefers-reduced-motion: reduce) { [style*="o8DockOrbit"] { animation: none !important; } }'
+        + '@keyframes o8VoicePulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }'
+        + '@media (prefers-reduced-motion: reduce) { [style*="o8DockOrbit"] { animation: none !important; } [style*="o8VoicePulse"] { animation: none !important; } }'
       }</style>
     </div>
   );
