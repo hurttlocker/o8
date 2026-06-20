@@ -276,6 +276,30 @@ Reusable interaction techniques every agent should reach for when building a UI 
 
 ---
 
+## Canvas card chrome (locked 2026-06-20)
+
+Every floating card on the glass canvas (`/preview/canvas-glass`) — chat, browser, terminal, diff, file, o8.md/spec, brain, agent, markdown, image, video — shares **one** chrome vocabulary. Before this lock each card hand-rolled its own header sizes (titles 8–9.5px, ✕ 7.7px, icons 11–16px) and none matched. Worse: cards live inside the canvas `zoom` layer (the "100%" step is `--cnv-zoom: 0.7`), so an authored `11.5px` title paints at **~8px** on screen — that's why canvas chrome read tiny and "jumbled" even when the numbers looked reasonable.
+
+**The system lives in `src/app/preview/canvas-glass/ui.ts`. Two pieces:**
+
+1. **`CHROME` tokens** — the one size/weight set. Pre-zoom px, tuned so chrome reads ~11–12px on screen at the 100% step, matching the IDE o8.md panel header, the orchestrator dock, and the dock's own ✕:
+   - `titleSize: 16` / `titleWeight: 400` — card title (→ 11.2px on screen)
+   - `metaSize: 13` / `metaWeight: 300` — secondary meta (branch, W×H, path tail)
+   - `iconSize: 18` — header glyph svg (dock, globe, picker, media file icon → 12.6px)
+   - `closeSize: 16` — the ✕ glyph (→ 11.2px, ≈ the dock's undock ✕)
+   - `fieldSize: 14` — body field text in a header (url bar, tab labels → 9.8px)
+
+2. **`chromeFloorScale(origin)`** — the scaling mechanism. Interactive corner chrome (the ✕ + dock/action cluster) **scales with the canvas like content**, but a clamp lifts it once the field zoom would shrink it below a clickable floor: `scale(clamp(1, calc(var(--cnv-chrome-floor, 0.64) / var(--cnv-zoom, 1)), 1.4))`. At 0.7 it resolves to **1** (pure proportional — no counter-scale); it only boosts when small; 1.4 caps a tiny card from ballooning the buttons. **Text scales freely (no floor); only the interactive buttons floor.** Tune the floor via `--cnv-chrome-floor`.
+
+**Rules:**
+- **Never hand-roll a canvas card's chrome sizes.** Route titles/✕/icons through `CHROME`; wrap the ✕/action cluster with `chromeFloorScale(...)`. A new card that sets its own `fontSize: 11.5` reintroduces the jumble.
+- **Two render paths, both land at the same on-screen size.** In-layer cards scale via CSS `zoom`; the o8.md/spec card renders *out* of the zoom layer (`screenMap`) and scales its chrome by `* s` (s = zoom) instead — so **gate `chromeFloorScale` off when `screenMap` is set** (it reads `--cnv-zoom` and would double-scale). Both paths render the ✕ at an identical box (verified: 15.4px at 100%).
+- **The dock is the 1:1 reference, not a canvas card.** `chrome.tsx` `DockGlyphButton`/`SpawnGlyphButton` and `dock.tsx` render at device 1:1 (outside the zoom layer) — their sizes are the on-screen target the tokens were tuned to match. Don't pull them into the zoom-layer token system. `DockTab` is shared by both the dock (1:1) and the in-layer chat card; it takes an optional `size` (default 14 = dock truth) so the chat card can opt up to `CHROME.titleSize` without touching the dock.
+
+Shipped in #1259 (commits `0dfc1ab1`, `d464bd53`, `3213cd7c`). Verify after any change with dev-browser on `:3010` — measure `getBoundingClientRect().height` of each card's ✕ at `--cnv-zoom` 0.7 and 0.49; they must match across kinds and the 0.49 value must stay above the 0.7×raw floor.
+
+---
+
 ## Open items for next-level theming
 
 This file captures what got *locked*. The roadmap below is what's *open* — the work that comes next when theme v2 starts from scratch.
