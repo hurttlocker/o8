@@ -81,6 +81,10 @@ import {
   handleScaffold,
 } from '@/lib/mcp/operator-handlers/repo-management';
 import {
+  CANVAS_TOOLS,
+  handleRender,
+} from '@/lib/mcp/operator-handlers/canvas';
+import {
   type McpTool,
   type McpToolResult,
   checkApiHealth,
@@ -502,6 +506,7 @@ const TOOLS: McpTool[] = [
   ...CORTEX_TOOLS,
   ...SPEC_TOOLS,
   ...O8_WEBVIEW_TOOLS,
+  ...CANVAS_TOOLS,
   ...LOOP_OBSERVABILITY_TOOLS,
   ...MISSION_TOOLS.filter((t) => t.name === 'create_mission'),
   ...MISSION_TOOLS.filter((t) => t.name === 'dispatch_mission'),
@@ -556,6 +561,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   ...createO8WebviewToolHandlers(getO8WebviewClient),
   o8_view_console_errors: handleConsoleErrors,
   o8_view_active_route: handleActiveRoute,
+  o8_render: handleRender,
   o8_user_context: handleUserContext,
   create_mission: handleCreateMission,
   dispatch_mission: handleDispatchMission,
