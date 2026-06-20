@@ -15,7 +15,7 @@ import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
  * it's somewhere else, then waits for the intent listener to mount.
  */
 
-const VERBS = new Set(['enter', 'open-browser', 'ask-brain', 'open-spec', 'spawn-terminal', 'search', 'zoom', 'dock', 'send-prompt', 'spawn-agents', 'render']);
+const VERBS = new Set(['enter', 'open-browser', 'ask-brain', 'open-spec', 'spawn-terminal', 'search', 'zoom', 'dock', 'send-prompt', 'spawn-agents', 'render', 'grid']);
 const CANVAS_ROUTE = '/preview/canvas-glass';
 const READY_POLL_MS = 300;
 const READY_TIMEOUT_MS = 10_000;
