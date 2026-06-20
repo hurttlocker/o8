@@ -1006,6 +1006,7 @@ const CANVAS_VERBS: &[&str] = &[
     "zoom",
     "dock",
     "spawn-agents",
+    "grid",
 ];
 
 /// Build the `/api/canvas/intent` POST body from the model's FLAT params.
@@ -1038,6 +1039,7 @@ pub fn canvas_intent_body(verb: &str, args: &Value) -> Value {
             carry("count");
             carry("repo");
         }
+        "grid" => carry("on"),
         // enter / open-spec / spawn-terminal take no args — for `enter`, the
         // route's `ensure:true` navigation IS the action (just bring the Canvas up).
         _ => {}
@@ -1445,6 +1447,21 @@ mod canvas_tests {
     #[test]
     fn spawn_agents_is_a_known_verb() {
         assert!(CANVAS_VERBS.contains(&"spawn-agents"));
+    }
+
+    #[test]
+    fn grid_carries_on_flag_and_is_known() {
+        // "put them in grid mode" → on:true; "free the canvas" → on:false; bare
+        // "grid mode" omits `on` and the page toggles. Only `on` rides through.
+        let body = canvas_intent_body("grid", &json!({ "on": true, "text": "ignored" }));
+        assert_eq!(body["verb"], "grid");
+        assert_eq!(body["args"]["on"], true);
+        assert!(body["args"].get("text").is_none(), "unrelated keys must not leak through");
+
+        let toggle = canvas_intent_body("grid", &json!({}));
+        assert_eq!(toggle["args"], json!({}), "no `on` → empty args, page toggles");
+
+        assert!(CANVAS_VERBS.contains(&"grid"));
     }
 
     #[test]

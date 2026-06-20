@@ -60,6 +60,7 @@ import { MarkdownGlassCard, type MarkdownCard } from './markdown-card';
 import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
 import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
 import { AgentGlassCard, type AgentCard } from './agent-card';
+import { codename } from './codename';
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
@@ -1691,6 +1692,7 @@ export default function CanvasGlassPreviewPage() {
         h: 92,
         laneId: lane.id,
         number,
+        codename: codename(lane.id),
         title: lane.label?.trim() || repoTail || lane.id,
         runtime: lane.runtime ?? null,
       }];
@@ -2588,6 +2590,17 @@ export default function CanvasGlassPreviewPage() {
               const n = Math.max(1, Math.min(5, Math.floor(count) || 1));
               note = `spawning ${n} agent${n === 1 ? '' : 's'}`;
             }
+            break;
+          }
+          case 'grid': {
+            // "grid mode" / "tile the agents" — form-fit every canvas card into a
+            // grid (the demo's auto-arrange). `on` boolean sets it; omit to toggle.
+            const on = typeof args.on === 'boolean' ? args.on
+              : typeof args.enabled === 'boolean' ? args.enabled
+              : null;
+            if (on === null) setGridMode((previous) => !previous);
+            else setGridMode(on);
+            note = on === false ? 'free canvas' : 'grid mode';
             break;
           }
           default:
