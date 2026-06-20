@@ -431,7 +431,7 @@ export function OrchestratorDock({
 /** One pane-header tab — Orchestrator | Cortex. Borderless (Q's reference):
  *  no underline, no box — the active tab is a weight + ink + opacity shift.
  *  Exported: the chat-card orchestrator modal renders the same strip. */
-export function DockTab({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
+export function DockTab({ label, active, onClick, size = 14 }: { label: string; active: boolean; onClick: () => void; size?: number }) {
   return (
     <button
       type="button"
@@ -448,7 +448,7 @@ export function DockTab({ label, active, onClick }: { label: string; active: boo
         paddingRight: 2,
         cursor: 'pointer',
         fontFamily: FONT,
-        fontSize: 14,
+        fontSize: size,
         fontWeight: active ? 500 : 400,
         letterSpacing: '-0.2px',
         color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
