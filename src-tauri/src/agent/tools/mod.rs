@@ -352,7 +352,7 @@ pub fn all_tools() -> Vec<Value> {
         // ── o8 bridge (Tier-2) — read what the coding agents are doing ─────────
         json!({
             "name": "o8_status",
-            "description": "Report what's currently shipping or in progress across o8's autonomous agent fleet — the active packets/lanes and their status (running, reviewing, etc.). Use for 'what's shipping?', 'what's in progress?', 'what are my agents doing?'. Optionally filter to one repo.",
+            "description": "Report what's currently shipping or in progress across o8's autonomous agent fleet — the active packets/lanes, each with its memorable agent NAME (Atlas, Nova…), task, status (running, reviewing, etc.). Use for 'what's shipping?', 'what's in progress?', 'what are my agents doing?', 'who's working?', 'what's Atlas doing?'. Read the names back when the operator asks who's working, and use them to address an agent via o8_agent_task. Optionally filter to one repo.",
             "parameters": {
                 "type": "object",
                 "properties": {
