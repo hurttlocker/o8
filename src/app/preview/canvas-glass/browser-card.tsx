@@ -14,7 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
-import { FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
+import { CHROME, FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
 import { GlassCardShell } from './card-shell';
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -312,7 +312,7 @@ export function BrowserGlassCard({
         {/* URL bar — stays in the BODY (the shell's grab pill is the drag
             handle now). Globe + address + element picker. */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2, paddingBottom: 6, paddingLeft: 16, paddingRight: 16 }}>
-          <svg style={{ width: 11, height: 11, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+          <svg style={{ width: CHROME.iconSize, height: CHROME.iconSize, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
             <circle cx="12" cy="12" r="10" /><path d="M2 12h20" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" />
           </svg>
           <input
@@ -340,8 +340,8 @@ export function BrowserGlassCard({
               paddingLeft: 8,
               paddingRight: 8,
               color: 'var(--cnv-ink)',
-              fontSize: 10.5,
-              fontWeight: 300,
+              fontSize: CHROME.fieldSize,
+              fontWeight: CHROME.metaWeight,
               letterSpacing: '-0.05px',
               fontFamily: FONT,
             }}
@@ -365,7 +365,7 @@ export function BrowserGlassCard({
             onMouseEnter={(event) => { if (!picking) event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { if (!picking) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
-            <svg style={{ width: 12, height: 12, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <svg style={{ width: CHROME.iconSize, height: CHROME.iconSize, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
             </svg>
           </button>
@@ -396,8 +396,8 @@ export function BrowserGlassCard({
                   borderRadius: 7,
                   background: active ? 'var(--cnv-tint)' : 'transparent',
                   color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
-                  fontSize: 9.5,
-                  fontWeight: 300,
+                  fontSize: CHROME.fieldSize,
+                  fontWeight: CHROME.metaWeight,
                   fontFamily: FONT,
                   letterSpacing: '-0.05px',
                   cursor: 'pointer',
@@ -415,7 +415,7 @@ export function BrowserGlassCard({
                     role="button"
                     aria-label="Close tab"
                     onClick={(event) => { event.stopPropagation(); closeTab(tab.id); }}
-                    style={{ fontSize: 9, lineHeight: 1, paddingLeft: 2, paddingRight: 2, opacity: 0.7, cursor: 'pointer' }}
+                    style={{ fontSize: CHROME.metaSize, lineHeight: 1, paddingLeft: 2, paddingRight: 2, opacity: 0.7, cursor: 'pointer' }}
                     onMouseEnter={(event) => { event.currentTarget.style.opacity = '1'; }}
                     onMouseLeave={(event) => { event.currentTarget.style.opacity = '0.7'; }}
                   >
@@ -431,7 +431,7 @@ export function BrowserGlassCard({
             title="New tab"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={addTab}
-            style={{ borderWidth: 0, background: 'transparent', color: 'var(--cnv-ink-muted)', fontSize: 12, lineHeight: 1, paddingTop: 1, paddingBottom: 1, paddingLeft: 6, paddingRight: 6, cursor: 'pointer', fontFamily: FONT, flexShrink: 0 }}
+            style={{ borderWidth: 0, background: 'transparent', color: 'var(--cnv-ink-muted)', fontSize: CHROME.iconSize, lineHeight: 1, paddingTop: 1, paddingBottom: 1, paddingLeft: 6, paddingRight: 6, cursor: 'pointer', fontFamily: FONT, flexShrink: 0 }}
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
@@ -442,7 +442,7 @@ export function BrowserGlassCard({
         {/* Selector readout — appears while picking / after a pick. */}
         {readout ? (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2, paddingBottom: 4, paddingLeft: 16, paddingRight: 16, flexShrink: 0 }}>
-            <span style={{ flex: 1, fontFamily: MONO, fontSize: 9.5, fontWeight: 300, color: picking ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ flex: 1, fontFamily: MONO, fontSize: CHROME.metaSize, fontWeight: CHROME.metaWeight, color: picking ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {readout}
             </span>
             <button
@@ -450,7 +450,7 @@ export function BrowserGlassCard({
               aria-label="Dismiss selector readout"
               onPointerDown={(event) => event.stopPropagation()}
               onClick={() => setReadout(null)}
-              style={{ borderWidth: 0, background: 'transparent', padding: 0, fontSize: 9.5, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
+              style={{ borderWidth: 0, background: 'transparent', padding: 0, fontSize: CHROME.metaSize, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
             >
               ✕
             </button>
