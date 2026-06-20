@@ -134,7 +134,13 @@ interface RepoPickerRowData {
 const ZOOM_KEY = 'o8:canvas-zoom';
 /** Canvas layout mode — 'grid' = form-fit hard placement (#1239), else free-flow. */
 const GRID_MODE_KEY = 'o8:canvas-grid-mode';
+// Ordered most-zoomed-IN (index 0) → most-out. "100%" is the home/fit anchor
+// (0.7 actual — cards fit comfortably); 115/130 let the operator zoom IN and
+// make cards + text bigger (the loupe could previously only go smaller). The
+// default + the loupe "Fit" both resolve the label===100 step, NOT index 0.
 const ZOOM_STEPS = [
+  { label: 130, value: 0.91 },
+  { label: 115, value: 0.805 },
   { label: 100, value: 0.7 },
   { label: 85, value: 0.595 },
   { label: 70, value: 0.49 },
@@ -249,7 +255,7 @@ export default function CanvasGlassPreviewPage() {
   const [dockOpen, setDockOpen] = useState(false);
   const [tunerOpen, setTunerOpen] = useState(false);
   const [orbSettings, setOrbSettings] = useState<OrbSettings>(ORB_DEFAULTS);
-  const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS[0].value);
+  const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS.find((step) => step.label === 100)?.value ?? 0.7);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
   const [composerMenu, setComposerMenu] = useState<'repo' | 'model' | 'mode' | null>(null);

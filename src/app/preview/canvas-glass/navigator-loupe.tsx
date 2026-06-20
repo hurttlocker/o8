@@ -161,7 +161,7 @@ export function NavigatorLoupe({
 
   useEffect(() => () => { if (idleRef.current) clearTimeout(idleRef.current); }, []);
 
-  // Zoom steps run 100% (most zoomed-in) → 70% (most out). − steps out, + in.
+  // Zoom steps run 130% (most zoomed-in) → 70% (most out). − steps out, + in.
   const idx = Math.max(0, zoomSteps.findIndex((s) => s.value === zoomValue));
   const stepZoom = (delta: number) => {
     const next = zoomSteps[Math.min(zoomSteps.length - 1, Math.max(0, idx + delta))];
@@ -266,7 +266,7 @@ export function NavigatorLoupe({
           <LoupeButton label="Zoom out" disabled={atMin} onClick={() => stepZoom(1)}>
             <line x1="5" y1="12" x2="19" y2="12" />
           </LoupeButton>
-          <LoupeButton label="Fit to 100%" onClick={() => onZoomChange(zoomSteps[0]?.value ?? zoomValue)}>
+          <LoupeButton label="Fit to 100%" onClick={() => onZoomChange(zoomSteps.find((s) => s.label === 100)?.value ?? zoomSteps[0]?.value ?? zoomValue)}>
             <path d="M8 4H5a1 1 0 0 0-1 1v3M16 4h3a1 1 0 0 1 1 1v3M8 20H5a1 1 0 0 1-1-1v-3M16 20h3a1 1 0 0 0 1-1v-3" />
           </LoupeButton>
           <LoupeButton label="Zoom in" disabled={atMax} onClick={() => stepZoom(-1)}>
