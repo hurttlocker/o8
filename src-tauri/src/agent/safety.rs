@@ -129,6 +129,8 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "term_watch" => SafetyClass::ReadOnly,
         // Packet verbs reach a live worker / spawn a fresh one → carded.
         "o8_packet_steer" => SafetyClass::Reversible,
+        // Address a working agent by its canvas name and steer it → carded.
+        "o8_agent_task" => SafetyClass::Reversible,
         "o8_packet_rerun" => SafetyClass::Reversible,
         // Reset wipes the worktree + relaunches (compute) → carded. (Destructive
         // in spirit, but Destructive tools are withheld from the model entirely,

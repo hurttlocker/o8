@@ -60,7 +60,7 @@ import { MarkdownGlassCard, type MarkdownCard } from './markdown-card';
 import { loadCanvasSnapshot, saveCanvasSnapshot, type SnapGeometry } from './canvas-persistence';
 import { DIFF_MIN_H, DIFF_MIN_W, DiffGlassCard, type DiffCard } from './diff-card';
 import { AgentGlassCard, type AgentCard } from './agent-card';
-import { codename } from './codename';
+import { codename } from '@/lib/agents/codename';
 import { ChatGlassCard, type ChatCard } from './chat-card';
 import { CanvasCard } from './cards';
 import { DiffusionBackdrop, DockGlyphButton, EdgeRail, SpawnGlyphButton } from './chrome';
@@ -2595,12 +2595,14 @@ export default function CanvasGlassPreviewPage() {
           case 'grid': {
             // "grid mode" / "tile the agents" — form-fit every canvas card into a
             // grid (the demo's auto-arrange). `on` boolean sets it; omit to toggle.
-            const on = typeof args.on === 'boolean' ? args.on
+            // The ack note reflects the RESULTING state (read from the closure) so
+            // a spoken toggle never reports the wrong mode back to the operator.
+            const explicit = typeof args.on === 'boolean' ? args.on
               : typeof args.enabled === 'boolean' ? args.enabled
               : null;
-            if (on === null) setGridMode((previous) => !previous);
-            else setGridMode(on);
-            note = on === false ? 'free canvas' : 'grid mode';
+            const next = explicit === null ? !gridMode : explicit;
+            setGridMode(next);
+            note = next ? 'grid mode' : 'free canvas';
             break;
           }
           default:
@@ -2619,7 +2621,7 @@ export default function CanvasGlassPreviewPage() {
       window.removeEventListener('o8:canvas-intent', onIntent);
       (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
     };
-  }, [activeRepoPath, canvasEnabled, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal]);
+  }, [activeRepoPath, canvasEnabled, gridMode, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal]);
 
   if (!canvasEnabled) {
     return (
