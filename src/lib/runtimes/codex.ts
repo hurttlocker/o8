@@ -31,6 +31,7 @@ import {
   getOwnedCodexReviewPacket,
   getOwnedCodexTelemetrySources,
 } from '@/lib/codex/owned';
+import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 
 const capabilities: RuntimeCapabilities = {
   discover: true,
@@ -226,9 +227,14 @@ export const codexRuntime: AgentRuntime = {
 
   async launch(opts: LaunchOptions): Promise<RuntimeActionResult> {
     const startedAtMs = Date.now();
-    const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt, model: opts.model });
+    // Fall back to the operator's default worker model when the dispatch didn't
+    // pin one — that's how "run every worker on my local model" (an
+    // `ollama:`/`lmstudio:` default) reaches every dispatch path, scoped to o8
+    // workers. A per-mission model still wins.
+    const model = opts.model ?? (resolveDefaultDispatchModelSync() || undefined);
+    const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt, model });
     if (result.ok && result.surfaceId) {
-      scheduleCodexUsageDispatch(result.surfaceId, startedAtMs, undefined, opts.laneId, opts.model, () =>
+      scheduleCodexUsageDispatch(result.surfaceId, startedAtMs, undefined, opts.laneId, model, () =>
         waitForOwnedRunToFinish(result.surfaceId, startedAtMs));
     }
     return {

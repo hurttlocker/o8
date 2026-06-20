@@ -40,6 +40,7 @@ import {
   type OwnedTailEntry,
   type ParsedRunLog,
 } from '@/lib/runtimes/shared/owned-session';
+import { codexModelArgs } from './local-model';
 
 // Re-export the fleet additions shape under its original Codex name.
 export type { OwnedCodexFleetAdditions } from '@/lib/runtimes/shared/owned-session';
@@ -237,7 +238,9 @@ function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: string }): 
     ...DISABLE_IMAGE_TOOL,
     '-C',
     ctx.cwd,
-    ...(ctx.model ? ['--model', ctx.model] : []),
+    // `ollama:<model>` / `lmstudio:<model>` → run this worker on a LOCAL model
+    // (--oss --local-provider …); a plain name → --model; empty → Codex default.
+    ...codexModelArgs(ctx.model),
     ctx.prompt,
   ];
 }
