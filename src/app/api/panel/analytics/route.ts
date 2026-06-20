@@ -19,7 +19,7 @@ export const dynamic = 'force-dynamic';
  * - IDE LLM chat usage logs
  */
 
-type SurfaceKey = 'Codex CLI' | 'Claude Code' | 'IDE LLM Chat';
+type SurfaceKey = 'Codex CLI' | 'Claude Code' | 'IDE LLM Chat' | 'Symon Voice';
 
 interface HourBucket {
   hour: string;
@@ -66,7 +66,7 @@ interface SessionAccumulator {
   active: boolean;
 }
 
-const SURFACES: SurfaceKey[] = ['Codex CLI', 'Claude Code', 'IDE LLM Chat'];
+const SURFACES: SurfaceKey[] = ['Codex CLI', 'Claude Code', 'IDE LLM Chat', 'Symon Voice'];
 const ACTIVE_WINDOW_MS = 5 * 60 * 1000;
 const ANTHROPIC_DEFAULT_PRICING = {
   inputPerToken: 3 / 1_000_000,
