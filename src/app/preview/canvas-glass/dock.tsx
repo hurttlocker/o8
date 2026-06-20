@@ -450,7 +450,12 @@ export function DockTab({ label, active, onClick, size = 14, truncate = false }:
         cursor: 'pointer',
         fontFamily: FONT,
         fontSize: size,
-        fontWeight: active ? 500 : 400,
+        // Active is distinguished by color + opacity, NOT weight (hurttlocker
+        // locked rule: "active state never bumps weight"). The old active-500
+        // made the chat card's title tab read heavier than every other card's
+        // weight-400 title — the "chat vs o8 panel different sizes" the operator
+        // caught on the dogfood run. 400 matches CHROME.titleWeight everywhere.
+        fontWeight: 400,
         letterSpacing: '-0.2px',
         color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
         opacity: active ? 1 : 0.7,
