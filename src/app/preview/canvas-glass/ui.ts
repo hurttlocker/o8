@@ -34,6 +34,51 @@ export const RESIZE_ARC = squircleCornerArc(18, 2.5);
 export const MEDIA_RIM = 7;
 export const MEDIA_HEADER_H = 28;
 
+/**
+ * Canvas chrome vocabulary (#1259) — ONE size/weight set for every card's
+ * header: title, secondary meta, glyph icons, the ✕. Cards live inside the
+ * CSS-zoom layer (default 0.7), so these pre-zoom px render ~×0.7 on screen —
+ * tuned so chrome reads ~11–12px at the 100% step, matching the IDE o8.md panel
+ * header, the orchestrator dock, and the dock's own ✕. Before this every card
+ * hand-rolled its own 8–9.5px chrome and none of them matched. Multiply by the
+ * shell's pull-out factor `s` (1 for in-layer cards) where a card already does.
+ */
+export const CHROME = {
+  /** Card title (header label). */
+  titleSize: 16,
+  titleWeight: 400,
+  /** Secondary meta beside/under the title (branch, status, path tail). */
+  metaSize: 13,
+  metaWeight: 300,
+  /** Header glyph svg (dock, globe, picker, open-in-panel). */
+  iconSize: 18,
+  /** The ✕ glyph — sized to read like the dock's undock ✕ (~11px on screen). */
+  closeSize: 16,
+  /** Body field text inside a card header (url bar, tab labels) — same family. */
+  fieldSize: 14,
+} as const;
+
+/**
+ * The formal canvas-chrome scale (#1259). Interactive corner chrome — the ✕ +
+ * dock/action cluster — scales WITH the canvas like content, so it stays in
+ * proportion at any card size. But the clamp lifts it once the field zoom would
+ * shrink it below a clickable floor, so it never gets too small to hit in a
+ * zoomed-out canvas. At the 0.7 default the clamp resolves to 1 (pure
+ * proportional); it only boosts when small. The 1.4 cap stops a tiny card
+ * ballooning the buttons. Tune the floor via --cnv-chrome-floor. Pass the
+ * transformOrigin so the cluster pins to its corner as it scales.
+ *
+ * Skip this for screenMap pull-out cards — those scale their chrome via `* s`
+ * already and aren't inside the CSS-zoom layer, so reading --cnv-zoom here
+ * would double-scale them.
+ */
+export function chromeFloorScale(origin: string = 'top right'): CSSProperties {
+  return {
+    transform: 'scale(clamp(1, calc(var(--cnv-chrome-floor, 0.64) / var(--cnv-zoom, 1)), 1.4))',
+    transformOrigin: origin,
+  };
+}
+
 /** The one glass recipe — every surface consumes the tunable vars.
  *  `suppressBlur` drops the live `backdrop-filter` (set true WHILE a card is
  *  dragged): a moving backdrop-filter re-samples the dark native vibrancy each

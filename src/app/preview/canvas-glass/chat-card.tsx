@@ -14,7 +14,7 @@ import { SmoothCorners } from '@lisse/react';
 import { DockEntryView, DockTab } from './dock';
 import { BrainConversation } from './brain-card';
 import { CardComposer } from './card-composer';
-import { canvasZoom, FONT, chatVocabularyRebind, glassChat, scrollFadeY, type DockEntry } from './ui';
+import { canvasZoom, CHROME, chromeFloorScale, FONT, chatVocabularyRebind, glassChat, scrollFadeY, type DockEntry } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 import { CornerResize } from './corner-resize';
 import { useThreadOrchestrator, type CanvasThreadEvent } from './use-canvas-orchestrator';
@@ -213,8 +213,8 @@ export function ChatGlassCard({
             <span aria-hidden style={{ width: 34, height: 4, borderRadius: 3, background: 'var(--cnv-ink-muted)', opacity: 0.35 }} />
           </div>
           <div role="tablist" aria-label="Orchestrator panel views" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', paddingLeft: 20, paddingRight: 20, paddingBottom: 13 }}>
-            <DockTab label={nameTab} active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} />
-            <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => setActiveTab('cortex')} />
+            <DockTab label={nameTab} active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} size={CHROME.titleSize} />
+            <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => setActiveTab('cortex')} size={CHROME.titleSize} />
           </div>
         </div>
 
@@ -233,6 +233,10 @@ export function ChatGlassCard({
             pointerEvents: hovered ? 'auto' : 'none',
             transition: 'opacity 160ms ease',
             zIndex: 7,
+            // Chrome parity floor (#1259) — the shared canvas-chrome scale: the
+            // ✕/dock cluster scales with the canvas like content, but floors to a
+            // clickable minimum when the field zoom would shrink it too small.
+            ...chromeFloorScale('top right'),
           }}
         >
           <button
@@ -241,11 +245,11 @@ export function ChatGlassCard({
             title="Dock this conversation"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => onDock(card)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 3, color: 'var(--cnv-ink-muted)', cursor: 'pointer', display: 'inline-flex' }}
+            style={{ borderWidth: 0, background: 'transparent', padding: 4, color: 'var(--cnv-ink-muted)', cursor: 'pointer', display: 'inline-flex' }}
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
-            <svg style={{ width: 12, height: 12, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <svg style={{ width: CHROME.iconSize, height: CHROME.iconSize, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
               <path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M15 3v18" />
             </svg>
           </button>
@@ -254,7 +258,7 @@ export function ChatGlassCard({
             aria-label="Close conversation"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => onClose(card.id)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 2, paddingLeft: 6, paddingRight: 6, fontSize: 11, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
+            style={{ borderWidth: 0, background: 'transparent', padding: 3, paddingLeft: 6, paddingRight: 6, fontSize: CHROME.closeSize, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
