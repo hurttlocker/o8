@@ -14,7 +14,7 @@
 import { useRef, useState, type ReactNode } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, glassChat, MEDIA_HEADER_H } from './ui';
+import { canvasZoom, CHROME, chromeFloorScale, FONT, glassChat, MEDIA_HEADER_H } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 import { CornerResize } from './corner-resize';
 
@@ -177,7 +177,7 @@ export function GlassCardShell({
       aria-label="Close"
       onPointerDown={(event) => event.stopPropagation()}
       onClick={() => onClose(card.id)}
-      style={{ borderWidth: 0, background: 'transparent', padding: 2 * s, paddingLeft: 6 * s, paddingRight: 6 * s, fontSize: 11 * s, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
+      style={{ borderWidth: 0, background: 'transparent', padding: 3 * s, paddingLeft: 6 * s, paddingRight: 6 * s, fontSize: CHROME.closeSize * s, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
       onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
       onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
     >
@@ -242,10 +242,10 @@ export function GlassCardShell({
             }}
           >
             {icon ? <span aria-hidden style={{ display: 'flex', flexShrink: 0, color: 'var(--cnv-ink-muted)' }}>{icon}</span> : null}
-            <span style={{ flex: 1, minWidth: 0, fontSize: 11.5 * s, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            <span style={{ flex: 1, minWidth: 0, fontSize: CHROME.titleSize * s, fontWeight: CHROME.titleWeight, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
               {title}
             </span>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 1, opacity: hovered ? 1 : 0, pointerEvents: hovered ? 'auto' : 'none', transition: 'opacity 160ms ease', flexShrink: 0 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 1, opacity: hovered ? 1 : 0, pointerEvents: hovered ? 'auto' : 'none', transition: 'opacity 160ms ease', flexShrink: 0, ...(screenMap ? null : chromeFloorScale('center right')) }}>
               {actions}
               {closeBtn}
             </div>
@@ -273,11 +273,11 @@ export function GlassCardShell({
               </div>
               {title ? (
                 <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8 * s, paddingLeft: 22 * s, paddingRight: 22 * s, paddingBottom: 11 * s, minWidth: 0 }}>
-                  <span style={{ fontSize: 11.5 * s, fontWeight: 500, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
+                  <span style={{ fontSize: CHROME.titleSize * s, fontWeight: CHROME.titleWeight, letterSpacing: '-0.1px', color: 'var(--cnv-ink)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 }}>
                     {title}
                   </span>
                   {badge ? (
-                    <span style={{ fontSize: 9 * s, fontWeight: 300, color: 'var(--cnv-ink-muted)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0, maxWidth: '45%' }}>
+                    <span style={{ fontSize: CHROME.metaSize * s, fontWeight: CHROME.metaWeight, color: 'var(--cnv-ink-muted)', fontFamily: FONT, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flexShrink: 0, maxWidth: '45%' }}>
                       {badge}
                     </span>
                   ) : null}
@@ -286,7 +286,8 @@ export function GlassCardShell({
             </div>
 
             {/* Hover-revealed ghost actions + close — top-right, off when hidden so
-                they never swallow the corner resize zone. */}
+                they never swallow the corner resize zone. The cluster scales with
+                the canvas but floors to a clickable minimum (#1259). */}
             <div
               style={{
                 position: 'absolute',
@@ -299,6 +300,7 @@ export function GlassCardShell({
                 pointerEvents: hovered ? 'auto' : 'none',
                 transition: 'opacity 160ms ease',
                 zIndex: 7,
+                ...(screenMap ? null : chromeFloorScale('top right')),
               }}
             >
               {actions}
