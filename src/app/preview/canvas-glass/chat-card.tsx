@@ -212,58 +212,55 @@ export function ChatGlassCard({
           <div style={{ display: 'flex', justifyContent: 'center', paddingBottom: 8 }}>
             <span aria-hidden style={{ width: 34, height: 4, borderRadius: 3, background: 'var(--cnv-ink-muted)', opacity: 0.35 }} />
           </div>
-          <div role="tablist" aria-label="Orchestrator panel views" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-around', paddingLeft: 20, paddingRight: 20, paddingBottom: 13 }}>
-            <DockTab label={nameTab} active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} size={CHROME.titleSize} />
+          <div role="tablist" aria-label="Orchestrator panel views" style={{ display: 'flex', alignItems: 'center', gap: 10, paddingLeft: 20, paddingRight: 12, paddingBottom: 13, minWidth: 0 }}>
+            <DockTab label={nameTab} active={activeTab === 'orchestrator'} onClick={() => setActiveTab('orchestrator')} size={CHROME.titleSize} truncate />
             <DockTab label="Cortex" active={activeTab === 'cortex'} onClick={() => setActiveTab('cortex')} size={CHROME.titleSize} />
+            {/* Reserved lane — pushes the actions to the right edge and lets the
+                title tab truncate (not the actions) as the card narrows. */}
+            <div aria-hidden style={{ flex: 1, minWidth: 12 }} />
+            {/* Dock + close — hover-revealed, INLINE at the row's right end. The
+                old version was absolute top-right and collided with the right
+                tab + the NE resize zone; reserving a lane here fixes both, with
+                no reflow on hover. Floors with the canvas (#1259). */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 1,
+                flexShrink: 0,
+                opacity: hovered ? 1 : 0,
+                pointerEvents: hovered ? 'auto' : 'none',
+                transition: 'opacity 160ms ease',
+                ...chromeFloorScale('center right'),
+              }}
+            >
+              <button
+                type="button"
+                aria-label="Dock this conversation"
+                title="Dock this conversation"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => onDock(card)}
+                style={{ borderWidth: 0, background: 'transparent', padding: 4, color: 'var(--cnv-ink-muted)', cursor: 'pointer', display: 'inline-flex' }}
+                onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+                onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+              >
+                <svg style={{ width: CHROME.iconSize, height: CHROME.iconSize, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M15 3v18" />
+                </svg>
+              </button>
+              <button
+                type="button"
+                aria-label="Close conversation"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => onClose(card.id)}
+                style={{ borderWidth: 0, background: 'transparent', padding: 3, paddingLeft: 6, paddingRight: 6, fontSize: CHROME.closeSize, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
+                onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+                onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+              >
+                ✕
+              </button>
+            </div>
           </div>
-        </div>
-
-        {/* Dock + close — hover-revealed ghost icons, top-right corner, so the
-            bench header stays clean. pointer-events off when hidden so they
-            never swallow the corner resize zone. */}
-        <div
-          style={{
-            position: 'absolute',
-            top: 7,
-            right: 9,
-            display: 'flex',
-            alignItems: 'center',
-            gap: 1,
-            opacity: hovered ? 1 : 0,
-            pointerEvents: hovered ? 'auto' : 'none',
-            transition: 'opacity 160ms ease',
-            zIndex: 7,
-            // Chrome parity floor (#1259) — the shared canvas-chrome scale: the
-            // ✕/dock cluster scales with the canvas like content, but floors to a
-            // clickable minimum when the field zoom would shrink it too small.
-            ...chromeFloorScale('top right'),
-          }}
-        >
-          <button
-            type="button"
-            aria-label="Dock this conversation"
-            title="Dock this conversation"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onDock(card)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 4, color: 'var(--cnv-ink-muted)', cursor: 'pointer', display: 'inline-flex' }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            <svg style={{ width: CHROME.iconSize, height: CHROME.iconSize, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M15 3v18" />
-            </svg>
-          </button>
-          <button
-            type="button"
-            aria-label="Close conversation"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onClose(card.id)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 3, paddingLeft: 6, paddingRight: 6, fontSize: CHROME.closeSize, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            ✕
-          </button>
         </div>
 
         {activeTab === 'cortex' ? (

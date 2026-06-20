@@ -431,12 +431,13 @@ export function OrchestratorDock({
 /** One pane-header tab — Orchestrator | Cortex. Borderless (Q's reference):
  *  no underline, no box — the active tab is a weight + ink + opacity shift.
  *  Exported: the chat-card orchestrator modal renders the same strip. */
-export function DockTab({ label, active, onClick, size = 14 }: { label: string; active: boolean; onClick: () => void; size?: number }) {
+export function DockTab({ label, active, onClick, size = 14, truncate = false }: { label: string; active: boolean; onClick: () => void; size?: number; truncate?: boolean }) {
   return (
     <button
       type="button"
       role="tab"
       aria-selected={active}
+      title={truncate ? label : undefined}
       onPointerDown={(event) => event.stopPropagation()}
       onClick={onClick}
       style={{
@@ -454,6 +455,9 @@ export function DockTab({ label, active, onClick, size = 14 }: { label: string; 
         color: active ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)',
         opacity: active ? 1 : 0.7,
         transition: 'color 160ms ease, opacity 160ms ease',
+        // Truncate mode (the conversation-title tab): shrink + ellipsis inside a
+        // flex row so a long title never pushes the layout or clips the corner.
+        ...(truncate ? { display: 'block', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } : null),
       }}
       onMouseEnter={(event) => { if (!active) event.currentTarget.style.opacity = '1'; }}
       onMouseLeave={(event) => { if (!active) event.currentTarget.style.opacity = '0.7'; }}
