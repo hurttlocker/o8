@@ -15,7 +15,7 @@
 import type { CSSProperties } from 'react';
 import { FONT } from './ui';
 import { GlassCardShell } from './card-shell';
-import { runtimeColor } from './codename';
+import { runtimeColor } from '@/lib/agents/codename';
 import { PhaseRing, phaseFor, type DispatchLane } from './dispatch-dock';
 
 export const AGENT_MIN_W = 220;
