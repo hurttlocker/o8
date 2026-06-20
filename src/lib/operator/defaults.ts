@@ -68,6 +68,15 @@ export interface OperatorDefaults {
   orchestratorModel: string;
   defaultDispatchRuntime: OrchestratorRuntime;
   /**
+   * Default model for DISPATCHED workers. Empty = let the runtime pick its own
+   * default (today: Codex's configured model). Set it to a LOCAL model with the
+   * `ollama:<model>` / `lmstudio:<model>` convention (see
+   * src/lib/codex/local-model.ts) to run every worker on your own machine —
+   * scoped to o8 workers; your interactive Codex is untouched. A per-mission
+   * model still overrides this. Env: `O8_DISPATCH_MODEL`.
+   */
+  defaultDispatchModel: string;
+  /**
    * Off by default for v1. When true, opencode shows up in the dispatch
    * runtime picker + packet runtime dropdown + command palette. Kept as an
    * opt-in while we dogfood the adapter with early users; the owned-session
@@ -136,6 +145,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   promptCachingEnabled: true,
   orchestratorModel: 'claude-opus-4-8',
   defaultDispatchRuntime: 'codex',
+  defaultDispatchModel: '',
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
@@ -242,6 +252,11 @@ function envDefaultDispatchRuntime(): OrchestratorRuntime | null {
   return null;
 }
 
+function envDefaultDispatchModel(): string | null {
+  const raw = process.env.O8_DISPATCH_MODEL;
+  return raw?.trim() || null;
+}
+
 function envExperimentalOpencode(): boolean | null {
   const raw = process.env.O8_EXPERIMENTAL_OPENCODE;
   if (raw === '1') return true;
@@ -300,6 +315,7 @@ interface StoredOperatorDefaults {
   promptCachingEnabled?: boolean;
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
+  defaultDispatchModel?: string;
   experimentalOpencode?: boolean;
   experimentalGemini?: boolean;
   experimentalChat?: boolean;
@@ -351,6 +367,10 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (isDispatchRuntime(stored.defaultDispatchRuntime)) {
     result.defaultDispatchRuntime = stored.defaultDispatchRuntime;
   }
+  if (typeof stored.defaultDispatchModel === 'string') {
+    // Empty string is meaningful here ("unset → runtime default"), so accept it.
+    result.defaultDispatchModel = stored.defaultDispatchModel.trim();
+  }
   if (typeof stored.experimentalOpencode === 'boolean') {
     result.experimentalOpencode = stored.experimentalOpencode;
   }
@@ -386,6 +406,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envCache = envPromptCachingEnabled();
   const envModel = envOrchestratorModel();
   const envRuntime = envDefaultDispatchRuntime();
+  const envDispatchModel = envDefaultDispatchModel();
   const envOpencode = envExperimentalOpencode();
   const envGemini = envExperimentalGemini();
   const envChat = envExperimentalChat();
@@ -405,6 +426,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
     defaultDispatchRuntime: envRuntime ?? fileValues.defaultDispatchRuntime ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchRuntime,
+    defaultDispatchModel: envDispatchModel ?? fileValues.defaultDispatchModel ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchModel,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
@@ -426,6 +448,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntime !== undefined ? 'file' : 'default',
+    defaultDispatchModel: envDispatchModel !== null ? 'env' : fileValues.defaultDispatchModel !== undefined ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
@@ -518,6 +541,11 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
   }
+  if (update.defaultDispatchModel !== undefined) {
+    // Empty string clears it (back to the runtime default); any string is valid
+    // (cloud name, or the `ollama:`/`lmstudio:` local convention).
+    stored.defaultDispatchModel = update.defaultDispatchModel.trim();
+  }
   if (update.experimentalOpencode !== undefined) {
     stored.experimentalOpencode = Boolean(update.experimentalOpencode);
   }
@@ -578,6 +606,13 @@ export function resolvePromptCachingEnabledSync(): boolean {
 
 export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime {
   return getOperatorDefaultsSync().values.defaultDispatchRuntime;
+}
+
+/** Default worker model ('' = runtime's own default). Applied at the Codex
+ *  launch chokepoint so every dispatched worker inherits it; per-mission model
+ *  still wins. Set to `ollama:<model>` / `lmstudio:<model>` to dispatch local. */
+export function resolveDefaultDispatchModelSync(): string {
+  return getOperatorDefaultsSync().values.defaultDispatchModel;
 }
 
 export function resolveExperimentalOpencodeSync(): boolean {
