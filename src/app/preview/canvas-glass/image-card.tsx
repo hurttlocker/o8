@@ -15,7 +15,7 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, glassMedia } from './ui';
+import { canvasZoom, CHROME, chromeFloorScale, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, glassMedia } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 import { CornerResize } from './corner-resize';
 
@@ -155,21 +155,21 @@ export function ImageGlassCard({
       />
       {/* Header strip — icon + filename on the frosted frame top (reference). */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: MEDIA_HEADER_H, display: 'flex', alignItems: 'center', gap: 7, paddingLeft: 11, paddingRight: 9, fontFamily: FONT }}>
-        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+        <svg width={CHROME.iconSize} height={CHROME.iconSize} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
           <rect width="18" height="18" x="3" y="3" rx="2" ry="2" /><circle cx="9" cy="9" r="2" /><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21" />
         </svg>
-        <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: 400, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: CHROME.titleSize, fontWeight: CHROME.titleWeight, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {stack ? `${card.items.length} images` : lead?.name}
         </span>
         {resizing ? (
-          <span style={{ flexShrink: 0, fontFamily: MONO, fontSize: 9.5, color: 'var(--cnv-ink-muted)' }}>{Math.round(card.w)}×{Math.round(card.h)}</span>
+          <span style={{ flexShrink: 0, fontFamily: MONO, fontSize: CHROME.metaSize, color: 'var(--cnv-ink-muted)' }}>{Math.round(card.w)}×{Math.round(card.h)}</span>
         ) : hovered ? (
           <button
             type="button"
             aria-label="Remove image"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => onClose(card.id)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: 12, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, flexShrink: 0 }}
+            style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: CHROME.closeSize, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, flexShrink: 0, ...chromeFloorScale('center right') }}
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
