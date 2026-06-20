@@ -90,6 +90,15 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.defaultDispatchRuntime = raw;
   }
 
+  if (body.defaultDispatchModel !== undefined) {
+    // Any string is valid; '' clears it back to the runtime default. Use the
+    // `ollama:<model>` / `lmstudio:<model>` convention to dispatch local.
+    if (typeof body.defaultDispatchModel !== 'string') {
+      throw new Error('defaultDispatchModel must be a string.');
+    }
+    update.defaultDispatchModel = body.defaultDispatchModel.trim();
+  }
+
   if (body.experimentalOpencode !== undefined) {
     if (typeof body.experimentalOpencode !== 'boolean') {
       throw new Error('experimentalOpencode must be boolean.');
