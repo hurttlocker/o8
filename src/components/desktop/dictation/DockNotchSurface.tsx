@@ -745,9 +745,11 @@ export function DockNotchSurface({
     if (isRealtimeVoice) {
       // Voice-to-voice — the brand capsule (same footprint as listening), the
       // live EQ on the left + a "Voice live" tag. Slightly wider than 248 so the
-      // tag never crowds the waveform.
+      // tag never crowds the waveform; wider still when it also has to carry the
+      // in-flight worker count (the conductor delegated work — show it happening).
+      const withWorkers = realtimeVoice === 'live' && workerWorking > 0;
       return {
-        width: 268,
+        width: withWorkers ? 348 : 268,
         height: 40,
         borderRadius: '0 0 20px 20px',
         background: capsuleBg, ...capsuleBlur,
@@ -1177,6 +1179,28 @@ export function DockNotchSurface({
             {connecting ? 'Connecting…' : 'Voice live'}
           </span>
         </span>
+        {/* The conductor delegated work — surface it happening, right in the
+            voice capsule (the idle-sliver worker orbit is hidden while voice
+            owns the dock). */}
+        {!connecting && workerWorking > 0 ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 7, flexShrink: 0 }}>
+            <span aria-hidden style={{ width: 3, height: 3, borderRadius: '50%', background: 'rgba(255, 255, 255, 0.4)' }} />
+            <NotchOrbit size={12} />
+            <span
+              style={{
+                fontSize: 10.5,
+                fontWeight: 300,
+                letterSpacing: '-0.1px',
+                color: 'rgba(255, 255, 255, 0.78)',
+                textShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
+                whiteSpace: 'nowrap',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {workerWorking} working
+            </span>
+          </span>
+        ) : null}
       </div>
     );
   } else if (isAsking) {
