@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { listLanes, listActiveLanes } from '@/lib/lane/registry';
+import { codename } from '@/lib/agents/codename';
 import { dispatch } from '@/lib/lane/commands';
 import { reconcileOrphanedWorktrees } from '@/lib/lane/reconcile';
 import type { LaneCommand } from '@/lib/lane/types';
@@ -20,7 +21,13 @@ export async function GET(req: NextRequest) {
   const url = new URL(req.url);
   const activeOnly = url.searchParams.get('active') !== 'false';
 
-  const lanes = activeOnly ? listActiveLanes() : listLanes();
+  // Stamp the memorable codename (same pure fn that labels the canvas card and
+  // resolves voice "[Name], [task]") so every lane consumer — the canvas, voice
+  // status, mobile — sees the agent by the SAME name. Additive, deterministic.
+  const lanes = (activeOnly ? listActiveLanes() : listLanes()).map((lane) => ({
+    ...lane,
+    codename: codename(lane.id),
+  }));
 
   return NextResponse.json({ lanes }, {
     headers: { 'Cache-Control': 'no-store, max-age=0' },
