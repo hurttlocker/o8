@@ -16,7 +16,7 @@
 import { useRef, useState } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
-import { canvasZoom, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, glassMedia } from './ui';
+import { canvasZoom, CHROME, chromeFloorScale, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, glassMedia } from './ui';
 import { dragBounds, resistAxis, settleInBounds } from './canvas-drag';
 import { CornerResize } from './corner-resize';
 
@@ -134,21 +134,21 @@ export function VideoGlassCard({
       />
       {/* Header strip — icon + filename on the frosted frame top (reference). */}
       <div style={{ position: 'absolute', top: 0, left: 0, right: 0, height: MEDIA_HEADER_H, display: 'flex', alignItems: 'center', gap: 7, paddingLeft: 11, paddingRight: 9, fontFamily: FONT }}>
-        <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
+        <svg width={CHROME.iconSize} height={CHROME.iconSize} viewBox="0 0 24 24" fill="none" stroke="var(--cnv-ink-muted)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden style={{ flexShrink: 0 }}>
           <path d="m22 8-6 4 6 4V8Z" /><rect width="14" height="12" x="2" y="6" rx="2" ry="2" />
         </svg>
-        <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: 400, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        <span style={{ flex: 1, minWidth: 0, fontSize: CHROME.titleSize, fontWeight: CHROME.titleWeight, color: 'var(--cnv-ink)', letterSpacing: '-0.1px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {card.name}
         </span>
         {resizing ? (
-          <span style={{ flexShrink: 0, fontFamily: MONO, fontSize: 9.5, color: 'var(--cnv-ink-muted)' }}>{Math.round(card.w)}×{Math.round(card.h)}</span>
+          <span style={{ flexShrink: 0, fontFamily: MONO, fontSize: CHROME.metaSize, color: 'var(--cnv-ink-muted)' }}>{Math.round(card.w)}×{Math.round(card.h)}</span>
         ) : hovered ? (
           <button
             type="button"
             aria-label="Remove video"
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => onClose(card.id)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: 12, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, flexShrink: 0 }}
+            style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: CHROME.closeSize, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, flexShrink: 0, ...chromeFloorScale('center right') }}
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
