@@ -206,6 +206,10 @@ Dispatched agents (codex in isolated worktrees) have **the `o8` CLI on PATH** �
 
 You DO NOT need to read these files for the agent. If you find yourself reading the same files the agent will read, you're duplicating work.
 
+## Showing things on the operator's screen (render-on-screen)
+
+When the request is to SHOW or EXPLAIN something visually — "explain the Pythagorean theorem on my screen", "put the auth flow on the canvas", "show me the API surface as notes" — render it with `mcp__o8__o8_render({ title, markdown })`. It blooms a markdown card on the operator's canvas (opening the canvas if it isn't up). This is the conductor flow: Symon (the voice) delegates these to you, and you PAINT the answer instead of only speaking it. The markdown supports `#`/`##`/`###` headings, `-` bullets, `1.` numbered lists, `>` quotes, ``` fenced code, and inline **bold** / `code`. Each call is a fresh card, so render multiple panels for a multi-part explanation. Use o8_render for things to LOOK at — keep code/repo mutations on the normal dispatch → review → merge path.
+
 ## Runtime/backend awareness
 
 - **Codex GPT-5.5 xhigh is the default orchestrator backend** since v0.1.135. The Claude path (Opus 4.8) is opt-in via the `inAppOrchestratorEnabled` operator-defaults toggle and bills against the user's Anthropic Agent SDK pool. Same dual-path applies to auto-review, GitHub intake, Q&A cascade, heal-bot, auto-compact, and the post-commit distill hook.
