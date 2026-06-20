@@ -435,11 +435,11 @@ pub fn all_tools() -> Vec<Value> {
         // ── o8 Canvas control (drive the operator's screen) ───────────────────
         json!({
             "name": "o8_canvas",
-            "description": "Drive o8's Canvas (the spatial workspace) by voice — this is the ONLY tool that opens the Canvas (do NOT use o8_ui_open for the canvas). Use when the user wants to SEE or arrange something in o8 itself: 'open / enter / show / go to / pull up the canvas' (enter — just bring the Canvas up, no other action), 'tell the orchestrator to fix the failing test' (send-prompt), 'ask the brain why the merge gate exists' (ask-brain), 'open the browser on localhost 3000' (open-browser), 'pull up the spec' (open-spec), 'open a terminal' (spawn-terminal), 'search the canvas for the tooltip card' (search), 'zoom out' (zoom), 'open/close the dock' (dock), 'spawn two agents on the auth refactor' (spawn-agents — blooms N worker cards that work the task in isolated worktrees). Every verb opens the Canvas automatically if it isn't already up. This only changes what's on screen — it never edits code itself (use o8_dispatch/escalate for that).",
+            "description": "Drive o8's Canvas (the spatial workspace) by voice — this is the ONLY tool that opens the Canvas (do NOT use o8_ui_open for the canvas). Use when the user wants to SEE or arrange something in o8 itself: 'open / enter / show / go to / pull up the canvas' (enter — just bring the Canvas up, no other action), 'tell the orchestrator to fix the failing test' (send-prompt), 'ask the brain why the merge gate exists' (ask-brain), 'open the browser on localhost 3000' (open-browser), 'pull up the spec' (open-spec), 'open a terminal' (spawn-terminal), 'search the canvas for the tooltip card' (search), 'zoom out' (zoom), 'open/close the dock' (dock), 'spawn two agents on the auth refactor' (spawn-agents — blooms N worker cards that work the task in isolated worktrees), 'put them in grid mode' / 'tile the cards' / 'free the canvas' (grid — tiles every card into an auto-arranged grid, or toggles back). Every verb opens the Canvas automatically if it isn't already up. This only changes what's on screen — it never edits code itself (use o8_dispatch/escalate for that).",
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "verb": { "type": "string", "enum": ["enter", "send-prompt", "ask-brain", "open-browser", "open-spec", "spawn-terminal", "search", "zoom", "dock", "spawn-agents"], "description": "Which canvas action to run. 'enter' just brings the Canvas up (open/show/go to the canvas) with no further action." },
+                    "verb": { "type": "string", "enum": ["enter", "send-prompt", "ask-brain", "open-browser", "open-spec", "spawn-terminal", "search", "zoom", "dock", "spawn-agents", "grid"], "description": "Which canvas action to run. 'enter' just brings the Canvas up (open/show/go to the canvas) with no further action." },
                     "text": { "type": "string", "description": "send-prompt: the message for the orchestrator." },
                     "question": { "type": "string", "description": "ask-brain: the question for the Engineering Brain." },
                     "url": { "type": "string", "description": "open-browser: the URL to open (omit for the app dashboard)." },
@@ -449,7 +449,8 @@ pub fn all_tools() -> Vec<Value> {
                     "open": { "type": "boolean", "description": "dock: true opens, false closes (omit to toggle)." },
                     "task": { "type": "string", "description": "spawn-agents: what the agents should work on, e.g. 'the auth refactor'." },
                     "count": { "type": "number", "description": "spawn-agents: how many agents to spawn (1-5, default 1)." },
-                    "repo": { "type": "string", "description": "spawn-agents: optional repo name or path to scope the agents to; omit to use the active repo." }
+                    "repo": { "type": "string", "description": "spawn-agents: optional repo name or path to scope the agents to; omit to use the active repo." },
+                    "on": { "type": "boolean", "description": "grid: true tiles the cards into a grid, false frees them; omit to toggle." }
                 },
                 "required": ["verb"]
             }

@@ -15,6 +15,7 @@
 import type { CSSProperties } from 'react';
 import { FONT } from './ui';
 import { GlassCardShell } from './card-shell';
+import { runtimeColor } from './codename';
 import { PhaseRing, phaseFor, type DispatchLane } from './dispatch-dock';
 
 export const AGENT_MIN_W = 220;
@@ -31,6 +32,9 @@ export interface AgentCard {
   laneId: string;
   /** Stable address number (#1, #2…) — what voice "agent two" resolves to. */
   number: number;
+  /** Memorable, voice-friendly name (Atlas, Nova…) — the primary identity the
+   *  operator sees and addresses. Deterministic on laneId (see codename.ts). */
+  codename: string;
   /** Snapshotted at bloom so the label survives the lane leaving the active set. */
   title: string;
   /** Worker runtime label (codex / claude-code / …), snapshotted at bloom. */
@@ -79,7 +83,10 @@ export function AgentGlassCard({
   // A lane that has left the active set has wrapped up — read it as done so the
   // card settles to a check rather than spinning forever.
   const phase = phaseFor(lane ? lane.status : 'done');
-  const meta = [card.runtime, lane?.repoPath?.split('/').filter(Boolean).pop()].filter(Boolean).join(' · ');
+  // Number + repo tail — runtime now reads as the colored badge dot, so it leaves
+  // the meta line. `#N` stays as the stable secondary address.
+  const meta = [`#${card.number}`, lane?.repoPath?.split('/').filter(Boolean).pop()].filter(Boolean).join(' · ');
+  const accent = runtimeColor(card.runtime);
 
   return (
     <GlassCardShell
@@ -87,8 +94,15 @@ export function AgentGlassCard({
       cornerHandles
       minW={AGENT_MIN_W}
       minH={AGENT_MIN_H}
-      title={`Agent ${card.number}`}
-      badge={card.runtime ?? undefined}
+      title={card.codename || `Agent ${card.number}`}
+      badge={
+        card.runtime ? (
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+            <span aria-hidden style={{ width: 6, height: 6, borderRadius: 3, background: accent, flexShrink: 0 }} />
+            {card.runtime}
+          </span>
+        ) : undefined
+      }
       onMove={onMove}
       onResize={onResize}
       onFocus={onFocus}
@@ -132,7 +146,7 @@ export function AgentGlassCard({
             <button
               type="button"
               onClick={() => onReview(card.laneId)}
-              aria-label={`Review agent ${card.number}`}
+              aria-label={`Review ${card.codename || `agent ${card.number}`}`}
               style={reviewButton}
               onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.18)'; }}
               onMouseLeave={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
