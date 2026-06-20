@@ -53,6 +53,22 @@ function forwardLog(line: string): void {
 }
 
 /**
+ * Meter a realtime response. gpt-realtime reports per-response token usage in
+ * `response.done.usage`; forward it to the server so it's priced + written to
+ * usage_logs (the spend you see during the $5 dogfood). Fire-and-forget — a
+ * metering hiccup must never interrupt the conversation.
+ */
+function reportUsage(usage: unknown, model: string | undefined, sessionKey: string): void {
+  if (!usage || typeof usage !== 'object') return;
+  fetch('/api/voice/realtime/usage', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    credentials: 'same-origin',
+    body: JSON.stringify({ usage, model, sessionKey }),
+  }).catch(() => { /* metering is best-effort */ });
+}
+
+/**
  * Mirror the session PRESENCE to the screen dock (the always-on Symon pill) so
  * "voice is live" shows up where Symon lives — not only in the IDE window. Maps
  * the fine-grained {@link RealtimeStatus} down to the dock's simple set
@@ -99,6 +115,9 @@ const DEFAULT_INSTRUCTIONS =
  * abort mid-connect or end a live session. All teardown is idempotent.
  */
 export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeSessionHandle {
+  // Stable id for the whole conversation so every metered response groups into
+  // one "Symon Voice" session in the cost dashboard.
+  const meterSessionId = `realtime-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
   let status: RealtimeStatus = 'idle';
   let aborted = false;
   let pc: RTCPeerConnection | null = null;
@@ -282,6 +301,7 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
       if (parsed.type === 'response.done') {
         const response = parsed['response'];
         if (response && typeof response === 'object') {
+          reportUsage((response as Record<string, unknown>)['usage'], opts.model, meterSessionId);
           void handleFunctionCalls(response as Record<string, unknown>);
         }
       }
