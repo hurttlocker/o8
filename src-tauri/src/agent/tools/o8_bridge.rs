@@ -46,6 +46,9 @@ pub async fn status(args: Value) -> Result<Value, String> {
             }
         }
         items.push(json!({
+            // The agent's memorable canvas name — say it back ("Atlas is on the
+            // auth refactor") and use it to address the agent via o8_agent_task.
+            "name": lane.get("codename").and_then(|v| v.as_str()).unwrap_or(""),
             "label": lane.get("label").and_then(|v| v.as_str()).unwrap_or("Untitled"),
             "status": lane.get("status").and_then(|v| v.as_str()).unwrap_or("unknown"),
             "repo": repo,
