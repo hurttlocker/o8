@@ -117,6 +117,10 @@ type PanelPending = { phase: 'listening' | 'polishing' | 'handoff'; text: string
 export default function DictationPillPage() {
   const [snapshot, setSnapshot] = useState<DictationSnapshot>(IDLE_SNAPSHOT);
   const [ttsState, setTtsState] = useState<TtsControlState>('idle');
+  // Realtime voice-to-voice presence (Track B) — mirrored from the session via
+  // `o8:realtime-status`, so the dock pill shows "voice live" up where Symon
+  // lives, not only the in-window indicator.
+  const [realtimeVoice, setRealtimeVoice] = useState<'off' | 'connecting' | 'live'>('off');
   const [askOpen, setAskOpen] = useState(false);
   const [askMode, setAskMode] = useState<AskMode>('idle');
   const [askThread, setAskThread] = useState<AskTurn[]>([]);
@@ -366,6 +370,58 @@ export default function DictationPillPage() {
       disposed = true;
       if (off) { try { off(); } catch { /* noop */ } off = null; }
     };
+  }, []);
+
+  // ── Realtime voice presence (o8:realtime-status) ──
+  // The session lives in the MAIN window (RealtimeVoiceHost / realtime-client);
+  // it forwards `off | connecting | live | error` here via Rust
+  // (realtime_status_changed → emit_to dock). `live` persists until `off`;
+  // `connecting` self-clears if it never lands (stuck negotiation); `error`
+  // flashes off — the in-window pill already says "Voice unavailable".
+  const rtSafetyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!isTauri()) return;
+    let disposed = false;
+    let off: (() => void) | null = null;
+    const clearSafety = () => {
+      if (rtSafetyTimerRef.current) { clearTimeout(rtSafetyTimerRef.current); rtSafetyTimerRef.current = null; }
+    };
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{ status?: string }>('o8:realtime-status', (e) => {
+        const s = e.payload?.status;
+        dockLog(`realtime-status ${s ?? '?'}`);
+        clearSafety();
+        if (s === 'live') {
+          setRealtimeVoice('live');
+        } else if (s === 'connecting') {
+          setRealtimeVoice('connecting');
+          // Never strand a "Connecting…" pill if the session dies mid-negotiate.
+          rtSafetyTimerRef.current = setTimeout(() => setRealtimeVoice('off'), 15_000);
+        } else {
+          // 'off' | 'error' | anything else → clear the presence.
+          setRealtimeVoice('off');
+        }
+      }))
+      .then((unlisten) => {
+        if (disposed) { unlisten(); return; }
+        off = unlisten;
+      })
+      .catch((err) => dockLog(`realtime-status subscribe failed: ${err instanceof Error ? err.message : String(err)}`));
+    return () => {
+      disposed = true;
+      clearSafety();
+      if (off) { try { off(); } catch { /* noop */ } off = null; }
+    };
+  }, []);
+
+  // Tap the dock voice-live capsule → toggle the realtime session off. The
+  // session lives in the main window, so broadcast the SAME toggle the
+  // double-tap right ⌘ hotkey emits; RealtimeVoiceHost (main) flips it off.
+  const stopRealtimeVoice = useCallback(() => {
+    if (!isTauri()) return;
+    import('@tauri-apps/api/event')
+      .then(({ emit }) => emit('o8:realtime-toggle', { origin: 'dock-tap' }))
+      .catch((err) => dockLog(`realtime toggle emit failed: ${err instanceof Error ? err.message : String(err)}`));
   }, []);
 
   const handleTogglePause = useCallback(() => { invokeCmd('tts_toggle_pause'); }, []);
@@ -813,6 +869,8 @@ export default function DictationPillPage() {
             workerRepos={workers.repos}
             showWorkers={showWorkers}
             panelPending={panelPending}
+            realtimeVoice={realtimeVoice}
+            onStopRealtime={stopRealtimeVoice}
           />
           {editApplied ? (
             <button

@@ -3744,6 +3744,8 @@ pub fn run() {
             #[cfg(target_os = "macos")]
             agent::realtime_bridge::record_realtime_event,
             #[cfg(target_os = "macos")]
+            agent::realtime_bridge::realtime_status_changed,
+            #[cfg(target_os = "macos")]
             agent_get_escalation,
             #[cfg(target_os = "macos")]
             agent_set_escalation,
