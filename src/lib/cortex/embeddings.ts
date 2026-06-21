@@ -19,6 +19,7 @@
  */
 
 import 'server-only';
+import { resolveLocalInferenceBaseUrlSync, resolveLocalEmbedModelSync } from '@/lib/operator/defaults';
 
 const OPENAI_EMBED_MODEL = 'text-embedding-3-small';
 const EMBED_DIMS = 1536;
@@ -26,6 +27,9 @@ const BATCH_LIMIT = 100;
 const TIMEOUT_MS = 30_000;
 
 export function isAvailable(): boolean {
+  // A local endpoint with an embed model makes the Brain work with zero cloud
+  // keys; otherwise we need OpenAI. Either path satisfies "embeddings on".
+  if (resolveLocalInferenceBaseUrlSync().trim() && resolveLocalEmbedModelSync().trim()) return true;
   return !!process.env.OPENAI_API_KEY;
 }
 
@@ -96,6 +100,15 @@ export async function embedBatch(texts: string[]): Promise<Float32Array[]> {
     );
   }
 
+  // Local endpoint first — a zero-cloud-key dev embeds on their own machine.
+  // Returns the local model's native dimension; for a fresh local install every
+  // stored + query vector shares that dimension, so cosine stays consistent.
+  const localBaseUrl = resolveLocalInferenceBaseUrlSync().trim();
+  const localEmbedModel = resolveLocalEmbedModelSync().trim();
+  if (localBaseUrl && localEmbedModel) {
+    return embedBatchLocal(texts, localBaseUrl, localEmbedModel);
+  }
+
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) {
     throw new Error(
@@ -148,4 +161,37 @@ export async function embedBatch(texts: string[]): Promise<Float32Array[]> {
     }
     return new Float32Array(entry.embedding);
   });
+}
+
+/**
+ * Embed via a local OpenAI-compatible endpoint (Ollama / LM Studio `/v1/embeddings`).
+ * Accepts the model's native dimension (no 1536 enforcement) — zero cloud cost.
+ */
+async function embedBatchLocal(texts: string[], baseUrl: string, model: string): Promise<Float32Array[]> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  try {
+    const response = await fetch(`${baseUrl.replace(/\/+$/, '')}/v1/embeddings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ model, input: texts }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '(no body)');
+      throw new Error(`[embeddings] local endpoint error ${response.status}: ${errorText.slice(0, 200)}`);
+    }
+    const body = (await response.json()) as { data?: Array<{ embedding: number[] }> };
+    if (!body.data || body.data.length !== texts.length) {
+      throw new Error(`[embeddings] local endpoint returned ${body.data?.length ?? 0} embeddings for ${texts.length} inputs`);
+    }
+    return body.data.map((entry) => {
+      if (!Array.isArray(entry.embedding) || entry.embedding.length === 0) {
+        throw new Error(`[embeddings] unexpected local embedding shape: length=${entry.embedding?.length}`);
+      }
+      return new Float32Array(entry.embedding);
+    });
+  } finally {
+    clearTimeout(timeoutId);
+  }
 }

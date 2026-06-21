@@ -22,6 +22,8 @@ import {
   readOrchestratorBackendSessionId,
   writeOrchestratorBackendSessionId,
 } from '@/lib/mobile/orchestrator-thread-history';
+import { parseLocalModel } from '@/lib/codex/local-model';
+import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -289,6 +291,38 @@ function reasoningEffortFromThinkingEffort(effort: ThinkingEffort | undefined): 
   return effort;
 }
 
+/**
+ * Resolve the orchestrator's Codex model. An explicit per-turn model always
+ * wins. Otherwise: if the operator's default dispatch model is a LOCAL model
+ * (`ollama:` / `lmstudio:`), the orchestrator runs on it too — so a zero-cloud-
+ * key dev's chat surface works end-to-end on their own machine. A *cloud*
+ * dispatch model does NOT change the orchestrator default (workers and the
+ * orchestrator are separate concerns on the cloud path), so the gpt-5.5 default
+ * is preserved exactly.
+ */
+function resolveOrchestratorModelSync(explicit?: string): string {
+  const trimmed = explicit?.trim();
+  if (trimmed) return trimmed;
+  const dispatch = resolveDefaultDispatchModelSync().trim();
+  if (dispatch && parseLocalModel(dispatch)) return dispatch;
+  return DEFAULT_CODEX_MODEL;
+}
+
+/**
+ * Build the model `-c`/flag pairs for `codex exec`. A local model expands to the
+ * `--oss --local-provider … --model` form (no reasoning-effort tier — local
+ * models don't have one). A cloud model keeps the historical `-c model=` +
+ * `-c model_reasoning_effort=` pair verbatim, so the default path is unchanged.
+ * Exported for the unit test that locks the cloud-path invariant.
+ */
+export function codexOrchestratorModelFlags(model: string, reasoningEffort: string): string[] {
+  const local = parseLocalModel(model);
+  if (local) {
+    return ['--oss', '--local-provider', local.provider, '--model', local.model];
+  }
+  return ['-c', `model=${model}`, '-c', `model_reasoning_effort=${reasoningEffort}`];
+}
+
 // ── Event mapping (codex JSON → OrchestratorEvent) ───────────────────────────
 
 interface ParsedCodexLine {
@@ -326,7 +360,8 @@ export async function sendToCodexOrchestrator(
   options: SendToCodexOrchestratorOptions = {},
 ): Promise<void> {
   const permissionMode: CodexOrchestratorPermissionMode = options.permissionMode ?? 'full';
-  const model = options.model?.trim() || DEFAULT_CODEX_MODEL;
+  const model = resolveOrchestratorModelSync(options.model);
+  const isLocalModel = !!parseLocalModel(model);
   const reasoningEffort = reasoningEffortFromThinkingEffort(options.thinkingEffort);
 
   // Steer-Now / queue preempt: the ws-server aborts the prior turn's
@@ -393,10 +428,7 @@ export async function sendToCodexOrchestrator(
         session.threadId!,
         '--json',
         ...sandboxFlagsForMode(permissionMode),
-        '-c',
-        `model=${model}`,
-        '-c',
-        `model_reasoning_effort=${reasoningEffort}`,
+        ...codexOrchestratorModelFlags(model, reasoningEffort),
         // Disable the hosted image_generation tool (defaults to nonexistent
         // gpt-image-2 in Codex CLI 0.130.0 → 400s every turn at spawn).
         '-c',
@@ -408,10 +440,7 @@ export async function sendToCodexOrchestrator(
         'exec',
         '--json',
         ...sandboxFlagsForMode(permissionMode),
-        '-c',
-        `model=${model}`,
-        '-c',
-        `model_reasoning_effort=${reasoningEffort}`,
+        ...codexOrchestratorModelFlags(model, reasoningEffort),
         '-c',
         'tools.image_generation=false',
         '-C',
@@ -630,7 +659,7 @@ export async function sendToCodexOrchestrator(
           }
 
           if (type === 'turn.completed' && parsed.usage) {
-            cost = computeUsdCost(parsed.usage);
+            cost = isLocalModel ? null : computeUsdCost(parsed.usage);
             continue;
           }
         } catch {
@@ -662,7 +691,7 @@ export async function sendToCodexOrchestrator(
         try {
           const parsed = JSON.parse(lineBuffer) as ParsedCodexLine;
           if (parsed.type === 'turn.completed' && parsed.usage) {
-            cost = computeUsdCost(parsed.usage);
+            cost = isLocalModel ? null : computeUsdCost(parsed.usage);
           }
         } catch {
           // ignore
