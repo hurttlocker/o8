@@ -49,6 +49,10 @@ const SPEECH_EVENTS = new Set([
 export function RealtimeVoiceHost() {
   const sessionRef = useRef<RealtimeSessionHandle | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // True between response.created and response.done — i.e. while Symon is
+  // mid-answer. The idle clock is HARD-OFF for the whole window so no
+  // intermediate event can re-arm it and cut a long reply short.
+  const respondingRef = useRef(false);
   const [status, setStatus] = useState<RealtimeStatus>('idle');
 
   const clearIdle = useCallback(() => {
@@ -60,6 +64,7 @@ export function RealtimeVoiceHost() {
 
   const stop = useCallback(() => {
     clearIdle();
+    respondingRef.current = false;
     void sessionRef.current?.stop();
     sessionRef.current = null;
   }, [clearIdle]);
@@ -74,6 +79,7 @@ export function RealtimeVoiceHost() {
 
   const start = useCallback(() => {
     if (sessionRef.current) return;
+    respondingRef.current = false;
     let voice = 'marin';
     try {
       voice = localStorage.getItem('o8:realtime-voice') || 'marin';
@@ -86,21 +92,22 @@ export function RealtimeVoiceHost() {
       onStatus: (s) => setStatus(s),
       onEvent: (e) => {
         const t = typeof e.type === 'string' ? e.type : '';
-        // The model started a turn → SUSPEND the idle clock for the whole turn,
-        // however long Symon talks. (A tool call mints a fresh response.created
-        // after response.done, so tool→speak chains stay suspended too.)
+        // HARD-GATE the idle clock on a responding flag. We must NOT lean on
+        // intermediate response.*/transcript-delta events to keep re-arming it:
+        // in WebRTC the audio rides the media track and the data channel can go
+        // silent for the whole spoken answer, so the timer would fire mid-reply
+        // (the 0.1.423 bug). Instead: OFF for the entire model turn
+        // (response.created → response.done), then re-armed once when the turn
+        // ends. A tool call mints a fresh response.created after response.done,
+        // so tool→speak chains stay suspended too.
         if (t === 'response.created') {
+          respondingRef.current = true;
           clearIdle();
-        } else if (
-          // Any model-response progress/finish OR user activity re-arms the
-          // 20s clock. Covering the whole `response.*` family (transcript
-          // deltas stream throughout the answer) + the WebRTC audio-buffer
-          // events means a long reply is never cut, while a genuinely silent
-          // gap after the turn still auto-stops.
-          t.startsWith('response.')
-          || t.startsWith('output_audio_buffer.')
-          || SPEECH_EVENTS.has(t)
-        ) {
+        } else if (t === 'response.done') {
+          respondingRef.current = false;
+          armIdle();
+        } else if (!respondingRef.current && SPEECH_EVENTS.has(t)) {
+          // User activity between turns → keep the line open.
           armIdle();
         }
       },
