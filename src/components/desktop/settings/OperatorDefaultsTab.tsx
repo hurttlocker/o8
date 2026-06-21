@@ -21,6 +21,7 @@ import {
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
 import { CanvasGlassTuner } from './CanvasGlassTuner';
+import { LocalModelsSection } from './LocalModelsSection';
 
 type OverlapGateMode = 'advisory' | 'strict';
 type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
@@ -39,6 +40,9 @@ interface OperatorDefaults {
   promptCachingEnabled: boolean;
   orchestratorModel: string;
   defaultDispatchRuntime: DispatchRuntime;
+  defaultDispatchModel: string;
+  localInferenceBaseUrl: string;
+  localEmbedModel: string;
   experimentalOpencode: boolean;
   experimentalGemini: boolean;
   experimentalChat: boolean;
@@ -908,6 +912,23 @@ export function OperatorDefaultsTab() {
           <HairlineRule />
         </div>
       </section>
+
+      {/* 10 — LOCAL MODELS */}
+      <LocalModelsSection
+        values={{
+          defaultDispatchModel: values.defaultDispatchModel,
+          localInferenceBaseUrl: values.localInferenceBaseUrl,
+          localEmbedModel: values.localEmbedModel,
+        }}
+        sources={{
+          defaultDispatchModel: sources.defaultDispatchModel,
+          localInferenceBaseUrl: sources.localInferenceBaseUrl,
+          localEmbedModel: sources.localEmbedModel,
+        }}
+        busyField={busyField}
+        envDisabledReason={envDisabledReason}
+        onCommit={(field, value) => { void updateField(field, value); }}
+      />
     </div>
   );
 }

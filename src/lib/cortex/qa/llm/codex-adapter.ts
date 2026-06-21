@@ -30,6 +30,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
+import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
+import { codexModelArgs, parseLocalModel } from '@/lib/codex/local-model';
+
 const execFileAsync = promisify(execFile);
 
 // ── Shared binary detection ──────────────────────────────────────────────────
@@ -107,6 +110,24 @@ export interface CallCodexOptions {
 export const CODEX_DEFAULT_MODEL = 'gpt-5.5';
 
 /**
+ * Resolve the Codex model for a Q&A call. An explicit model wins. Otherwise, if
+ * the operator's default dispatch model is LOCAL (`ollama:`/`lmstudio:`), the
+ * Brain composes on that local model too — so a zero-cloud-key dev gets real
+ * synthesized answers (not just retrieved sources) with no Codex subscription.
+ * A cloud dispatch model does NOT change the default here (gpt-5.5 stays).
+ */
+function resolveCodexQaModel(explicit?: string): string {
+  if (explicit) return explicit;
+  try {
+    const dispatch = resolveDefaultDispatchModelSync().trim();
+    if (dispatch && parseLocalModel(dispatch)) return dispatch;
+  } catch {
+    // operator defaults unavailable — fall through to the cloud default
+  }
+  return CODEX_DEFAULT_MODEL;
+}
+
+/**
  * Call Codex via the CLI with `prompt` on stdin and read the final answer
  * from a tmpfile written by `--output-last-message`.
  *
@@ -121,7 +142,7 @@ export const CODEX_DEFAULT_MODEL = 'gpt-5.5';
  */
 export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 30_000;
-  const model = opts.model ?? CODEX_DEFAULT_MODEL;
+  const model = resolveCodexQaModel(opts.model);
 
   const codexBin = await resolveCodexBin();
   if (!codexBin) {
@@ -139,7 +160,9 @@ export async function callCodex(prompt: string, opts: CallCodexOptions = {}): Pr
     'exec',
     '--skip-git-repo-check',
     '--output-last-message', tmpFile,
-    '-m', model,
+    // Local models expand to `--oss --local-provider … --model`; cloud models to
+    // `--model <name>` (equivalent to the historical `-m`).
+    ...codexModelArgs(model),
   ];
 
   // tmpdir cwd so no project .codex/ config bleeds in.

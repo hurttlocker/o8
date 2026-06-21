@@ -77,6 +77,17 @@ export interface OperatorDefaults {
    */
   defaultDispatchModel: string;
   /**
+   * Local inference endpoint — the OpenAI-compatible base URL of a local model
+   * server (Ollama `http://localhost:11434`, LM Studio `http://localhost:1234`,
+   * or any custom host root, NO trailing /v1). Empty = use cloud. When set with
+   * `localEmbedModel`, the Brain embeds here instead of OpenAI — a zero-cloud-key
+   * local dev. Env: `O8_LOCAL_INFERENCE_BASE_URL`.
+   */
+  localInferenceBaseUrl: string;
+  /** Embedding model on the local endpoint for the Brain (e.g. `nomic-embed-text`).
+   *  Empty = no local embeddings (Brain uses BM25/exact-match). Env: `O8_LOCAL_EMBED_MODEL`. */
+  localEmbedModel: string;
+  /**
    * Off by default for v1. When true, opencode shows up in the dispatch
    * runtime picker + packet runtime dropdown + command palette. Kept as an
    * opt-in while we dogfood the adapter with early users; the owned-session
@@ -146,6 +157,8 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   orchestratorModel: 'claude-opus-4-8',
   defaultDispatchRuntime: 'codex',
   defaultDispatchModel: '',
+  localInferenceBaseUrl: '',
+  localEmbedModel: '',
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
@@ -257,6 +270,14 @@ function envDefaultDispatchModel(): string | null {
   return raw?.trim() || null;
 }
 
+function envLocalInferenceBaseUrl(): string | null {
+  return process.env.O8_LOCAL_INFERENCE_BASE_URL?.trim() || null;
+}
+
+function envLocalEmbedModel(): string | null {
+  return process.env.O8_LOCAL_EMBED_MODEL?.trim() || null;
+}
+
 function envExperimentalOpencode(): boolean | null {
   const raw = process.env.O8_EXPERIMENTAL_OPENCODE;
   if (raw === '1') return true;
@@ -316,6 +337,8 @@ interface StoredOperatorDefaults {
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
   defaultDispatchModel?: string;
+  localInferenceBaseUrl?: string;
+  localEmbedModel?: string;
   experimentalOpencode?: boolean;
   experimentalGemini?: boolean;
   experimentalChat?: boolean;
@@ -371,6 +394,12 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
     // Empty string is meaningful here ("unset → runtime default"), so accept it.
     result.defaultDispatchModel = stored.defaultDispatchModel.trim();
   }
+  if (typeof stored.localInferenceBaseUrl === 'string') {
+    result.localInferenceBaseUrl = stored.localInferenceBaseUrl.trim();
+  }
+  if (typeof stored.localEmbedModel === 'string') {
+    result.localEmbedModel = stored.localEmbedModel.trim();
+  }
   if (typeof stored.experimentalOpencode === 'boolean') {
     result.experimentalOpencode = stored.experimentalOpencode;
   }
@@ -407,6 +436,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envModel = envOrchestratorModel();
   const envRuntime = envDefaultDispatchRuntime();
   const envDispatchModel = envDefaultDispatchModel();
+  const envLocalBaseUrl = envLocalInferenceBaseUrl();
+  const envLocalEmbed = envLocalEmbedModel();
   const envOpencode = envExperimentalOpencode();
   const envGemini = envExperimentalGemini();
   const envChat = envExperimentalChat();
@@ -427,6 +458,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
     defaultDispatchRuntime: envRuntime ?? fileValues.defaultDispatchRuntime ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchRuntime,
     defaultDispatchModel: envDispatchModel ?? fileValues.defaultDispatchModel ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchModel,
+    localInferenceBaseUrl: envLocalBaseUrl ?? fileValues.localInferenceBaseUrl ?? OPERATOR_DEFAULTS_FALLBACK.localInferenceBaseUrl,
+    localEmbedModel: envLocalEmbed ?? fileValues.localEmbedModel ?? OPERATOR_DEFAULTS_FALLBACK.localEmbedModel,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
@@ -449,6 +482,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
     defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntime !== undefined ? 'file' : 'default',
     defaultDispatchModel: envDispatchModel !== null ? 'env' : fileValues.defaultDispatchModel !== undefined ? 'file' : 'default',
+    localInferenceBaseUrl: envLocalBaseUrl !== null ? 'env' : fileValues.localInferenceBaseUrl !== undefined ? 'file' : 'default',
+    localEmbedModel: envLocalEmbed !== null ? 'env' : fileValues.localEmbedModel !== undefined ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
@@ -546,6 +581,18 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     // (cloud name, or the `ollama:`/`lmstudio:` local convention).
     stored.defaultDispatchModel = update.defaultDispatchModel.trim();
   }
+  if (update.localInferenceBaseUrl !== undefined) {
+    if (typeof update.localInferenceBaseUrl !== 'string') {
+      throw new Error('localInferenceBaseUrl must be a string.');
+    }
+    stored.localInferenceBaseUrl = update.localInferenceBaseUrl.trim();
+  }
+  if (update.localEmbedModel !== undefined) {
+    if (typeof update.localEmbedModel !== 'string') {
+      throw new Error('localEmbedModel must be a string.');
+    }
+    stored.localEmbedModel = update.localEmbedModel.trim();
+  }
   if (update.experimentalOpencode !== undefined) {
     stored.experimentalOpencode = Boolean(update.experimentalOpencode);
   }
@@ -613,6 +660,18 @@ export function resolveDefaultDispatchRuntimeSync(): OrchestratorRuntime {
  *  still wins. Set to `ollama:<model>` / `lmstudio:<model>` to dispatch local. */
 export function resolveDefaultDispatchModelSync(): string {
   return getOperatorDefaultsSync().values.defaultDispatchModel;
+}
+
+/** Local inference endpoint base URL ('' = use cloud). Read by the Brain
+ *  embeddings path to route to a local OpenAI-compatible server (Ollama /
+ *  LM Studio). NO trailing /v1 — consumers append the path. */
+export function resolveLocalInferenceBaseUrlSync(): string {
+  return getOperatorDefaultsSync().values.localInferenceBaseUrl;
+}
+
+/** Local embedding model for the Brain ('' = no local embeddings). */
+export function resolveLocalEmbedModelSync(): string {
+  return getOperatorDefaultsSync().values.localEmbedModel;
 }
 
 export function resolveExperimentalOpencodeSync(): boolean {
