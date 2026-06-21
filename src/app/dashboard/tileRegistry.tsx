@@ -270,6 +270,13 @@ export function createTileRegistry({
           : workspaceTerminalPreferredRepo;
         const canCloseTerminalTile = collectLeafContentKinds(tileLayout.root).filter((kind) => kind === 'terminal').length > 1;
         const openRepoPaths = Array.from(new Set(collectOpenTerminalRepoPaths(tileLayout.root, tileId)));
+        // The primary workspace tile hosts the Orchestrator + Assistant tab set
+        // (and the conversation sidebar). Match the canonical 'tile-root' OR a
+        // single-leaf root whose id drifted to a UUID after a split/close — else
+        // a relaunch defaults the whole workspace to a bare Shell instead of the
+        // orchestrator/repo selector.
+        const isPrimaryWorkspaceTile = tileId === 'tile-root'
+          || (tileLayout.root.type === 'leaf' && tileLayout.root.id === tileId);
 
         return (
           <Suspense fallback={<div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'var(--t-bg)', color: 'var(--t-text-faint)', fontSize: 13 }} />}>
@@ -277,9 +284,9 @@ export function createTileRegistry({
             key={`workspace-terminal:${tileId}:${workspaceTerminalResetNonceByTileId[tileId] ?? 0}`}
             ref={(handle) => registerWorkspaceTerminalHandle(tileId, handle)}
             stateScope={tileId}
-            defaultTab={tileId === 'tile-root' ? 'llm-chat' : 'terminal'}
-            autoCreateDefaultTab={tileId === 'tile-root' || workspaceScopeEntries.length > 0}
-            conversationNavigation={tileId === 'tile-root' ? 'sidebar' : 'tabs'}
+            defaultTab={isPrimaryWorkspaceTile ? 'llm-chat' : 'terminal'}
+            autoCreateDefaultTab={isPrimaryWorkspaceTile || workspaceScopeEntries.length > 0}
+            conversationNavigation={isPrimaryWorkspaceTile ? 'sidebar' : 'tabs'}
             preferredRepo={tilePreferredRepo}
             splitCreated={content.kind === 'terminal' ? effectiveSplitCreated : false}
             availableRepos={workspaceScopeEntries}
