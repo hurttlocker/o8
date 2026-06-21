@@ -270,6 +270,17 @@ func applySelectedInputDevice(sessionId: UInt64? = nil) -> Bool {
         return true
     }
 
+    // If the selected mic IS the current system default, do NOT force it onto the
+    // engine's input unit. Setting kAudioOutputUnitProperty_CurrentDevice to the
+    // already-default device leaves the AUHAL pulling ZERO buffers — no audio
+    // levels, empty transcripts — verified live on a default USB mic that worked
+    // everywhere else. The engine's natural inputNode already follows the system
+    // default, and that path captures fine. Only force-switch for a genuinely
+    // non-default device.
+    if let defaultID = defaultInputDeviceID(), defaultID == deviceID {
+        return true
+    }
+
     guard let audioUnit = audioEngine.inputNode.audioUnit else {
         emitError("Audio input unit is unavailable.", sessionId: sessionId)
         return false
