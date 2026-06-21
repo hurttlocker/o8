@@ -296,7 +296,15 @@ export function startRealtimeSession(opts: StartRealtimeOptions = {}): RealtimeS
         if (parsed.type === 'error') {
           console.error(`${LOG} oai error:`, parsed);
           forwardLog(`oai error: ${JSON.stringify(parsed).slice(0, 300)}`);
-        } else console.log(`${LOG} event: ${parsed.type}`);
+        } else {
+          console.log(`${LOG} event: ${parsed.type}`);
+          // Mirror turn boundaries to the app log (timestamps) so a live voice
+          // test is diagnosable from o8.log — compare response.created/done to
+          // the host's idle-stop to prove a long reply isn't cut. Low volume.
+          if (parsed.type === 'response.created' || parsed.type === 'response.done') {
+            forwardLog(`event: ${parsed.type}`);
+          }
+        }
       }
       if (parsed.type === 'response.done') {
         const response = parsed['response'];
