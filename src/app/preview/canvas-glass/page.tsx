@@ -41,6 +41,7 @@ import {
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
+import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { isTauri, onFileOpenRequest, setCanvasBackdropBlur, setCanvasMaterial, takePendingFileOpens } from '@/lib/tauri/bridge';
 import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSocket';
 import { useDictationHostOptional } from '@/components/desktop/dictation/DictationHost';
@@ -2663,6 +2664,11 @@ export default function CanvasGlassPreviewPage() {
       onDrop={dropImages}
       style={{ position: 'fixed', inset: 0, overflow: 'hidden', fontFamily: FONT, background: inTauri ? 'transparent' : '#07090d', userSelect: 'none' }}
     >
+      {/* Realtime voice host — also mounted here (not just the dashboard) so the
+          full-page nav into the canvas auto-resumes the session via the handoff
+          instead of going silent. Renders only its own fixed pill. */}
+      <RealtimeVoiceHost />
+
       {/* In the app the desktop IS the backdrop (native material). The
           diffusion only stands in where there is no desktop to show. */}
       {inTauri ? null : <DiffusionBackdrop />}
