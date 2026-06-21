@@ -46,6 +46,20 @@ const SPEECH_EVENTS = new Set([
   'input_audio_buffer.committed',
 ]);
 
+/**
+ * "Open canvas" does a FULL-PAGE navigation (window.location.assign to
+ * /preview/canvas-glass — the SPA bridge can't reliably cross that segment, so
+ * the hard reload stays). A WebRTC session can't survive a document reload, so
+ * the host stamps a short-lived handoff on unmount-while-live; the destination
+ * route (which also mounts this host) reads it and auto-resumes the session
+ * instead of going silent. One ~2s reconnect entering the canvas, then every
+ * canvas tool runs without dropping the line. A NEW session (no prior
+ * conversation memory) — acceptable for the conductor hop; seamless same-session
+ * survival would need reliable SPA nav, which this route doesn't have yet.
+ */
+const HANDOFF_KEY = 'o8:realtime-handoff';
+const HANDOFF_TTL_MS = 12_000;
+
 export function RealtimeVoiceHost() {
   const sessionRef = useRef<RealtimeSessionHandle | null>(null);
   const idleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -146,8 +160,37 @@ export function RealtimeVoiceHost() {
     };
   }, [toggle]);
 
-  // Tear the session down if the host ever unmounts (hot reload, route change).
-  useEffect(() => () => stop(), [stop]);
+  // On unmount (notably the full-page nav "open canvas" triggers) tear the
+  // WebRTC session down — it can't survive a document reload — but if it was
+  // LIVE, stamp a short-lived handoff so the destination route auto-resumes it
+  // instead of going dead. Intentional ends (toggle-off / idle-auto-off) null
+  // sessionRef first, so they never leave a handoff → no unwanted resume.
+  useEffect(() => () => {
+    if (sessionRef.current) {
+      try { sessionStorage.setItem(HANDOFF_KEY, String(Date.now())); } catch { /* no sessionStorage */ }
+    }
+    stop();
+  }, [stop]);
+
+  // Pick the session back up if we just arrived from a live one (the canvas-nav
+  // handoff). Runs once per mount; consumes the handoff so a later manual reload
+  // doesn't spuriously reopen the line.
+  const resumedRef = useRef(false);
+  useEffect(() => {
+    if (resumedRef.current || !isTauri()) return;
+    resumedRef.current = true;
+    let raw: string | null = null;
+    try {
+      raw = sessionStorage.getItem(HANDOFF_KEY);
+      sessionStorage.removeItem(HANDOFF_KEY);
+    } catch { /* no sessionStorage */ }
+    if (!raw) return;
+    const ts = Number(raw);
+    if (Number.isFinite(ts) && Date.now() - ts < HANDOFF_TTL_MS) {
+      console.log(`${LOG} resuming voice after canvas-nav handoff`);
+      start();
+    }
+  }, [start]);
 
   // Auto-clear the transient error pill after a few seconds.
   useEffect(() => {
