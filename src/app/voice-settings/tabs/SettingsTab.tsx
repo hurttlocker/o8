@@ -63,7 +63,10 @@ export default function SettingsTab({ prefs, setPref }: TabProps) {
   // ── Input ──
   const micValue = prefStr(prefs, 'dictation_microphone_uid', 'default');
   const micOptions = devices && devices.length
-    ? [{ value: 'default', label: 'System Default' }, ...devices.filter((d) => !d.is_default).map((d) => ({ value: d.id, label: d.name }))]
+    ? [
+        { value: 'default', label: 'System Default' },
+        ...devices.map((d) => ({ value: d.id, label: d.is_default ? `${d.name} (default)` : d.name })),
+      ]
     : [{ value: 'default', label: 'System Default' }];
   const locale = prefStr(prefs, 'dictation_locale', 'en-US');
   const tone = prefStr(prefs, 'output_tone', 'auto');

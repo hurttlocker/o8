@@ -33,6 +33,26 @@ export interface ApplyPersistedStateResult {
 }
 
 /**
+ * The `thoughts-*` ids the operator has archived. Bounded + fail-open: a slow
+ * or failed fetch returns `null`, which disables the archived-tab filter so we
+ * NEVER drop an orchestrator tab we can't positively confirm is archived.
+ */
+async function fetchArchivedOrchestratorThreadIds(): Promise<Set<string> | null> {
+  try {
+    const result = await Promise.race([
+      fetch('/api/mobile/orchestrator/threads?archived=1', { cache: 'no-store' })
+        .then((response) => (response.ok ? response.json() : null)),
+      new Promise<'timeout'>((resolve) => setTimeout(() => resolve('timeout'), 2000)),
+    ]);
+    const archivedIds = (result as { archivedIds?: unknown } | null)?.archivedIds;
+    if (!Array.isArray(archivedIds)) return null;
+    return new Set(archivedIds.filter((id): id is string => typeof id === 'string'));
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Pure logic for restoring persisted tab state.
  * Computes which tabs to restore, which tmux sessions to reattach,
  * and which dead terminal tabs need new sessions.
@@ -57,6 +77,18 @@ export async function computeRestoredTabs(
     if (kind === 'chat' && !tab.orchestrationPacket) return true;
     return false;
   });
+
+  // Kick the archived-thread fetch off in parallel with the liveness check so
+  // the two bounded probes overlap rather than serialize. Gated on actually
+  // having an orchestrator-shaped tab — a pure-terminal workspace skips it.
+  const needsArchivedCheck = saved.tabs.some((tab) => {
+    const kind = tab.kind ?? 'terminal';
+    const id = tab.id ?? '';
+    return kind === 'orchestrator' || id.startsWith('orchestrator-') || id.startsWith('thoughts-');
+  });
+  const archivedThreadIdsPromise = needsArchivedCheck
+    ? fetchArchivedOrchestratorThreadIds()
+    : Promise.resolve<Set<string> | null>(null);
 
   let alive: Set<string>;
   let liveRuntimeSessionKeys: Set<PersistedRuntimeSessionKey>;
@@ -84,6 +116,9 @@ export async function computeRestoredTabs(
       .filter((key): key is PersistedRuntimeSessionKey => key !== null);
     liveRuntimeSessionKeys = new Set(optimisticKeys);
   }
+  if (cancelled?.()) return null;
+
+  const archivedOrchestratorThreadIds = await archivedThreadIdsPromise;
   if (cancelled?.()) return null;
 
   const currentPreferredRepo = options.preferredRepo;
@@ -117,6 +152,10 @@ export async function computeRestoredTabs(
         ? savedTab.id
         : (savedTab.orchestratorThreadId ?? null);
       if (!recoveredThreadId) continue;
+      // Archived threads are off the active surfaces — their persisted tab must
+      // not resurrect on reload. Only drop ids positively confirmed archived; a
+      // null set (fetch failed/disabled) leaves every tab intact.
+      if (archivedOrchestratorThreadIds?.has(recoveredThreadId)) continue;
       // One orchestrator tab per thread — a second persisted tab pointing at the
       // same conversation is a duplicate; drop it so reload can't resurrect the
       // two-copies-of-one-thread bug.
