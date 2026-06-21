@@ -17,6 +17,7 @@ export const dynamic = 'force-dynamic';
 import { NextResponse, type NextRequest } from 'next/server';
 import {
   createMobileOrchestratorThread,
+  listArchivedOrchestratorThreadIds,
   listMobileOrchestratorThreads,
 } from '@/lib/mobile/orchestrator-thread-history';
 
@@ -25,6 +26,18 @@ export const runtime = 'nodejs';
 const NO_STORE = { 'Cache-Control': 'no-store, max-age=0' };
 
 export async function GET(request: NextRequest) {
+  // ?archived=1 → just the archived `thoughts-*` ids (no recency cap, both
+  // backends). The restore pipeline uses this to drop archived threads that
+  // would otherwise resurrect as workspace tabs on reload. See terminal-restore.
+  if (request.nextUrl.searchParams.get('archived') === '1') {
+    try {
+      return NextResponse.json({ archivedIds: listArchivedOrchestratorThreadIds() }, { headers: NO_STORE });
+    } catch (error) {
+      console.log('[mobile-orchestrator] archived id list failed', error);
+      return NextResponse.json({ archivedIds: [] }, { headers: NO_STORE });
+    }
+  }
+
   // ?backend=openclaw → only openclaw threads; otherwise → non-openclaw
   // threads (the default Orchestrator surface; untagged/legacy threads count
   // as non-openclaw). The two surfaces coexist — see docs/openclaw-integration.md.

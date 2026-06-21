@@ -286,6 +286,18 @@ func applySelectedInputDevice(sessionId: UInt64? = nil) -> Bool {
         return false
     }
 
+    // KNOWN LIMITATION — force-switching to a NON-default input device here yields
+    // ZERO captured buffers (no levels, empty transcript), even though the property
+    // write returns noErr. Verified standalone on the iMac built-in mic while a USB
+    // mic was the system default. AVAudioEngine binds `inputNode` to the default
+    // device at engine creation and caches that binding; setting
+    // kAudioOutputUnitProperty_CurrentDevice on the AUHAL underneath the long-lived
+    // engine doesn't propagate. DEAD END (tested, did not help): uninitialize →
+    // set → reinitialize the AUHAL. A real per-app fix needs the AVAudioEngine
+    // RECREATED per device switch (engine is a `let` singleton today, line 30);
+    // the only other reliable route — swapping the macOS system-default input — is
+    // user-hostile (hijacks every other app's mic). Deferred; the default-device
+    // path (the skip-branch above) captures fine and is what users get today.
     var mutableDeviceID = deviceID
     let status = AudioUnitSetProperty(
         audioUnit,
