@@ -292,6 +292,10 @@ export function listMobileOrchestratorThreads(options: {
       const filePath = join(ORCHESTRATOR_HISTORY_DIR, file);
       const stat = statSync(filePath);
       const record = JSON.parse(readFileSync(filePath, 'utf-8')) as OrchestratorHistoryRecord;
+      // Archived threads are off the active list — the operator archived them to
+      // declutter; they must not reappear in the orchestrator history/past-thread
+      // surfaces (which is where they were leaking back in).
+      if (record.archivedAt) continue;
       const threadBackend = effectiveBackend(record);
       if (wantOpenclaw ? threadBackend !== 'openclaw' : threadBackend === 'openclaw') {
         continue;
