@@ -312,6 +312,42 @@ export function listMobileOrchestratorThreads(options: {
   return threads.slice(0, limit);
 }
 
+/**
+ * The `thoughts-*` ids the operator has archived (record.archivedAt set).
+ *
+ * The restore pipeline cross-references this so an archived thread's persisted
+ * workspace tab does NOT resurrect on reload — archiving removes the thread from
+ * the active surfaces and the tab must follow. Unlike listMobileOrchestratorThreads
+ * this has NO recency cap and ignores the backend split: it returns EVERY
+ * archived id so the client only ever drops genuinely-archived tabs (a top-20
+ * or backend-filtered live list would false-positive and strip valid tabs).
+ */
+export function listArchivedOrchestratorThreadIds(): string[] {
+  const ids: string[] = [];
+  if (!existsSync(ORCHESTRATOR_HISTORY_DIR)) return ids;
+
+  let files: string[] = [];
+  try {
+    files = readdirSync(ORCHESTRATOR_HISTORY_DIR).filter((file) => file.endsWith('.json'));
+  } catch {
+    return ids;
+  }
+
+  for (const file of files) {
+    const tabId = basename(file, '.json');
+    if (!tabId.startsWith('thoughts-')) continue;
+    try {
+      const record = JSON.parse(
+        readFileSync(join(ORCHESTRATOR_HISTORY_DIR, file), 'utf-8'),
+      ) as OrchestratorHistoryRecord;
+      if (record.archivedAt) ids.push(tabId);
+    } catch {
+      // skip unreadable files
+    }
+  }
+  return ids;
+}
+
 export function createMobileOrchestratorThread(input: {
   repoPath: string;
   title?: string | null;
