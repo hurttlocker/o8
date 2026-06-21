@@ -6,7 +6,7 @@
  * Double-tap Right ⌘ (detected in src-tauri/src/fn_hotkey.rs) emits the Tauri
  * event `o8:realtime-toggle`; this host — mounted once in the dashboard — flips
  * the gpt-realtime session on/off, shows a small "voice live" pill up top, and
- * auto-stops after ~20s of no speech so an idle session never burns tokens.
+ * auto-stops after ~90s of no speech so an idle session never burns tokens.
  *
  * The session itself lives in `@/lib/voice/realtime-client` (WebRTC in the
  * webview). Inline styles only; themed via var(--t-*). Self-contained — no props.
@@ -23,8 +23,14 @@ import {
 
 const LOG = '[realtime-host]';
 
-/** Auto-stop after this long with no activity — token guardrail. */
-const IDLE_MS = 20_000;
+/**
+ * Auto-stop after this long with no activity — token guardrail. Counts only
+ * during USER silence between turns (the model's whole turn is suspended in
+ * onEvent), so this is "how long a quiet operator keeps the line open." 90s is
+ * comfortable for thinking/observing without dropping; raise if it ever feels
+ * abrupt, lower to trim idle spend.
+ */
+const IDLE_MS = 90_000;
 
 /**
  * USER-side activity that resets the idle clock. The MODEL's turn is handled
