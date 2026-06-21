@@ -23,16 +23,21 @@ import {
 
 const LOG = '[realtime-host]';
 
-/** Auto-stop after this long with no speech (user or model) — token guardrail. */
+/** Auto-stop after this long with no activity — token guardrail. */
 const IDLE_MS = 20_000;
 
-/** Realtime event types that mean "someone is still talking" → reset idle clock. */
+/**
+ * USER-side activity that resets the idle clock. The MODEL's turn is handled
+ * separately in onEvent via the response.* lifecycle — crucially NOT via
+ * `*.audio.delta`: in WebRTC the model's audio rides the RTP media track, so
+ * those byte-delta events never arrive on the data channel. Keying the idle
+ * reset off them (as we used to) let the 20s timer fire mid-answer and cut a
+ * long spoken response off. See the onEvent handler below.
+ */
 const SPEECH_EVENTS = new Set([
   'input_audio_buffer.speech_started',
   'input_audio_buffer.speech_stopped',
   'input_audio_buffer.committed',
-  'response.audio.delta',
-  'response.output_audio.delta',
 ]);
 
 export function RealtimeVoiceHost() {
@@ -75,14 +80,30 @@ export function RealtimeVoiceHost() {
       onStatus: (s) => setStatus(s),
       onEvent: (e) => {
         const t = typeof e.type === 'string' ? e.type : '';
-        if (SPEECH_EVENTS.has(t)) armIdle();
+        // The model started a turn → SUSPEND the idle clock for the whole turn,
+        // however long Symon talks. (A tool call mints a fresh response.created
+        // after response.done, so tool→speak chains stay suspended too.)
+        if (t === 'response.created') {
+          clearIdle();
+        } else if (
+          // Any model-response progress/finish OR user activity re-arms the
+          // 20s clock. Covering the whole `response.*` family (transcript
+          // deltas stream throughout the answer) + the WebRTC audio-buffer
+          // events means a long reply is never cut, while a genuinely silent
+          // gap after the turn still auto-stops.
+          t.startsWith('response.')
+          || t.startsWith('output_audio_buffer.')
+          || SPEECH_EVENTS.has(t)
+        ) {
+          armIdle();
+        }
       },
       onError: (msg) => console.warn(`${LOG} error: ${msg}`),
     });
     // Start the idle clock immediately — a session opened but never spoken to
     // still auto-closes after IDLE_MS.
     armIdle();
-  }, [armIdle]);
+  }, [armIdle, clearIdle]);
 
   const toggle = useCallback(() => {
     if (sessionRef.current) {
