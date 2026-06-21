@@ -99,6 +99,20 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.defaultDispatchModel = body.defaultDispatchModel.trim();
   }
 
+  if (body.localInferenceBaseUrl !== undefined) {
+    if (typeof body.localInferenceBaseUrl !== 'string') {
+      throw new Error('localInferenceBaseUrl must be a string.');
+    }
+    update.localInferenceBaseUrl = body.localInferenceBaseUrl.trim();
+  }
+
+  if (body.localEmbedModel !== undefined) {
+    if (typeof body.localEmbedModel !== 'string') {
+      throw new Error('localEmbedModel must be a string.');
+    }
+    update.localEmbedModel = body.localEmbedModel.trim();
+  }
+
   if (body.experimentalOpencode !== undefined) {
     if (typeof body.experimentalOpencode !== 'boolean') {
       throw new Error('experimentalOpencode must be boolean.');
