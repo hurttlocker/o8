@@ -49,16 +49,28 @@ const SPEECH_EVENTS = new Set([
 /**
  * "Open canvas" does a FULL-PAGE navigation (window.location.assign to
  * /preview/canvas-glass — the SPA bridge can't reliably cross that segment, so
- * the hard reload stays). A WebRTC session can't survive a document reload, so
- * the host stamps a short-lived handoff on unmount-while-live; the destination
- * route (which also mounts this host) reads it and auto-resumes the session
- * instead of going silent. One ~2s reconnect entering the canvas, then every
- * canvas tool runs without dropping the line. A NEW session (no prior
- * conversation memory) — acceptable for the conductor hop; seamless same-session
- * survival would need reliable SPA nav, which this route doesn't have yet.
+ * the hard reload stays). A WebRTC session can't survive a document reload, and
+ * — the part that bit 0.1.426 — React effect CLEANUPS DON'T RUN on
+ * window.location.assign (the browser unloads the document before React commits),
+ * so the resume marker can't be stamped on unmount. Instead a HEARTBEAT writes a
+ * fresh marker to localStorage every few seconds while live; the destination
+ * route (which also mounts this host) reads it on mount and auto-resumes if it's
+ * recent. localStorage, not sessionStorage, so it's bulletproof across the hard
+ * reload; the TTL gates a stale marker (e.g. after a crash). One ~2s reconnect
+ * entering the canvas, then every canvas tool runs without dropping the line. A
+ * NEW session (no prior conversation memory) — acceptable for the hop; seamless
+ * same-session survival would need the reliable SPA nav this route lacks.
  */
 const HANDOFF_KEY = 'o8:realtime-handoff';
 const HANDOFF_TTL_MS = 12_000;
+const HANDOFF_HEARTBEAT_MS = 2_500;
+
+function writeHandoff() {
+  try { localStorage.setItem(HANDOFF_KEY, String(Date.now())); } catch { /* no localStorage */ }
+}
+function clearHandoff() {
+  try { localStorage.removeItem(HANDOFF_KEY); } catch { /* no localStorage */ }
+}
 
 export function RealtimeVoiceHost() {
   const sessionRef = useRef<RealtimeSessionHandle | null>(null);
@@ -67,6 +79,7 @@ export function RealtimeVoiceHost() {
   // mid-answer. The idle clock is HARD-OFF for the whole window so no
   // intermediate event can re-arm it and cut a long reply short.
   const respondingRef = useRef(false);
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [status, setStatus] = useState<RealtimeStatus>('idle');
 
   const clearIdle = useCallback(() => {
@@ -76,12 +89,25 @@ export function RealtimeVoiceHost() {
     }
   }, []);
 
+  const clearHeartbeat = useCallback(() => {
+    if (heartbeatRef.current) {
+      clearInterval(heartbeatRef.current);
+      heartbeatRef.current = null;
+    }
+  }, []);
+
+  // INTENTIONAL end (toggle-off / idle-auto-off): stop the session + heartbeat
+  // AND clear the resume marker so the next route does NOT auto-resume. A
+  // full-page canvas nav never reaches here (the browser unloads the page), so
+  // the heartbeat's fresh marker survives and the destination resumes.
   const stop = useCallback(() => {
     clearIdle();
+    clearHeartbeat();
+    clearHandoff();
     respondingRef.current = false;
     void sessionRef.current?.stop();
     sessionRef.current = null;
-  }, [clearIdle]);
+  }, [clearIdle, clearHeartbeat]);
 
   const armIdle = useCallback(() => {
     clearIdle();
@@ -127,10 +153,16 @@ export function RealtimeVoiceHost() {
       },
       onError: (msg) => console.warn(`${LOG} error: ${msg}`),
     });
+    // Resume marker: write it now + keep it fresh on a heartbeat, so a full-page
+    // canvas nav (which skips React cleanup) always leaves a recent marker for
+    // the destination route to auto-resume from.
+    writeHandoff();
+    clearHeartbeat();
+    heartbeatRef.current = setInterval(writeHandoff, HANDOFF_HEARTBEAT_MS);
     // Start the idle clock immediately — a session opened but never spoken to
     // still auto-closes after IDLE_MS.
     armIdle();
-  }, [armIdle, clearIdle]);
+  }, [armIdle, clearIdle, clearHeartbeat]);
 
   const toggle = useCallback(() => {
     if (sessionRef.current) {
@@ -160,35 +192,35 @@ export function RealtimeVoiceHost() {
     };
   }, [toggle]);
 
-  // On unmount (notably the full-page nav "open canvas" triggers) tear the
-  // WebRTC session down — it can't survive a document reload — but if it was
-  // LIVE, stamp a short-lived handoff so the destination route auto-resumes it
-  // instead of going dead. Intentional ends (toggle-off / idle-auto-off) null
-  // sessionRef first, so they never leave a handoff → no unwanted resume.
+  // On a React-driven unmount, LIGHT teardown only — stop the session + timers
+  // but do NOT clear the resume marker (this unmount may be a navigation; the
+  // destination route should resume). Intentional ends go through stop(), which
+  // clears the marker. (A full-page canvas nav doesn't reach here at all — the
+  // browser unloads the document before React runs cleanups, which is exactly
+  // why the marker is a localStorage heartbeat, not stamped here.)
   useEffect(() => () => {
-    if (sessionRef.current) {
-      try { sessionStorage.setItem(HANDOFF_KEY, String(Date.now())); } catch { /* no sessionStorage */ }
-    }
-    stop();
-  }, [stop]);
+    void sessionRef.current?.stop();
+    sessionRef.current = null;
+    if (idleTimerRef.current) clearTimeout(idleTimerRef.current);
+    if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+  }, []);
 
   // Pick the session back up if we just arrived from a live one (the canvas-nav
-  // handoff). Runs once per mount; consumes the handoff so a later manual reload
-  // doesn't spuriously reopen the line.
+  // heartbeat marker is recent). Runs once per mount. start() re-arms its own
+  // heartbeat, so the marker stays fresh for the next hop.
   const resumedRef = useRef(false);
   useEffect(() => {
     if (resumedRef.current || !isTauri()) return;
     resumedRef.current = true;
     let raw: string | null = null;
-    try {
-      raw = sessionStorage.getItem(HANDOFF_KEY);
-      sessionStorage.removeItem(HANDOFF_KEY);
-    } catch { /* no sessionStorage */ }
+    try { raw = localStorage.getItem(HANDOFF_KEY); } catch { /* no localStorage */ }
     if (!raw) return;
     const ts = Number(raw);
     if (Number.isFinite(ts) && Date.now() - ts < HANDOFF_TTL_MS) {
       console.log(`${LOG} resuming voice after canvas-nav handoff`);
       start();
+    } else {
+      clearHandoff(); // stale marker (old session / crash) — drop it
     }
   }, [start]);
 
