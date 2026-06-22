@@ -157,6 +157,18 @@ export function useGlobalRepoState({
       });
   }, [loadRegisteredRepos]);
 
+  // Refetch when a repo is added/removed anywhere (the add-repo dialog, etc.)
+  // so the workspace targets show the new repo WITHOUT a manual reload —
+  // operator-hit 2026-06-22: adding a repo didn't refresh the workspace.
+  // loadRegisteredRepos refreshes globalRepoEntries → orchestratorWorkspaceTargets
+  // re-derives.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handler = () => { void loadRegisteredRepos(); };
+    window.addEventListener('o8:repos-changed', handler);
+    return () => window.removeEventListener('o8:repos-changed', handler);
+  }, [loadRegisteredRepos]);
+
   const handleSelectRegisteredRepo = useCallback(async (repoId: string | null) => {
     setGlobalRepoId(repoId);
     if (!repoId) {
