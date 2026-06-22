@@ -66,9 +66,16 @@ Goal: measure every managed-inference path so we know what to push/adjust — be
 Paths to sweep:
 - [x] **Fast Brain** — DONE (results below): `gemini-2.5-flash-lite` wins.
 - [~] **Dictation polish — SWEPT + BUG FIXED 2026-06-22** (`scripts/founder-polish-sweep.mjs`). **Found:** the primary `google/gemini-flash-lite-latest` is an INVALID OpenRouter id — failed *every* call, forcing a wasted round-trip before the fallback = a major "slow sometimes" cause. **Fixed:** `POLISH_MODELS` now leads with `gemini-2.5-flash-lite` (0.37s, ~$0.00005/polish, accurate, coverage ~1.0 / no summarizing) → `deepseek-chat` fallback. **Still pending:** founder-deliberate routing (today a no-key fallback), free-mode, and passing the open-files anchor for spoken code-identifier accuracy (e.g. "class a composer" → `classAComposer`).
-- [ ] **Premium STT** — `openai/whisper-large-v3-turbo` (`src/app/api/dictation/transcribe/route.ts`). Needs a sample audio clip (or generate via macOS `say`) → WER + speed + $/min.
+- [x] **Premium STT — TESTED 2026-06-22** (`scripts/founder-stt-sweep.mjs`, hits the real route). `openai/whisper-large-v3-turbo`: **1.09s** for a ~7s clip, **~5% WER** (1 word: "brain"→"brand") — and that residual recognizer miss is exactly what the **polish** pass corrects from context. Cost negligible (~$0.0001/clip). Wired + working.
 - [x] **Symon brain = Claude CLI (FREE, sub-billed)** — CORRECTED 2026-06-22: NOT Gemini/managed (operator won't pay that bill). Drop from the cost sweep. Its test is a **PERF** check — the CLI flow (warm-pool) should be warm + fast + fine-tuned.
 - [ ] **Proxy overhead** — license-server hop + cap-enforcement latency.
+
+**Complete inference inventory (app-wide audit 2026-06-22) — answers "is there anything else?":**
+- **Founder user-facing PERKS (managed, what they pay for):** fast Brain · dictation polish · premium STT. **That's it — nothing new.**
+- **Background managed COGS** (small, runs for EVERYONE — do NOT gate founder-only; it's free-tier infra): embeddings (OpenAI `text-embedding-3-small`, Brain storage), spec image-captioning (Gemini vision), contradiction-detection (Gemini, over directives), project-suggestions (Gemini, cache-heavy), Q&A classify (Gemini). Matters for subscription COGS, not the founder edition.
+- **Free to us — BYO-sub** (user's Claude/Codex CLI): orchestrator + dispatched workers (coding), auto-review, GitHub intake, heal-bot, auto-compact, fact/doc distillation, **Symon's Claude/Opus brain**.
+- **BYO-key only** (no o8 fallback): ElevenLabs voice, Google TTS, OpenAI realtime/S2S, Symon Gemini-direct.
+- Net: founder managed perks = exactly {fast Brain, polish, premium STT}; everything else is tiny background COGS for all users or already free via their sub/key.
 
 Tuning levers to evaluate: model choice per path, caching, context trimming, fallback ordering. (See the S2S cost research — caching + trimming was the dominant lever; expect similar on Brain.) Output: a table the operator reads to decide tunes.
 
