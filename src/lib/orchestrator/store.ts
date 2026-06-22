@@ -315,6 +315,16 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     maxAttempts: normalizeMaxAttempts(packet.maxAttempts),
     recoveryCount: normalizeAttemptCount(packet.recoveryCount),
     lastRecoveryAt: typeof packet.lastRecoveryAt === 'string' ? packet.lastRecoveryAt : null,
+    // Packet-stored control counters MUST be preserved here — this is the single
+    // normalize chokepoint every read/write funnels through, and an omitted field
+    // is silently dropped on the next round-trip. typecheckAutoRetries is also
+    // event-derived (#1108) but persisting it keeps the field honest; stallRetries
+    // (stall-cap, 2026-06-22) and operatorStopped (manual Stop) live ONLY on the
+    // packet, so dropping them would reset the stall cap to 0 every tick and make a
+    // Stop forget itself on the next state read.
+    typecheckAutoRetries: normalizeAttemptCount(packet.typecheckAutoRetries),
+    stallRetries: normalizeAttemptCount(packet.stallRetries),
+    operatorStopped: packet.operatorStopped === true ? true : undefined,
     blockedReason: typeof packet.blockedReason === 'string' ? packet.blockedReason : null,
     lastEventAt: typeof packet.lastEventAt === 'string' ? packet.lastEventAt : null,
     lastEventLabel: typeof packet.lastEventLabel === 'string' ? packet.lastEventLabel : null,

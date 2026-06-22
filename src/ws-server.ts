@@ -2497,6 +2497,11 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
 
   // #624 — Declared outside try so the catch can also release the entry.
   let turnController: AbortController | null = null;
+  // Declared outside try so the catch can broadcast the terminal error to EVERY
+  // subscriber on this thread (phone + desktop), not just the origin client. A
+  // phone-started turn that threw used to leave the desktop latched at "busy"
+  // forever because the error went only to the sender. (2026-06-22 latch audit)
+  let sessionName: string | null = null;
 
   // Durable assistant persistence for canonical thoughts-* threads. Even if
   // the mobile preview sheet closes or no full /chat client is open, the
@@ -2539,7 +2544,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   try {
     console.log(`[ws-server][orchestrator] Routing chat via ${backend.label}${agentId ? ` (agent ${agentId})` : ''}`);
 
-    const sessionName = orchestratorRouteSessionName(
+    sessionName = orchestratorRouteSessionName(
       backend.ensureSession(repoPath, agentTag, threadId).sessionName,
       threadId,
     );
@@ -2595,6 +2600,13 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     }
     turnController = new AbortController();
     orchestratorInflightAborts.set(abortKey, turnController);
+
+    // Track whether the backend stream delivered a terminal event. If it
+    // resolves without one (a hung claude/codex child that never closes, so no
+    // 'done' fires), we synthesize a 'ready' below — otherwise the client latch
+    // ("Working M:SS") counts up until the 4-hour process reaper or the 5-min
+    // client watchdog. (2026-06-22 latch audit)
+    let sawTerminal = false;
 
     // Spawn the selected orchestrator and stream structured JSON events to
     // subscribers. Every event is tagged with `backend` (and `agent`, for
@@ -2656,6 +2668,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           break;
 
         case 'done':
+          sawTerminal = true;
           if (threadId && event.sessionId && (backend.id === 'claude' || backend.id === 'codex')) {
             writeOrchestratorBackendSessionId(threadId, backend.id, event.sessionId);
           }
@@ -2668,6 +2681,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           break;
 
         case 'error':
+          sawTerminal = true;
           persistAssistantText(null);
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
@@ -2677,8 +2691,21 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           break;
       }
 
-      if (wsMsg) broadcastToOrchestratorSession(sessionName, wsMsg);
+      if (wsMsg && sessionName) broadcastToOrchestratorSession(sessionName, wsMsg);
     }, turnController.signal);
+
+    // The stream resolved without ever emitting 'done'/'error' (hung child that
+    // produced nothing, then exited). Synthesize the terminal 'ready' so the
+    // client latch releases instead of counting up to the 4-hour reaper.
+    // (2026-06-22 latch audit)
+    if (!sawTerminal && sessionName) {
+      persistAssistantText(null);
+      broadcastToOrchestratorSession(sessionName, JSON.stringify({
+        channel: 'orchestrator',
+        event: 'status',
+        data: { status: 'ready', repoPath, threadId, backend: backend.id, agent: agentTag },
+      }));
+    }
 
     // #624 — Release the in-flight controller. Keyed compare guards against a
     // newer turn having already replaced this entry.
@@ -2695,11 +2722,20 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     // Save any partial assistant text accumulated before the failure so
     // mobile listings still show what arrived rather than a blank turn.
     persistAssistantText(null);
-    send(client, {
-      channel: 'orchestrator',
-      event: 'error',
+    // Broadcast the error to EVERY subscriber on this thread, not just the
+    // origin client — a phone-started turn that throws must also release the
+    // desktop watching the same thread (it was latching forever). Fall back to
+    // the origin client only if the session name was never resolved.
+    const errorMsg = {
+      channel: 'orchestrator' as const,
+      event: 'error' as const,
       data: { error: err instanceof Error ? err.message : 'Failed to send message', repoPath, threadId, backend: backend.id, agent: agentTag },
-    });
+    };
+    if (sessionName) {
+      broadcastToOrchestratorSession(sessionName, JSON.stringify(errorMsg));
+    } else {
+      send(client, errorMsg);
+    }
   }
 }
 

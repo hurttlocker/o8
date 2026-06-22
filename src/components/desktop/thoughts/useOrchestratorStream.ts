@@ -213,8 +213,16 @@ export function useOrchestratorStream(
   // cold-starting the orchestrator before its first event), not stale carryover.
   const lastSendAtRef = useRef(0);
   const RECONNECT_HEAL_DELAY_MS = 3000;
-  const HEAL_STALE_AFTER_MS = 300_000;
-  const HEAL_POLL_INTERVAL_MS = 30_000;
+  // 2026-06-22 latch audit: was 300_000 (5 min) — too long, an operator watched
+  // a dead turn count "Working" up for minutes. The server now synthesizes a
+  // terminal 'ready' when the stream resolves without 'done', so this client
+  // watchdog only has to catch the rarer truly-wedged child that never closes
+  // (await never resolves). 120s is below the felt-pain threshold yet still well
+  // clear of a slow cold-start that's silent before its first token (the warm
+  // REPL pool keeps real cold starts fast). Any stream event resets the clock,
+  // so an active-but-slow turn never heals.
+  const HEAL_STALE_AFTER_MS = 120_000;
+  const HEAL_POLL_INTERVAL_MS = 15_000;
 
   useEffect(() => {
     messagesRef.current = messages;

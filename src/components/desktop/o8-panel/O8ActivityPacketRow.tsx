@@ -130,6 +130,26 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
     }).catch(() => {});
   }, [packet.lane?.laneId]);
 
+  const handleStop = useCallback(() => {
+    const laneId = packet.lane?.laneId;
+    if (!laneId) return;
+    // Optimistic: flip the card to a held/blocked state immediately so the Stop
+    // button can't be re-clicked while the interrupt round-trips. The server's
+    // operatorStopped flag is the source of truth; the next state poll reconciles.
+    patchPacket((current) => ({
+      ...current,
+      operatorStopped: true,
+      queueState: 'held',
+      status: 'blocked',
+      blockedReason: 'operator_stopped',
+    }));
+    fetch('/api/lanes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ verb: 'stop', laneId, actor: 'user' }),
+    }).catch(() => {});
+  }, [packet.lane?.laneId, patchPacket]);
+
   const handleReviewAction = useCallback(
     async (verb: 'create_pr' | 'merge') => {
       const laneId = packet.lane?.laneId;
@@ -450,6 +470,7 @@ function O8ActivityPacketRowBase({ packet, isExpanded, onToggleExpanded }: O8Act
             onReviewAction={(verb) => { void handleReviewAction(verb); }}
             onToggleShowAllFiles={handleToggleShowAllFiles}
             onResume={handleResume}
+            onStop={handleStop}
           />
         </div>
       ) : null}
