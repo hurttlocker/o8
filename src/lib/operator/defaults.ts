@@ -136,6 +136,19 @@ export interface OperatorDefaults {
    * orchestrator brain (free for ChatGPT Plus / Codex subscribers).
    */
   inAppOrchestratorEnabled: boolean;
+  /**
+   * Engineering Brain — may it use the Claude CLI warm pool (Haiku/Sonnet) for
+   * classify + compose. **On by default.** This is DECOUPLED from
+   * {@link inAppOrchestratorEnabled} on purpose (2026-06-22): the orchestrator
+   * toggle is about which model drives orchestration; this is purely "can the
+   * Brain answer via the warm sub-billed Claude CLI." Before the split, running
+   * Codex as the orchestrator (inAppOrchestratorEnabled=false) silently forced
+   * the Brain off its fast ~2.7s warm-Haiku path. Subscription-billed (the warm
+   * REPL pool, no `-p`); degrades gracefully to the rest of the cascade when the
+   * `claude` CLI is missing or signed out. Flip off to keep the Brain on
+   * OpenRouter/Codex/heuristic only.
+   */
+  brainUseClaudeCli: boolean;
   /** See {@link WorkersUseBrain}. Default 'auto'. */
   workersUseBrain: WorkersUseBrain;
 }
@@ -171,6 +184,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // ON by default post-#1097. Subscription pool, not Agent SDK pool. See the
   // docstring above on the field for the rationale.
   inAppOrchestratorEnabled: true,
+  // ON by default — the free, fast (~2.7s warm), subscription-billed Brain for
+  // anyone with a Claude sub. Independent of the orchestrator toggle (2026-06-22).
+  brainUseClaudeCli: true,
   workersUseBrain: 'auto',
 };
 
@@ -327,6 +343,13 @@ function envInAppOrchestratorEnabled(): boolean | null {
   return null;
 }
 
+function envBrainUseClaudeCli(): boolean | null {
+  const raw = process.env.O8_BRAIN_USE_CLAUDE_CLI;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 function envWorkersUseBrain(): WorkersUseBrain | null {
   const raw = process.env.O8_WORKERS_USE_BRAIN?.trim();
   if (raw && isWorkersUseBrain(raw)) return raw;
@@ -354,6 +377,7 @@ interface StoredOperatorDefaults {
   experimentalCanvas?: boolean;
   classAComposer?: ClassAComposer;
   inAppOrchestratorEnabled?: boolean;
+  brainUseClaudeCli?: boolean;
   workersUseBrain?: WorkersUseBrain;
 }
 
@@ -430,6 +454,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (typeof stored.inAppOrchestratorEnabled === 'boolean') {
     result.inAppOrchestratorEnabled = stored.inAppOrchestratorEnabled;
   }
+  if (typeof stored.brainUseClaudeCli === 'boolean') {
+    result.brainUseClaudeCli = stored.brainUseClaudeCli;
+  }
   if (isWorkersUseBrain(stored.workersUseBrain)) {
     result.workersUseBrain = stored.workersUseBrain;
   }
@@ -457,6 +484,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envCanvas = envExperimentalCanvas();
   const envComposer = envClassAComposer();
   const envInApp = envInAppOrchestratorEnabled();
+  const envBrainCli = envBrainUseClaudeCli();
   const envBrain = envWorkersUseBrain();
 
   const resolved: OperatorDefaults = {
@@ -481,6 +509,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled:
       envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled,
+    brainUseClaudeCli:
+      envBrainCli ?? fileValues.brainUseClaudeCli ?? OPERATOR_DEFAULTS_FALLBACK.brainUseClaudeCli,
     workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
   };
 
@@ -506,6 +536,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
       envInApp !== null ? 'env' : fileValues.inAppOrchestratorEnabled !== undefined ? 'file' : 'default',
+    brainUseClaudeCli:
+      envBrainCli !== null ? 'env' : fileValues.brainUseClaudeCli !== undefined ? 'file' : 'default',
     workersUseBrain: envBrain !== null ? 'env' : fileValues.workersUseBrain !== undefined ? 'file' : 'default',
   };
 
@@ -635,6 +667,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   if (update.inAppOrchestratorEnabled !== undefined) {
     stored.inAppOrchestratorEnabled = Boolean(update.inAppOrchestratorEnabled);
   }
+  if (update.brainUseClaudeCli !== undefined) {
+    stored.brainUseClaudeCli = Boolean(update.brainUseClaudeCli);
+  }
   if (update.workersUseBrain !== undefined) {
     if (!isWorkersUseBrain(update.workersUseBrain)) {
       throw new Error('workersUseBrain must be one of "off", "auto", "all".');
@@ -706,6 +741,15 @@ export function resolveExperimentalOpencodeSync(): boolean {
 
 export function resolveInAppOrchestratorEnabledSync(): boolean {
   return getOperatorDefaultsSync().values.inAppOrchestratorEnabled;
+}
+
+/**
+ * Whether the Engineering Brain may use the Claude CLI warm pool (Haiku/Sonnet).
+ * Decoupled from {@link resolveInAppOrchestratorEnabledSync} (2026-06-22) so a
+ * Codex-orchestrator user still gets the fast sub-billed warm Brain.
+ */
+export function resolveBrainUseClaudeCliSync(): boolean {
+  return getOperatorDefaultsSync().values.brainUseClaudeCli;
 }
 
 export function resolveWorkersUseBrainSync(): WorkersUseBrain {

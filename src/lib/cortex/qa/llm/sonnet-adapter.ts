@@ -84,19 +84,20 @@ async function resolveClaudeBinForQa(): Promise<string | null> {
 /**
  * Detect and cache the active Sonnet provider tier. The expensive probe
  * (login-shell binary resolution + --version) runs once per process PER
- * TOGGLE STATE — the cache is keyed by the live `inAppOrchestratorEnabled`
- * value, so an operator flipping the toggle in Settings re-probes exactly
+ * TOGGLE STATE — the cache is keyed by the live `brainUseClaudeCli`
+ * value, so an operator flipping the setting in Settings re-probes exactly
  * once instead of keeping the old billing tier until restart (review
  * 2026-06-11; resetSonnetProviderCache existed but nothing called it).
  */
 async function detectTier(): Promise<TierResult> {
   // June 15 2026 — `claude --print` bills against the user's Agent SDK credit
-  // pool. Gated behind the same toggle as the in-app orchestrator chat. When
-  // off, skip the CLI tier and fall through to API key (their own pay-per-
-  // token, unaffected) or Flash. Dynamic import keeps the dependency graph
-  // one-way at compile time. Re-read on EVERY call (cheap sync file read).
-  const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-  const cliAllowed = resolveInAppOrchestratorEnabledSync();
+  // pool. Gated behind the Brain's own `brainUseClaudeCli` setting (decoupled
+  // from the orchestrator toggle 2026-06-22). When off, skip the CLI tier and
+  // fall through to API key (their own pay-per-token, unaffected) or Flash.
+  // Dynamic import keeps the dependency graph one-way at compile time. Re-read
+  // on EVERY call (cheap sync file read).
+  const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
+  const cliAllowed = resolveBrainUseClaudeCliSync();
   if (cachedTier && cachedTierCliAllowed === cliAllowed) return cachedTier;
   cachedTierCliAllowed = cliAllowed;
 

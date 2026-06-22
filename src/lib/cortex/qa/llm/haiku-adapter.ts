@@ -109,7 +109,7 @@ export interface CallHaikuOptions {
  * the SDK-billing trap the prior `--print` path fell into.
  *
  * Throws on:
- *   - in-app orchestrator toggle OFF (gate matches the chat tab)
+ *   - brainUseClaudeCli setting OFF (the Brain's own Claude-CLI gate)
  *   - claude binary not found
  *   - REPL spawn / exit error
  *   - timeout exceeded
@@ -122,14 +122,14 @@ export interface CallHaikuOptions {
 export async function callHaiku(prompt: string, opts: CallHaikuOptions = {}): Promise<string> {
   const timeoutMs = opts.timeoutMs ?? 8_000;
 
-  // Subscription pool gate — matches the chat tab's behaviour. When the
-  // operator toggle is OFF, the user has explicitly opted out of the Claude
-  // CLI tier (e.g. they don't have a Max sub and want Codex/OpenRouter only),
-  // so we throw and let the cascade fall through. Dynamic import keeps the
+  // Subscription pool gate — Brain-specific (2026-06-22). Decoupled from the
+  // orchestrator toggle: when `brainUseClaudeCli` is OFF the user has opted the
+  // Brain out of the Claude CLI tier (no Max sub, or Codex/OpenRouter only), so
+  // we throw and let the cascade fall through. Dynamic import keeps the
   // server-only dependency graph one-way.
-  const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-  if (!resolveInAppOrchestratorEnabledSync()) {
-    throw new Error('[qa][haiku] disabled by operator setting (inAppOrchestratorEnabled=false)');
+  const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
+  if (!resolveBrainUseClaudeCliSync()) {
+    throw new Error('[qa][haiku] disabled by operator setting (brainUseClaudeCli=false)');
   }
 
   const claudeBin = await resolveClaudeBin();
@@ -153,13 +153,13 @@ const HAIKU_MODEL = 'claude-haiku-4-5-20251001';
 /**
  * Fire-and-forget: pre-spawn a warm Haiku REPL so the next `callHaiku` skips
  * the 6-9s CLI bootstrap. Called at brain-pipeline start (ask.ts). No-ops
- * when the in-app orchestrator toggle is off (the tier would throw anyway)
- * or the binary can't be resolved.
+ * when brainUseClaudeCli is off (the tier would throw anyway) or the binary
+ * can't be resolved.
  */
 export async function prewarmHaiku(): Promise<void> {
   try {
-    const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-    if (!resolveInAppOrchestratorEnabledSync()) return;
+    const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
+    if (!resolveBrainUseClaudeCliSync()) return;
     const claudeBin = await resolveClaudeBin();
     if (claudeBin) prewarmClaudeRepl(claudeBin, HAIKU_MODEL);
   } catch {
