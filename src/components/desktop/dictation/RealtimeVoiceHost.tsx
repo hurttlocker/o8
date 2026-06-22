@@ -192,6 +192,26 @@ export function RealtimeVoiceHost() {
     };
   }, [toggle]);
 
+  // Phone remote (o8-mobile → POST /api/mobile/symon) drives the SAME toggle()
+  // the double-tap does: the route evals an `o8:symon-remote-toggle` CustomEvent
+  // into this webview. The mic + WebRTC session stay on the Mac — the phone is
+  // only the trigger. __o8SymonRemoteReady lets the route gate (is the host
+  // mounted?) and __o8RealtimeStatus lets it report on/connecting/live back.
+  useEffect(() => {
+    const w = window as unknown as { __o8SymonRemoteReady?: boolean };
+    const onRemote = () => toggle();
+    window.addEventListener('o8:symon-remote-toggle', onRemote);
+    w.__o8SymonRemoteReady = true;
+    return () => {
+      window.removeEventListener('o8:symon-remote-toggle', onRemote);
+      w.__o8SymonRemoteReady = false;
+    };
+  }, [toggle]);
+
+  useEffect(() => {
+    (window as unknown as { __o8RealtimeStatus?: RealtimeStatus }).__o8RealtimeStatus = status;
+  }, [status]);
+
   // On a React-driven unmount, LIGHT teardown only — stop the session + timers
   // but do NOT clear the resume marker (this unmount may be a navigation; the
   // destination route should resume). Intentional ends go through stop(), which
