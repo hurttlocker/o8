@@ -103,8 +103,27 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         let status = resp.status();
         if !status.is_success() {
             let err_body = resp.text().await.unwrap_or_default();
-            let snippet = crate::utf8_head(&err_body, 300);
-            return Err(format!("Gemini API error ({status}): {snippet}"));
+            let snippet = crate::utf8_head(&err_body, 200);
+            // Say WHY, not just the code, and whether it's the user's OWN key
+            // (Direct) or the o8 managed plan (Proxy). The bare "API error 401"
+            // left operators with no next step — Sydney hit exactly this and
+            // couldn't tell if it was her key, the model, or her plan. (2026-06-22)
+            let via = match &target {
+                crate::entitlement::GeminiTarget::Direct { .. } => "your Gemini API key",
+                crate::entitlement::GeminiTarget::Proxy { .. } => "your o8 plan (managed inference)",
+            };
+            let hint = match status.as_u16() {
+                401 | 403 => format!(
+                    "{via} was rejected — it's invalid or has no access to model `{model}`. Open Settings → Voice and check the Gemini key, or check your o8 plan."
+                ),
+                404 => format!(
+                    "model `{model}` isn't available to {via}. Set a different model in ~/.o8/agent_models.json."
+                ),
+                429 => format!("{via} is rate-limited — wait a moment, or add billing in Google AI Studio."),
+                500..=599 => "Gemini had a server error — try again shortly.".to_string(),
+                _ => format!("{via} rejected the request."),
+            };
+            return Err(format!("Symon agent couldn't reach Gemini ({status}): {hint} [{snippet}]"));
         }
 
         let resp_json: Value = resp
