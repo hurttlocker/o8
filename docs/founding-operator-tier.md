@@ -41,7 +41,8 @@ The "use us instead of your own CLI/local" layer, turned **ON automatically** an
 - **Fast Brain** — managed speed tier → instant answers instead of 15–30s on your own sub.
 - **Dictation polish** — Gemini, automatic.
 - **Premium STT** — Whisper (so dictation is end-to-end premium, not polished-text-from-a-worse-transcript).
-- *(optional)* managed Symon brain.
+
+*(Corrected 2026-06-22: **Symon's brain is NOT a managed founder perk** — it runs on the user's Claude CLI, free/sub-billed. The operator won't carry a Gemini bill for it.)*
 
 Founders **never pay the future ~$19 infra tier** — it's just on for them. A **fair-use cap applies** (never lifetime-unlimited metered — that's the solvency rule, non-negotiable).
 
@@ -55,7 +56,7 @@ Founders are permanently a release-channel ahead — new surfaces land for them 
 
 ### Exclusive theme — the founder flex
 
-Free users get **light + dark** (kept beautiful). Founders get an exclusive **"o8" signature theme**, with more founder-only themes over time. This is **additive cosmetic only** — we never remove theming from free. (Note: the theme registry only has light/dark today, so the signature theme is a small build.)
+Free users get **light + dark** (kept beautiful). Founders get an exclusive **"o8" signature theme**, with more founder-only themes over time. This is **additive cosmetic only** — we never remove theming from free. (First founder theme **shipped 2026-06-22**; more themes + picture/ASCII canvas backgrounds are backlog.)
 
 ### Status + community
 
@@ -80,7 +81,7 @@ Free users get **light + dark** (kept beautiful). Founders get an exclusive **"o
 | Engineering Brain | Works on your sub — correct but 15–30s/query | Managed speed tier ON → instant |
 | Dictation polish | raw transcript, none | Gemini polish ON, automatic |
 | Dictation STT | Apple Speech (local) | Premium Whisper |
-| Symon brain | Claude CLI (free) | optional managed Gemini |
+| Symon brain | Claude CLI (free) | Claude CLI (free) — NOT a managed founder perk |
 | Voice / TTS | Edge / `say` / Neural2 | same (no premium TTS tier) |
 | ElevenLabs voice | BYO key | BYO key — **not founder** |
 | Speech-to-speech | BYO key | BYO key — **not founder** |
