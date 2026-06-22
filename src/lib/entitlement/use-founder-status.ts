@@ -8,16 +8,21 @@
  * works on every surface — including the canvas tree, which isn't wrapped by
  * EntitlementProvider. Returns false for everyone who isn't a founder, so
  * non-founder behavior is unchanged.
+ *
+ * Shares the retrying remote-flag reader so a transient failure on full-page
+ * canvas entry never pins a founder's access OFF until reload (see
+ * use-remote-flag — that combined with the canvas flag failing is how the
+ * canvas went black-with-no-header).
  */
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useRetryingRemoteFlag, type FlagCache } from '@/lib/operator/use-remote-flag';
 
-let cached: boolean | null = null;
+const cache: FlagCache = { value: null };
 
 // Returns null on ANY failure so a transient hiccup is never cached as `false`
-// (which would pin a founder's early access OFF until reload — same guard the
-// experimental flag hooks use).
+// (which would pin a founder's early access OFF). The retry layer in
+// useRetryingRemoteFlag re-fetches a null instead of giving up.
 async function fetchFounder(signal?: AbortSignal): Promise<boolean | null> {
   try {
     const response = await fetch('/api/panel/entitlement', { signal });
@@ -31,17 +36,5 @@ async function fetchFounder(signal?: AbortSignal): Promise<boolean | null> {
 }
 
 export function useFounderStatus(): boolean {
-  const [isFounder, setIsFounder] = useState<boolean>(cached ?? false);
-  useEffect(() => {
-    if (cached !== null) { setIsFounder(cached); return; }
-    let cancelled = false;
-    const controller = new AbortController();
-    void fetchFounder(controller.signal).then((value) => {
-      if (cancelled || value === null) return;
-      cached = value;
-      setIsFounder(value);
-    });
-    return () => { cancelled = true; controller.abort(); };
-  }, []);
-  return isFounder;
+  return useRetryingRemoteFlag(fetchFounder, cache);
 }
