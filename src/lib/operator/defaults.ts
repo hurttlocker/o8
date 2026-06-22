@@ -87,6 +87,9 @@ export interface OperatorDefaults {
   /** Embedding model on the local endpoint for the Brain (e.g. `nomic-embed-text`).
    *  Empty = no local embeddings (Brain uses BM25/exact-match). Env: `O8_LOCAL_EMBED_MODEL`. */
   localEmbedModel: string;
+  /** Chat model on the local endpoint for Brain compose/classify + dictation polish.
+   *  Empty = cloud/managed path. Env: `O8_LOCAL_CHAT_MODEL`. */
+  localChatModel: string;
   /**
    * Off by default for v1. When true, opencode shows up in the dispatch
    * runtime picker + packet runtime dropdown + command palette. Kept as an
@@ -159,6 +162,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   defaultDispatchModel: '',
   localInferenceBaseUrl: '',
   localEmbedModel: '',
+  localChatModel: '',
   experimentalOpencode: false,
   experimentalGemini: false,
   experimentalChat: false,
@@ -278,6 +282,10 @@ function envLocalEmbedModel(): string | null {
   return process.env.O8_LOCAL_EMBED_MODEL?.trim() || null;
 }
 
+function envLocalChatModel(): string | null {
+  return process.env.O8_LOCAL_CHAT_MODEL?.trim() || null;
+}
+
 function envExperimentalOpencode(): boolean | null {
   const raw = process.env.O8_EXPERIMENTAL_OPENCODE;
   if (raw === '1') return true;
@@ -339,6 +347,7 @@ interface StoredOperatorDefaults {
   defaultDispatchModel?: string;
   localInferenceBaseUrl?: string;
   localEmbedModel?: string;
+  localChatModel?: string;
   experimentalOpencode?: boolean;
   experimentalGemini?: boolean;
   experimentalChat?: boolean;
@@ -400,6 +409,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (typeof stored.localEmbedModel === 'string') {
     result.localEmbedModel = stored.localEmbedModel.trim();
   }
+  if (typeof stored.localChatModel === 'string') {
+    result.localChatModel = stored.localChatModel.trim();
+  }
   if (typeof stored.experimentalOpencode === 'boolean') {
     result.experimentalOpencode = stored.experimentalOpencode;
   }
@@ -438,6 +450,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envDispatchModel = envDefaultDispatchModel();
   const envLocalBaseUrl = envLocalInferenceBaseUrl();
   const envLocalEmbed = envLocalEmbedModel();
+  const envLocalChat = envLocalChatModel();
   const envOpencode = envExperimentalOpencode();
   const envGemini = envExperimentalGemini();
   const envChat = envExperimentalChat();
@@ -460,6 +473,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     defaultDispatchModel: envDispatchModel ?? fileValues.defaultDispatchModel ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchModel,
     localInferenceBaseUrl: envLocalBaseUrl ?? fileValues.localInferenceBaseUrl ?? OPERATOR_DEFAULTS_FALLBACK.localInferenceBaseUrl,
     localEmbedModel: envLocalEmbed ?? fileValues.localEmbedModel ?? OPERATOR_DEFAULTS_FALLBACK.localEmbedModel,
+    localChatModel: envLocalChat ?? fileValues.localChatModel ?? OPERATOR_DEFAULTS_FALLBACK.localChatModel,
     experimentalOpencode: envOpencode ?? fileValues.experimentalOpencode ?? OPERATOR_DEFAULTS_FALLBACK.experimentalOpencode,
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
@@ -484,6 +498,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     defaultDispatchModel: envDispatchModel !== null ? 'env' : fileValues.defaultDispatchModel !== undefined ? 'file' : 'default',
     localInferenceBaseUrl: envLocalBaseUrl !== null ? 'env' : fileValues.localInferenceBaseUrl !== undefined ? 'file' : 'default',
     localEmbedModel: envLocalEmbed !== null ? 'env' : fileValues.localEmbedModel !== undefined ? 'file' : 'default',
+    localChatModel: envLocalChat !== null ? 'env' : fileValues.localChatModel !== undefined ? 'file' : 'default',
     experimentalOpencode: envOpencode !== null ? 'env' : fileValues.experimentalOpencode !== undefined ? 'file' : 'default',
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
@@ -593,6 +608,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.localEmbedModel = update.localEmbedModel.trim();
   }
+  if (update.localChatModel !== undefined) {
+    if (typeof update.localChatModel !== 'string') {
+      throw new Error('localChatModel must be a string.');
+    }
+    stored.localChatModel = update.localChatModel.trim();
+  }
   if (update.experimentalOpencode !== undefined) {
     stored.experimentalOpencode = Boolean(update.experimentalOpencode);
   }
@@ -672,6 +693,11 @@ export function resolveLocalInferenceBaseUrlSync(): string {
 /** Local embedding model for the Brain ('' = no local embeddings). */
 export function resolveLocalEmbedModelSync(): string {
   return getOperatorDefaultsSync().values.localEmbedModel;
+}
+
+/** Local chat model for Brain compose/classify + dictation polish ('' = cloud). */
+export function resolveLocalChatModelSync(): string {
+  return getOperatorDefaultsSync().values.localChatModel;
 }
 
 export function resolveExperimentalOpencodeSync(): boolean {

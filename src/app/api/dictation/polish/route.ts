@@ -72,7 +72,8 @@ export async function POST(request: Request) {
   ];
 
   const failures: string[] = [];
-  for (const model of POLISH_MODELS) {
+  const polishModels = route.model ? [route.model] : POLISH_MODELS;
+  for (const model of polishModels) {
     try {
       const response = await fetch(route.url, {
         method: 'POST',

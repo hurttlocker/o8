@@ -97,10 +97,10 @@ Tuning levers to evaluate: model choice per path, caching, context trimming, fal
 
 **Full build-spec: [`local-inference-backend-scope.md`](./local-inference-backend-scope.md).** Headline: **~80% already built** — embeddings run local Ollama, operator-defaults carry `localInferenceBaseUrl`/`localEmbedModel`, the Settings "LOCAL MODELS" section exists, and Codex dispatch runs local. **The gap:** `inference-route.ts` has no local branch → local is invisible to Brain compose/classify + polish + STT.
 
-**v1 (~7–8h):** wire a **liveness-gated `local` branch** into `resolveOpenRouterRoute()` (chain: **local → BYO-key → managed → free/slow**), add `localChatModel` + a "Chat model" Settings row + a `/api/setup/local-inference/probe` route. Ollama, `qwen2.5-coder:7b` suggested default. Local **backstops** the paid OpenRouter call (keeps fast CLI tiers). Free/slow fallback already exists (the cascade's Flash/heuristic/sources floor).
+**v1 (~7–8h):** wire a **liveness-gated `local` branch** into `resolveOpenRouterRoute()` with entitlement-aware order: **plan token → managed proxy first** (founder/paid perk; never local), then for free users **local → BYO-key → null → free/slow cascade**. Add `localChatModel` + a "Chat model" Settings row + a `/api/setup/local-inference/probe` route. Ollama, `qwen2.5-coder:7b` suggested default. Local **backstops** the paid OpenRouter call for free users only (keeps fast CLI tiers). Free/slow fallback already exists (the cascade's Flash/heuristic/sources floor).
 - [ ] Build v1 per the scope doc (one global setting, opt-in; fresh installs unchanged).
 - [ ] **Critical:** the cached liveness-probe gate (a dead Ollama must NOT hang the chat path) — needs hardware validation (operator can't test).
-- [ ] **Open question (operator):** local *backstops* the paid call (v1 rec) vs local *leads* everything — confirm.
+- [x] **Resolved (operator):** local *backstops* for free users only; founders/paid users always get the managed proxy first.
 - [ ] Deferred: local STT (whisper.cpp), MLX, model auto-pull UX, Symon (Rust) local config.
 
 ## Explicitly NOT this launch (future)
