@@ -43,6 +43,7 @@ interface OperatorDefaults {
   defaultDispatchModel: string;
   localInferenceBaseUrl: string;
   localEmbedModel: string;
+  localChatModel: string;
   experimentalOpencode: boolean;
   experimentalGemini: boolean;
   experimentalChat: boolean;
@@ -919,11 +920,13 @@ export function OperatorDefaultsTab() {
           defaultDispatchModel: values.defaultDispatchModel,
           localInferenceBaseUrl: values.localInferenceBaseUrl,
           localEmbedModel: values.localEmbedModel,
+          localChatModel: values.localChatModel,
         }}
         sources={{
           defaultDispatchModel: sources.defaultDispatchModel,
           localInferenceBaseUrl: sources.localInferenceBaseUrl,
           localEmbedModel: sources.localEmbedModel,
+          localChatModel: sources.localChatModel,
         }}
         busyField={busyField}
         envDisabledReason={envDisabledReason}

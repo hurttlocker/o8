@@ -218,7 +218,7 @@ async function streamRound({
   modelOverride?: string | null;
 }): Promise<StreamRoundResult | { error: string }> {
   const failures: string[] = [];
-  for (const model of scratchModels(modelOverride)) {
+  for (const model of route.model ? [route.model] : scratchModels(modelOverride)) {
     try {
       const response = await openRouterRequest({ route, messages, model, signal, withTools });
       if (!response.ok) {

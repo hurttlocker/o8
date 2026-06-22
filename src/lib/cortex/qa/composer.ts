@@ -23,7 +23,6 @@ import 'server-only';
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
 import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
-import { isByokRequired } from '@/lib/cortex/qa/llm/byok-keys';
 import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/openrouter-adapter';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { CitationKind, TypedRow } from '@/lib/cortex/qa/types';
@@ -749,18 +748,8 @@ async function tryComposeCodex(prompt: string): Promise<string | null> {
 
 /** Tier 3: OpenRouter — flash-lite primary with gpt-5.4-nano + grok-4.3 in-call fallback.
  * Optional `model` override routes to a specific model instead of the primary
- * (used by the eval-mode Haiku-4.5 tier).
- *
- * BYOK gate (#960): when O8_BYOK_REQUIRED=1 and no stored user key exists,
- * this tier is skipped so non-BYOK users don't accidentally burn the
- * founder's OpenRouter credits. Without the flag the existing behaviour is
- * preserved (smoke + dev env always resolve via process.env). */
+ * (used by the eval-mode Haiku-4.5 tier). */
 async function tryComposeOpenRouter(prompt: string, model?: string): Promise<string | null> {
-  // O8_BYOK_REQUIRED=1 + no stored key → skip tier
-  if (await isByokRequired()) {
-    console.info('[qa][composer-A] OpenRouter tier skipped (O8_BYOK_REQUIRED and no stored key)');
-    return null;
-  }
   try {
     // 25s — was 10s, but ownership questions in eval mode hit grok-4.1-fast
     // with the full 30-row payload (post-slice-fix) and timed out at 10s
