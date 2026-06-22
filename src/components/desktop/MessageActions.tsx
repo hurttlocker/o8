@@ -3,15 +3,17 @@
 /**
  * MessageActions — inline action bar under each agent message.
  *
- * Default mode:  ▶ Play  📋 Copy  👍 👎  🔖 Keep  ⎇ Fork
+ * Default mode:  ▶ Play  📋 Copy  🔖 Keep
  * Playing mode:  ⏪ 10s  ⏸ Pause  ⏩ 10s  1x  0:24/1:47  ■ Stop
  *
  * The row morphs in place — zero new UI elements (Option A).
  * Option B (floating pill) filed for later enhancement.
+ *
+ * Trimmed 2026-06-22 (operator): dropped 👍/👎 (good/bad response) and ⎇ Fork —
+ * Codex doesn't surface them and they cluttered the row. Play + Copy + Keep stay.
  */
 
 import { memo, useCallback, useEffect, useState } from 'react';
-import { GitBranch } from './tabler-shims';
 import {
   Check,
   Bookmark,
@@ -21,8 +23,6 @@ import {
   RotateCcw,
   RotateCw,
   Square,
-  ThumbsDown,
-  ThumbsUp,
   Volume2,
 } from './lucide-shims';
 import { ttsEngine, type PlaybackState, type TTSEngineState } from '@/lib/tts/engine';
@@ -37,6 +37,8 @@ interface MessageActionsProps {
   canPinContext?: boolean;
   isPinnedContext?: boolean;
   onTogglePinContext?: () => void;
+  /** @deprecated Fork button removed 2026-06-22. Prop retained so existing
+   *  callers typecheck without a ripple; it is intentionally ignored. */
   onFork?: () => void;
 }
 
@@ -73,10 +75,8 @@ export const MessageActions = memo(function MessageActions({
   canPinContext = false,
   isPinnedContext = false,
   onTogglePinContext,
-  onFork,
 }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
-  const [rating, setRating] = useState<'up' | 'down' | null>(null);
   const [ttsState, setTtsState] = useState<PlaybackState>('idle');
   const [isThisMessage, setIsThisMessage] = useState(false);
   const [currentTime, setCurrentTime] = useState(0);
@@ -259,7 +259,7 @@ export const MessageActions = memo(function MessageActions({
     );
   }
 
-  // ── Default mode: ▶ 📋 👍 👎 🔖 ⎇ ──
+  // ── Default mode: ▶ 📋 🔖 ──
   return (
     <div
         style={{
@@ -296,34 +296,6 @@ export const MessageActions = memo(function MessageActions({
         {copied ? <Check size={14} strokeWidth={2} /> : <Copy size={14} strokeWidth={1.8} />}
       </button>
 
-      <button
-        type="button"
-        onClick={() => setRating((value) => (value === 'up' ? null : 'up'))}
-        title="Good response"
-        aria-label="Good response"
-        aria-pressed={rating === 'up'}
-        style={{
-          ...iconBtnBase,
-          color: rating === 'up' ? '#16a34a' : 'var(--t-text-secondary)',
-        }}
-      >
-        <ThumbsUp size={14} strokeWidth={1.8} />
-      </button>
-
-      <button
-        type="button"
-        onClick={() => setRating((value) => (value === 'down' ? null : 'down'))}
-        title="Bad response"
-        aria-label="Bad response"
-        aria-pressed={rating === 'down'}
-        style={{
-          ...iconBtnBase,
-          color: rating === 'down' ? '#ef4444' : 'var(--t-text-secondary)',
-        }}
-      >
-        <ThumbsDown size={14} strokeWidth={1.8} />
-      </button>
-
       {canPinContext ? (
         <button
           type="button"
@@ -339,16 +311,6 @@ export const MessageActions = memo(function MessageActions({
           <Bookmark size={14} strokeWidth={1.8} fill={isPinnedContext ? 'currentColor' : 'none'} />
         </button>
       ) : null}
-
-      <button
-        type="button"
-        onClick={onFork}
-        title="Fork from here"
-        aria-label="Fork from here"
-        style={{ ...iconBtnBase }}
-      >
-        <GitBranch size={14} strokeWidth={1.8} />
-      </button>
     </div>
   );
 });
