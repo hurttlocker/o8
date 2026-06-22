@@ -1,16 +1,15 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-
 import { useFounderStatus } from '@/lib/entitlement/use-founder-status';
+import { useRetryingRemoteFlag, type FlagCache } from '@/lib/operator/use-remote-flag';
 
-let cached: boolean | null = null;
+const cache: FlagCache = { value: null };
 
 // Returns null on ANY failure (non-OK response, parse error, abort/network) so a
-// transient hiccup is NEVER cached. Previously this returned `false` on error,
-// which the caller cached permanently — one failed read (a slow boot, a brief API
-// blip, or unmounting mid-fetch → abort) pinned Canvas mode OFF until a full app
-// reload. Only successful reads get cached now.
+// transient hiccup is NEVER cached. The retry layer in useRetryingRemoteFlag
+// re-fetches a null instead of giving up — previously a single failed read on
+// full-page canvas entry pinned Canvas mode OFF (the black #0a0c10 "Canvas mode
+// is off" screen, no header) until a manual reload.
 async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
   try {
     const response = await fetch('/api/panel/operator-defaults', { signal });
@@ -25,19 +24,6 @@ async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
 
 export function useExperimentalCanvasFlag(): boolean {
   const isFounder = useFounderStatus();
-  const [flag, setFlag] = useState<boolean>(cached ?? false);
-  useEffect(() => {
-    if (cached !== null) { setFlag(cached); return; }
-    let cancelled = false;
-    const controller = new AbortController();
-    void fetchFlag(controller.signal).then((value) => {
-      // Only cache + apply a real (non-null) read; transient failures retry next mount.
-      if (cancelled || value === null) return;
-      cached = value;
-      setFlag(value);
-    });
-    return () => { cancelled = true; controller.abort(); };
-  }, []);
   // Founders get early access regardless of the operator default.
-  return flag || isFounder;
+  return useRetryingRemoteFlag(fetchFlag, cache) || isFounder;
 }
