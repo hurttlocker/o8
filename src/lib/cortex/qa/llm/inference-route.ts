@@ -50,7 +50,13 @@ export interface InferenceRoute {
  * the proxy makes the real validity call.
  */
 function planToken(): string | null {
-  const token = readCachedEntitlement()?.licenseKey?.trim();
+  const entitlement = readCachedEntitlement();
+  const token = entitlement?.licenseKey?.trim();
+  const managedPlan =
+    entitlement?.plan === 'founder' ||
+    entitlement?.plan === 'pro' ||
+    entitlement?.plan === 'team';
+  if (!managedPlan) return null;
   return token && token.split('.').length === 3 ? token : null;
 }
 
@@ -74,7 +80,7 @@ interface CachedLocalProbe extends LocalInferenceProbeResult {
 const localProbeCache = new Map<string, CachedLocalProbe>();
 
 export function normalizeLocalInferenceBaseUrl(raw: string): string {
-  return raw.trim().replace(/\/+$/, '');
+  return raw.trim().replace(/\/+$/, '').replace(/\/v1$/i, '');
 }
 
 function parseLocalInferenceModels(payload: unknown): string[] {
