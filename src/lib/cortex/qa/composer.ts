@@ -619,23 +619,24 @@ export async function composeClassA(
     }
   }
 
-  // Tier ordering depends on the in-app orchestrator toggle (epic #1044):
-  //   - toggle OFF (default) → Codex is effective tier 1, Haiku is skipped
-  //     (the adapter throws when gated; no point burning the call).
-  //   - toggle ON              → Haiku tier 1, Codex tier 2 (legacy order).
-  let inAppOrchestratorOn = false;
+  // Tier ordering depends on the Brain's own `brainUseClaudeCli` setting
+  // (epic #1044; decoupled from the orchestrator toggle 2026-06-22 — a
+  // Codex-orchestrator user still gets warm Haiku as tier 1):
+  //   - OFF → Codex is effective tier 1, Haiku is skipped (adapter throws).
+  //   - ON  → Haiku tier 1, Codex tier 2 (legacy order).
+  let brainCliOn = false;
   if (!evalMode && !sonnetCliFirst) {
     try {
-      const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-      inAppOrchestratorOn = resolveInAppOrchestratorEnabledSync();
+      const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
+      brainCliOn = resolveBrainUseClaudeCliSync();
     } catch {
-      inAppOrchestratorOn = false;
+      brainCliOn = false;
     }
   }
 
-  // Tier 1 (toggle ON): Haiku CLI. Skipped in eval mode, sonnet-cli mode, or
-  // when the toggle is OFF (default).
-  if (!evalMode && !sonnetCliFirst && inAppOrchestratorOn) {
+  // Tier 1 (brainUseClaudeCli ON): Haiku CLI. Skipped in eval mode, sonnet-cli
+  // mode, or when the setting is OFF.
+  if (!evalMode && !sonnetCliFirst && brainCliOn) {
     const haikuAnswer = await tryComposeHaiku(composePrompt);
     if (haikuAnswer) {
       console.info('[qa][composer-A] resolved via haiku-cli (tier 1)');
@@ -644,12 +645,12 @@ export async function composeClassA(
     }
   }
 
-  // Tier 1 (toggle OFF — default) / Tier 2 (toggle ON): Codex CLI.
+  // Tier 1 (brainUseClaudeCli OFF) / Tier 2 (ON): Codex CLI.
   if (!evalMode && !sonnetCliFirst) {
     const codexAnswer = await tryComposeCodex(composePrompt);
     if (codexAnswer) {
       console.info(
-        `[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (${inAppOrchestratorOn ? 'tier 2' : 'tier 1 default'})`,
+        `[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (${brainCliOn ? 'tier 2' : 'tier 1 default'})`,
       );
       emitClassAAnswer(codexAnswer, lookup, emit);
       return;

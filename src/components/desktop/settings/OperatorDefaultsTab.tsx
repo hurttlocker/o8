@@ -50,6 +50,7 @@ interface OperatorDefaults {
   experimentalCanvas: boolean;
   classAComposer: ClassAComposer;
   inAppOrchestratorEnabled: boolean;
+  brainUseClaudeCli: boolean;
   workersUseBrain: WorkersUseBrain;
 }
 
@@ -848,6 +849,21 @@ export function OperatorDefaultsTab() {
               disabled={sources?.inAppOrchestratorEnabled === 'env' || busyField === 'inAppOrchestratorEnabled'}
               onChange={(next) => {
                 void updateField('inAppOrchestratorEnabled', next);
+              }}
+            />
+          }
+        />
+        <Row
+          label="Engineering Brain uses Claude"
+          description={values.brainUseClaudeCli ? 'On (default) — the Brain answers via the warm claude CLI (Haiku ~2.7s, Sonnet for reasoning), billed to your Claude subscription. Decoupled from the orchestrator runtime above, so this stays fast even when you run Codex as the orchestrator. Falls through to OpenRouter/Codex/heuristic when claude isn’t installed or signed in.' : 'Off — the Brain skips the Claude CLI and answers via OpenRouter / Codex / heuristic only.'}
+          source={sources.brainUseClaudeCli}
+          disabledReason={sources?.brainUseClaudeCli === 'env' ? envDisabledReason : undefined}
+          right={
+            <SettingsToggleButton
+              checked={values.brainUseClaudeCli}
+              disabled={sources?.brainUseClaudeCli === 'env' || busyField === 'brainUseClaudeCli'}
+              onChange={(next) => {
+                void updateField('brainUseClaudeCli', next);
               }}
             />
           }
