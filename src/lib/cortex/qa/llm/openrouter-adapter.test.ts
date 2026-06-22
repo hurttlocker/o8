@@ -16,11 +16,17 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 // first use — point it at a throwaway dir so tests never touch ~/.o8.
 process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(os.tmpdir(), 'o8-qa-test-'));
 
+vi.mock('@/lib/cortex/qa/llm/brain-spend', () => ({
+  assertUnderBrainDailyCap: vi.fn(),
+  recordBrainOpenRouterSpend: vi.fn(),
+}));
+
 import {
   callOpenRouter,
   isOpenRouterCircuitOpen,
   resetOpenRouterCircuit,
 } from '@/lib/cortex/qa/llm/openrouter-adapter';
+import { resetLocalInferenceProbeCacheForTests } from '@/lib/cortex/qa/llm/inference-route';
 
 function jsonResponse(status: number, body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -37,14 +43,18 @@ describe('openrouter-adapter circuit breaker', { timeout: 10_000 }, () => {
 
   beforeEach(() => {
     resetOpenRouterCircuit();
+    resetLocalInferenceProbeCacheForTests();
     fetchMock.mockReset();
     vi.stubGlobal('fetch', fetchMock);
     process.env.OPENROUTER_API_KEY = 'sk-or-test-key';
+    delete process.env.O8_LOCAL_INFERENCE_BASE_URL;
+    delete process.env.O8_LOCAL_CHAT_MODEL;
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
     resetOpenRouterCircuit();
+    resetLocalInferenceProbeCacheForTests();
   });
 
   it('starts closed', () => {

@@ -208,7 +208,7 @@ export async function callOpenRouter(
 
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
-    if (isHardFailureStatus(res.status)) {
+    if (route.via !== 'local' && isHardFailureStatus(res.status)) {
       recordHardFailure(res.status, errText);
     }
     throw new Error(`[qa][openrouter] HTTP ${res.status}: ${errText.slice(0, 200)}`);
