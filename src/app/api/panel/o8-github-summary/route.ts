@@ -98,7 +98,7 @@ async function summarizeWithOpenRouter(input: string) {
   ];
 
   const failures: string[] = [];
-  for (const model of summaryModels()) {
+  for (const model of route.model ? [route.model] : summaryModels()) {
     try {
       const response = await fetch(route.url, {
         method: 'POST',

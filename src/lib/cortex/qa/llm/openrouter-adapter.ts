@@ -161,36 +161,36 @@ export async function callOpenRouter(
     );
   }
 
-  // Resolve the route (#monetization Step 2): the user's own OpenRouter key
-  // (direct) or, when there's no local key but a plan token is present, the o8
-  // proxy (our key, metered server-side). Null = no route → the caller falls
-  // through to the next CLI tier, exactly as a missing key did before.
+  // Resolve the route (#monetization Step 2): plan-token proxy first, then
+  // liveness-gated local for free users, then the user's own OpenRouter key.
+  // Null = no route → the caller falls through to the next CLI tier, exactly
+  // as a missing key did before.
   const route = await resolveOpenRouterRoute();
   if (!route) {
-    throw new Error('[qa][openrouter] no route (no local key, no plan token)');
+    throw new Error('[qa][openrouter] no route (no proxy token, local endpoint, or BYO key)');
   }
 
   // The daily spend cap is the DESKTOP guardrail on the USER's own key/credits.
   // In proxy mode the user isn't spending their own OpenRouter $ (we are) and
-  // the proxy enforces its own per-account cap, so skip it there.
+  // the proxy enforces its own per-account cap. In local mode the call is free.
   if (route.via === 'direct') await assertUnderBrainDailyCap();
 
   const timeoutMs = opts.timeoutMs ?? 10_000;
-  const primary = opts.model ?? OPENROUTER_PRIMARY_MODEL;
-  const fallbacks = opts.fallbackModels ?? OPENROUTER_FALLBACK_MODELS;
+  const primary = route.model ?? opts.model ?? OPENROUTER_PRIMARY_MODEL;
+  const fallbacks = route.model ? [] : opts.fallbackModels ?? OPENROUTER_FALLBACK_MODELS;
 
   // OpenRouter accepts `model` (primary) + `models[]` (in-call fallback).
   // Including the primary in `models[]` is harmless but redundant; we keep
   // them separate so the response's actual-served model is unambiguous.
   const body = {
     model: primary,
-    models: fallbacks,
+    ...(fallbacks.length > 0 ? { models: fallbacks } : {}),
     messages: [{ role: 'user', content: prompt }],
     temperature: 0,
     max_tokens: 512,
     // Ask OpenRouter to return the call's cost in the response so the spend
     // ledger records exact figures instead of pricing-table estimates.
-    usage: { include: true },
+    ...(route.via === 'local' ? {} : { usage: { include: true } }),
   };
 
   let res: Response;

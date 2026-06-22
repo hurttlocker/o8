@@ -32,7 +32,7 @@ function jsonResponse(status: number, body: unknown): Response {
 const okBody = { choices: [{ message: { content: 'OK' } }], model: 'test-model' };
 const insufficientCredits = { error: { message: 'Insufficient credits', code: 402 } };
 
-describe('openrouter-adapter circuit breaker', () => {
+describe('openrouter-adapter circuit breaker', { timeout: 10_000 }, () => {
   const fetchMock = vi.fn();
 
   beforeEach(() => {

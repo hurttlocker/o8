@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 
 import {
   APP_FONT_STACK,
@@ -20,12 +20,14 @@ export interface LocalModelsValues {
   defaultDispatchModel: string;
   localInferenceBaseUrl: string;
   localEmbedModel: string;
+  localChatModel: string;
 }
 
 export interface LocalModelsSources {
   defaultDispatchModel: SettingSource;
   localInferenceBaseUrl: SettingSource;
   localEmbedModel: SettingSource;
+  localChatModel: SettingSource;
 }
 
 interface LocalModelsSectionProps {
@@ -136,6 +138,43 @@ function PresetChip({ label, onClick, disabled }: { label: string; onClick: () =
   );
 }
 
+function ProbeBadge({ configured, checking, running, modelCount }: {
+  configured: boolean;
+  checking: boolean;
+  running: boolean;
+  modelCount: number;
+}) {
+  const label = !configured
+    ? `not set / ${modelCount} models`
+    : checking
+      ? `checking / ${modelCount} models`
+      : running
+        ? `running / ${modelCount} models`
+        : `offline / ${modelCount} models`;
+  const color = checking
+    ? 'var(--t-brand-orange, #f59e0b)'
+    : running
+      ? 'var(--t-success)'
+      : RAMS_INK_QUIET;
+
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 6,
+        color,
+        fontSize: 11,
+        fontFamily: MONO_FONT_STACK,
+        letterSpacing: 0,
+      }}
+    >
+      <span style={{ fontSize: 10, lineHeight: 1 }}>●</span>
+      {label}
+    </span>
+  );
+}
+
 // ── Row (mirrors the parent tab's Row geometry) ──
 
 function FieldRow({ label, description, source, control }: {
@@ -181,6 +220,39 @@ export function LocalModelsSection({ values, sources, busyField, envDisabledReas
   const dispatchEnv = sources.defaultDispatchModel === 'env';
   const baseUrlEnv = sources.localInferenceBaseUrl === 'env';
   const embedEnv = sources.localEmbedModel === 'env';
+  const chatEnv = sources.localChatModel === 'env';
+  const [probe, setProbe] = useState({ checking: false, running: false, models: [] as string[] });
+
+  useEffect(() => {
+    const configured = Boolean(values.localInferenceBaseUrl.trim());
+    if (!configured) {
+      setProbe({ checking: false, running: false, models: [] });
+      return;
+    }
+
+    let cancelled = false;
+    setProbe((current) => ({ ...current, checking: true }));
+    fetch('/api/setup/local-inference/probe', { cache: 'no-store' })
+      .then(async (response) => {
+        const payload = await response.json().catch(() => ({}));
+        if (cancelled) return;
+        const models = Array.isArray(payload.models)
+          ? payload.models.filter((item: unknown): item is string => typeof item === 'string')
+          : [];
+        setProbe({
+          checking: false,
+          running: response.ok && payload.running === true,
+          models,
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setProbe({ checking: false, running: false, models: [] });
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [values.localInferenceBaseUrl]);
 
   return (
     <section style={{ marginBottom: 32 }}>
@@ -225,8 +297,16 @@ export function LocalModelsSection({ values, sources, busyField, envDisabledReas
         source={sources.localInferenceBaseUrl}
         description={(
           <>
-            OpenAI-compatible base URL for the Brain&rsquo;s local embeddings. No
+            OpenAI-compatible base URL for local Brain embedding and chat calls. No
             trailing <code style={{ fontFamily: MONO_FONT_STACK }}>/v1</code>.
+            <div style={{ marginTop: 8 }}>
+              <ProbeBadge
+                configured={Boolean(values.localInferenceBaseUrl.trim())}
+                checking={probe.checking}
+                running={probe.running}
+                modelCount={probe.models.length}
+              />
+            </div>
             {baseUrlEnv ? <div style={{ marginTop: 4, color: RAMS_INK_QUIET, fontSize: 11 }}>{envDisabledReason}</div> : null}
           </>
         )}
@@ -241,6 +321,33 @@ export function LocalModelsSection({ values, sources, busyField, envDisabledReas
               placeholder="http://localhost:11434"
               disabled={baseUrlEnv || busyField === 'localInferenceBaseUrl'}
               onCommit={(next) => onCommit('localInferenceBaseUrl', next)}
+            />
+          </>
+        )}
+      />
+
+      <FieldRow
+        label="Chat model"
+        source={sources.localChatModel}
+        description={(
+          <>
+            Local chat model for Brain compose/classify and dictation polish.
+            Needs the endpoint above. Empty = cloud or managed route.
+            {chatEnv ? <div style={{ marginTop: 4, color: RAMS_INK_QUIET, fontSize: 11 }}>{envDisabledReason}</div> : null}
+          </>
+        )}
+        control={(
+          <>
+            <div style={{ display: 'flex', gap: 6 }}>
+              <PresetChip label="qwen2.5-coder:7b" disabled={chatEnv} onClick={() => onCommit('localChatModel', 'qwen2.5-coder:7b')} />
+              <PresetChip label="qwen2.5-coder:32b" disabled={chatEnv} onClick={() => onCommit('localChatModel', 'qwen2.5-coder:32b')} />
+              <PresetChip label="Cloud" disabled={chatEnv} onClick={() => onCommit('localChatModel', '')} />
+            </div>
+            <LocalTextField
+              value={values.localChatModel}
+              placeholder="qwen2.5-coder:7b"
+              disabled={chatEnv || busyField === 'localChatModel'}
+              onCommit={(next) => onCommit('localChatModel', next)}
             />
           </>
         )}

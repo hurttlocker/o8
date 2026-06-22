@@ -139,7 +139,7 @@ async function summarizeMission(lines: PacketLine[], missionSummary: string | nu
     },
   ];
 
-  for (const model of summaryModels()) {
+  for (const model of route.model ? [route.model] : summaryModels()) {
     try {
       const response = await fetch(route.url, {
         method: 'POST',

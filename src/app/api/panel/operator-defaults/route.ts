@@ -113,6 +113,13 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.localEmbedModel = body.localEmbedModel.trim();
   }
 
+  if (body.localChatModel !== undefined) {
+    if (typeof body.localChatModel !== 'string') {
+      throw new Error('localChatModel must be a string.');
+    }
+    update.localChatModel = body.localChatModel.trim();
+  }
+
   if (body.experimentalOpencode !== undefined) {
     if (typeof body.experimentalOpencode !== 'boolean') {
       throw new Error('experimentalOpencode must be boolean.');

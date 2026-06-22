@@ -1,12 +1,14 @@
 /**
  * Inference route resolver (monetization Step 2).
  *
- * Decides, for a given upstream call, whether to go DIRECT (the user's own key)
- * or through the o8 managed-inference PROXY (our key, metered server-side):
+ * Decides, for a given upstream chat-completions call, whether to use the o8
+ * managed-inference PROXY, a local OpenAI-compatible endpoint, or DIRECT (the
+ * user's own key):
  *
- *   1. local key present            → direct  (today's behavior; founder unchanged)
- *   2. no local key + plan token     → proxy   (Railway /v1/* with the JWT as bearer)
- *   3. neither                       → null    (caller falls through to CLI tiers)
+ *   1. plan token present            → proxy   (founder/paid perk: managed fast path)
+ *   2. free user + local alive        → local   (Ollama/LM Studio /v1/chat/completions)
+ *   3. free user + local key present  → direct  (BYO OpenRouter key)
+ *   4. none                           → null    (caller falls through to CLI tiers)
  *
  * The proxy bearer is the EdDSA license JWT already persisted to entitlement.json
  * (license.ts `licenseKey`, surfaced by `readCachedEntitlement`). Server-side
@@ -17,8 +19,14 @@ import 'server-only';
 
 import { resolveOpenRouterKey } from '@/lib/cortex/qa/llm/byok-keys';
 import { readCachedEntitlement } from '@/lib/entitlement/license';
+import {
+  resolveLocalChatModelSync,
+  resolveLocalInferenceBaseUrlSync,
+} from '@/lib/operator/defaults';
 
 const DEFAULT_PROXY_BASE = 'https://o8-license-server-production.up.railway.app';
+const LOCAL_LIVENESS_TTL_MS = 30_000;
+const LOCAL_LIVENESS_TIMEOUT_MS = 1_500;
 
 /** Base URL of the managed-inference proxy (the license server). Overridable. */
 export function proxyBaseUrl(): string {
@@ -31,7 +39,9 @@ export interface InferenceRoute {
   url: string;
   /** Headers including auth (and analytics headers for the direct path). */
   headers: Record<string, string>;
-  via: 'direct' | 'proxy';
+  via: 'direct' | 'proxy' | 'local';
+  /** Optional model override for endpoints that need local model names. */
+  model?: string;
 }
 
 /**
@@ -52,12 +62,103 @@ function resolveGeminiKey(): string | undefined {
   );
 }
 
+export interface LocalInferenceProbeResult {
+  running: boolean;
+  models: string[];
+}
+
+interface CachedLocalProbe extends LocalInferenceProbeResult {
+  checkedAt: number;
+}
+
+const localProbeCache = new Map<string, CachedLocalProbe>();
+
+export function normalizeLocalInferenceBaseUrl(raw: string): string {
+  return raw.trim().replace(/\/+$/, '');
+}
+
+function parseLocalInferenceModels(payload: unknown): string[] {
+  if (!payload || typeof payload !== 'object') return [];
+  const models = (payload as { models?: unknown }).models;
+  if (!Array.isArray(models)) return [];
+
+  const names = models
+    .map((entry) => {
+      if (typeof entry === 'string') return entry;
+      if (!entry || typeof entry !== 'object') return '';
+      const record = entry as { name?: unknown; model?: unknown };
+      if (typeof record.name === 'string') return record.name;
+      if (typeof record.model === 'string') return record.model;
+      return '';
+    })
+    .map((name) => name.trim())
+    .filter(Boolean);
+
+  return Array.from(new Set(names));
+}
+
+export function resetLocalInferenceProbeCacheForTests(): void {
+  localProbeCache.clear();
+}
+
+export async function probeLocalInference(baseUrl: string): Promise<LocalInferenceProbeResult> {
+  const base = normalizeLocalInferenceBaseUrl(baseUrl);
+  if (!base) return { running: false, models: [] };
+
+  const cached = localProbeCache.get(base);
+  if (cached && Date.now() - cached.checkedAt < LOCAL_LIVENESS_TTL_MS) {
+    return { running: cached.running, models: cached.models };
+  }
+
+  let result: LocalInferenceProbeResult = { running: false, models: [] };
+  try {
+    const response = await fetch(`${base}/api/tags`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+      signal: AbortSignal.timeout(LOCAL_LIVENESS_TIMEOUT_MS),
+    });
+    if (response.ok) {
+      const payload = await response.json().catch(() => null);
+      result = { running: true, models: parseLocalInferenceModels(payload) };
+    }
+  } catch {
+    result = { running: false, models: [] };
+  }
+
+  localProbeCache.set(base, { ...result, checkedAt: Date.now() });
+  return result;
+}
+
 /**
- * OpenRouter chat-completions route. Direct (user key) → proxy (plan token) →
- * null. The proxy is OpenRouter-compatible, so the request body is identical
- * either way; only the URL + auth header change.
+ * OpenAI-compatible chat-completions route. Managed plan token wins first
+ * (founder/paid users get the managed fast path). Only free users can reach
+ * local, and only when the endpoint recently answered `/api/tags`; dead
+ * endpoints are skipped so the caller can fall through to BYO-key/free tiers.
  */
 export async function resolveOpenRouterRoute(): Promise<InferenceRoute | null> {
+  const token = planToken();
+  if (token) {
+    return {
+      url: `${proxyBaseUrl()}/v1/inference`,
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      via: 'proxy',
+    };
+  }
+
+  const localBaseUrl = normalizeLocalInferenceBaseUrl(resolveLocalInferenceBaseUrlSync());
+  const localModel = resolveLocalChatModelSync().trim();
+  if (localBaseUrl && localModel) {
+    const probe = await probeLocalInference(localBaseUrl);
+    if (probe.running) {
+      return {
+        url: `${localBaseUrl}/v1/chat/completions`,
+        headers: { 'Content-Type': 'application/json' },
+        via: 'local',
+        model: localModel,
+      };
+    }
+  }
+
   const localKey = await resolveOpenRouterKey();
   if (localKey) {
     return {
@@ -70,15 +171,6 @@ export async function resolveOpenRouterRoute(): Promise<InferenceRoute | null> {
         'X-Title': 'o8 Cortex Q&A',
       },
       via: 'direct',
-    };
-  }
-
-  const token = planToken();
-  if (token) {
-    return {
-      url: `${proxyBaseUrl()}/v1/inference`,
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-      via: 'proxy',
     };
   }
 
