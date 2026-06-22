@@ -42,6 +42,8 @@ interface PacketCardProps {
   onReviewAction: (verb: 'create_pr' | 'merge') => void;
   onToggleShowAllFiles: () => void;
   onResume: () => void;
+  /** Operator hard-stop for a live agent. Optional — surfaces only where wired. */
+  onStop?: () => void;
 }
 
 // #517 — Packets that belong to a best-of-n comparison group render via
@@ -66,6 +68,7 @@ export function PacketCard({
   onReviewAction,
   onToggleShowAllFiles,
   onResume,
+  onStop,
 }: PacketCardProps) {
   const statusMeta = orchestratorStatusTone(packet.status);
   const runtimeMeta = orchestratorRuntimeTone(packet.runtime);
@@ -556,6 +559,30 @@ export function PacketCard({
               </button>
             ) : (
               <>
+                {onStop && packet.lane?.laneId && !packet.operatorStopped
+                  && (packet.status === 'running' || packet.status === 'launching' || packet.status === 'recovering') ? (
+                  <button
+                    type="button"
+                    onClick={onStop}
+                    style={{
+                      borderWidth: 0,
+                      background: 'transparent',
+                      color: '#ef4444',
+                      paddingTop: 4,
+                      paddingRight: 8,
+                      paddingBottom: 4,
+                      paddingLeft: 8,
+                      borderRadius: 5,
+                      fontSize: 10.5,
+                      fontWeight: 400,
+                      cursor: 'pointer',
+                    }}
+                    onMouseEnter={(e) => { e.currentTarget.style.background = 'rgba(239, 68, 68, 0.08)'; }}
+                    onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+                  >
+                    Stop
+                  </button>
+                ) : null}
                 {packet.lane?.laneId && (packet.status === 'idle' || packet.status === 'awaiting_review' || packet.status === 'recovering') ? (
                   <button
                     type="button"
