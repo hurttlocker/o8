@@ -3,10 +3,13 @@
  *
  * When off, opencode stays hidden from the dispatch picker and CLI runtime pickers.
  * Off by default for v1, mirroring the sibling flag in `use-experimental-gemini.ts`.
+ * Founding Operators get it ON regardless (early-access perk) — see useFounderStatus.
  */
 'use client';
 
 import { useEffect, useState } from 'react';
+
+import { useFounderStatus } from '@/lib/entitlement/use-founder-status';
 
 let cached: boolean | null = null;
 
@@ -25,6 +28,7 @@ async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
 }
 
 export function useExperimentalOpencodeFlag(): boolean {
+  const isFounder = useFounderStatus();
   const [flag, setFlag] = useState<boolean>(cached ?? false);
   useEffect(() => {
     if (cached !== null) { setFlag(cached); return; }
@@ -37,5 +41,6 @@ export function useExperimentalOpencodeFlag(): boolean {
     });
     return () => { cancelled = true; controller.abort(); };
   }, []);
-  return flag;
+  // Founders get early access regardless of the operator default.
+  return flag || isFounder;
 }

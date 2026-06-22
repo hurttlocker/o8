@@ -2,6 +2,8 @@
 
 import { useEffect, useState } from 'react';
 
+import { useFounderStatus } from '@/lib/entitlement/use-founder-status';
+
 let cached: boolean | null = null;
 
 // Returns null on ANY failure (non-OK response, parse error, abort/network) so a
@@ -22,6 +24,7 @@ async function fetchFlag(signal?: AbortSignal): Promise<boolean | null> {
 }
 
 export function useExperimentalCanvasFlag(): boolean {
+  const isFounder = useFounderStatus();
   const [flag, setFlag] = useState<boolean>(cached ?? false);
   useEffect(() => {
     if (cached !== null) { setFlag(cached); return; }
@@ -35,5 +38,6 @@ export function useExperimentalCanvasFlag(): boolean {
     });
     return () => { cancelled = true; controller.abort(); };
   }, []);
-  return flag;
+  // Founders get early access regardless of the operator default.
+  return flag || isFounder;
 }

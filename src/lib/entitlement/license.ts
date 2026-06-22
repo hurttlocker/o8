@@ -25,7 +25,7 @@ import type { Plan } from './types';
  * Never throws — every path returns a structured result.
  */
 
-const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team'];
+const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team', 'founder'];
 const ALLOWED_ALGS = ['EdDSA', 'RS256'] as const;
 const DEFAULT_GRACE_DAYS = 30;
 

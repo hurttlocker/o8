@@ -6,7 +6,7 @@
  * client provider can import it.
  */
 
-export type Plan = 'free' | 'pro' | 'team';
+export type Plan = 'free' | 'pro' | 'team' | 'founder';
 
 /**
  * Cost/reach entitlement levers — NOT feature gates.
@@ -42,12 +42,12 @@ export interface EntitlementState {
 /**
  * Founding Operator display metadata. Client-safe (pure, no I/O) so both the
  * server founder record (founder.ts) and the client context (context.tsx) share
- * one shape. NOT an entitlement gate — the signed plan is still 'pro'; this only
- * carries the cosmetic "Founding Operator #N" status + the soft grant figures
- * (which are finalized separately). `null` figures mean "not set yet".
+ * one shape. Cosmetic — the entitlement is the signed `plan: 'founder'`; this
+ * only carries the "Founding Operator #N" badge + pricing tier. There is no
+ * credit block or locked rate (dropped per docs/founding-operator-tier.md).
  */
 export interface FounderInfo {
   operatorNumber: number;
-  creditUsd: number | null;
-  rateLockUsd: number | null;
+  /** Pricing tier (1=$150, 2=$250, 3=$500), from the assigned operator number. */
+  tier: number | null;
 }
