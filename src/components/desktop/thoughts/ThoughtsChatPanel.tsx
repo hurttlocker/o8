@@ -1201,7 +1201,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     dismissChips: dismissSuggestedReplies,
     restoreChips: restoreSuggestedReplies,
   } = useSuggestedReplies({
-    enabled: isOrchestratorMode && !isChatMode,
+    // Suggested-reply chips cut 2026-06-22 (operator: "i dont think we need
+    // those"). Disabled at the source so the hook generates nothing and every
+    // downstream prop stays wired (no dead-code ripple); flip back to
+    // `isOrchestratorMode && !isChatMode` to restore.
+    enabled: false,
     messages: displayMessages,
     isStreaming: displayWaiting,
   });
