@@ -61,6 +61,10 @@ pub(crate) fn kill_tracked_children() {
 
 /// Install panic + Unix signal handlers before Tauri starts spawning children.
 pub(crate) fn install_shutdown_handlers() {
+    // The disposable pre-ship boot-gate child (#1161) runs with O8_PRESHIP_GATE=1.
+    // Captured once (the env is fixed for the process lifetime) so the panic path
+    // below stays allocation-free.
+    let preship_gate = crate::env_flag_enabled("O8_PRESHIP_GATE");
     let prev = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |info| {
         prev(info);
@@ -74,6 +78,15 @@ pub(crate) fn install_shutdown_handlers() {
         let on_main = std::thread::current().name() == Some("main");
         if on_main {
             kill_tracked_children();
+            // A main-thread panic in the gate child is about to abort, which on
+            // macOS raises SIGABRT and pops a "o8 quit unexpectedly" crash-report
+            // dialog — making the operator think their REAL app died. The gate
+            // reads the child's exit code / socket, not a crash dump, so exit
+            // cleanly instead (#1161). Gated to the disposable child only; the
+            // operator's real app still aborts + reports genuine crashes.
+            if preship_gate {
+                std::process::exit(70);
+            }
         } else {
             log::warn!(
                 "[panic-isolation] non-main thread {:?} panicked but the process is still running — NOT reaping children (see #1109)",
