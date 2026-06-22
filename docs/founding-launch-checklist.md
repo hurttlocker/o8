@@ -72,6 +72,17 @@ Paths to sweep:
 
 Tuning levers to evaluate: model choice per path, caching, context trimming, fallback ordering. (See the S2S cost research — caching + trimming was the dominant lever; expect similar on Brain.) Output: a table the operator reads to decide tunes.
 
+**Sweep v1 results — Brain compose model comparison (2026-06-22, `scripts/founder-brain-sweep.mjs`, n=1/q over 3 repo Qs):**
+
+| model | avg latency | ~$/query | verdict |
+|---|---|---|---|
+| **`google/gemini-2.5-flash-lite`** | **0.48s** | **~$0.00004** | **WINNER** — fastest + cheapest, accurate |
+| `deepseek/deepseek-chat` | 0.41s | ~$0.00009 | comparable, viable fallback |
+| `x-ai/grok-4.3` | 0.48s | ~$0.0013 | same speed, ~30× cost → skip |
+| `anthropic/claude-sonnet-4-6` | 1.32s | ~$0.0019 | 3× slower, ~45× cost; most thorough → quality/escalation tier only |
+
+**DECISION: route founder fast-Brain to `gemini-2.5-flash-lite`** (already the cascade's 'fastest' primary). Empirical solvency: a heavy founder (100 q/day) ≈ **$0.12/mo** vs the $2/day cap = huge headroom → "managed Brain included for life" is near-free, and **30–60× faster than the 15–30s CLI** free users get. `grok`/`sonnet` = paid "quality" escalation only, not default. (Harness re-runnable as a baseline; add p95/multi-run + polish + STT paths next.) **→ feeds the B-1 wiring (step 3): gate founders to this tier.**
+
 ---
 
 ## Explicitly NOT this launch (future)
