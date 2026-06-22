@@ -125,6 +125,10 @@ export function TileContainer({
   return (
     <div
       ref={containerRef}
+      // Paint anchor for the pre-ship boot gate: the workspace subtree only
+      // carries this once TileContainer actually renders, so a white-screen /
+      // empty render can't report healthy. See DashboardHydrationMarker.
+      data-o8-workspace="1"
       style={{
         position: 'relative',
         flexGrow: 1,
