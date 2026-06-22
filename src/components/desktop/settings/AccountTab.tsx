@@ -12,6 +12,7 @@
 import { type ReactNode, useEffect, useState } from 'react';
 
 import { useO8Auth } from '@/components/auth/O8AuthProvider';
+import { useEntitlement } from '@/lib/entitlement/context';
 import { isTelemetryOptedOut, setTelemetryOptOut } from '@/lib/analytics/track';
 import {
   APP_FONT_STACK,
@@ -28,6 +29,7 @@ import {
 
 export function AccountTab() {
   const auth = useO8Auth();
+  const { founder } = useEntitlement();
 
   // Usage-data sharing (telemetry). Default on; the toggle persists an opt-out
   // flag honored by track() (analytics epic #1249). Read on mount so the switch
@@ -87,6 +89,11 @@ export function AccountTab() {
                 {displayName}
               </span>
               <BracketLabel tone="accent">signed in</BracketLabel>
+              {founder ? (
+                <BracketLabel tone="accent">
+                  founding operator · no. {String(founder.operatorNumber).padStart(2, '0')}
+                </BracketLabel>
+              ) : null}
             </div>
             {user?.email ? (
               <span style={{ fontFamily: APP_FONT_STACK, fontSize: 12, color: RAMS_INK_QUIET, letterSpacing: '-0.01em' }}>{user.email}</span>
