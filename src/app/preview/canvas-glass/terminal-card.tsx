@@ -45,6 +45,9 @@ export interface TermCard {
   /** Working directory the shell opens in (null = shell default, HOME). */
   cwd: string | null;
   cwdLabel: string | null;
+  /** Home agent (#1244): auto-launch the local `claude` CLI on first attach —
+   *  an all-local agent in the home dir (no repo / worktree / governance). */
+  runAgent?: boolean;
 }
 
 // The Claude Code borrow — rotating verbs in o8's own vocabulary while the
