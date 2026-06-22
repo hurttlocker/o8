@@ -16,7 +16,7 @@ interface AccountLicenseResponse {
   license?: unknown;
   plan?: unknown;
   source?: unknown;
-  founder?: { operatorNumber?: unknown; creditUsd?: unknown; rateLockUsd?: unknown };
+  founder?: { operatorNumber?: unknown; tier?: unknown };
 }
 
 /**
@@ -82,8 +82,7 @@ export async function POST() {
     if (data.source === 'founding' && founder && typeof founder.operatorNumber === 'number') {
       writeFounderRecord({
         operatorNumber: founder.operatorNumber,
-        creditUsd: typeof founder.creditUsd === 'number' ? founder.creditUsd : null,
-        rateLockUsd: typeof founder.rateLockUsd === 'number' ? founder.rateLockUsd : null,
+        tier: typeof founder.tier === 'number' ? founder.tier : null,
         syncedAt: new Date().toISOString(),
       });
     } else {

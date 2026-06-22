@@ -81,15 +81,17 @@ export type Invite = typeof invites.$inferSelect;
 export type NewInvite = typeof invites.$inferInsert;
 
 /**
- * `founders` — Founding Operator one-time purchases ($150 via Stripe Checkout,
- * mode=payment). Parallel to `subscriptions` but one-off: no renewal, no seats.
- * The Stripe Checkout Session id is the primary key, which makes the webhook
- * idempotent — Stripe retries the same session id, so we never double-issue an
- * operator number. A founder is granted `plan: 'pro'`; the *exact* perks are
- * SOFT — `creditMicroUsd` (prepaid managed-infra credit), `rateLockMicroUsd`
- * (locked monthly rate on the future metered tier) and `perksJson` are stamped
- * from env at purchase and editable later, so finalizing "what a founder gets"
- * is a data/env change, not a redeploy.
+ * `founders` — Founding Operator one-time purchases (tiered $150 / $250 / $500,
+ * 250-cohort; via Stripe Checkout, mode=payment). Parallel to `subscriptions`
+ * but one-off: no renewal, no seats. The Stripe Checkout Session id is the
+ * primary key, making the webhook idempotent — Stripe retries the same session
+ * id, so we never double-issue an operator number.
+ *
+ * A founder is granted `plan: 'founder'` — managed inference included for life
+ * within the proxy per-account fair-use cap (proxy.ts DAILY_CAP_MICRO_USD). There
+ * is NO finite credit block and NO locked rate (dropped per
+ * docs/founding-operator-tier.md); `perksJson` holds the derived tier + any
+ * future flexible grant data.
  */
 export const founders = pgTable('founders', {
   /** Stripe Checkout Session id — PK so webhook retries are idempotent. */
@@ -101,13 +103,10 @@ export const founders = pgTable('founders', {
   email: text('email'),
   /** Serial "Founding Operator #N", assigned at first insert (max+1). Unique. */
   operatorNumber: integer('operator_number').notNull().unique(),
-  /** 'active' | 'revoked'. */
+  /** 'active' = granted; 'over_cap' = recorded past the cohort cap, NOT granted;
+   *  'revoked'. */
   status: text('status').notNull().default('active'),
-  /** Prepaid founder credit toward metered infra, micro-USD (USD*1e6). Soft. */
-  creditMicroUsd: integer('credit_micro_usd').notNull().default(0),
-  /** Locked monthly rate on the future metered tier, micro-USD. Null = unset. */
-  rateLockMicroUsd: integer('rate_lock_micro_usd'),
-  /** Flexible "what they get" bucket, finalized later (flags, early-access…). */
+  /** Flexible grant bucket — currently { tier, priceUsd }; room for more. */
   perksJson: jsonb('perks_json'),
   licenseMintedAt: timestamp('license_minted_at', { withTimezone: true }),
   revokedAt: timestamp('revoked_at', { withTimezone: true }),

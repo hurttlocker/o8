@@ -11,20 +11,39 @@ import { mintLicense } from './mint.js';
 import type { WebhookResult } from './stripe-webhook.js';
 
 /**
- * Founding Operator one-time purchase ($150). Separate from the subscription
- * checkout path: mode=payment, no subscription object, granted `plan: 'pro'`,
- * recorded in the `founders` table (idempotent on the checkout session id).
+ * Founding Operator one-time purchase (tiered $150 / $250 / $500, 250-cohort).
+ * Separate from the subscription checkout path: mode=payment, no subscription
+ * object, granted `plan: 'founder'` (managed inference included for life within
+ * the proxy per-account fair-use cap — proxy.ts DAILY_CAP_MICRO_USD.founder).
+ * Recorded in the `founders` table (idempotent on the checkout session id).
+ *
+ * The cohort cap is a HARD ceiling: a checkout beyond FOUNDER_CAP is recorded
+ * as `status: 'over_cap'` and NOT granted founder status (needs a manual
+ * refund/honor decision) — we never silently exceed the cohort, and never drop
+ * the record of a paid purchase.
  */
+
+/** Founder pricing tier, derived from the assigned operator number (spec
+ *  docs/founding-operator-tier.md): T1 #1-100 $150, T2 #101-200 $250,
+ *  T3 #201-250 $500. */
+export function founderTier(operatorNumber: number): { tier: 1 | 2 | 3; priceUsd: number } {
+  if (operatorNumber <= 100) return { tier: 1, priceUsd: 150 };
+  if (operatorNumber <= 200) return { tier: 2, priceUsd: 250 };
+  return { tier: 3, priceUsd: 500 };
+}
+
+function anyFounderPriceConfigured(): boolean {
+  return Boolean(
+    env.STRIPE_PRICE_FOUNDER_T1 || env.STRIPE_PRICE_FOUNDER_T2 || env.STRIPE_PRICE_FOUNDER_T3,
+  );
+}
 
 /** True when a completed checkout is the one-time Founding Operator purchase
  *  rather than a subscription. The metadata flag o8-site sets is the primary
  *  signal; mode==='payment' + a configured founder price is the fallback. */
 export function isFoundingCheckout(session: Stripe.Checkout.Session): boolean {
   if (session.metadata?.productType === 'founding') return true;
-  // mode=payment is never a subscription. Only treat a bare one-time checkout
-  // as founding when a founder price is configured (so we don't hijack other
-  // one-off products that might be added later).
-  if (session.mode === 'payment' && env.STRIPE_PRICE_FOUNDER) return true;
+  if (session.mode === 'payment' && anyFounderPriceConfigured()) return true;
   return false;
 }
 
@@ -49,12 +68,6 @@ async function nextOperatorNumber(): Promise<number> {
   return (top[0]?.n ?? 0) + 1;
 }
 
-function rateLockMicroUsd(): number | null {
-  if (!env.FOUNDER_RATE_LOCK_USD) return null;
-  const usd = Number.parseFloat(env.FOUNDER_RATE_LOCK_USD);
-  return Number.isFinite(usd) ? Math.round(usd * 1_000_000) : null;
-}
-
 export async function handleFoundingCheckout(
   session: Stripe.Checkout.Session,
 ): Promise<WebhookResult> {
@@ -63,12 +76,13 @@ export async function handleFoundingCheckout(
   const days = Math.max(1, env.FOUNDER_LICENSE_DAYS);
   const clerkUserId = clerkUserIdFromSession(session);
 
-  // Idempotent: Stripe retries the same session id. If we already recorded this
-  // purchase, just re-mint + return — never assign a second operator number.
+  // Idempotent: Stripe retries the same session id. Re-mint only for an ACTIVE
+  // founder; an over_cap / revoked row is recorded but never granted a token.
   const existing = await db.select().from(founders).where(eq(founders.id, sessionId)).limit(1);
   if (existing.length > 0) {
     const row = existing[0]!;
-    const license = await mintLicense({ plan: 'pro', sub: row.clerkUserId ?? row.id, days });
+    if (row.status !== 'active') return { handled: true, type };
+    const license = await mintLicense({ plan: 'founder', sub: row.clerkUserId ?? row.id, days });
     return { handled: true, type, license };
   }
 
@@ -81,11 +95,7 @@ export async function handleFoundingCheckout(
   // low-volume, but a paid checkout must never fail to record.
   for (let attempt = 0; ; attempt++) {
     const operatorNumber = await nextOperatorNumber();
-    if (env.FOUNDER_CAP > 0 && operatorNumber > env.FOUNDER_CAP) {
-      console.warn(
-        `[founding] operator #${operatorNumber} exceeds FOUNDER_CAP=${env.FOUNDER_CAP} — honoring the paid purchase anyway.`,
-      );
-    }
+    const withinCap = env.FOUNDER_CAP <= 0 || operatorNumber <= env.FOUNDER_CAP;
     try {
       await db
         .insert(founders)
@@ -95,18 +105,16 @@ export async function handleFoundingCheckout(
           clerkUserId,
           email,
           operatorNumber,
-          status: 'active',
-          creditMicroUsd: Math.round(Math.max(0, env.FOUNDER_CREDIT_USD) * 1_000_000),
-          rateLockMicroUsd: rateLockMicroUsd(),
-          perksJson: null,
-          licenseMintedAt: new Date(),
+          // HARD ceiling: past the cohort cap we record the purchase but do NOT
+          // grant founder status (manual refund/honor decision downstream).
+          status: withinCap ? 'active' : 'over_cap',
+          perksJson: withinCap ? founderTier(operatorNumber) : null,
+          licenseMintedAt: withinCap ? new Date() : null,
           updatedAt: new Date(),
         })
-        // Idempotent on the checkout session id (Stripe retries the same id).
         .onConflictDoNothing({ target: founders.id });
       break;
     } catch (err) {
-      // A concurrent purchase grabbed this operator_number first — recompute + retry.
       if (attempt >= 4) {
         console.error('[founding] could not assign an operator number after retries:', err);
         throw err;
@@ -115,21 +123,31 @@ export async function handleFoundingCheckout(
   }
 
   // Re-read the authoritative row (an idempotent retry or a concurrent winner
-  // set the persisted number); report whatever actually persisted.
+  // set the persisted number/status); act on what actually persisted.
   const persisted = (
     await db.select().from(founders).where(eq(founders.id, sessionId)).limit(1)
   )[0];
   const finalNumber = persisted?.operatorNumber ?? 0;
 
-  const license = await mintLicense({ plan: 'pro', sub: clerkUserId ?? sessionId, days });
+  // Cohort full → recorded as over_cap, no founder token. Flag loudly so the
+  // operator can refund or manually honor it.
+  if (!persisted || persisted.status !== 'active') {
+    console.warn(
+      `[founding] cohort cap (${env.FOUNDER_CAP}) reached — purchase ${sessionId} recorded as over_cap at #${finalNumber}; NOT granted. Manual refund/honor needed.`,
+    );
+    return { handled: true, type };
+  }
+
+  const { tier } = founderTier(finalNumber);
+  const license = await mintLicense({ plan: 'founder', sub: clerkUserId ?? sessionId, days });
 
   try {
     await db.insert(productEvents).values({
       id: randomUUID(),
       sub: clerkUserId ?? `founder:${sessionId}`,
-      plan: 'pro',
+      plan: 'founder',
       event: 'founding.purchased',
-      props: { operatorNumber: finalNumber, days },
+      props: { operatorNumber: finalNumber, tier, days },
     });
   } catch (err) {
     console.error('[founding] failed to record purchase event:', err);

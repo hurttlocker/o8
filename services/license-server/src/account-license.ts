@@ -6,6 +6,7 @@ import { founders, subscriptions } from './db/schema.js';
 import { env } from './env.js';
 import { mintLicense, type Plan } from './mint.js';
 import { verifyClerkSession } from './clerk-verify.js';
+import { founderTier } from './founding.js';
 
 /**
  * POST /account/license — return THIS signed-in user's license token.
@@ -16,8 +17,8 @@ import { verifyClerkSession } from './clerk-verify.js';
  * license, and no shared secret is shipped in the app. 503 when CLERK_ISSUER is
  * unset (feature off); 401 on a missing/invalid session.
  *
- * Resolution: an active (non-revoked) subscription wins; else an active
- * Founding Operator purchase → a fresh `pro` token + founder metadata. 404 when
+ * Resolution: an active (non-revoked) subscription wins; else an ACTIVE
+ * Founding Operator purchase → a fresh `founder` token + status. 404 when
  * neither exists.
  */
 export async function handleAccountLicense(c: Context): Promise<Response> {
@@ -43,28 +44,31 @@ export async function handleAccountLicense(c: Context): Promise<Response> {
     return c.json({ license, plan: sub.plan, source: 'subscription' });
   }
 
-  // 2) Founding Operator purchase (one-time) — fresh `pro` token + metadata.
+  // 2) Founding Operator purchase (one-time, ACTIVE only — over_cap rows never
+  //    get a token) — fresh `founder` token.
   const founderRows = await db
     .select()
     .from(founders)
-    .where(and(eq(founders.clerkUserId, clerkUserId), isNull(founders.revokedAt)))
+    .where(
+      and(
+        eq(founders.clerkUserId, clerkUserId),
+        eq(founders.status, 'active'),
+        isNull(founders.revokedAt),
+      ),
+    )
     .limit(1);
   if (founderRows.length > 0) {
     const f = founderRows[0]!;
     const license = await mintLicense({
-      plan: 'pro',
+      plan: 'founder',
       sub: clerkUserId,
       days: Math.max(1, env.FOUNDER_LICENSE_DAYS),
     });
     return c.json({
       license,
-      plan: 'pro',
+      plan: 'founder',
       source: 'founding',
-      founder: {
-        operatorNumber: f.operatorNumber,
-        creditUsd: f.creditMicroUsd / 1_000_000,
-        rateLockUsd: f.rateLockMicroUsd != null ? f.rateLockMicroUsd / 1_000_000 : null,
-      },
+      founder: { operatorNumber: f.operatorNumber, tier: founderTier(f.operatorNumber).tier },
     });
   }
 

@@ -17,7 +17,7 @@ import type { EntitlementState, Plan } from './types';
  */
 
 const ENTITLEMENT_FILE = 'entitlement.json';
-const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team'];
+const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team', 'founder'];
 
 interface EntitlementFile {
   plan?: unknown;

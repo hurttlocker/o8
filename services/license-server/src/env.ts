@@ -48,10 +48,13 @@ export const env = {
   STRIPE_WEBHOOK_SECRET: required('STRIPE_WEBHOOK_SECRET'),
   STRIPE_PRICE_SOLO: required('STRIPE_PRICE_SOLO'),
   STRIPE_PRICE_TEAM: required('STRIPE_PRICE_TEAM'),
-  // The $150 one-time "Founding Operator" price. Optional so the server still
-  // boots before it exists in Stripe; the webhook also recognizes the purchase
-  // via session.metadata.productType === 'founding'.
-  STRIPE_PRICE_FOUNDER: optional('STRIPE_PRICE_FOUNDER', ''),
+  // Founding Operator tiered prices (250-cohort): T1 #1-100 $150, T2 #101-200
+  // $250, T3 #201-250 $500. Optional so the server boots before they exist in
+  // Stripe; the checkout-session creation against these lives in o8-site. The
+  // webhook also recognizes the purchase via session.metadata.productType.
+  STRIPE_PRICE_FOUNDER_T1: optional('STRIPE_PRICE_FOUNDER_T1', ''),
+  STRIPE_PRICE_FOUNDER_T2: optional('STRIPE_PRICE_FOUNDER_T2', ''),
+  STRIPE_PRICE_FOUNDER_T3: optional('STRIPE_PRICE_FOUNDER_T3', ''),
 
   // Signing
   LICENSE_PRIVATE_KEY: loadPrivateKeyPem(),
@@ -85,19 +88,17 @@ export const env = {
   // independently of ADMIN_TOKEN; lower blast radius if it leaks from a build.
   INVITE_REGISTER_TOKEN: optional('INVITE_REGISTER_TOKEN', ''),
 
-  // ── Founding Operator (one-time $150 purchase) ──────────────────────────
+  // ── Founding Operator (one-time, tiered; 250-cohort) ────────────────────
   // License validity for a founder's minted token. Long-dated (≈10y) because
   // it's a lifetime grant; it's also re-minted on each account fetch, so this
   // is just the offline ceiling.
   FOUNDER_LICENSE_DAYS: Number.parseInt(optional('FOUNDER_LICENSE_DAYS', '3650'), 10),
-  // SOFT "what a founder gets" knobs, stamped onto the row at purchase and
-  // editable later (finalize the grant by setting these, not by redeploying):
-  // prepaid managed-infra credit and the locked monthly rate, both in USD.
-  FOUNDER_CREDIT_USD: Number.parseFloat(optional('FOUNDER_CREDIT_USD', '0')),
-  FOUNDER_RATE_LOCK_USD: optional('FOUNDER_RATE_LOCK_USD', ''),
-  // Soft cap for the cohort — the sell side enforces it; we only log if a
-  // purchase lands beyond it. NEVER reject money already taken.
-  FOUNDER_CAP: Number.parseInt(optional('FOUNDER_CAP', '100'), 10),
+  // HARD cohort ceiling (250 total). A checkout beyond this is recorded but NOT
+  // granted founder status — we never silently exceed the cohort. The proxy
+  // per-account fair-use cap (PROXY_CAP_FOUNDER_USD, read in proxy.ts) is what
+  // keeps "managed inference included for life" solvent — there is no per-founder
+  // credit block or locked rate (dropped per docs/founding-operator-tier.md).
+  FOUNDER_CAP: Number.parseInt(optional('FOUNDER_CAP', '250'), 10),
 
   // Clerk issuer URL (e.g. https://<slug>.clerk.accounts.dev). Used to verify a
   // desktop's Clerk session token on /account/license, so a signed-in user can

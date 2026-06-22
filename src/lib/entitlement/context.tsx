@@ -55,8 +55,7 @@ export function useEntitlement() {
 
 interface FounderResponse {
   operatorNumber?: unknown;
-  creditUsd?: unknown;
-  rateLockUsd?: unknown;
+  tier?: unknown;
 }
 
 interface EntitlementResponse {
@@ -67,7 +66,7 @@ interface EntitlementResponse {
 }
 
 function coercePlan(value: unknown): Plan {
-  return value === 'pro' || value === 'team' ? value : 'free';
+  return value === 'pro' || value === 'team' || value === 'founder' ? value : 'free';
 }
 
 function coerceFounder(value: unknown): FounderInfo | null {
@@ -76,8 +75,7 @@ function coerceFounder(value: unknown): FounderInfo | null {
   if (typeof f.operatorNumber !== 'number') return null;
   return {
     operatorNumber: f.operatorNumber,
-    creditUsd: typeof f.creditUsd === 'number' ? f.creditUsd : null,
-    rateLockUsd: typeof f.rateLockUsd === 'number' ? f.rateLockUsd : null,
+    tier: typeof f.tier === 'number' ? f.tier : null,
   };
 }
 
