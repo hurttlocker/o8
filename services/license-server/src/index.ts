@@ -82,6 +82,30 @@ app.get('/v1/founders/count', async (c) => {
   }
 });
 
+// Public list for the founders wall (o8-site /founders). Returns active founders
+// as { position, displayName } — the client computes tier from position and falls
+// back to "Founding Operator" when displayName is null. displayName is read from
+// perks_json.displayName (set only when a founder opts in / is seeded), so the wall
+// stays privacy-safe (never exposes email) until a name-capture flow is added.
+app.get('/v1/founders', async (c) => {
+  try {
+    const rows = await db
+      .select({ operatorNumber: founders.operatorNumber, perks: founders.perksJson })
+      .from(founders)
+      .where(eq(founders.status, 'active'));
+    const list = rows.map((r) => {
+      const perks = r.perks as { displayName?: unknown } | null;
+      const displayName =
+        perks && typeof perks.displayName === 'string' ? perks.displayName : null;
+      return { position: r.operatorNumber, displayName };
+    });
+    return c.json({ founders: list });
+  } catch (err) {
+    console.error('[license-server] /v1/founders failed:', err);
+    return c.json({ error: 'founders_unavailable' }, 503);
+  }
+});
+
 // ── Stripe webhook (RAW body required for signature verification) ─────────────
 app.post('/webhooks/stripe', async (c) => {
   const signature = c.req.header('stripe-signature') ?? null;
