@@ -21,6 +21,15 @@ const ICON_MAP: Record<string, typeof AlertTriangle> = {
   completed: CheckCircle2,
 };
 
+// Per-severity accent (status colors, theme-stable) — replaces the old
+// always-blue icon. The surface itself rides the theme tokens below.
+const ACCENT_BY_TYPE: Record<string, string> = {
+  approval: 'var(--t-accent, #2563eb)',
+  error: '#ef4444',
+  'context-critical': '#f59e0b',
+  completed: '#22c55e',
+};
+
 interface ToastItem {
   alert: Alert;
   visible: boolean;
@@ -115,6 +124,7 @@ export const AlertToast = memo(function AlertToast({
     >
       {toasts.map(({ alert, exiting }) => {
         const Icon = ICON_MAP[alert.type] ?? AlertTriangle;
+        const accent = ACCENT_BY_TYPE[alert.type] ?? 'var(--t-accent, #2563eb)';
 
         return (
           <div
@@ -123,14 +133,18 @@ export const AlertToast = memo(function AlertToast({
               display: 'flex',
               alignItems: 'center',
               gap: 10,
-              padding: '12px 14px',
+              paddingTop: 12,
+              paddingBottom: 12,
+              paddingLeft: 14,
+              paddingRight: 14,
               borderRadius: 14,
-              background: 'linear-gradient(180deg, rgba(239, 246, 255, 0.82), rgba(191, 219, 254, 0.52))',
-              backdropFilter: 'blur(28px) saturate(1.7)',
-              WebkitBackdropFilter: 'blur(28px) saturate(1.7)',
-              border: '1px solid rgba(147, 197, 253, 0.22)',
-              boxShadow:
-                '0 22px 56px rgba(29, 78, 216, 0.18), 0 8px 24px rgba(15, 23, 42, 0.08), inset 0 1px 0 rgba(255,255,255,0.45)',
+              // Theme glass surface (was a hardcoded baby-blue gradient that
+              // ignored the palette + read as a light blob in dark mode).
+              background: 'color-mix(in srgb, var(--t-bg-card) 92%, transparent)',
+              backdropFilter: 'blur(24px) saturate(1.4)',
+              WebkitBackdropFilter: 'blur(24px) saturate(1.4)',
+              border: '1px solid var(--t-panel-border, var(--t-border))',
+              boxShadow: 'var(--t-shadow-card, 0 18px 45px rgba(15, 23, 42, 0.16))',
               width: 320,
               pointerEvents: 'auto',
               cursor: 'pointer',
@@ -147,7 +161,7 @@ export const AlertToast = memo(function AlertToast({
               dismissToast(alert.id);
             }}
           >
-            <Icon size={18} strokeWidth={2} style={{ color: '#2563eb', flexShrink: 0 }} />
+            <Icon size={18} strokeWidth={2} style={{ color: accent, flexShrink: 0 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
@@ -155,7 +169,7 @@ export const AlertToast = memo(function AlertToast({
                   fontSize: 13.5,
                   fontWeight: 300,
                   letterSpacing: '-0.1px',
-                  color: '#0f172a',
+                  color: 'var(--t-text)',
                   lineHeight: 1.3,
                 }}
               >
@@ -167,7 +181,7 @@ export const AlertToast = memo(function AlertToast({
                   fontSize: 9.5,
                   fontWeight: 260,
                   letterSpacing: '-0.4px',
-                  color: '#475569',
+                  color: 'var(--t-text-muted)',
                   lineHeight: 1.35,
                   marginTop: 2,
                   overflow: 'hidden',
@@ -193,8 +207,8 @@ export const AlertToast = memo(function AlertToast({
                 height: 22,
                 borderRadius: 11,
                 border: 'none',
-                background: 'rgba(37, 99, 235, 0.08)',
-                color: '#64748b',
+                background: 'var(--t-hover, rgba(120, 120, 128, 0.12))',
+                color: 'var(--t-text-secondary)',
                 cursor: 'pointer',
                 padding: 0,
                 flexShrink: 0,
