@@ -10,7 +10,7 @@ It does not change the core thesis — **monetize cost, not capability; distribu
 
 > **Free = run it on your own keys/CLIs (works, but slower / manual). Founder = we run the fast, automatic, managed version for you — included for life, within fair use.**
 
-$150 one-time. **First 100 operators only.** The app is 100% free with or without it. The $150 funds the build and turns the managed-inference layer ON for the believers — permanently. It must **never** add friction to the free install.
+One-time, **250 founders total** (tiered $150 → $500 — see Pricing below). The app is 100% free with or without it. The payment funds the build and turns the managed-inference layer ON for the believers — permanently. It must **never** add friction to the free install.
 
 ---
 
@@ -106,9 +106,22 @@ Order of magnitude: ~$15k in vs. ~$100–300/mo total COGS across all 100. The c
 
 ---
 
-## Still open (numbers only)
+## Pricing — LOCKED (2026-06-21)
 
-- Founder **count** — 50 vs 100.
-- **Price** — $150 vs $199.
+**250 founders total, three tiers, escalating to reward earliness:**
 
-Everything else above is locked.
+| Tier | Operators | Price | Raises |
+|---|---|---|---|
+| 1 | #1–100 | $150 | $15,000 |
+| 2 | #101–200 | $250 | $25,000 |
+| 3 (final) | #201–250 | $500 | $25,000 |
+| **Total** | **250** | — | **$65,000** |
+
+The price climbs so the earliest believers get the best rate; the final 50 are a premium "last seats" tier. The cohort is **hard-capped at 250** to keep "founding" meaningful.
+
+**Solvency — the price is for scarcity + funding, NOT how "forever inference" is kept affordable.** That's guaranteed by three things, independent of price:
+1. **Per-account fair-use cap** — the hard ceiling on what any one founder can cost us.
+2. **Inference cost decay** — ~2× cheaper every 12–18 months for equal capability, so lifetime cost *converges* rather than growing.
+3. **Dev-heavy, sub-backed cohort** — the first few hundred almost all have their own Claude/Codex CLI subs, so much of the Brain rides their sub, not ours.
+
+Blended lifetime COGS ≈ **$80–150 per founder** (fair-use cap as the floor under the downside). ~$32k across 250 founders vs. **$65k raised → ~$33k cushion**, before cost-decay over-delivers.
