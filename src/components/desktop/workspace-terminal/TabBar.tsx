@@ -10,6 +10,7 @@ import {
 } from '@/components/desktop/workspace-terminal/icons';
 import { WorkspaceLaunchPicker } from '@/components/desktop/workspace-terminal/WorkspaceLaunchPicker';
 import { describeWorkspaceChatTab, workspaceTabPrimaryLabel } from '@/components/desktop/workspace-terminal/utils';
+import { repoColor } from '@/lib/repos/repo-color';
 import { CodexIcon, ClaudeIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { compactPacketLabel } from '@/lib/workspace-terminal/compact-packet-label';
@@ -320,6 +321,12 @@ export const TabBar = memo(function TabBar({
               || tab.label;
 
             const isFlashing = flashTabId === tab.id;
+            // Project-identity dot: only when this tab has a repo AND another
+            // open tab lives in a DIFFERENT repo — i.e. only when there's real
+            // multi-repo ambiguity to resolve. Single-repo workspaces stay clean.
+            const tabRepoPath = tab.repo?.localPath ?? null;
+            const showRepoDot = Boolean(tabRepoPath)
+              && tabs.some((t) => t.id !== tab.id && t.repo?.localPath && t.repo.localPath !== tabRepoPath);
             const stateKey = tabStateKey(tab.orchestrationPacket?.status, isLatestDispatch);
             const stateScheme = packetStateColorScheme(stateKey);
             const hasStateColor = stateKey !== 'neutral';
@@ -411,6 +418,19 @@ export const TabBar = memo(function TabBar({
                   event.currentTarget.style.background = 'transparent';
                 }}
               >
+                {showRepoDot && tabRepoPath ? (
+                  <span
+                    title={tab.repo?.name ?? tabRepoPath}
+                    style={{
+                      width: 7,
+                      height: 7,
+                      borderRadius: '50%',
+                      background: repoColor(tabRepoPath),
+                      flexShrink: 0,
+                      opacity: isActive ? 1 : 0.7,
+                    }}
+                  />
+                ) : null}
                 {tab.unseen ? (
                   <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#2563eb', flexShrink: 0 }} />
                 ) : null}

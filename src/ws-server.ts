@@ -2537,6 +2537,14 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
   const assistantStartedAtMs = Date.now();
   let assistantTextAccum = '';
   let lastPersistedAssistantText = '';
+  // Incremental persistence (2026-06-22): persist the streamed assistant text
+  // every ~1.5s WHILE the turn runs, not only at terminal points. Without this,
+  // a turn whose child wedges (never emits 'done', the await never resolves)
+  // loses its entire streamed reply on the next reload — the transcript drops
+  // back to just the user messages (operator-observed data loss). Throttled so
+  // a fast token stream doesn't hammer the chat-history file + threads broadcast.
+  let lastIncrementalPersistAt = 0;
+  const INCREMENTAL_PERSIST_MS = 1_500;
 
   const persistAssistantText = (sessionId: string | null) => {
     if (!isThreadBacked || !assistantMessageId) return;
@@ -2650,6 +2658,12 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         case 'text':
           if (isThreadBacked) {
             assistantTextAccum += event.text;
+            // Throttled mid-stream persist so a wedged turn's reply survives a
+            // reload instead of dropping to user-only on disk.
+            if (Date.now() - lastIncrementalPersistAt > INCREMENTAL_PERSIST_MS) {
+              lastIncrementalPersistAt = Date.now();
+              persistAssistantText(null);
+            }
           }
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
