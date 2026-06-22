@@ -178,22 +178,22 @@ export async function classifyQuestion(question: string): Promise<ClassifierResu
     }
   }
 
-  // CLI tier ordering depends on the in-app orchestrator toggle (epic #1044):
-  //   - toggle OFF (default) → Codex is the only CLI tier (Haiku would throw —
-  //     no Claude Max sub assumed by default).
-  //   - toggle ON             → Haiku first, then Codex.
-  let inAppOrchestratorOn = false;
+  // CLI tier ordering depends on the Brain's own `brainUseClaudeCli` setting
+  // (epic #1044; decoupled from the orchestrator toggle 2026-06-22):
+  //   - OFF → Codex is the only CLI tier (Haiku would throw — no Claude sub).
+  //   - ON  → Haiku first, then Codex.
+  let brainCliOn = false;
   if (!evalMode) {
     try {
-      const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-      inAppOrchestratorOn = resolveInAppOrchestratorEnabledSync();
+      const { resolveBrainUseClaudeCliSync } = await import('@/lib/operator/defaults');
+      brainCliOn = resolveBrainUseClaudeCliSync();
     } catch {
-      inAppOrchestratorOn = false;
+      brainCliOn = false;
     }
   }
 
-  // Tier 3 (only when toggle ON): Haiku CLI — free for Claude Max users.
-  if (!evalMode && inAppOrchestratorOn) {
+  // Tier 3 (only when brainUseClaudeCli ON): Haiku CLI — free for Claude sub users.
+  if (!evalMode && brainCliOn) {
     const haikuResult = await tryHaiku(prompt, question);
     if (haikuResult) {
       console.info('[qa][classifier] resolved via haiku-cli (tier 3 fallback)');

@@ -162,6 +162,12 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     }
     update.inAppOrchestratorEnabled = body.inAppOrchestratorEnabled;
   }
+  if (body.brainUseClaudeCli !== undefined) {
+    if (typeof body.brainUseClaudeCli !== 'boolean') {
+      throw new Error('brainUseClaudeCli must be boolean.');
+    }
+    update.brainUseClaudeCli = body.brainUseClaudeCli;
+  }
 
   if (body.workersUseBrain !== undefined) {
     const raw = body.workersUseBrain;
