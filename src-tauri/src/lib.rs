@@ -4032,9 +4032,15 @@ pub fn run() {
             let app_handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
                 #[cfg(target_os = "macos")]
-                if let Err(err) =
-                    apply_vibrancy(&window, NSVisualEffectMaterial::HudWindow, None, None)
-                {
+                if let Err(err) = apply_vibrancy(
+                    &window,
+                    NSVisualEffectMaterial::HudWindow,
+                    // Active (not focus-following): keep the chrome glassy when the
+                    // window loses key focus instead of flattening to grey (#1267).
+                    // Mirrors what the canvas surface already does (set_canvas_material).
+                    Some(window_vibrancy::NSVisualEffectState::Active),
+                    None,
+                ) {
                     log::warn!("Failed to apply macOS vibrancy: {}", err);
                 }
 
