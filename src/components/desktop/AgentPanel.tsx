@@ -182,6 +182,11 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
     await projects.refresh();
     await onRepoAdded?.(repo);
     onSelectRepo?.(repo.id);
+    // Tell the dashboard's global repo state to refetch so the new repo shows
+    // in the workspace targets immediately (no manual reload) — 2026-06-22.
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('o8:repos-changed'));
+    }
   }, [onRepoAdded, onSelectRepo, projects]);
   // Clicking a project just SELECTS it (makes it active) — the rest of the app
   // follows (right panel + a new orchestrator). The drawer stays OPEN so you can
