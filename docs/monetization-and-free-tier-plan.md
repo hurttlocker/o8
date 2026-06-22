@@ -295,4 +295,18 @@ A founder/operator view answering **how many users, what they're using, how they
 
 ---
 
+## 12. GTM posture — distribution first; the founding tier is patronage (2026-06-21)
+
+**This phase's KPI is installs, not revenue.** With no audience yet, optimizing for $150 conversions optimizes the wrong variable. The install base *is* the asset: it's the funnel the build-in-public stream feeds, and it compounds into the Phase-2 metered business (worth ~8× founding revenue within a year). The stream's job is laptops, not sales — revenue is a *lagging* indicator of having put o8 on enough machines.
+
+- **Phase 1 (now → there's a base AND cloud/relay/voice ship):** 100% free, frictionless; `/issue-free` mints a free credential at first run. **No paywall or signup wall ever touches the install funnel.** Track installs → weekly-active → "would be sad if it went away." Ignore MRR.
+- **Phase 2 (base exists + infra levers shipped):** turn on the metered tier (~$19 unified + fair-use cap, §5.5). This is the real recurring revenue — cost-justified, sticky, scaling with the base Phase 1 built.
+
+**The Founding Operator tier is patronage, not a revenue target.** It's the `/invites/*` founding-pass already built (#1249). **Grants (LOCKED 2026-06-21 — full spec in [`founding-operator-tier.md`](./founding-operator-tier.md)):** the app (free anyway) + the **managed-inference layer included for life, fair-use-capped** (fast Brain + dictation polish + premium Whisper STT — founders *never* pay the future infra tier) + **early access** as the headline perk (experimental always-on) + an exclusive **"o8" canvas theme** (free keeps light/dark) + status (badge, numbered, name on the wall, 5 founding passes). **The earlier "finite credit block" framing is dropped.** ElevenLabs premium voice + speech-to-speech stay **BYO-key for everyone** (not a founder perk).
+- **Honest verdict on "will they buy at $150": almost nobody yet — and that's fine.** Price it as a tip jar for true believers, never a gate. The build-in-public ownership effect converts a handful; they become the advocate + feedback core and a willingness-to-pay signal. Model it as advocacy, not income.
+- **Rec: $150, first 100 operators** (impulse-yes, scarce, advocate-optimized); $199 if you want it to read "serious tool."
+- **Discipline (non-negotiable):** the founding tier must never add friction to the free install — it's an optional "fund the journey" button. And **never sell lifetime-*unlimited* metered infra**: the per-account daily COGS caps (§5.5) + the capped cohort + BYO-key-is-free are what keep a one-time founder license solvent.
+
+---
+
 *Inputs: 6-domain codebase map 2026-06-16. History: `monetization-{tiers,build-plan,issues}.md`, `cloud-agents-open-agents.md`, `harness-vision.md`. Memory: `monetization_direction_pro_tier`, `m5_deploy_state`, `symon_o8_bridge_build_locked`, `o8_native_mobile_app`.*
