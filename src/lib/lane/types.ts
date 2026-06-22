@@ -126,6 +126,14 @@ export type LaneCommand =
       actor?: LaneEventActor;
     }
   | {
+      // Operator hard-stop: interrupt the live session AND mark the packet
+      // operator-stopped so the scheduler can never auto-redispatch it. Cleared
+      // by reset_packet / explicit relaunch. (2026-06-22)
+      verb: 'stop';
+      laneId: string;
+      actor?: LaneEventActor;
+    }
+  | {
       verb: 'resume';
       laneId: string;
       message?: string;

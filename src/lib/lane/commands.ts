@@ -472,6 +472,54 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       }
     }
 
+    case 'stop': {
+      const lane = getLane(command.laneId);
+      if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
+
+      // 1) Flag the packet operator-stopped FIRST, inside the control-plane lock.
+      //    The order is the correctness point: interrupting the session can end it
+      //    and trip a stall/ralph requeue, and a concurrent dispatch tick reads
+      //    state under the same lock — setting operatorStopped + held atomically
+      //    here means getDispatchBlocker rejects every relaunch path before the
+      //    interrupt can race a re-dispatch in. (2026-06-22)
+      if (lane.packetId) {
+        try {
+          const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+          await withLockedState((state) => {
+            const packet = state.packets.find((candidate) => candidate.id === lane.packetId);
+            if (!packet) return;
+            packet.operatorStopped = true;
+            packet.queueState = 'held';
+            packet.status = 'blocked';
+            packet.blockedReason = 'operator_stopped';
+            packet.lastEventAt = new Date().toISOString();
+            packet.lastEventLabel = 'operator_stopped';
+          });
+        } catch (err) {
+          console.warn('[lane] stop: could not mark packet operator-stopped', err);
+        }
+      }
+
+      // 2) Interrupt the live session if one exists. Best-effort — the guard above
+      //    already halts the scheduler even when the process is already gone.
+      if (lane.sessionKey) {
+        try {
+          const { performRuntimeAction } = await import('@/lib/runtime/actions');
+          await performRuntimeAction({ action: 'stop', surfaceId: lane.sessionKey });
+        } catch (err) {
+          console.warn('[lane] stop: interrupt failed (session may already be gone)', err);
+        }
+      }
+
+      setLaneStatus(command.laneId, 'paused', actor, 'operator_stopped');
+      return {
+        ok: true,
+        laneId: command.laneId,
+        note: 'Agent stopped. It will not auto-redispatch — reset or relaunch to continue.',
+        lane: getLane(command.laneId) ?? undefined,
+      };
+    }
+
     case 'resume': {
       const lane = getLane(command.laneId);
       if (!lane) return { ok: false, laneId: command.laneId, note: 'Lane not found.' };
