@@ -247,7 +247,17 @@ export function createTileRegistry({
         })();
         const hasScopedTerminalLeaf = collectOpenTerminalRepoPaths(tileLayout.root).length > 0;
         const tileRepoEntry = content.kind === 'terminal' && content.repoPath
-          ? workspaceScopeEntries.find((repo) => repo.localPath === content.repoPath) ?? null
+          // When the tile is scoped to a repo that ISN'T in the current scope
+          // set (e.g. an o8-site/worker repo a dispatched session lives in),
+          // synthesize an entry from the path instead of letting it fall through
+          // to workspaceTerminalPreferredRepo below. The fall-through made
+          // tilePreferredRepo.localPath !== content.repoPath, which fed an
+          // onRepoScopeChange → restoreKey flip-flop that cleared the tab array
+          // every render — the "blink to the Start-a-new-session picker" + the
+          // worker transcript vanishing (2026-06-22). A synthesized entry makes
+          // content.repoPath a stable fixed point and stops the oscillation.
+          ? workspaceScopeEntries.find((repo) => repo.localPath === content.repoPath)
+              ?? { name: content.repoPath.split('/').pop() || content.repoPath, localPath: content.repoPath }
           : null;
         const isFreshSplitTile = content.kind === 'terminal' && !content.repoPath && tileId !== 'tile-root';
         const isPrimaryUnscopedTerminal = content.kind === 'terminal'

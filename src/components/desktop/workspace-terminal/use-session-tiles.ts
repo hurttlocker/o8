@@ -129,8 +129,17 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
   const sessionLeaves = useMemo(() => collectSessionLeaves(layout.root), [layout.root]);
   const isTiled = tiledSessions.length > 0;
 
-  // Persist whenever the layout changes.
+  // Persist whenever the layout changes — but NOT the default/empty layout.
+  // Pre-fix (2026-06-22) every orchestrator tab wrote a `…:session-tiles:tab:*`
+  // key on mount even when empty (no tiled sessions); fresh-UUID tab ids per
+  // spawn + restore-drop paths that never route through close then orphaned
+  // those keys forever (the 10+/80+ dead keys piling up). Now an empty layout
+  // writes nothing and clears any stale prior key.
   useEffect(() => {
+    if (collectSessionKeys(layout.root).length === 0) {
+      clearSessionTileStorage(tabId);
+      return;
+    }
     persistSessionTileLayout(tabId, layout);
   }, [tabId, layout]);
 
