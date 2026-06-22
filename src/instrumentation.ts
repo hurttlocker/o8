@@ -37,4 +37,17 @@ export async function register(): Promise<void> {
       // never blocks boot
     }
   })();
+
+  // Ensure the edge-tts Steffan play voice is installed in the route's python —
+  // without it, "play" on an orchestrator message silently degrades to the
+  // system SpeechSynthesis voice (Siri). Self-heals fresh machines/downloaders
+  // in the background so the next play uses the real voice. Never blocks boot.
+  void (async () => {
+    try {
+      const { ensureEdgeTtsInstalled } = await import('@/lib/tts/ensure-edge-tts');
+      void ensureEdgeTtsInstalled();
+    } catch {
+      // never blocks boot
+    }
+  })();
 }
