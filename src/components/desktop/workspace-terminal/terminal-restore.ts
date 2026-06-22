@@ -495,6 +495,14 @@ export function canPreserveScopedTabs(
   if (currentTabs.length === 0) return false;
   const hasOrchestratedTabs = currentTabs.some((tab) => Boolean(tab.orchestrationPacket));
   if (hasOrchestratedTabs) return true;
+  // Belt-and-suspenders (2026-06-22): a worker/CLI chat tab (kind:'chat') hosts
+  // a live agent transcript and must never be wiped by a repo-scope flip — even
+  // after its orchestrationPacket badge was dropped during session-discovery
+  // reconstruction (the badge "doesn't survive" per WorkspaceChatPane). Without
+  // this, a scope oscillation cleared the tab and the transcript vanished into
+  // the empty picker.
+  const hasChatSessionTabs = currentTabs.some((tab) => tab.kind === 'chat');
+  if (hasChatSessionTabs) return true;
   if (!nextPreferredRepoPath) return false;
   return (
     currentTabs.some((tab) => tab.repo?.localPath === nextPreferredRepoPath)
