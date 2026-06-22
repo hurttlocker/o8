@@ -15,9 +15,9 @@ Already shipped (the precedent + plumbing):
 ## Architecture (v1)
 
 - Add `'local'` to `InferenceRoute.via` + an optional `model?: string` on the route. Local endpoints (Ollama/LM Studio) are OpenAI-compatible (`/v1/chat/completions`) so the request body is identical — consumers need ~no change for the happy path.
-- **Local-first branch at the top of `resolveOpenRouterRoute()`**, gated by a **cached liveness probe** (see Risk #1). Resolution chain: **local → BYO-key (direct) → managed (proxy) → null** (→ the existing free/slow CLI/Flash/heuristic tiers).
+- **Entitlement-aware resolution (operator-corrected 2026-06-22 — founders are NEVER routed to local):** a **managed plan token (founder / paid) → managed proxy FIRST** — the fast paid call IS the perk, so founders always get managed, leading. Only **free users** (no plan token) reach the local branch. Free-user chain: **local (set + liveness-gated) → BYO-key (direct) → null** (→ the free/slow CLI/Flash/heuristic floor). So the local branch is gated on BOTH a cached liveness probe (Risk #1) AND the absence of a managed entitlement.
 - **Model-id fix:** callers pass cloud ids (`google/gemini-2.5-flash-lite`) a local endpoint won't know. The resolver returns `route.model` (the configured local chat model); callers do `body.model = route.model ?? body.model`. One-line per caller; routing stays in the resolver.
-- **Local = the tier-3 HTTP replacement (backstop), not the lead** — it replaces the *paid* OpenRouter call, preserving the fast subscription-CLI tiers. (Local-leads is a deferred composer reorder.)
+- **For FREE users, local backstops** — it replaces the *paid* OpenRouter call at the HTTP tier, keeping the user's own CLI-sub tiers ahead of it. This "backstop vs lead" choice is **free-user-only**; it never affects founders (who get managed-fast, leading). Local-leads is a deferred composer reorder.
 - **One global setting** (`localChatModel`), not per-path. Default `''` = cloud → fresh installs unchanged, local is opt-in.
 - **Skip the spend-cap + spend-record on `via:'local'`** (it's free).
 
@@ -52,4 +52,4 @@ Local STT (whisper.cpp sidecar — `resolveTranscribeRoute` branch, audio/Tauri 
 2. **Model-id mismatch** silently 404s without the `route.model` override — verify the body carries the local name.
 3. **Quality cliff:** does `qwen2.5-coder:7b` respect the compose citation-handle contract (`rowDisplayTitle` sources)? Validator must check; bump the default suggestion if it breaks.
 4. **Embedding-dim drift:** switching embed model (cloud 1536 ↔ local 768) makes stored vectors incompatible → needs re-index. Pre-existing; flag on change.
-5. **OPEN QUESTION (operator):** v1 = local *backstops* (replaces the paid OpenRouter call, keeps fast CLI tiers) vs local *leads* everything. **Rec: backstop for v1**, revisit after benchmarks.
+5. **RESOLVED (operator 2026-06-22):** local *backstops* for v1 (a free-user-only choice). **Founders are NEVER routed to local — they get the managed fast call, leading** (that's the perk). Local-leads-everything is deferred.
