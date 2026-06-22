@@ -41,14 +41,14 @@ async fn run(app: tauri::AppHandle) {
     let mut last: Option<(usize, usize, Vec<String>)> = None;
     loop {
         let snapshot = poll().await;
-        if let Some((count, waiting, repos)) = snapshot {
+        if let Some((working, waiting, repos)) = snapshot {
             // Emit on change, and keep re-asserting while work is in flight so
             // a dock webview that loaded late still syncs.
-            let changed = last.as_ref() != Some(&(count, waiting, repos.clone()));
-            if changed || count > 0 {
+            let changed = last.as_ref() != Some(&(working, waiting, repos.clone()));
+            if changed || working + waiting > 0 {
                 let payload = json!({
-                    "count": count,
-                    "working": count.saturating_sub(waiting),
+                    "count": working + waiting,
+                    "working": working,
                     "waiting": waiting,
                     "repos": repos,
                 });
@@ -57,16 +57,15 @@ async fn run(app: tauri::AppHandle) {
             }
             if changed {
                 log::info!(
-                    "[worker-pulse] {} working, {waiting} waiting on the operator",
-                    count.saturating_sub(waiting)
+                    "[worker-pulse] {working} working, {waiting} waiting on the operator"
                 );
             }
-            last = Some((count, waiting, repos));
+            last = Some((working, waiting, repos));
         }
 
         // Sleep in 2s ticks so a nudge cuts the wait short.
         let interval_secs: u64 = match &last {
-            Some((count, _, _)) if *count > 0 => 30,
+            Some((working, waiting, _)) if working + waiting > 0 => 30,
             _ => 90,
         };
         for _ in 0..(interval_secs / 2) {
@@ -78,10 +77,22 @@ async fn run(app: tauri::AppHandle) {
     }
 }
 
-/// Lane statuses that are parked on a HUMAN (or a review), not working — the
-/// dock must not present these as "in flight" (live-hit: two lanes sat in
-/// reviewing/awaiting_input for half an hour while the sliver implied active
-/// work). `recovering` stays "working": the system is auto-retrying.
+/// Lane statuses that are GENUINELY working — these drive the spinning orbit.
+/// Counted EXPLICITLY (2026-06-22) rather than "everything minus waiting": the
+/// old `total - waiting` math counted `idle`/`paused`/stopped lanes as working,
+/// so a closed agent (lane left at `idle`, session=none) kept Symon's dock
+/// spinning "1 working agent" while o8's own UI showed it idle — a parity break.
+/// `recovering` stays working (the system is auto-retrying).
+const WORKING_STATUSES: &[&str] = &[
+    "running",
+    "launching",
+    "dispatching",
+    "recovering",
+    "merging",
+];
+
+/// Lane statuses parked on a HUMAN (or a review), not working — surfaced as
+/// "waiting on you", never as in-flight work.
 const WAITING_STATUSES: &[&str] = &[
     "awaiting_input",
     "awaiting_orchestrator",
@@ -90,18 +101,32 @@ const WAITING_STATUSES: &[&str] = &[
     "failed",
 ];
 
-/// One `/api/lanes?active=true` read → (total, waiting-on-operator, deduped
-/// repo names, max 3). None on transport failure (server restarting, port
-/// moved) — keep the last known state rather than flickering the orbit off.
+/// One `/api/lanes?active=true` read → (working, waiting-on-operator, deduped
+/// repo names of working+waiting lanes, max 3). Lanes that are neither working
+/// nor waiting (idle / paused / stopped — present in the active set but doing
+/// nothing) are surfaced as NEITHER, so a closed/dead agent stops spinning.
+/// None on transport failure (server restarting, port moved) — keep the last
+/// known state rather than flickering the orbit off.
 async fn poll() -> Option<(usize, usize, Vec<String>)> {
     let resp = super::o8_http::get_json("/api/lanes?active=true").await.ok()?;
     let lanes = resp.get("lanes").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let mut repos: Vec<String> = Vec::new();
+    let mut working = 0usize;
     let mut waiting = 0usize;
     for lane in &lanes {
         let status = lane.get("status").and_then(|v| v.as_str()).unwrap_or("");
-        if WAITING_STATUSES.contains(&status) {
+        let is_working = WORKING_STATUSES.contains(&status);
+        let is_waiting = WAITING_STATUSES.contains(&status);
+        if is_working {
+            working += 1;
+        }
+        if is_waiting {
             waiting += 1;
+        }
+        // Only surface a repo for a lane that is actually working or waiting —
+        // an idle/paused lane shouldn't put its repo in the dock either.
+        if !is_working && !is_waiting {
+            continue;
         }
         let repo = lane
             .get("repoPath")
@@ -116,5 +141,5 @@ async fn poll() -> Option<(usize, usize, Vec<String>)> {
             repos.push(repo);
         }
     }
-    Some((lanes.len(), waiting, repos))
+    Some((working, waiting, repos))
 }
