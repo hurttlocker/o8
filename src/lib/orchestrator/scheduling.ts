@@ -296,6 +296,13 @@ export function getDispatchBlocker(
 ): string | null {
   const candidate = packet.status === 'recovering' ? clearStaleLaneBinding(packet) : packet;
 
+  // Operator Stop is terminal — this is THE line that makes a Stop the loop
+  // can't ignore. Every dispatch path funnels through here, so a stopped packet
+  // can never be relaunched by the headless loop, a stall escalation, or a ralph
+  // requeue. Cleared by reset_packet / explicit relaunch. (2026-06-22)
+  if (candidate.operatorStopped) {
+    return 'Operator stopped';
+  }
   if (candidate.queueState !== 'queued') {
     return 'Not queued';
   }

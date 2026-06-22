@@ -494,7 +494,52 @@ async function handleCodexSelfReviewProgress(surfaceId: string, lastMessage: str
       lastEventAt: new Date().toISOString(),
       lastEventLabel: 'self_review_stall_detected',
     }, 'system');
-    broadcastSelfReviewStallSignal(surfaceId, lane, decision);
+
+    // Count stalls per PACKET (a per-lane count resets on every redispatch — the
+    // bug). Under the cap, escalate to the orchestrator as before (a one-off
+    // stall may be legitimately fixable). AT the cap, drive the packet terminal
+    // (held + awaiting_human) and STOP escalating — getDispatchBlocker blocks a
+    // held packet, so it can never infinitely re-dispatch again.
+    const { withLockedState } = await import('@/lib/orchestrator/control-plane');
+    const { setLaneStatus } = await import('@/lib/lane/registry');
+    const stallPacketId = lane.packetId;
+    let stallExhausted = false;
+    if (stallPacketId) {
+      await withLockedState((state) => {
+        const packet = state.packets.find((candidate) => candidate.id === stallPacketId);
+        if (!packet) return;
+        const next = (packet.stallRetries ?? 0) + 1;
+        packet.stallRetries = next;
+        if (next >= STALL_RETRY_CAP) {
+          packet.queueState = 'held';
+          packet.status = 'blocked';
+          packet.blockedReason = 'stall_retry_exhausted';
+          packet.lastEventAt = new Date().toISOString();
+          packet.lastEventLabel = 'stall_retry_exhausted';
+          packet.lane = null;
+          stallExhausted = true;
+        }
+      });
+    }
+
+    if (stallExhausted) {
+      setLaneStatus(lane.id, 'awaiting_input', 'system', 'stall_retry_exhausted');
+      const minutes = Math.round(decision.runningMs / 60_000);
+      broadcast({
+        channel: 'supervisor',
+        event: 'agent-update',
+        data: {
+          surfaceId,
+          name: lane.label,
+          status: 'stuck',
+          detail: `Held after ${STALL_RETRY_CAP} self-review stalls (last ${minutes}m, no commit) — needs operator attention, no auto-redispatch.`,
+          repoPath: lane.repoPath,
+        } satisfies AgentUpdateEvent,
+      });
+      console.warn(`[supervisor] Stall-retry cap (${STALL_RETRY_CAP}) reached for packet ${stallPacketId}; lane ${lane.id} held for operator — NO re-dispatch.`);
+    } else {
+      broadcastSelfReviewStallSignal(surfaceId, lane, decision);
+    }
     return;
   }
 
@@ -502,6 +547,12 @@ async function handleCodexSelfReviewProgress(surfaceId: string, lastMessage: str
     await forceCodexSelfReviewToReview(surfaceId, lane, decision);
   }
 }
+
+// Bound the self-review stall→requeue loop (2026-06-22): after this many stalls
+// on ONE packet, hold it for the operator instead of escalating/re-dispatching
+// forever. The bug it fixes: a stalling packet re-dispatched ~4× in a loop
+// because the stall path never counted attempts (only the failure path did).
+const STALL_RETRY_CAP = 2;
 
 function broadcastSelfReviewStallSignal(
   surfaceId: string,

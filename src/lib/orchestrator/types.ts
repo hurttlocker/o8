@@ -164,6 +164,21 @@ export interface OrchestratorPacket {
    * across rerun_with_feedback; zeroed only by operator reset_packet.
    */
   typecheckAutoRetries?: number;
+  /**
+   * Self-review-stall auto-retry budget spent (loop bound, 2026-06-22). Same
+   * lifecycle as {@link typecheckAutoRetries} — lives ON the packet because a
+   * per-lane count resets on every stall redispatch (the bug: a stalling packet
+   * re-dispatched ~4× in an infinite loop). Capped (STALL_RETRY_CAP) so after N
+   * stalls the packet goes terminal (awaiting_human) instead of relaunching.
+   * Zeroed only by operator reset_packet.
+   */
+  stallRetries?: number;
+  /**
+   * Operator hit Stop — terminal "do not re-dispatch" marker. Checked first in
+   * getDispatchBlocker so NO path (headless loop, stall escalation, ralph
+   * requeue) can relaunch it. Cleared by reset_packet / explicit relaunch.
+   */
+  operatorStopped?: boolean;
   blockedReason?: string | null;
   lastEventAt?: string | null;
   lastEventLabel?: string | null;
