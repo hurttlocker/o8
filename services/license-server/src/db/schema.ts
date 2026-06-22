@@ -81,6 +81,44 @@ export type Invite = typeof invites.$inferSelect;
 export type NewInvite = typeof invites.$inferInsert;
 
 /**
+ * `founders` — Founding Operator one-time purchases ($150 via Stripe Checkout,
+ * mode=payment). Parallel to `subscriptions` but one-off: no renewal, no seats.
+ * The Stripe Checkout Session id is the primary key, which makes the webhook
+ * idempotent — Stripe retries the same session id, so we never double-issue an
+ * operator number. A founder is granted `plan: 'pro'`; the *exact* perks are
+ * SOFT — `creditMicroUsd` (prepaid managed-infra credit), `rateLockMicroUsd`
+ * (locked monthly rate on the future metered tier) and `perksJson` are stamped
+ * from env at purchase and editable later, so finalizing "what a founder gets"
+ * is a data/env change, not a redeploy.
+ */
+export const founders = pgTable('founders', {
+  /** Stripe Checkout Session id — PK so webhook retries are idempotent. */
+  id: text('id').primaryKey(),
+  stripeCustomerId: text('stripe_customer_id'),
+  /** Clerk user_id from checkout metadata — the account the license binds to. */
+  clerkUserId: text('clerk_user_id'),
+  /** Buyer email (Stripe customer_details) — welcome mail + contact. */
+  email: text('email'),
+  /** Serial "Founding Operator #N", assigned at first insert (max+1). Unique. */
+  operatorNumber: integer('operator_number').notNull().unique(),
+  /** 'active' | 'revoked'. */
+  status: text('status').notNull().default('active'),
+  /** Prepaid founder credit toward metered infra, micro-USD (USD*1e6). Soft. */
+  creditMicroUsd: integer('credit_micro_usd').notNull().default(0),
+  /** Locked monthly rate on the future metered tier, micro-USD. Null = unset. */
+  rateLockMicroUsd: integer('rate_lock_micro_usd'),
+  /** Flexible "what they get" bucket, finalized later (flags, early-access…). */
+  perksJson: jsonb('perks_json'),
+  licenseMintedAt: timestamp('license_minted_at', { withTimezone: true }),
+  revokedAt: timestamp('revoked_at', { withTimezone: true }),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type Founder = typeof founders.$inferSelect;
+export type NewFounder = typeof founders.$inferInsert;
+
+/**
  * `proxy_usage` — one append-only row per managed-inference call routed through
  * the o8 proxy (Step 1). It is the per-account meter (today's spend vs the
  * plan's daily cap) AND the raw COGS ledger we aggregate to set pricing

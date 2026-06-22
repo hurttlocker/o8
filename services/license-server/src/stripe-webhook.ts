@@ -6,6 +6,7 @@ import Stripe from 'stripe';
 import { db } from './db/client.js';
 import { entitlementEvents, subscriptions } from './db/schema.js';
 import { env } from './env.js';
+import { handleFoundingCheckout, isFoundingCheckout } from './founding.js';
 import { mintLicense, type Plan } from './mint.js';
 
 export const stripe = new Stripe(env.STRIPE_SECRET_KEY);
@@ -88,8 +89,12 @@ export interface WebhookResult {
  */
 export async function handleStripeEvent(event: Stripe.Event): Promise<WebhookResult> {
   switch (event.type) {
-    case 'checkout.session.completed':
-      return handleCheckoutCompleted(event.data.object);
+    case 'checkout.session.completed': {
+      const session = event.data.object;
+      // One-time Founding Operator purchase vs a subscription checkout.
+      if (isFoundingCheckout(session)) return handleFoundingCheckout(session);
+      return handleCheckoutCompleted(session);
+    }
     case 'customer.subscription.updated':
       return handleSubscriptionUpdated(event.data.object);
     case 'customer.subscription.deleted':

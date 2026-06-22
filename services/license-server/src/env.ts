@@ -48,6 +48,10 @@ export const env = {
   STRIPE_WEBHOOK_SECRET: required('STRIPE_WEBHOOK_SECRET'),
   STRIPE_PRICE_SOLO: required('STRIPE_PRICE_SOLO'),
   STRIPE_PRICE_TEAM: required('STRIPE_PRICE_TEAM'),
+  // The $150 one-time "Founding Operator" price. Optional so the server still
+  // boots before it exists in Stripe; the webhook also recognizes the purchase
+  // via session.metadata.productType === 'founding'.
+  STRIPE_PRICE_FOUNDER: optional('STRIPE_PRICE_FOUNDER', ''),
 
   // Signing
   LICENSE_PRIVATE_KEY: loadPrivateKeyPem(),
@@ -80,6 +84,32 @@ export const env = {
   // disabled (503) and the rest of the service runs unchanged. Rotate
   // independently of ADMIN_TOKEN; lower blast radius if it leaks from a build.
   INVITE_REGISTER_TOKEN: optional('INVITE_REGISTER_TOKEN', ''),
+
+  // ── Founding Operator (one-time $150 purchase) ──────────────────────────
+  // License validity for a founder's minted token. Long-dated (≈10y) because
+  // it's a lifetime grant; it's also re-minted on each account fetch, so this
+  // is just the offline ceiling.
+  FOUNDER_LICENSE_DAYS: Number.parseInt(optional('FOUNDER_LICENSE_DAYS', '3650'), 10),
+  // SOFT "what a founder gets" knobs, stamped onto the row at purchase and
+  // editable later (finalize the grant by setting these, not by redeploying):
+  // prepaid managed-infra credit and the locked monthly rate, both in USD.
+  FOUNDER_CREDIT_USD: Number.parseFloat(optional('FOUNDER_CREDIT_USD', '0')),
+  FOUNDER_RATE_LOCK_USD: optional('FOUNDER_RATE_LOCK_USD', ''),
+  // Soft cap for the cohort — the sell side enforces it; we only log if a
+  // purchase lands beyond it. NEVER reject money already taken.
+  FOUNDER_CAP: Number.parseInt(optional('FOUNDER_CAP', '100'), 10),
+
+  // Clerk issuer URL (e.g. https://<slug>.clerk.accounts.dev). Used to verify a
+  // desktop's Clerk session token on /account/license, so a signed-in user can
+  // pull THEIR OWN license — no shared secret shipped in the app. Optional:
+  // when unset, /account/license is disabled (503).
+  CLERK_ISSUER: optional('CLERK_ISSUER', ''),
+
+  // Welcome email (best-effort, Resend). Optional: when RESEND_API_KEY is unset
+  // the mail is skipped (Stripe sends its own receipt, and the license is
+  // delivered by account-fetch on sign-in regardless).
+  RESEND_API_KEY: optional('RESEND_API_KEY', ''),
+  EMAIL_FROM: optional('EMAIL_FROM', 'o8 <founding@o8.run>'),
 
   // HTTP
   PORT: Number.parseInt(optional('PORT', '8080'), 10),

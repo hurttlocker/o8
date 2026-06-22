@@ -14,6 +14,7 @@ import { redeemInvite, registerInvite, resolveInvite } from './invites.js';
 import { handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscribe } from './proxy.js';
 import { handleAnalytics, handleTelemetry } from './analytics.js';
 import { handleIssueFree } from './free-issue.js';
+import { handleAccountLicense } from './account-license.js';
 
 const app = new Hono();
 
@@ -116,6 +117,12 @@ app.post('/v1/telemetry', handleTelemetry);
 // ── First-run free issuance (epic #1249) — PUBLIC: fresh installs have no creds.
 //    Mints a free-plan token bound to the install id (stable account `sub`). ──
 app.post('/issue-free', handleIssueFree);
+
+// ── Account-keyed license fetch — a signed-in desktop pulls its OWN license
+//    (Founding Operator or active subscription). Auth = the caller's Clerk
+//    session token, verified server-side via JWKS; NO shared secret shipped in
+//    the app. 503 until CLERK_ISSUER is configured. ─────────────────────────
+app.post('/account/license', handleAccountLicense);
 
 // ── Manual issuance (ADMIN-guarded) — for testing before live Stripe ──────────
 app.post('/issue-entitlement', async (c) => {

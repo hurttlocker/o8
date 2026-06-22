@@ -86,6 +86,20 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
     }).catch(() => {
       /* provisioning is best-effort; getCurrentUser retries on next sign-in */
     });
+
+    // Pull this account's license (Founding Operator / subscription) and cache
+    // it locally so the plan flips without a reload. Best-effort + fail-soft;
+    // on a non-free result we nudge EntitlementProvider to re-fetch live.
+    void fetch('/api/panel/entitlement/sync', { method: 'POST' })
+      .then((r) => (r.ok ? r.json() : null))
+      .then((d: { ok?: boolean; plan?: string } | null) => {
+        if (d?.ok && d.plan && d.plan !== 'free') {
+          window.dispatchEvent(new Event('o8:entitlement-refresh'));
+        }
+      })
+      .catch(() => {
+        /* sync is best-effort; entitlement re-reads on next mount */
+      });
   }, [isSignedIn, user]);
 
   const value = useMemo<O8AuthState>(

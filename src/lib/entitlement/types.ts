@@ -38,3 +38,16 @@ export interface EntitlementState {
   flags: EntitlementFlags;
   source: EntitlementSource;
 }
+
+/**
+ * Founding Operator display metadata. Client-safe (pure, no I/O) so both the
+ * server founder record (founder.ts) and the client context (context.tsx) share
+ * one shape. NOT an entitlement gate — the signed plan is still 'pro'; this only
+ * carries the cosmetic "Founding Operator #N" status + the soft grant figures
+ * (which are finalized separately). `null` figures mean "not set yet".
+ */
+export interface FounderInfo {
+  operatorNumber: number;
+  creditUsd: number | null;
+  rateLockUsd: number | null;
+}
