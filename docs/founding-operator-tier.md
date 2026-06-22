@@ -59,10 +59,17 @@ Free users get **light + dark** (kept beautiful). Founders get an exclusive **"o
 
 ### Status + community
 
-- Founding Operator **badge**, numbered (first 100).
+- Founding Operator **badge**, numbered (1–250).
 - **Name on the founders wall** (in-app + o8.run).
-- **5 collectible founding invite passes** to hand out (#1249) — doubles as distribution.
 - Founders' channel + roadmap input.
+
+> **Amended 2026-06-21 — invites are NOT a founder perk.** Dropped the earlier
+> "5 collectible founding invite passes" line. Every operator *already* gets 5
+> beta-referral invite passes (#beta-referral, `src/lib/invites/store.ts`,
+> `FOUNDING_COUNT = 5`), so they stay **universal** — do not grant founders a
+> special or larger invite batch. If invites should ever become a true founder
+> flex (more than the universal 5, or invitee perks), that's a separate, explicit
+> decision — not implied here.
 
 ---
 
