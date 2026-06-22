@@ -24,6 +24,10 @@ export interface XtermPanelProps {
   transparent?: boolean;
   /** Override the terminal font size (default 12). */
   fontSize?: number;
+  /** Override the line-height multiplier (default 1.35). The canvas passes 1.0
+   *  so xterm's DOM-renderer selection overlay aligns with the glyph baseline —
+   *  1.35 offsets the highlight ~½ line up from the text under CSS zoom (#1245). */
+  lineHeight?: number;
   /** Bump on every WebSocket (re)connect. Terminal sends drop silently on a
    *  closed socket and the server never re-attaches us — without this, any
    *  transport bounce leaves the view permanently deaf while the pty lives
@@ -54,7 +58,7 @@ export interface XtermPanelHandle {
 }
 
 export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function XtermPanel(
-  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize, connectionEpoch, spawnReveal, revealMinPlay, themeOverrides },
+  { tmuxSession, sendTerminalAttach, sendTerminalInput, sendTerminalResize, sendTerminalDetach, visible, transparent, fontSize, lineHeight, connectionEpoch, spawnReveal, revealMinPlay, themeOverrides },
   ref,
 ) {
   const { themeId } = useTheme();
@@ -173,7 +177,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
         const term = new Terminal({
           fontFamily: 'ui-monospace, "SF Mono", Monaco, Menlo, monospace',
           fontSize: fontSize ?? 12,
-          lineHeight: 1.35,
+          lineHeight: lineHeight ?? 1.35,
           cursorBlink: true,
           cursorStyle: 'block',
           allowTransparency: transparent === true,
@@ -292,7 +296,7 @@ export const XtermPanel = forwardRef<XtermPanelHandle, XtermPanelProps>(function
       fitAddonRef.current = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- cancelReveal only touches refs
-  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize, transparent, fontSize, spawnReveal, revealMinPlay]);
+  }, [tmuxSession, sendTerminalAttach, sendTerminalDetach, sendTerminalInput, sendTerminalResize, transparent, fontSize, lineHeight, spawnReveal, revealMinPlay]);
 
   // Re-attach after a transport (re)connect. The init effect's attach is
   // dropped silently if the socket isn't open yet, and the server never
