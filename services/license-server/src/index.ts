@@ -1,11 +1,11 @@
 import { createHash, randomUUID, timingSafeEqual } from 'node:crypto';
 
 import { serve } from '@hono/node-server';
-import { eq } from 'drizzle-orm';
+import { count, eq } from 'drizzle-orm';
 import { Hono } from 'hono';
 
 import { db } from './db/client.js';
-import { entitlementEvents, subscriptions } from './db/schema.js';
+import { entitlementEvents, founders, subscriptions } from './db/schema.js';
 import { env } from './env.js';
 import { mintLicense, type Plan } from './mint.js';
 import { constructEvent, handleStripeEvent } from './stripe-webhook.js';
@@ -62,6 +62,25 @@ function isAnalyticsReader(authHeader: string | undefined): boolean {
 
 // ── Health ──────────────────────────────────────────────────────────────────
 app.get('/health', (c) => c.json({ ok: true, service: 'o8-license-server', issuer: env.ISSUER }));
+
+// ── Founding cohort count (PUBLIC, read-only) ─────────────────────────────────
+// The number of GRANTED founders (status='active' — NOT 'over_cap'/'revoked').
+// The NEXT buyer's position is count+1. o8.run proxies this server-side
+// (app/api/founding/*) to resolve the tier + price, so no secret/auth is needed
+// and no PII is exposed. On a DB error we surface 503 so o8-site fails CLOSED
+// (refuses to guess a price) rather than mis-pricing a seat.
+app.get('/v1/founders/count', async (c) => {
+  try {
+    const rows = await db
+      .select({ n: count() })
+      .from(founders)
+      .where(eq(founders.status, 'active'));
+    return c.json({ count: rows[0]?.n ?? 0 });
+  } catch (err) {
+    console.error('[license-server] /v1/founders/count failed:', err);
+    return c.json({ error: 'count_unavailable' }, 503);
+  }
+});
 
 // ── Stripe webhook (RAW body required for signature verification) ─────────────
 app.post('/webhooks/stripe', async (c) => {
