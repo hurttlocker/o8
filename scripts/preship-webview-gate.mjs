@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { setTimeout as sleep } from 'node:timers/promises';
+import { BOOT_PROBE_JS, classifyBootProbe } from './preship-gate-logic.mjs';
 
 // Per-phase deadlines (each phase gets its OWN fresh budget — a shared budget
 // let a slow cold boot under machine load starve the later route/health checks
@@ -275,14 +276,13 @@ async function waitForDashboard(client, deadline) {
 }
 
 async function waitForHealthyBoot(client, deadline) {
-  const code = "(function(){var d=document.documentElement;var b=document.body;if(d&&d.getAttribute('data-o8-mount-error')==='1')return 'mount-error';if(b&&b.innerText&&b.innerText.indexOf('Application error')!==-1)return 'app-error';if(d&&d.getAttribute('data-o8-dashboard-hydrated')==='1'&&d.getAttribute('data-o8-mount-error')!=='1')return 'hydrated';return 'pending';})()";
   let lastErr;
   while (Date.now() < deadline) {
     try {
-      const result = await executeJs(client, code);
-      if (result === 'mount-error') throw new Error('dashboard reported a React mount error');
-      if (result === 'app-error') throw new Error('dashboard rendered the Next.js "Application error" page');
-      if (result === 'hydrated') return;
+      const result = await executeJs(client, BOOT_PROBE_JS);
+      const { verdict, reason } = classifyBootProbe(result);
+      if (verdict === 'fail') throw new Error(reason);
+      if (verdict === 'pass') return;
     } catch (error) {
       const msg = error?.message ?? String(error);
       // Real verdicts must propagate; transient eval errors (window not ready
