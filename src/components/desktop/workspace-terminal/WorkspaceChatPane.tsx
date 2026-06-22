@@ -131,6 +131,48 @@ function WorkspaceChatPaneBase({
     return candidateKeys.some((key) => Boolean(key) && archivedLaneView.sessionKeys.has(key as string));
   }, [tab.kind, tab.chatSessionKey, tab.orchestrationPacket?.packetId, chat.normalizedSessionKey, liveStatus, livePacket, archivedLaneView]);
 
+  // A retired lane is NOT necessarily a merged one. The old banner said "Merged"
+  // for every archived lane — including ones the operator stopped or reset, and
+  // ones that failed — which is a lie (operator flagged it 2026-06-22). Derive
+  // the real outcome: `releaseState === 'released'` is the sticky merge signal
+  // (set at merge, survives archival even when status flips to 'archived'); a
+  // `failed` status is a failure; anything else retired was archived without
+  // ever merging. Only the genuine-merge branch gets the green "Merged" check.
+  const retirement = useMemo(() => {
+    const merged = liveStatus === 'released' || livePacket?.releaseState === 'released';
+    if (merged) {
+      return {
+        merged: true,
+        tone: '#22c55e',
+        iconBg: 'rgba(34, 197, 94, 0.10)',
+        heroTitle: 'Merged & archived',
+        heroSub: `This ${chat.runtimeLabel} session shipped and its lane was archived. The live transcript isn’t available here.`,
+        bannerLabel: 'Merged · read-only',
+        bannerSub: 'This session’s lane merged and was archived. The transcript stays for review.',
+      };
+    }
+    if (liveStatus === 'failed') {
+      return {
+        merged: false,
+        tone: '#f59e0b',
+        iconBg: 'rgba(245, 158, 11, 0.10)',
+        heroTitle: 'Ended without merging',
+        heroSub: `This ${chat.runtimeLabel} session ended without merging and its lane was archived.`,
+        bannerLabel: 'Ended · read-only',
+        bannerSub: 'This session ended without merging. The transcript stays for review.',
+      };
+    }
+    return {
+      merged: false,
+      tone: 'var(--t-text-muted)',
+      iconBg: 'var(--t-panel)',
+      heroTitle: 'Archived',
+      heroSub: `This ${chat.runtimeLabel} session’s lane was archived without merging.`,
+      bannerLabel: 'Archived · read-only',
+      bannerSub: 'This session’s lane was archived without merging. The transcript stays for review.',
+    };
+  }, [liveStatus, livePacket?.releaseState, chat.runtimeLabel]);
+
   // Runtime fallback notifications: when a Gemini model quotas out, the
   // adapter picks the next model in GEMINI_FALLBACK_CASCADE before retrying.
   // The store publishes a `runtime-fallback` mutation; we render it as a
@@ -270,16 +312,20 @@ function WorkspaceChatPaneBase({
                     width: 40,
                     height: 40,
                     borderRadius: 12,
-                    background: 'rgba(34, 197, 94, 0.10)',
+                    background: retirement.iconBg,
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                   }}
                 >
-                  <CheckCircle2 size={20} style={{ color: '#22c55e' }} />
+                  {retirement.merged ? (
+                    <CheckCircle2 size={20} style={{ color: retirement.tone }} />
+                  ) : (
+                    <AlertCircle size={20} style={{ color: retirement.tone }} />
+                  )}
                 </div>
                 <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-                  Merged &amp; archived
+                  {retirement.heroTitle}
                 </div>
                 <div
                   style={{
@@ -290,7 +336,7 @@ function WorkspaceChatPaneBase({
                     lineHeight: 1.5,
                   }}
                 >
-                  This {chat.runtimeLabel} session shipped and its lane was archived. The live transcript isn&apos;t available here.
+                  {retirement.heroSub}
                 </div>
                 {orchestratorData?.onOpenO8Panel ? (
                   <button
@@ -655,17 +701,23 @@ function WorkspaceChatPaneBase({
             paddingLeft: 20,
             paddingRight: 20,
             borderTop: '1px solid var(--t-divider)',
-            background: 'linear-gradient(180deg, rgba(34, 197, 94, 0.06), rgba(34, 197, 94, 0.02))',
+            background: retirement.merged
+              ? 'linear-gradient(180deg, rgba(34, 197, 94, 0.06), rgba(34, 197, 94, 0.02))'
+              : 'var(--t-panel)',
             color: 'var(--t-text-secondary)',
             fontSize: 12,
             fontWeight: 600,
             letterSpacing: '-0.005em',
           }}
         >
-          <CheckCircle2 size={14} style={{ color: '#22c55e', flexShrink: 0 }} />
-          <span>Merged · read-only</span>
+          {retirement.merged ? (
+            <CheckCircle2 size={14} style={{ color: retirement.tone, flexShrink: 0 }} />
+          ) : (
+            <AlertCircle size={14} style={{ color: retirement.tone, flexShrink: 0 }} />
+          )}
+          <span>{retirement.bannerLabel}</span>
           <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>
-            This session&apos;s lane has been archived. The transcript stays for review.
+            {retirement.bannerSub}
           </span>
         </div>
       ) : null}
