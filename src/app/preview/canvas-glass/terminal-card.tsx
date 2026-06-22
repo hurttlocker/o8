@@ -225,6 +225,9 @@ export function TerminalGlassCard({
               transparent
               themeOverrides={inkOverrides}
               fontSize={TERM_FONT_PX}
+              // 1.0 so xterm's DOM-renderer selection overlay lands on the glyph
+              // baseline — 1.35 offsets the highlight ~½ line up under zoom (#1245).
+              lineHeight={1.0}
               connectionEpoch={connectionEpoch}
               spawnReveal
               revealMinPlay={card.revealHold}
