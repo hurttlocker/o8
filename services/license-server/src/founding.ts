@@ -40,9 +40,13 @@ function anyFounderPriceConfigured(): boolean {
 
 /** True when a completed checkout is the one-time Founding Operator purchase
  *  rather than a subscription. The metadata flag o8-site sets is the primary
- *  signal; mode==='payment' + a configured founder price is the fallback. */
+ *  signal; mode==='payment' + a configured founder price is the fallback.
+ *  o8-site's checkout (app/api/founding/checkout) stamps `metadata.product`,
+ *  while older drafts used `metadata.productType` — accept either so the
+ *  explicit signal fires regardless of which the checkout writes. */
 export function isFoundingCheckout(session: Stripe.Checkout.Session): boolean {
   if (session.metadata?.productType === 'founding') return true;
+  if (session.metadata?.product === 'founding') return true;
   if (session.mode === 'payment' && anyFounderPriceConfigured()) return true;
   return false;
 }
