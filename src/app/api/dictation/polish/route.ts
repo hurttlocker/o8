@@ -9,10 +9,14 @@ import {
 } from '@/lib/dictation/polish-prompt';
 import { processVoiceCommands } from '@/lib/dictation/voice-commands';
 
-// Symon uses Gemini Flash Lite for polish; on OpenRouter the matching
-// model is `google/gemini-flash-lite-latest`. Adjust here if a newer
-// preview is named differently — tested values fall through.
-const POLISH_MODELS = ['google/gemini-flash-lite-latest', 'google/gemini-2.5-flash-lite'];
+// Polish runs on Gemini Flash Lite. NOTE (2026-06-22): the former primary
+// `google/gemini-flash-lite-latest` is NO LONGER a valid OpenRouter model id
+// ("is not a valid model ID") — it failed EVERY call and forced a wasted
+// round-trip before the fallback, a major source of polish slowness. Lead with
+// the verified-working `gemini-2.5-flash-lite` (0.37s, ~$0.00005/polish in the
+// founder-polish-sweep); deepseek-chat is a working fallback. Both keep meaning
+// (OUTPUT COVERAGE guard) — re-verify any new id with scripts/founder-polish-sweep.mjs.
+const POLISH_MODELS = ['google/gemini-2.5-flash-lite', 'deepseek/deepseek-chat'];
 
 interface PolishRequestBody {
   transcript?: string;

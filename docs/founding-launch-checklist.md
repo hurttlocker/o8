@@ -65,7 +65,7 @@ Goal: measure every managed-inference path so we know what to push/adjust — be
 
 Paths to sweep:
 - [x] **Fast Brain** — DONE (results below): `gemini-2.5-flash-lite` wins.
-- [ ] **Dictation polish** — `google/gemini-flash-lite-latest` → `gemini-2.5-flash-lite` (`src/app/api/dictation/polish/route.ts`). Audit cost; test **SPEED** (slow sometimes → tune the 2-model loop / timeouts) + **ACCURACY** (target near-perfect — must never change meaning). Needs the **founder-deliberate fix** (today routes only as a no-key fallback). Plus a **free-mode** answer (free/slow model when no key/local).
+- [~] **Dictation polish — SWEPT + BUG FIXED 2026-06-22** (`scripts/founder-polish-sweep.mjs`). **Found:** the primary `google/gemini-flash-lite-latest` is an INVALID OpenRouter id — failed *every* call, forcing a wasted round-trip before the fallback = a major "slow sometimes" cause. **Fixed:** `POLISH_MODELS` now leads with `gemini-2.5-flash-lite` (0.37s, ~$0.00005/polish, accurate, coverage ~1.0 / no summarizing) → `deepseek-chat` fallback. **Still pending:** founder-deliberate routing (today a no-key fallback), free-mode, and passing the open-files anchor for spoken code-identifier accuracy (e.g. "class a composer" → `classAComposer`).
 - [ ] **Premium STT** — `openai/whisper-large-v3-turbo` (`src/app/api/dictation/transcribe/route.ts`). Needs a sample audio clip (or generate via macOS `say`) → WER + speed + $/min.
 - [x] **Symon brain = Claude CLI (FREE, sub-billed)** — CORRECTED 2026-06-22: NOT Gemini/managed (operator won't pay that bill). Drop from the cost sweep. Its test is a **PERF** check — the CLI flow (warm-pool) should be warm + fast + fine-tuned.
 - [ ] **Proxy overhead** — license-server hop + cap-enforcement latency.
