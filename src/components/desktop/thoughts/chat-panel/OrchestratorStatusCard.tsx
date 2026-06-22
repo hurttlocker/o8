@@ -40,7 +40,7 @@ export function OrchestratorStatusCard({
   const palette = TONE[tone];
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%' }}>
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', width: '100%', marginBottom: isLast ? 32 : undefined }}>
       <button
         type="button"
         onClick={() => setDetailOpen((open) => !open)}
