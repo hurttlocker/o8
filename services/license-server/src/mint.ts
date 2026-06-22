@@ -4,9 +4,11 @@ import { env } from './env.js';
 
 /**
  * License plan tiers. MUST stay in sync with the desktop `Plan` type
- * (src/lib/entitlement/types.ts) — 'free' | 'pro' | 'team'.
+ * (src/lib/entitlement/types.ts) — 'free' | 'pro' | 'team' | 'founder'.
+ * ('founder' = the one-time Founding Operator tier; managed inference for life
+ * within the proxy fair-use cap.)
  */
-export type Plan = 'free' | 'pro' | 'team';
+export type Plan = 'free' | 'pro' | 'team' | 'founder';
 
 export interface MintLicenseInput {
   /** The entitlement tier this token grants. */

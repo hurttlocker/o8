@@ -35,8 +35,7 @@ export function readFounderRecord(): FounderRecord | null {
     if (typeof parsed.operatorNumber !== 'number') return null;
     return {
       operatorNumber: parsed.operatorNumber,
-      creditUsd: typeof parsed.creditUsd === 'number' ? parsed.creditUsd : null,
-      rateLockUsd: typeof parsed.rateLockUsd === 'number' ? parsed.rateLockUsd : null,
+      tier: typeof parsed.tier === 'number' ? parsed.tier : null,
       syncedAt: typeof parsed.syncedAt === 'string' ? parsed.syncedAt : '',
     };
   } catch (error) {

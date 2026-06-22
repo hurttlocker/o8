@@ -56,12 +56,14 @@ const PLAN_LABELS: Record<Plan, string> = {
   free: 'Free',
   pro: 'Pro',
   team: 'Team',
+  founder: 'Founding Operator',
 };
 
 const PLAN_TAGLINES: Record<Plan, string> = {
   free: 'The full o8 — orchestration, governance, the Engineering Brain, multi-repo fleet, and review. It all runs on your own CLI subscriptions. Free, forever.',
   pro: 'Everything in Free, with managed inference (no keys to bring) and off-network mobile.',
   team: 'Everything in Pro, plus shared team governance and cloud agents.',
+  founder: 'Everything free, plus managed inference included for life (fair-use capped), early access to everything new, and an exclusive theme. One-time — the first 250.',
 };
 
 // What Free includes — i.e. everything. None of this is gated; it runs on the

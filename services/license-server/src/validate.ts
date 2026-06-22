@@ -8,7 +8,7 @@ import { env } from './env.js';
 import type { Plan } from './mint.js';
 import { eq } from 'drizzle-orm';
 
-const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team'];
+const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team', 'founder'];
 const DEFAULT_GRACE_DAYS = 30;
 
 /**

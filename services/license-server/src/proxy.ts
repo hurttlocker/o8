@@ -45,6 +45,10 @@ const DAILY_CAP_MICRO_USD: Record<Plan, number> = {
   free: usdToMicro(envUsd('PROXY_CAP_FREE_USD', 0.1)),
   pro: usdToMicro(envUsd('PROXY_CAP_PRO_USD', 0.5)),
   team: usdToMicro(envUsd('PROXY_CAP_TEAM_USD', 2.0)),
+  // Founders get managed inference "included for life" — THIS per-account daily
+  // ceiling is the solvency guarantee (docs/founding-operator-tier.md §Pricing),
+  // never lifetime-unlimited. Env-tunable from real COGS data.
+  founder: usdToMicro(envUsd('PROXY_CAP_FOUNDER_USD', 2.0)),
 };
 
 /** Gemini embeddings have no cost field — estimate from input length. */

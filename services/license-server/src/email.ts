@@ -52,8 +52,9 @@ function foundingWelcomeText(operatorNumber: number, licenseKey?: string): strin
     `You're in — Founding Operator #${operatorNumber}.`,
     '',
     'Open o8 and sign in with the same account; your founder status is already',
-    'on it and unlocks automatically. The app is free either way — this just',
-    'locks your founder rate and credit for what comes next.',
+    'on it and unlocks automatically. The managed essentials — fast Brain,',
+    'dictation polish, and premium speech-to-text — are included for life,',
+    'within fair use. The app is free either way; this funds the build.',
   ];
   if (licenseKey) {
     lines.push(

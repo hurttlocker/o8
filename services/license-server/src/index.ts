@@ -18,7 +18,7 @@ import { handleAccountLicense } from './account-license.js';
 
 const app = new Hono();
 
-const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team'];
+const VALID_PLANS: readonly Plan[] = ['free', 'pro', 'team', 'founder'];
 
 /** Constant-time admin guard. Returns true when the bearer matches. */
 function isAdmin(authHeader: string | undefined): boolean {
