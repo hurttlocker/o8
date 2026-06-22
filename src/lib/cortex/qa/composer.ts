@@ -28,6 +28,7 @@ import { callOpenRouter, OPENROUTER_PRIMARY_MODEL } from '@/lib/cortex/qa/llm/op
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import type { CitationKind, TypedRow } from '@/lib/cortex/qa/types';
 import { getOperatorDefaultsSync, type ClassAComposer } from '@/lib/operator/defaults';
+import { getEntitlementSync } from '@/lib/entitlement/store';
 
 // ── Prompts ───────────────────────────────────────────────────────────────────
 
@@ -547,9 +548,19 @@ export async function composeClassA(
 
   // #971: in production, the user-selected `classAComposer` setting picks
   // which CLI tier leads. Eval mode is never affected (smoke gate is fixed).
-  const classAMode: ClassAComposer = evalMode
+  let classAMode: ClassAComposer = evalMode
     ? 'auto'
     : resolveClassAComposerSetting();
+  // B-1 (2026-06-22): managed-inference users (founders / paid plan — `proxy.inference`)
+  // get the fast Brain tier automatically — the perk. 'fastest' leads with flash-lite
+  // via the capped proxy (~0.5s) instead of the 15-30s CLI bootstrap. Only overrides the
+  // DEFAULT 'auto' (an explicit 'fastest'/'sonnet-cli' choice is respected), never in eval
+  // mode, and never weakens the spend cap (still enforced server-side on the proxy,
+  // brain-spend.ts). On failure it still falls through the full subscription chain below,
+  // so availability is never reduced.
+  if (!evalMode && classAMode === 'auto' && managedInferenceEnabled()) {
+    classAMode = 'fastest';
+  }
   const sonnetCliFirst = classAMode === 'sonnet-cli';
   let triedSonnetCli = false;
 
@@ -683,6 +694,20 @@ export async function composeClassA(
  * `~/.cortex-ide/operator-defaults.json`; failures fall back to 'auto'
  * so a missing/corrupt prefs file never breaks Q&A.
  */
+/**
+ * B-1: true when this install holds a managed-inference entitlement
+ * (`proxy.inference` — founder / paid plan). Lets the Class A composer auto-lead
+ * the fast Brain tier for those users. Sync + never throws (mirrors
+ * resolveClassAComposerSetting); resolves env > entitlement.json > free default.
+ */
+function managedInferenceEnabled(): boolean {
+  try {
+    return getEntitlementSync().flags['proxy.inference'] === true;
+  } catch {
+    return false;
+  }
+}
+
 function resolveClassAComposerSetting(): ClassAComposer {
   try {
     return getOperatorDefaultsSync().values.classAComposer;

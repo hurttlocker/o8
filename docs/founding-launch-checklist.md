@@ -21,10 +21,11 @@
 
 ## B. Make the perks actually WORK (fine-tune core — this is the app work)
 
-- [~] **B-1 — Managed inference routing ("the proxy"). INVESTIGATED 2026-06-22.** Proxy auth seam wired (founder JWT from `entitlement.json` → Bearer → license-server proxy, cap enforced). Per path:
+- [x] **B-1 — Managed inference routing ("the proxy"). WIRED 2026-06-22.** Proxy auth seam wired (founder JWT from `entitlement.json` → Bearer → license-server proxy, cap enforced). Per path:
   - ✅ **Premium Whisper STT — FULLY WIRED** (`/api/dictation/transcribe` → `/v1/transcribe`, cap-metered).
   - 🟡 **Dictation polish — PARTIAL** (`/api/dictation/polish` routes via plan token, but gated on key-*absence* not founder — same fallback as free; no founder-specific behavior/signal).
-  - ❌ **Fast Brain — NOT WIRED (the gap).** The Q&A cascade (`cortex/qa/ask.ts`, `composer.ts`, `classifier.ts`) is entitlement-BLIND — tier selection reads only the local `classAComposer` operator-pref (`composer.ts:~550`), never plan/`proxy.inference`. Founders don't auto-get the fast tier. **FIX:** thread `proxy.inference`/founder into composer+classifier → auto-prefer the fast managed tier (no-BYOK founders). (`proxy.inference` is read behaviorally in only 2 spots today: `voice/realtime-access.ts`, `Gate.tsx`.)
+  - ✅ **Fast Brain — WIRED 2026-06-22.** `composer.ts` Class A overrides `classAMode` → `'fastest'` for managed-inference users (`proxy.inference` — founders / paid) on the default `'auto'`, so they lead with flash-lite via the capped proxy (~0.5s) instead of the 15–30s CLI. Free users + explicit composer choices untouched; spend cap stays server-side (`brain-spend.ts`); falls through the full chain on failure. tsc clean + 188 tests green (2×). **Makes the dossier's "instant Brain" founder claim TRUE in the app.** (Compose is the latency driver; classify is already fast.)
+  - **Polish — NO CHANGE NEEDED.** It already routes founders through the managed proxy when they have no key, and (correctly) prefers their own key when they do — cheaper for us. The model-id bug was the real fix (done, commit 009f6b51). The "founder-deliberate" refinement was cosmetic; skipped.
 - [ ] **B-2 — Early-access reload caveat.** Founder who signs in mid-session needs a reload before `experimental*` flips (module-cache; #1275 class). Decide: fix vs accept.
 - [x] **B-3 — Exclusive "o8" theme — FIRST ONE DONE** (operator, 2026-06-22). Future: more founder themes + picture/ASCII canvas backgrounds — backlog, not launch.
 - [ ] **B-4 — Founder badge.** Verify "Founding Operator #N" renders in the desktop AccountTab.
