@@ -58,7 +58,7 @@ const KEYCHAIN_SERVICE: &str = "ai.o8.master-key";
 /// Keychain account name — a single per-install master key slot.
 const KEYCHAIN_ACCOUNT: &str = "default";
 
-fn env_flag_enabled(name: &str) -> bool {
+pub(crate) fn env_flag_enabled(name: &str) -> bool {
     matches!(std::env::var(name).as_deref(), Ok("1"))
 }
 
