@@ -855,7 +855,18 @@ function resolveMsgAgentId(msg: Record<string, unknown>, backendId: Orchestrator
 }
 
 /** Send a raw WS message to every client subscribed to `sessionName`. */
+// Last time we broadcast ANY live event for an orchestrator route session
+// (turn-start busy, output, thinking, tool, done, error). Used to heal a stale
+// 'busy' snapshot on (re)subscribe: a wedged child that never closed its stdout
+// leaves session.status === 'busy' forever, and on every webview reload the
+// snapshot replays that busy → a phantom "Working M:SS" counts up. If the
+// session has been silent past the heal window, the busy is stale. (2026-06-22)
+const lastOrchestratorActivityAt = new Map<string, number>();
+// Mirror of the client stall watchdog (useOrchestratorStream HEAL_STALE_AFTER_MS).
+const ORCH_SNAPSHOT_STALE_MS = 120_000;
+
 function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): void {
+  lastOrchestratorActivityAt.set(sessionName, Date.now());
   // Stamp the event with a monotonic seq and buffer it so a (re)subscribing
   // client can replay what it missed (reload / reconnect / first-turn re-
   // subscribe). On a parse miss we fall back to the unstamped raw — no
@@ -2428,6 +2439,19 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
 
     // No PTY to hook — the new approach spawns a process per message
     // and streams structured JSON events directly to WS subscribers.
+    //
+    // Heal a STALE 'busy' snapshot: if the session claims busy but we haven't
+    // broadcast any live event for it in > ORCH_SNAPSHOT_STALE_MS, the turn's
+    // child wedged/died without flipping back to 'ready' (the case the live
+    // stream-resolve fix can't catch — the await never returns). Reporting the
+    // real 'busy' would restore a phantom "Working" timer on this reload that
+    // counts up forever. Report 'ready' instead; we do NOT mutate the session,
+    // so a genuinely-resuming turn still streams normally. (2026-06-22)
+    const lastActivityAt = lastOrchestratorActivityAt.get(routeSessionName) ?? 0;
+    const snapshotStatus = session.status === 'busy'
+      && Date.now() - lastActivityAt > ORCH_SNAPSHOT_STALE_MS
+        ? 'ready'
+        : session.status;
     send(client, {
       channel: 'orchestrator',
       event: 'status',
@@ -2437,7 +2461,7 @@ async function handleOrchestratorSubscribe(client: ClientState, msg: Record<stri
       // the first-turn threadId mint forces a mid-turn re-subscribe, and a
       // snapshot 'ready' landing right after the client set 'busy' is exactly
       // what silently killed first-turn streaming until a reload.
-      data: { status: session.status, snapshot: true, repoPath, sessionName: routeSessionName, threadId, backend: backend.id, agent: agentTag },
+      data: { status: snapshotStatus, snapshot: true, repoPath, sessionName: routeSessionName, threadId, backend: backend.id, agent: agentTag },
     });
 
     // Replay anything this client missed on the in-flight turn (reload /
