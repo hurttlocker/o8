@@ -178,7 +178,10 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
       if (existing) {
         return closeSessionLeaf(current, existing.id);
       }
-      return splitChatWithSession(current, sessionKey, 'vertical');
+      // Default/auto split stacks horizontally (under the chat), matching the
+      // terminal split. The explicit pill menu still offers "split right"
+      // (vertical) for users who want a column. (#1285)
+      return splitChatWithSession(current, sessionKey, 'horizontal');
     });
   }, []);
 
@@ -224,12 +227,12 @@ export function useSessionTiles({ tabId, liveSessionKeys }: UseSessionTilesArgs)
       for (let index = 0; index < sessionKeys.length; index += 1) {
         const key = sessionKeys[index]!;
         if (index === 0) {
-          next = splitChatWithSession(next, key, 'vertical');
+          next = splitChatWithSession(next, key, 'horizontal');
         } else {
           const previousLeaf = collectSessionLeaves(next.root)
             .find((leaf) => leaf.sessionKey === sessionKeys[index - 1]);
           if (previousLeaf) {
-            next = splitSessionWithSession(next, previousLeaf.id, key, 'vertical');
+            next = splitSessionWithSession(next, previousLeaf.id, key, 'horizontal');
           }
         }
       }
