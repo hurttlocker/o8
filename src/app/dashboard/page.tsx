@@ -37,6 +37,7 @@ import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceH
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
 import { AttendanceHeartbeat } from '@/components/desktop/AttendanceHeartbeat';
 import { UiZoomLayer } from '@/components/desktop/UiZoomLayer';
+import { ReportIssueHost } from '@/components/desktop/ReportIssueHost';
 import {
   OPEN_MOBILE_PAIRING_EVENT,
   OPEN_SETTINGS_TAB_EVENT,
@@ -3980,6 +3981,7 @@ function DashboardInner() {
       <FileOpenBridge />
       <UiZoomLayer />
       <RealtimeVoiceHost />
+      <ReportIssueHost />
     <div data-vibrancy-passthrough="" data-mcp-scope="dashboard" style={{
       height: '100vh',
       display: 'flex',
