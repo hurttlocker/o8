@@ -362,6 +362,27 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "o8_team_tell",
+            "description": "Relay a message to a running agent by its NAME (the codenames o8_status reports — Atlas, Nova…). The voice path for 'tell Nova to hold the ship', 'let Atlas know the API changed', 'message the agent on spear'. The agent sees it on its next step. Use o8_status first if you're unsure who's working. This is a peer message, NOT a coding task — for code changes use o8_dispatch.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent": { "type": "string", "description": "The agent's codename to message, e.g. 'Nova'." },
+                    "message": { "type": "string", "description": "What to tell them." }
+                },
+                "required": ["agent", "message"]
+            }
+        }),
+        json!({
+            "name": "o8_team_inbox",
+            "description": "Read the recent messages agents have sent each other across the repos — oversight for 'what are the agents saying?', 'any messages between the agents?', 'what did Nova tell Atlas?'. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }),
+        json!({
             "name": "o8_ask",
             "description": "Ask o8's Engineering Brain a question about the codebase, recent work, or the fleet — e.g. 'what did Codex do today?', 'what changed in the orchestrator?', 'how does dispatch work?'. Returns a synthesized answer grounded in o8's organizational memory.",
             "parameters": {
@@ -959,6 +980,8 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
             crate::agent::edit_ctx::apply(&ctx.app, edit, new_text)
         }
         "o8_status" => o8_bridge::status(args).await,
+        "o8_team_tell" => o8_bridge::team_tell(args).await,
+        "o8_team_inbox" => o8_bridge::team_inbox(args).await,
         "o8_needs_me" => o8_bridge::needs_me(args).await,
         "o8_approve_item" => o8_bridge::approve_item(args).await,
         "o8_reject_item" => o8_bridge::reject_item(args).await,

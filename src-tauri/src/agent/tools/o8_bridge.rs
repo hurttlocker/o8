@@ -84,6 +84,46 @@ pub async fn status(args: Value) -> Result<Value, String> {
     }))
 }
 
+/// `o8_team_tell` — relay a message to a running agent by handle (the voice path:
+/// "tell Nova to hold the ship"). The server resolves the codename to the repo
+/// the agent is in and drops a durable message; the agent's guard hook surfaces
+/// it on its next tool call. No repo mutation → Symon does it directly.
+pub async fn team_tell(args: Value) -> Result<Value, String> {
+    let to = args
+        .get("agent")
+        .and_then(|v| v.as_str())
+        .or_else(|| args.get("to").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .trim();
+    let text = args
+        .get("message")
+        .and_then(|v| v.as_str())
+        .or_else(|| args.get("text").and_then(|v| v.as_str()))
+        .unwrap_or("")
+        .trim();
+    if to.is_empty() || text.is_empty() {
+        return Err("Tell whom what? Give the agent's name and a message — e.g. tell Nova to hold the ship.".to_string());
+    }
+    let resp = o8_http::post_json("/api/team/tell", json!({ "to": to, "text": text, "from": "Symon" })).await?;
+    if resp.get("ok").and_then(|v| v.as_bool()) == Some(true) {
+        let who = resp.get("to").and_then(|v| v.as_str()).unwrap_or(to);
+        let repo = resp.get("repo").and_then(|v| v.as_str()).unwrap_or("");
+        let spoken = if repo.is_empty() { format!("Sent to {who}.") } else { format!("Sent to {who} on {repo}.") };
+        Ok(json!({ "ok": true, "delivered_to": who, "repo": repo, "spoken": spoken }))
+    } else {
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("No agent by that name is running.");
+        Ok(json!({ "ok": false, "spoken": err }))
+    }
+}
+
+/// `o8_team_inbox` — recent agent-to-agent messages across the operator's repos
+/// (oversight: "what are the agents saying to each other?"). Read-through.
+pub async fn team_inbox(_args: Value) -> Result<Value, String> {
+    let resp = o8_http::get_json("/api/team/messages?limit=10").await?;
+    let messages = resp.get("messages").and_then(|v| v.as_array()).cloned().unwrap_or_default();
+    Ok(json!({ "count": messages.len(), "messages": messages }))
+}
+
 /// Lane states that won't move without the operator (or at least someone)
 /// looking — the "needs attention" half of `o8_needs_me`. Mirrors `LaneStatus`
 /// in `src/lib/lane/types.ts`.
