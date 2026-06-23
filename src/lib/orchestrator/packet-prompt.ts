@@ -1,5 +1,6 @@
 import { buildContextBlock } from '@/lib/codebase-memory/build-context';
 import { BRAIN_PROMPT_SECTION, resolvePacketBrainEnabled } from '@/lib/orchestrator/brain-access';
+import { HUDDLE_PROMPT_SECTION, resolvePacketHuddleEnabled } from '@/lib/orchestrator/huddle-access';
 import { renderEdgeCaseSections } from '@/lib/dispatch/edge-case-surfacer';
 import { renderReadBudgetSections } from '@/lib/dispatch/read-budget';
 import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-store';
@@ -304,6 +305,10 @@ export async function buildPacketPrompt(
   // setting ('auto' = non-frontier runtimes only). Tells the worker about
   // `o8 ask` so it queries org memory instead of re-deriving it via search.
   const brainSection = resolvePacketBrainEnabled(packet) ? BRAIN_PROMPT_SECTION : null;
+  // Huddle mode (#1282) — armed per-mission by the orchestrator. When on, the
+  // worker posts its plan + pushback and STOPS before editing, so Claude and
+  // Codex align on the approach before implementation.
+  const huddleSection = resolvePacketHuddleEnabled(packet) ? HUDDLE_PROMPT_SECTION : null;
   // #1147 — visual proof. Only nudge UI-shaped packets, and only when they
   // legitimately run their own app (NOT o8's dev servers — the sandbox block
   // above forbids that). Pure-logic packets get nothing (no visual to show).
@@ -368,6 +373,7 @@ export async function buildPacketPrompt(
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
     livePacketSpec,
+    huddleSection,
     packet.branchTarget ? `Branch target: ${packet.branchTarget}` : null,
     packet.dependencyLabels.length > 0 ? `Dependencies: ${packet.dependencyLabels.join(', ')}` : null,
     dependencySections.length > 0 ? 'Dependency handoff context:' : null,

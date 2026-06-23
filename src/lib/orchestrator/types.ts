@@ -217,6 +217,16 @@ export interface OrchestratorPacket {
    */
   useBrain?: boolean;
   /**
+   * Huddle mode (per-packet, armed by the orchestrator). When true,
+   * `buildPacketPrompt` instructs the worker to read the repo, post its plan +
+   * any pushback via `o8 packet report --event huddle`, and STOP before
+   * editing — a bidirectional alignment turn. The orchestrator reviews the
+   * huddle (lane → awaiting_orchestrator) and steers it (`steer_packet`, a warm
+   * resume) before the worker implements. Default off — armed only on packets
+   * the orchestrator wants to align on first (#1282 / Huddle).
+   */
+  huddle?: boolean;
+  /**
    * Provider/runtime routing decision. Production currently enforces Codex as
    * the selected runtime while preserving requested future providers.
    */

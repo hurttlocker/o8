@@ -169,6 +169,7 @@ export async function createMission(input: CreateMissionInput) {
       ...(learnedRules.length > 0 ? { learnedRules } : {}),
       ...(issueMeta ? { issue: issueMeta } : {}),
       ...(typeof input.useBrain === 'boolean' ? { useBrain: input.useBrain } : {}),
+      ...(typeof input.huddle === 'boolean' ? { huddle: input.huddle } : {}),
     } satisfies OrchestratorPacket;
   });
 

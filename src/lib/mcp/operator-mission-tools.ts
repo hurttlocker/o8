@@ -110,6 +110,7 @@ interface CreateMissionInput {
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
+  huddle?: boolean;
 }
 
 interface InlineIssue {
@@ -130,6 +131,7 @@ interface CreateMissionInlineInput {
   sequential?: boolean;
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
+  huddle?: boolean;
 }
 
 interface ApiSuccessResponse<T> {
