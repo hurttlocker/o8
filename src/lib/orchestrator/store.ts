@@ -879,8 +879,12 @@ export function reconcileOrchestratorMissionState(
           next.blockedReason = 'Recovery cooldown — waiting before next attempt.';
           return next;
         }
-        next.status = 'recovering';
-        next.blockedReason = 'Session lost — re-launch to reattach.';
+        // A paused, session-less lane that is NOT in an active recovery cooldown
+        // is dormant/abandoned (a reset or supervisor-auto-escalate leftover), not
+        // live. Synthesize 'idle' so it's hidden from the live SwarmStatusCard
+        // instead of pulsing "Recovering" forever; the lane reaper archives it.
+        // Genuine recovery still surfaces via the cooldown branch above. (#1282)
+        next.status = 'idle';
         return next;
       }
     }

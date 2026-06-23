@@ -91,8 +91,14 @@ export function createOrchestratorMessageHandler(
     // subscribe) can't double-apply tokens. Snapshot/notice sends have no seq.
     if (skipDuplicateBySeq(msg, options.lastSeqRef)) return;
 
-    options.eventCountRef.current += 1;
-    options.lastEventAtRef.current = Date.now();
+    // Snapshot (subscribe-ack) sends are a point-in-time status, NOT live
+    // activity. Counting them advances the reconnect-heal guard AND keeps
+    // resetting the stale-busy watchdog, so a 'busy' snapshot for a dead session
+    // would pin the "Working" timer forever. Only live events advance these. (#1282)
+    if (msg.data?.snapshot !== true) {
+      options.eventCountRef.current += 1;
+      options.lastEventAtRef.current = Date.now();
+    }
 
     // #register-mcp — transient banner notices ride the same channel but
     // don't touch transcript state. They're dispatched to a window listener
