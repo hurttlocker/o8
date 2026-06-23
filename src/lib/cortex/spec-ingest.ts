@@ -346,6 +346,90 @@ function deletePriorSpecDirectives(
   return deleted;
 }
 
+/**
+ * The repo slug embedded in a spec-ingest directive id, or null when the id
+ * isn't a spec-ingest row. Ids are `spec-ingest:<slug>:<file>:<h2>[:<h3>]`, so
+ * the slug is the first segment after the prefix. Lower-cased to match the
+ * basename comparison `directiveAppliesToRepo()` uses.
+ */
+export function specIngestSlugFromId(id: string): string | null {
+  const prefix = `${DIRECTIVE_ID_PREFIX}:`;
+  if (!id.startsWith(prefix)) return null;
+  const slug = id.slice(prefix.length).split(':')[0];
+  return slug ? slug.toLowerCase() : null;
+}
+
+/**
+ * Auto-heal a repo rename (#1228): purge spec-ingest directives whose slug is
+ * claimed by NO registered repo. A rename (cortex-ide → o8) surfaces as a fresh
+ * addRepo at the new path — it re-ingests under the new slug but leaves the old
+ * one's rows behind. `directiveAppliesToRepo()` matches basename(repoPath), so
+ * those stale rows apply to nothing AND still occupy the FTS top-N candidate
+ * slots, starving live directives out of retrieval (the #1228 live-hit: 1,406
+ * stale rows blanked the brain's own spec knowledge for a full day). They
+ * regenerate from the repo's spec files, so purging is pure cleanup.
+ *
+ * Only the `spec-ingest:` prefix is touched — hand-authored `seed-*` directives
+ * are never purged. A rename has no trustworthy old→new mapping (it's just a
+ * new addRepo), so authored seeds stay with the manual migration script.
+ *
+ * SAFETY: returns immediately when `liveSlugs` is empty. A failed repo lookup
+ * must NEVER be read as "every directive is orphaned" — that would wipe the
+ * whole brain. `liveSlugs` is lower-cased internally so a mixed-case caller
+ * can't cause a wrong purge.
+ */
+export function purgeOrphanedSpecDirectives(
+  liveSlugs: Set<string>,
+  opts?: { directivesDir?: string; sqlite?: ReturnType<typeof getSqlite> | null },
+): { purged: number; slugs: string[] } {
+  if (liveSlugs.size === 0) return { purged: 0, slugs: [] };
+  const live = new Set([...liveSlugs].map((s) => s.toLowerCase()));
+
+  const directivesDir = opts?.directivesDir ?? join(getDataDir(), 'directives');
+  let entries: string[] = [];
+  try {
+    entries = readdirSync(directivesDir);
+  } catch {
+    return { purged: 0, slugs: [] };
+  }
+
+  const sqlite = opts?.sqlite !== undefined
+    ? opts.sqlite
+    : (() => { try { return getSqlite(); } catch { return null; } })();
+  const ftsDelete = sqlite
+    ? (() => {
+        try { return sqlite.prepare('DELETE FROM directives_fts WHERE directive_id = ?'); } catch { return null; }
+      })()
+    : null;
+
+  let purged = 0;
+  const purgedSlugs = new Set<string>();
+  for (const name of entries) {
+    if (!name.endsWith('.md')) continue;
+    const path = join(directivesDir, name);
+    let content: string;
+    try { content = readFileSync(path, 'utf-8'); } catch { continue; }
+    const match = content.match(/^id:\s*(.+)$/m);
+    if (!match) continue;
+    const id = match[1].trim();
+    const slug = specIngestSlugFromId(id);
+    if (!slug || live.has(slug)) continue;
+    try {
+      unlinkSync(path);
+      purged += 1;
+      purgedSlugs.add(slug);
+      try { ftsDelete?.run(id); } catch { /* skip */ }
+    } catch {
+      // skip — don't fail the sweep on one file
+    }
+  }
+
+  if (purged > 0) {
+    try { invalidateAnswerCache(); } catch { /* skip */ }
+  }
+  return { purged, slugs: [...purgedSlugs] };
+}
+
 function escapeYamlString(value: string): string {
   return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, ' ').trim();
 }

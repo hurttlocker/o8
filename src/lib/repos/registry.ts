@@ -453,11 +453,35 @@ export async function addRepo(localPath: string) {
 
 async function scheduleSpecIngest(repoPath: string, repoSlug: string): Promise<void> {
   try {
-    const { ingestRepoSpecs } = await import('@/lib/cortex/spec-ingest');
+    const { ingestRepoSpecs, purgeOrphanedSpecDirectives } = await import('@/lib/cortex/spec-ingest');
     const result = await ingestRepoSpecs(repoPath, repoSlug);
     console.log(
       `[spec-ingest] addRepo(${repoSlug}): scanned=${result.scannedFiles} written=${result.writtenDirectives} deletedStale=${result.deletedStaleDirectives}`,
     );
+
+    // #1228 — auto-heal a repo rename. A rename surfaces as a fresh addRepo at
+    // the new path: the ingest above writes the new slug's directives, but the
+    // OLD slug's spec-ingest rows linger, orphaned — they match no live basename
+    // yet still occupy FTS top-N slots, starving live directives. Purge any
+    // spec-ingest slug claimed by no registered repo. Live slugs include BOTH
+    // the registry name and the path basename, since directiveAppliesToRepo()
+    // matches basename(repoPath).
+    try {
+      const repos = await listRepos();
+      const liveSlugs = new Set<string>();
+      for (const repo of repos) {
+        if (repo.name) liveSlugs.add(repo.name.toLowerCase());
+        try { liveSlugs.add(path.basename(repo.localPath).toLowerCase()); } catch { /* skip */ }
+      }
+      const orphan = purgeOrphanedSpecDirectives(liveSlugs);
+      if (orphan.purged > 0) {
+        console.log(
+          `[spec-ingest] #1228 purged ${orphan.purged} orphaned directive(s) from stale slug(s): ${orphan.slugs.join(', ')}`,
+        );
+      }
+    } catch (err) {
+      console.error('[spec-ingest] #1228 orphan purge failed:', err);
+    }
   } catch (err) {
     console.error(`[spec-ingest] addRepo(${repoSlug}) failed:`, err);
   }
