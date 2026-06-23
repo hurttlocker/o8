@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
+import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
@@ -151,12 +152,6 @@ export async function POST(request: NextRequest) {
       ? (m.content as string).replace(/!\[[^\]]*\]\(data:[^)]+\)/g, '[image]')
       : m.content,
   }));
-  const extractedPlanText = extractPlanFromTranscript(messages.map((m: Record<string, unknown>) => ({
-    role: typeof m.role === 'string' ? m.role : undefined,
-    content: m.content,
-    toolCalls: m.toolCalls,
-  })));
-
   // Preserve starred status from existing file
   let starred = false;
   let pinned = false;
@@ -175,8 +170,10 @@ export async function POST(request: NextRequest) {
   let orchestratorSessionIds: Record<string, string | null> | undefined;
   let orchestratorSessionUpdatedAt: string | null | undefined;
   let model: string | undefined;
+  let existingMessages: Array<Record<string, unknown>> = [];
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8'));
+    existingMessages = Array.isArray(existing.messages) ? existing.messages : [];
     starred = existing.starred || false;
     pinned = existing.pinned === true;
     model = normalizeModel(existing.model);
@@ -195,6 +192,21 @@ export async function POST(request: NextRequest) {
     orchestratorSessionIds = normalizeSessionIds(existing.orchestratorSessionIds);
     orchestratorSessionUpdatedAt = normalizeNullableDate(existing.orchestratorSessionUpdatedAt);
   } catch { /* new file */ }
+
+  // #1282 — non-destructive by default: merge the inbound transcript onto the
+  // stored one so a partial/stale POST (e.g. a client that missed a streamed
+  // reply) can never drop a stored turn. Intentional truncation (edit-and-resend
+  // / delete in the single-writer Assistant tab) passes `replace: true` for a
+  // full replace, since a shorter array can't be told apart from a partial here.
+  const finalMessages = body.replace === true
+    ? messages
+    : mergeChatMessages(existingMessages, messages);
+  const extractedPlanText = extractPlanFromTranscript(finalMessages.map((m: Record<string, unknown>) => ({
+    role: typeof m.role === 'string' ? m.role : undefined,
+    content: m.content,
+    toolCalls: m.toolCalls,
+  })));
+
   const nextArchivedAt = body.archivedAt !== undefined
     ? normalizeNullableDate(body.archivedAt) ?? null
     : archivedAt ?? null;
@@ -212,7 +224,7 @@ export async function POST(request: NextRequest) {
     ?? (isThoughtsThread(body.tabId) && nextBackend !== 'openclaw' ? 'claude-code' : undefined);
 
   writeFileSync(filePath, JSON.stringify({
-    messages,
+    messages: finalMessages,
     model: nextModel,
     savedAt: new Date().toISOString(),
     starred: body.starred ?? starred,

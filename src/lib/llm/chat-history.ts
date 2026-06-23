@@ -31,6 +31,12 @@ export async function saveChatHistory(
       body: JSON.stringify({
         tabId,
         messages,
+        // The Assistant tab is single-writer (this client only) and supports
+        // edit-and-resend / delete-message, which intentionally SHORTEN the
+        // transcript. Full-replace keeps those truncations authoritative; the
+        // multi-writer orchestrator threads use the route's merge default so a
+        // partial POST can't drop a turn (#1282).
+        replace: true,
         model,
         repoName: repo?.name,
         repoPath: repo?.localPath,
