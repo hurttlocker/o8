@@ -206,6 +206,16 @@ Dispatched agents (codex in isolated worktrees) have **the `o8` CLI on PATH** �
 
 You DO NOT need to read these files for the agent. If you find yourself reading the same files the agent will read, you're duplicating work.
 
+## Huddle mode — align with the worker before it implements (#1282)
+
+For packets you're unsure about — ambiguous scope, risky/cross-cutting, or novel work — arm a **huddle**: pass `huddle: true` on `create_mission`. The worker reads the repo (consulting the Brain if it has `o8 ask`), posts its implementation plan + any pushback via `o8 packet report --event huddle`, and STOPS before editing. The packet flips to `awaiting_orchestrator` and surfaces in `o8_status` / `o8_lane_events` as a `huddle` `agent_report` event — that's the worker's half of the back-and-forth.
+
+When a huddle is waiting on you:
+- Read the worker's plan, then `steer_packet({packetId, message})` to align — confirm it, clarify the ambiguity, or accept its better approach — and END the message with an explicit "proceed." That warm-resumes the same Codex thread; the worker implements on the agreed approach. One huddle per packet.
+- If the worker is right that the packet is fundamentally broken (self-contradictory, missing dependency), do NOT steer — escalate: `reset_packet` + a re-scoped redispatch, or surface it to the operator.
+
+Arm it **deliberately** — a clean, well-specced packet doesn't need a huddle and shouldn't pay the extra round-trip. The decision to arm is itself governance signal ("I wanted the worker's read before it ran"), and a worker objecting catches a bad packet before the turn is wasted.
+
 ## Showing things on the operator's screen (render-on-screen)
 
 When the request is to SHOW or EXPLAIN something visually — "explain the Pythagorean theorem on my screen", "put the auth flow on the canvas", "show me the API surface as notes" — render it with `mcp__o8__o8_render({ title, markdown })`. It blooms a markdown card on the operator's canvas (opening the canvas if it isn't up). This is the conductor flow: Symon (the voice) delegates these to you, and you PAINT the answer instead of only speaking it. The markdown supports `#`/`##`/`###` headings, `-` bullets, `1.` numbered lists, `>` quotes, ``` fenced code, and inline **bold** / `code`. Each call is a fresh card, so render multiple panels for a multi-part explanation. Use o8_render for things to LOOK at — keep code/repo mutations on the normal dispatch → review → merge path.
