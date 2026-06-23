@@ -12,7 +12,11 @@ export const AGENT_REPORT_REASONS: readonly AgentReportReason[] = [
   'unknown',
 ];
 
-const BLOCKING_AGENT_REPORT_EVENTS = new Set(['blocked', 'question']);
+// `huddle` (#1282 / Huddle mode) is a worker's pre-implementation alignment
+// turn: it posts its plan + any pushback, which flips the lane to
+// `awaiting_orchestrator` exactly like `blocked`/`question` so the orchestrator
+// reviews and steers (warm `codex exec resume`) before the worker edits.
+const BLOCKING_AGENT_REPORT_EVENTS = new Set(['blocked', 'question', 'huddle']);
 
 export interface AgentReportInput {
   laneId?: string;

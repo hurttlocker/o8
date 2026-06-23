@@ -325,6 +325,9 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     typecheckAutoRetries: normalizeAttemptCount(packet.typecheckAutoRetries),
     stallRetries: normalizeAttemptCount(packet.stallRetries),
     operatorStopped: packet.operatorStopped === true ? true : undefined,
+    // Huddle mode (per-mission alignment turn) lives only on the packet — drop
+    // it here and a rerun/re-read would silently disarm the huddle.
+    huddle: packet.huddle === true ? true : undefined,
     blockedReason: typeof packet.blockedReason === 'string' ? packet.blockedReason : null,
     lastEventAt: typeof packet.lastEventAt === 'string' ? packet.lastEventAt : null,
     lastEventLabel: typeof packet.lastEventLabel === 'string' ? packet.lastEventLabel : null,

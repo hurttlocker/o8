@@ -99,6 +99,7 @@ export async function POST(request: NextRequest) {
       sequential: record.sequential === true,
       existingBranchPolicy,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
+      ...(typeof record.huddle === 'boolean' ? { huddle: record.huddle } : {}),
     });
     return operatorSuccess(result, 201);
   } catch (error) {

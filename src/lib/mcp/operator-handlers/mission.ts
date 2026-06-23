@@ -107,6 +107,10 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Engineering Brain for the workers. true: every packet prompt teaches the worker `o8 ask` (instant cited repo answers — use for weaker models or knowledge-heavy tasks). false: suppress. Omit to inherit the operator "Workers use the Brain" setting (auto = on for non-frontier runtimes only).',
         },
+        huddle: {
+          type: 'boolean',
+          description: 'Huddle mode — a bidirectional alignment turn. When true, each worker reads the repo then posts its plan + any pushback (`o8 packet report --event huddle`) and STOPS before editing; you review it (the packet flips to awaiting_orchestrator) and steer it (steer_packet) to align before it implements. Arm it ONLY on packets worth aligning on first — ambiguous scope, risky/cross-cutting, or novel work. Omit (default off) for clear, well-specced packets so they don\'t pay the extra round-trip.',
+        },
       },
       required: ['repoPath'],
     },
@@ -797,6 +801,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const sequential = args.sequential === true;
     const existingBranchPolicy = parseExistingBranchPolicy(args.existingBranchPolicy);
     const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
+    const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
 
     if (inlineIssues) {
       // #453 — Auto-assign synthetic numbers starting at 90001 when not provided
@@ -819,6 +824,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         sequential,
         existingBranchPolicy,
         useBrain,
+        huddle,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
@@ -849,6 +855,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       sequential,
       existingBranchPolicy,
       useBrain,
+      huddle,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {

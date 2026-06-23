@@ -35,6 +35,12 @@ export interface CreateMissionInput {
    * `useBrain`. Omit to inherit the operator `workersUseBrain` setting.
    */
   useBrain?: boolean;
+  /**
+   * Huddle mode (#1282) — stamps every packet's `huddle`. When true, each
+   * worker aligns with the orchestrator (posts plan + pushback, then STOPS)
+   * before editing. Armed per-mission; omit (default off) for clear packets.
+   */
+  huddle?: boolean;
 }
 
 export interface DispatchMissionInput {
