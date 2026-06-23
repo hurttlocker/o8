@@ -136,6 +136,12 @@ interface RepoPickerRowData {
 const ZOOM_KEY = 'o8:canvas-zoom';
 /** Canvas layout mode — 'grid' = form-fit hard placement (#1239), else free-flow. */
 const GRID_MODE_KEY = 'o8:canvas-grid-mode';
+/** Navigator loupe size (#1281) — operator-adjustable via the canvas tuner.
+ *  A standalone pref (mirrors ZOOM_KEY/GRID_MODE_KEY) so glass presets don't
+ *  resize it. The old hardcoded value was 160. */
+const LOUPE_SIZE_KEY = 'o8:canvas-loupe-size';
+const LOUPE_SIZE_DEFAULT = 160;
+const LOUPE_SIZE_RANGE = { min: 120, max: 240, step: 4 };
 // Ordered most-zoomed-IN (index 0) → most-out. "100%" is the home/fit anchor
 // (0.7 actual — cards fit comfortably); 115/130 let the operator zoom IN and
 // make cards + text bigger (the loupe could previously only go smaller). The
@@ -258,6 +264,7 @@ export default function CanvasGlassPreviewPage() {
   const [tunerOpen, setTunerOpen] = useState(false);
   const [orbSettings, setOrbSettings] = useState<OrbSettings>(ORB_DEFAULTS);
   const [canvasZoomLevel, setCanvasZoomLevel] = useState<number>(ZOOM_STEPS.find((step) => step.label === 100)?.value ?? 0.7);
+  const [loupeSize, setLoupeSize] = useState<number>(LOUPE_SIZE_DEFAULT);
   const [personalDefault, setPersonalDefault] = useState<CanvasGlassSettings | null>(null);
   const [activeRepoPath, setActiveRepoPath] = useState<string | null>(null);
   const [composerMenu, setComposerMenu] = useState<'repo' | 'model' | 'mode' | null>(null);
@@ -429,6 +436,8 @@ export default function CanvasGlassPreviewPage() {
       if (window.localStorage.getItem(CANVAS_WELCOME_KEY) !== '1') setWelcomeOpen(true);
       const storedZoom = Number.parseFloat(window.localStorage.getItem(ZOOM_KEY) ?? '');
       if (ZOOM_STEPS.some((step) => step.value === storedZoom)) setCanvasZoomLevel(storedZoom);
+      const storedLoupe = Number.parseFloat(window.localStorage.getItem(LOUPE_SIZE_KEY) ?? '');
+      if (Number.isFinite(storedLoupe) && storedLoupe >= LOUPE_SIZE_RANGE.min && storedLoupe <= LOUPE_SIZE_RANGE.max) setLoupeSize(storedLoupe);
       // Image cards restore through the canvas snapshot (loadCanvasSnapshot)
       // like every other card kind — NOT through a second store here. Loading
       // them in both places spawned a perfect-overlap duplicate that only
@@ -455,6 +464,15 @@ export default function CanvasGlassPreviewPage() {
       // non-critical
     }
   }, [canvasZoomLevel]);
+
+  // Persist the operator-adjustable navigator loupe size (#1281).
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(LOUPE_SIZE_KEY, String(loupeSize));
+    } catch {
+      // non-critical
+    }
+  }, [loupeSize]);
 
   // Kill the text-selection "highlight" a drag leaves behind: dragging the
   // navigator ball / a card / panning the canvas paints a selection across the
@@ -3522,7 +3540,7 @@ export default function CanvasGlassPreviewPage() {
       <NavigatorLoupe
         cards={minimapCards}
         area={loupeArea}
-        size={160}
+        size={loupeSize}
         zoomSteps={ZOOM_STEPS}
         zoomValue={canvasZoomLevel}
         onZoomChange={setCanvasZoomLevel}
@@ -4307,6 +4325,9 @@ export default function CanvasGlassPreviewPage() {
             onChange={updateSettings}
             inTauri={inTauri}
             personalDefault={personalDefault}
+            loupeSize={loupeSize}
+            loupeSizeRange={LOUPE_SIZE_RANGE}
+            onLoupeSizeChange={setLoupeSize}
             onSaveDefault={() => {
               savePersonalDefault(settings);
               setPersonalDefault({ ...settings });
