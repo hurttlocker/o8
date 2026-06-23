@@ -17,21 +17,25 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
-import { isTauri } from '@/lib/tauri/bridge';
+import {
+  captureAppWindow,
+  fileToReportImage,
+  submitReport,
+  MAX_REPORT_MESSAGE,
+  type ReportCategory,
+  type ReportImage,
+} from '@/lib/feedback/report-client';
 import { FONT, glass } from './ui';
 
-type Category = 'bug' | 'request';
 type SendState = 'idle' | 'sending' | 'sent' | 'error';
 
-const MAX_MESSAGE = 4000;
-const MAX_IMAGE_BYTES = 8 * 1024 * 1024;
 const ACCENT = '#f59e0b'; // the canvas one-orange, used sparingly
 
 export function CanvasFeedbackButton() {
   const [open, setOpen] = useState(false);
-  const [category, setCategory] = useState<Category>('bug');
+  const [category, setCategory] = useState<ReportCategory>('bug');
   const [message, setMessage] = useState('');
-  const [image, setImage] = useState<{ dataUrl: string; name: string } | null>(null);
+  const [image, setImage] = useState<ReportImage | null>(null);
   const [state, setState] = useState<SendState>('idle');
   const [error, setError] = useState<string | null>(null);
 
@@ -46,18 +50,7 @@ export function CanvasFeedbackButton() {
   // so the shot is the app state, not this popover), then open with it attached.
   // Falls back to opening empty if capture is unavailable (web) or denied.
   const openWithCapture = useCallback(async () => {
-    let shot: { dataUrl: string; name: string } | null = null;
-    try {
-      if (isTauri()) {
-        const { invoke } = await import('@tauri-apps/api/core');
-        const b64 = await invoke<string | null>('capture_app_window');
-        if (typeof b64 === 'string' && b64) {
-          shot = { dataUrl: `data:image/png;base64,${b64}`, name: 'o8-window.png' };
-        }
-      }
-    } catch {
-      /* no capture — the operator can still paste/drop a shot */
-    }
+    const shot = await captureAppWindow();
     setState('idle');
     setError(null);
     if (shot) setImage(shot);
@@ -75,22 +68,16 @@ export function CanvasFeedbackButton() {
     return () => window.removeEventListener('keydown', onKey);
   }, [openWithCapture]);
 
-  const attachImage = useCallback((file: File | null | undefined) => {
-    if (!file || !file.type.startsWith('image/')) return;
-    if (file.size > MAX_IMAGE_BYTES) {
+  const attachImage = useCallback(async (file: File | null | undefined) => {
+    const result = await fileToReportImage(file);
+    if (result.ok) {
+      setImage(result.image);
+      setState((p) => (p === 'sent' || p === 'error' ? 'idle' : p));
+      setError(null);
+    } else {
       setState('error');
-      setError('Screenshot too large (max 8 MB).');
-      return;
+      setError(result.error);
     }
-    const reader = new FileReader();
-    reader.onload = () => {
-      if (typeof reader.result === 'string') {
-        setImage({ dataUrl: reader.result, name: file.name || 'screenshot.png' });
-        setState((p) => (p === 'sent' || p === 'error' ? 'idle' : p));
-        setError(null);
-      }
-    };
-    reader.readAsDataURL(file);
   }, []);
 
   const onPaste = useCallback((event: React.ClipboardEvent) => {
@@ -99,14 +86,14 @@ export function CanvasFeedbackButton() {
     for (let i = 0; i < items.length; i += 1) {
       if (items[i].type.startsWith('image/')) {
         const file = items[i].getAsFile();
-        if (file) { event.preventDefault(); attachImage(file); return; }
+        if (file) { event.preventDefault(); void attachImage(file); return; }
       }
     }
   }, [attachImage]);
 
   const onDrop = useCallback((event: React.DragEvent) => {
     const file = event.dataTransfer?.files?.[0];
-    if (file) { event.preventDefault(); attachImage(file); }
+    if (file) { event.preventDefault(); void attachImage(file); }
   }, [attachImage]);
 
   const send = useCallback(async () => {
@@ -114,30 +101,14 @@ export function CanvasFeedbackButton() {
     if (!trimmed) { setState('error'); setError('Add a short note first.'); return; }
     setState('sending');
     setError(null);
-    try {
-      const response = await fetch('/api/feedback/report', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          category,
-          message: trimmed,
-          route: 'canvas',
-          userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'unknown',
-          image: image ? { dataUrl: image.dataUrl, name: image.name } : undefined,
-        }),
-      });
-      const body = (await response.json().catch(() => null)) as { ok?: boolean; error?: string } | null;
-      if (!response.ok || !body?.ok) {
-        setState('error');
-        setError(body?.error || `Failed (HTTP ${response.status}).`);
-        return;
-      }
+    const result = await submitReport({ category, message: trimmed, route: 'canvas', image });
+    if (result.ok) {
       setState('sent');
       setMessage('');
       setImage(null);
-    } catch (sendError) {
+    } else {
       setState('error');
-      setError(sendError instanceof Error ? sendError.message : 'Send failed.');
+      setError(result.error);
     }
   }, [category, message, image]);
 
@@ -229,7 +200,7 @@ export function CanvasFeedbackButton() {
 
             <textarea
               value={message}
-              maxLength={MAX_MESSAGE}
+              maxLength={MAX_REPORT_MESSAGE}
               placeholder="What's off, or what would help? (⌘⇧E captures the window; or paste a shot)"
               autoFocus
               onChange={(event) => {
@@ -276,7 +247,7 @@ export function CanvasFeedbackButton() {
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
               <span style={{ fontSize: 11, fontWeight: 300, color: state === 'error' ? '#ef4444' : state === 'sent' ? ACCENT : 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                {state === 'sent' ? 'Sent — thanks ✊🏽' : state === 'error' ? (error ?? 'Send failed.') : `${message.length}/${MAX_MESSAGE}`}
+                {state === 'sent' ? 'Sent — thanks ✊🏽' : state === 'error' ? (error ?? 'Send failed.') : `${message.length}/${MAX_REPORT_MESSAGE}`}
               </span>
               <button
                 type="button"
