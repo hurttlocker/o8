@@ -57,9 +57,30 @@ pub async fn status(args: Value) -> Result<Value, String> {
         }));
     }
 
+    // o8 team peers — the OTHER agents/operators driving o8 right now (the
+    // top-level sessions, named by the same canonical codename as the lanes
+    // above). Lets Symon be peer-aware ("Atlas and Nova are both driving o8").
+    // Best-effort: a missing/empty coordination room just yields [].
+    let peers: Vec<Value> = o8_http::get_json("/api/team/presence")
+        .await
+        .ok()
+        .and_then(|p| p.get("peers").and_then(|v| v.as_array()).cloned())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|p| match &repo_filter {
+            Some(f) => p
+                .get("repo")
+                .and_then(|v| v.as_str())
+                .map(|r| r.to_lowercase().contains(f))
+                .unwrap_or(false),
+            None => true,
+        })
+        .collect();
+
     Ok(json!({
         "active_count": items.len(),
         "lanes": items,
+        "peers": peers,
     }))
 }
 
