@@ -47,6 +47,13 @@ const RRF_K = 60;
 // out directives/outcomes/PRs/issues. Tweak alongside MERGE_LIMIT in
 // retrieve.ts if recall starts slipping.
 const DOCS_PER_INDEX_LIMIT = 8;
+// #1228 — directives get scope-filtered (directiveInScope) AFTER the FTS top-N
+// cut, so out-of-scope rows (e.g. orphaned old-slug directives after a repo
+// rename) used to occupy all PER_INDEX_LIMIT (20) slots and starve live ones
+// out of the candidate pool entirely. Over-fetch the directives index so the
+// scope-filter has enough headroom to surface in-scope directives even when
+// many stale rows match. The downstream RRF merge still caps the final output.
+const DIRECTIVES_PER_INDEX_LIMIT = 80;
 
 /** Sanitize a query string for FTS5 MATCH. FTS5 is picky:
  *   - Bare punctuation = parse error
@@ -340,7 +347,9 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
       merge(outcomesHits, ftsSearch(sqlite, 'outcomes_fts', 'outcome_id', match));
       merge(prsHits, ftsSearch(sqlite, 'prs_fts', 'pr_id', match));
       merge(issuesHits, ftsSearch(sqlite, 'issues_fts', 'issue_id', match));
-      merge(directivesHits, ftsSearch(sqlite, 'directives_fts', 'directive_id', match));
+      // Over-fetch (#1228): scope-filtering happens after this cut, so a wider
+      // candidate pool keeps orphaned old-slug rows from starving live directives.
+      merge(directivesHits, ftsSearch(sqlite, 'directives_fts', 'directive_id', match, DIRECTIVES_PER_INDEX_LIMIT));
       // Comments table may not exist on installs that haven't applied schema
       // v15 yet — ftsSearch swallows the error and returns []. The retriever
       // stays no-op in that case and the rest of the FTS5 path keeps working.
@@ -552,6 +561,15 @@ export async function ftsRetriever(input: RetrieverInput): Promise<RetrieverResu
       const byId = new Map(records
         .filter((record) => directiveInScope(record.directive_id, input, scope.directiveScope))
         .map((r) => [r.directive_id, r]));
+      // #1228 health signal — if most directive candidates fall out of scope,
+      // the repo likely has orphaned old-slug directives (a rename left them
+      // stamped with the previous basename). Log loudly so it never silently
+      // blanks the brain again; the fix is scripts/migrate-directive-repo-slug.ts.
+      if (records.length >= 8 && byId.size / records.length < 0.5) {
+        console.warn(
+          `[brain-health] ${records.length - byId.size}/${records.length} directive candidates scope-filtered out for repo ${input.repoPath ?? '(none)'} — possible orphaned slug after a repo rename. Run scripts/migrate-directive-repo-slug.ts <oldSlug> <repoPath> if directives went missing.`,
+        );
+      }
       sortedIds.forEach((id, idx) => {
         const record = byId.get(id);
         if (!record) return;
