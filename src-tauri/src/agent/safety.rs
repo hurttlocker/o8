@@ -133,6 +133,12 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         // Watching only observes a window the user explicitly named; the
         // one-shot spoken announcement is the entire side effect.
         "term_watch" => SafetyClass::ReadOnly,
+        // Killing an agent reaps a live runtime process + archives the lane →
+        // Destructive in spirit, but Destructive tools are withheld from the
+        // model entirely, so Reversible keeps it reachable by voice and ALWAYS
+        // cards in V1 (blanket consent hardcoded OFF). NOTE: if blanket consent
+        // ever ships, EXCLUDE o8_stop_agent — a kill must never go silent.
+        "o8_stop_agent" => SafetyClass::Reversible,
         // Packet verbs reach a live worker / spawn a fresh one → carded.
         "o8_packet_steer" => SafetyClass::Reversible,
         // Address a working agent by its canvas name and steer it → carded.

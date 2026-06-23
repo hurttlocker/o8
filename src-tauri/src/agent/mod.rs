@@ -136,7 +136,10 @@ pub(crate) fn system_prompt() -> String {
          term_interrupt/term_key stop or answer one — always term_list first, \
          and pass the title so the user hears the target. For packets: \
          o8_packet_steer tells a running worker something, o8_packet_rerun \
-         restarts one fresh; o8_orchestrator_draft puts a message in the \
+         restarts one fresh, o8_stop_agent KILLS one — or all with all:true — \
+         reaping its process and archiving it with NO relaunch (the clean-up \
+         move for a stuck/unwanted/test agent: \"kill that agent\", \"stop \
+         everything\"); o8_orchestrator_draft puts a message in the \
          orchestrator's composer as a draft the user sends; gh_issue_create \
          files an issue the user dictates; o8_add_repo connects a local git \
          folder to o8 (spoken folder name → fs_spotlight kind:folder for the \
@@ -636,6 +639,18 @@ fn confirm_summary(tool_name: &str, args: &Value) -> String {
                 format!("Restart the “{}” packet fresh", s("packet"))
             } else {
                 format!("Restart the “{}” packet with feedback: {feedback}", s("packet"))
+            }
+        }
+        "o8_stop_agent" => {
+            if args.get("all").and_then(|v| v.as_bool()).unwrap_or(false) {
+                let repo = s("repo");
+                if repo.is_empty() {
+                    "Stop ALL running agents (kill them, no relaunch)".to_string()
+                } else {
+                    format!("Stop all agents in {repo} (kill them, no relaunch)")
+                }
+            } else {
+                format!("Stop the “{}” agent — kill it and archive it, no relaunch", s("packet"))
             }
         }
         "gh_issue_create" => format!("File the issue “{}” on {}", s("title"), s("repo")),

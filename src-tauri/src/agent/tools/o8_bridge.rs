@@ -929,6 +929,62 @@ pub async fn packet_reset(args: Value) -> Result<Value, String> {
     }))
 }
 
+/// `o8_stop_agent` — KILL/STOP an agent (the symmetric counterpart to spawn).
+/// Reaps the live runtime PROCESS and archives the lane + prunes the worktree,
+/// with NO relaunch — distinct from o8_packet_reset, which relaunches and can
+/// leave an orphaned `codex exec` churning against a pruned worktree (#1286).
+/// `all:true` stops every active agent (clean slate), optionally scoped to a repo.
+pub async fn stop_agent(args: Value) -> Result<Value, String> {
+    let all = args.get("all").and_then(|v| v.as_bool()).unwrap_or(false);
+
+    if all {
+        let mut body = json!({ "all": true });
+        if let Some(repo) = args
+            .get("repo")
+            .and_then(|v| v.as_str())
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+        {
+            let repo_path = resolve_repo_path(repo).await?;
+            body["repoPath"] = json!(repo_path);
+        }
+        let resp = o8_http::post_json("/api/orchestrator/stop-packet", body)
+            .await
+            .map_err(|e| format!("Couldn't stop the agents: {e}"))?;
+        crate::agent::worker_pulse::nudge();
+        let result = resp.get("result").cloned().unwrap_or_else(|| json!({}));
+        let reaped = result.get("interruptedSessions").and_then(|v| v.as_i64()).unwrap_or(0);
+        let archived = result.get("archivedLanes").and_then(|v| v.as_i64()).unwrap_or(0);
+        let packets = result.get("stoppedPackets").and_then(|v| v.as_i64()).unwrap_or(0);
+        return Ok(json!({
+            "ok": true,
+            "scope": "all",
+            "reaped": reaped,
+            "archived": archived,
+            "packets": packets,
+            "note": format!("stopped everything — killed {reaped} live session(s) and archived {archived} agent(s); nothing relaunched"),
+        }));
+    }
+
+    let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
+    let (packet_id, _session, label) = resolve_lane(which).await?;
+    let resp = o8_http::post_json(
+        "/api/orchestrator/stop-packet",
+        json!({ "packetId": packet_id }),
+    )
+    .await
+    .map_err(|e| format!("Couldn't stop \u{201c}{label}\u{201d}: {e}"))?;
+    crate::agent::worker_pulse::nudge();
+    let result = resp.get("result").cloned().unwrap_or_else(|| json!({}));
+    let reaped = result.get("interruptedSessions").and_then(|v| v.as_i64()).unwrap_or(0);
+    Ok(json!({
+        "ok": true,
+        "packet": label,
+        "reaped": reaped,
+        "note": format!("stopped \u{201c}{label}\u{201d} — killed the process and archived it; not relaunched"),
+    }))
+}
+
 /// `o8_packet_wait` — wait for a packet to leave the "working" state and report
 /// where it landed (ready-to-merge / needs-revision / merged / failed). A short
 /// bounded poll (~12s) so a live voice turn doesn't hang; if it's still working,
