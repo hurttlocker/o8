@@ -9,6 +9,7 @@ import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-regist
 import type { Lane } from './types';
 import {
   appendEvent,
+  archiveLane,
   getLane,
   listActiveLanes,
   updateLane,
@@ -338,6 +339,26 @@ export async function reapZombieLanes(options: {
   return reaped;
 }
 
+// A lane that lost its session and is NOT actively recovering (no auto-escalate
+// re-attempt) gets stuck in `paused`/`recovering` with an empty session_key
+// forever — it renders as a phantom "Recovering" agent and never terminalizes.
+// Archive any that have been dead this long so they stop showing and don't
+// accumulate. Generous threshold so a brief legitimate pause/recovery is safe. (#1282)
+export const STALE_DEAD_LANE_MS = 15 * 60_000;
+
+export function archiveStaleDeadLanes(now: number = Date.now()): number {
+  let archived = 0;
+  for (const lane of listActiveLanes()) {
+    if (lane.status !== 'paused' && lane.status !== 'recovering') continue;
+    if (lane.sessionKey) continue; // still owns a session — leave it alone
+    const lastTouch = lane.lastEventAt ? Date.parse(lane.lastEventAt) : Number.NaN;
+    const staleMs = Number.isFinite(lastTouch) ? now - lastTouch : Number.MAX_SAFE_INTEGER;
+    if (staleMs <= STALE_DEAD_LANE_MS) continue;
+    if (archiveLane(lane.id, 'system')) archived += 1;
+  }
+  return archived;
+}
+
 export async function runLaneZombieReaperTick(): Promise<void> {
   if (zombieReaperInFlight) return;
   zombieReaperInFlight = true;
@@ -347,6 +368,10 @@ export async function runLaneZombieReaperTick(): Promise<void> {
       console.log(
         `[lane-reaper] ${item.candidate.lane.id} stale ${Math.round(item.candidate.staleMs / 1000)}s; owner dead via ${item.candidate.probe.source} — recovering`,
       );
+    }
+    const archivedDead = archiveStaleDeadLanes();
+    if (archivedDead > 0) {
+      console.log(`[lane-reaper] archived ${archivedDead} stale dead lane(s) (paused/recovering, no session)`);
     }
   } finally {
     zombieReaperInFlight = false;
