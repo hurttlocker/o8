@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { homedir } from 'node:os';
+import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
 import type {
   MobileTranscriptEntry,
   MobileTranscriptMedia,
@@ -94,14 +95,20 @@ export function readPersistedLlmChat(tabId: string): PersistedLlmChatRecord | nu
   }
 }
 
-export function writePersistedLlmChat(tabId: string, history: PersistedLlmChatHistory) {
+export function writePersistedLlmChat(
+  tabId: string,
+  history: PersistedLlmChatHistory,
+  opts?: { replace?: boolean },
+) {
   ensureDir();
   const filePath = safePath(tabId);
   let starred = false;
   let title: string | undefined;
   let planText: string | undefined;
+  let existingMessages: PersistedLlmChatMessage[] = [];
   try {
     const existing = JSON.parse(readFileSync(filePath, 'utf-8')) as PersistedLlmChatHistory;
+    existingMessages = Array.isArray(existing.messages) ? existing.messages : [];
     starred = existing.starred || false;
     title = existing.title;
     planText = normalizePlanText(existing.planText);
@@ -109,9 +116,18 @@ export function writePersistedLlmChat(tabId: string, history: PersistedLlmChatHi
     // no existing history
   }
 
+  // #1282 — non-destructive store: merge onto the on-disk transcript so a partial
+  // write, or a stale read-modify-write racing a concurrent writer (e.g. the
+  // desktop ws-server upserting a reply), can never drop a stored turn. This is
+  // the second write path alongside the /api/v2/chat-history route. Pass
+  // replace:true only for an intentional truncation (none today).
+  const mergedMessages = opts?.replace === true
+    ? history.messages
+    : mergeChatMessages(existingMessages, history.messages);
+
   writeFileSync(filePath, JSON.stringify({
     ...history,
-    messages: history.messages.map(stripImages),
+    messages: mergedMessages.map(stripImages),
     savedAt: new Date().toISOString(),
     starred: history.starred ?? starred,
     title: history.title ?? title,

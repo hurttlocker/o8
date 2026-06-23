@@ -25,7 +25,6 @@
 export interface ChatMessageLike {
   id?: unknown;
   timestamp?: unknown;
-  [key: string]: unknown;
 }
 
 function timestampOf(message: ChatMessageLike): number | null {
