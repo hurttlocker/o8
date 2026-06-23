@@ -26,6 +26,13 @@ export interface FlagCache {
  * still cached process-wide and never re-fetched. A genuine `false` from the
  * server is a successful read, so a legitimately-off flag is honored on the
  * first try and never retried.
+ *
+ * REACTIVE TO SIGN-IN (#1277): the read is also re-run on the
+ * `o8:entitlement-refresh` window event (dispatched by O8AuthProvider after a
+ * Clerk sign-in / entitlement sync). Without this, the module cache held the
+ * signed-out value and founder perks + experimental flags only flipped after a
+ * manual reload. On the event we bust the SHARED cache and re-fetch, so every
+ * consumer reflects the new plan live.
  */
 export function useRetryingRemoteFlag(
   fetchFlag: (signal?: AbortSignal) => Promise<boolean | null>,
@@ -33,38 +40,57 @@ export function useRetryingRemoteFlag(
 ): boolean {
   const [flag, setFlag] = useState<boolean>(cache.value ?? false);
   useEffect(() => {
-    if (cache.value !== null) {
-      setFlag(cache.value);
-      return;
-    }
     let cancelled = false;
-    const controller = new AbortController();
+    let controller = new AbortController();
     // Back off across a boot race / brief API blip before giving up (~11.7s of
     // attempts). One cheap GET per attempt; only fires while the read keeps
     // failing — a success or a real `false` ends it immediately.
     const delays = [400, 800, 1500, 3000, 6000];
-    let attempt = 0;
+
     const run = () => {
-      void fetchFlag(controller.signal).then((value) => {
-        if (cancelled) return;
-        if (value === null) {
-          if (attempt < delays.length) {
-            const wait = delays[attempt];
-            attempt += 1;
-            window.setTimeout(() => {
-              if (!cancelled) run();
-            }, wait);
+      let attempt = 0;
+      const attemptFetch = () => {
+        void fetchFlag(controller.signal).then((value) => {
+          if (cancelled) return;
+          if (value === null) {
+            if (attempt < delays.length) {
+              const wait = delays[attempt];
+              attempt += 1;
+              window.setTimeout(() => {
+                if (!cancelled) attemptFetch();
+              }, wait);
+            }
+            return;
           }
-          return;
-        }
-        cache.value = value;
-        setFlag(value);
-      });
+          cache.value = value;
+          setFlag(value);
+        });
+      };
+      attemptFetch();
     };
-    run();
+
+    // Honor a cached value on mount; otherwise fetch (with retry).
+    if (cache.value !== null) {
+      setFlag(cache.value);
+    } else {
+      run();
+    }
+
+    // Sign-in / entitlement change → bust the SHARED cache + re-fetch so the new
+    // plan flips without a reload. Every mounted consumer re-reads; the first
+    // success repopulates the cache for later mounts.
+    const onRefresh = () => {
+      cache.value = null;
+      controller.abort();
+      controller = new AbortController();
+      run();
+    };
+    window.addEventListener('o8:entitlement-refresh', onRefresh);
+
     return () => {
       cancelled = true;
       controller.abort();
+      window.removeEventListener('o8:entitlement-refresh', onRefresh);
     };
   }, [fetchFlag, cache]);
   return flag;
