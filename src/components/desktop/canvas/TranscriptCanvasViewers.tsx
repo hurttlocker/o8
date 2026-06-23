@@ -385,7 +385,7 @@ function CanvasEmptyBase({
   mode?: 'idle' | 'welcome';
 }) {
   const repoLabel = canvasEmptyRepoLabel(selectedRepo);
-  const title = mode === 'welcome' ? 'Canvas ready' : 'Content will appear here';
+  const title = mode === 'welcome' ? 'Canvas ready' : 'Hello, operator';
   const subtitle = repoLabel
     ? `Click an issue, file, or transcript from ${repoLabel} and the inspector will open here.`
     : 'Click an issue, file, or transcript and the inspector will open here.';
