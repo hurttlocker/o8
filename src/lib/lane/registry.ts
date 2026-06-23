@@ -689,7 +689,18 @@ export function reconcileLanesWithSessions(
     );
 
     for (const lane of currentLanes) {
-      if (lane.status === 'archived' || lane.status === 'completed' || lane.status === 'failed') continue;
+      // #1282 — once a lane reaches an authoritative "work done / merge in
+      // progress" status, session liveness must NOT downgrade it. A Codex
+      // worker that finished but keeps emitting transcript would otherwise flip
+      // `reviewing` back to `running` below (the lane reads as hung, the
+      // reviewable packet never surfaces, and wait_for_mission_ready never
+      // wakes). The lane status is the truth here; the session is a heuristic.
+      // (`awaiting_orchestrator` — incl. the Huddle alignment turn — keeps its
+      // own continue below so the warm session survives for steer_packet.)
+      if (
+        lane.status === 'archived' || lane.status === 'completed' || lane.status === 'failed'
+        || lane.status === 'reviewing' || lane.status === 'merging'
+      ) continue;
 
       if (lane.sessionKey) {
         const session = sessionByKey.get(lane.sessionKey);
@@ -765,7 +776,10 @@ export function reconcileLanesWithSessions(
           nextValues.lastEventAt = now;
           nextValues.lastEventLabel = 'awaiting_input';
           lifecycleTimestamp = now;
-        } else if (session.status === 'reviewing' && lane.status !== 'reviewing') {
+        } else if (session.status === 'reviewing') {
+          // A lane already in `reviewing` was skipped by the authoritative-status
+          // guard above (#1282), so this only promotes a still-active lane whose
+          // session just reported done — never a redundant self-write.
           const now = nowIso();
           nextValues.status = 'reviewing';
           nextValues.lastEventAt = now;
