@@ -168,6 +168,8 @@ const GATED_PREFIXES = [
   // One-way beta feedback intake posts operator reports to the private team
   // webhook. Keep it same-origin/loopback so the webhook can't be abused.
   '/api/feedback/',
+  // o8 team peer presence — reads local agent-coordination files; loopback only.
+  '/api/team/',
   // Setup routes are gated too — GET is allowlisted above, POST needs loopback
   // or a token (so an evil cross-origin page can't POST to /api/setup/claude-desktop
   // and silently write to the user's Claude config).
