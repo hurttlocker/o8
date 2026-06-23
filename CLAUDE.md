@@ -123,6 +123,8 @@ These are **completely separate codebases** by design. No shared components. Mob
 
 SQLite via better-sqlite3 + Drizzle ORM. Data dir: `~/.o8/` (override: `CORTEX_IDE_DATA_DIR`). WAL mode, normal sync, FK constraints on. Schema auto-migrates on first `getDb()` call — markers at `~/.o8/.db-migrated-v*`.
 
+**The main DB file is `~/.o8/cortex-ide.db`** — `lanes`, `lane_events`, `approvals`, `chat_history`, `session_outcomes`, GitHub mirror, etc. all live here (it's the `getDb()` target). Other DBs in the dir: `~/.o8/agent.db` (Symon voice agent), `~/.o8/skeleton.db` (skeleton/render cache); `~/.o8/o8.db` and `~/.o8/cortex.db` are legacy/empty. To inspect lane state directly (debugging phantom/zombie lanes): `sqlite3 ~/.o8/cortex-ide.db "SELECT id,status,session_key,last_event_label FROM lanes WHERE status NOT IN ('merged','archived','released','completed')"`. The app holds this DB open (WAL) — direct writes are visible to the running app on its next read, but its in-memory orchestrator store won't reflect them until a reload.
+
 Core tables (current schema): `users`, `api_keys` (AES-256-GCM encrypted), `usage_logs`, `subscriptions`, `sessions`, `teams`, `team_members`, `waitlist`, `session_outcomes` (Cortex v2 ledger), `lanes`, `lane_events`, `approvals`, `approval_events`, `watched_agents`, `chat_history`, `automations`, `dispatch_rules`, `external_mcp_servers`, `push_subscriptions`, `review_queue`, `supervisor_inbox`, `worker_events` / `worker_runs` / `worker_tokens`, `github_installations` / `github_repositories` / `github_issues` / `github_pull_requests` / `github_sync_state`. FTS5 indexes on comments, docs, facts (migrations v14–v20). Source: `src/lib/db/schema.ts`.
 
 ### Theming (`src/lib/theme/`)
