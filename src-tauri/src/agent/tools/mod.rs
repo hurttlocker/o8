@@ -564,6 +564,19 @@ pub fn all_tools() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "o8_stop_agent",
+            "description": "KILL / STOP a running agent — the opposite of spawning one. 'kill that agent', 'stop the agent on o8-mobile', 'stop everything', 'kill all the agents'. Reaps the live runtime PROCESS and archives the lane + prunes the worktree, with NO relaunch — use this to clean up a stuck, unwanted, or test agent. (A plain o8_packet_reset RELAUNCHES and can leave a zombie process; this does not.) Name the agent/packet to stop ONE, or set all:true (optionally scoped to a repo) for a clean slate.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "packet": { "type": "string", "description": "Which agent/packet to stop (fuzzy match on its label/codename). Omit only when all:true." },
+                    "all": { "type": "boolean", "description": "true = stop EVERY active agent (clean slate). Optionally scope with `repo`." },
+                    "repo": { "type": "string", "description": "With all:true, limit the clean slate to this repo (folder name or path). Omit to stop agents everywhere." }
+                },
+                "required": []
+            }
+        }),
+        json!({
             "name": "o8_packet_wait",
             "description": "Wait for a coding packet to finish and report where it landed — 'tell me when the auth packet is ready'. Polls briefly (~12s) and reports its review state (working / ready-to-merge / needs-revision / merged / failed). If it's still working, say so — ask again to keep waiting. Name the packet, or omit for the only active one.",
             "parameters": {
@@ -1037,6 +1050,7 @@ pub async fn dispatch_tool_call(name: &str, args: Value, ctx: &TaskCtx) -> Resul
         "o8_delegate" => o8_bridge::delegate(args).await,
         "o8_spec_annotate" => o8_bridge::spec_annotate(args).await,
         "o8_packet_reset" => o8_bridge::packet_reset(args).await,
+        "o8_stop_agent" => o8_bridge::stop_agent(args).await,
         "o8_packet_wait" => o8_bridge::packet_wait(args).await,
         "read_screen" => crate::agent::screen::read_screen(ctx, args).await,
         "o8_ui_open" => o8_ui::open(&ctx.app, args),
