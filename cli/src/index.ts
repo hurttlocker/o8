@@ -36,6 +36,7 @@ import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
 import { runPacketDiff } from './commands/packet/diff.js';
 import { runPacketCommit } from './commands/packet/commit.js';
 import { runSpec } from './commands/spec.js';
+import { runTeam } from './commands/team.js';
 import {
   runTaskArchive,
   runTaskBlock,
@@ -215,6 +216,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     }
     case 'spec':
       return runSpec(args.mode, secondary, args.rest);
+    case 'team':
+      return runTeam(args.mode, secondary, args.rest);
     default:
       throw new CliError(
         'unknown_command',
