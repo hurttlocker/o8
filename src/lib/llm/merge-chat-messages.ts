@@ -16,6 +16,9 @@
  *   interleaved case where a preserved reply belongs *between* two inbound
  *   messages). Missing/invalid timestamps carry the prior message's value so
  *   they stay put; ties keep concat order (inbound before preserved).
+ * - A `timestamp` is a CREATION time and never moves: on an id match the
+ *   earlier of the two timestamps wins, so a client that re-POSTs an existing
+ *   message stamped Date.now() can't shove it to the bottom of the thread.
  *
  * Intentional truncation (edit-and-resend / delete-message in the single-writer
  * Assistant tab) must NOT go through here — those callers pass `replace: true`
@@ -41,8 +44,36 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
   const inboundList = Array.isArray(inbound) ? inbound : [];
   const existingList = Array.isArray(existing) ? existing : [];
 
+  // A message's `timestamp` is its CREATION time — immutable for ordering. Some
+  // clients re-POST an existing message stamped with Date.now() (a mobile sync
+  // path did exactly this: it re-sent the user's messages stamped "now" as a
+  // partial, so — because we sort by timestamp — every reply floated ABOVE the
+  // question it answered). On an id match we therefore pin the inbound message
+  // back to the EARLIER of the two timestamps: a re-stamp can never push a
+  // message forward, so no client bug can reorder a thread. (The Assistant
+  // tab's legitimate edits bypass merge entirely via replace:true.)
+  const existingTsById = new Map<string, number>();
+  for (const message of existingList) {
+    if (message && typeof message.id === 'string') {
+      const ts = timestampOf(message);
+      if (ts !== null) existingTsById.set(message.id, ts);
+    }
+  }
+  let pinnedAny = false;
+  const normalizedInbound = inboundList.map((message) => {
+    if (!message || typeof message.id !== 'string') return message;
+    const priorTs = existingTsById.get(message.id);
+    if (priorTs === undefined) return message;
+    const ownTs = timestampOf(message);
+    if (ownTs === null || priorTs < ownTs) {
+      pinnedAny = true;
+      return { ...message, timestamp: priorTs } as T;
+    }
+    return message;
+  });
+
   const inboundIds = new Set<string>();
-  for (const message of inboundList) {
+  for (const message of normalizedInbound) {
     if (message && typeof message.id === 'string') inboundIds.add(message.id);
   }
 
@@ -53,11 +84,13 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
     (message) => !(message && typeof message.id === 'string' && inboundIds.has(message.id)),
   );
 
-  // Fast path: inbound already covers everything on disk (the normal
-  // full-transcript POST) — return it untouched, no reordering.
-  if (preserved.length === 0) return inboundList;
+  // Fast path: inbound already covers everything on disk AND no timestamp had
+  // to be pinned (the normal full-transcript POST) — return it untouched, no
+  // reordering. If we pinned anything we must fall through to the sort so the
+  // corrected timestamps actually reorder the thread.
+  if (preserved.length === 0 && !pinnedAny) return inboundList;
 
-  const concat: T[] = [...inboundList, ...preserved];
+  const concat: T[] = [...normalizedInbound, ...preserved];
   const decorated = concat.map((message, index) => ({ message, index, ts: timestampOf(message) }));
   // Carry a missing/invalid timestamp forward from the prior message so an
   // unstamped row sorts next to where it actually sat.

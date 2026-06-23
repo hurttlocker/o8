@@ -51,4 +51,33 @@ describe('mergeChatMessages (#1282 transcript-loss)', () => {
     const inbound = [msg('u1', 'user', 100)];
     expect(mergeChatMessages(existing, inbound).length).toBe(2);
   });
+
+  it('pins a re-stamped message back to its original time (mobile Date.now() bug)', () => {
+    // Mobile re-POSTs the user messages stamped "now" (300) — far later than
+    // their real creation times — as a partial (assistant replies omitted).
+    const existing = [
+      msg('u1', 'user', 100),
+      msg('a1', 'assistant', 110),
+      msg('u2', 'user', 200),
+      msg('a2', 'assistant', 210),
+    ];
+    const inbound = [msg('u1', 'user', 300), msg('u2', 'user', 300)];
+    const merged = mergeChatMessages(existing, inbound);
+    // Order stays chronological by ORIGINAL creation time — replies must NOT
+    // float above the questions they answer.
+    expect(merged.map((m) => m.id)).toEqual(['u1', 'a1', 'u2', 'a2']);
+    // And the persisted timestamp is pinned back to the original, not "now".
+    expect(merged.find((m) => m.id === 'u1')?.timestamp).toBe(100);
+    expect(merged.find((m) => m.id === 'u2')?.timestamp).toBe(200);
+  });
+
+  it('pins re-stamped timestamps even on a full-transcript POST (no preserved)', () => {
+    const existing = [msg('u1', 'user', 100), msg('a1', 'assistant', 110)];
+    // Full transcript, but the client re-stamped the user msg to "now" (300)
+    // and emitted it last — the merge must re-sort it to its real slot.
+    const inbound = [msg('a1', 'assistant', 110), msg('u1', 'user', 300)];
+    const merged = mergeChatMessages(existing, inbound);
+    expect(merged.map((m) => m.id)).toEqual(['u1', 'a1']);
+    expect(merged.find((m) => m.id === 'u1')?.timestamp).toBe(100);
+  });
 });
