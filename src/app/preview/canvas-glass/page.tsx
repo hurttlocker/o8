@@ -243,6 +243,16 @@ const LISSE_PANEL_SURFACE = {
   color: 'var(--cnv-ink)',
 } as React.CSSProperties;
 
+/** Home-dir agents (#1244): an all-local agent CLI spawned in $HOME as its own
+ *  canvas card — no repo, worktree, dispatch, or merge governance. Reuses the
+ *  terminal-in-~ PTY path; the chosen `command` is sent to the shell on attach.
+ *  opencode is intentionally omitted (experimentalOpencode-gated elsewhere). */
+const HOME_AGENTS: { id: string; label: string; command: string }[] = [
+  { id: 'claude', label: 'Claude', command: 'claude' },
+  { id: 'codex', label: 'Codex', command: 'codex' },
+  { id: 'gemini', label: 'Gemini', command: 'gemini' },
+];
+
 export default function CanvasGlassPreviewPage() {
   const canvasEnabled = useExperimentalCanvasFlag();
   const [settings, setSettings] = useState<CanvasGlassSettings>(CANVAS_GLASS_DEFAULTS);
@@ -400,10 +410,11 @@ export default function CanvasGlassPreviewPage() {
         const escaped = card.cwd.replace(/'/g, `'\\''`);
         sendTerminalInput(sessionName, `cd '${escaped}' && clear\n`);
       }
-      // Home agent (#1244): auto-launch the local Claude CLI — an all-local
-      // agent in the home dir (cwd null → PTY's HOME default), no repo/worktree.
-      if (card.runAgent) {
-        sendTerminalInput(sessionName, 'claude\n');
+      // Home agent (#1244): auto-launch the chosen local agent CLI — an
+      // all-local agent in the home dir (cwd null → PTY's HOME default), no
+      // repo/worktree. `agentCli` is the command (claude | codex | gemini).
+      if (card.agentCli) {
+        sendTerminalInput(sessionName, `${card.agentCli}\n`);
       }
     },
     onTerminalExited: (sessionName) => {
@@ -1566,7 +1577,7 @@ export default function CanvasGlassPreviewPage() {
   }, [gridMode, layoutGrid]);
 
   /** Spawn a REAL shell — production transport, canvas treatment. */
-  const spawnTerminal = useCallback((cwd: string | null, cwdLabel: string | null, at?: SnapGeometry, opts?: { runAgent?: boolean }) => {
+  const spawnTerminal = useCallback((cwd: string | null, cwdLabel: string | null, at?: SnapGeometry, opts?: { agentCli?: string }) => {
     const id = nextIdRef.current;
     nextIdRef.current += 1;
     const requestId = `cnv-term-${id}-${Math.random().toString(36).slice(2, 8)}`;
@@ -1589,7 +1600,7 @@ export default function CanvasGlassPreviewPage() {
       z,
       cwd,
       cwdLabel,
-      runAgent: opts?.runAgent ?? false,
+      agentCli: opts?.agentCli,
     }]);
     sendTerminalCreate(120, 30, requestId, cwd ?? undefined);
   }, [findFreeSpot, sendTerminalCreate]);
@@ -3601,16 +3612,20 @@ export default function CanvasGlassPreviewPage() {
                   WebkitMaskImage: 'linear-gradient(to bottom, transparent 0, black 26px, black calc(100% - 30px), transparent 100%)',
                 } as React.CSSProperties}
               >
-                <PickerRow
-                  name="Claude agent"
-                  path="local · ~"
-                  onClick={() => {
-                    // Home agent (#1244): a Claude session in the home dir, all-local
-                    // (no repo / worktree / governance) — auto-launches `claude` on attach.
-                    spawnTerminal(null, 'Claude · ~', undefined, { runAgent: true });
-                    setTermPickerOpen(false);
-                  }}
-                />
+                {HOME_AGENTS.map((agent) => (
+                  <PickerRow
+                    key={agent.id}
+                    name={`${agent.label} agent`}
+                    path="local · ~"
+                    onClick={() => {
+                      // Home agent (#1244): an all-local agent CLI session in the
+                      // home dir (no repo / worktree / governance) — auto-launches
+                      // the chosen CLI on attach. Bypasses the mission pipeline.
+                      spawnTerminal(null, `${agent.label} · ~`, undefined, { agentCli: agent.command });
+                      setTermPickerOpen(false);
+                    }}
+                  />
+                ))}
                 <PickerRow
                   name="Home"
                   path="~"
