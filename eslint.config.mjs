@@ -28,6 +28,13 @@ const config = [
   },
   {
     rules: {
+      // #1191 — these five are React Compiler (react-hooks v7) ADVISORY rules.
+      // Ratified at 'warn' by decision: they flag patterns the compiler can't
+      // auto-memoize, not correctness bugs, and the ~97 current hits live mostly
+      // in the inline-style-heavy desktop surfaces where the churn to satisfy
+      // them outweighs the benefit. Kept as warnings (surfaced, never CI-blocking).
+      // Revisit as a focused fix-pass only if the count grows or a real bug
+      // traces to one of these patterns.
       'react-hooks/set-state-in-effect': 'warn',
       'react-hooks/refs': 'warn',
       'react-hooks/purity': 'warn',
