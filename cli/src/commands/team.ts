@@ -90,13 +90,59 @@ function roomDir(): string {
   return path.join(os.homedir(), '.o8', 'team', 'default');
 }
 
-function ensureRoom(): { room: string; presence: string; leases: string } {
+function ensureRoom(): { room: string; presence: string; leases: string; mailbox: string } {
   const room = roomDir();
   const presence = path.join(room, 'presence');
   const leases = path.join(room, 'leases');
+  const mailbox = path.join(room, 'mailbox');
   mkdirSync(presence, { recursive: true });
   mkdirSync(leases, { recursive: true });
-  return { room, presence, leases };
+  mkdirSync(mailbox, { recursive: true });
+  return { room, presence, leases, mailbox };
+}
+
+interface Message {
+  from: string;
+  fromHandle: string;
+  text: string;
+  at: string;
+}
+
+/** Mailboxes are append-only JSONL named by recipient handle; a sibling `.read`
+ *  file holds the count already surfaced, so unread is a tail slice. Durable —
+ *  the message survives the peer being mid-turn or offline. */
+function deliver(mailboxDir: string, toHandle: string, msg: Message): void {
+  const file = path.join(mailboxDir, `${encodeURIComponent(toHandle)}.jsonl`);
+  const fd = `${JSON.stringify(msg)}\n`;
+  try {
+    writeFileSync(file, fd, { flag: 'a' });
+  } catch {
+    /* best effort */
+  }
+}
+
+function readMailbox(mailboxDir: string, handle: string): { all: Message[]; readCount: number } {
+  const file = path.join(mailboxDir, `${encodeURIComponent(handle)}.jsonl`);
+  const all: Message[] = [];
+  try {
+    for (const line of readFileSync(file, 'utf8').split('\n')) {
+      if (!line.trim()) continue;
+      try { all.push(JSON.parse(line) as Message); } catch { /* skip bad line */ }
+    }
+  } catch {
+    /* no mailbox yet */
+  }
+  const marker = path.join(mailboxDir, `${encodeURIComponent(handle)}.read`);
+  const readCount = Number.parseInt((() => { try { return readFileSync(marker, 'utf8'); } catch { return '0'; } })(), 10) || 0;
+  return { all, readCount };
+}
+
+function markRead(mailboxDir: string, handle: string, count: number): void {
+  try {
+    writeFileSync(path.join(mailboxDir, `${encodeURIComponent(handle)}.read`), String(count));
+  } catch {
+    /* best effort */
+  }
 }
 
 function agentId(): string {
@@ -283,32 +329,73 @@ function cmdLease(mode: OutputMode, action: string | undefined, rest: string[]):
   throw new CliError('invalid_args', `Unknown lease action: ${action}`, EXIT.INVALID_ARGS, 'Use: acquire | release | list');
 }
 
-/** PreToolUse hook: stamp heartbeat + block a ship/bump when the `ship` lease is
- *  held by another live agent. Reads Claude Code's hook JSON on stdin; exit 2
- *  blocks the tool and feeds stderr back to the model. */
+function cmdTell(mode: OutputMode, rest: string[]): number {
+  const { presence, mailbox } = ensureRoom();
+  const me = touchPresence(presence);
+  const target = rest.find((t) => t.startsWith('@'));
+  if (!target) throw new CliError('invalid_args', 'o8 team tell requires a @handle.', EXIT.INVALID_ARGS, 'Example: o8 team tell @nova "hold your bump, I am mid-ship"');
+  const toHandle = target.slice(1);
+  const text = rest.filter((t) => t !== target).join(' ').trim();
+  if (!text) throw new CliError('invalid_args', 'o8 team tell requires a message.', EXIT.INVALID_ARGS);
+  const online = livePresences(presence).some((p) => p.handle === toHandle);
+  deliver(mailbox, toHandle, { from: me.agentId, fromHandle: me.handle, text, at: nowIso() });
+  if (mode.human) process.stdout.write(`sent to @${toHandle}${online ? '' : ' (offline — durable; they see it on their next turn)'}\n`);
+  else printJson({ schema: 'o8/team.tell/v1', ok: true, to: toHandle, online });
+  return EXIT.OK;
+}
+
+function cmdInbox(mode: OutputMode, rest: string[]): number {
+  const { presence, mailbox } = ensureRoom();
+  const me = touchPresence(presence);
+  const box = readMailbox(mailbox, me.handle);
+  const msgs = rest.includes('--all') ? box.all : box.all.slice(box.readCount);
+  if (mode.human) {
+    if (!msgs.length) process.stdout.write('no new messages\n');
+    for (const m of msgs) process.stdout.write(`@${m.fromHandle}: ${m.text}  (${m.at})\n`);
+  } else printJson({ schema: 'o8/team.inbox/v1', you: me.handle, messages: msgs });
+  markRead(mailbox, me.handle, box.all.length);
+  return EXIT.OK;
+}
+
+/** PreToolUse hook: stamp heartbeat, surface unread peer messages as context,
+ *  and block a ship/bump when the `ship` lease is held by another live agent.
+ *  Reads Claude Code's hook JSON on stdin; exit 2 blocks + feeds stderr back. */
 function cmdGuard(): number {
-  const { presence, leases } = ensureRoom();
-  touchPresence(presence);
+  const { presence, leases, mailbox } = ensureRoom();
+  const me = touchPresence(presence);
+  const box = readMailbox(mailbox, me.handle);
+  const unread = box.all.slice(box.readCount);
+
   let command = '';
   try {
-    const raw = readFileSync(0, 'utf8');
-    const payload = JSON.parse(raw) as { tool_input?: { command?: string }; tool_name?: string };
+    const payload = JSON.parse(readFileSync(0, 'utf8')) as { tool_input?: { command?: string } };
     command = payload?.tool_input?.command ?? '';
   } catch {
-    return EXIT.OK; // no/!parseable stdin → don't block anything
+    /* no/unparseable stdin — still surface unread below */
   }
-  if (!command) return EXIT.OK;
-  const isShip = SHIP_COMMAND_PATTERNS.some((re) => re.test(command));
-  if (!isShip) return EXIT.OK;
-  const ship = leaseFor(leases, 'ship');
-  const me = agentId();
-  if (ship && ship.holderId !== me) {
+
+  const isShip = Boolean(command) && SHIP_COMMAND_PATTERNS.some((re) => re.test(command));
+  const ship = isShip ? leaseFor(leases, 'ship') : null;
+  if (ship && ship.holderId !== me.agentId) {
+    markRead(mailbox, me.handle, box.all.length);
+    const peerNote = unread.length ? `\nUnread peer message(s): ${unread.map((m) => `@${m.fromHandle}: ${m.text}`).join(' · ')}` : '';
     process.stderr.write(
       `[o8 team] Blocked: @${ship.holderHandle} holds the 'ship' lease${ship.note ? ` (${ship.note})` : ''} since ${ship.acquiredAt}.\n`
       + `Another agent is mid-ship in this repo — a concurrent bump/publish would break their build (this is the collision o8 team prevents).\n`
-      + `Wait for them, or run \`o8 team who\` to coordinate. Re-run once the lease clears.\n`,
+      + `Wait for them, or run \`o8 team who\` to coordinate. Re-run once the lease clears.${peerNote}\n`,
     );
     return 2; // Claude Code: exit 2 = block this tool call
+  }
+
+  // Non-blocking: surface any unread peer messages as model context, then mark read.
+  if (unread.length) {
+    markRead(mailbox, me.handle, box.all.length);
+    process.stdout.write(JSON.stringify({
+      hookSpecificOutput: {
+        hookEventName: 'PreToolUse',
+        additionalContext: `[o8 team] You are @${me.handle}. New message(s) from a teammate in this repo — ${unread.map((m) => `@${m.fromHandle} says "${m.text}"`).join(' · ')}. Reply with \`o8 team tell @<handle> "..."\`.`,
+      },
+    }));
   }
   return EXIT.OK;
 }
@@ -343,6 +430,8 @@ export function runTeam(mode: OutputMode, sub: string | undefined, rest: string[
     case 'who': return cmdWho(mode);
     case 'status': return cmdStatus(mode, rest);
     case 'lease': return cmdLease(mode, rest[0], rest.slice(1));
+    case 'tell': return cmdTell(mode, rest);
+    case 'inbox': return cmdInbox(mode, rest);
     case 'guard': return cmdGuard();
     case 'init': return cmdInit(mode);
     default:
@@ -350,7 +439,7 @@ export function runTeam(mode: OutputMode, sub: string | undefined, rest: string[
         'unknown_team_subcommand',
         `Unknown team subcommand: ${sub ?? '(none)'}`,
         EXIT.INVALID_ARGS,
-        'Use: who | status | lease acquire|release|list | guard | init',
+        'Use: who | status | tell @h "msg" | inbox | lease acquire|release|list | guard | init',
       );
   }
 }

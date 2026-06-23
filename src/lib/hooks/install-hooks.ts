@@ -64,6 +64,25 @@ export function installClaudeCodePreToolHook(projectRoot: string) {
     });
   }
 
+  // `o8 team guard` — agent coordination. Blocks a concurrent bump/publish when
+  // another agent working THIS repo holds the `ship` lease, so two agents in one
+  // tree can't collide on a version bump (the bug that motivated `o8 team`).
+  // Idempotent; uses the `o8` CLI on PATH so it tracks the installed build.
+  const teamGuardInstalled = preToolUse.some((group) => (
+    Array.isArray(group.hooks)
+    && group.hooks.some((hook) => hook.type === 'command' && hook.command.includes('o8 team guard'))
+  ));
+  if (!teamGuardInstalled) {
+    preToolUse.push({
+      matcher: 'Bash',
+      hooks: [{
+        type: 'command',
+        command: 'o8 team guard',
+        timeout: 10,
+      }],
+    });
+  }
+
   settings.hooks = {
     ...hooks,
     PreToolUse: preToolUse,
