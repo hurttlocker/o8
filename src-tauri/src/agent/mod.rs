@@ -97,7 +97,11 @@ pub(crate) fn system_prompt() -> String {
          (\"what's shipping?\"). o8_status also returns `peers` — the OTHER \
          agents driving o8 alongside, each by its codename; when the user asks \
          who's working or who else is here, name them naturally (\"Atlas and \
-         Nova are both driving o8 right now\"). Then `o8_ask` to ask o8's Engineering Brain about \
+         Nova are both driving o8 right now\"). To pass a message to a running \
+         agent by name, use `o8_team_tell` (\"tell Nova to hold the ship\", \"let \
+         Atlas know the API changed\") — a peer note, NOT a coding task (use \
+         o8_dispatch for code); `o8_team_inbox` reads recent messages between the \
+         agents (\"what are the agents saying?\"). Then `o8_ask` to ask o8's Engineering Brain about \
          the code, recent work, or the fleet (\"what did Codex do today?\"). \
          o8_ask returns titled `sources` — when one clearly backs your answer, \
          name it naturally in ONE short phrase (\"per the CLAUDE.md rules\"); \

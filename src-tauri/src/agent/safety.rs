@@ -78,6 +78,12 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "o8_status" => SafetyClass::ReadOnly,
         "o8_needs_me" => SafetyClass::ReadOnly,
         "o8_ask" => SafetyClass::ReadOnly,
+        // o8 team peer messaging — relaying a note to a running agent (same
+        // posture as o8_delegate: hands a message to a live agent, no repo
+        // mutation, and the recipient's own actions stay gated downstream).
+        // Reading the message log is pure observation. Keep the voice flow fluid.
+        "o8_team_tell" => SafetyClass::ReadOnly,
+        "o8_team_inbox" => SafetyClass::ReadOnly,
         // o8 UI control — showing a surface of o8's own window has no
         // destructive side effect (same reasoning as open_app).
         "o8_ui_open" => SafetyClass::ReadOnly,
