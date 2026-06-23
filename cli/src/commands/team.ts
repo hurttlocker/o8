@@ -1,0 +1,356 @@
+/**
+ * `o8 team` — coordination for multiple agents sharing one repo (from o8).
+ *
+ * Concurrent agents (Claude Code / Codex / any CLI) working the SAME repo on the
+ * SAME machine are otherwise blind to each other — they collide (two `npm
+ * version` bumps in the same tree broke a ship). This is the fix: a daemonless,
+ * git-native PRESENCE registry + named LEASES, all plain files under the git
+ * common dir (shared across every worktree, never committed). No server, no
+ * socket — files don't need to be running, which is why the old live-delivery
+ * bridge failed and this won't.
+ *
+ *   o8 team who                      — who else is working this repo right now
+ *   o8 team status "<text>"          — set your one-line status
+ *   o8 team lease acquire <name>     — claim a lock (e.g. `ship`); fails if a
+ *                                       live peer holds it (exit 5)
+ *   o8 team lease release <name>     — drop your lock
+ *   o8 team guard                    — PreToolUse hook: blocks ship/bump
+ *                                       commands unless you hold the `ship` lease
+ *   o8 team init                     — install the guard hook into .claude/settings.json
+ *
+ * Identity = CLAUDE_CODE_SESSION_ID (stable per session). Open-source extraction
+ * tracked separately; this is the in-o8 build (`o8 team`).
+ */
+
+import { execFileSync } from 'node:child_process';
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { CliError, EXIT } from '../api.js';
+import { printJson, type OutputMode } from '../output.js';
+
+const LIVE_TTL_MS = 6 * 60 * 1000; // a presence/lease holder is "live" if seen within this
+const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
+/** Commands the `ship` lease guards — the bump/publish/tag-push surface that collided. */
+const SHIP_COMMAND_PATTERNS = [
+  /\bnpm\s+version\b/,
+  /\bnpm\s+run\s+ship\b/,
+  /\bgit\s+push\b[^\n]*--follow-tags/,
+  /\bgit\s+push\b[^\n]*--tags/,
+  /\bcargo\s+tauri\s+build\b/,
+];
+const FRIENDLY_HANDLES = [
+  'west', 'nova', 'atlas', 'echo', 'sol', 'kit', 'vega', 'rune',
+  'flux', 'pike', 'onyx', 'wren', 'dune', 'arc', 'jet', 'fen',
+];
+
+interface Presence {
+  agentId: string;
+  handle: string;
+  runtime: string;
+  pid: number;
+  cwd: string;
+  status: string;
+  startedAt: string;
+  lastSeen: string;
+}
+
+interface Lease {
+  name: string;
+  holderId: string;
+  holderHandle: string;
+  note: string;
+  acquiredAt: string;
+  expiresAt: string;
+}
+
+function nowIso() {
+  return new Date().toISOString();
+}
+
+function isFresh(iso: string | undefined, ttl = LIVE_TTL_MS): boolean {
+  if (!iso) return false;
+  const t = Date.parse(iso);
+  return Number.isFinite(t) && Date.now() - t < ttl;
+}
+
+/** The shared room — the git common dir is the same for every worktree of a repo,
+ *  and everything under it is git-ignored, so it never touches the tree. */
+function roomDir(): string {
+  try {
+    const gitDir = execFileSync('git', ['rev-parse', '--absolute-git-dir'], {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim();
+    if (gitDir) return path.join(gitDir, 'agents');
+  } catch {
+    /* not a git repo — fall back */
+  }
+  return path.join(os.homedir(), '.o8', 'team', 'default');
+}
+
+function ensureRoom(): { room: string; presence: string; leases: string } {
+  const room = roomDir();
+  const presence = path.join(room, 'presence');
+  const leases = path.join(room, 'leases');
+  mkdirSync(presence, { recursive: true });
+  mkdirSync(leases, { recursive: true });
+  return { room, presence, leases };
+}
+
+function agentId(): string {
+  return (
+    process.env.CLAUDE_CODE_SESSION_ID
+    || process.env.TERM_SESSION_ID
+    || `pid-${process.ppid || process.pid}`
+  );
+}
+
+function runtimeLabel(): string {
+  const a = process.env.AI_AGENT;
+  if (a) return a.split('_')[0] || a;
+  if (process.env.CLAUDECODE) return 'claude-code';
+  return 'cli';
+}
+
+function readJson<T>(file: string): T | null {
+  try {
+    return JSON.parse(readFileSync(file, 'utf8')) as T;
+  } catch {
+    return null;
+  }
+}
+
+function writeJsonAtomic(file: string, value: unknown): void {
+  const tmp = `${file}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(value, null, 2));
+  renameSync(tmp, file);
+}
+
+function livePresences(presenceDir: string): Presence[] {
+  if (!existsSync(presenceDir)) return [];
+  const out: Presence[] = [];
+  for (const f of readdirSync(presenceDir)) {
+    if (!f.endsWith('.json')) continue;
+    const p = readJson<Presence>(path.join(presenceDir, f));
+    if (!p) continue;
+    if (isFresh(p.lastSeen)) out.push(p);
+    else {
+      // reap stale presence so a crashed agent never lingers
+      try { rmSync(path.join(presenceDir, f)); } catch { /* best effort */ }
+    }
+  }
+  return out.sort((a, b) => a.startedAt.localeCompare(b.startedAt));
+}
+
+/** Touch my presence (heartbeat). Auto-assigns a friendly handle on first sight. */
+function touchPresence(presenceDir: string, status?: string): Presence {
+  const id = agentId();
+  const file = path.join(presenceDir, `${encodeURIComponent(id)}.json`);
+  const existing = readJson<Presence>(file);
+  let handle = existing?.handle;
+  if (!handle) {
+    const taken = new Set(livePresences(presenceDir).map((p) => p.handle));
+    handle = FRIENDLY_HANDLES.find((h) => !taken.has(h)) || `a${id.slice(0, 4)}`;
+  }
+  const presence: Presence = {
+    agentId: id,
+    handle,
+    runtime: existing?.runtime || runtimeLabel(),
+    pid: process.ppid || process.pid,
+    cwd: process.cwd(),
+    status: status ?? existing?.status ?? 'working',
+    startedAt: existing?.startedAt || nowIso(),
+    lastSeen: nowIso(),
+  };
+  writeJsonAtomic(file, presence);
+  return presence;
+}
+
+function liveLeases(leasesDir: string): Lease[] {
+  if (!existsSync(leasesDir)) return [];
+  const out: Lease[] = [];
+  const live = new Set(livePresences(path.join(path.dirname(leasesDir), 'presence')).map((p) => p.agentId));
+  for (const f of readdirSync(leasesDir)) {
+    if (!f.endsWith('.json')) continue;
+    const file = path.join(leasesDir, f);
+    const lease = readJson<Lease>(file);
+    if (!lease) continue;
+    // A lease is dead if it expired OR its holder is no longer a live presence.
+    if (!isFresh(lease.expiresAt, Number.MAX_SAFE_INTEGER) && Date.parse(lease.expiresAt) < Date.now()) {
+      try { rmSync(file); } catch { /* */ } continue;
+    }
+    if (!live.has(lease.holderId)) {
+      try { rmSync(file); } catch { /* */ } continue;
+    }
+    out.push(lease);
+  }
+  return out;
+}
+
+function leaseFor(leasesDir: string, name: string): Lease | null {
+  return liveLeases(leasesDir).find((l) => l.name === name) ?? null;
+}
+
+// ── subcommands ─────────────────────────────────────────────────────────
+
+function cmdWho(mode: OutputMode): number {
+  const { presence, leases } = ensureRoom();
+  const me = touchPresence(presence);
+  const peers = livePresences(presence);
+  const held = liveLeases(leases);
+  if (mode.human) {
+    process.stdout.write(`o8 team · ${peers.length} agent(s) on this repo (you are @${me.handle})\n`);
+    for (const p of peers) {
+      const age = Math.round((Date.now() - Date.parse(p.lastSeen)) / 1000);
+      process.stdout.write(`  @${p.handle.padEnd(8)} ${p.runtime.padEnd(12)} ${p.status}  (${age}s ago${p.agentId === me.agentId ? ', you' : ''})\n`);
+    }
+    if (held.length) {
+      process.stdout.write('  leases:\n');
+      for (const l of held) process.stdout.write(`    ${l.name} held by @${l.holderHandle}${l.note ? ` — ${l.note}` : ''}\n`);
+    }
+  } else {
+    printJson({ schema: 'o8/team.who/v1', you: me.handle, agents: peers, leases: held });
+  }
+  return EXIT.OK;
+}
+
+function cmdStatus(mode: OutputMode, rest: string[]): number {
+  const text = rest.join(' ').trim();
+  if (!text) throw new CliError('invalid_args', 'o8 team status requires text.', EXIT.INVALID_ARGS, 'Example: o8 team status "shipping 0.1.448"');
+  const { presence } = ensureRoom();
+  const me = touchPresence(presence, text);
+  if (mode.human) process.stdout.write(`@${me.handle}: ${me.status}\n`);
+  else printJson({ schema: 'o8/team.status/v1', handle: me.handle, status: me.status });
+  return EXIT.OK;
+}
+
+function flag(rest: string[], name: string): string | null {
+  const i = rest.indexOf(`--${name}`);
+  if (i >= 0 && rest[i + 1]) return rest[i + 1];
+  const eq = rest.find((t) => t.startsWith(`--${name}=`));
+  return eq ? eq.slice(name.length + 3) : null;
+}
+
+function cmdLease(mode: OutputMode, action: string | undefined, rest: string[]): number {
+  const { presence, leases } = ensureRoom();
+  const me = touchPresence(presence);
+  if (action === 'list' || !action) {
+    const held = liveLeases(leases);
+    if (mode.human) {
+      if (!held.length) process.stdout.write('no active leases\n');
+      for (const l of held) process.stdout.write(`${l.name} → @${l.holderHandle}${l.note ? ` — ${l.note}` : ''}\n`);
+    } else printJson({ schema: 'o8/team.lease.list/v1', leases: held });
+    return EXIT.OK;
+  }
+  const name = rest.find((t) => !t.startsWith('--'));
+  if (!name) throw new CliError('invalid_args', `o8 team lease ${action} requires a name.`, EXIT.INVALID_ARGS, 'Example: o8 team lease acquire ship --note "shipping 0.1.448"');
+
+  if (action === 'acquire') {
+    const current = leaseFor(leases, name);
+    if (current && current.holderId !== me.agentId) {
+      const reason = `'${name}' is held by @${current.holderHandle}${current.note ? ` — ${current.note}` : ''} (since ${current.acquiredAt}). Wait, or coordinate with \`o8 team who\`.`;
+      if (mode.human) process.stderr.write(`o8 team: ${reason}\n`);
+      else printJson({ schema: 'o8/team.lease.acquire/v1', ok: false, name, heldBy: current.holderHandle, note: current.note });
+      return EXIT.CONFLICT;
+    }
+    const ttl = Number.parseInt(flag(rest, 'ttl') ?? '', 10);
+    const lease: Lease = {
+      name,
+      holderId: me.agentId,
+      holderHandle: me.handle,
+      note: flag(rest, 'note') ?? '',
+      acquiredAt: nowIso(),
+      expiresAt: new Date(Date.now() + (Number.isFinite(ttl) ? ttl * 60_000 : DEFAULT_LEASE_TTL_MS)).toISOString(),
+    };
+    writeJsonAtomic(path.join(leases, `${encodeURIComponent(name)}.json`), lease);
+    if (mode.human) process.stdout.write(`acquired '${name}' as @${me.handle}\n`);
+    else printJson({ schema: 'o8/team.lease.acquire/v1', ok: true, name, handle: me.handle });
+    return EXIT.OK;
+  }
+  if (action === 'release') {
+    const file = path.join(leases, `${encodeURIComponent(name)}.json`);
+    const current = readJson<Lease>(file);
+    if (current && current.holderId !== me.agentId) {
+      throw new CliError('conflict', `'${name}' is held by @${current.holderHandle}, not you.`, EXIT.CONFLICT);
+    }
+    try { rmSync(file); } catch { /* already gone */ }
+    if (mode.human) process.stdout.write(`released '${name}'\n`);
+    else printJson({ schema: 'o8/team.lease.release/v1', ok: true, name });
+    return EXIT.OK;
+  }
+  throw new CliError('invalid_args', `Unknown lease action: ${action}`, EXIT.INVALID_ARGS, 'Use: acquire | release | list');
+}
+
+/** PreToolUse hook: stamp heartbeat + block a ship/bump when the `ship` lease is
+ *  held by another live agent. Reads Claude Code's hook JSON on stdin; exit 2
+ *  blocks the tool and feeds stderr back to the model. */
+function cmdGuard(): number {
+  const { presence, leases } = ensureRoom();
+  touchPresence(presence);
+  let command = '';
+  try {
+    const raw = readFileSync(0, 'utf8');
+    const payload = JSON.parse(raw) as { tool_input?: { command?: string }; tool_name?: string };
+    command = payload?.tool_input?.command ?? '';
+  } catch {
+    return EXIT.OK; // no/!parseable stdin → don't block anything
+  }
+  if (!command) return EXIT.OK;
+  const isShip = SHIP_COMMAND_PATTERNS.some((re) => re.test(command));
+  if (!isShip) return EXIT.OK;
+  const ship = leaseFor(leases, 'ship');
+  const me = agentId();
+  if (ship && ship.holderId !== me) {
+    process.stderr.write(
+      `[o8 team] Blocked: @${ship.holderHandle} holds the 'ship' lease${ship.note ? ` (${ship.note})` : ''} since ${ship.acquiredAt}.\n`
+      + `Another agent is mid-ship in this repo — a concurrent bump/publish would break their build (this is the collision o8 team prevents).\n`
+      + `Wait for them, or run \`o8 team who\` to coordinate. Re-run once the lease clears.\n`,
+    );
+    return 2; // Claude Code: exit 2 = block this tool call
+  }
+  return EXIT.OK;
+}
+
+const GUARD_HOOK = {
+  matcher: 'Bash',
+  hooks: [{ type: 'command', command: 'o8 team guard' }],
+};
+
+function cmdInit(mode: OutputMode): number {
+  const settingsPath = path.join(process.cwd(), '.claude', 'settings.json');
+  mkdirSync(path.dirname(settingsPath), { recursive: true });
+  const settings = (readJson<Record<string, unknown>>(settingsPath)) ?? {};
+  const hooks = (settings.hooks as Record<string, unknown>) ?? {};
+  const preToolUse = Array.isArray(hooks.PreToolUse) ? (hooks.PreToolUse as unknown[]) : [];
+  const already = preToolUse.some((h) => JSON.stringify(h).includes('o8 team guard'));
+  if (!already) preToolUse.push(GUARD_HOOK);
+  settings.hooks = { ...hooks, PreToolUse: preToolUse };
+  writeFileSync(settingsPath, JSON.stringify(settings, null, 2));
+  const { presence } = ensureRoom();
+  const me = touchPresence(presence);
+  if (mode.human) {
+    process.stdout.write(`o8 team installed (you are @${me.handle}).\n`);
+    process.stdout.write(`Guard hook ${already ? 'already present' : 'added'} in ${settingsPath}.\n`);
+    process.stdout.write('Before a ship: `o8 team lease acquire ship --note "shipping X"`; concurrent bumps now block.\n');
+  } else printJson({ schema: 'o8/team.init/v1', ok: true, handle: me.handle, settingsPath, hookAdded: !already });
+  return EXIT.OK;
+}
+
+export function runTeam(mode: OutputMode, sub: string | undefined, rest: string[]): number {
+  switch (sub) {
+    case 'who': return cmdWho(mode);
+    case 'status': return cmdStatus(mode, rest);
+    case 'lease': return cmdLease(mode, rest[0], rest.slice(1));
+    case 'guard': return cmdGuard();
+    case 'init': return cmdInit(mode);
+    default:
+      throw new CliError(
+        'unknown_team_subcommand',
+        `Unknown team subcommand: ${sub ?? '(none)'}`,
+        EXIT.INVALID_ARGS,
+        'Use: who | status | lease acquire|release|list | guard | init',
+      );
+  }
+}
