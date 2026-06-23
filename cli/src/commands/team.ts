@@ -29,6 +29,11 @@ import path from 'node:path';
 
 import { CliError, EXIT } from '../api.js';
 import { printJson, type OutputMode } from '../output.js';
+// PARITY: an agent's o8 team handle is the SAME canonical codename Symon speaks
+// (via o8_status) and the dashboard shows (SessionVisualizer / agent cards) —
+// one voice-friendly name follows the agent across every surface. Import the
+// single source so the CLI and the o8 server can never drift on the pool/hash.
+import { codename } from '../../../src/lib/agents/codename.js';
 
 const LIVE_TTL_MS = 6 * 60 * 1000; // a presence/lease holder is "live" if seen within this
 const DEFAULT_LEASE_TTL_MS = 30 * 60 * 1000;
@@ -40,11 +45,6 @@ const SHIP_COMMAND_PATTERNS = [
   /\bgit\s+push\b[^\n]*--tags/,
   /\bcargo\s+tauri\s+build\b/,
 ];
-const FRIENDLY_HANDLES = [
-  'west', 'nova', 'atlas', 'echo', 'sol', 'kit', 'vega', 'rune',
-  'flux', 'pike', 'onyx', 'wren', 'dune', 'arc', 'jet', 'fen',
-];
-
 interface Presence {
   agentId: string;
   handle: string;
@@ -197,8 +197,17 @@ function touchPresence(presenceDir: string, status?: string): Presence {
   const existing = readJson<Presence>(file);
   let handle = existing?.handle;
   if (!handle) {
-    const taken = new Set(livePresences(presenceDir).map((p) => p.handle));
-    handle = FRIENDLY_HANDLES.find((h) => !taken.has(h)) || `a${id.slice(0, 4)}`;
+    // The canonical codename for this agent (parity with Symon + the UI). Suffix
+    // only on the rare hash-collision with another LIVE peer, so addressing stays
+    // unambiguous for the mailbox.
+    const taken = new Set(livePresences(presenceDir).filter((p) => p.agentId !== id).map((p) => p.handle));
+    let candidate = codename(id);
+    let n = 2;
+    while (taken.has(candidate)) {
+      candidate = `${codename(id)}${n}`;
+      n += 1;
+    }
+    handle = candidate;
   }
   const presence: Presence = {
     agentId: id,
