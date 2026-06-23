@@ -64,12 +64,18 @@ export function TunerPanel({
   onChange,
   inTauri,
   personalDefault,
+  loupeSize,
+  loupeSizeRange,
+  onLoupeSizeChange,
   onSaveDefault,
 }: {
   settings: CanvasGlassSettings;
   onChange: (patch: Partial<CanvasGlassSettings>) => void;
   inTauri: boolean;
   personalDefault: CanvasGlassSettings | null;
+  loupeSize: number;
+  loupeSizeRange: { min: number; max: number; step: number };
+  onLoupeSizeChange: (value: number) => void;
   onSaveDefault: () => void;
 }) {
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -151,6 +157,7 @@ export function TunerPanel({
       <TunerSlider label="Glass" display={`${Math.round(settings.tint * 100)}%`} value={settings.tint} range={CANVAS_GLASS_RANGES.tint} onChange={(tint) => onChange({ tint })} />
       <TunerSlider label="Background" display={`${Math.round(settings.veil * 100)}%`} value={settings.veil} range={CANVAS_GLASS_RANGES.veil} onChange={(veil) => onChange({ veil })} />
       <TunerSlider label="Blur" display={`${Math.round(settings.frost)}px`} value={settings.frost} range={CANVAS_GLASS_RANGES.frost} onChange={(frost) => onChange({ frost })} />
+      <TunerSlider label="Loupe size" display={`${Math.round(loupeSize)}px`} value={loupeSize} range={loupeSizeRange} onChange={onLoupeSizeChange} />
 
       {/* Depth — the mood layer painted behind the glass. */}
       <span style={SECTION_LABEL}>Depth</span>
