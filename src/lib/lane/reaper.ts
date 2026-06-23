@@ -289,6 +289,39 @@ export async function reapZombieLane(
     recommendedAction: before.packetId ? 'retry_packet' : 'inspect_lane',
   };
 
+  // Salvage path (#1282 Failure B): a `running` lane whose owner died may have
+  // left COMPLETE, correct edits sitting uncommitted in its worktree — the
+  // pre-review auto-commit never ran because the session never reported done.
+  // Dumping that straight to `recovering` reads as a failure and the work is
+  // invisible. Commit it and route to `reviewing` so the operator sees it.
+  // Gate STRICTLY to `running`: a `merging` lane is mid-write, and committing
+  // its tree can corrupt the in-flight merge.
+  if (before.status === 'running' && before.worktreePath) {
+    try {
+      const { autoCommitCompletionWorktree, hasReviewableCompletionDiff } =
+        await import('@/lib/supervisor/completion-verification');
+      const baseRef = before.baseBranch?.trim() || 'main';
+      const autoCommitted = await autoCommitCompletionWorktree(before.worktreePath);
+      const reviewable =
+        autoCommitted || (await hasReviewableCompletionDiff(before.worktreePath, baseRef));
+      if (reviewable) {
+        appendEvent(before.id, 'zombie_reap', 'system', { ...payload, salvaged: true, autoCommitted });
+        return updateLane(
+          before.id,
+          {
+            status: 'reviewing',
+            sessionKey: null,
+            lastEventAt: new Date().toISOString(),
+            lastEventLabel: 'zombie_reap_salvaged',
+          },
+          'system',
+        );
+      }
+    } catch (error) {
+      console.warn('[lane-reaper] salvage attempt failed; falling through to recovering:', error);
+    }
+  }
+
   appendEvent(before.id, 'zombie_reap', 'system', payload);
   const updated = updateLane(
     before.id,
