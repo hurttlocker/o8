@@ -162,7 +162,7 @@ export function ReportIssueHost() {
           borderWidth: 1,
           borderStyle: 'solid',
           borderColor: 'var(--t-panel-border)',
-          background: 'var(--t-bg-card)',
+          background: 'var(--t-panel-solid)',
           boxShadow: '0 24px 64px rgba(0, 0, 0, 0.4)',
           padding: 20,
           display: 'flex',
@@ -189,7 +189,7 @@ export function ReportIssueHost() {
         </div>
 
         {/* bug / request */}
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: 4, borderRadius: 10, background: 'var(--t-input-bg)' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 4, padding: 4, borderRadius: 10, background: 'var(--t-hover)' }}>
           {(['bug', 'request'] as const).map((value) => (
             <button
               key={value}
@@ -200,15 +200,14 @@ export function ReportIssueHost() {
                 minHeight: 30,
                 borderRadius: 7,
                 borderWidth: 0,
-                background: category === value ? 'var(--t-bg-card)' : 'transparent',
-                color: category === value ? 'var(--t-text)' : 'var(--t-text-muted)',
+                background: category === value ? 'var(--t-accent-soft)' : 'transparent',
+                color: category === value ? 'var(--t-accent)' : 'var(--t-text-muted)',
                 cursor: 'pointer',
                 fontFamily: 'var(--font-sans-system)',
                 fontSize: 12,
-                fontWeight: category === value ? 400 : 300,
+                fontWeight: category === value ? 500 : 300,
                 letterSpacing: '0.02em',
                 textTransform: 'capitalize',
-                boxShadow: category === value ? '0 1px 2px rgba(0,0,0,0.12)' : 'none',
               }}
             >
               {value === 'bug' ? 'Bug' : 'Request'}
@@ -292,8 +291,9 @@ export function ReportIssueHost() {
                 paddingRight: 20,
                 borderRadius: 9,
                 borderWidth: 0,
-                background: canSend ? 'var(--t-accent)' : 'var(--t-input-bg)',
-                color: canSend ? '#ffffff' : 'var(--t-text-muted)',
+                background: 'var(--t-accent)',
+                color: '#ffffff',
+                opacity: canSend ? 1 : 0.4,
                 cursor: canSend ? 'pointer' : 'default',
                 fontFamily: 'var(--font-sans-system)',
                 fontSize: 12.5,
