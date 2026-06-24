@@ -52,7 +52,7 @@ import {
   packetStatusFromLaneStatus,
   pathBelongsToRepoScope,
 } from '../utils';
-import { useLaneArchivedSet, isRetiredLaneStatus } from './useLaneArchivedSet';
+import { useLaneArchivedView, isRetiredLaneStatus } from './useLaneArchivedSet';
 
 interface UseWorkspaceTerminalArgs {
   activeTileId: string | null;
@@ -328,7 +328,12 @@ export function useWorkspaceTerminal({
     return Object.values(workspaceChatSessionsByTileId).find((sessions) => sessions.length > 0) ?? [];
   }, [activeTileId, tileLayout.root, workspaceChatSessionsByTileId, workspaceTerminalPreferredRepo?.localPath]);
 
-  const archivedLaneSessionKeys = useLaneArchivedSet();
+  const archivedLaneView = useLaneArchivedView();
+  const archivedLaneSessionKeys = archivedLaneView.sessionKeys;
+  // Live ref so openWorkspaceTabForLane can consult the retired-lane set without
+  // taking it as a dep (which would re-create the callback on every view change).
+  const archivedLaneViewRef = useRef(archivedLaneView);
+  archivedLaneViewRef.current = archivedLaneView;
 
   const refreshAutomationLaneSessions = useCallback(async () => {
     try {
@@ -649,6 +654,17 @@ export function useWorkspaceTerminal({
     status?: string | null;
     branch?: string | null;
   }) => {
+    // #1293 — never resurrect a chat tab for a lane that already retired. The
+    // WS dispatch-replay fires stale `packet-dispatch` mutations on boot; each
+    // one would otherwise re-open a zombie tab for an archived packet (the
+    // #943 / #1293 duplicates). The view-change sweep below is the safety net
+    // for the open-before-view-loads race; this blocks the common case (archived
+    // set already resolved) with no flicker.
+    const retired = archivedLaneViewRef.current;
+    if ((lane.packetId != null && retired.packetIds.has(lane.packetId))
+      || retired.sessionKeys.has(lane.sessionKey)) {
+      return;
+    }
     const opened = openedLaneSessionsCache();
     if (opened.has(lane.sessionKey)) return;
     opened.add(lane.sessionKey);
@@ -814,11 +830,11 @@ export function useWorkspaceTerminal({
   // reset on a prior build, a reload) persists. When the archived-lane set
   // resolves/changes, close any chat tab already in it. Idempotent + cheap.
   useEffect(() => {
-    if (archivedLaneSessionKeys.size === 0) return;
+    if (archivedLaneView.sessionKeys.size === 0 && archivedLaneView.packetIds.size === 0) return;
     for (const handle of workspaceTerminalHandlesRef.current.values()) {
-      handle?.closeRetiredChatTabs(archivedLaneSessionKeys);
+      handle?.closeRetiredChatTabs(archivedLaneView);
     }
-  }, [archivedLaneSessionKeys]);
+  }, [archivedLaneView]);
 
   const collectOrchestratorLaneSnapshots = useCallback((): OrchestratorLaneSnapshot[] => (
     Array.from(workspaceTerminalHandlesRef.current.values()).flatMap((handle) => handle.getChatTabSnapshots())

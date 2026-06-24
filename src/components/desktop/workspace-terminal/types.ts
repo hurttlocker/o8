@@ -182,9 +182,12 @@ export interface TerminalTabHandle {
   /** Close the chat tab bound to a now-retired lane (matched by sessionKey or
    *  packetId), so reset/archive/merge doesn't leave an orphaned ghost tab. #1293 */
   closeChatTabForRetiredLane: (match: { sessionKey?: string | null; packetId?: string | null }) => boolean;
-  /** #1293 Part C — sweep: close every chat tab whose lane is ALREADY in the
-   *  archived-lane set (cleans pre-existing zombies, not just live retires). */
-  closeRetiredChatTabs: (archivedSessionKeys: Set<string>) => number;
+  /** #1293 Part C — sweep: close every chat tab whose lane is ALREADY retired
+   *  (cleans pre-existing zombies, not just live retires). tab.id /
+   *  chatSessionKey match the archived sessionKeys; the bound packetId matches
+   *  the archived packetIds (a packet tab is keyed by packetId, never a
+   *  sessionKey — matching only sessionKeys missed every dispatched tab). */
+  closeRetiredChatTabs: (archived: { sessionKeys: Set<string>; packetIds: Set<string> }) => number;
   openWorkspaceDiff: () => void;
   openInspectorTab: (tab: CanvasTab, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
 }

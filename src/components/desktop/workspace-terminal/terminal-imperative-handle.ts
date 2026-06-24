@@ -242,15 +242,20 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
     },
     // #1293 Part C — sweep tabs whose lane ALREADY retired (not just live
     // retire events). A tab whose lane archived BEFORE the lane-lifecycle
-    // listener mounted (a reset on a prior build, a page reload) would otherwise
-    // persist forever as a zombie. Closes every chat tab whose id /
-    // chatSessionKey / bound packetId is in the archived-lane set.
-    closeRetiredChatTabs: (archivedSessionKeys) => {
-      if (archivedSessionKeys.size === 0) return 0;
+    // listener mounted (a reset on a prior build, a page reload, or a WS
+    // dispatch-replay that resurrects a dispatched tab on boot) would otherwise
+    // persist as a zombie. A dispatched packet tab is keyed by its bound
+    // packetId — which is NEVER a sessionKey — so the prior sessionKey-only set
+    // silently missed every packet tab (the #943 / #1293 zombies). Match
+    // id / chatSessionKey against archived SESSION keys, and the bound packetId
+    // against archived PACKET ids (the same split the sidebar uses to hide
+    // retired packet chips).
+    closeRetiredChatTabs: ({ sessionKeys, packetIds }) => {
+      if (sessionKeys.size === 0 && packetIds.size === 0) return 0;
       const targets = deps.tabsRef.current.filter((tab) => tab.kind === 'chat' && (
-        archivedSessionKeys.has(tab.id)
-        || (tab.chatSessionKey != null && archivedSessionKeys.has(tab.chatSessionKey))
-        || (tab.orchestrationPacket?.packetId != null && archivedSessionKeys.has(tab.orchestrationPacket.packetId))
+        sessionKeys.has(tab.id)
+        || (tab.chatSessionKey != null && sessionKeys.has(tab.chatSessionKey))
+        || (tab.orchestrationPacket?.packetId != null && packetIds.has(tab.orchestrationPacket.packetId))
       ));
       for (const tab of targets) deps.closeTabById(tab.id);
       return targets.length;
