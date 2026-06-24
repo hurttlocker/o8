@@ -1,48 +1,145 @@
 'use client';
 
 /**
- * WorkspaceBootLoader — the calm boot loader shown while a workspace
- * surface is resolving: OrchestratorTab rehydrating its last thread, or
- * the workspace panel still figuring out its tabs (the boot window before
- * the "Start a new session" CTA is allowed to show).
+ * WorkspaceBootLoader — the calm boot loader shown while a workspace surface is
+ * resolving: OrchestratorTab rehydrating its last thread, or the workspace panel
+ * still figuring out its tabs (the boot window before the "Start a new session"
+ * CTA is allowed to show).
  *
- * The "o8" glyph + warm orange diagonal sweep is the DOM twin of the
- * canvas terminals' xterm spawn-reveal (`spawn-reveal.ts`) — same MARK
- * block-art, same one-orange leading edge settling to a faint grey — so
- * the boot identity reads the same on the dashboard as it does in a
- * terminal. Pure DOM + inline styles (no xterm), and theme-safe: the
- * settled blocks use a faint ink token while the sweep crest uses the
- * brand orange, which reads on both light and dark surfaces (a white
- * crest would vanish on light paper).
+ * It paints the SAME ASCII "o8" wave as the app's boot splash
+ * (scripts/tauri-export.mjs) so boot → workspace reads as one continuous
+ * identity. Unlike the bundled boot splash (which can't see the app theme and is
+ * hardcoded), this one runs inside the app, so it reads the live theme tokens
+ * (--t-chat-surface-bg / --t-text) off :root — light glyphs on dark, dark glyphs
+ * on light. A wordmark is rasterized to the grid, sampled to a density ramp, and
+ * a diagonal crest washes across it.
  */
 
-import { memo } from 'react';
+import { memo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
-// "o8" in five rows of block-art, lifted verbatim from spawn-reveal.ts's
-// MARK so the dashboard loader and the terminal loader paint the same glyph.
-const O8_MARK = [
-  ' ████   ████ ',
-  '██  ██ ██  ██',
-  '██  ██  ████ ',
-  '██  ██ ██  ██',
-  ' ████   ████ ',
-];
+const RAMP = ' .:-=+*#%@';
+const CELL = 8;
+const SCALE = 0.4;
+const TEXT = 'o8';
 
-const CELL = 9; // px per block
-const GAP = 2; // px between blocks
+function readVar(name: string, fallback: string): string {
+  if (typeof window === 'undefined') return fallback;
+  const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+  return v || fallback;
+}
 
 function WorkspaceBootLoaderBase() {
-  // Portal to <body> as a FIXED, viewport-centered splash. The loader used to
-  // live in-flow inside the workspace card, so the glyph "jumped": the center
-  // card renders full-width, then the right panel mounts late and the card
-  // reflows to a narrow column — dragging the centered glyph with it. Worse,
-  // the card carries a Lisse clip-path (squircle corners) which is a
-  // containing block for position:fixed, so a plain fixed element would be
-  // trapped + clipped. Portaling escapes that and pins the glyph dead-center
-  // over the workspace's own paper surface, masking the panel-settle churn
-  // until the real UI is ready. Fades in so a sub-200ms rehydration barely
-  // shows it.
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    // Theme-aware: read the resolved surface + ink tokens once on mount.
+    const bg = readVar('--t-chat-surface-bg', '#0a0a0a');
+    const ink = readVar('--t-text', '#f4f4f5');
+
+    let dpr = 1;
+    let cssW = 0;
+    let cssH = 0;
+    let cols = 0;
+    let rows = 0;
+    let lum = new Float32Array(0);
+    const off = document.createElement('canvas');
+
+    function build() {
+      const rect = canvas!.getBoundingClientRect();
+      cssW = Math.max(1, Math.floor(rect.width));
+      cssH = Math.max(1, Math.floor(rect.height));
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      canvas!.width = Math.floor(cssW * dpr);
+      canvas!.height = Math.floor(cssH * dpr);
+      cols = Math.max(8, Math.floor(cssW / CELL));
+      rows = Math.max(8, Math.floor(cssH / CELL));
+      lum = new Float32Array(cols * rows);
+
+      off.width = cols;
+      off.height = rows;
+      const o = off.getContext('2d', { willReadFrequently: true });
+      if (!o) return;
+      o.fillStyle = '#000';
+      o.fillRect(0, 0, cols, rows);
+      o.fillStyle = '#fff';
+      o.textBaseline = 'middle';
+      o.textAlign = 'center';
+      let size = rows * SCALE;
+      const font = (s: number) => `700 ${s}px ui-sans-serif, system-ui, -apple-system, sans-serif`;
+      o.font = font(size);
+      const w = o.measureText(TEXT).width;
+      const maxW = cols * 0.86;
+      const maxH = rows * 0.86;
+      if (w > maxW) size *= maxW / w;
+      if (size > maxH) size = maxH;
+      o.font = font(size);
+      o.fillText(TEXT, cols / 2, rows / 2);
+      const d = o.getImageData(0, 0, cols, rows).data;
+      for (let k = 0; k < cols * rows; k++) {
+        const a = d[4 * k + 3] / 255;
+        lum[k] = ((0.299 * d[4 * k] + 0.587 * d[4 * k + 1] + 0.114 * d[4 * k + 2]) / 255) * a;
+      }
+    }
+
+    build();
+    const ro = new ResizeObserver(() => build());
+    ro.observe(canvas);
+
+    const last = RAMP.length - 1;
+    let raf = 0;
+    let start = 0;
+    const now = () => (typeof performance !== 'undefined' ? performance.now() : Date.now());
+
+    function frame(ts: number) {
+      if (!start) start = ts;
+      const t = (ts - start) / 1000;
+      ctx!.setTransform(dpr, 0, 0, dpr, 0, 0);
+      ctx!.fillStyle = bg;
+      ctx!.fillRect(0, 0, cssW, cssH);
+      ctx!.fillStyle = ink;
+      ctx!.font = `${CELL}px ui-monospace, Menlo, monospace`;
+      ctx!.textBaseline = 'top';
+      ctx!.textAlign = 'left';
+
+      const span = cols + rows * 0.4;
+      const edge = ((t * 0.25) % 1.4) * span;
+      const bw2 = 2 * (cols * 0.1) * (cols * 0.1);
+
+      for (let j = 0; j < rows; j++) {
+        const y = j * CELL;
+        const rowOff = j * cols;
+        for (let i = 0; i < cols; i++) {
+          const base = lum[rowOff + i];
+          if (base <= 0.015) continue;
+          const dist = i + j * 0.4 - edge;
+          const crest = Math.exp(-(dist * dist) / bw2);
+          let val = base * (0.5 + crest * 0.85);
+          if (val <= 0.02) continue;
+          if (val > 1) val = 1;
+          const idx = Math.round(Math.pow(val, 1.2) * last);
+          if (idx <= 0) continue;
+          const ch = RAMP[idx];
+          if (ch === ' ') continue;
+          ctx!.fillText(ch, i * CELL, y);
+        }
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    raf = requestAnimationFrame(frame);
+    start = now();
+
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
+  }, []);
+
   if (typeof document === 'undefined') return null;
 
   return createPortal(
@@ -51,11 +148,6 @@ function WorkspaceBootLoaderBase() {
         position: 'fixed',
         inset: 0,
         zIndex: 180,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 16,
         background: 'var(--t-chat-surface-bg)',
         animation: 'o8BootBackdropIn 200ms ease-out both',
       }}
@@ -63,91 +155,26 @@ function WorkspaceBootLoaderBase() {
       aria-live="polite"
     >
       <style>{`
-        @keyframes o8BootBackdropIn {
-          from { opacity: 0; }
-          to   { opacity: 1; }
-        }
-        /* The sweep drives OPACITY (GPU-composited) instead of
-           background-color (a main-thread paint property). On a page reload
-           the main thread is slammed hydrating the dashboard; a color
-           animation can't repaint and FREEZES on an early frame (the
-           "static old loader"). An opacity animation runs on the compositor,
-           so the glow keeps moving even while the main thread is blocked. */
-        @keyframes o8MarkGlow {
-          0%, 30%, 100% { opacity: 0; }
-          12%           { opacity: 1; }
-          20%           { opacity: 0.72; }
-        }
-        @keyframes o8BootFadeIn {
-          from { opacity: 0; transform: translateY(2px); }
-          to   { opacity: 1; transform: translateY(0); }
-        }
+        @keyframes o8BootBackdropIn { from { opacity: 0; } to { opacity: 1; } }
+        @keyframes o8BootCaptionIn { from { opacity: 0; } to { opacity: 1; } }
       `}</style>
+      <canvas ref={canvasRef} style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', display: 'block' }} aria-hidden />
       <div
         style={{
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          gap: 14,
-          animation: 'o8BootFadeIn 280ms ease-out both',
+          position: 'absolute',
+          left: 0,
+          right: 0,
+          bottom: '14%',
+          textAlign: 'center',
+          fontSize: 11.5,
+          fontWeight: 320,
+          letterSpacing: '0.04em',
+          color: 'var(--t-text-faint)',
+          fontFamily: 'var(--font-sans-system)',
+          animation: 'o8BootCaptionIn 600ms ease-out both',
         }}
       >
-        <div
-          aria-hidden
-          style={{
-            display: 'grid',
-            gridTemplateColumns: `repeat(${O8_MARK[0].length}, ${CELL}px)`,
-            gridAutoRows: `${CELL}px`,
-            gap: GAP,
-          }}
-        >
-          {O8_MARK.flatMap((row, r) =>
-            row.split('').map((ch, c) =>
-              ch === '█' ? (
-                <div
-                  key={`${r}-${c}`}
-                  style={{
-                    position: 'relative',
-                    width: CELL,
-                    height: CELL,
-                    borderRadius: 1.5,
-                    background: 'var(--t-text-faint)',
-                  }}
-                >
-                  {/* Orange crest as an opacity-animated overlay (composited),
-                      staggered along (col + 0.45·row) so it wipes left-to-right
-                      with the same downward skew as the terminal spawn-reveal. */}
-                  <span
-                    aria-hidden
-                    style={{
-                      position: 'absolute',
-                      inset: 0,
-                      borderRadius: 1.5,
-                      background: 'rgb(251, 191, 36)',
-                      opacity: 0,
-                      willChange: 'opacity',
-                      animation: 'o8MarkGlow 2s ease-in-out infinite',
-                      animationDelay: `${(c + r * 0.45) * 0.06}s`,
-                    }}
-                  />
-                </div>
-              ) : (
-                <div key={`${r}-${c}`} style={{ width: CELL, height: CELL }} />
-              ),
-            ),
-          )}
-        </div>
-        <div
-          style={{
-            fontSize: 11.5,
-            fontWeight: 320,
-            letterSpacing: '0.01em',
-            color: 'var(--t-text-faint)',
-            fontFamily: 'var(--font-sans-system)',
-          }}
-        >
-          Loading workspace…
-        </div>
+        Loading workspace…
       </div>
     </div>,
     document.body,
