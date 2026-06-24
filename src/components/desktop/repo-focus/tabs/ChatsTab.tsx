@@ -369,14 +369,40 @@ export function ChatsTab({
     for (const repo of targetRepos) {
       repoNameByPath.set(normalizeRepoPath(repo.localPath), repo.name);
     }
+    // #1292 — the multiply mints many archived lanes per task (one per
+    // reset / redispatch / supervisor-relaunch), and the history list showed
+    // every one (e.g. "Add #943" ×4, "lab notes" ×7). Collapse to a single
+    // row per (repo, task), keeping the RICHEST sibling: one that still has a
+    // sessionKey (→ a reviewable transcript) wins over an anonymized/empty
+    // ghost, then most-recent breaks ties. So the kept row is the useful one.
+    const byTaskKey = new Map<string, ArchivedLaneRow>();
     for (const lane of archivedLanes) {
-      const laneRepoPath = normalizeRepoPath(lane.repoPath);
-      const repoName = repoNameByPath.get(laneRepoPath);
+      const repoName = repoNameByPath.get(normalizeRepoPath(lane.repoPath));
+      if (!repoName) continue;
+      const taskKey = `${repoName.toLowerCase()} ${(lane.label ?? lane.branch ?? lane.id).trim().toLowerCase()}`;
+      const existing = byTaskKey.get(taskKey);
+      if (!existing) {
+        byTaskKey.set(taskKey, lane);
+        continue;
+      }
+      const existingHasSession = Boolean(existing.sessionKey);
+      const laneHasSession = Boolean(lane.sessionKey);
+      if (existingHasSession !== laneHasSession) {
+        if (laneHasSession) byTaskKey.set(taskKey, lane);
+      } else if (Date.parse(lane.updatedAt ?? '') > Date.parse(existing.updatedAt ?? '')) {
+        byTaskKey.set(taskKey, lane);
+      }
+    }
+    for (const lane of byTaskKey.values()) {
+      const repoName = repoNameByPath.get(normalizeRepoPath(lane.repoPath));
       if (!repoName) continue;
       const key = repoName.toLowerCase();
       const bucket = map.get(key);
       if (bucket) bucket.push(lane);
       else map.set(key, [lane]);
+    }
+    for (const lanes of map.values()) {
+      lanes.sort((a, b) => Date.parse(b.updatedAt ?? '') - Date.parse(a.updatedAt ?? ''));
     }
     return map;
   }, [archivedLanes, targetRepos, variant]);
