@@ -2,6 +2,7 @@ import { cleanupIssueBranch } from './branch-cleanup';
 import { currentMissionState, log } from './shared';
 import type { ResetPacketInput } from './types';
 import { interruptLaneSessions } from '@/lib/lane/reap-sessions';
+import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 
 async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
@@ -36,6 +37,15 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   // agent-supervisor relaunches it into a SIBLING lane (the zombie-multiply).
   // Interrupt is a clean stop (not `failed`), so it does not auto-retry.
   await interruptLaneSessions(bound);
+  // #1292 ROOT — unregister each reset lane's watched agent so its orphaned
+  // watched_agents row can't survive into the next app launch, get rehydrated,
+  // and re-trigger the supervisor's relaunch into a fresh sibling lane+session
+  // (the dominant multiply: ~154 sessions for ~7 tasks). Registration is
+  // explicit (dispatch → /supervisor/watch), so this delete sticks — nothing
+  // auto-rediscovers and re-adds it.
+  for (const lane of bound) {
+    if (lane.sessionKey?.trim()) unregisterWatchedAgent(lane.sessionKey.trim());
+  }
 
   const cleanupTargets = new Map<string, { repoPath: string; branch: string; worktreePath: string | null }>();
   let firstWorktreePath: string | null = null;
@@ -145,6 +155,11 @@ export async function resetPacket(input: ResetPacketInput) {
     // #1292 — reap live runtime procs BEFORE nulling sessionKey below, or a
     // killed orphan re-triggers the supervisor auto-retry into a sibling lane.
     await interruptLaneSessions(bound);
+    // #1292 ROOT — unregister watched agents so they don't rehydrate + relaunch
+    // into siblings on the next launch (see resetPacketViaLaneFallback above).
+    for (const lane of bound) {
+      if (lane.sessionKey?.trim()) unregisterWatchedAgent(lane.sessionKey.trim());
+    }
     for (const lane of bound) {
       // #1215 — terminal lanes get unbound below like the rest but are never
       // re-archived and never donate a worktreePath (mirrors

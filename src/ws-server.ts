@@ -4681,16 +4681,31 @@ async function bootstrapWsServer() {
           signal: AbortSignal.timeout(8000),
         });
       },
-      async relaunchAgent(prompt, repoPath, taskName) {
+      async relaunchAgent(prompt, repoPath, taskName, retryOfSurfaceId) {
         // Packet relaunch must ALWAYS isolate. Without isolate:true, shouldIsolate()
         // falls through to "active worktree count > 0" — when the original lane's
         // worktree was archived before relaunch, the check returns false and codex
         // boots at the main repo root, writing agent changes directly into main.
         // Every packet needs its own worktree, regardless of fleet state.
+        //
+        // #1292 ROOT — reuse the FAILING session's lane instead of auto-wrapping a
+        // fresh sibling. Without existingLaneId the launch creates a brand-new lane
+        // (actions.ts auto-wrap), so each retry doubled the lane count. The
+        // supervisor's onAgentRetry then rebinds that lane to the new session,
+        // matching the existingLaneId "caller attaches the session" convention.
+        // Degrades gracefully: no match (lane already archived/gone) → undefined →
+        // prior behavior.
+        let existingLaneId: string | undefined;
+        if (retryOfSurfaceId) {
+          try {
+            const { findLaneBySession } = await import('@/lib/lane/registry');
+            existingLaneId = findLaneBySession(retryOfSurfaceId)?.id ?? undefined;
+          } catch { /* best-effort — fall back to a fresh lane */ }
+        }
         const res = await fetchWithRetry(buildNextUrl('/api/runtime/launch'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName, isolate: true }),
+          body: JSON.stringify({ runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName, isolate: true, existingLaneId }),
           signal: AbortSignal.timeout(15000),
         });
         const data = await res.json() as { ok?: boolean; surfaceId?: string };
