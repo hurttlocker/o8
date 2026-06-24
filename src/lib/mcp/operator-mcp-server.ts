@@ -82,6 +82,7 @@ import {
 } from '@/lib/mcp/operator-handlers/repo-management';
 import {
   CANVAS_TOOLS,
+  handleCanvas,
   handleRender,
 } from '@/lib/mcp/operator-handlers/canvas';
 import {
@@ -561,6 +562,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   ...createO8WebviewToolHandlers(getO8WebviewClient),
   o8_view_console_errors: handleConsoleErrors,
   o8_view_active_route: handleActiveRoute,
+  o8_canvas: handleCanvas,
   o8_render: handleRender,
   o8_user_context: handleUserContext,
   create_mission: handleCreateMission,
