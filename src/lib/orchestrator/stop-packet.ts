@@ -7,8 +7,7 @@
  * stop must INTERRUPT the live session first (kills the process via the runtime
  * adapter), THEN archive — and must NOT relaunch. "Stop" means stop.
  */
-import type { Lane } from '@/lib/lane/types';
-import type { RuntimeId } from '@/lib/runtimes/types';
+import { interruptLaneSessions } from '@/lib/lane/reap-sessions';
 
 export interface StopPacketResult {
   ok: boolean;
@@ -104,23 +103,4 @@ export async function stopAllLanes(opts: { repoPath?: string } = {}): Promise<St
     archivedLanes: archived,
     note: `Stopped everything${opts.repoPath ? ' in this repo' : ''}: reaped ${interrupted} live session${interrupted === 1 ? '' : 's'}, archived ${archived} lane${archived === 1 ? '' : 's'} across ${packetIds.size} packet${packetIds.size === 1 ? '' : 's'}. Nothing relaunched.`,
   };
-}
-
-/** Interrupt each lane's live session through the universal runtime router
- *  (reaps the process per-runtime). Best-effort: a failed kill is logged, not
- *  thrown — the archive still proceeds. Returns the number actually reaped. */
-async function interruptLaneSessions(lanes: Lane[]): Promise<number> {
-  const { routeAction } = await import('@/lib/runtimes/registry');
-  let interrupted = 0;
-  for (const lane of lanes) {
-    const sessionKey = lane.sessionKey?.trim();
-    if (!sessionKey) continue;
-    try {
-      await routeAction(lane.runtime as RuntimeId, 'interrupt', sessionKey);
-      interrupted += 1;
-    } catch (error) {
-      console.warn(`[stop-packet] interrupt failed for lane ${lane.id} (${lane.runtime}):`, error);
-    }
-  }
-  return interrupted;
 }
