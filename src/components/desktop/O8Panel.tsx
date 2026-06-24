@@ -652,7 +652,12 @@ export function O8Panel({
         display: 'flex',
         flexDirection: 'column',
         height: '100%',
-        background: 'var(--t-bg)',
+        // Glass chrome, matching the left AgentPanel: --t-chrome is transparent
+        // in glass (ThemeProvider flips it) so the panel shows the dark window
+        // vibrancy instead of painting a light --t-bg tint over it. Opaque chrome
+        // in solid mode. (Per-tab content that must stay paper — e.g. the
+        // workspace orchestrator hero — paints its own --t-chat-surface-bg.)
+        background: 'var(--t-chrome)',
         borderLeft: '1px solid var(--t-divider)',
       }}
     >

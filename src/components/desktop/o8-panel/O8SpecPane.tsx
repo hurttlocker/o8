@@ -312,7 +312,12 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded }: O8SpecPaneProps)
       flex: 1,
       flexDirection: 'column',
       minHeight: 0,
-      background: 'var(--t-canvas-bg)',
+      // Glass-panel model, matching the left AgentPanel: in glass mode paint the
+      // translucent --t-bg so the notes read as the SAME glass as the rest of the
+      // chrome (left panel + right chrome). --t-canvas-bg is fully transparent in
+      // glass (floating-canvas token) → washed-out bleed; the embedded canvas card
+      // keeps it (its shell owns the frame); solid mode keeps opaque paper.
+      background: embedded ? 'var(--t-canvas-bg)' : surface === 'solid' ? 'var(--t-chat-surface-bg)' : 'transparent',
       color: surface === 'solid' ? 'var(--t-chat-surface-text)' : 'var(--t-text)',
       ...contentRebinds,
     } as CSSProperties}>
@@ -461,7 +466,7 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded }: O8SpecPaneProps)
           marginRight: embedded ? undefined : 'auto',
           borderRadius: embedded ? 0 : 18,
           border: embedded ? 'none' : '1px solid var(--t-divider-subtle)',
-          background: embedded ? 'transparent' : (surface === 'solid' ? 'var(--t-chat-surface-input-bg)' : 'rgba(255, 255, 255, 0.04)'),
+          background: embedded ? 'transparent' : (surface === 'solid' ? 'var(--t-chat-surface-input-bg)' : 'transparent'),
           overflow: 'hidden',
         }}>
           {loading ? (
