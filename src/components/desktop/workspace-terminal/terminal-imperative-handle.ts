@@ -240,6 +240,21 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       deps.closeTabById(target.id);
       return true;
     },
+    // #1293 Part C — sweep tabs whose lane ALREADY retired (not just live
+    // retire events). A tab whose lane archived BEFORE the lane-lifecycle
+    // listener mounted (a reset on a prior build, a page reload) would otherwise
+    // persist forever as a zombie. Closes every chat tab whose id /
+    // chatSessionKey / bound packetId is in the archived-lane set.
+    closeRetiredChatTabs: (archivedSessionKeys) => {
+      if (archivedSessionKeys.size === 0) return 0;
+      const targets = deps.tabsRef.current.filter((tab) => tab.kind === 'chat' && (
+        archivedSessionKeys.has(tab.id)
+        || (tab.chatSessionKey != null && archivedSessionKeys.has(tab.chatSessionKey))
+        || (tab.orchestrationPacket?.packetId != null && archivedSessionKeys.has(tab.orchestrationPacket.packetId))
+      ));
+      for (const tab of targets) deps.closeTabById(tab.id);
+      return targets.length;
+    },
     openWorkspaceDiff: () => {
       const activeWorkspaceTab = deps.tabsRef.current.find((tab) => tab.id === deps.activeTabId);
       const repo = activeWorkspaceTab?.repo ?? deps.tabsRef.current.find((tab) => tab.repo)?.repo ?? deps.preferredRepo ?? null;

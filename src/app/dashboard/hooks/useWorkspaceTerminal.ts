@@ -809,6 +809,17 @@ export function useWorkspaceTerminal({
     return () => window.removeEventListener('o8:lane-lifecycle', onLaneLifecycle);
   }, []);
 
+  // #1293 Part C — sweep pre-existing zombie tabs: the event listener above only
+  // catches LIVE retires, so a tab whose lane archived before it mounted (a
+  // reset on a prior build, a reload) persists. When the archived-lane set
+  // resolves/changes, close any chat tab already in it. Idempotent + cheap.
+  useEffect(() => {
+    if (archivedLaneSessionKeys.size === 0) return;
+    for (const handle of workspaceTerminalHandlesRef.current.values()) {
+      handle?.closeRetiredChatTabs(archivedLaneSessionKeys);
+    }
+  }, [archivedLaneSessionKeys]);
+
   const collectOrchestratorLaneSnapshots = useCallback((): OrchestratorLaneSnapshot[] => (
     Array.from(workspaceTerminalHandlesRef.current.values()).flatMap((handle) => handle.getChatTabSnapshots())
   ), []);
