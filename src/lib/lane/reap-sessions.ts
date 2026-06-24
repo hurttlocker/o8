@@ -54,3 +54,41 @@ export async function interruptLaneSessions(lanes: Lane[]): Promise<number> {
   }
   return interrupted;
 }
+
+/**
+ * #1292 ROOT — archive each lane's owned-session DIRECTORY (move it to the
+ * runtime's `-archive` tree) after the process is interrupted. Reset previously
+ * archived the LANE + nulled fields but LEFT the `~/.o8/owned-<runtime>/<id>/`
+ * dir in the ACTIVE tree, so on the next app launch the owned-session discovery
+ * (`computeFleetAdditions` — which has no retirement gate, only a 24h age
+ * filter) re-found the orphan and re-created a phantom lane. This was the real
+ * multiply root: 1 dispatch left N session dirs that each re-spawned a lane on
+ * every restart until manually archived. Moving the dir to `-archive` removes it
+ * from discovery; the transcript stays reviewable (archive-aware tail). Best-
+ * effort per lane. Returns the number archived.
+ */
+export async function archiveLaneSessions(lanes: Lane[]): Promise<number> {
+  const targets = interruptableSessions(lanes);
+  if (targets.length === 0) return 0;
+  let archived = 0;
+  for (const target of targets) {
+    try {
+      if (target.sessionKey.startsWith('codex-owned:')) {
+        const { archiveOwnedCodexSession } = await import('@/lib/codex/owned');
+        await archiveOwnedCodexSession(target.sessionKey);
+      } else if (target.sessionKey.startsWith('gemini-owned:')) {
+        const { archiveOwnedGeminiSession } = await import('@/lib/gemini/owned');
+        await archiveOwnedGeminiSession(target.sessionKey);
+      } else if (target.sessionKey.startsWith('opencode-owned:')) {
+        const { archiveOwnedOpencodeSession } = await import('@/lib/opencode/owned');
+        await archiveOwnedOpencodeSession(target.sessionKey);
+      } else {
+        continue; // discovered / claude-code sessions own no dir under ~/.o8 to archive
+      }
+      archived += 1;
+    } catch (error) {
+      console.warn(`[reap-sessions] session-dir archive failed for lane ${target.laneId} (${target.runtime}):`, error);
+    }
+  }
+  return archived;
+}
