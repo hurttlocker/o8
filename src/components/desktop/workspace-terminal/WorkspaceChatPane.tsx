@@ -367,47 +367,107 @@ function WorkspaceChatPaneBase({
                 ) : null}
               </div>
             ) : (
-            <div
-              style={{
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                justifyContent: 'center',
-                height: '100%',
-                gap: 16,
-                animation: 'llmFadeIn 400ms ease-out',
-              }}
-            >
-              <div
-                style={{
-                  width: 40,
-                  height: 40,
-                  borderRadius: 12,
-                  background: 'rgba(37, 99, 235, 0.08)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
-                </svg>
-              </div>
-              <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-                Connecting to agent...
-              </div>
-              <div
-                style={{
-                  fontSize: 12,
-                  color: 'var(--t-text-secondary)',
-                  textAlign: 'center',
-                  maxWidth: 320,
-                  lineHeight: 1.5,
-                }}
-              >
-                Waiting for transcript from the {chat.runtimeLabel} session. You can type a message below to steer the agent.
-              </div>
-            </div>
+              // Empty transcript but the lane is live. Codex `exec --json`
+              // streams to the lane (Activity), NOT into this session's
+              // transcript slice — so a dispatched (un-steered) packet keeps an
+              // empty slice forever. Reflect the REAL lane lifecycle
+              // (`liveStatus`) instead of a perpetual, misleading "Connecting /
+              // waiting for transcript". (#1293)
+              (() => {
+                const awaitingReview = liveStatus === 'awaiting_review';
+                const showBanner = liveStatus === 'awaiting_review'
+                  || liveStatus === 'failed'
+                  || liveStatus === 'recovering';
+                return (
+                  <div
+                    style={{
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      height: '100%',
+                      gap: 14,
+                      animation: 'llmFadeIn 400ms ease-out',
+                    }}
+                  >
+                    <div
+                      style={{
+                        width: 40,
+                        height: 40,
+                        borderRadius: 12,
+                        background: awaitingReview ? 'rgba(245, 158, 11, 0.10)' : 'rgba(37, 99, 235, 0.08)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      {awaitingReview ? (
+                        <CheckCircle2 size={20} style={{ color: '#b45309' }} />
+                      ) : (
+                        <svg width={20} height={20} viewBox="0 0 24 24" fill="none" stroke="#2563eb" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                          <path d="M12 2v4m0 12v4M4.93 4.93l2.83 2.83m8.48 8.48l2.83 2.83M2 12h4m12 0h4M4.93 19.07l2.83-2.83m8.48-8.48l2.83-2.83" />
+                        </svg>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 15, fontWeight: 600, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
+                      {awaitingReview ? 'Ready for review' : 'Agent working…'}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: 'var(--t-text-secondary)',
+                        textAlign: 'center',
+                        maxWidth: 340,
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {awaitingReview
+                        ? `This ${chat.runtimeLabel} session finished and is awaiting review.`
+                        : `${chat.runtimeLabel} is working in this lane — live activity streams to the Activity panel. Type below to steer it.`}
+                    </div>
+                    {tab.orchestrationPacket && livePacket && showBanner ? (
+                      <div style={{ width: '100%', maxWidth: 440 }}>
+                        <ChatPacketStatusBanner
+                          status={liveStatus}
+                          laneId={livePacket.lane?.laneId ?? null}
+                          packetTitle={livePacket.title ?? tab.orchestrationPacket.title ?? null}
+                          onOpenInActivity={
+                            orchestratorData?.onOpenO8Panel
+                              ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
+                              : undefined
+                          }
+                        />
+                      </div>
+                    ) : orchestratorData?.onOpenO8Panel ? (
+                      <button
+                        type="button"
+                        onClick={() => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })}
+                        style={{
+                          marginTop: 2,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          height: 28,
+                          paddingLeft: 12,
+                          paddingRight: 12,
+                          borderRadius: 999,
+                          borderWidth: 1,
+                          borderStyle: 'solid',
+                          borderColor: 'var(--t-border)',
+                          background: 'var(--t-panel)',
+                          color: 'var(--t-text-muted)',
+                          cursor: 'pointer',
+                          fontSize: 11,
+                          fontWeight: 500,
+                          fontFamily: 'var(--font-sans-system)',
+                        }}
+                      >
+                        View in Activity
+                      </button>
+                    ) : null}
+                  </div>
+                );
+              })()
             )
           ) : (
             <div
