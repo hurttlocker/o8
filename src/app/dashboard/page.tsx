@@ -4556,14 +4556,12 @@ function DashboardInner() {
               }}
             >
               {/* Lisse squircle on all four corners so the right panel's TOP
-                  edges match the center workspace + canvas "list corners". In
-                  glass the header strip is transparent vibrancy, so without a
-                  fill on the clip itself the squircle's TOP corners read as
-                  empty vibrancy (no visible curve). Paint var(--t-bg) behind
-                  everything so the tint fills the whole squircle — top corners
-                  included — matching the content + the left panel. Solid keeps
-                  no fill (opaque children already paint the squircle). */}
-              <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden', background: effectiveGlassSurface ? 'var(--t-bg)' : undefined }}>
+                  edges match the center workspace + canvas "list corners". No
+                  fill: in glass the panel stays transparent so the dark window
+                  vibrancy shows through — the SAME glass as the left AgentPanel,
+                  which paints nothing. Solid mode's opaque children paint the
+                  squircle. */}
+              <SmoothCorners corners={{ radius: 14, smoothing: 0.6 }} autoEffects={false} style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
               <PanelHeaderStrip
                 o8PanelVisible={rightPanelKind === 'o8'}
                 workspacePanelVisible={rightPanelKind === 'review'}
