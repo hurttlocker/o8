@@ -379,7 +379,7 @@ export function ChatsTab({
     for (const lane of archivedLanes) {
       const repoName = repoNameByPath.get(normalizeRepoPath(lane.repoPath));
       if (!repoName) continue;
-      const taskKey = `${repoName.toLowerCase()} ${(lane.label ?? lane.branch ?? lane.id).trim().toLowerCase()}`;
+      const taskKey = `${repoName.toLowerCase()} ${(lane.label ?? lane.branch ?? lane.id).replace(/\s*\(retry \d+\)\s*$/i, '').trim().toLowerCase()}`;
       const existing = byTaskKey.get(taskKey);
       if (!existing) {
         byTaskKey.set(taskKey, lane);
