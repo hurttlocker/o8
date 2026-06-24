@@ -154,6 +154,22 @@ const ZOOM_STEPS = [
   { label: 70, value: 0.49 },
 ] as const;
 
+// ── Canvas control surface (agent parity) ──────────────────────────────────
+// Module-scope so the intent listener's deps stay stable. The card verbs let an
+// agent drive the canvas the way a human can: SEE every card (list), then move
+// / resize / focus / close one by (kind, id).
+type CanvasCardKind = 'term' | 'file' | 'image' | 'video' | 'browser' | 'chat' | 'diff' | 'spec' | 'brain' | 'markdown' | 'agent';
+const CANVAS_CARD_KINDS: CanvasCardKind[] = ['term', 'file', 'image', 'video', 'browser', 'chat', 'diff', 'spec', 'brain', 'markdown', 'agent'];
+const CANVAS_GEOM_FLOOR = 140;
+// Broad lite shape every card satisfies — enough to list + title + resize
+// without reaching for the 11 concrete card types.
+type CanvasCardLite = {
+  id: number; x: number; y: number; z: number; w: number; h: number;
+  sessionName?: string | null; cwd?: string | null; name?: string; path?: string;
+  items?: unknown[]; tabs?: Array<{ id: number; url?: string; title?: string }>; activeTabId?: number;
+  title?: string; repoPath?: string | null; initialQuestion?: string; codename?: string; number?: number; aspect?: number;
+};
+
 // Account dossier (the Clerk sign-in popover) — one row vocabulary shared by
 // Manage account / Sign out / Sign in, matching the operator's reference.
 const DOSSIER_ROW: React.CSSProperties = {
@@ -2533,6 +2549,83 @@ export default function CanvasGlassPreviewPage() {
     setSearchQuery('');
   }, [focusCard, pickThread]);
 
+  // ── Canvas control surface (agent parity) ────────────────────────────────
+  // The intent bus's card verbs let an agent drive the canvas the way a human
+  // can: SEE every card (list), then move / resize / focus / close one by id.
+  // focusCard + the per-kind close handlers (which own teardown — closeTerminal
+  // kills the PTY, closeImageCard revokes the object URL) already exist; these
+  // route to them so an agent's close behaves exactly like clicking the ✕.
+  //
+  // canvasCardsRef holds the latest card arrays so `list` + verb existence
+  // checks read fresh state WITHOUT re-subscribing the intent listener on every
+  // card change. Synced in an effect (not during render) — intents fire from
+  // event handlers, long after commit, so one-tick lag never bites.
+  const canvasCardsRef = useRef<Record<CanvasCardKind, CanvasCardLite[]>>({
+    term: [], file: [], image: [], video: [], browser: [], chat: [], diff: [], spec: [], brain: [], markdown: [], agent: [],
+  });
+  useEffect(() => {
+    canvasCardsRef.current = {
+      term: termCards, file: fileCards, image: imageCards, video: videoCards, browser: browserCards,
+      chat: chatCards, diff: diffCards, spec: specCards, brain: brainCards, markdown: markdownCards, agent: agentCards,
+    };
+  }, [termCards, fileCards, imageCards, videoCards, browserCards, chatCards, diffCards, specCards, brainCards, markdownCards, agentCards]);
+
+  const canvasCardTitle = useCallback((kind: CanvasCardKind, card: CanvasCardLite): string => {
+    switch (kind) {
+      case 'term': return card.sessionName || (card.cwd ? `terminal · ${card.cwd}` : 'terminal');
+      case 'file': return card.name || card.path || 'file';
+      case 'image': return `${card.items?.length ?? 1} image${(card.items?.length ?? 1) === 1 ? '' : 's'}`;
+      case 'video': return card.name || 'video';
+      case 'browser': {
+        const active = card.tabs?.find((t) => t.id === card.activeTabId) ?? card.tabs?.[0];
+        return active?.title || active?.url || 'browser';
+      }
+      case 'chat': return card.title || 'session';
+      case 'diff': return card.title || 'diff';
+      case 'spec': return card.repoPath ? `spec · ${String(card.repoPath).split('/').pop()}` : 'o8.md';
+      case 'brain': return card.initialQuestion || 'brain';
+      case 'markdown': return card.title || 'note';
+      case 'agent': return card.codename || card.title || `agent #${card.number ?? '?'}`;
+      default: return kind;
+    }
+  }, []);
+
+  const patchCanvasCardGeom = useCallback((kind: CanvasCardKind, id: number, patch: { x?: number; y?: number; w?: number; h?: number }) => {
+    switch (kind) {
+      case 'term': setTermCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'file': setFileCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'image': setImageCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'video': setVideoCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'browser': setBrowserCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'chat': setChatCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'diff': setDiffCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'spec': setSpecCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'brain': setBrainCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'markdown': setMarkdownCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+      case 'agent': setAgentCards((p) => p.map((c) => (c.id === id ? { ...c, ...patch } : c))); break;
+    }
+  }, []);
+
+  const dismissCanvasCard = useCallback((kind: CanvasCardKind, id: number) => {
+    switch (kind) {
+      case 'term': {
+        const card = canvasCardsRef.current.term.find((c) => c.id === id);
+        if (card) closeTerminal(card as unknown as TermCard);
+        break;
+      }
+      case 'file': closeFileCard(id); break;
+      case 'image': closeImageCard(id); break;
+      case 'video': closeVideoCard(id); break;
+      case 'browser': closeBrowserCard(id); break;
+      case 'chat': closeChatCard(id); break;
+      case 'diff': setDiffCards((p) => p.filter((c) => c.id !== id)); break;
+      case 'spec': setSpecCards((p) => p.filter((c) => c.id !== id)); break;
+      case 'brain': setBrainCards((p) => p.filter((c) => c.id !== id)); break;
+      case 'markdown': setMarkdownCards((p) => p.filter((c) => c.id !== id)); break;
+      case 'agent': setAgentCards((p) => p.filter((c) => c.id !== id)); break;
+    }
+  }, [closeTerminal, closeFileCard, closeImageCard, closeVideoCard, closeBrowserCard, closeChatCard]);
+
   // Canvas intent bus (#1232 phase 2) — Symon and the gated /api/canvas/intent
   // route drive the canvas through the SAME handlers the rail buttons call.
   // Listeners run synchronously on dispatchEvent, so the ack stamped on
@@ -2544,6 +2637,7 @@ export default function CanvasGlassPreviewPage() {
       const args = (detail.args && typeof detail.args === 'object' ? detail.args : {}) as Record<string, unknown>;
       let ok = true;
       let note: string | null = null;
+      let data: unknown = undefined;
       try {
         switch (detail.verb) {
           case 'open-browser':
@@ -2643,6 +2737,75 @@ export default function CanvasGlassPreviewPage() {
             note = next ? 'grid mode' : 'free canvas';
             break;
           }
+          case 'list': {
+            // Sight — the canvas card inventory so an agent can act on ids, not
+            // pixels. Read from the ref (latest arrays) so this never goes stale.
+            const cards: Array<Record<string, unknown>> = [];
+            for (const k of CANVAS_CARD_KINDS) {
+              for (const c of canvasCardsRef.current[k]) {
+                cards.push({ kind: k, id: c.id, x: Math.round(c.x), y: Math.round(c.y), z: c.z, w: Math.round(c.w), h: Math.round(c.h), title: canvasCardTitle(k, c) });
+              }
+            }
+            data = { cards, count: cards.length, zoom: canvasZoomLevel, grid: gridMode, dock: dockOpen, activeRepo: activeRepoPath ?? null };
+            note = `${cards.length} card${cards.length === 1 ? '' : 's'} on canvas`;
+            break;
+          }
+          case 'move-card':
+          case 'resize-card':
+          case 'focus-card':
+          case 'close-card': {
+            // Address a card by (kind, id) — ids come from `list`. Every verb
+            // validates the card exists first so an agent gets a clear miss note
+            // instead of a silent no-op.
+            const kind = (typeof args.kind === 'string' ? args.kind : '') as CanvasCardKind;
+            const id = typeof args.id === 'number' ? args.id : Number(args.id);
+            if (!CANVAS_CARD_KINDS.includes(kind) || !Number.isFinite(id)) {
+              ok = false;
+              note = `${detail.verb} needs args.kind (one of ${CANVAS_CARD_KINDS.join(', ')}) and a numeric args.id — call list first`;
+              break;
+            }
+            const card = canvasCardsRef.current[kind].find((c) => c.id === id);
+            if (!card) {
+              ok = false;
+              note = `no ${kind} card with id ${id} on the canvas (call list to see current ids)`;
+              break;
+            }
+            if (detail.verb === 'move-card') {
+              const x = Number(args.x);
+              const y = Number(args.y);
+              if (!Number.isFinite(x) || !Number.isFinite(y)) {
+                ok = false;
+                note = 'move-card needs numeric args.x and args.y (canvas-layer coordinates)';
+                break;
+              }
+              patchCanvasCardGeom(kind, id, { x, y });
+              note = `moved ${kind} ${id} to (${Math.round(x)}, ${Math.round(y)})`;
+            } else if (detail.verb === 'resize-card') {
+              const w = Number(args.w);
+              const h = Number(args.h);
+              if (!Number.isFinite(w) || !Number.isFinite(h)) {
+                ok = false;
+                note = 'resize-card needs numeric args.w and args.h';
+                break;
+              }
+              if ((kind === 'image' || kind === 'video') && card.aspect) {
+                // Photos + video stay aspect-locked (like the human resize); honor
+                // width and derive height so the agent can't distort the media.
+                const nw = Math.max(CANVAS_GEOM_FLOOR, w);
+                patchCanvasCardGeom(kind, id, { w: nw, h: Math.round(nw / card.aspect) });
+              } else {
+                patchCanvasCardGeom(kind, id, { w: Math.max(CANVAS_GEOM_FLOOR, w), h: Math.max(CANVAS_GEOM_FLOOR, h) });
+              }
+              note = `resized ${kind} ${id}`;
+            } else if (detail.verb === 'focus-card') {
+              focusCard(kind, id);
+              note = `focused ${kind} ${id}`;
+            } else {
+              dismissCanvasCard(kind, id);
+              note = `closed ${kind} ${id}`;
+            }
+            break;
+          }
           default:
             ok = false;
             note = `unknown intent verb: ${String(detail.verb)}`;
@@ -2651,7 +2814,7 @@ export default function CanvasGlassPreviewPage() {
         ok = false;
         note = error instanceof Error ? error.message : String(error);
       }
-      (window as unknown as Record<string, unknown>).__o8CanvasIntentLast = { verb: detail.verb ?? null, ok, note, at: Date.now() };
+      (window as unknown as Record<string, unknown>).__o8CanvasIntentLast = { verb: detail.verb ?? null, ok, note, ...(data !== undefined ? { data } : {}), at: Date.now() };
     };
     window.addEventListener('o8:canvas-intent', onIntent);
     (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = true;
@@ -2659,7 +2822,7 @@ export default function CanvasGlassPreviewPage() {
       window.removeEventListener('o8:canvas-intent', onIntent);
       (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
     };
-  }, [activeRepoPath, canvasEnabled, gridMode, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal]);
+  }, [activeRepoPath, canvasEnabled, canvasZoomLevel, dockOpen, gridMode, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, canvasCardTitle, patchCanvasCardGeom, dismissCanvasCard, focusCard]);
 
   if (!canvasEnabled) {
     return (

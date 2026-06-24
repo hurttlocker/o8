@@ -15,7 +15,7 @@ import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
  * it's somewhere else, then waits for the intent listener to mount.
  */
 
-const VERBS = new Set(['enter', 'open-browser', 'ask-brain', 'open-spec', 'spawn-terminal', 'search', 'zoom', 'dock', 'send-prompt', 'spawn-agents', 'render', 'grid']);
+const VERBS = new Set(['enter', 'open-browser', 'ask-brain', 'open-spec', 'spawn-terminal', 'search', 'zoom', 'dock', 'send-prompt', 'spawn-agents', 'render', 'grid', 'list', 'move-card', 'resize-card', 'focus-card', 'close-card']);
 const CANVAS_ROUTE = '/preview/canvas-glass';
 const READY_POLL_MS = 300;
 const READY_TIMEOUT_MS = 10_000;
@@ -29,7 +29,7 @@ interface IntentBody {
 interface DispatchProbe {
   ready: boolean;
   route?: string;
-  ack?: { verb: string | null; ok: boolean; note: string | null } | null;
+  ack?: { verb: string | null; ok: boolean; note: string | null; data?: unknown } | null;
 }
 
 function webviewClient(): O8WebviewClient {
@@ -110,6 +110,7 @@ export async function POST(request: NextRequest) {
       ok: ack ? ack.ok : true,
       verb,
       ...(ack?.note ? { note: ack.note } : {}),
+      ...(ack?.data !== undefined ? { data: ack.data } : {}),
       ...(navigated ? { navigated: true } : {}),
     });
   } catch (error) {
