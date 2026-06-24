@@ -123,21 +123,32 @@ const LONG_FORM_FN_DOUBLE_TAP_MS: u64 = 480;
 #[cfg(target_os = "macos")]
 const ESCAPE_KEYCODE: i64 = 53;
 
-/// NSEventModifierFlagOption = 1 << 19. Set for BOTH Option keys.
+/// NSEventModifierFlagOption = 1 << 19. Set when EITHER Option key is down (the
+/// side-agnostic bit). Used only for the ⌥S say path's physical-finger truth.
 #[cfg(target_os = "macos")]
 const OPTION_FLAG: u64 = 0x80000;
 
-/// Virtual keycode for the RIGHT Option key (Left Option = 58). The flag bit is
-/// shared, so the keycode tells the two keys apart — but since v0.1.312 BOTH
-/// Option keys drive the Symon voice AGENT (the invisible left/right split sent
-/// half of all presses to the toolless Ask lane: "I cannot open applications").
+/// Device-dependent RIGHT-Option mask (NX_DEVICERALTKEYMASK). The generic
+/// `OPTION_FLAG` says only "an Option is down", not which side; this bit is set
+/// for the RIGHT key specifically, so a held LEFT Option never reads as the
+/// agent gesture. The keycode (61) also tells the keys apart, but on a
+/// FlagsChanged event the device bit is the directly-comparable down/up signal.
+#[cfg(target_os = "macos")]
+const RIGHT_OPTION_DEVICE_FLAG: u64 = 0x40;
+
+/// Virtual keycode for the RIGHT Option key (Left Option = 58). RIGHT Option,
+/// held alone, drives the Symon voice AGENT: hold, speak a command or question,
+/// release to run it through the tool-calling loop. Double-tap Right-Option =
+/// long-form agent (open mic for a long question; single tap finishes, Escape
+/// cancels). LEFT Option is reserved for the ⌥S "say" combo and does NOT trigger
+/// the agent.
 #[cfg(target_os = "macos")]
 const RIGHT_OPTION_KEYCODE: i64 = 61;
 
-/// Virtual keycode for the LEFT Option key. Either Option key = the Symon voice
-/// AGENT: hold, speak a command or question, release to run it through the
-/// tool-calling loop. Double-tap Option = long-form agent (open mic for a long
-/// question; single Option tap finishes, Escape cancels).
+/// Virtual keycode for the LEFT Option key. LEFT Option does NOT trigger the
+/// agent — it only participates in the ⌥S "say" chord (speak-selection). We
+/// still track its physical down/up so the say path can wait for the finger to
+/// leave Option before the synthetic Cmd+C selection grab.
 #[cfg(target_os = "macos")]
 const LEFT_OPTION_KEYCODE: i64 = 58;
 
@@ -154,10 +165,9 @@ const ASK_BRUSH_MS: u64 = 120;
 #[cfg(target_os = "macos")]
 static ASK_MODE: AtomicBool = AtomicBool::new(false);
 
-/// Edge latch for the Option agent gesture. ONE latch covers BOTH Option keys:
-/// the OPTION_FLAG bit reflects either key held, so chorded left+right holds
-/// collapse into a single gesture (no double-begin, releases only end the
-/// gesture when the last Option key comes up).
+/// Edge latch for the RIGHT-Option agent gesture. Keyed on the right-Option
+/// device bit (not the side-agnostic OPTION_FLAG), so a held LEFT Option never
+/// begins/ends the gesture — left Option is the ⌥S "say" key, not the agent.
 #[cfg(target_os = "macos")]
 static OPTION_HELD: AtomicBool = AtomicBool::new(false);
 
@@ -1061,12 +1071,14 @@ pub fn start(app: tauri::AppHandle) {
                         }
                     }
 
-                    // ── Option (either side) → Symon voice AGENT ──
-                    // Both Option keycodes (58 left, 61 right) drive the SAME
-                    // agent gesture — the old left=agent / right=Ask split was
-                    // invisible and sent half of all presses to the toolless Ask
-                    // lane. One latch keyed on OPTION_FLAG covers both keys
-                    // (chorded holds collapse into a single gesture).
+                    // ── Option → Symon voice AGENT (RIGHT Option ONLY) ──
+                    // RIGHT Option (keycode 61), held alone, drives the agent
+                    // gesture. LEFT Option (58) is reserved for the ⌥S "say"
+                    // combo and must NOT trigger the agent — so the edge-latch is
+                    // keyed on the RIGHT-Option device bit, not the side-agnostic
+                    // OPTION_FLAG. We still update OPTION_PHYSICALLY_DOWN for
+                    // EITHER key, because the say path's wait_for_option_release
+                    // needs the physical-finger truth regardless of side.
                     //
                     // Gestures (ORDER of branches is load-bearing, mirror of Fn):
                     //   (a) single tap while long-form is active FINISHES it,
@@ -1079,14 +1091,19 @@ pub fn start(app: tauri::AppHandle) {
                         let keycode =
                             event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                         if keycode == LEFT_OPTION_KEYCODE || keycode == RIGHT_OPTION_KEYCODE {
-                            let option_down = (flags & OPTION_FLAG) != 0;
-                            // Physical-key truth for the ⌥S say path: the
-                            // synthetic Cmd+C selection grab must wait until
-                            // the user's finger leaves Option, or the held
-                            // modifier merges into the synthetic event (⌥C —
-                            // no copy). Tracked separately from OPTION_HELD,
-                            // which the S-chord guard clears early on purpose.
-                            OPTION_PHYSICALLY_DOWN.store(option_down, Ordering::SeqCst);
+                            // Physical-key truth for the ⌥S say path (EITHER
+                            // Option key): the synthetic Cmd+C selection grab
+                            // must wait until the user's finger leaves Option,
+                            // or the held modifier merges into the synthetic
+                            // event (⌥C — no copy). Side-agnostic OPTION_FLAG.
+                            OPTION_PHYSICALLY_DOWN
+                                .store((flags & OPTION_FLAG) != 0, Ordering::SeqCst);
+                        }
+                        // The agent gesture is RIGHT-Option-only. Key the edge
+                        // latch on the right-Option device bit so a held LEFT
+                        // Option never reads as "option_down" here.
+                        if keycode == RIGHT_OPTION_KEYCODE {
+                            let option_down = (flags & RIGHT_OPTION_DEVICE_FLAG) != 0;
                             let opt_down_edge = option_down
                                 && OPTION_HELD
                                     .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
