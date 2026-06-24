@@ -1,6 +1,7 @@
 import { cleanupIssueBranch } from './branch-cleanup';
 import { currentMissionState, log } from './shared';
 import type { ResetPacketInput } from './types';
+import { interruptLaneSessions } from '@/lib/lane/reap-sessions';
 
 async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
@@ -29,6 +30,12 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
       );
     }
   }
+
+  // #1292 — reap the live runtime procs BEFORE we null their sessionKeys. A
+  // reset that leaves the codex exec running lets it later exit/fail and the
+  // agent-supervisor relaunches it into a SIBLING lane (the zombie-multiply).
+  // Interrupt is a clean stop (not `failed`), so it does not auto-retry.
+  await interruptLaneSessions(bound);
 
   const cleanupTargets = new Map<string, { repoPath: string; branch: string; worktreePath: string | null }>();
   let firstWorktreePath: string | null = null;
@@ -135,6 +142,9 @@ export async function resetPacket(input: ResetPacketInput) {
     if (bound.length === 0) {
       console.log(`[reset-packet] No lane bound to packet ${packet.referenceLabel} (${packet.id})`);
     }
+    // #1292 — reap live runtime procs BEFORE nulling sessionKey below, or a
+    // killed orphan re-triggers the supervisor auto-retry into a sibling lane.
+    await interruptLaneSessions(bound);
     for (const lane of bound) {
       // #1215 — terminal lanes get unbound below like the rest but are never
       // re-archived and never donate a worktreePath (mirrors
