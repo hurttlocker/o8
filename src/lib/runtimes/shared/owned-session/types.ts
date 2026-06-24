@@ -261,6 +261,9 @@ export interface OwnedSessionStore {
   getReviewPacket(surfaceId: string): Promise<RuntimeReviewPacket>;
   getFleetAdditions(options?: { fresh?: boolean }): Promise<OwnedFleetAdditions>;
   archiveSession(surfaceId: string): Promise<OwnedArchiveResponse>;
+  /** #1292 — archive owned-session dirs not bound to an active lane (orphans) so
+   *  discovery can't re-spawn phantom lanes. Skips active/in-flight sessions. */
+  sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number): Promise<number>;
   getTelemetrySources(surfaceId: string): Promise<{ threadId?: string; stdoutPaths: string[] } | null>;
   setReviewDisposition(
     surfaceId: string,

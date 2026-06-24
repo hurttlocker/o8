@@ -637,6 +637,10 @@ export async function archiveOwnedCodexSession(surfaceId: string) {
   return codexStore.archiveSession(surfaceId);
 }
 
+export async function sweepOrphanedCodexSessions(activeSurfaceIds: Set<string>, maxAgeMs: number) {
+  return codexStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs);
+}
+
 export async function launchOwnedCodexSession(
   request: OwnedCodexLaunchRequest,
 ): Promise<OwnedCodexLaunchResponse> {
