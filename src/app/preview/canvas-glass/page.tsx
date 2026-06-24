@@ -309,6 +309,12 @@ export default function CanvasGlassPreviewPage() {
   const [termCards, setTermCards] = useState<TermCard[]>([]);
   const [fileCards, setFileCards] = useState<FileCard[]>([]);
   const [imageCards, setImageCards] = useState<ImageCard[]>([]);
+  // Which card the dragged photo is currently hovering over (→ would stack).
+  // Drives the "Drop to stack" highlight. A ref mirror of imageCards lets the
+  // move handler hit-test against the other cards without a stale closure.
+  const [dropTargetId, setDropTargetId] = useState<number | null>(null);
+  const imageCardsRef = useRef<ImageCard[]>([]);
+  imageCardsRef.current = imageCards;
   const [videoCards, setVideoCards] = useState<VideoCard[]>([]);
   const [termVeil, setTermVeil] = useState(TERM_VEIL_DEFAULT);
   const [termPickerOpen, setTermPickerOpen] = useState(false);
@@ -2349,6 +2355,19 @@ export default function CanvasGlassPreviewPage() {
 
   const moveImageCard = useCallback((id: number, x: number, y: number) => {
     setImageCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
+    // Live hit-test while dragging: highlight the photo we'd stack onto (the
+    // topmost OTHER card whose bounds contain the dragged card's center).
+    const cards = imageCardsRef.current;
+    const dragged = cards.find((c) => c.id === id);
+    if (!dragged) return;
+    const cx = x + dragged.w / 2;
+    const cy = y + dragged.h / 2;
+    let tgt: number | null = null;
+    for (const c of cards) {
+      if (c.id === id) continue;
+      if (cx >= c.x && cx <= c.x + c.w && cy >= c.y && cy <= c.y + c.h) tgt = c.id;
+    }
+    setDropTargetId(tgt);
   }, []);
 
   const resizeImageCard = useCallback((id: number, w: number, h: number) => {
@@ -2367,6 +2386,7 @@ export default function CanvasGlassPreviewPage() {
 
   /** Dropped onto another photo → the two collapse into a stack (deck). */
   const dropImageCard = useCallback((id: number, centerX: number, centerY: number) => {
+    setDropTargetId(null);
     setImageCards((previous) => {
       const dragged = previous.find((card) => card.id === id);
       if (!dragged) return previous;
@@ -2382,15 +2402,47 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
-  /** Tap a deck → flip to the next photo (rotate the stack in place), so you
-   *  can click through a group instead of exploding it. items[0] is the visible
-   *  top photo; moving it to the back surfaces the next one. */
-  const cycleImageCard = useCallback((id: number) => {
+  /** Flip a deck to the next (dir≥0) or previous (dir<0) photo, rotating the
+   *  stack in place — tap and the ‹ › arrows both route here. items[0] is the
+   *  visible top photo. */
+  const cycleImageCard = useCallback((id: number, dir = 1) => {
     setImageCards((previous) => previous.map((card) => {
       if (card.id !== id || card.items.length < 2) return card;
-      const [first, ...rest] = card.items;
-      return { ...card, items: [...rest, first] };
+      if (dir >= 0) {
+        const [first, ...rest] = card.items;
+        return { ...card, items: [...rest, first] };
+      }
+      const last = card.items[card.items.length - 1]!;
+      return { ...card, items: [last, ...card.items.slice(0, -1)] };
     }));
+  }, []);
+
+  /** Separate a deck → spread its photos back into individual cards (the
+   *  explicit un-stack control on a hovered deck). */
+  const spreadImageCard = useCallback((id: number) => {
+    setImageCards((previous) => {
+      const stackCard = previous.find((card) => card.id === id);
+      if (!stackCard || stackCard.items.length < 2) return previous;
+      const spread: ImageCard[] = stackCard.items.slice(1).map((item, index) => {
+        const spreadId = nextIdRef.current;
+        nextIdRef.current += 1;
+        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+        return {
+          id: spreadId,
+          x: stackCard.x + 30 * (index + 1),
+          y: stackCard.y + 22 * (index + 1),
+          z: zPeakRef.current,
+          w: stackCard.w,
+          h: stackCard.h,
+          aspect: stackCard.aspect,
+          items: [item],
+        };
+      });
+      return [
+        ...previous.map((card) => (card.id === id ? { ...card, items: [stackCard.items[0]!] } : card)),
+        ...spread,
+      ];
+    });
   }, []);
 
   /** Drop a video clip onto the canvas — the bytes go to IndexedDB (a clip is
@@ -2966,11 +3018,14 @@ export default function CanvasGlassPreviewPage() {
           <ImageGlassCard
             key={card.id}
             card={card}
+            isDropTarget={card.id === dropTargetId}
             onMove={moveImageCard}
             onResize={resizeImageCard}
             onFocus={focusImageCard}
             onDrop={dropImageCard}
             onTap={cycleImageCard}
+            onCycle={cycleImageCard}
+            onSpread={spreadImageCard}
             onClose={closeImageCard}
           />
         ))}
