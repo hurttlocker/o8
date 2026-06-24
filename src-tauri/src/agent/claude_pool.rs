@@ -107,7 +107,7 @@ pub fn acquire(bin: &str, model: &str, mcp_cfg: &str) -> Option<ClaudeSession> {
 /// Keydown convenience: resolve the agent's bin/model/mcp and warm a session.
 /// Only warms the CLAUDE brain — when the configured front brain is Gemini or an
 /// OpenRouter id, no `claude` proc is used, so warming would just leak one.
-/// Called from the Left-Option down edge (`fn_hotkey::begin_agent_dictation`).
+/// Called from the Right-Option down edge (`fn_hotkey::begin_agent_dictation`).
 pub fn prewarm_agent() {
     let model = super::router::load_config().mac_native_action;
     if model.contains('/') || !model.starts_with("claude") {
