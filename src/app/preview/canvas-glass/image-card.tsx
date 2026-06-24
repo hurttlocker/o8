@@ -12,7 +12,7 @@
  * the bottom mask makes the lower corners moot.
  */
 
-import { useRef, useState } from 'react';
+import { useRef, useState, type CSSProperties } from 'react';
 import { motion } from 'framer-motion';
 import { SmoothCorners } from '@lisse/react';
 import { canvasZoom, CHROME, chromeFloorScale, FONT, IMG_MIN_W, MEDIA_HEADER_H, MEDIA_RIM, glassMedia } from './ui';
@@ -39,16 +39,45 @@ export interface ImageCard {
 
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
+/** Circular ‹ › deck-flip button, pinned to a photo's left/right edge. */
+function navArrowStyle(side: 'left' | 'right'): CSSProperties {
+  return {
+    position: 'absolute',
+    top: '50%',
+    [side]: MEDIA_RIM + 8,
+    transform: 'translateY(-50%)',
+    width: 30,
+    height: 30,
+    borderRadius: 999,
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 0,
+    cursor: 'pointer',
+    color: '#ffffff',
+    background: 'rgba(20, 22, 26, 0.46)',
+    backdropFilter: 'blur(8px)',
+    WebkitBackdropFilter: 'blur(8px)',
+    boxShadow: '0 2px 10px rgba(0, 0, 0, 0.28)',
+  } as CSSProperties;
+}
+
 export function ImageGlassCard({
   card,
+  isDropTarget,
   onMove,
   onResize,
   onFocus,
   onDrop,
   onTap,
+  onCycle,
+  onSpread,
   onClose,
 }: {
   card: ImageCard;
+  /** True while another photo is being dragged over this one — shows the
+   *  "Drop to stack" highlight. */
+  isDropTarget?: boolean;
   onMove: (id: number, x: number, y: number) => void;
   /** Aspect-locked corner resize — CornerResize derives h from w; both land. */
   onResize: (id: number, w: number, h: number) => void;
@@ -57,6 +86,10 @@ export function ImageGlassCard({
   onDrop: (id: number, centerX: number, centerY: number) => void;
   /** Pointer released without travel — flips the deck to the next photo. */
   onTap: (id: number) => void;
+  /** ‹ › deck arrows — flip to prev (dir<0) / next (dir≥0) photo. */
+  onCycle: (id: number, dir: number) => void;
+  /** Separate a deck back into individual cards. */
+  onSpread: (id: number) => void;
   onClose: (id: number) => void;
 }) {
   const dragRef = useRef<{ pointerId: number; startX: number; startY: number; originX: number; originY: number; moved: boolean; lastX: number; lastY: number } | null>(null);
@@ -71,7 +104,7 @@ export function ImageGlassCard({
   return (
     <motion.div
       initial={{ scale: 0.7, opacity: 0, y: 24 }}
-      animate={{ scale: 1, opacity: 1, y: 0 }}
+      animate={{ scale: isDropTarget ? 1.05 : 1, opacity: 1, y: 0 }}
       exit={{ scale: 0.86, opacity: 0 }}
       transition={{ type: 'spring', stiffness: 360, damping: 28 }}
       onPointerDownCapture={() => onFocus(card.id)}
@@ -164,17 +197,35 @@ export function ImageGlassCard({
         {resizing ? (
           <span style={{ flexShrink: 0, fontFamily: MONO, fontSize: CHROME.metaSize, color: 'var(--cnv-ink-muted)' }}>{Math.round(card.w)}×{Math.round(card.h)}</span>
         ) : hovered ? (
-          <button
-            type="button"
-            aria-label="Remove image"
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => onClose(card.id)}
-            style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: CHROME.closeSize, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, flexShrink: 0, ...chromeFloorScale('center right') }}
-            onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            ✕
-          </button>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 }}>
+            {stack ? (
+              <button
+                type="button"
+                aria-label="Separate stack"
+                title="Separate"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => onSpread(card.id)}
+                style={{ borderWidth: 0, background: 'transparent', padding: 2, lineHeight: 0, color: 'var(--cnv-ink-muted)', cursor: 'pointer', display: 'inline-flex', ...chromeFloorScale('center right') }}
+                onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+                onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+              >
+                <svg width={CHROME.iconSize} height={CHROME.iconSize} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <rect x="3" y="3" width="8" height="8" rx="1.5" /><rect x="13" y="13" width="8" height="8" rx="1.5" />
+                </svg>
+              </button>
+            ) : null}
+            <button
+              type="button"
+              aria-label="Remove image"
+              onPointerDown={(event) => event.stopPropagation()}
+              onClick={() => onClose(card.id)}
+              style={{ borderWidth: 0, background: 'transparent', padding: 2, fontSize: CHROME.closeSize, lineHeight: 1, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT, ...chromeFloorScale('center right') }}
+              onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
+              onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
+            >
+              ✕
+            </button>
+          </span>
         ) : null}
       </div>
       {/* The photo — squircle, below the header with the grey rim on the other sides. */}
@@ -189,6 +240,25 @@ export function ImageGlassCard({
           />
         ) : null}
       </SmoothCorners>
+
+      {/* Deck nav — ‹ › flip arrows on hover (tapping the photo also flips). */}
+      {stack && hovered ? (
+        <>
+          <button type="button" aria-label="Previous photo" onPointerDown={(event) => event.stopPropagation()} onClick={() => onCycle(card.id, -1)} style={navArrowStyle('left')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m15 18-6-6 6-6" /></svg>
+          </button>
+          <button type="button" aria-label="Next photo" onPointerDown={(event) => event.stopPropagation()} onClick={() => onCycle(card.id, 1)} style={navArrowStyle('right')}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m9 18 6-6-6-6" /></svg>
+          </button>
+        </>
+      ) : null}
+
+      {/* Drop-to-stack highlight on the card a dragged photo is hovering over. */}
+      {isDropTarget ? (
+        <div aria-hidden style={{ position: 'absolute', inset: 0, borderRadius: 18, borderWidth: 2, borderStyle: 'solid', borderColor: '#ff7a18', boxShadow: '0 0 0 5px rgba(255, 122, 24, 0.20), 0 14px 36px rgba(255, 122, 24, 0.28)', pointerEvents: 'none', display: 'flex', alignItems: 'flex-start', justifyContent: 'center' }}>
+          <span style={{ marginTop: MEDIA_HEADER_H + 10, paddingTop: 5, paddingBottom: 5, paddingLeft: 12, paddingRight: 12, borderRadius: 999, background: '#ff7a18', color: '#ffffff', fontSize: 11, fontWeight: 600, letterSpacing: '-0.1px', fontFamily: FONT, boxShadow: '0 4px 14px rgba(0, 0, 0, 0.35)' }}>Drop to stack</span>
+        </div>
+      ) : null}
 
       {/* Stack count — top-right of the deck. */}
       {stack ? (
