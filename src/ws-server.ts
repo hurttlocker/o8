@@ -5055,6 +5055,13 @@ async function bootstrapWsServer() {
       },
     };
     startSupervisorLoop(supervisorCallbacks);
+    // #1292 — self-heal: archive owned-session dirs with no active lane so fleet
+    // discovery can't re-spawn phantom lanes from orphans (the multiply). Fire-
+    // and-forget; the dominant case is already handled by reset archiving its own
+    // dir. Guarded inside each store (skips active/in-flight sessions).
+    void import('@/lib/lane/sweep-orphan-sessions')
+      .then((m) => m.sweepOrphanedOwnedSessions())
+      .catch(() => {});
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
     startWorktreeReaper();
     startLaneZombieReaper();

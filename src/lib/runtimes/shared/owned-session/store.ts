@@ -1160,6 +1160,31 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     globalStore[TIMER_KEY] = timer;
   }
 
+  // #1292 — startup orphan sweep: archive any owned-session dir NOT bound to an
+  // active lane and past the in-flight window, so fleet discovery can't re-spawn
+  // a phantom lane from it (the multiply). Guarded: skips active-lane sessions,
+  // live runs, and recently-active dirs; best-effort per dir. The dominant case
+  // is handled by reset archiving its own dir — this is the self-healing belt-
+  // and-suspenders for orphans from OTHER paths (supervisor relaunch, crashes).
+  async function sweepOrphanedSessions(activeSurfaceIds: Set<string>, maxAgeMs: number): Promise<number> {
+    let archived = 0;
+    for (const sessionDir of await listSessionDirs()) {
+      try {
+        if (!(await pathExists(metadataPath(sessionDir)))) continue;
+        const session = await loadSession(sessionDir);
+        if (activeSurfaceIds.has(session.surfaceId)) continue; // bound to a live lane — keep
+        if (session.activeRun) continue;                        // a run is in flight — keep
+        const latest = latestRun(session);
+        const lastActivity = latest?.finishedAt ?? latest?.startedAt ?? session.updatedAt;
+        if (Date.now() - new Date(lastActivity).getTime() < maxAgeMs) continue; // recently active — keep
+        const result = await archiveOwnedSessionDir(root, session);
+        if (result.archived) archived += 1;
+      } catch { /* best-effort per dir — never block startup */ }
+    }
+    if (archived > 0) invalidateFleetCache();
+    return archived;
+  }
+
   // ── Assembled store ────────────────────────────────────────────────────────
 
   return {
@@ -1172,6 +1197,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     getReviewPacket,
     getFleetAdditions,
     archiveSession,
+    sweepOrphanedSessions,
     getTelemetrySources,
     setReviewDisposition,
     invalidateFleetCache,
