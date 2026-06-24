@@ -1,7 +1,7 @@
 import { cleanupIssueBranch } from './branch-cleanup';
 import { currentMissionState, log } from './shared';
 import type { ResetPacketInput } from './types';
-import { interruptLaneSessions } from '@/lib/lane/reap-sessions';
+import { interruptLaneSessions, archiveLaneSessions } from '@/lib/lane/reap-sessions';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
 
 async function resetPacketViaLaneFallback(input: ResetPacketInput) {
@@ -37,6 +37,13 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   // agent-supervisor relaunches it into a SIBLING lane (the zombie-multiply).
   // Interrupt is a clean stop (not `failed`), so it does not auto-retry.
   await interruptLaneSessions(bound);
+  // #1292 ROOT (the real one) — archive the owned-session DIR (move to
+  // -archive) so startup discovery (computeFleetAdditions, no retirement gate)
+  // can't re-find the orphan and re-create a phantom lane. Reset previously left
+  // the dir in the ACTIVE tree, so one dispatch's leftover dirs re-spawned a lane
+  // on every restart. Runs after the interrupt (proc stopped), before sessionKey
+  // is nulled below. Transcript stays reviewable via the archive-aware tail.
+  await archiveLaneSessions(bound);
   // #1292 ROOT — unregister each reset lane's watched agent so its orphaned
   // watched_agents row can't survive into the next app launch, get rehydrated,
   // and re-trigger the supervisor's relaunch into a fresh sibling lane+session
@@ -155,6 +162,10 @@ export async function resetPacket(input: ResetPacketInput) {
     // #1292 — reap live runtime procs BEFORE nulling sessionKey below, or a
     // killed orphan re-triggers the supervisor auto-retry into a sibling lane.
     await interruptLaneSessions(bound);
+    // #1292 ROOT (the real one) — archive the owned-session DIR so startup
+    // discovery can't re-find the orphan and re-create a phantom lane (see
+    // resetPacketViaLaneFallback above).
+    await archiveLaneSessions(bound);
     // #1292 ROOT — unregister watched agents so they don't rehydrate + relaunch
     // into siblings on the next launch (see resetPacketViaLaneFallback above).
     for (const lane of bound) {
