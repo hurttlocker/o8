@@ -147,7 +147,7 @@ const loaderHtml = `<!DOCTYPE html>
     (function () {
       var cv = document.getElementById('ascii');
       var ctx = cv.getContext('2d');
-      var CFG = { text: 'o8', cell: 12, color: '#ffffff', bg: '#0a0a0a', speed: 1.0, baseLevel: 0.5, waveBoost: 0.85, contrast: 1.2, ripple: 33 / 50, radiusFrac: 0.04 };
+      var CFG = { text: 'o8', cell: 8, scale: 0.4, color: '#ffffff', bg: '#0a0a0a', speed: 1.0, baseLevel: 0.5, waveBoost: 0.85, contrast: 1.2, ripple: 33 / 50, radiusFrac: 0.04 };
       var RAMP = ' .:-=+*#%@';
       var dpr = 1, W = 0, H = 0, cols = 0, rows = 0, lum = null;
       var cx = -1, cy = -1;
@@ -164,7 +164,7 @@ const loaderHtml = `<!DOCTYPE html>
         var o = off.getContext('2d', { willReadFrequently: true });
         o.fillStyle = '#000'; o.fillRect(0, 0, cols, rows);
         o.fillStyle = '#fff'; o.textBaseline = 'middle'; o.textAlign = 'center';
-        var size = rows * 0.82;
+        var size = rows * CFG.scale;
         function font(s) { return '700 ' + s + 'px ui-sans-serif, system-ui, -apple-system, sans-serif'; }
         o.font = font(size);
         var w = o.measureText(CFG.text).width;
