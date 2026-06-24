@@ -384,21 +384,33 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_view_click',
-    description: 'USE THIS WHEN the user asks you to click something in o8, dismiss a dialog, or drive the UI to a specific state. Pass ref from o8_view_snapshot for label-based targeting, or {x, y} coordinates when you already know the position from a screenshot.',
+    description: 'Click an element in o8. PREFER semantic targeting: pass `text` (the element\'s visible text or aria-label) or `role`+`name` — resolved and clicked in a single in-page step, robust under load and immune to coordinate drift. `ref` (from o8_view_snapshot) also works. Use {x, y} CSS-pixel coordinates only as a last resort when no stable label exists — agents should drive o8 by intent, not pixels.',
     inputSchema: {
       type: 'object',
       properties: {
+        text: {
+          type: 'string',
+          description: 'Visible text or aria-label of the element to click, e.g. "New session" or "Archived". Exact match wins; falls back to a contains-match on clickable elements. The agent-first way to click — no coordinates, no prior snapshot.',
+        },
+        role: {
+          type: 'string',
+          description: 'ARIA role or tag name to target, paired with `name` (e.g. role "button", name "Restart").',
+        },
+        name: {
+          type: 'string',
+          description: 'Accessible name (aria-label or text) to match alongside `role`.',
+        },
         ref: {
           type: 'number',
           description: 'Element ref from o8_view_snapshot.',
         },
         x: {
           type: 'number',
-          description: 'X coordinate in CSS pixels.',
+          description: 'X coordinate in CSS pixels (last-resort fallback).',
         },
         y: {
           type: 'number',
-          description: 'Y coordinate in CSS pixels.',
+          description: 'Y coordinate in CSS pixels (last-resort fallback).',
         },
       },
     },
@@ -586,6 +598,52 @@ export function browserAgentEval(verb: 'read' | 'click' | 'type' | 'probe', args
   })()`;
 }
 
+/**
+ * #agent-surface-ergonomics — build an in-page expression that resolves an
+ * element by visible text / aria-label (or role + name) and clicks it in the
+ * SAME synchronous step. o8 is the governance layer for AI agents, so an agent
+ * must drive it by INTENT, not pixels. The click is dispatched in-page (React's
+ * bubbling onClick fires even when the match is a text node inside the handler),
+ * so it survives a busy-thread eval timeout and never drifts as layout reflows.
+ * Returns { clicked, matchedText, tag, x, y } or { clicked: false, reason }.
+ */
+export function buildSemanticClickExpr(locator: { text: string; role: string; name: string }): string {
+  const TEXT = JSON.stringify(locator.text);
+  const ROLE = JSON.stringify(locator.role);
+  const NAME = JSON.stringify(locator.name);
+  return `(() => {
+    const TEXT = ${TEXT}, ROLE = ${ROLE}, NAME = ${NAME};
+    const norm = (s) => (s || '').replace(/\\s+/g, ' ').trim();
+    const vis = (el) => { const r = el.getBoundingClientRect(); return r.width > 0 && r.height > 0 && el.offsetParent !== null; };
+    const CLICKABLE = 'button,[role="button"],a,[role="tab"],[role="menuitem"],[role="option"],input,label,summary';
+    let cand = [];
+    if (ROLE && NAME) {
+      const want = norm(NAME).toLowerCase();
+      cand = Array.from(document.querySelectorAll('*')).filter(vis).filter((el) =>
+        ((el.getAttribute('role') || el.tagName.toLowerCase()) === ROLE) &&
+        (norm(el.getAttribute('aria-label') || el.textContent).toLowerCase() === want));
+    } else if (TEXT) {
+      const want = norm(TEXT).toLowerCase();
+      const all = Array.from(document.querySelectorAll(CLICKABLE + ',div,span,li,p')).filter(vis);
+      let hits = all.filter((el) => norm(el.textContent).toLowerCase() === want || norm(el.getAttribute('aria-label') || '').toLowerCase() === want);
+      hits = hits.filter((el) => !hits.some((o) => o !== el && el.contains(o)));
+      if (!hits.length) {
+        hits = Array.from(document.querySelectorAll(CLICKABLE)).filter(vis)
+          .filter((el) => norm(el.textContent).toLowerCase().includes(want))
+          .sort((a, b) => norm(a.textContent).length - norm(b.textContent).length)
+          .slice(0, 1);
+      }
+      cand = hits;
+    }
+    const el = cand[0];
+    if (!el) return { clicked: false, reason: 'no-match', text: TEXT, role: ROLE, name: NAME };
+    try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
+    const r = el.getBoundingClientRect();
+    el.click();
+    return { clicked: true, matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+  })()`;
+}
+
 function parseAgentResult(raw: string): McpToolResult {
   try {
     return jsonResult(JSON.parse(raw));
@@ -662,6 +720,18 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
     }),
 
     o8_view_click: async (args) => withStructuredErrors(async () => {
+      const text = typeof args.text === 'string' ? args.text.trim() : '';
+      const role = typeof args.role === 'string' ? args.role.trim() : '';
+      const name = typeof args.name === 'string' ? args.name.trim() : '';
+      // Semantic locator (#agent-surface-ergonomics): resolve + click in ONE
+      // in-page step — robust under load, immune to coordinate drift, no prior
+      // snapshot needed. The click fires inside the same eval that finds the
+      // element, so it lands even if the eval transport reports a busy-thread
+      // timeout. Coordinates/ref remain a fallback for label-less targets.
+      if (text || (role && name)) {
+        const evalResult = await getClient().evalJs(wrapEvalCode(buildSemanticClickExpr({ text, role, name })));
+        return capEvalResult(evalResult.result);
+      }
       const ref = parseOptionalNumber(args.ref);
       const x = parseOptionalNumber(args.x);
       const y = parseOptionalNumber(args.y);
