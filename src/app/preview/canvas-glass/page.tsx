@@ -2382,31 +2382,15 @@ export default function CanvasGlassPreviewPage() {
     });
   }, []);
 
-  /** Tap a stack → the deck spreads back out into separate photos. */
-  const unstackImageCard = useCallback((id: number) => {
-    setImageCards((previous) => {
-      const stackCard = previous.find((card) => card.id === id);
-      if (!stackCard || stackCard.items.length < 2) return previous;
-      const spread: ImageCard[] = stackCard.items.slice(1).map((item, index) => {
-        const spreadId = nextIdRef.current;
-        nextIdRef.current += 1;
-        zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
-        return {
-          id: spreadId,
-          x: stackCard.x + 36 * (index + 1),
-          y: stackCard.y + 26 * (index + 1),
-          z: zPeakRef.current,
-          w: stackCard.w,
-          h: stackCard.h,
-          aspect: stackCard.aspect,
-          items: [item],
-        };
-      });
-      return [
-        ...previous.map((card) => (card.id === id ? { ...card, items: [stackCard.items[0]!] } : card)),
-        ...spread,
-      ];
-    });
+  /** Tap a deck → flip to the next photo (rotate the stack in place), so you
+   *  can click through a group instead of exploding it. items[0] is the visible
+   *  top photo; moving it to the back surfaces the next one. */
+  const cycleImageCard = useCallback((id: number) => {
+    setImageCards((previous) => previous.map((card) => {
+      if (card.id !== id || card.items.length < 2) return card;
+      const [first, ...rest] = card.items;
+      return { ...card, items: [...rest, first] };
+    }));
   }, []);
 
   /** Drop a video clip onto the canvas — the bytes go to IndexedDB (a clip is
@@ -2976,7 +2960,7 @@ export default function CanvasGlassPreviewPage() {
       </AnimatePresence>
 
       {/* ── Image cards — photos dissolve into the canvas; drag together
-            to stack, tap a deck to spread ─────────────────────────── */}
+            to stack, tap a deck to flip through ─────────────────────── */}
       <AnimatePresence>
         {imageCards.map((card) => (
           <ImageGlassCard
@@ -2986,7 +2970,7 @@ export default function CanvasGlassPreviewPage() {
             onResize={resizeImageCard}
             onFocus={focusImageCard}
             onDrop={dropImageCard}
-            onTap={unstackImageCard}
+            onTap={cycleImageCard}
             onClose={closeImageCard}
           />
         ))}
