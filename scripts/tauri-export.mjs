@@ -41,111 +41,36 @@ const loaderHtml = `<!DOCTYPE html>
   <meta charset="utf-8">
   <title>o8</title>
   <style>
-    :root {
-      --paper: #F4F2ED;
-      --ink: #111111;
-      --ink-muted: #777777;
-      --ink-quiet: #9A968E;
-      --accent: #FF5A1F;
-      --hairline: rgba(17, 17, 17, 0.18);
-      --dot: rgba(17, 17, 17, 0.055);
-    }
     * { box-sizing: border-box; margin: 0; padding: 0; }
     html, body { height: 100%; overflow: hidden; }
     body {
-      background: var(--paper);
-      background-image: radial-gradient(circle at 1px 1px, var(--dot) 1px, transparent 0);
-      background-size: 24px 24px;
-      color: var(--ink);
-      font-family: "Inter", "Neue Haas Grotesk", "Söhne", system-ui, -apple-system, sans-serif;
-      font-weight: 400;
-      letter-spacing: -0.01em;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      gap: 48px;
+      background: #0a0a0a;
+      color: #f4f4f5;
+      font-family: "Inter", system-ui, -apple-system, sans-serif;
       -webkit-font-smoothing: antialiased;
-      color-scheme: only light;
+      color-scheme: only dark;
     }
-    .mono {
-      font-family: "iA Writer Mono", "JetBrains Mono", "SF Mono", Menlo, ui-monospace, monospace;
-    }
-    .topbar {
-      position: fixed; top: 0; left: 0; right: 0;
-      display: flex; align-items: baseline; gap: 14px;
-      padding: 20px 28px;
-      font-size: 11px;
-      color: var(--ink-muted);
-      letter-spacing: 0.22em;
-      text-transform: uppercase;
-      font-weight: 500;
-    }
-    .topbar .brand { color: var(--ink); letter-spacing: -0.01em; text-transform: none; font-size: 13px; font-weight: 500; }
-    .topbar .sep { flex: 1; height: 1px; background: var(--hairline); opacity: 0.6; margin-top: 8px; }
-    .topbar .stamp { font-size: 10px; letter-spacing: 0; text-transform: none; color: var(--ink-quiet); }
-
-    .center {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 28px;
-    }
-    .section-label {
-      font-size: 11px; letter-spacing: 0.22em; text-transform: uppercase;
-      color: var(--ink-muted); font-weight: 500;
-    }
-    .mark {
-      font-size: clamp(72px, 12vw, 140px);
-      line-height: 0.9;
-      font-weight: 500;
-      letter-spacing: -0.04em;
-      color: var(--ink);
-      display: flex; align-items: baseline; gap: 0;
-    }
-    .mark .eight {
-      position: relative;
-      display: inline-block;
-    }
-    .mark .eight::after {
-      content: ""; position: absolute; right: -16px; top: 12px;
-      width: 10px; height: 10px; border-radius: 50%;
-      background: var(--accent);
-      animation: pulse 1.6s ease-in-out infinite;
-    }
-    @keyframes pulse {
-      0%, 100% { opacity: 0.35; transform: scale(0.85); }
-      50% { opacity: 1; transform: scale(1); }
-    }
-
-    .ticker {
-      display: flex; align-items: center; gap: 10px;
-      font-size: 11px; color: var(--ink-muted);
-      letter-spacing: 0.04em; text-transform: uppercase;
-      min-height: 14px;
-    }
-    .ticker .bracket { color: var(--ink); }
-    .ticker .dot-row { display: inline-flex; gap: 3px; }
-    .ticker .dot-row span {
-      width: 4px; height: 4px; border-radius: 50%;
-      background: var(--ink-muted); opacity: 0.3;
-      animation: step 1.4s ease-in-out infinite;
-    }
-    .ticker .dot-row span:nth-child(2) { animation-delay: 0.2s; }
-    .ticker .dot-row span:nth-child(3) { animation-delay: 0.4s; }
-    @keyframes step {
-      0%, 100% { opacity: 0.3; }
-      40% { opacity: 1; }
-    }
-
-    .footer {
+    .mono { font-family: "iA Writer Mono", "JetBrains Mono", "SF Mono", Menlo, ui-monospace, monospace; }
+    #ascii { position: fixed; inset: 0; display: block; }
+    .bootbar {
       position: fixed; bottom: 0; left: 0; right: 0;
       display: flex; justify-content: space-between; align-items: center;
-      padding: 20px 28px;
-      font-size: 10px; color: var(--ink-quiet);
-      letter-spacing: 0.04em;
+      padding: 18px 26px;
+      font-size: 10.5px; letter-spacing: 0.05em;
+      color: rgba(244, 244, 245, 0.34);
+      pointer-events: none;
     }
-    .footer .grid { display: flex; gap: 28px; }
+    .bootbar .left { display: flex; align-items: center; gap: 10px; }
+    .bootbar .brand { color: rgba(244, 244, 245, 0.74); font-weight: 500; letter-spacing: -0.01em; }
+    .bootbar .dot-row { display: inline-flex; gap: 3px; }
+    .bootbar .dot-row span {
+      width: 3px; height: 3px; border-radius: 50%;
+      background: rgba(244, 244, 245, 0.5); opacity: 0.3;
+      animation: step 1.4s ease-in-out infinite;
+    }
+    .bootbar .dot-row span:nth-child(2) { animation-delay: 0.2s; }
+    .bootbar .dot-row span:nth-child(3) { animation-delay: 0.4s; }
+    @keyframes step { 0%, 100% { opacity: 0.25; } 40% { opacity: 0.9; } }
   </style>
   <script>
     const HINT = typeof window.__O8_PORT_HINT__ === 'number' ? window.__O8_PORT_HINT__ : null;
@@ -209,33 +134,96 @@ const loaderHtml = `<!DOCTYPE html>
   </script>
 </head>
 <body>
-  <div class="topbar">
-    <span class="brand">o8</span>
-    <span class="sep"></span>
-    <span>00 — BOOT</span>
-    <span class="stamp mono" id="stamp">v0.1.16 · 00:00:00</span>
-  </div>
-
-  <div class="center">
-    <span class="section-label">01 — COLD START</span>
-    <div class="mark">
-      o<span class="eight">8</span>
-    </div>
-    <div class="ticker mono">
-      <span class="bracket" id="stage">(NODE)  probing runtime</span>
+  <canvas id="ascii"></canvas>
+  <div class="bootbar mono">
+    <span class="left">
+      <span class="brand">o8</span>
+      <span id="stage">(NODE)  probing runtime</span>
       <span class="dot-row"><span></span><span></span><span></span></span>
-    </div>
+    </span>
+    <span id="stamp">v0.1.16 · 00:00:00</span>
   </div>
-
-  <div class="footer mono">
-    <span>orchestrator governance layer</span>
-    <div class="grid">
-      <span>codex</span>
-      <span>claude</span>
-      <span>gemini</span>
-      <span>opencode</span>
-    </div>
-  </div>
+  <script>
+    (function () {
+      var cv = document.getElementById('ascii');
+      var ctx = cv.getContext('2d');
+      var CFG = { text: 'o8', cell: 12, color: '#ffffff', bg: '#0a0a0a', speed: 1.0, baseLevel: 0.5, waveBoost: 0.85, contrast: 1.2, ripple: 33 / 50, radiusFrac: 0.04 };
+      var RAMP = ' .:-=+*#%@';
+      var dpr = 1, W = 0, H = 0, cols = 0, rows = 0, lum = null;
+      var cx = -1, cy = -1;
+      var off = document.createElement('canvas');
+      function build() {
+        W = window.innerWidth; H = window.innerHeight;
+        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr);
+        cv.style.width = W + 'px'; cv.style.height = H + 'px';
+        cols = Math.max(8, Math.floor(W / CFG.cell));
+        rows = Math.max(8, Math.floor(H / CFG.cell));
+        lum = new Float32Array(cols * rows);
+        off.width = cols; off.height = rows;
+        var o = off.getContext('2d', { willReadFrequently: true });
+        o.fillStyle = '#000'; o.fillRect(0, 0, cols, rows);
+        o.fillStyle = '#fff'; o.textBaseline = 'middle'; o.textAlign = 'center';
+        var size = rows * 0.82;
+        function font(s) { return '700 ' + s + 'px ui-sans-serif, system-ui, -apple-system, sans-serif'; }
+        o.font = font(size);
+        var w = o.measureText(CFG.text).width;
+        var maxW = cols * 0.86, maxH = rows * 0.86;
+        if (w > maxW) size = size * (maxW / w);
+        if (size > maxH) size = maxH;
+        o.font = font(size);
+        o.fillText(CFG.text, cols / 2, rows / 2);
+        var d = o.getImageData(0, 0, cols, rows).data;
+        for (var k = 0; k < cols * rows; k++) {
+          var a = d[4 * k + 3] / 255;
+          lum[k] = ((0.299 * d[4 * k] + 0.587 * d[4 * k + 1] + 0.114 * d[4 * k + 2]) / 255) * a;
+        }
+      }
+      build();
+      window.addEventListener('resize', build);
+      window.addEventListener('pointermove', function (e) { cx = e.clientX / CFG.cell; cy = e.clientY / CFG.cell; });
+      window.addEventListener('pointerleave', function () { cx = -1; cy = -1; });
+      var last = RAMP.length - 1;
+      var start = null;
+      function frame(ts) {
+        if (start === null) start = ts;
+        var t = (ts - start) / 1000;
+        ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        ctx.fillStyle = CFG.bg; ctx.fillRect(0, 0, W, H);
+        ctx.fillStyle = CFG.color;
+        ctx.font = CFG.cell + 'px ui-monospace, Menlo, monospace';
+        ctx.textBaseline = 'top'; ctx.textAlign = 'left';
+        var span = cols + rows * 0.4;
+        var edge = ((t * CFG.speed * 0.25) % 1.4) * span;
+        var bw = cols * 0.1, bw2 = 2 * bw * bw;
+        var rad = CFG.radiusFrac * Math.min(cols, rows), rad2 = 2 * rad * rad;
+        var inside = cx >= 0;
+        for (var j = 0; j < rows; j++) {
+          var y = j * CFG.cell, rowOff = j * cols;
+          for (var i = 0; i < cols; i++) {
+            var base = lum[rowOff + i];
+            if (base <= 0.015) continue;
+            var dist = i + j * 0.4 - edge;
+            var crest = Math.exp(-(dist * dist) / bw2);
+            var val = base * (CFG.baseLevel + crest * CFG.waveBoost);
+            if (inside) {
+              var dx = i - cx, dy = j - cy, d2 = dx * dx + dy * dy;
+              if (d2 < rad2 * 3) { var dd = Math.sqrt(d2); val = val + base * CFG.ripple * Math.exp(-d2 / rad2) * Math.sin(dd * 0.7 - t * 7); }
+            }
+            if (val <= 0.02) continue;
+            if (val > 1) val = 1;
+            var idx = Math.round(Math.pow(val, CFG.contrast) * last);
+            if (idx <= 0) continue;
+            var ch = RAMP.charAt(idx);
+            if (ch === ' ') continue;
+            ctx.fillText(ch, i * CFG.cell, y);
+          }
+        }
+        requestAnimationFrame(frame);
+      }
+      requestAnimationFrame(frame);
+    })();
+  </script>
 </body>
 </html>`;
 writeFileSync(join(frontend, 'index.html'), loaderHtml);
