@@ -32,7 +32,14 @@ export interface ArchivedLaneView {
 // inactive (the Codex process has exited), so we treat them the same —
 // otherwise an override-merged packet's tab stays stuck on "Agent working…"
 // with a live steer composer while its sibling (normal merge) reads as merged.
-const RETIRED_LANE_STATUSES = new Set(['archived', 'completed']);
+export const RETIRED_LANE_STATUSES = new Set(['archived', 'completed']);
+
+/** True when a lane-lifecycle status means the lane is retired (done — the
+ *  worker process has exited). Drives read-only views AND closing the orphaned
+ *  workspace tab (#1293). */
+export function isRetiredLaneStatus(status: string | null | undefined): boolean {
+  return Boolean(status) && RETIRED_LANE_STATUSES.has(status as string);
+}
 
 // Fetches all lanes and exposes the sessionKeys + packetIds that belong to
 // lanes in a retired (`archived` / `completed`) status. Subscribes to the
