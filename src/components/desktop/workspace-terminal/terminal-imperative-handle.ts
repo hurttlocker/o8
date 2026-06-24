@@ -224,6 +224,22 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       deps.preferredRepo?.localPath ?? null,
       deps.preferredRepo?.branch ?? null,
     ),
+    // #1293 — close the orphaned chat tab when its lane retires. Matches by the
+    // same keys setOrchestrationPacket uses (tab id / chatSessionKey / bound
+    // packetId), since a retired lane's payload may carry only sessionKey or
+    // only packetId. Reuses the already-wired closeTabById.
+    closeChatTabForRetiredLane: (match) => {
+      const keys = [match.sessionKey, match.packetId].filter((k): k is string => Boolean(k));
+      if (keys.length === 0) return false;
+      const target = deps.tabsRef.current.find((tab) => tab.kind === 'chat' && keys.some((key) => (
+        tab.id === key
+        || tab.chatSessionKey === key
+        || tab.orchestrationPacket?.packetId === key
+      )));
+      if (!target) return false;
+      deps.closeTabById(target.id);
+      return true;
+    },
     openWorkspaceDiff: () => {
       const activeWorkspaceTab = deps.tabsRef.current.find((tab) => tab.id === deps.activeTabId);
       const repo = activeWorkspaceTab?.repo ?? deps.tabsRef.current.find((tab) => tab.repo)?.repo ?? deps.preferredRepo ?? null;

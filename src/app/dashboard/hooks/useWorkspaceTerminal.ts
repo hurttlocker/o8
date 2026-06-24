@@ -52,7 +52,7 @@ import {
   packetStatusFromLaneStatus,
   pathBelongsToRepoScope,
 } from '../utils';
-import { useLaneArchivedSet } from './useLaneArchivedSet';
+import { useLaneArchivedSet, isRetiredLaneStatus } from './useLaneArchivedSet';
 
 interface UseWorkspaceTerminalArgs {
   activeTileId: string | null;
@@ -792,6 +792,22 @@ export function useWorkspaceTerminal({
       for (const e of wsEvents) window.removeEventListener(e, handler);
     };
   }, [openWorkspaceTabForLane]);
+
+  // #1293 — when a lane retires (archived/completed), close its orphaned chat
+  // tab. The strip otherwise keeps a dead "ghost" tab after reset/merge — it
+  // survives even a full backend cleanup. The subscriber above only refetches
+  // lane data; this one acts on the event payload to close the matching tab.
+  useEffect(() => {
+    const onLaneLifecycle = (event: Event) => {
+      const data = (event as CustomEvent<{ data?: { sessionKey?: string | null; packetId?: string | null; status?: string; laneStatus?: string } }>).detail?.data;
+      if (!data || !isRetiredLaneStatus(data.laneStatus ?? data.status)) return;
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        if (handle?.closeChatTabForRetiredLane({ sessionKey: data.sessionKey, packetId: data.packetId })) break;
+      }
+    };
+    window.addEventListener('o8:lane-lifecycle', onLaneLifecycle);
+    return () => window.removeEventListener('o8:lane-lifecycle', onLaneLifecycle);
+  }, []);
 
   const collectOrchestratorLaneSnapshots = useCallback((): OrchestratorLaneSnapshot[] => (
     Array.from(workspaceTerminalHandlesRef.current.values()).flatMap((handle) => handle.getChatTabSnapshots())

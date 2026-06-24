@@ -179,6 +179,9 @@ export interface TerminalTabHandle {
   setOrchestrationPacket: (tabId: string, packet: WorkspaceOrchestrationPacketBadge | null) => boolean;
   updateChatRuntimeStatus: (sessionKey: string, status: string, label?: string) => boolean;
   getChatTabSnapshots: () => OrchestratorLaneSnapshot[];
+  /** Close the chat tab bound to a now-retired lane (matched by sessionKey or
+   *  packetId), so reset/archive/merge doesn't leave an orphaned ghost tab. #1293 */
+  closeChatTabForRetiredLane: (match: { sessionKey?: string | null; packetId?: string | null }) => boolean;
   openWorkspaceDiff: () => void;
   openInspectorTab: (tab: CanvasTab, options?: { repo?: RegisteredRepo; createNew?: boolean }) => string;
 }
