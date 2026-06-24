@@ -160,6 +160,30 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     return null;
   }
 
+  // #1293 — read-only lookup for an ARCHIVED session (its dir was moved to the
+  // `<root>-archive` tree). The transcript data survives the archive, but the run
+  // artifact paths were stored absolute under the ACTIVE dir, so the `rename`
+  // orphaned them — rebase each onto the archived dir so a done agent's lane
+  // stays reviewable ("the transcript stays for review"). Never used for live
+  // ops; the caller skips refresh/save for archived sessions.
+  async function findArchivedSession(surfaceId: string): Promise<OwnedSessionRecord | null> {
+    const archivePath = await archivedSessionPathForSurfaceId(root, surfaceId, surfacePrefix);
+    if (!archivePath) return null;
+    if (!(await pathExists(metadataPath(archivePath)))) return null;
+    const session = await loadSession(archivePath);
+    const rebaseRun = <T extends { stdoutPath: string; stderrPath: string }>(run: T): T => ({
+      ...run,
+      stdoutPath: path.join(archivePath, RUNS_DIR, path.basename(run.stdoutPath)),
+      stderrPath: path.join(archivePath, RUNS_DIR, path.basename(run.stderrPath)),
+    });
+    return {
+      ...session,
+      sessionDir: archivePath,
+      recentRuns: session.recentRuns.map(rebaseRun),
+      activeRun: session.activeRun ? rebaseRun(session.activeRun) : session.activeRun,
+    };
+  }
+
   async function archiveSession(surfaceId: string): Promise<OwnedArchiveResponse> {
     const session = await findSession(surfaceId);
     if (!session) {
@@ -820,20 +844,35 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   }
 
   async function getRuntimeTail(surfaceId: string) {
-    const session = await findSession(surfaceId);
+    const activeSession = await findSession(surfaceId);
+    // #1293 — fall back to the archived session so a retired (archived/merged/
+    // reset) lane still serves its transcript read-only instead of 500-ing with
+    // "runtime surface was not found" (which rendered an empty archived tab).
+    const session = activeSession ?? await findArchivedSession(surfaceId);
     if (!session) {
       throw new Error(`Owned ${adapter.squadShortName} runtime surface was not found.`);
     }
 
-    await refreshSession(session);
-    const tail = await collectTailEntries(session);
-    if (!session.threadId && tail.threadId) {
-      session.threadId = tail.threadId;
-      await saveSession(session);
+    // Archived sessions have no live process — refreshSession reconciles run
+    // liveness, MUTATES the metadata, and can auto-retry/spawn a run, so it must
+    // never run against an archived dir. Read the persisted transcript only.
+    if (activeSession) {
+      await refreshSession(session);
+      const tail = await collectTailEntries(session);
+      if (!session.threadId && tail.threadId) {
+        session.threadId = tail.threadId;
+        await saveSession(session);
+      }
+      return {
+        surface: buildRuntimeSurface(session, Boolean(session.activeRun)),
+        entries: tail.entries,
+        groups: tail.groups,
+      };
     }
 
+    const tail = await collectTailEntries(session);
     return {
-      surface: buildRuntimeSurface(session, Boolean(session.activeRun)),
+      surface: buildRuntimeSurface(session, false),
       entries: tail.entries,
       groups: tail.groups,
     };
