@@ -5,8 +5,8 @@
  * (#1232): a floating filename pill above the image, the picture itself
  * dissolving into the canvas at its bottom edge, a W×H chip while
  * resizing, and drag-together STACKS — drop one photo onto another and
- * they collapse into a fanned deck to save space; click a deck to spread
- * it back out.
+ * they collapse into a fanned deck to save space; tap a deck to flip
+ * through it (cycles to the next photo).
  *
  * No glass body — the photo IS the card. Squircle top corners via Lisse;
  * the bottom mask makes the lower corners moot.
@@ -55,7 +55,7 @@ export function ImageGlassCard({
   onFocus: (id: number) => void;
   /** Pointer released after a real drag — page hit-tests for stacking. */
   onDrop: (id: number, centerX: number, centerY: number) => void;
-  /** Pointer released without travel — spreads a stack back out. */
+  /** Pointer released without travel — flips the deck to the next photo. */
   onTap: (id: number) => void;
   onClose: (id: number) => void;
 }) {
