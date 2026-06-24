@@ -83,7 +83,7 @@ export interface SupervisorCallbacks {
   fetchTranscript(sessionKey: string, limit: number): Promise<TranscriptEntry[]>;
   steerAgent(surfaceId: string, message: string): Promise<void>;
   interruptAgent(surfaceId: string): Promise<void>;
-  relaunchAgent(prompt: string, repoPath: string, taskName: string): Promise<string | null>;
+  relaunchAgent(prompt: string, repoPath: string, taskName: string, retryOfSurfaceId?: string): Promise<string | null>;
   broadcastAgentUpdate(update: AgentUpdateEvent): void;
   queueOrchestratorEscalation(repoPath: string, message: string): void;
   onAgentProgress?: (surfaceId: string, lastMessage: string) => void;
@@ -242,7 +242,18 @@ export function rehydrateWatchedAgents(): number {
       const agent = watchedAgents.get(surfaceId);
       if (!agent) continue;
       if (agent.completionReported) continue;
-      if (now - agent.lastEventAt <= STALE_WATCH_THRESHOLD_MS) continue;
+      // #1292 ROOT — purge orphans whose lane was reset/archived (no ACTIVE lane
+      // maps to the session). Pre-fix, reset didn't unregister these rows, so they
+      // rehydrated and relaunched into a fresh sibling lane+session on EVERY launch
+      // — the dominant multiply (~154 sessions for ~7 tasks). A missing active lane
+      // = the lane is gone/retired → orphan. This drains the existing orphan
+      // backlog on the next launch, regardless of staleness; FIX #1 (reset
+      // unregister) prevents new ones at reset time. Raw SQL avoids a registry
+      // import cycle in this hot startup path.
+      const activeLane = db
+        .prepare("SELECT 1 FROM lanes WHERE session_key = ? AND status NOT IN ('archived','completed') LIMIT 1")
+        .get(surfaceId);
+      if (activeLane && now - agent.lastEventAt <= STALE_WATCH_THRESHOLD_MS) continue;
       removePersistedAgent(surfaceId);
       watchedAgents.delete(surfaceId);
       transcriptSourceCache.delete(surfaceId);
@@ -252,7 +263,7 @@ export function rehydrateWatchedAgents(): number {
     if (count > 0) {
       console.log(`[supervisor] Rehydrated ${count} watched agent${count === 1 ? '' : 's'} from SQLite`);
     }
-    console.log(`[supervisor] Purged ${purged} stale watched agents on startup`);
+    console.log(`[supervisor] Purged ${purged} stale/orphaned watched agents on startup`);
     return count;
   } catch {
     return 0;
@@ -709,6 +720,9 @@ async function handleStatusChange(
           watched.prompt,
           watched.repoPath,
           `${watched.name} (retry ${watched.retryCount})`,
+          // #1292 ROOT — hand the failing session's key so the relaunch reuses
+          // its lane (existingLaneId) instead of auto-wrapping a fresh sibling.
+          watched.surfaceId,
         );
         if (newSurfaceId) {
           // Update lane session binding so the new agent is tracked
