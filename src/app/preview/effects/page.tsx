@@ -1,11 +1,10 @@
 'use client';
 
 import { useMemo, useState, type CSSProperties } from 'react';
-import { EFFECTS, type Control, type ControlGroup, type EffectDef, type Params } from './registry';
+import { EFFECTS, type Control, type EffectDef, type Params } from './registry';
 
 const FONT = 'var(--font-sans-system)';
 const MONO = 'var(--font-mono, ui-monospace, SFMono-Regular, Menlo, monospace)';
-const GROUPS: ControlGroup[] = ['Simulation', 'Cursor & Solver', 'Color'];
 
 export default function EffectsLabPage() {
   const [effectId, setEffectId] = useState(EFFECTS[0].id);
@@ -14,6 +13,12 @@ export default function EffectsLabPage() {
     Object.fromEntries(EFFECTS.map((e) => [e.id, { ...e.defaults }])),
   );
   const params = paramsByEffect[effect.id];
+
+  const groups = useMemo(() => {
+    const seen: string[] = [];
+    for (const c of effect.controls) if (!seen.includes(c.group)) seen.push(c.group);
+    return seen;
+  }, [effect]);
 
   const setParam = (key: string, value: number | boolean | string) =>
     setParamsByEffect((prev) => ({ ...prev, [effect.id]: { ...prev[effect.id], [key]: value } }));
@@ -85,7 +90,7 @@ export default function EffectsLabPage() {
               gap: 40,
             }}
           >
-            {GROUPS.map((group) => {
+            {groups.map((group) => {
               const controls = effect.controls.filter((c) => c.group === group);
               if (controls.length === 0) return null;
               return (
@@ -223,6 +228,69 @@ function ControlRow({
       </div>
     );
   }
+  if (control.kind === 'text') {
+    return (
+      <div>
+        <label style={{ ...labelStyle, display: 'block', marginBottom: 8 }}>{control.label}</label>
+        <input
+          type="text"
+          value={String(value ?? '')}
+          placeholder={control.placeholder}
+          onChange={(e) => onChange(control.key, e.target.value)}
+          style={textInputStyle}
+        />
+      </div>
+    );
+  }
+  if (control.kind === 'select') {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 12 }}>
+        <label style={labelStyle}>{control.label}</label>
+        <div style={{ display: 'flex', gap: 6 }}>
+          {control.options.map((o) => {
+            const active = String(value) === o.value;
+            return (
+              <button
+                key={o.value}
+                type="button"
+                onClick={() => onChange(control.key, o.value)}
+                style={{ ...miniPillStyle, ...(active ? activePillStyle : null) }}
+              >
+                {o.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
+    );
+  }
+  if (control.kind === 'upload') {
+    const has = Boolean(value);
+    return (
+      <div>
+        <label style={{ ...labelStyle, display: 'block', marginBottom: 8 }}>{control.label}</label>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+          <label style={{ ...miniPillStyle, cursor: 'pointer' }}>
+            {has ? 'Replace…' : 'Upload…'}
+            <input
+              type="file"
+              accept="image/*"
+              style={{ display: 'none' }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) onChange(control.key, URL.createObjectURL(f));
+              }}
+            />
+          </label>
+          {has && (
+            <button type="button" onClick={() => onChange(control.key, '')} style={{ ...miniPillStyle, opacity: 0.7 }}>
+              Clear
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
   // color
   const hex = String(value);
   return (
@@ -330,7 +398,37 @@ const pillStyle: CSSProperties = {
 const activePillStyle: CSSProperties = {
   background: 'var(--t-text, #f4f4f5)',
   color: 'var(--t-bg, #0a0a0a)',
-  borderColor: 'var(--t-text, #f4f4f5)',
+  border: '1px solid var(--t-text, #f4f4f5)',
+};
+
+const miniPillStyle: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 460,
+  paddingTop: 5,
+  paddingBottom: 5,
+  paddingLeft: 11,
+  paddingRight: 11,
+  borderRadius: 8,
+  border: '1px solid var(--t-divider, #2a2a2e)',
+  background: 'var(--t-input-bg, rgba(255,255,255,0.03))',
+  color: 'var(--t-text, #f4f4f5)',
+  cursor: 'pointer',
+  fontFamily: FONT,
+};
+
+const textInputStyle: CSSProperties = {
+  width: '100%',
+  fontSize: 13.5,
+  fontFamily: FONT,
+  paddingTop: 8,
+  paddingBottom: 8,
+  paddingLeft: 10,
+  paddingRight: 10,
+  borderRadius: 8,
+  border: '1px solid var(--t-divider, #2a2a2e)',
+  background: 'var(--t-input-bg, rgba(255,255,255,0.04))',
+  color: 'var(--t-text, #f4f4f5)',
+  outline: 'none',
 };
 
 const labelStyle: CSSProperties = { fontSize: 13.5, fontWeight: 460, color: 'var(--t-text, #e6e6e9)' };
