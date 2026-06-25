@@ -66,6 +66,40 @@ pub(crate) struct ClipboardSnapshot {
     pub(crate) change_count: i64,
 }
 
+/// Cross-paste clipboard guard. Without this, a burst of dictation pastes
+/// destroys the user's clipboard: each paste snapshots the clipboard at its
+/// start, so paste N captures paste N-1's *Symon output* as "the user's
+/// clipboard" — the real original is overwritten on the first paste and is
+/// never recoverable. We instead remember the user's true clipboard and the
+/// changeCount of our own last write, so we can tell "this is Symon's own
+/// output" apart from "the user copied something" and only ever restore the
+/// real original.
+#[cfg(target_os = "macos")]
+struct ClipboardGuard {
+    user: Option<ClipboardSnapshot>,
+    last_injected: i64,
+}
+
+#[cfg(target_os = "macos")]
+static CLIPBOARD_GUARD: Mutex<ClipboardGuard> =
+    Mutex::new(ClipboardGuard { user: None, last_injected: -1 });
+
+/// How long Symon's pasted text stays on the clipboard before we hand it back
+/// to the user, for the synthetic-Cmd+V path. Long enough for normal fields +
+/// webviews to consume the paste; short enough that the user's clipboard is
+/// theirs again almost immediately (the old 5000ms made copy/paste unusable
+/// while dictating). The poisoning fix above guarantees the real original is
+/// the thing restored, so the worst case here is a rare slow app needing a
+/// re-dictate — never a lost clipboard.
+#[cfg(target_os = "macos")]
+const CLIPBOARD_RESTORE_DELAY_MS: u64 = 700;
+
+/// Restore delay for the Accessibility-not-granted path: there is no synthetic
+/// paste, so the user must press ⌘V themselves — keep the text on the clipboard
+/// long enough for that manual paste.
+#[cfg(target_os = "macos")]
+const MANUAL_PASTE_RESTORE_MS: u64 = 5000;
+
 #[cfg(target_os = "macos")]
 type AXUIElementRef = core_foundation::base::CFTypeRef;
 
@@ -909,8 +943,20 @@ pub fn paste_text(text: &str) -> bool {
         return false;
     }
 
-    // Step 0: Save current clipboard for later restoration.
-    let saved_clipboard = capture_clipboard_snapshot();
+    // Step 0: Preserve the user's REAL clipboard. capture_clipboard_snapshot()
+    // can grab Symon's OWN previous paste output mid-dictation-burst, so only
+    // treat the clipboard as the user's when its changeCount isn't one we wrote
+    // — otherwise a chained paste saves Symon's text as "the user's clipboard"
+    // and the original is gone for good (the operator's core bug). We always
+    // restore the preserved real original, never Symon's output.
+    let saved_clipboard = {
+        let current = capture_clipboard_snapshot();
+        let mut guard = CLIPBOARD_GUARD.lock().unwrap();
+        if current.change_count != guard.last_injected {
+            guard.user = Some(current.clone());
+        }
+        guard.user.clone().unwrap_or(current)
+    };
 
     // Step 1: Write text to clipboard.
     let injected_change_count = match copy_to_clipboard(text) {
@@ -920,6 +966,7 @@ pub fn paste_text(text: &str) -> bool {
             return false;
         }
     };
+    CLIPBOARD_GUARD.lock().unwrap().last_injected = injected_change_count;
 
     // Accessibility gate: the synthetic Cmd+V below is a CGEvent the OS silently
     // ignores unless o8 is a trusted Accessibility client. When untrusted — e.g.
@@ -933,7 +980,7 @@ pub fn paste_text(text: &str) -> bool {
              (grant o8 in System Settings → Privacy & Security → Accessibility, or move o8 to /Applications if it is running from a disk image)",
             text.len()
         );
-        restore_clipboard_delayed(saved_clipboard, injected_change_count, 5000);
+        restore_clipboard_delayed(saved_clipboard, injected_change_count, MANUAL_PASTE_RESTORE_MS);
         return false;
     }
 
@@ -955,19 +1002,19 @@ pub fn paste_text(text: &str) -> bool {
 
     tracing::debug!("paste: wrote {} chars to clipboard and pasted", text.len());
 
-    // Step 5: Restore the user's original clipboard after a delay.
+    // Step 5: Hand the user's clipboard back, fast.
     //
-    // The old 300ms delay was WAY too aggressive. On Intel, slow-paste-handler
-    // apps (Terminal, Slack, some Electron editors) consume the clipboard 400-
-    // 1500ms AFTER we post the synthetic Cmd+V, long after we'd already rolled
-    // back — so the app ends up pasting the *old* clipboard content and the
-    // user sees "pasting old stuff". Worse, if the user hit Cmd+V manually
-    // within a second of dictation hoping to re-paste their words, they also
-    // got the stale content. 5s covers both cases comfortably while still
-    // eventually returning the user's previous clipboard for copy-history
-    // workflows. If someone hits Cmd+C on something else during those 5s, the
-    // change_count guard in restore_clipboard_if_match skips the restore.
-    restore_clipboard_delayed(saved_clipboard, injected_change_count, 5000);
+    // History: a 300ms delay once let slow-paste apps (Terminal, Slack, some
+    // Electron) paste stale content because they read the clipboard 400-1500ms
+    // after the synthetic Cmd+V; the fix over-corrected to 5000ms, which made
+    // the user's clipboard unusable for a full 5s every dictation (the operator
+    // hit this 3×/5min). CLIPBOARD_RESTORE_DELAY_MS is the balance: long enough
+    // for the common field/webview paste to land, short enough that copy/paste
+    // is the user's again almost immediately. The change_count guard in
+    // restore_clipboard_if_match still skips the restore if the user copied
+    // something new in the window, and the ClipboardGuard above guarantees the
+    // thing we restore is the user's REAL original, not Symon's own output.
+    restore_clipboard_delayed(saved_clipboard, injected_change_count, CLIPBOARD_RESTORE_DELAY_MS);
     true
 }
 
