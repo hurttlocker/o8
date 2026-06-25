@@ -26,7 +26,7 @@ import { findLatestLaneByPacket } from '@/lib/lane/registry';
  * trail as a `browser_acted` event.
  */
 
-const VERBS = new Set(['read', 'click', 'type', 'probe', 'open', 'close']);
+const VERBS = new Set(['read', 'click', 'type', 'probe', 'grab', 'open', 'close']);
 
 interface AgentBody {
   verb?: unknown;
@@ -98,6 +98,9 @@ async function runEngineVerb(verb: string, scope: string, args: Record<string, u
       return engine.type(scope, selector, typeof args.text === 'string' ? args.text : '', args.submit === true);
     case 'probe':
       return engine.probe(scope, selector, typeof args.text === 'string' ? args.text : undefined);
+    case 'grab':
+      if (!selector) return { ok: false, error: 'grab requires a selector' };
+      return engine.grab(scope, selector);
     case 'close':
       return engine.close(scope);
     default:
@@ -145,7 +148,7 @@ export async function POST(request: NextRequest) {
       const result = await client.evalJs(browserAgentEval('probe', args));
       return new NextResponse(result.result, { headers: { 'content-type': 'application/json' } });
     }
-    const result = await client.evalJs(browserAgentEval(verb as 'read' | 'click' | 'type', args));
+    const result = await client.evalJs(browserAgentEval(verb as 'read' | 'click' | 'type' | 'grab', args));
     let ok = false;
     let url: string | undefined;
     try {

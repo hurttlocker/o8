@@ -7,6 +7,7 @@
  *   o8 browser read [--selector css]           page text + interactive elements (selectors)
  *   o8 browser click <selector>                click an element (ghost cursor paints in the UI)
  *   o8 browser type <selector> <text…>         type into an input (--submit presses Enter)
+ *   o8 browser grab <selector>                 capture an element's rich design payload (styles/a11y)
  *   o8 browser wait <selector> [--text s]      poll until the selector (and text) resolves
  *
  * Common flags: --surface canvas|panel|engine (default: most recently active).
@@ -123,6 +124,13 @@ export async function runBrowser(mode: OutputMode, verb: string | undefined, res
       printJson({ schema: 'o8/cli/browser/v1', verb: 'type', ...data });
       return data.ok === true ? 0 : EXIT.CONFLICT;
     }
+    case 'grab': {
+      const selector = flags.positional[0] ?? flags.selector;
+      if (!selector) throw new CliError('invalid_args', 'o8 browser grab requires a CSS selector.', EXIT.INVALID_ARGS);
+      const data = await callAgent('grab', { selector, ...surface }, packetId);
+      printJson({ schema: 'o8/cli/browser/v1', verb: 'grab', ...data });
+      return data.ok === true ? 0 : EXIT.CONFLICT;
+    }
     case 'wait': {
       const selector = flags.positional[0] ?? flags.selector;
       if (!selector) throw new CliError('invalid_args', 'o8 browser wait requires a CSS selector.', EXIT.INVALID_ARGS);
@@ -149,7 +157,7 @@ export async function runBrowser(mode: OutputMode, verb: string | undefined, res
     default:
       throw new CliError(
         'invalid_args',
-        `Unknown browser verb: ${verb ?? '(none)'} — expected open | read | click | type | wait | close.`,
+        `Unknown browser verb: ${verb ?? '(none)'} — expected open | read | click | type | grab | wait | close.`,
         EXIT.INVALID_ARGS,
       );
   }
