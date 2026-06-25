@@ -1252,8 +1252,19 @@ pub(crate) fn grab_selection() -> Option<String> {
     }
 
     let new_clipboard = copied_change_count.and_then(|_| read_clipboard_text());
-    if let Some(change_count) = copied_change_count {
-        let _ = restore_clipboard_if_match(&saved, change_count);
+    // ALWAYS restore the user's clipboard. We synthesized a Cmd+C purely to READ
+    // the selection — it must never be left sitting in the clipboard. The old
+    // change-count-gated restore SKIPPED on any race (slow copy, undetected
+    // change, a concurrent write), which is exactly how a grab clobbered the
+    // user's copy and made "Cmd+C stopped working" system-wide. Put their
+    // clipboard back unconditionally; the grabbed text is returned below.
+    match &saved.text {
+        Some(text) => {
+            let _ = copy_to_clipboard(text);
+        }
+        None => {
+            clear_clipboard();
+        }
     }
 
     match (&new_clipboard, &saved.text) {
