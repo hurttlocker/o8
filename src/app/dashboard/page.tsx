@@ -4046,14 +4046,6 @@ function DashboardInner() {
                 injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null);
                 setGrabbedElement(null);
               }}
-              onOpenSource={(filePath) => {
-                const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
-                void (async () => {
-                  const target = await waitForWorkspaceTerminalTarget({});
-                  if (target) target.handle.openInspectorTab(tab);
-                  else openCanvasTab(tab);
-                })();
-              }}
             />
           </Suspense>
         </div>

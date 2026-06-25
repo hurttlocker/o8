@@ -7,7 +7,6 @@ interface O8ElementPanelProps {
   element: GrabbedElement;
   onClose: () => void;
   onEditWithAI?: (context: string) => void;
-  onOpenSource?: (file: string, line: number) => void;
 }
 
 type DescriptorPart = {
@@ -95,36 +94,15 @@ function buildEditContext(element: GrabbedElement, draftText: string): string {
   return details.join('\n');
 }
 
-function resolveSourceLocation(element: GrabbedElement) {
-  const file = element.attributes['data-source-file']
-    || element.attributes['data-file']
-    || element.attributes['data-path']
-    || element.cssSelector
-    || element.tagName;
-  const lineValue = element.attributes['data-source-line'] || element.attributes['data-line'] || '1';
-  const line = Number.parseInt(lineValue, 10);
-
-  return {
-    file,
-    line: Number.isFinite(line) && line > 0 ? line : 1,
-  };
-}
-
 function isInteractiveValue(value: string) {
   return value && value !== 'transparent' && value !== 'rgba(0, 0, 0, 0)';
 }
 
-export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }: O8ElementPanelProps) {
+export function O8ElementPanel({ element, onClose, onEditWithAI }: O8ElementPanelProps) {
   const [draftText, setDraftText] = useState(element.textContent);
   const [isVisible, setIsVisible] = useState(false);
   const descriptorParts = truncateDescriptorParts(buildDescriptorParts(element), 60);
   const descriptorTitle = buildPlainDescriptor(element);
-  // "Open Source" only makes sense when the element carries a real source
-  // annotation (a JSX-source dev plugin stamps these). Without one it would
-  // open a tab named after the CSS selector — so hide it unless it'll work.
-  const hasSourceLocation = Boolean(
-    element.attributes['data-source-file'] || element.attributes['data-file'] || element.attributes['data-path'],
-  );
 
   useEffect(() => {
     setDraftText(element.textContent);
@@ -141,14 +119,6 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
       return;
     }
     onEditWithAI(buildTextEditContext(element, draftText));
-  };
-
-  const handleOpenSource = () => {
-    if (!onOpenSource) {
-      return;
-    }
-    const source = resolveSourceLocation(element);
-    onOpenSource(source.file, source.line);
   };
 
   return (
@@ -328,7 +298,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
           </div>
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
           <button
             type="button"
             onClick={() => onEditWithAI?.(buildEditContext(element, draftText))}
@@ -346,25 +316,6 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
           >
             Edit with AI
           </button>
-          {onOpenSource && hasSourceLocation ? (
-            <button
-              type="button"
-              onClick={handleOpenSource}
-              style={{
-                height: 28,
-                borderRadius: 8,
-                border: '1px solid var(--t-divider)',
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
-                padding: '0 12px',
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: 'pointer',
-              }}
-            >
-              Open Source
-            </button>
-          ) : null}
         </div>
       </div>
     </div>
