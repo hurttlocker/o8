@@ -317,13 +317,7 @@ function BottomUtilitySurface({
 
   if (kind === 'browser') {
     return (
-      <O8BrowserPane
-        previews={previews}
-        onOpenFile={(filePath) => {
-          onSelectFile(filePath);
-          onOpenFilesSurface();
-        }}
-      />
+      <O8BrowserPane previews={previews} />
     );
   }
 
