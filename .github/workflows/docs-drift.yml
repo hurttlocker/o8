@@ -1,0 +1,33 @@
+name: o8.run docs drift
+
+# When a PR changes source that the public o8.run docs describe, flag the
+# affected pages so they don't silently go stale. Comment-only — never edits
+# docs, never blocks the merge. The source→doc map is fetched live from
+# o8.run/api/docs/manifest (o8-site owns it; this repo carries no copy).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Detect docs drift
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          MANIFEST_URL: https://o8.run/api/docs/manifest
+        run: node scripts/docs-drift.mjs
