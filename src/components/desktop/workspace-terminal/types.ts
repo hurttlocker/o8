@@ -33,6 +33,17 @@ export interface TerminalTab {
   id: string;
   label: string;
   /**
+   * Provenance of `label`. 'auto' (the default — ABSENT is treated as 'auto',
+   * so every persisted tab from before this field needs no migration) means the
+   * label is a cache the self-heal effect may overwrite when fresher canonical
+   * title data arrives. 'user' means the operator renamed the tab — it is then
+   * frozen and NEVER re-derived. This is what makes the wrong-label race
+   * impossible-by-construction while preserving renames. See the self-heal
+   * effect in dashboard/hooks/useWorkspaceTerminal.ts (twin of the packet-badge
+   * rebind) and setTabLabelIfAuto in terminal-imperative-handle.ts.
+   */
+  labelSource?: 'auto' | 'user';
+  /**
    * NAMING GOTCHA — read carefully:
    *   - 'orchestrator'  → Fleet/Claude orchestrator tab (planning + dispatch)
    *   - 'llm-chat'      → casual o8 Chat tab (the user-facing "Chat")
@@ -177,6 +188,11 @@ export interface TerminalTabHandle {
     activeTabId: string;
   };
   setOrchestrationPacket: (tabId: string, packet: WorkspaceOrchestrationPacketBadge | null) => boolean;
+  /** Self-heal the auto-derived tab label — the twin of setOrchestrationPacket.
+   *  Writes `label` ONLY when the tab's labelSource !== 'user' (renames are
+   *  preserved) AND the value actually changed (guards re-render churn). Matched
+   *  by sessionKey or packetId. Returns true if a tab was updated. Option D. */
+  setTabLabelIfAuto: (match: { sessionKey?: string | null; packetId?: string | null }, label: string) => boolean;
   updateChatRuntimeStatus: (sessionKey: string, status: string, label?: string) => boolean;
   getChatTabSnapshots: () => OrchestratorLaneSnapshot[];
   /** Close the chat tab bound to a now-retired lane (matched by sessionKey or

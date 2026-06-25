@@ -2257,8 +2257,13 @@ function DashboardInner() {
     openRightPanelFromUser();
   }, [openRightPanelFromUser]);
 
-  const handleSelectSession = useCallback((sessionKey: string) => {
-    // Open the session transcript in a canvas chat tab
+  const handleSelectSession = useCallback((sessionKey: string, hint?: { title?: string }) => {
+    // Open the session transcript in a canvas chat tab.
+    // `hint.title` is the pass-through (Option D): an archived row already has
+    // its real title in hand — thread it so the tab opens with the right label
+    // instead of the runtime fallback, since archived sessions aren't in the
+    // `ideWorkspaceSessionsForSidebar` lookup below. Live tabs self-heal via the
+    // setTabLabelIfAuto effect; this covers the archived case the effect can't reach.
     void (async () => {
       const selectedSession = ideWorkspaceSessionsForSidebar.find((session) => (
         session.sessionKey === sessionKey
@@ -2293,7 +2298,7 @@ function DashboardInner() {
       // key, so the old `sessionKey.split(':').pop()?.slice(0,12)` → literal
       // "codex-owned-" leak is impossible by construction.
       const label = agentDisplayLabel({
-        name: selectedSession?.name,
+        name: hint?.title ?? selectedSession?.name,
         title: selectedSession?.surfaceLabel?.trim() || selectedSession?.currentTask?.trim(),
         runtime,
       });
@@ -3953,7 +3958,7 @@ function DashboardInner() {
       selectedRepoReadiness={globalRepoEntry?.readiness ?? workspaceTerminalPreferredRepo?.readiness ?? null}
       onLaunchWorkspaceAgent={handleLaunchWorkspaceAgent}
       onLaunchWorkspaceTask={handleLaunchWorkspaceRepoTask}
-      onSelectSession={(sessionKey) => { leaveNavTakeover(); handleSelectSession(sessionKey); }}
+      onSelectSession={(sessionKey: string, hint?: { title?: string }) => { leaveNavTakeover(); handleSelectSession(sessionKey, hint); }}
       onOpenHistoryChat={(...args) => { leaveNavTakeover(); handleOpenHistoryChatFromPanel(...args); }}
       onSelectRepo={(repoId) => { leaveNavTakeover(); handleAlignToRepo(repoId); }}
       onSelectIssue={handleSelectIssue}

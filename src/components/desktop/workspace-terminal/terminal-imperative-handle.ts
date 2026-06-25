@@ -208,6 +208,33 @@ export function buildTerminalTabHandle(deps: ImperativeHandleDeps): TerminalTabH
       }));
       return found;
     },
+    // Option D — the twin of setOrchestrationPacket, for the tab LABEL. The
+    // packet badge already self-heals when async data lands; the label didn't,
+    // so it froze on its open-time fallback. This writes the freshly-derived
+    // canonical label ONLY when the tab is still auto-sourced (labelSource !==
+    // 'user'; absent ⇒ auto) AND the value actually changed (no needless setTabs
+    // → no re-render churn). Matched by the same keys setOrchestrationPacket uses.
+    setTabLabelIfAuto: (match, label) => {
+      const next = label.trim();
+      if (!next) return false;
+      const keys = [match.sessionKey, match.packetId].filter((k): k is string => Boolean(k));
+      if (keys.length === 0) return false;
+      // Find the target first (no setTabs yet) so we only schedule a state
+      // update when something ACTUALLY changes — `previous.map` always returns a
+      // fresh array, which would re-render on every packet tick otherwise.
+      const target = deps.tabsRef.current.find((tab) => keys.some((key) => (
+        tab.id === key
+        || tab.chatSessionKey === key
+        || tab.orchestrationPacket?.packetId === key
+      )));
+      if (!target) return false;
+      // Matched — but frozen by a user rename, or already correct: nothing to do.
+      if (target.labelSource === 'user' || target.label === next) return true;
+      deps.setTabs((previous) => previous.map((tab) => (
+        tab.id === target.id ? { ...tab, label: next, labelSource: 'auto' as const } : tab
+      )));
+      return true;
+    },
     updateChatRuntimeStatus: (sessionKey, status, label) => {
       const normalizedTarget = sessionKey.trim();
       let found = false;
