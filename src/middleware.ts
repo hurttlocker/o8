@@ -123,6 +123,9 @@ const GATED_PREFIXES = [
   '/api/browser/agent',
   // Engine tier (headless Chrome live view + verbs) — loopback img tags pass.
   '/api/browser/engine',
+  // Native browser-view secure result sink — the injected agent POSTs here from
+  // loopback (passes); external callers are blocked. cid-only, no state reach.
+  '/api/browser/native-result',
   // Canvas intent bus (Symon / local agents drive the canvas surface).
   '/api/canvas/',
   '/api/runtime/',

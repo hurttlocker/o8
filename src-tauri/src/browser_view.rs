@@ -129,6 +129,27 @@ pub fn set_rect(app: &tauri::AppHandle, x: f64, y: f64, w: f64, h: f64) {
     }
 }
 
+/// Eval `js` into the browser-view page — raw, fire-and-forget. The native host
+/// owns this webview, so eval runs in the page's main world at ANY origin with
+/// no IPC bridge / Tauri capability (same-origin policy binds web frames, not the
+/// host). Returns whether the window existed (so the caller can fall back to the
+/// iframe path when native isn't up). The injected JS returns its result to o8 by
+/// POSTing to /api/browser/native-result (the narrow cid-only secure channel),
+/// NEVER via `__TAURI_INTERNALS__` — the untrusted page deliberately has no IPC
+/// bridge (see `native_browser_view_security` memory).
+#[cfg(target_os = "macos")]
+pub fn eval(app: &tauri::AppHandle, js: &str) -> bool {
+    use tauri::Manager;
+    if let Some(win) = app.get_webview_window(BROWSER_VIEW_LABEL) {
+        if let Err(e) = win.eval(js) {
+            log::warn!("[browser-view] eval failed: {e}");
+        }
+        true
+    } else {
+        false
+    }
+}
+
 /// Navigate the existing child window to a new URL (URL bar / tab switch /
 /// reload). No-op if the window isn't open.
 #[cfg(target_os = "macos")]
@@ -245,6 +266,10 @@ pub fn open(
 }
 #[cfg(not(target_os = "macos"))]
 pub fn set_rect(_app: &tauri::AppHandle, _x: f64, _y: f64, _w: f64, _h: f64) {}
+#[cfg(not(target_os = "macos"))]
+pub fn eval(_app: &tauri::AppHandle, _js: &str) -> bool {
+    false
+}
 #[cfg(not(target_os = "macos"))]
 pub fn navigate(_app: &tauri::AppHandle, _url: &str) -> Result<(), String> {
     Ok(())
