@@ -119,6 +119,12 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
   const [isVisible, setIsVisible] = useState(false);
   const descriptorParts = truncateDescriptorParts(buildDescriptorParts(element), 60);
   const descriptorTitle = buildPlainDescriptor(element);
+  // "Open Source" only makes sense when the element carries a real source
+  // annotation (a JSX-source dev plugin stamps these). Without one it would
+  // open a tab named after the CSS selector — so hide it unless it'll work.
+  const hasSourceLocation = Boolean(
+    element.attributes['data-source-file'] || element.attributes['data-file'] || element.attributes['data-path'],
+  );
 
   useEffect(() => {
     setDraftText(element.textContent);
@@ -340,25 +346,25 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
           >
             Edit with AI
           </button>
-          <button
-            type="button"
-            onClick={handleOpenSource}
-            disabled={!onOpenSource}
-            style={{
-              height: 28,
-              borderRadius: 8,
-              border: '1px solid var(--t-divider)',
-              background: 'transparent',
-              color: 'var(--t-text-muted)',
-              padding: '0 12px',
-              fontSize: 12,
-              fontWeight: 600,
-              cursor: onOpenSource ? 'pointer' : 'default',
-              opacity: onOpenSource ? 1 : 0.4,
-            }}
-          >
-            Open Source
-          </button>
+          {onOpenSource && hasSourceLocation ? (
+            <button
+              type="button"
+              onClick={handleOpenSource}
+              style={{
+                height: 28,
+                borderRadius: 8,
+                border: '1px solid var(--t-divider)',
+                background: 'transparent',
+                color: 'var(--t-text-muted)',
+                padding: '0 12px',
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: 'pointer',
+              }}
+            >
+              Open Source
+            </button>
+          ) : null}
         </div>
       </div>
     </div>
