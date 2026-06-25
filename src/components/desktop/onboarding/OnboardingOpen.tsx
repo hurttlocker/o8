@@ -14,9 +14,8 @@
  * (Tauri/WebKit).
  */
 
-import { useEffect, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
-import { AsciiImage } from '@/app/preview/effects/AsciiImage';
+import { OnboardingReveal, useStageColors } from './kit/OnboardingReveal';
 import { playOnboardingCue } from './onboarding-sound';
 
 const FONT = 'var(--font-sans-system)';
@@ -26,39 +25,6 @@ export interface GithubFlowLite {
   stage: 'idle' | 'waiting' | 'polling' | 'success' | 'error';
   userCode?: string;
   error?: string;
-}
-
-/** Resolve the ASCII stage colors from the live theme, re-reading on toggle. */
-function useStageColors(): { bg: string; glyph: string } {
-  const [colors, setColors] = useState<{ bg: string; glyph: string }>({ bg: '#08080b', glyph: '#ff7a18' });
-  useEffect(() => {
-    const lum = (c: string): number => {
-      try {
-        const el = document.createElement('div');
-        el.style.color = c;
-        document.body.appendChild(el);
-        const rgb = getComputedStyle(el).color;
-        document.body.removeChild(el);
-        const m = rgb.match(/(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?),\s*(\d+(?:\.\d+)?)/);
-        if (!m) return 0;
-        return (0.299 * Number(m[1]) + 0.587 * Number(m[2]) + 0.114 * Number(m[3])) / 255;
-      } catch {
-        return 0;
-      }
-    };
-    const read = () => {
-      const cs = getComputedStyle(document.documentElement);
-      const surface = cs.getPropertyValue('--t-chat-surface-bg').trim() || '#08080b';
-      const dark = lum(surface) < 0.5;
-      // Amber pops on dark; a deeper ember reads crisply on a paper surface.
-      setColors({ bg: surface, glyph: dark ? '#ff7a18' : '#d65a12' });
-    };
-    read();
-    const obs = new MutationObserver(read);
-    obs.observe(document.documentElement, { attributes: true, attributeFilter: ['class', 'style', 'data-theme', 'data-palette', 'data-surface'] });
-    return () => obs.disconnect();
-  }, []);
-  return colors;
 }
 
 export function OnboardingOpen({
@@ -278,20 +244,7 @@ export function OnboardingOpen({
               overflow: 'hidden',
             }}
           >
-            <AsciiImage
-              text="o8"
-              color={stage.glyph}
-              backgroundColor={stage.bg}
-              cellSize={11}
-              speed={1}
-              baseLevel={0.42}
-              waveBoost={0.95}
-              contrast={1.25}
-              cursorRipple={26}
-              cursorRadius={0.22}
-              width="100%"
-              height="100%"
-            />
+            <OnboardingReveal bg={stage.bg} glyph={stage.glyph} />
           </div>
         </motion.div>
       </AnimatePresence>

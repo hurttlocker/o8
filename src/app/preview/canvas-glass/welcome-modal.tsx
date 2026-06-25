@@ -16,7 +16,7 @@
 import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FONT } from './ui';
-import { AsciiImage } from '@/app/preview/effects/AsciiImage';
+import { OnboardingReveal } from '@/components/desktop/onboarding/kit/OnboardingReveal';
 import { playOnboardingCue } from '@/components/desktop/onboarding/onboarding-sound';
 
 const ACCENT = 'var(--t-brand-orange, #FF5A1F)';
@@ -209,20 +209,7 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
                 overflow: 'hidden',
               }}
             >
-              <AsciiImage
-                text="o8"
-                color={stageGlyph}
-                backgroundColor={stageBg}
-                cellSize={11}
-                speed={1}
-                baseLevel={0.42}
-                waveBoost={0.95}
-                contrast={1.25}
-                cursorRipple={26}
-                cursorRadius={0.22}
-                width="100%"
-                height="100%"
-              />
+              <OnboardingReveal bg={stageBg} glyph={stageGlyph} />
             </div>
 
             {/* dismiss — quiet, top-right */}
