@@ -15,6 +15,7 @@ export const CANVAS_TOOLS: McpTool[] = [
       'SIGHT: `list` (args: none) → returns { cards:[{kind,id,x,y,w,h,z,title}], count, zoom, grid, dock, activeRepo }. Call this first to learn card ids — every card verb addresses a card by its (kind, id).\n' +
       'CARD LIFECYCLE: `move-card` {kind,id,x,y} · `resize-card` {kind,id,w,h} (image/video stay aspect-locked) · `focus-card` {kind,id} (raise to front) · `close-card` {kind,id} (full teardown). kind ∈ term|file|image|video|browser|chat|diff|spec|brain|markdown|agent.\n' +
       'SPAWN: `spawn-terminal` {} · `ask-brain` {question} · `open-spec` {} · `open-browser` {url} · `spawn-agents` {task,count?,repo?}. (To paint a markdown explainer card use the o8_render tool.)\n' +
+      'CONTENT: `add-file` {path} (an absolute file path → editor card) · `open-diff` {repo?} (the repo working-tree diff) · `open-chat` {threadId} (reopen a past orchestrator thread) · `add-video` {src,name?,x?,y?} (place a video from a URL/served path).\n' +
       'IMAGES: `add-image` {src,name?,x?,y?} (place a photo from a URL/served path) · `stack` {ids:[…]} or {id,ontoId} (group into a deck) · `flip` {id,dir?} (next/prev photo) · `separate` {id} (un-stack a deck).\n' +
       'VIEW + ORCHESTRATOR: `zoom` {level|direction:in|out} · `grid` {on?} (tile all cards) · `dock` {open?} · `search` {query?} · `send-prompt` {text} (to the scoped orchestrator) · `enter` {} (just open the canvas).',
     inputSchema: {

@@ -2902,6 +2902,51 @@ export default function CanvasGlassPreviewPage() {
             note = `separated deck ${id} into ${deck.items.length} cards`;
             break;
           }
+          case 'add-file': {
+            // Put a repo file on the canvas (CodeMirror editor card). file-io
+            // needs an ABSOLUTE path, so reject relative ones with a clear note.
+            const path = typeof args.path === 'string' ? args.path.trim() : '';
+            if (!path) { ok = false; note = 'add-file needs args.path (an absolute file path)'; break; }
+            if (!path.startsWith('/')) { ok = false; note = 'add-file path must be absolute (start with /)'; break; }
+            const at = (typeof args.x === 'number' && typeof args.y === 'number') ? { x: args.x, y: args.y, w: 620, h: 420 } : undefined;
+            spawnFileCard(path, at);
+            note = `added file ${path.split('/').pop() || path}`;
+            break;
+          }
+          case 'open-diff': {
+            // The active repo's working-tree diff ("what have I changed") — the
+            // fixture-free diff an agent can always show. Lane diffs go through
+            // o8_packet_diff, not here.
+            const repo = typeof args.repo === 'string' ? args.repo : (activeRepoPath ?? '');
+            if (!repo) { ok = false; note = 'open-diff needs a repo (no active repo scoped — pass args.repo)'; break; }
+            void spawnWorktreeDiffCard(undefined, repo);
+            note = `opened working-tree diff for ${repo.split('/').filter(Boolean).pop() ?? repo}`;
+            break;
+          }
+          case 'open-chat': {
+            // Reopen a past orchestrator thread as a chat card (replays history).
+            const threadId = typeof args.threadId === 'string' ? args.threadId.trim() : '';
+            if (!threadId) { ok = false; note = 'open-chat needs args.threadId (a past thread id)'; break; }
+            const repo = typeof args.repo === 'string' ? args.repo : (activeRepoPath ?? null);
+            void pickThread(threadId, repo);
+            note = `opened chat thread ${threadId}`;
+            break;
+          }
+          case 'add-video': {
+            // Put a video on the canvas from a URL/served path — fetched into a
+            // File so it rides the same IndexedDB-backed path as a human drop.
+            const src = typeof args.src === 'string' ? args.src.trim() : '';
+            if (!src) { ok = false; note = 'add-video needs args.src (a video URL/served path)'; break; }
+            const vname = typeof args.name === 'string' ? args.name : (src.split('/').pop() || 'video');
+            const vx = typeof args.x === 'number' ? args.x : 320;
+            const vy = typeof args.y === 'number' ? args.y : 260;
+            void fetch(src)
+              .then((r) => (r.ok ? r.blob() : Promise.reject(new Error('fetch failed'))))
+              .then((blob) => spawnVideoCard(new File([blob], vname, { type: blob.type || 'video/mp4' }), { x: vx, y: vy }))
+              .catch(() => {});
+            note = `adding video ${vname}`;
+            break;
+          }
           default:
             ok = false;
             note = `unknown intent verb: ${String(detail.verb)}`;
@@ -2918,7 +2963,7 @@ export default function CanvasGlassPreviewPage() {
       window.removeEventListener('o8:canvas-intent', onIntent);
       (window as unknown as Record<string, unknown>).__o8CanvasIntentReady = false;
     };
-  }, [activeRepoPath, canvasEnabled, canvasZoomLevel, dockOpen, gridMode, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, canvasCardTitle, patchCanvasCardGeom, dismissCanvasCard, focusCard]);
+  }, [activeRepoPath, canvasEnabled, canvasZoomLevel, dockOpen, gridMode, repos, sendPrompt, spawnAgents, spawnBrainCard, spawnMarkdownCard, spawnSpecCard, spawnTerminal, spawnFileCard, spawnWorktreeDiffCard, spawnVideoCard, pickThread, cycleImageCard, spreadImageCard, canvasCardTitle, patchCanvasCardGeom, dismissCanvasCard, focusCard]);
 
   if (!canvasEnabled) {
     return (
