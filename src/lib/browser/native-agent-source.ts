@@ -1,0 +1,183 @@
+/**
+ * Injectable in-page agent for the NATIVE browser-view child window
+ * (docs/native-browser-webview-spec.md, Stage 2).
+ *
+ * Unlike `page-agent.ts` — which runs in o8's OWN window and reaches INTO an
+ * `iframe[data-o8-browser]` via `contentDocument` — this agent is injected
+ * DIRECTLY into the browser-view page (the user's localhost app, real origin)
+ * by the native host via `WebviewWindowBuilder::initialization_script`. So it
+ * operates on its OWN `document`: no iframe pick, no cross-origin guard, no
+ * proxy-URL unwrap. Same verb surface (`window.__o8BrowserAgent` with
+ * read/click/type/probe/grab) so the o8_browser_* eval bridge is identical.
+ *
+ * SECURITY (see `native_browser_view_security` memory): the browser-view page is
+ * UNTRUSTED arbitrary localhost content and deliberately has NO Tauri capability
+ * — `__TAURI_INTERNALS__` is never injected there, so this agent can NOT reach
+ * any o8 host command (master_key_get, agent_run, …). The native host evals into
+ * the page (host→page needs no IPC); DOM results return via a narrow cid-only
+ * callback wired in Stage 4, never via the IPC bridge.
+ *
+ * NO-DRIFT: the two complex, drift-prone pieces — `selectorFor` and
+ * `buildGrabbedElement` — are pulled in as the SAME injectable source strings
+ * the engine grab uses (`SELECTOR_FOR_SOURCE`, `GRAB_PAYLOAD_SOURCE`), derived
+ * from the real functions via `.toString()`. The verbs + ghost cursor are short
+ * and hand-written in the template so a minifier can never rename a reference out
+ * from under them. `native-agent-source.test.ts` locks the shape.
+ */
+
+import { SELECTOR_FOR_SOURCE } from '@/lib/browser/selector';
+import { GRAB_PAYLOAD_SOURCE } from '@/lib/browser/grab';
+
+/**
+ * Self-contained IIFE that installs `window.__o8BrowserAgent` in the page it is
+ * injected into. Idempotent. References only page globals (document, window,
+ * location, CSS) plus the injected `selectorFor` / `buildGrabbedElement`.
+ */
+export const NATIVE_BROWSER_AGENT_SOURCE = [
+  '(function () {',
+  "  if (typeof window === 'undefined' || window.__o8BrowserAgent) return;",
+  '',
+  '  // ── no-drift shared algorithms ──',
+  SELECTOR_FOR_SOURCE,
+  GRAB_PAYLOAD_SOURCE,
+  '',
+  '  // ── helpers ──',
+  '  function labelFor(el) {',
+  "    var aria = el.getAttribute('aria-label');",
+  '    if (aria) return aria;',
+  "    var value = el.placeholder || '';",
+  "    var text = (el.textContent || '').trim().replace(/\\s+/g, ' ');",
+  "    return (text || value || el.getAttribute('title') || '').slice(0, 80);",
+  '  }',
+  '',
+  '  // ── ghost cursor (the spectator layer — one per page, reused) ──',
+  '  var cursorState = null;',
+  '  function ensureCursor() {',
+  '    if (cursorState && document.body && document.body.contains(cursorState.cursor)) return cursorState;',
+  '    if (!document.body) return null;',
+  "    var cursor = document.createElement('div');",
+  "    cursor.setAttribute('data-o8-agent-cursor', 'true');",
+  "    cursor.setAttribute('style', [",
+  "      'position:fixed;left:0;top:0;width:16px;height:16px;border-radius:50%',",
+  "      'background:rgba(245,158,11,0.9);border:2px solid rgba(255,255,255,0.95)',",
+  "      'box-shadow:0 0 0 4px rgba(245,158,11,0.22), 0 2px 10px rgba(0,0,0,0.4)',",
+  "      'z-index:2147483600;pointer-events:none;opacity:0;transform:translate(-50%,-50%)',",
+  "      'transition:left 320ms cubic-bezier(0.22,1,0.36,1),top 320ms cubic-bezier(0.22,1,0.36,1),opacity 220ms ease-out',",
+  "    ].join(';'));",
+  "    var ripple = document.createElement('div');",
+  "    ripple.setAttribute('data-o8-agent-cursor-ripple', 'true');",
+  "    ripple.setAttribute('style', [",
+  "      'position:fixed;left:0;top:0;width:16px;height:16px;border-radius:50%',",
+  "      'border:2px solid rgba(245,158,11,0.7)',",
+  "      'z-index:2147483599;pointer-events:none;opacity:0;transform:translate(-50%,-50%)',",
+  "    ].join(';'));",
+  '    document.body.appendChild(cursor);',
+  '    document.body.appendChild(ripple);',
+  '    cursorState = { cursor: cursor, ripple: ripple, hideTimer: null };',
+  '    return cursorState;',
+  '  }',
+  '  function paintCursor(x, y) {',
+  '    try {',
+  '      var state = ensureCursor();',
+  '      if (!state) return;',
+  "      var left = Math.round(x) + 'px';",
+  "      var top = Math.round(y) + 'px';",
+  "      state.cursor.style.opacity = '1';",
+  '      state.cursor.style.left = left;',
+  '      state.cursor.style.top = top;',
+  '      state.ripple.style.left = left;',
+  '      state.ripple.style.top = top;',
+  "      if (typeof state.ripple.animate === 'function') {",
+  '        state.ripple.animate(',
+  "          [{ transform: 'translate(-50%,-50%) scale(0.7)', opacity: 0.8 }, { transform: 'translate(-50%,-50%) scale(3.2)', opacity: 0 }],",
+  "          { duration: 520, easing: 'ease-out' },",
+  '        );',
+  '      }',
+  '      if (state.hideTimer) clearTimeout(state.hideTimer);',
+  "      state.hideTimer = setTimeout(function () { state.cursor.style.opacity = '0'; }, 2400);",
+  '    } catch (e) { /* theater is best-effort */ }',
+  '  }',
+  '',
+  '  // ── verbs (operate on this page document directly) ──',
+  '  function read(args) {',
+  '    args = args || {};',
+  '    var root = args.selector ? (document.querySelector(args.selector) || document.body) : document.body;',
+  "    if (!root) return { ok: false, error: 'page has no body yet' };",
+  '    var maxChars = Math.min(14000, Math.max(400, args.maxChars || 6000));',
+  "    var text = (root.innerText || root.textContent || '').replace(/\\n{3,}/g, '\\n\\n');",
+  '    var interactive = [];',
+  '    var nodes = root.querySelectorAll(\'a[href], button, input, textarea, select, [role="button"], [role="link"], [onclick]\');',
+  '    for (var i = 0; i < nodes.length; i++) {',
+  '      if (interactive.length >= 60) break;',
+  '      var el = nodes[i];',
+  '      var rect = el.getBoundingClientRect();',
+  '      if (rect.width === 0 || rect.height === 0) continue;',
+  '      interactive.push({ selector: selectorFor(el), tag: el.tagName.toLowerCase(), label: labelFor(el) });',
+  '    }',
+  '    return {',
+  '      ok: true,',
+  '      url: location.href,',
+  '      title: document.title,',
+  "      text: text.length > maxChars ? text.slice(0, maxChars) + '\\u2026 [truncated ' + (text.length - maxChars) + ' chars]' : text,",
+  '      interactive: interactive,',
+  '    };',
+  '  }',
+  '',
+  '  function click(args) {',
+  '    args = args || {};',
+  '    var el = args.selector ? document.querySelector(args.selector) : null;',
+  "    if (!el) return { ok: false, error: 'no element matches ' + args.selector };",
+  '    var rect = el.getBoundingClientRect();',
+  '    var x = rect.left + rect.width / 2;',
+  '    var y = rect.top + rect.height / 2;',
+  '    paintCursor(x, y);',
+  '    var opts = { bubbles: true, cancelable: true, clientX: x, clientY: y, view: window };',
+  "    try { el.dispatchEvent(new PointerEvent('pointerdown', opts)); } catch (e) {}",
+  "    el.dispatchEvent(new MouseEvent('mousedown', opts));",
+  "    try { el.dispatchEvent(new PointerEvent('pointerup', opts)); } catch (e) {}",
+  "    el.dispatchEvent(new MouseEvent('mouseup', opts));",
+  '    if (typeof el.click === \'function\') el.click();',
+  '    return { ok: true, clicked: args.selector, label: labelFor(el) };',
+  '  }',
+  '',
+  '  function type(args) {',
+  '    args = args || {};',
+  '    var el = args.selector ? document.querySelector(args.selector) : null;',
+  "    if (!el) return { ok: false, error: 'no element matches ' + args.selector };",
+  '    var rect = el.getBoundingClientRect();',
+  '    paintCursor(rect.left + Math.min(24, rect.width / 2), rect.top + rect.height / 2);',
+  '    el.focus();',
+  "    var proto = el.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype : window.HTMLInputElement.prototype;",
+  "    var desc = Object.getOwnPropertyDescriptor(proto, 'value');",
+  '    var setter = desc && desc.set;',
+  "    if (setter) setter.call(el, args.text); else el.value = args.text;",
+  "    el.dispatchEvent(new Event('input', { bubbles: true }));",
+  "    el.dispatchEvent(new Event('change', { bubbles: true }));",
+  '    if (args.submit) {',
+  "      el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));",
+  "      var form = el.closest('form');",
+  "      if (form && typeof form.requestSubmit === 'function') form.requestSubmit();",
+  '    }',
+  "    return { ok: true, typed: (args.text || '').length, into: args.selector };",
+  '  }',
+  '',
+  '  function probe(args) {',
+  '    args = args || {};',
+  '    var el = args.selector ? document.querySelector(args.selector) : null;',
+  '    if (!el) return { ok: false, pending: true };',
+  "    if (args.text && (el.textContent || '').indexOf(args.text) === -1) return { ok: false, pending: true };",
+  '    return { ok: true, found: args.selector };',
+  '  }',
+  '',
+  '  function grab(args) {',
+  '    args = args || {};',
+  '    var el = args.selector ? document.querySelector(args.selector) : null;',
+  "    if (!el) return { ok: false, error: 'no element matches ' + args.selector };",
+  '    var rect = el.getBoundingClientRect();',
+  '    paintCursor(rect.left + rect.width / 2, rect.top + rect.height / 2);',
+  '    return { ok: true, element: buildGrabbedElement(el, selectorFor(el)) };',
+  '  }',
+  '',
+  '  window.__o8BrowserAgent = { read: read, click: click, type: type, probe: probe, grab: grab };',
+  '})();',
+].join('\n');
