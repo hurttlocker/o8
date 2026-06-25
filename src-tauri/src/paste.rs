@@ -1138,10 +1138,21 @@ fn restore_clipboard_delayed(saved: ClipboardSnapshot, expected_change_count: i6
 }
 
 /// Simulate a Command-modified keystroke using Core Graphics events.
+///
+/// CRITICAL (stuck-modifier bug): synthesize a REAL chord — press the Command
+/// KEY, tap the target key, release the target key, then RELEASE Command with
+/// cleared flags. The old version posted only the target key with the Command
+/// FLAG set (and never a Command key-up), which could leave macOS's HID modifier
+/// state believing Command was still held: every later keypress then read as a
+/// Cmd-chord and BEEPED system-wide — and it survived o8's death (only a logout
+/// cleared it). A balanced Command down/up keeps the modifier state from ever
+/// sticking.
 #[cfg(target_os = "macos")]
 fn simulate_command_keypress(keycode: u16, label: &str) {
     use core_graphics::event::{CGEvent, CGEventFlags, CGEventTapLocation};
     use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
+
+    const CMD_KEYCODE: u16 = 0x37; // kVK_Command (left ⌘)
 
     let source = match CGEventSource::new(CGEventSourceStateID::CombinedSessionState) {
         Ok(s) => s,
@@ -1151,27 +1162,27 @@ fn simulate_command_keypress(keycode: u16, label: &str) {
         }
     };
 
-    let key_down = match CGEvent::new_keyboard_event(source.clone(), keycode, true) {
-        Ok(e) => e,
-        Err(()) => {
-            tracing::error!("{label}: failed to create key-down event");
-            return;
+    // Post one keyboard event (down/up) for `kc` with `flags`; log + skip on err.
+    let post = |kc: u16, down: bool, flags: CGEventFlags| {
+        match CGEvent::new_keyboard_event(source.clone(), kc, down) {
+            Ok(e) => {
+                e.set_flags(flags);
+                e.post(CGEventTapLocation::HID);
+            }
+            Err(()) => tracing::error!("{label}: failed to create key event (kc={kc}, down={down})"),
         }
     };
-    key_down.set_flags(CGEventFlags::CGEventFlagCommand);
 
-    let key_up = match CGEvent::new_keyboard_event(source, keycode, false) {
-        Ok(e) => e,
-        Err(()) => {
-            tracing::error!("{label}: failed to create key-up event");
-            return;
-        }
-    };
-    key_up.set_flags(CGEventFlags::CGEventFlagCommand);
-
-    key_down.post(CGEventTapLocation::HID);
-    std::thread::sleep(std::time::Duration::from_millis(COMMAND_KEY_GAP_MS));
-    key_up.post(CGEventTapLocation::HID);
+    let gap = std::time::Duration::from_millis(COMMAND_KEY_GAP_MS);
+    // ⌘ down → key down → key up → ⌘ up (flags cleared). The balanced Command
+    // press/release is the fix — it can never strand "Command held".
+    post(CMD_KEYCODE, true, CGEventFlags::CGEventFlagCommand);
+    std::thread::sleep(gap);
+    post(keycode, true, CGEventFlags::CGEventFlagCommand);
+    std::thread::sleep(gap);
+    post(keycode, false, CGEventFlags::CGEventFlagCommand);
+    std::thread::sleep(gap);
+    post(CMD_KEYCODE, false, CGEventFlags::empty());
 }
 
 /// Simulate Cmd+V keystroke using Core Graphics events.
