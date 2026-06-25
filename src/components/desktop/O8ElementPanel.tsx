@@ -27,17 +27,17 @@ const STYLE_ITEMS = [
 ] as const;
 
 function buildDescriptorParts(element: GrabbedElement): DescriptorPart[] {
-  const parts: DescriptorPart[] = [{ text: `<${element.tagName.toLowerCase()}`, color: '#ffffff' }];
+  const parts: DescriptorPart[] = [{ text: `<${element.tagName.toLowerCase()}`, color: 'var(--t-text)' }];
 
   element.classList.forEach((className) => {
-    parts.push({ text: `.${className}`, color: '#60a5fa' });
+    parts.push({ text: `.${className}`, color: 'var(--t-accent)' });
   });
 
   if (element.id) {
-    parts.push({ text: `#${element.id}`, color: '#4ade80' });
+    parts.push({ text: `#${element.id}`, color: 'var(--t-text-muted)' });
   }
 
-  parts.push({ text: '>', color: '#ffffff' });
+  parts.push({ text: '>', color: 'var(--t-text)' });
   return parts;
 }
 
@@ -61,7 +61,7 @@ function truncateDescriptorParts(parts: DescriptorPart[], maxLength: number): De
   }
 
   if (nextParts.length === 0) {
-    return [{ text: '...', color: '#ffffff' }];
+    return [{ text: '...', color: 'var(--t-text)' }];
   }
 
   const lastPart = nextParts[nextParts.length - 1];
@@ -149,13 +149,13 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
     <div
       className="cortex-scroll-fade-y cortex-themed-scroll"
       style={{
-        margin: '0 12px 0',
-        borderTop: '1px solid rgba(255,255,255,0.1)',
+        border: '1px solid var(--t-divider)',
         borderRadius: 14,
-        background: 'rgba(20,20,25,0.95)',
-        backdropFilter: 'blur(12px)',
-        boxShadow: '0 22px 40px rgba(0,0,0,0.24)',
-        maxHeight: 220,
+        background: 'var(--t-panel-translucent)',
+        backdropFilter: 'blur(18px) saturate(1.5)',
+        WebkitBackdropFilter: 'blur(18px) saturate(1.5)',
+        boxShadow: 'var(--t-glass-shadow)',
+        maxHeight: '70vh',
         overflow: 'auto',
         transform: isVisible ? 'translateY(0)' : 'translateY(14px)',
         opacity: isVisible ? 1 : 0,
@@ -168,7 +168,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
           alignItems: 'center',
           gap: 12,
           padding: '12px 14px 10px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          borderBottom: '1px solid var(--t-divider)',
         }}
       >
         <div
@@ -200,7 +200,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
             height: 24,
             border: 'none',
             borderRadius: 8,
-            background: 'rgba(255,255,255,0.08)',
+            background: 'var(--t-hover)',
             cursor: 'pointer',
             padding: 0,
             display: 'inline-flex',
@@ -208,7 +208,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
             justifyContent: 'center',
           }}
         >
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.72)" strokeWidth="2.5" strokeLinecap="round" style={{ display: 'block' }}>
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-muted)" strokeWidth="2.5" strokeLinecap="round" style={{ display: 'block' }}>
             <line x1="18" y1="6" x2="6" y2="18" />
             <line x1="6" y1="6" x2="18" y2="18" />
           </svg>
@@ -220,7 +220,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
           <div style={{ display: 'grid', gap: 8 }}>
             <span
               style={{
-                color: 'rgba(255,255,255,0.48)',
+                color: 'var(--t-text-faint)',
                 fontSize: 12,
                 fontFamily: LABEL_FONT,
               }}
@@ -241,9 +241,9 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
                 width: '100%',
                 height: 36,
                 borderRadius: 10,
-                border: '1px solid rgba(255,255,255,0.12)',
-                background: 'rgba(255,255,255,0.05)',
-                color: 'rgba(255,255,255,0.88)',
+                border: '1px solid var(--t-divider)',
+                background: 'var(--t-input-bg)',
+                color: 'var(--t-text)',
                 padding: '0 12px',
                 outline: 'none',
                 fontSize: 13,
@@ -256,7 +256,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
         <div style={{ display: 'grid', gap: 8 }}>
           <span
             style={{
-              color: 'rgba(255,255,255,0.48)',
+              color: 'var(--t-text-faint)',
               fontSize: 12,
               fontFamily: LABEL_FONT,
             }}
@@ -278,7 +278,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
                     minWidth: 0,
                     padding: '8px 10px',
                     borderRadius: 10,
-                    background: 'rgba(255,255,255,0.04)',
+                    background: 'var(--t-hover)',
                   }}
                 >
                   {showSwatch ? (
@@ -288,7 +288,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
                         height: 12,
                         flexShrink: 0,
                         borderRadius: 999,
-                        border: '1px solid rgba(255,255,255,0.18)',
+                        border: '1px solid var(--t-divider)',
                         background: isInteractiveValue(value) ? value : 'transparent',
                       }}
                     />
@@ -299,7 +299,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
                       overflow: 'hidden',
                       textOverflow: 'ellipsis',
                       whiteSpace: 'nowrap',
-                      color: 'rgba(255,255,255,0.88)',
+                      color: 'var(--t-text)',
                       fontSize: 12,
                       fontFamily: MONO_FONT,
                     }}
@@ -308,7 +308,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
                   </span>
                   <span
                     style={{
-                      color: 'rgba(255,255,255,0.42)',
+                      color: 'var(--t-text-faint)',
                       fontSize: 11,
                       fontFamily: LABEL_FONT,
                       whiteSpace: 'nowrap',
@@ -330,7 +330,7 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
               height: 28,
               border: 'none',
               borderRadius: 8,
-              background: '#2563eb',
+              background: 'var(--t-accent)',
               color: '#ffffff',
               padding: '0 12px',
               fontSize: 12,
@@ -347,9 +347,9 @@ export function O8ElementPanel({ element, onClose, onEditWithAI, onOpenSource }:
             style={{
               height: 28,
               borderRadius: 8,
-              border: '1px solid rgba(255,255,255,0.14)',
+              border: '1px solid var(--t-divider)',
               background: 'transparent',
-              color: 'rgba(255,255,255,0.78)',
+              color: 'var(--t-text-muted)',
               padding: '0 12px',
               fontSize: 12,
               fontWeight: 600,

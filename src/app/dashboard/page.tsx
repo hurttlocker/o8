@@ -4037,7 +4037,7 @@ function DashboardInner() {
           was grabbed. "Edit with AI" routes the rich payload into the agent
           chat; "Open Source" opens the inferred file in an inspector tab. */}
       {grabbedElement ? (
-        <div style={{ position: 'fixed', bottom: 16, right: 16, width: 380, zIndex: 9998 }}>
+        <div style={{ position: 'fixed', bottom: 56, right: 16, width: 360, zIndex: 9998 }}>
           <Suspense fallback={null}>
             <LazyO8ElementPanel
               element={grabbedElement}
