@@ -88,8 +88,13 @@ export const OnboardingRuntimeStep = memo(function OnboardingRuntimeStep({
 
   return (
     <div style={{ maxWidth: 520, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5, textAlign: 'center' }}>
-        These power your assistant and agent sessions. No extra API keys needed.
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, textAlign: 'center' }}>
+        <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
+          These power your assistant and agent sessions. No extra API keys needed.
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--t-text-faint)', lineHeight: 1.5 }}>
+          A <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>runtime</span> is the AI that writes the code — Codex, Claude, or Gemini. o8 uses whichever you have installed.
+        </div>
       </div>
 
       <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>

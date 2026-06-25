@@ -145,7 +145,7 @@ export function AboutTab() {
       <ReportIssueSection number="03" />
 
       {/* 04 — CREDITS */}
-      <section style={{ marginBottom: isProduction ? 0 : 32 }}>
+      <section style={{ marginBottom: 32 }}>
         <SectionLabel number="04">CREDITS</SectionLabel>
         <div style={{
           paddingTop: 4,
@@ -160,10 +160,35 @@ export function AboutTab() {
         </div>
       </section>
 
+      {/* 05 — ONBOARDING (replay the intro; always available) */}
+      <section style={{ marginBottom: isProduction ? 0 : 32 }}>
+        <SectionLabel number="05">ONBOARDING</SectionLabel>
+        <div style={{
+          paddingTop: 4,
+          paddingBottom: 20,
+          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 12,
+          maxWidth: 620,
+        }}>
+          <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.6 }}>
+            Replay the welcome flow — the o8 intro, repos, runtimes, and the rest. Handy to revisit, or to walk a teammate through it.
+          </div>
+          <button
+            type="button"
+            onClick={() => { window.dispatchEvent(new CustomEvent('o8-trigger-onboarding')); }}
+            style={accentLinkStyle(false)}
+          >
+            Replay onboarding
+          </button>
+        </div>
+      </section>
+
       {/* Developer tools (dev only) */}
       {!isProduction ? (
         <section>
-          <SectionLabel number="05">DEVELOPER</SectionLabel>
+          <SectionLabel number="06">DEVELOPER</SectionLabel>
           <div style={{
             paddingTop: 4,
             paddingBottom: 4,

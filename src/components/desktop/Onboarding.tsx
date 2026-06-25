@@ -20,12 +20,14 @@ import type { ExtractedProfile, ImportProgress } from '@/lib/connectors/chatgpt/
 import { OnboardingDispatchStep } from './onboarding/OnboardingDispatchStep';
 import { OnboardingRuntimeStep, type DetectedRuntime } from './onboarding/OnboardingRuntimeStep';
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import { OnboardingOpen } from './onboarding/OnboardingOpen';
+import { playOnboardingCue } from './onboarding/onboarding-sound';
 
 // ── Shared constants ──
 
-type OnboardingStep = 'welcome' | 'repos' | 'runtimes' | 'dispatch' | 'import' | 'ready';
+type OnboardingStep = 'open' | 'welcome' | 'repos' | 'runtimes' | 'dispatch' | 'import' | 'ready';
 
-const STEP_ORDER: OnboardingStep[] = ['welcome', 'repos', 'runtimes', 'dispatch', 'import', 'ready'];
+const STEP_ORDER: OnboardingStep[] = ['open', 'repos', 'runtimes', 'dispatch', 'import', 'ready'];
 
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, monospace';
@@ -159,7 +161,7 @@ interface GithubRepo {
 // ════════════════════════════════════════════════════════════
 
 export const Onboarding = memo(function Onboarding({ onComplete, completionError }: { onComplete: () => void; completionError?: string | null }) {
-  const [step, setStep] = useState<OnboardingStep>('welcome');
+  const [step, setStep] = useState<OnboardingStep>('open');
 
   // Step 1: Welcome
   const [activeSlide, setActiveSlide] = useState(0);
@@ -350,14 +352,25 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
 
   return (
     <div
-      data-vibrancy-passthrough=""
       style={{ position: 'fixed', inset: 0, zIndex: 99998, display: 'flex', flexDirection: 'column', background: 'var(--t-chat-surface-bg)' }}
     >
       {/* Drag region */}
       <div data-tauri-drag-region="" style={{ height: 44, flexShrink: 0, WebkitAppRegion: 'drag' as unknown as string } as React.CSSProperties} />
 
       {/* Content */}
-      <div style={{ flex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 48px 48px', minHeight: 0, overflow: 'auto' }}>
+      <div style={{ flex: 1, position: 'relative', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', padding: '0 48px 48px', minHeight: 0, overflow: 'auto' }}>
+
+        {step === 'open' ? (
+          <OnboardingOpen
+            onSetup={goNext}
+            onFastLane={onComplete}
+            onSignIn={startGithubFlow}
+            signInEnabled={githubDeviceFlowEnabled}
+            githubFlow={githubFlow}
+            onPrivacy={() => openExternalUrl('https://o8.run/privacy')}
+          />
+        ) : (
+        <>
 
         {/* Logo — always visible */}
         <div style={{ marginBottom: 36, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
@@ -690,7 +703,23 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
               </div>
             </GlassCard>
 
-            <GlassButton primary onClick={onComplete} style={{ paddingLeft: 28, paddingRight: 28 }}>
+            {/* Free-forever + optional Founding Operator close (never gating) */}
+            <div style={{ width: '100%', paddingTop: 16, paddingBottom: 16, paddingLeft: 18, paddingRight: 18, borderRadius: 14, border: '1px solid var(--t-glass-border-strong)', background: 'var(--t-glass-muted)', display: 'flex', flexDirection: 'column', gap: 8, textAlign: 'left' }}>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}>o8 is free, forever.</div>
+              <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
+                Your keys, your machine. If it earns a place in your stack, back the build as a Founding Operator — lifetime managed inference and your own operator number. Optional, always.
+              </div>
+              <button
+                type="button"
+                onClick={() => openExternalUrl('https://o8.run/founding')}
+                style={{ alignSelf: 'flex-start', marginTop: 4, border: 'none', background: 'transparent', color: 'var(--t-brand-orange, #FF5A1F)', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', fontFamily: FONT, padding: 0, display: 'inline-flex', alignItems: 'center', gap: 6 }}
+              >
+                Become a Founding Operator
+                <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="m9 18 6-6-6-6" /></svg>
+              </button>
+            </div>
+
+            <GlassButton primary onClick={() => { playOnboardingCue('complete'); onComplete(); }} style={{ paddingLeft: 28, paddingRight: 28 }}>
               Enter o8
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
             </GlassButton>
@@ -706,6 +735,8 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
         <div style={{ marginTop: 32, flexShrink: 0 }}>
           <StepIndicator steps={STEP_ORDER} current={step} />
         </div>
+        </>
+        )}
       </div>
 
       {/* Support link */}

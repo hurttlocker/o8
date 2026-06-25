@@ -9,20 +9,33 @@
  * what the surface IS). Shown once per browser (the page owns the localStorage
  * flag) and dismissed by Start / ✕ / Escape.
  *
- * Inline styles only. The card panes are deliberately HARD dark/light (not the
- * tone-aware --cnv-* tokens) so the modal reads with the same drama whether the
- * canvas is in light or dark tone — same call we make for portal popovers.
+ * Inline styles only. Tone-aware (light/dark) to match the app onboarding
+ * (OnboardingOpen) — the two surfaces share one visual language.
  */
 
 import { useEffect } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FONT } from './ui';
-import { O8Reel } from './welcome-reel';
+import { AsciiImage } from '@/app/preview/effects/AsciiImage';
+import { playOnboardingCue } from '@/components/desktop/onboarding/onboarding-sound';
 
 const ACCENT = 'var(--t-brand-orange, #FF5A1F)';
 
 export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; onClose: () => void; onStart: () => void; tone: 'light' | 'dark' }) {
   const isDark = tone === 'dark';
+  // Shared aurora-ASCII reveal language with the app onboarding (OnboardingOpen).
+  const stageBg = isDark ? '#0c0d12' : '#f2f2f0';
+  const stageGlyph = isDark ? '#ff7a18' : '#d65a12';
+  // Tone-aware card surfaces — match the app onboarding (theme-aware), not hard-dark.
+  const cardBg = isDark
+    ? 'linear-gradient(155deg, rgba(28, 30, 38, 0.55), rgba(15, 17, 23, 0.62))'
+    : 'linear-gradient(155deg, rgba(255, 255, 255, 0.74), rgba(247, 247, 244, 0.82))';
+  const cardInk = isDark ? 'rgba(255, 255, 255, 0.92)' : 'rgba(22, 24, 30, 0.92)';
+  const inkStrong = isDark ? '#fff' : '#15171d';
+  const inkMuted = isDark ? 'rgba(255, 255, 255, 0.6)' : 'rgba(28, 32, 40, 0.62)';
+  const cardBorder = isDark ? 'rgba(255, 255, 255, 0.12)' : 'rgba(15, 23, 42, 0.1)';
+  const closeBg = isDark ? 'rgba(255, 255, 255, 0.1)' : 'rgba(15, 23, 42, 0.06)';
+  const closeInk = isDark ? 'rgba(255, 255, 255, 0.7)' : 'rgba(20, 24, 30, 0.6)';
   useEffect(() => {
     if (!open) return;
     const onKey = (event: KeyboardEvent) => {
@@ -70,7 +83,7 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
               maxHeight: 'calc(100vh - 120px)',
               borderRadius: 22,
               overflow: 'hidden',
-              border: '1px solid rgba(255, 255, 255, 0.12)',
+              border: `1px solid ${cardBorder}`,
               boxShadow: '0 40px 120px rgba(0, 0, 0, 0.5), 0 2px 0 rgba(255, 255, 255, 0.04) inset',
             }}
           >
@@ -86,24 +99,24 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
                 paddingRight: 30,
                 // Translucent dark glass — the canvas fogs through behind it,
                 // headline stays readable on the dark tint. (Not a solid wall.)
-                background: 'linear-gradient(155deg, rgba(28, 30, 38, 0.55), rgba(15, 17, 23, 0.62))',
+                background: cardBg,
                 backdropFilter: 'blur(32px) saturate(1.4)',
                 WebkitBackdropFilter: 'blur(32px) saturate(1.4)',
-                color: 'rgba(255, 255, 255, 0.92)',
+                color: cardInk,
               }}
             >
               {/* eyebrow — wordmark + beta pill */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 9, marginBottom: 'auto' }}>
-                <span style={{ fontSize: 14, fontWeight: 500, letterSpacing: '0.02em', color: '#fff' }}>o8</span>
+                <span style={{ fontSize: 14, fontWeight: 500, letterSpacing: '0.02em', color: inkStrong }}>o8</span>
                 <span
                   style={{
                     fontSize: 8.5,
                     fontWeight: 600,
                     letterSpacing: '0.08em',
                     textTransform: 'uppercase',
-                    color: 'rgba(150, 226, 168, 0.95)',
-                    background: 'rgba(80, 200, 120, 0.14)',
-                    border: '1px solid rgba(120, 210, 150, 0.28)',
+                    color: 'var(--t-brand-orange, #FF5A1F)',
+                    background: 'color-mix(in srgb, var(--t-brand-orange, #FF5A1F) 14%, transparent)',
+                    border: '1px solid color-mix(in srgb, var(--t-brand-orange, #FF5A1F) 32%, transparent)',
                     paddingTop: 2,
                     paddingBottom: 2,
                     paddingLeft: 6,
@@ -111,7 +124,7 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
                     borderRadius: 999,
                   }}
                 >
-                  Beta
+                  Free forever
                 </span>
               </div>
 
@@ -123,7 +136,7 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
                   fontWeight: 300,
                   lineHeight: 1.12,
                   letterSpacing: '-0.02em',
-                  color: '#fff',
+                  color: inkStrong,
                 }}
               >
                 Welcome to a shift
@@ -139,7 +152,7 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
                   fontWeight: 300,
                   lineHeight: 1.55,
                   letterSpacing: '-0.1px',
-                  color: 'rgba(255, 255, 255, 0.6)',
+                  color: inkMuted,
                 }}
               >
                 Your whole fleet on one surface. Drop in work, talk to the orchestrator,
@@ -148,7 +161,7 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
 
               <button
                 type="button"
-                onClick={onStart}
+                onClick={() => { playOnboardingCue('advance'); onStart(); }}
                 style={{
                   marginTop: 26,
                   alignSelf: 'flex-start',
@@ -192,11 +205,24 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
                 flex: '1 1 54%',
                 position: 'relative',
                 borderLeft: isDark ? '1px solid rgba(255,255,255,0.06)' : '1px solid rgba(15,23,42,0.05)',
-                background: isDark ? '#191c24' : '#f2f2f0',
+                background: stageBg,
                 overflow: 'hidden',
               }}
             >
-              <O8Reel tone={tone} />
+              <AsciiImage
+                text="o8"
+                color={stageGlyph}
+                backgroundColor={stageBg}
+                cellSize={11}
+                speed={1}
+                baseLevel={0.42}
+                waveBoost={0.95}
+                contrast={1.25}
+                cursorRipple={26}
+                cursorRadius={0.22}
+                width="100%"
+                height="100%"
+              />
             </div>
 
             {/* dismiss — quiet, top-right */}
@@ -215,14 +241,14 @@ export function WelcomeModal({ open, onClose, onStart, tone }: { open: boolean; 
                 justifyContent: 'center',
                 borderRadius: 999,
                 borderWidth: 0,
-                background: 'rgba(255, 255, 255, 0.1)',
-                color: 'rgba(255, 255, 255, 0.7)',
+                background: closeBg,
+                color: closeInk,
                 cursor: 'pointer',
                 fontSize: 13,
                 fontFamily: FONT,
               }}
-              onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255, 255, 255, 0.2)'; event.currentTarget.style.color = '#fff'; }}
-              onMouseLeave={(event) => { event.currentTarget.style.background = 'rgba(255, 255, 255, 0.1)'; event.currentTarget.style.color = 'rgba(255, 255, 255, 0.7)'; }}
+              onMouseEnter={(event) => { event.currentTarget.style.background = isDark ? 'rgba(255, 255, 255, 0.2)' : 'rgba(15, 23, 42, 0.12)'; event.currentTarget.style.color = inkStrong; }}
+              onMouseLeave={(event) => { event.currentTarget.style.background = closeBg; event.currentTarget.style.color = closeInk; }}
             >
               ✕
             </button>
