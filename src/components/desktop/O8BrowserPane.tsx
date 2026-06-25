@@ -17,7 +17,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
+import { isTauri, browserViewNavigate } from '@/lib/tauri/bridge';
 import { O8EnginePane } from './O8EnginePane';
+import { NativeBrowserSurface } from './NativeBrowserSurface';
 
 // ── live proxy ──
 // Loading a localhost dev server directly makes the iframe cross-origin with
@@ -112,6 +114,16 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
   /** URLs that blank out when proxied (auth-gated SPAs) — drive them in the
    *  engine's real Chrome instead, where they render + stay grabbable. */
   const [engineUrls, setEngineUrls] = useState<Set<string>>(() => new Set());
+  /** Native browser-view path (docs/native-browser-webview-spec.md). Operator
+   *  opt-in via localStorage `o8:native-browser-view=1`; Stage 6 promotes it to
+   *  a Settings toggle + flips the default. Only in Tauri — the native child
+   *  window can't exist in the web/dev preview, where the iframe is the default.
+   *  When on, the native surface renders ANY url (incl. origin-locked Clerk), so
+   *  the proxy/iframe + engine-blank fallback are bypassed for tabs with a url. */
+  const [nativeEnabled] = useState<boolean>(() => {
+    if (!isTauri()) return false;
+    try { return window.localStorage.getItem('o8:native-browser-view') === '1'; } catch { return false; }
+  });
 
   // Agent verbs (o8_browser_* / `o8 browser`) drive this pane's iframe too.
   useEffect(() => { installBrowserAgent(); }, []);
@@ -244,6 +256,12 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
 
   const handleReload = useCallback(() => {
     if (!activeTab?.url) return;
+    // Native path: re-navigating to the same URL reloads the page in the child
+    // window — no iframe-key toggle (which would unmount + flash the surface).
+    if (nativeEnabled) {
+      void browserViewNavigate(activeTab.url);
+      return;
+    }
     // Force iframe reload by toggling URL
     const url = activeTab.url;
     setTabs(prev => prev.map(t =>
@@ -254,7 +272,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
         t.id === activeTabId ? { ...t, url } : t
       ));
     });
-  }, [activeTab, activeTabId]);
+  }, [activeTab, activeTabId, nativeEnabled]);
 
   const openExternal = useCallback(() => {
     if (activeTab?.url) openExternalUrl(activeTab.url);
@@ -542,6 +560,11 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
               </span>
             )}
           </div>
+        ) : nativeEnabled && activeTab?.url ? (
+          // Native host-owned child window over this rect — renders origin-
+          // sensitive auth apps (Clerk) smoothly AND stays agent-grabbable.
+          // Bypasses the proxy/iframe + engine-blank fallback entirely.
+          <NativeBrowserSurface url={activeTab.url} agentGlow={agentGlow} />
         ) : activeTab?.url && engineUrls.has(activeTab.url) ? (
           <O8EnginePane url={activeTab.url} agentGlow={agentGlow} />
         ) : activeTab?.url ? (
