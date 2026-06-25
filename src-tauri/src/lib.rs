@@ -3989,13 +3989,21 @@ pub fn run() {
                             if event.state != ShortcutState::Pressed {
                                 return;
                             }
-                            // ⌥S is a toggle: if TTS is already speaking, this
-                            // press STOPS it instead of starting a second read.
-                            // This is the primary keyboard stop AND prevents the
-                            // re-trigger-stacking that forced a hard kill before.
+                            // ⌥S says the current selection — ALWAYS. If a read is
+                            // already playing (commonly Symon's OWN voice, or a
+                            // transient/stale is_active right after it finishes),
+                            // stop it first but DON'T return — fall through and say
+                            // the new selection. The old early-return gated ⌥S on
+                            // is_active, so every press became a no-op stop whenever
+                            // TTS looked active ("⌥S won't initiate the say", the
+                            // operator hit this constantly while dictating). The
+                            // re-trigger-stacking this once guarded against is now
+                            // prevented by play_thread's single-flight (a new speak
+                            // supersedes the old), so the gate is obsolete. A bare
+                            // ⌥S with nothing selected still just stops, because
+                            // grab_selection returns None below; Escape also stops.
                             if crate::tts::playback::is_active() {
                                 std::thread::spawn(crate::tts::playback::stop);
-                                return;
                             }
                             // o8's own webview doesn't expose its text selection via
                             // AXSelectedText (and synthetic Cmd+C can't copy it), so
