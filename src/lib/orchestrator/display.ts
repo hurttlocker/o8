@@ -206,3 +206,34 @@ export function laneDisplayTitle(
   const title = packet?.title?.trim();
   return title || adHocLaneTitle(kind);
 }
+
+/**
+ * Canonical runtime → human label. The single source of truth for naming a
+ * runtime in the UI ("Codex" / "Claude Code" / "Gemini" / "opencode"). Never
+ * returns a raw id; an unknown/empty runtime yields the generic 'Agent'.
+ */
+export function runtimeDisplayLabel(runtime?: OrchestratorRuntime | string | null): string {
+  const cap = runtime ? ORCHESTRATOR_RUNTIMES[runtime as OrchestratorRuntime] : null;
+  return cap?.label ?? 'Agent';
+}
+
+/**
+ * Canonical agent/session display label. **Never returns a raw id or prefix** —
+ * the worst case is the runtime's human label ("Codex") or 'Agent'. Use this
+ * everywhere a session/agent needs a name (tab titles, agent tiles, sub-agent
+ * rows) so the fallback lives in ONE place and can't drift into id-slicing
+ * (`sessionKey.split(':').pop()?.slice(0, 12)` on an owned key yields the
+ * literal "codex-owned-", the recurring leak this prevents by construction).
+ */
+export function agentDisplayLabel(input: {
+  name?: string | null;
+  title?: string | null;
+  sessionKey?: string | null;
+  runtime?: OrchestratorRuntime | string | null;
+}): string {
+  const explicit = input.name?.trim() || input.title?.trim();
+  if (explicit) return explicit;
+  const runtime = input.runtime
+    ?? (input.sessionKey ? resolveDisplayRuntime({ lane: { sessionKey: input.sessionKey } }) : null);
+  return runtimeDisplayLabel(runtime);
+}
