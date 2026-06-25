@@ -106,9 +106,30 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
   const urlRef = useRef<HTMLInputElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const seeded = useRef(false);
+  /** Agent-driving glow — pulses when an agent verb lands on this surface. */
+  const [agentGlow, setAgentGlow] = useState(false);
 
   // Agent verbs (o8_browser_* / `o8 browser`) drive this pane's iframe too.
   useEffect(() => { installBrowserAgent(); }, []);
+
+  // The agent-driving indicator — mirror the canvas card: pulse a glow when an
+  // o8_browser_* verb lands on the panel surface (the ghost cursor moves inside
+  // the page; this glow frames the surface so the operator sees who's driving).
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const onPulse = (event: Event) => {
+      const surface = (event as CustomEvent<{ surface?: string | null }>).detail?.surface;
+      if (surface && surface !== 'panel') return;
+      setAgentGlow(true);
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(() => setAgentGlow(false), 1300);
+    };
+    window.addEventListener('o8:browser-agent-pulse', onPulse);
+    return () => {
+      if (timer) clearTimeout(timer);
+      window.removeEventListener('o8:browser-agent-pulse', onPulse);
+    };
+  }, []);
 
   // Seed tabs from previews on first render
   useEffect(() => {
@@ -428,7 +449,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
       </div>
 
       {/* ── Content area ── */}
-      <div style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      <div style={{ flex: 1, minHeight: 0, position: 'relative', boxShadow: agentGlow ? 'inset 0 0 0 1.5px rgba(245,158,11,0.75)' : 'none', transition: 'box-shadow 200ms ease-out' }}>
         {showNewTabPage ? (
           <div style={{
             height: '100%', display: 'flex', flexDirection: 'column',
