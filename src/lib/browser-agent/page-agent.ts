@@ -31,7 +31,7 @@ interface AgentElementRow {
   label: string;
 }
 
-const PROXY_MARKERS = ['/api/browser/proxy?url=', '/api/panel/iframe-proxy?'];
+const PROXY_MARKERS = ['/api/browser/proxy?url='];
 
 function realUrl(raw: string): string {
   for (const marker of PROXY_MARKERS) {
