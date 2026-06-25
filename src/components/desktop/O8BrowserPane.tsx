@@ -276,8 +276,10 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
       try {
         const doc = iframe.contentDocument;
         if (!doc) return; // already cross-origin — nothing to do
+        // No visible text after the hydrate window → the proxy broke it
+        // (origin-sensitive SPA, or an empty redirect body). Reload direct.
         const empty = (doc.body?.innerText || '').trim().length < 5;
-        if (empty && doc.querySelector('script')) {
+        if (empty) {
           setDirectFallback((prev) => new Set(prev).add(url));
         }
       } catch {
