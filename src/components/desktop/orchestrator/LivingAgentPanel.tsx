@@ -32,6 +32,7 @@
 
 import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
+import { agentDisplayLabel } from '@/lib/orchestrator/display';
 import { ToolCallChip, classifyToolCall, extractO8AskQuestion, type ToolCallChipStatus } from './ToolCallChip';
 
 const RENDER_THROTTLE_MS = 100;
@@ -105,7 +106,7 @@ function LivingAgentPanelBase({ packet, toolCalls = [] }: LivingAgentPanelProps)
             : 'idle';
         const row: SubAgentRow = {
           id: detail.surfaceId,
-          label: detail.name ?? detail.surfaceId,
+          label: agentDisplayLabel({ name: detail.name, sessionKey: detail.surfaceId }),
           status,
           detail: detail.detail ?? null,
           updatedAt: Date.now(),

@@ -77,7 +77,7 @@ import {
   updateOrchestratorMissionState,
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
-import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
+import { agentDisplayLabel } from '@/lib/orchestrator/display';
 import { deriveParkedLanes } from '@/components/desktop/merge-beacon/derive';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import type {
@@ -2288,15 +2288,15 @@ function DashboardInner() {
         : sessionKey.startsWith('gemini-owned:') ? 'gemini'
         : sessionKey.startsWith('opencode-owned:') ? 'opencode'
         : 'codex';
-      // Fall back to the runtime's human label (e.g. "Codex") rather than a
-      // truncated session id — `sessionKey.split(':').pop().slice(0,12)` on an
-      // owned key (`codex-owned:codex-owned-<ts>-<uuid>`) yields the literal
-      // "codex-owned-", which leaked into the tab/packet label.
-      const label = selectedSession?.name?.trim()
-        || selectedSession?.surfaceLabel?.trim()
-        || selectedSession?.currentTask?.trim()
-        || ORCHESTRATOR_RUNTIMES[runtime]?.label
-        || 'Session';
+      // Canonical label — never an id slice. agentDisplayLabel falls back to
+      // the runtime's human name ("Codex") rather than a raw `codex-owned:...`
+      // key, so the old `sessionKey.split(':').pop()?.slice(0,12)` → literal
+      // "codex-owned-" leak is impossible by construction.
+      const label = agentDisplayLabel({
+        name: selectedSession?.name,
+        title: selectedSession?.surfaceLabel?.trim() || selectedSession?.currentTask?.trim(),
+        runtime,
+      });
       target.handle.openCliChatSession({
         runtime,
         repo: targetRepo ? {

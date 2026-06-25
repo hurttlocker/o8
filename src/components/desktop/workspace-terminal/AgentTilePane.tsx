@@ -13,7 +13,7 @@ import {
 } from 'react';
 import type { FleetAgent } from '@/components/desktop/thoughts/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
-import { orchestratorRuntimeTone } from '@/lib/orchestrator/display';
+import { orchestratorRuntimeTone, agentDisplayLabel } from '@/lib/orchestrator/display';
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
@@ -52,10 +52,9 @@ function inferRuntime(sessionKey: string, rawRuntime?: string): 'codex' | 'claud
 }
 
 function displayName(agent: FleetAgent | null, sessionKey: string): string {
-  const name = agent?.name?.trim();
-  if (name) return name;
-  const shortKey = sessionKey.split(':').slice(1).join(':').trim();
-  return shortKey || sessionKey;
+  // Canonical label — never an id slice. Falls back to the runtime's human
+  // name ("Codex") rather than a raw `codex-owned:...` key.
+  return agentDisplayLabel({ name: agent?.name, sessionKey });
 }
 
 function roleLabel(role: MobileTranscriptEntry['role']): string {
