@@ -3059,6 +3059,17 @@ fn browser_view_navigate(app: tauri::AppHandle, url: String) -> Result<(), Strin
     browser_view::navigate(&app, &url)
 }
 
+/// Eval `js` into the browser-view page (fire-and-forget, host-owned, no IPC).
+/// Returns whether the window existed — the o8_browser_* native path invokes this
+/// from the main webview (reached via the plugin socket); the eval'd agent verb
+/// POSTs its result back through /api/browser/native-result (cid-only channel).
+/// Returns `false` so the caller falls back to the iframe path when native is off.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn browser_view_eval(app: tauri::AppHandle, js: String) -> bool {
+    browser_view::eval(&app, &js)
+}
+
 /// Close + destroy the browser-view child window (Browser tab closed / teardown).
 #[cfg(target_os = "macos")]
 #[tauri::command]
@@ -3789,6 +3800,8 @@ pub fn run() {
             browser_view_set_rect,
             #[cfg(target_os = "macos")]
             browser_view_navigate,
+            #[cfg(target_os = "macos")]
+            browser_view_eval,
             #[cfg(target_os = "macos")]
             browser_view_close,
             #[cfg(target_os = "macos")]
