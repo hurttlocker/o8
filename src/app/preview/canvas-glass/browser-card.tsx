@@ -14,11 +14,8 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
-import { selectorFor } from '@/lib/browser/selector';
 import { CHROME, FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
 import { GlassCardShell } from './card-shell';
-
-const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
 
 export interface BrowserTab {
   id: number;
@@ -44,29 +41,9 @@ function normalizeUrl(raw: string): string {
   return `https://${value}`;
 }
 
-/** The picker proxy re-serves LOCAL pages from our origin so their DOM
- *  becomes inspectable (other localhost ports are cross-origin by port).
- *  Tabs may carry proxied URLs; the bar and labels always show the real one. */
-const PROXY_PATH = '/api/browser/proxy?url=';
-const LOCAL_PAGE = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i;
-
-function toProxyUrl(url: string): string {
-  return `${PROXY_PATH}${encodeURIComponent(url)}`;
-}
-
-function fromProxyUrl(url: string): string {
-  const index = url.indexOf(PROXY_PATH);
-  if (index === -1) return url;
-  try {
-    return decodeURIComponent(url.slice(index + PROXY_PATH.length));
-  } catch {
-    return url;
-  }
-}
-
 function tabLabel(url: string): string {
   if (engineScope(url)) return 'Agent Chrome';
-  return fromProxyUrl(url).replace(/^https?:\/\//i, '').replace(/\/$/, '') || 'New tab';
+  return url.replace(/^https?:\/\//i, '').replace(/\/$/, '') || 'New tab';
 }
 
 /** `o8-engine://<scope>` tabs are live views of the headless engine Chrome
@@ -135,18 +112,13 @@ export function BrowserGlassCard({
 }) {
   const activeTab = card.tabs.find((tab) => tab.id === card.activeTabId) ?? card.tabs[0];
   const activeUrl = activeTab?.url ?? '';
-  const [urlDraft, setUrlDraft] = useState(fromProxyUrl(activeUrl));
+  const [urlDraft, setUrlDraft] = useState(activeUrl);
   const iframeRefs = useRef(new Map<number, HTMLIFrameElement>());
-  const [picking, setPicking] = useState(false);
-  const [readout, setReadout] = useState<string | null>(null);
-  const pickerCleanupRef = useRef<(() => void) | null>(null);
-  /** Set when arming required a proxy reload — re-arms once the load lands. */
-  const pendingArmRef = useRef(false);
   /** Agent-driving glow — pulses when an agent verb lands on this surface. */
   const [agentGlow, setAgentGlow] = useState(false);
 
   // Switching tabs (or a navigate landing) re-seeds the URL bar.
-  useEffect(() => { setUrlDraft(fromProxyUrl(activeUrl)); }, [activeUrl]);
+  useEffect(() => { setUrlDraft(activeUrl); }, [activeUrl]);
 
   // The agent verbs (o8_browser_* / `o8 browser`) drive these iframes.
   useEffect(() => {
@@ -181,95 +153,6 @@ export function BrowserGlassCard({
     }
     onTabsChange(card.id, remaining, tabId === card.activeTabId ? remaining[remaining.length - 1].id : card.activeTabId);
   };
-
-  const disarmPicker = () => {
-    pickerCleanupRef.current?.();
-    pickerCleanupRef.current = null;
-    setPicking(false);
-  };
-
-  const armPicker = () => {
-    if (picking) {
-      disarmPicker();
-      return;
-    }
-    const frame = iframeRefs.current.get(card.activeTabId) ?? null;
-    let doc: Document | null = null;
-    try {
-      doc = frame?.contentDocument ?? null;
-    } catch {
-      doc = null;
-    }
-    if (!doc || !doc.body) {
-      // Cross-origin-by-port localhost page — reload it through the
-      // same-origin picker proxy, then arm once the load lands.
-      const realUrl = fromProxyUrl(activeUrl);
-      if (LOCAL_PAGE.test(realUrl) && activeUrl === realUrl) {
-        pendingArmRef.current = true;
-        navigate(toProxyUrl(realUrl));
-        setReadout('Reloading through the picker proxy…');
-        return;
-      }
-      setReadout('Picker needs a local page — external sites can’t be instrumented.');
-      return;
-    }
-    const highlight = doc.createElement('div');
-    highlight.setAttribute('style', 'position:absolute;pointer-events:none;z-index:2147483600;border:1px solid #f59e0b;background:rgba(245,158,11,0.12);border-radius:2px;display:none;');
-    doc.body.appendChild(highlight);
-
-    const onMoveOver = (event: MouseEvent) => {
-      const target = event.target as Element | null;
-      if (!target || target === highlight) return;
-      const rect = target.getBoundingClientRect();
-      const win = doc!.defaultView;
-      highlight.style.display = 'block';
-      highlight.style.left = `${rect.left + (win?.scrollX ?? 0)}px`;
-      highlight.style.top = `${rect.top + (win?.scrollY ?? 0)}px`;
-      highlight.style.width = `${rect.width}px`;
-      highlight.style.height = `${rect.height}px`;
-      setReadout(`${selectorFor(target)}  ·  ${Math.round(rect.width)}×${Math.round(rect.height)}`);
-    };
-    const onPick = (event: MouseEvent) => {
-      event.preventDefault();
-      event.stopPropagation();
-      const target = event.target as Element | null;
-      if (!target) return;
-      const selector = selectorFor(target);
-      try {
-        void navigator.clipboard.writeText(selector);
-        setReadout(`${selector}  ·  copied`);
-      } catch {
-        setReadout(selector);
-      }
-      disarm();
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') disarm();
-    };
-    const disarm = () => {
-      doc!.removeEventListener('mousemove', onMoveOver, true);
-      doc!.removeEventListener('click', onPick, true);
-      doc!.removeEventListener('keydown', onKey, true);
-      window.removeEventListener('keydown', onKey, true);
-      highlight.remove();
-      pickerCleanupRef.current = null;
-      setPicking(false);
-    };
-    doc.addEventListener('mousemove', onMoveOver, true);
-    doc.addEventListener('click', onPick, true);
-    doc.addEventListener('keydown', onKey, true);
-    window.addEventListener('keydown', onKey, true);
-    pickerCleanupRef.current = disarm;
-    setPicking(true);
-    setReadout('Hover the page, click to copy the selector. Esc cancels.');
-  };
-
-  // Navigating away, switching tabs, or unmounting tears the picker down.
-  useEffect(() => () => { pickerCleanupRef.current?.(); }, []);
-  useEffect(() => {
-    pickerCleanupRef.current?.();
-    setPicking(false);
-  }, [activeUrl, card.activeTabId]);
 
   return (
     <GlassCardShell
@@ -320,29 +203,6 @@ export function BrowserGlassCard({
               fontFamily: FONT,
             }}
           />
-          <button
-            type="button"
-            aria-label={picking ? 'Stop picking elements' : 'Pick an element'}
-            title={picking ? 'Stop picking' : 'Pick an element — hover highlights, click copies the selector'}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={armPicker}
-            style={{
-              borderWidth: 0,
-              background: 'transparent',
-              padding: 2,
-              paddingLeft: 4,
-              paddingRight: 4,
-              color: picking ? '#f59e0b' : 'var(--cnv-ink-muted)',
-              cursor: 'pointer',
-              display: 'inline-flex',
-            }}
-            onMouseEnter={(event) => { if (!picking) event.currentTarget.style.color = 'var(--cnv-ink)'; }}
-            onMouseLeave={(event) => { if (!picking) event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
-          >
-            <svg style={{ width: CHROME.iconSize, height: CHROME.iconSize, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-              <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z" />
-            </svg>
-          </button>
         </div>
 
         {/* Tab strip — pills, like the default-side browser. Always present so
@@ -413,24 +273,6 @@ export function BrowserGlassCard({
           </button>
         </div>
 
-        {/* Selector readout — appears while picking / after a pick. */}
-        {readout ? (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, paddingTop: 2, paddingBottom: 4, paddingLeft: 16, paddingRight: 16, flexShrink: 0 }}>
-            <span style={{ flex: 1, fontFamily: MONO, fontSize: CHROME.metaSize, fontWeight: CHROME.metaWeight, color: picking ? 'var(--cnv-ink)' : 'var(--cnv-ink-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              {readout}
-            </span>
-            <button
-              type="button"
-              aria-label="Dismiss selector readout"
-              onPointerDown={(event) => event.stopPropagation()}
-              onClick={() => setReadout(null)}
-              style={{ borderWidth: 0, background: 'transparent', padding: 0, fontSize: CHROME.metaSize, color: 'var(--cnv-ink-muted)', cursor: 'pointer', fontFamily: FONT }}
-            >
-              ✕
-            </button>
-          </div>
-        ) : null}
-
         {/* The page — solid paper behind the iframes, never glass-through.
             Every tab stays mounted (display toggles) so scroll/form state
             survives switching, like a real browser. The amber ring pulses
@@ -454,11 +296,6 @@ export function BrowserGlassCard({
                 }}
                 src={tab.url}
                 title={`Browser — ${tabLabel(tab.url)}`}
-                onLoad={() => {
-                  if (!pendingArmRef.current || tab.id !== card.activeTabId) return;
-                  pendingArmRef.current = false;
-                  armPicker();
-                }}
                 data-o8-browser="canvas"
                 data-o8-active={tab.id === card.activeTabId ? 'true' : 'false'}
                 style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', borderWidth: 0, display: tab.id === card.activeTabId ? 'block' : 'none' }}

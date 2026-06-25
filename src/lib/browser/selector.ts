@@ -6,9 +6,8 @@
  *    app-context surfaces (the in-page agent `page-agent.ts` and the canvas
  *    `browser-card.tsx`).
  *  - `SELECTOR_FOR_SOURCE` — the SAME function as an injectable source string,
- *    for the two contexts that can't import it: the Playwright-serialized
- *    engine collector (`browser-engine/engine.ts`) and the injected element
- *    picker bridge (`element-picker-bridge.ts`). It is *derived from*
+ *    for the serialized context that can't import it: the Playwright-driven
+ *    engine collector + grab (`browser-engine/engine.ts`). It is *derived from*
  *    `selectorFor` (not hand-copied) so the function and the string can never
  *    drift — `selector.test.ts` locks that invariant.
  *

@@ -220,7 +220,6 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/panel/analytics?hours=24` | Aggregate cost/usage across Codex, Claude Code, and IDE LLM chat. |
-| POST | `/api/panel/annotation-screenshot` | Save an annotated screenshot to `/tmp/o8-visual-annotations/`. |
 | GET | `/api/panel/approvals` | List pending approvals from the shared queue. |
 | POST | `/api/panel/approvals` | Resolve a pending approval. |
 | POST | `/api/panel/assign-issue` | Assign a GitHub issue to an agent (adds comment + label). |
@@ -264,7 +263,6 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | GET | `/api/panel/github-status` | Parsed `gh auth status` output. |
 | GET | `/api/panel/ide-surface` | Read persisted IDE surface state (terminal repos, active repo). |
 | POST | `/api/panel/ide-surface` | Persist IDE surface state. |
-| GET | `/api/panel/iframe-proxy?target=...` | Proxy localhost dev server through this origin so O8 Browser pane can inject scripts. |
 | GET | `/api/panel/issues?repo=...` | List GitHub issues for a repo. |
 | GET | `/api/panel/issues/[number]?repo=...` | Detail for a single issue. |
 | POST | `/api/panel/issues/create` | Create a GitHub issue. |
