@@ -265,7 +265,6 @@ function BottomUtilitySurface({
   dirtyFiles,
   onSelectFile,
   onRepoPathChange,
-  onOpenFilesSurface,
 }: {
   kind: Exclude<BottomPanelSurfaceKind, 'terminal'>;
   tabId: string;
@@ -278,7 +277,6 @@ function BottomUtilitySurface({
   dirtyFiles: Set<string>;
   onSelectFile: (path: string) => void;
   onRepoPathChange?: (repoPath: string) => void;
-  onOpenFilesSurface: () => void;
 }) {
   if (kind === 'files') {
     return (
@@ -992,7 +990,6 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
                     dirtyFiles={dirtyFiles}
                     onSelectFile={setSelectedFile}
                     onRepoPathChange={onRepoPathChange}
-                    onOpenFilesSurface={() => createSurfaceTab('files')}
                   />
                 </div>
               )
