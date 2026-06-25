@@ -3,6 +3,7 @@ import 'server-only';
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { SELECTOR_FOR_SOURCE } from '@/lib/browser/selector';
 import { GRAB_PAYLOAD_SOURCE, type GrabbedElement } from '@/lib/browser/grab';
+import { ENGINE_VIEWPORT } from '@/lib/browser/engine-viewport';
 
 /**
  * Browser engine (#1232 phase 3) — a REAL browser for agents, driving the
@@ -32,7 +33,7 @@ interface EngineSession {
 const IDLE_REAP_MS = 10 * 60 * 1000;
 const NAV_TIMEOUT_MS = 20_000;
 const ACTION_TIMEOUT_MS = 5_000;
-const VIEWPORT = { width: 1180, height: 740 };
+const VIEWPORT = { width: ENGINE_VIEWPORT.width, height: ENGINE_VIEWPORT.height };
 
 interface PageState {
   title: string;
@@ -186,6 +187,42 @@ class BrowserEngine {
     await session.page.fill(selector, text, { timeout: ACTION_TIMEOUT_MS });
     if (submit) await session.page.press(selector, 'Enter', { timeout: ACTION_TIMEOUT_MS });
     return { ok: true, typed: text.length, into: selector, surface: 'engine', url: session.page.url() };
+  }
+
+  // ── Coordinate-based interaction (the panel live-view forwards the human's
+  //    clicks/keys/scroll here so auth-gated apps the iframe can't embed stay
+  //    usable — sign in, navigate — inside the engine's real Chrome). ──
+
+  async clickAt(scope: string, x: number, y: number): Promise<EngineEnvelope> {
+    const session = this.sessions.get(scope);
+    if (!session || session.page.isClosed()) return { ok: false, error: 'no engine page open for this scope' };
+    session.lastUsedAt = Date.now();
+    await session.page.mouse.click(x, y);
+    return { ok: true, clickedAt: { x, y }, surface: 'engine', url: session.page.url() };
+  }
+
+  async typeText(scope: string, text: string): Promise<EngineEnvelope> {
+    const session = this.sessions.get(scope);
+    if (!session || session.page.isClosed()) return { ok: false, error: 'no engine page open for this scope' };
+    session.lastUsedAt = Date.now();
+    await session.page.keyboard.type(text, { delay: 8 });
+    return { ok: true, typed: text.length, surface: 'engine', url: session.page.url() };
+  }
+
+  async pressKey(scope: string, key: string): Promise<EngineEnvelope> {
+    const session = this.sessions.get(scope);
+    if (!session || session.page.isClosed()) return { ok: false, error: 'no engine page open for this scope' };
+    session.lastUsedAt = Date.now();
+    await session.page.keyboard.press(key);
+    return { ok: true, pressed: key, surface: 'engine', url: session.page.url() };
+  }
+
+  async scrollBy(scope: string, deltaY: number): Promise<EngineEnvelope> {
+    const session = this.sessions.get(scope);
+    if (!session || session.page.isClosed()) return { ok: false, error: 'no engine page open for this scope' };
+    session.lastUsedAt = Date.now();
+    await session.page.mouse.wheel(0, deltaY);
+    return { ok: true, scrolled: deltaY, surface: 'engine', url: session.page.url() };
   }
 
   async grab(scope: string, selector: string): Promise<EngineEnvelope> {
