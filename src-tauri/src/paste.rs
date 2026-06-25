@@ -100,6 +100,24 @@ const CLIPBOARD_RESTORE_DELAY_MS: u64 = 700;
 #[cfg(target_os = "macos")]
 const MANUAL_PASTE_RESTORE_MS: u64 = 5000;
 
+/// Serializes ALL NSPasteboard access. paste_text (called from the dictation
+/// finalize thread, agent edit threads, and a spawned ⌥-V thread), every
+/// spawned restore thread (one per paste, all waking ~700ms later), and
+/// grab_selection's Cmd+C poll otherwise hammer the general pasteboard from
+/// multiple threads at once. NSPasteboard is NOT thread-safe — that concurrent
+/// access wedges the macOS `pboard` server, which is the "I can't copy at all
+/// (needs killall pboard)" hang. Every leaf pasteboard op takes this lock, so
+/// o8 never touches the pasteboard from two threads simultaneously.
+#[cfg(target_os = "macos")]
+static PASTEBOARD_LOCK: Mutex<()> = Mutex::new(());
+
+/// Take the pasteboard lock, recovering (not panicking) if a prior holder
+/// panicked — a poisoned lock must never permanently break copy/paste.
+#[cfg(target_os = "macos")]
+fn pb_guard() -> std::sync::MutexGuard<'static, ()> {
+    PASTEBOARD_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+}
+
 #[cfg(target_os = "macos")]
 type AXUIElementRef = core_foundation::base::CFTypeRef;
 
@@ -1024,6 +1042,7 @@ pub(crate) fn copy_to_clipboard(text: &str) -> Result<i64, String> {
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
     use objc2_foundation::NSString;
 
+    let _pb = pb_guard();
     let pasteboard = NSPasteboard::generalPasteboard();
     pasteboard.clearContents();
     let text = NSString::from_str(text);
@@ -1040,6 +1059,7 @@ pub(crate) fn copy_to_clipboard(text: &str) -> Result<i64, String> {
 pub(crate) fn capture_clipboard_snapshot() -> ClipboardSnapshot {
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 
+    let _pb = pb_guard();
     let pasteboard = NSPasteboard::generalPasteboard();
     let string_type = unsafe { NSPasteboardTypeString };
     ClipboardSnapshot {
@@ -1055,6 +1075,7 @@ pub(crate) fn capture_clipboard_snapshot() -> ClipboardSnapshot {
 pub(crate) fn clipboard_change_count() -> i64 {
     use objc2_app_kit::NSPasteboard;
 
+    let _pb = pb_guard();
     let pasteboard = NSPasteboard::generalPasteboard();
     pasteboard.changeCount() as i64
 }
@@ -1063,6 +1084,7 @@ pub(crate) fn clipboard_change_count() -> i64 {
 pub(crate) fn read_clipboard_text() -> Option<String> {
     use objc2_app_kit::{NSPasteboard, NSPasteboardTypeString};
 
+    let _pb = pb_guard();
     let pasteboard = NSPasteboard::generalPasteboard();
     let string_type = unsafe { NSPasteboardTypeString };
     pasteboard
@@ -1075,6 +1097,7 @@ pub(crate) fn read_clipboard_text() -> Option<String> {
 fn clear_clipboard() -> i64 {
     use objc2_app_kit::NSPasteboard;
 
+    let _pb = pb_guard();
     let pasteboard = NSPasteboard::generalPasteboard();
     pasteboard.clearContents();
     pasteboard.changeCount() as i64
