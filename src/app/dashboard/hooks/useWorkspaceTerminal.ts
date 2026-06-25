@@ -907,6 +907,25 @@ export function useWorkspaceTerminal({
     });
   }, [thoughtsMissionPackets]);
 
+  // Option D — self-heal the tab LABEL when a packet's real title resolves. The
+  // twin of the badge rebind above: the badge already healed on async data, the
+  // label didn't, so it stayed frozen on whatever fallback it had at open-time
+  // (e.g. the runtime name "Codex", or — before the canonical helper — a raw id
+  // slice). Only fires when the packet carries a REAL title, so it never
+  // downgrades a good label to a generic; setTabLabelIfAuto itself skips
+  // user-renamed tabs (labelSource === 'user') and no-op writes (value-diff
+  // guard), so there's no re-render churn and renames are preserved.
+  useEffect(() => {
+    thoughtsMissionPackets.forEach((packet) => {
+      const title = buildOrchestrationPacketBadge(packet).title?.trim();
+      if (!title) return;
+      const match = { sessionKey: packet.lane?.sessionKey ?? null, packetId: packet.id };
+      for (const handle of workspaceTerminalHandlesRef.current.values()) {
+        if (handle?.setTabLabelIfAuto(match, title)) return;
+      }
+    });
+  }, [thoughtsMissionPackets]);
+
   const updateSupervisorWorkspaceTab = useCallback((surfaceId: string, status: string, label?: string) => {
     for (const handle of workspaceTerminalHandlesRef.current.values()) {
       if (handle?.updateChatRuntimeStatus(surfaceId, status, label)) {
