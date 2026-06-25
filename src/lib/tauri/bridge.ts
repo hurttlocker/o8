@@ -112,6 +112,65 @@ export async function setCanvasBackdropBlur(radius: number): Promise<void> {
   await invoke<void>('set_canvas_backdrop_blur', { radius: Math.max(0, Math.round(radius)) });
 }
 
+// ── Native browser-view (the embedded Browser pane's native child window) ──
+//
+// The native path (operator-flagged) replaces the iframe/proxy with a
+// host-owned child WebviewWindow positioned over the panel's content rect, so
+// origin-sensitive auth apps (Clerk) render natively AND stay agent-grabbable.
+// All no-ops outside Tauri/macOS — the iframe path stays the default there.
+
+export interface BrowserViewRect {
+  /** CSS logical px, relative to the main webview viewport (getBoundingClientRect). */
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+/** Open/retarget the native browser-view window over `rect` + navigate to `url`.
+ *  `initScript` (NATIVE_BROWSER_AGENT_SOURCE) installs the in-page agent on first
+ *  open. Idempotent — Rust navigates + repositions an existing window. */
+export async function browserViewOpen(
+  url: string,
+  rect: BrowserViewRect,
+  initScript?: string,
+): Promise<void> {
+  await invoke<void>('browser_view_open', {
+    url,
+    x: rect.x,
+    y: rect.y,
+    w: rect.w,
+    h: rect.h,
+    ...(initScript ? { initScript } : {}),
+  });
+}
+
+/** Reposition/resize the native browser-view window (ResizeObserver / move). */
+export async function browserViewSetRect(rect: BrowserViewRect): Promise<void> {
+  await invoke<void>('browser_view_set_rect', { x: rect.x, y: rect.y, w: rect.w, h: rect.h });
+}
+
+/** Navigate the native browser-view window to a new URL (URL bar / reload). */
+export async function browserViewNavigate(url: string): Promise<void> {
+  await invoke<void>('browser_view_navigate', { url });
+}
+
+/** Hide the native browser-view window without destroying it (tab hidden,
+ *  pane collapsed, occlusion snapshot-swap). */
+export async function browserViewHide(): Promise<void> {
+  await invoke<void>('browser_view_hide');
+}
+
+/** Show the native browser-view window again + re-apply its last rect. */
+export async function browserViewShow(): Promise<void> {
+  await invoke<void>('browser_view_show');
+}
+
+/** Close + destroy the native browser-view window (Browser tab closed). */
+export async function browserViewClose(): Promise<void> {
+  await invoke<void>('browser_view_close');
+}
+
 // ── OS file opens (Finder "Open With → o8", dock drop) ──
 
 /** Drain the paths the OS handed us — the canvas turns them into file cards. */
