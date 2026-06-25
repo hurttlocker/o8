@@ -1,6 +1,7 @@
 import 'server-only';
 
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
+import { SELECTOR_FOR_SOURCE } from '@/lib/browser/selector';
 
 /**
  * Browser engine (#1232 phase 3) — a REAL browser for agents, driving the
@@ -32,53 +33,42 @@ const NAV_TIMEOUT_MS = 20_000;
 const ACTION_TIMEOUT_MS = 5_000;
 const VIEWPORT = { width: 1180, height: 740 };
 
-/** Runs inside the page — same selector/label vocabulary as the in-page agent. */
-function collectPageState(maxChars: number) {
-  const selectorFor = (el: Element): string => {
-    const doc = el.ownerDocument;
-    if (el.id) return `#${CSS.escape(el.id)}`;
-    const parts: string[] = [];
-    let node: Element | null = el;
-    for (let depth = 0; node && node !== doc.documentElement && depth < 5; depth++) {
-      let part = node.tagName.toLowerCase();
-      const classes = [...node.classList].slice(0, 2).map((c) => `.${CSS.escape(c)}`).join('');
-      if (classes) part += classes;
-      const parent: Element | null = node.parentElement;
-      if (parent) {
-        const sameTag = [...parent.children].filter((child) => child.tagName === node!.tagName);
-        if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
-      }
-      parts.unshift(part);
-      try {
-        if (doc.querySelectorAll(parts.join(' > ')).length === 1) return parts.join(' > ');
-      } catch {
-        // keep walking
-      }
-      node = parent;
+interface PageState {
+  title: string;
+  text: string;
+  interactive: Array<{ selector: string; tag: string; label: string }>;
+}
+
+/** Page-state collector as an injectable IIFE — evaluated inside the engine's
+ *  headless Chrome. Embeds the shared selector source (SELECTOR_FOR_SOURCE) so
+ *  the selector vocabulary matches the in-page agent exactly. The cap is baked
+ *  into the script because `page.evaluate(string)` ignores the arg form. */
+function collectPageStateScript(maxChars: number): string {
+  return `(() => {
+    ${SELECTOR_FOR_SOURCE}
+    const labelFor = (el) => {
+      const aria = el.getAttribute('aria-label');
+      if (aria) return aria;
+      const value = el.placeholder || '';
+      const text = (el.textContent || '').trim().replace(/\\s+/g, ' ');
+      return (text || value || el.getAttribute('title') || '').slice(0, 80);
+    };
+    const maxChars = ${maxChars};
+    const text = ((document.body && document.body.innerText) || '').replace(/\\n{3,}/g, '\\n\\n');
+    const interactive = [];
+    const nodes = document.querySelectorAll('a[href], button, input, textarea, select, [role="button"], [role="link"], [onclick]');
+    for (const el of nodes) {
+      if (interactive.length >= 60) break;
+      const rect = el.getBoundingClientRect();
+      if (rect.width === 0 || rect.height === 0) continue;
+      interactive.push({ selector: selectorFor(el), tag: el.tagName.toLowerCase(), label: labelFor(el) });
     }
-    return parts.join(' > ');
-  };
-  const labelFor = (el: Element): string => {
-    const aria = el.getAttribute('aria-label');
-    if (aria) return aria;
-    const value = (el as HTMLInputElement).placeholder ?? '';
-    const text = (el.textContent ?? '').trim().replace(/\s+/g, ' ');
-    return (text || value || el.getAttribute('title') || '').slice(0, 80);
-  };
-  const text = (document.body?.innerText ?? '').replace(/\n{3,}/g, '\n\n');
-  const interactive: Array<{ selector: string; tag: string; label: string }> = [];
-  const nodes = document.querySelectorAll('a[href], button, input, textarea, select, [role="button"], [role="link"], [onclick]');
-  for (const el of nodes) {
-    if (interactive.length >= 60) break;
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 || rect.height === 0) continue;
-    interactive.push({ selector: selectorFor(el), tag: el.tagName.toLowerCase(), label: labelFor(el) });
-  }
-  return {
-    title: document.title,
-    text: text.length > maxChars ? `${text.slice(0, maxChars)}… [truncated ${text.length - maxChars} chars]` : text,
-    interactive,
-  };
+    return {
+      title: document.title,
+      text: text.length > maxChars ? (text.slice(0, maxChars) + '… [truncated ' + (text.length - maxChars) + ' chars]') : text,
+      interactive,
+    };
+  })()`;
 }
 
 class BrowserEngine {
@@ -163,7 +153,7 @@ class BrowserEngine {
     if (!session || session.page.isClosed()) return { ok: false, error: 'no engine page open for this scope — run `o8 browser open <url>` first' };
     session.lastUsedAt = Date.now();
     const cap = Math.min(14_000, Math.max(400, maxChars ?? 6000));
-    const state = await session.page.evaluate(collectPageState, cap);
+    const state = (await session.page.evaluate(collectPageStateScript(cap))) as PageState;
     return { ok: true, url: session.page.url(), surface: 'engine', ...state };
   }
 

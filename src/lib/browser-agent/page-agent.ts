@@ -17,6 +17,8 @@
  * the operator literally watches the agent work.
  */
 
+import { selectorFor } from '@/lib/browser/selector';
+
 export interface BrowserAgentTarget {
   /** 'canvas' (browser cards) or 'panel' (default-side Browser tab). */
   surface?: 'canvas' | 'panel';
@@ -57,32 +59,6 @@ function frameDoc(frame: HTMLIFrameElement): Document | null {
   } catch {
     return null;
   }
-}
-
-/** Same selector vocabulary the element picker copies. */
-function selectorFor(el: Element): string {
-  const doc = el.ownerDocument;
-  if (el.id) return `#${CSS.escape(el.id)}`;
-  const parts: string[] = [];
-  let node: Element | null = el;
-  for (let depth = 0; node && node !== doc.documentElement && depth < 5; depth++) {
-    let part = node.tagName.toLowerCase();
-    const classes = [...node.classList].slice(0, 2).map((c) => `.${CSS.escape(c)}`).join('');
-    if (classes) part += classes;
-    const parent: Element | null = node.parentElement;
-    if (parent) {
-      const sameTag = [...parent.children].filter((child) => child.tagName === node!.tagName);
-      if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
-    }
-    parts.unshift(part);
-    try {
-      if (doc.querySelectorAll(parts.join(' > ')).length === 1) return parts.join(' > ');
-    } catch {
-      // keep walking
-    }
-    node = parent;
-  }
-  return parts.join(' > ');
 }
 
 function labelFor(el: Element): string {

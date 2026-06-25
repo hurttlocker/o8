@@ -14,6 +14,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
+import { selectorFor } from '@/lib/browser/selector';
 import { CHROME, FONT, TERM_MIN_H, TERM_MIN_W } from './ui';
 import { GlassCardShell } from './card-shell';
 
@@ -115,33 +116,6 @@ function EngineLiveView({ scope, active }: { scope: string; active: boolean }) {
       ) : null}
     </div>
   );
-}
-
-/** Shortest selector that still uniquely hits the element in its doc. */
-function cssSelectorFor(el: Element): string {
-  const doc = el.ownerDocument;
-  if (el.id) return `#${CSS.escape(el.id)}`;
-  const parts: string[] = [];
-  let node: Element | null = el;
-  for (let depth = 0; node && node !== doc.documentElement && depth < 5; depth++) {
-    let part = node.tagName.toLowerCase();
-    const classes = [...node.classList].slice(0, 2).map((c) => `.${CSS.escape(c)}`).join('');
-    if (classes) part += classes;
-    const parent: Element | null = node.parentElement;
-    if (parent) {
-      const sameTag = [...parent.children].filter((child) => child.tagName === node!.tagName);
-      if (sameTag.length > 1) part += `:nth-of-type(${sameTag.indexOf(node) + 1})`;
-    }
-    parts.unshift(part);
-    const candidate = parts.join(' > ');
-    try {
-      if (doc.querySelectorAll(candidate).length === 1) return candidate;
-    } catch {
-      // bad escape — keep walking
-    }
-    node = parent;
-  }
-  return parts.join(' > ');
 }
 
 export function BrowserGlassCard({
@@ -253,14 +227,14 @@ export function BrowserGlassCard({
       highlight.style.top = `${rect.top + (win?.scrollY ?? 0)}px`;
       highlight.style.width = `${rect.width}px`;
       highlight.style.height = `${rect.height}px`;
-      setReadout(`${cssSelectorFor(target)}  ·  ${Math.round(rect.width)}×${Math.round(rect.height)}`);
+      setReadout(`${selectorFor(target)}  ·  ${Math.round(rect.width)}×${Math.round(rect.height)}`);
     };
     const onPick = (event: MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
       const target = event.target as Element | null;
       if (!target) return;
-      const selector = cssSelectorFor(target);
+      const selector = selectorFor(target);
       try {
         void navigator.clipboard.writeText(selector);
         setReadout(`${selector}  ·  copied`);
