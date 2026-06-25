@@ -108,6 +108,8 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
   const seeded = useRef(false);
   /** Agent-driving glow — pulses when an agent verb lands on this surface. */
   const [agentGlow, setAgentGlow] = useState(false);
+  /** URLs that broke when proxied (origin-sensitive SPAs) — load them direct. */
+  const [directFallback, setDirectFallback] = useState<Set<string>>(() => new Set());
 
   // Agent verbs (o8_browser_* / `o8 browser`) drive this pane's iframe too.
   useEffect(() => { installBrowserAgent(); }, []);
@@ -256,7 +258,33 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
     if (activeTab?.url) openExternalUrl(activeTab.url);
   }, [activeTab]);
 
-  const iframeSrc = activeTab?.url ? liveSrc(activeTab.url) : '';
+  const iframeSrc = activeTab?.url
+    ? (directFallback.has(activeTab.url) ? activeTab.url : liveSrc(activeTab.url))
+    : '';
+
+  // Origin-sensitive SPAs (Clerk/OAuth) render BLANK when proxied to our origin
+  // — their frontend rejects the mismatched origin. Give the proxied page a
+  // moment to hydrate; if it's same-origin but still empty, the proxy broke it,
+  // so reload the page DIRECTLY at its real origin (renders + human-interactive;
+  // cross-origin means the agent grab can't reach it — an inherent tradeoff).
+  const handleIframeLoad = useCallback(() => {
+    const iframe = iframeRef.current;
+    const url = activeTab?.url;
+    if (!iframe || !url || !isLoopbackUrl(url) || directFallback.has(url)) return;
+    window.setTimeout(() => {
+      if (iframeRef.current !== iframe) return; // navigated away
+      try {
+        const doc = iframe.contentDocument;
+        if (!doc) return; // already cross-origin — nothing to do
+        const empty = (doc.body?.innerText || '').trim().length < 5;
+        if (empty && doc.querySelector('script')) {
+          setDirectFallback((prev) => new Set(prev).add(url));
+        }
+      } catch {
+        // cross-origin — can't inspect, which means it's already loading direct
+      }
+    }, 1500);
+  }, [activeTab?.url, directFallback]);
 
   // If no tabs, show empty state with option to add
   if (tabs.length === 0) {
@@ -519,6 +547,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
               key={activeTab.id + '-' + activeTab.url}
               src={iframeSrc}
               title={activeTab.title}
+              onLoad={handleIframeLoad}
               data-o8-browser="panel"
               data-o8-active="true"
               sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
