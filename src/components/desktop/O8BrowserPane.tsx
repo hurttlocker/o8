@@ -5,33 +5,28 @@
  *
  * Tab bar + URL bar + iframe content. Localhost previews seed as initial tabs.
  * New Tab page shows detected ports as clickable tiles.
+ *
+ * Local pages load through the same-origin live proxy (`/api/browser/proxy`)
+ * so the page stays fully interactive for the human AND inspectable by both the
+ * in-page agent (o8_browser_*) and the unified Design Mode grab (Cmd+Shift+D).
+ * There is no longer a script-stripping picker mode — grabbing an element is a
+ * Design Mode click on the live page.
  */
 
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
-import {
-  PREVIEW_HOST_MESSAGE_SOURCE,
-  PREVIEW_MESSAGE_SOURCE,
-  PREVIEW_PROXY_ROUTE,
-  formatPreviewAnnotationContext,
-  type DetectedLocalhostPreview,
-  type PreviewAnnotationPayload,
-} from '@/lib/panel/preview';
-import {
-  ELEMENT_PICKER_START_EVENT,
-  ELEMENT_PICKER_RESULT_EVENT,
-  type PickedElement,
-} from '@/lib/browser/element-picker-bridge';
+import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
-import { O8ElementPanel } from './O8ElementPanel';
 
-// ── iframe-proxy helper ──
-// The element picker needs the bridge script living inside the iframe's
-// document. Loading a dev server directly makes the iframe cross-origin with
-// our dashboard, which blocks script injection. Routing the URL through our
-// own origin (`/api/panel/iframe-proxy?url=...`) makes it same-origin, lets
-// the proxy route inject the bridge, and unblocks the picker. For non-loopback
-// URLs we fall back to direct loading — external sites don't support picking.
+// ── live proxy ──
+// Loading a localhost dev server directly makes the iframe cross-origin with
+// our dashboard (different port), which blocks both agent driving and the
+// Design Mode grab. Routing local URLs through our own origin
+// (`/api/browser/proxy?url=...`) makes the page same-origin and inspectable
+// WITHOUT stripping scripts, so the SPA still boots and stays interactive.
+// External URLs load directly (best-effort; grabbing them routes to the engine).
+const PROXY_PATH = '/api/browser/proxy?url=';
+
 function isLoopbackUrl(url: string): boolean {
   try {
     const u = new URL(url);
@@ -51,15 +46,9 @@ function isLoopbackUrl(url: string): boolean {
   }
 }
 
-function proxiedPickUrl(url: string): string {
+function liveSrc(url: string): string {
   return isLoopbackUrl(url)
-    ? `/api/panel/iframe-proxy?pick=1&url=${encodeURIComponent(url)}`
-    : url;
-}
-
-function proxiedLiveUrl(url: string): string {
-  return isLoopbackUrl(url)
-    ? `${PREVIEW_PROXY_ROUTE}?url=${encodeURIComponent(url.replace('0.0.0.0', 'localhost'))}`
+    ? `${PROXY_PATH}${encodeURIComponent(url.replace('0.0.0.0', 'localhost'))}`
     : url;
 }
 
@@ -73,37 +62,10 @@ interface BrowserTab {
 
 interface O8BrowserPaneProps {
   previews?: DetectedLocalhostPreview[];
-  onEditWithAI?: (context: string) => void;
-  onOpenFile?: (filePath: string) => void;
   navigateToUrl?: string | null;
   // Bubbles the currently-loaded URL up to the dashboard so the TitleBar
   // Browser button can render a hover-preview iframe pointed at it.
   onActiveUrlChange?: (url: string | null) => void;
-}
-
-type AnnotationScreenshot = NonNullable<PreviewAnnotationPayload['screenshot']>;
-
-interface AnnotationScreenshotResponse {
-  ok?: boolean;
-  screenshot?: AnnotationScreenshot;
-  error?: string;
-}
-
-function nextPaint(): Promise<void> {
-  return new Promise((resolve) => {
-    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
-  });
-}
-
-function iframePanelRect(iframe: HTMLIFrameElement | null) {
-  const rect = iframe?.getBoundingClientRect();
-  if (!rect) return null;
-  return {
-    x: rect.x,
-    y: rect.y,
-    width: rect.width,
-    height: rect.height,
-  };
 }
 
 // ── Helpers ──
@@ -128,17 +90,6 @@ function titleFromUrl(url: string): string {
   }
 }
 
-function annotationTargetLabel(target: PreviewAnnotationPayload['domMap']['start']): string {
-  if (!target) return 'unknown element';
-  if (target.id) return `#${target.id}`;
-  if (target.classes.length > 0) return `.${target.classes.slice(0, 2).join('.')}`;
-  return target.selector || `<${target.tagName.toLowerCase()}>`;
-}
-
-function formatAnnotationSummary(annotation: PreviewAnnotationPayload): string {
-  return `${annotationTargetLabel(annotation.domMap.start)} -> ${annotationTargetLabel(annotation.domMap.end)}`;
-}
-
 let tabCounter = 0;
 function newTabId(): string {
   tabCounter += 1;
@@ -147,7 +98,7 @@ function newTabId(): string {
 
 // ── Component ──
 
-export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigateToUrl, onActiveUrlChange }: O8BrowserPaneProps) {
+export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange }: O8BrowserPaneProps) {
   const [tabs, setTabs] = useState<BrowserTab[]>([]);
   const [activeTabId, setActiveTabId] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState('');
@@ -155,12 +106,6 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
   const urlRef = useRef<HTMLInputElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const seeded = useRef(false);
-  const [pickerActive, setPickerActive] = useState(false);
-  const [annotationActive, setAnnotationActive] = useState(false);
-  const [selectedElement, setSelectedElement] = useState<PickedElement | null>(null);
-  const [visualAnnotation, setVisualAnnotation] = useState<PreviewAnnotationPayload | null>(null);
-  const [capturingAnnotation, setCapturingAnnotation] = useState(false);
-  const [annotationCaptureError, setAnnotationCaptureError] = useState<string | null>(null);
 
   // Agent verbs (o8_browser_* / `o8 browser`) drive this pane's iframe too.
   useEffect(() => { installBrowserAgent(); }, []);
@@ -290,162 +235,7 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
     if (activeTab?.url) openExternalUrl(activeTab.url);
   }, [activeTab]);
 
-  // ── Element Picker ──
-  //
-  // Default iframe loads the target URL DIRECTLY so the user's SPA boots
-  // normally (Next.js, Vite, etc.). Direct load means cross-origin, which
-  // blocks the picker bridge — that's fine until the user wants to pick.
-  //
-  // When the picker is toggled ON we swap the iframe src to the proxy route
-  // with `?pick=1`, which serves the same HTML from OUR origin with every
-  // `<script>` tag stripped and the bridge pre-installed. The SSR-rendered
-  // DOM is fully visible and pickable; there is no runtime to crash with
-  // "Application error". When toggled OFF we swap back to the direct URL
-  // and the SPA rehydrates.
-  const togglePicker = useCallback(() => {
-    setPickerActive((prev) => {
-      const next = !prev;
-      if (next) {
-        setSelectedElement(null);
-        setVisualAnnotation(null);
-        setAnnotationCaptureError(null);
-        setAnnotationActive(false);
-      }
-      return next;
-    });
-  }, []);
-
-  const syncAnnotationMode = useCallback((enabled: boolean) => {
-    const iframe = iframeRef.current;
-    iframe?.contentWindow?.postMessage({
-      source: PREVIEW_HOST_MESSAGE_SOURCE,
-      type: 'annotation-mode',
-      enabled,
-    }, window.location.origin);
-  }, []);
-
-  const toggleAnnotation = useCallback(() => {
-    setAnnotationActive((prev) => {
-      const next = !prev;
-      if (next) {
-        setPickerActive(false);
-        setSelectedElement(null);
-        setVisualAnnotation(null);
-        setAnnotationCaptureError(null);
-      } else {
-        syncAnnotationMode(false);
-      }
-      return next;
-    });
-  }, [syncAnnotationMode]);
-
-  // Build the iframe src based on picker state. When picking, proxy + strip
-  // scripts. Otherwise direct-load for full SPA functionality.
-  const iframeSrc = activeTab?.url
-    ? (pickerActive ? proxiedPickUrl(activeTab.url) : annotationActive || visualAnnotation ? proxiedLiveUrl(activeTab.url) : activeTab.url)
-    : '';
-
-  // When the proxied iframe finishes loading, kick the bridge script into
-  // picker mode with a postMessage. The bridge was injected at the top of
-  // `<head>` by the proxy, so by onLoad time it has installed its listeners.
-  // When the user toggles picker OFF, the iframe navigates back to the
-  // direct URL and the old document is unloaded — no explicit STOP needed.
-  const handleIframeLoad = useCallback(() => {
-    const iframe = iframeRef.current;
-    if (!iframe?.contentWindow) return;
-    if (annotationActive) {
-      syncAnnotationMode(true);
-      return;
-    }
-    if (!pickerActive) return;
-    try {
-      iframe.contentWindow.postMessage({ type: ELEMENT_PICKER_START_EVENT }, '*');
-    } catch {
-      // Target origin is '*' so postMessage rarely throws, but swallow in case
-      // the iframe is cross-origin (non-loopback URL) and doesn't hear it.
-    }
-  }, [annotationActive, pickerActive, syncAnnotationMode]);
-
-  const captureAnnotationScreenshot = useCallback(async (annotation: PreviewAnnotationPayload): Promise<PreviewAnnotationPayload> => {
-    setCapturingAnnotation(true);
-    setAnnotationCaptureError(null);
-
-    try {
-      await nextPaint();
-      const response = await fetch('/api/panel/annotation-screenshot', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          annotation,
-          panelRect: iframePanelRect(iframeRef.current),
-        }),
-      });
-      const payload = await response.json().catch(() => null) as AnnotationScreenshotResponse | null;
-      if (!response.ok || !payload?.ok || !payload.screenshot) {
-        throw new Error(payload?.error || `Screenshot capture failed with status ${response.status}`);
-      }
-
-      const enriched = { ...annotation, screenshot: payload.screenshot };
-      setVisualAnnotation(enriched);
-      return enriched;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : 'Screenshot capture failed';
-      const enriched = {
-        ...annotation,
-        screenshot: {
-          error: message,
-          capturedAt: new Date().toISOString(),
-        },
-      };
-      setAnnotationCaptureError(message);
-      setVisualAnnotation(enriched);
-      return enriched;
-    } finally {
-      setCapturingAnnotation(false);
-    }
-  }, []);
-
-  const handleSendVisualAnnotation = useCallback(async () => {
-    if (!visualAnnotation || !onEditWithAI || capturingAnnotation) return;
-    const enriched = await captureAnnotationScreenshot(visualAnnotation);
-    onEditWithAI(formatPreviewAnnotationContext(enriched));
-  }, [captureAnnotationScreenshot, capturingAnnotation, onEditWithAI, visualAnnotation]);
-
-  // Listen for picker results
-  useEffect(() => {
-    function handleMessage(e: MessageEvent) {
-      if (e.data?.type === ELEMENT_PICKER_RESULT_EVENT && e.data.element) {
-        setSelectedElement(e.data.element as PickedElement);
-        setPickerActive(false);
-        setVisualAnnotation(null);
-        setAnnotationCaptureError(null);
-        return;
-      }
-
-      if (e.origin !== window.location.origin) return;
-      const data = e.data as {
-        source?: string;
-        type?: string;
-        enabled?: boolean;
-        annotation?: PreviewAnnotationPayload;
-      };
-      if (!data || data.source !== PREVIEW_MESSAGE_SOURCE) return;
-
-      if (data.type === 'annotation-mode') {
-        setAnnotationActive(Boolean(data.enabled));
-        return;
-      }
-
-      if (data.type === 'annotation' && data.annotation) {
-        setVisualAnnotation(data.annotation);
-        setAnnotationCaptureError(null);
-        setSelectedElement(null);
-        setAnnotationActive(false);
-      }
-    }
-    window.addEventListener('message', handleMessage);
-    return () => window.removeEventListener('message', handleMessage);
-  }, []);
+  const iframeSrc = activeTab?.url ? liveSrc(activeTab.url) : '';
 
   // If no tabs, show empty state with option to add
   if (tabs.length === 0) {
@@ -568,51 +358,6 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
         borderBottom: '1px solid var(--t-divider)',
         flexShrink: 0,
       }}>
-        {/* Element Picker toggle */}
-        <button
-          type="button"
-          onClick={togglePicker}
-          title={pickerActive ? 'Cancel element picker' : 'Select element'}
-          style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 26, height: 26, border: 'none', borderRadius: 6,
-            background: pickerActive ? 'rgba(37,99,235,0.2)' : 'transparent',
-            cursor: 'pointer', padding: 0,
-          }}
-          onMouseEnter={(e) => { if (!pickerActive) e.currentTarget.style.background = 'var(--t-hover)'; }}
-          onMouseLeave={(e) => { if (!pickerActive) e.currentTarget.style.background = 'transparent'; }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={pickerActive ? '#3b82f6' : 'var(--t-text-secondary)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: 14, height: 14, minWidth: 14, minHeight: 14, flexShrink: 0 }}>
-            <circle cx="12" cy="12" r="10" />
-            <line x1="22" y1="12" x2="18" y2="12" />
-            <line x1="6" y1="12" x2="2" y2="12" />
-            <line x1="12" y1="6" x2="12" y2="2" />
-            <line x1="12" y1="22" x2="12" y2="18" />
-          </svg>
-        </button>
-        {/* Visual annotation toggle */}
-        <button
-          type="button"
-          onClick={toggleAnnotation}
-          title={annotationActive ? 'Cancel visual annotation' : 'Draw visual annotation'}
-          disabled={!activeTab?.url || !isLoopbackUrl(activeTab.url)}
-          style={{
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            width: 26, height: 26, border: 'none', borderRadius: 6,
-            background: annotationActive ? 'rgba(249,115,22,0.22)' : 'transparent',
-            cursor: activeTab?.url && isLoopbackUrl(activeTab.url) ? 'pointer' : 'default',
-            padding: 0,
-            opacity: activeTab?.url && isLoopbackUrl(activeTab.url) ? 1 : 0.35,
-          }}
-          onMouseEnter={(e) => { if (!annotationActive && activeTab?.url && isLoopbackUrl(activeTab.url)) e.currentTarget.style.background = 'var(--t-hover)'; }}
-          onMouseLeave={(e) => { if (!annotationActive) e.currentTarget.style.background = 'transparent'; }}
-        >
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke={annotationActive ? '#f97316' : 'var(--t-text-secondary)'} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', width: 14, height: 14, minWidth: 14, minHeight: 14, flexShrink: 0 }}>
-            <path d="M4 20 20 4" />
-            <path d="M14 4h6v6" />
-            <path d="M5 15c3-1 4 3 7 1" />
-          </svg>
-        </button>
         {/* Reload */}
         <button
           type="button"
@@ -753,175 +498,14 @@ export function O8BrowserPane({ previews = [], onEditWithAI, onOpenFile, navigat
               key={activeTab.id + '-' + activeTab.url}
               src={iframeSrc}
               title={activeTab.title}
-              onLoad={handleIframeLoad}
               data-o8-browser="panel"
               data-o8-active="true"
               sandbox="allow-same-origin allow-scripts allow-forms allow-popups allow-modals"
               style={{
-                width: '100%', height: selectedElement || visualAnnotation ? 'calc(100% - 32px)' : '100%',
+                width: '100%', height: '100%',
                 border: 'none', background: '#ffffff',
               }}
             />
-            {/* Selected element info bar */}
-            {selectedElement ? (
-              <div style={{
-                height: 32, display: 'flex', alignItems: 'center', gap: 8,
-                paddingLeft: 10, paddingRight: 10,
-                borderTop: '1px solid rgba(255,255,255,0.1)',
-                background: 'rgba(37,99,235,0.08)', flexShrink: 0,
-                fontSize: 11, fontFamily: '"SF Mono", ui-monospace, monospace',
-                color: 'rgba(255,255,255,0.75)',
-              }}>
-                <span style={{ color: '#60a5fa', fontWeight: 600 }}>&lt;{selectedElement.tagName.toLowerCase()}&gt;</span>
-                {selectedElement.classList.length > 0 ? (
-                  <span style={{ color: 'rgba(255,255,255,0.4)' }}>.{selectedElement.classList.slice(0, 3).join('.')}</span>
-                ) : null}
-                {selectedElement.textContent ? (
-                  <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.5)' }}>
-                    &quot;{selectedElement.textContent.slice(0, 60)}&quot;
-                  </span>
-                ) : <div style={{ flex: 1 }} />}
-                <button
-                  type="button"
-                  onClick={() => setSelectedElement(null)}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 18, height: 18, border: 'none', borderRadius: 4,
-                    background: 'transparent', cursor: 'pointer', padding: 0,
-                  }}
-                >
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="3" strokeLinecap="round" style={{ display: 'block' }}>
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
-            ) : null}
-            {/* Visual annotation info bar */}
-            {visualAnnotation ? (
-              <div style={{
-                height: 32, display: 'flex', alignItems: 'center', gap: 8,
-                paddingLeft: 10, paddingRight: 10,
-                borderTop: '1px solid rgba(255,255,255,0.1)',
-                background: 'rgba(249,115,22,0.10)', flexShrink: 0,
-                fontSize: 11, fontFamily: '"SF Mono", ui-monospace, monospace',
-                color: 'rgba(255,255,255,0.78)',
-              }}>
-                <span style={{ color: '#fb923c', fontWeight: 700 }}>arrow</span>
-                <span style={{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', color: 'rgba(255,255,255,0.58)' }}>
-                  {formatAnnotationSummary(visualAnnotation)}
-                </span>
-                <button
-                  type="button"
-                  onClick={() => {
-                    setVisualAnnotation(null);
-                    setAnnotationCaptureError(null);
-                  }}
-                  style={{
-                    display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-                    width: 18, height: 18, border: 'none', borderRadius: 4,
-                    background: 'transparent', cursor: 'pointer', padding: 0,
-                  }}
-                >
-                  <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="3" strokeLinecap="round" style={{ display: 'block' }}>
-                    <line x1="18" y1="6" x2="6" y2="18" />
-                    <line x1="6" y1="6" x2="18" y2="18" />
-                  </svg>
-                </button>
-              </div>
-            ) : null}
-            {/* Element editing panel */}
-            {selectedElement ? (
-              <div style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10,
-              }}>
-                <O8ElementPanel
-                  element={selectedElement}
-                  onClose={() => setSelectedElement(null)}
-                  onEditWithAI={onEditWithAI}
-                  onOpenSource={onOpenFile ? (file) => onOpenFile(file) : undefined}
-                />
-              </div>
-            ) : null}
-            {/* Visual annotation dispatch panel */}
-            {visualAnnotation && !capturingAnnotation ? (
-              <div style={{
-                position: 'absolute', bottom: 0, left: 0, right: 0, zIndex: 10,
-              }}>
-                <div
-                  style={{
-                    margin: '0 12px 0',
-                    borderTop: '1px solid rgba(255,255,255,0.1)',
-                    borderRadius: 14,
-                    background: 'rgba(20,20,25,0.95)',
-                    backdropFilter: 'blur(12px)',
-                    boxShadow: '0 22px 40px rgba(0,0,0,0.24)',
-                    padding: 14,
-                    display: 'grid',
-                    gap: 12,
-                  }}
-                >
-                  <div style={{ display: 'grid', gap: 5 }}>
-                    <div style={{ color: 'rgba(255,255,255,0.88)', fontSize: 13, fontWeight: 700 }}>
-                      Visual annotation
-                    </div>
-                    <div style={{ color: 'rgba(255,255,255,0.52)', fontSize: 12, fontFamily: '"SF Mono", ui-monospace, monospace', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                      {formatAnnotationSummary(visualAnnotation)}
-                    </div>
-                    {annotationCaptureError ? (
-                      <div style={{ color: 'rgba(251,146,60,0.76)', fontSize: 11 }}>
-                        Screenshot unavailable; agent will receive DOM map and annotation JSON.
-                      </div>
-                    ) : visualAnnotation.screenshot?.path ? (
-                      <div style={{ color: 'rgba(255,255,255,0.42)', fontSize: 11, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                        Screenshot attached: {visualAnnotation.screenshot.path}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 10 }}>
-                    <button
-                      type="button"
-                      onClick={() => { void handleSendVisualAnnotation(); }}
-                      disabled={!onEditWithAI || capturingAnnotation}
-                      style={{
-                        height: 28,
-                        border: 'none',
-                        borderRadius: 8,
-                        background: '#f97316',
-                        color: '#ffffff',
-                        padding: '0 12px',
-                        fontSize: 12,
-                        fontWeight: 700,
-                        cursor: onEditWithAI && !capturingAnnotation ? 'pointer' : 'default',
-                        opacity: onEditWithAI && !capturingAnnotation ? 1 : 0.55,
-                      }}
-                    >
-                      Send to agent
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setVisualAnnotation(null);
-                        setAnnotationCaptureError(null);
-                      }}
-                      style={{
-                        height: 28,
-                        borderRadius: 8,
-                        border: '1px solid rgba(255,255,255,0.14)',
-                        background: 'transparent',
-                        color: 'rgba(255,255,255,0.78)',
-                        padding: '0 12px',
-                        fontSize: 12,
-                        fontWeight: 600,
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Clear
-                    </button>
-                  </div>
-                </div>
-              </div>
-            ) : null}
             {/* Hint for non-localhost URLs that may block iframe embedding */}
             {activeTab.url && !activeTab.url.includes('localhost') && !activeTab.url.includes('127.0.0.1') ? (
               <div style={{
