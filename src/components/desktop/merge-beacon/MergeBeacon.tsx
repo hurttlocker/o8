@@ -200,7 +200,7 @@ function MergeBeaconBase({ parked, compact }: { parked: ParkedLane[]; compact?: 
                   color: 'var(--t-text)',
                 }}
               >
-                {lane.label || lane.branch || lane.packetId}
+                {lane.label || lane.branch || 'Lane'}
               </span>
               <span style={{ flexShrink: 0, fontSize: 10.5, color: 'var(--t-text-faint)' }}>
                 {statusWord(lane.status)}
