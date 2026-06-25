@@ -3,13 +3,19 @@ import { NextRequest, NextResponse } from 'next/server';
 export const dynamic = 'force-dynamic';
 
 /**
- * Same-origin picker proxy for canvas browser cards (#1232).
+ * Same-origin live proxy for the embedded Browser pane (#1232).
  *
- * The element picker needs contentDocument access, and localhost dev
+ * Grab + the in-page agent need contentDocument access, and localhost dev
  * servers on other ports are cross-origin by port. This route fetches a
  * LOCAL page server-side and re-serves it from our origin with a <base>
- * tag pointed at the original server, so assets/links still resolve
- * there while the document itself becomes inspectable.
+ * tag pointed at the original server, so assets/links still resolve there
+ * while the document itself becomes inspectable (and grabbable).
+ *
+ * Fallback: when the server-side fetch can't proxy the page (e.g. an auth
+ * redirect loop from a Clerk-gated dev app, whose cookieless fetch loops),
+ * we 302 to the DIRECT url so the iframe still RENDERS it in the browser
+ * context — viewable, just cross-origin (not grabbable). Only a genuine
+ * connection failure (server down) shows the "is it running?" hint.
  *
  * Localhost targets only — this is a dev-inspection tool, not an open
  * fetch relay.
@@ -42,7 +48,15 @@ export async function GET(request: NextRequest) {
       status: upstream.status,
       headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' },
     });
-  } catch {
+  } catch (error) {
+    // The server RESPONDED but we couldn't proxy it (most often a Clerk-style
+    // auth redirect loop our cookieless fetch can't satisfy) — hand the iframe
+    // the direct url so the browser, which HAS the cookies, renders it.
+    const code = (error as { cause?: { code?: string } } | null)?.cause?.code;
+    const serverDown = code === 'ECONNREFUSED' || code === 'ENOTFOUND' || code === 'EAI_AGAIN';
+    if (!serverDown) {
+      return NextResponse.redirect(url, 302);
+    }
     return new NextResponse(
       `<!doctype html><body style="font-family:system-ui;padding:24px;font-size:13px;color:#555">Could not reach ${url.replace(/</g, '&lt;')} — is that server running?</body>`,
       { status: 502, headers: { 'content-type': 'text/html; charset=utf-8' } },
