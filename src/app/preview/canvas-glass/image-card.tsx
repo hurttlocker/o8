@@ -82,8 +82,9 @@ export function ImageGlassCard({
   /** Aspect-locked corner resize — CornerResize derives h from w; both land. */
   onResize: (id: number, w: number, h: number) => void;
   onFocus: (id: number) => void;
-  /** Pointer released after a real drag — page hit-tests for stacking. */
-  onDrop: (id: number, centerX: number, centerY: number) => void;
+  /** Pointer released after a real drag — page hit-tests (in canvas coords,
+   *  from the card's own geometry) for stacking. */
+  onDrop: (id: number) => void;
   /** Pointer released without travel — flips the deck to the next photo. */
   onTap: (id: number) => void;
   /** ‹ › deck arrows — flip to prev (dir<0) / next (dir≥0) photo. */
@@ -136,7 +137,7 @@ export function ImageGlassCard({
         drag.lastY = y;
         onMove(card.id, x, y);
       }}
-      onPointerUp={(event) => {
+      onPointerUp={() => {
         const drag = dragRef.current;
         dragRef.current = null;
         setDragging(false);
@@ -145,7 +146,7 @@ export function ImageGlassCard({
           // Stacking hit-test first (page may absorb/reposition this card), then
           // spring the last few resisted px back in-bounds — a no-op if the card
           // was consumed into a deck or already settled inside the walls.
-          onDrop(card.id, event.clientX, event.clientY);
+          onDrop(card.id);
           settleRef.current = settleInBounds(drag.lastX, drag.lastY, dragBounds(card.w, card.h), (x, y) => onMove(card.id, x, y));
         } else if (stack) {
           onTap(card.id);

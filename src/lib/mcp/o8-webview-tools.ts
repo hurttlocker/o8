@@ -639,8 +639,24 @@ export function buildSemanticClickExpr(locator: { text: string; role: string; na
     if (!el) return { clicked: false, reason: 'no-match', text: TEXT, role: ROLE, name: NAME };
     try { el.scrollIntoView({ block: 'center', inline: 'center' }); } catch (e) {}
     const r = el.getBoundingClientRect();
-    el.click();
-    return { clicked: true, matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName, x: Math.round(r.x + r.width / 2), y: Math.round(r.y + r.height / 2) };
+    const cx = r.x + r.width / 2, cy = r.y + r.height / 2;
+    // Fire a full pointer+mouse sequence, not just el.click(): canvas cards
+    // (tap/drag) listen on onPointerDown/onPointerUp, which a bare click()
+    // never triggers — the agent-surface gap that forced raw PointerEvent
+    // dispatch via o8_view_eval. el.click() still runs last so plain buttons,
+    // links, and form submits keep working.
+    const mo = { bubbles: true, cancelable: true, composed: true, view: window, clientX: cx, clientY: cy, button: 0 };
+    const po = Object.assign({ pointerId: 1, pointerType: 'mouse', isPrimary: true }, mo);
+    const seq = [
+      ['pointerover', typeof PointerEvent === 'function' ? PointerEvent : MouseEvent, Object.assign({ buttons: 0 }, po)],
+      ['pointerdown', typeof PointerEvent === 'function' ? PointerEvent : MouseEvent, Object.assign({ buttons: 1 }, po)],
+      ['mousedown', MouseEvent, Object.assign({ buttons: 1 }, mo)],
+      ['pointerup', typeof PointerEvent === 'function' ? PointerEvent : MouseEvent, Object.assign({ buttons: 0 }, po)],
+      ['mouseup', MouseEvent, Object.assign({ buttons: 0 }, mo)],
+    ];
+    for (const [type, Ctor, init] of seq) { try { el.dispatchEvent(new Ctor(type, init)); } catch (e) {} }
+    try { el.click(); } catch (e) {}
+    return { clicked: true, matchedText: norm(el.textContent).slice(0, 48), tag: el.tagName, x: Math.round(cx), y: Math.round(cy) };
   })()`;
 }
 
