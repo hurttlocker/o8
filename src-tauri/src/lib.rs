@@ -1,5 +1,6 @@
 mod audio_ducker;
 mod background;
+mod browser_view;
 mod dev_frontend;
 mod dictation_history;
 mod dock_window;
@@ -3021,6 +3022,61 @@ fn dock_set_hit_rect(x: f64, y: f64, w: f64, h: f64) {
     dock_window::set_hit_rect(x, y, w, h);
 }
 
+/// Open (or re-target) the native browser-view child window over the panel's
+/// Browser content rect and navigate it to `url`. The React panel calls this on
+/// mount / URL change; idempotent (navigates + repositions an existing window).
+/// CSS logical px in (`getBoundingClientRect()`), converted to physical screen
+/// coords against the main window. See `browser_view.rs`.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn browser_view_open(
+    app: tauri::AppHandle,
+    url: String,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+) -> Result<(), String> {
+    browser_view::open(&app, &url, x, y, w, h)
+}
+
+/// Reposition/resize the browser-view child window over a new content rect
+/// (panel ResizeObserver / window move+resize). CSS logical px in.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn browser_view_set_rect(app: tauri::AppHandle, x: f64, y: f64, w: f64, h: f64) {
+    browser_view::set_rect(&app, x, y, w, h);
+}
+
+/// Navigate the browser-view child window to a new URL (URL bar / tab / reload).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn browser_view_navigate(app: tauri::AppHandle, url: String) -> Result<(), String> {
+    browser_view::navigate(&app, &url)
+}
+
+/// Close + destroy the browser-view child window (Browser tab closed / teardown).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn browser_view_close(app: tauri::AppHandle) {
+    browser_view::close(&app);
+}
+
+/// Hide the browser-view child window without destroying it (tab not visible,
+/// panel collapsed, occlusion snapshot-swap).
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn browser_view_hide(app: tauri::AppHandle) {
+    browser_view::hide(&app);
+}
+
+/// Show the browser-view child window again and re-apply its last rect.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn browser_view_show(app: tauri::AppHandle) {
+    browser_view::show(&app);
+}
+
 /// Open the standalone Voice settings window (Symon parity). Double-tapping the
 /// dock pill invokes this — it works even when the main o8 window is closed,
 /// since the dock is always-on. Creates the window on first call, then just
@@ -3723,6 +3779,18 @@ pub fn run() {
             tts_is_active,
             dock_set_expanded,
             dock_set_hit_rect,
+            #[cfg(target_os = "macos")]
+            browser_view_open,
+            #[cfg(target_os = "macos")]
+            browser_view_set_rect,
+            #[cfg(target_os = "macos")]
+            browser_view_navigate,
+            #[cfg(target_os = "macos")]
+            browser_view_close,
+            #[cfg(target_os = "macos")]
+            browser_view_hide,
+            #[cfg(target_os = "macos")]
+            browser_view_show,
             open_voice_settings,
             voice_prefs_get,
             voice_prefs_set,
