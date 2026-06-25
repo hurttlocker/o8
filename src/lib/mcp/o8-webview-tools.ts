@@ -573,6 +573,18 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
     },
   },
   {
+    name: 'o8_browser_grab',
+    description: "Design-Mode grab — capture ONE element INSIDE o8's embedded browser by CSS selector and return its rich payload: { tagName, cssSelector, computedStyles (color/type/box/layout), accessibility (role/name/aria-*), attributes, innerHTML, outerHTML, parentChain, boundingRect }. Use to hand the agent exactly what a UI element looks like — the structure + design tokens — instead of a screenshot guess. Localhost pages (embedded) or the headless engine (external URLs).",
+    inputSchema: {
+      type: 'object',
+      properties: {
+        selector: { type: 'string', description: 'CSS selector of the element to grab.' },
+        surface: { type: 'string', enum: ['canvas', 'panel', 'engine'], description: 'Which browser surface (engine = headless Chrome for external URLs). Omit to auto-route.' },
+      },
+      required: ['selector'],
+    },
+  },
+  {
     name: 'o8_browser_wait',
     description: "Poll the page INSIDE o8's embedded browser until a CSS selector resolves (optionally with a text substring) — the settle gate between o8_browser_click and o8_browser_read.",
     inputSchema: {
@@ -589,7 +601,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
 ];
 
 /** Eval snippet calling one in-page browser-agent verb; returns a JSON string. */
-export function browserAgentEval(verb: 'read' | 'click' | 'type' | 'probe', args: Record<string, unknown>): string {
+export function browserAgentEval(verb: 'read' | 'click' | 'type' | 'probe' | 'grab', args: Record<string, unknown>): string {
   return `(() => {
     const agent = window.__o8BrowserAgent;
     if (!agent) return JSON.stringify({ ok: false, error: 'browser agent not installed — open a browser card (canvas) or the Browser tab first' });
@@ -851,6 +863,14 @@ export function createO8WebviewToolHandlers(getClient: () => O8WebviewClient): R
       if (args.submit === true) agentArgs.submit = true;
       if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
       return browserAgentPost('type', agentArgs);
+    }),
+
+    o8_browser_grab: async (args) => withStructuredErrors(async () => {
+      const agentArgs: Record<string, unknown> = { selector: requiredString(args, 'selector') };
+      if (args.surface === 'canvas' || args.surface === 'panel' || args.surface === 'engine') agentArgs.surface = args.surface;
+      const result = await browserAgentPost('grab', agentArgs);
+      const text = result.content[0];
+      return text?.type === 'text' ? capText(text.text, READ_RESULT_BYTE_CAP) : result;
     }),
 
     o8_browser_wait: async (args) => withStructuredErrors(async () => {

@@ -18,6 +18,7 @@
  */
 
 import { selectorFor } from '@/lib/browser/selector';
+import { buildGrabbedElement } from '@/lib/browser/grab';
 
 export interface BrowserAgentTarget {
   /** 'canvas' (browser cards) or 'panel' (default-side Browser tab). */
@@ -213,11 +214,27 @@ function probe(args: BrowserAgentTarget & { selector: string; text?: string }) {
   return { ok: true as const, found: args.selector };
 }
 
+/** Design-Mode grab — capture the rich payload (structure + design styles +
+ *  a11y) for one element on the live same-origin page. */
+function grab(args: BrowserAgentTarget & { selector: string }) {
+  const frame = pickFrame(args);
+  if (!frame) return noFrame(args);
+  const doc = frameDoc(frame);
+  if (!doc || !doc.body) return crossOrigin(frame);
+  const el = doc.querySelector(args.selector);
+  if (!el) return { ok: false as const, error: `no element matches ${args.selector}` };
+  const rect = el.getBoundingClientRect();
+  paintCursor(doc, rect.left + rect.width / 2, rect.top + rect.height / 2);
+  pulse(frame);
+  return { ok: true as const, surface: frame.dataset.o8Browser ?? null, element: buildGrabbedElement(el, selectorFor(el)) };
+}
+
 export interface O8BrowserAgent {
   read: typeof read;
   click: typeof click;
   type: typeof type;
   probe: typeof probe;
+  grab: typeof grab;
 }
 
 declare global {
@@ -229,5 +246,5 @@ declare global {
 /** Idempotent — both browser surfaces call this on mount. */
 export function installBrowserAgent(): void {
   if (typeof window === 'undefined' || window.__o8BrowserAgent) return;
-  window.__o8BrowserAgent = { read, click, type, probe };
+  window.__o8BrowserAgent = { read, click, type, probe, grab };
 }
