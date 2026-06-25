@@ -22,7 +22,7 @@ export function ArchivedLaneCompactRow({
   onSelectSession,
 }: {
   lane: ArchivedLaneRow;
-  onSelectSession?: (sessionKey: string) => void;
+  onSelectSession?: (sessionKey: string, hint?: { title?: string }) => void;
 }) {
   const [hovered, setHovered] = useState(false);
   const disabled = !lane.sessionKey || !onSelectSession;
@@ -32,13 +32,13 @@ export function ArchivedLaneCompactRow({
       tabIndex={disabled ? -1 : 0}
       onClick={() => {
         if (disabled || !lane.sessionKey) return;
-        onSelectSession?.(lane.sessionKey);
+        onSelectSession?.(lane.sessionKey, { title: lane.label });
       }}
       onKeyDown={(event) => {
         if (disabled || !lane.sessionKey) return;
         if (event.key !== 'Enter' && event.key !== ' ') return;
         event.preventDefault();
-        onSelectSession?.(lane.sessionKey);
+        onSelectSession?.(lane.sessionKey, { title: lane.label });
       }}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
