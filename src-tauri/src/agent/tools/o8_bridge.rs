@@ -1165,6 +1165,18 @@ const CANVAS_VERBS: &[&str] = &[
     "dock",
     "spawn-agents",
     "grid",
+    // Card sight + lifecycle (parity with external Claude's o8_canvas).
+    "list",
+    "move-card",
+    "resize-card",
+    "focus-card",
+    "close-card",
+    "render",
+    // Image lifecycle (parity with the human drag/tap interactions).
+    "add-image",
+    "stack",
+    "flip",
+    "separate",
 ];
 
 /// Build the `/api/canvas/intent` POST body from the model's FLAT params.
@@ -1198,7 +1210,44 @@ pub fn canvas_intent_body(verb: &str, args: &Value) -> Value {
             carry("repo");
         }
         "grid" => carry("on"),
-        // enter / open-spec / spawn-terminal take no args — for `enter`, the
+        "render" => {
+            carry("title");
+            carry("markdown");
+        }
+        "move-card" => {
+            carry("kind");
+            carry("id");
+            carry("x");
+            carry("y");
+        }
+        "resize-card" => {
+            carry("kind");
+            carry("id");
+            carry("w");
+            carry("h");
+        }
+        "focus-card" | "close-card" => {
+            carry("kind");
+            carry("id");
+        }
+        "add-image" => {
+            carry("src");
+            carry("url");
+            carry("name");
+            carry("x");
+            carry("y");
+        }
+        "stack" => {
+            carry("ids");
+            carry("id");
+            carry("ontoId");
+        }
+        "flip" => {
+            carry("id");
+            carry("dir");
+        }
+        "separate" => carry("id"),
+        // enter / open-spec / spawn-terminal / list take no args — for `enter`, the
         // route's `ensure:true` navigation IS the action (just bring the Canvas up).
         _ => {}
     }

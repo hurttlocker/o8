@@ -460,7 +460,7 @@ pub fn all_tools() -> Vec<Value> {
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "verb": { "type": "string", "enum": ["enter", "send-prompt", "ask-brain", "open-browser", "open-spec", "spawn-terminal", "search", "zoom", "dock", "spawn-agents", "grid"], "description": "Which canvas action to run. 'enter' just brings the Canvas up (open/show/go to the canvas) with no further action." },
+                    "verb": { "type": "string", "enum": ["enter", "send-prompt", "ask-brain", "open-browser", "open-spec", "spawn-terminal", "search", "zoom", "dock", "spawn-agents", "grid", "list", "move-card", "resize-card", "focus-card", "close-card", "render", "add-image", "stack", "flip", "separate"], "description": "Which canvas action to run. 'enter' just brings the Canvas up. SEE+MANAGE CARDS: 'list' (inventory of cards with ids — call first), 'move-card'/'resize-card'/'focus-card'/'close-card' (need kind+id), 'render' (markdown+title → a note card). IMAGES: 'add-image' (src → a photo), 'stack' (ids → group into a deck), 'flip' (id → next/prev photo), 'separate' (id → un-stack)." },
                     "text": { "type": "string", "description": "send-prompt: the message for the orchestrator." },
                     "question": { "type": "string", "description": "ask-brain: the question for the Engineering Brain." },
                     "url": { "type": "string", "description": "open-browser: the URL to open (omit for the app dashboard)." },
@@ -471,7 +471,20 @@ pub fn all_tools() -> Vec<Value> {
                     "task": { "type": "string", "description": "spawn-agents: what the agents should work on, e.g. 'the auth refactor'." },
                     "count": { "type": "number", "description": "spawn-agents: how many agents to spawn (1-5, default 1)." },
                     "repo": { "type": "string", "description": "spawn-agents: optional repo name or path to scope the agents to; omit to use the active repo." },
-                    "on": { "type": "boolean", "description": "grid: true tiles the cards into a grid, false frees them; omit to toggle." }
+                    "on": { "type": "boolean", "description": "grid: true tiles the cards into a grid, false frees them; omit to toggle." },
+                    "kind": { "type": "string", "description": "move/resize/focus/close-card: the card kind (term|file|image|video|browser|chat|diff|spec|brain|markdown|agent) — from list." },
+                    "id": { "type": "number", "description": "Card id (from list) — for move/resize/focus/close-card, and for flip/separate (a deck), and stack." },
+                    "x": { "type": "number", "description": "move-card / add-image: canvas-layer X." },
+                    "y": { "type": "number", "description": "move-card / add-image: canvas-layer Y." },
+                    "w": { "type": "number", "description": "resize-card: width (image/video stay aspect-locked)." },
+                    "h": { "type": "number", "description": "resize-card: height." },
+                    "src": { "type": "string", "description": "add-image: URL or served path of the photo to place." },
+                    "name": { "type": "string", "description": "add-image: optional filename/label." },
+                    "ids": { "type": "array", "items": { "type": "number" }, "description": "stack: 2+ image card ids to group into one deck." },
+                    "ontoId": { "type": "number", "description": "stack: alternative to ids — stack id onto ontoId." },
+                    "dir": { "type": "number", "description": "flip: 1 = next photo, -1 = previous." },
+                    "title": { "type": "string", "description": "render: optional card title." },
+                    "markdown": { "type": "string", "description": "render: the markdown body to paint as a card." }
                 },
                 "required": ["verb"]
             }
