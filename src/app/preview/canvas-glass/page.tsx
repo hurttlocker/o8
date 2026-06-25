@@ -2842,6 +2842,66 @@ export default function CanvasGlassPreviewPage() {
             }
             break;
           }
+          case 'add-image': {
+            // Put a photo on the canvas from a URL/served path — the verb a voice
+            // or agent operator needs (humans drag a File; agents pass a src).
+            const src = typeof args.src === 'string' ? args.src : typeof args.url === 'string' ? args.url : '';
+            if (!src) { ok = false; note = 'add-image needs args.src (a URL or /served path the canvas can load)'; break; }
+            const name = typeof args.name === 'string' ? args.name : (src.split('/').pop() || 'image');
+            const ax = typeof args.x === 'number' ? args.x : 80;
+            const ay = typeof args.y === 'number' ? args.y : 80;
+            const probe = new Image();
+            probe.onload = () => {
+              const natW = probe.naturalWidth || 1;
+              const natH = probe.naturalHeight || 1;
+              const aspect = natW / natH;
+              const w = natW >= natH ? IMG_MAX_SPAWN_EDGE : Math.round(IMG_MAX_SPAWN_EDGE * aspect);
+              const h = Math.round(w / aspect);
+              const id = nextIdRef.current;
+              nextIdRef.current += 1;
+              zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+              setImageCards((prev) => [...prev, { id, x: ax, y: ay, z: zPeakRef.current, w, h, aspect, items: [{ src, name }] }]);
+            };
+            probe.src = src;
+            note = `adding image ${name}`;
+            break;
+          }
+          case 'stack': {
+            // Group image cards into one deck (the agent twin of drag-together).
+            const ids: number[] = Array.isArray(args.ids)
+              ? (args.ids as unknown[]).map(Number).filter((n) => Number.isFinite(n))
+              : [args.id, args.ontoId].map(Number).filter((n) => Number.isFinite(n));
+            const present = ids.filter((id) => imageCardsRef.current.some((c) => c.id === id));
+            if (present.length < 2) { ok = false; note = 'stack needs ≥2 existing image ids (args.ids or args.id + args.ontoId — call list for ids)'; break; }
+            setImageCards((prev) => {
+              const base = prev.find((c) => c.id === present[0]);
+              if (!base) return prev;
+              const items = present.map((id) => prev.find((c) => c.id === id)).filter((c): c is ImageCard => Boolean(c)).flatMap((c) => c.items);
+              const drop = new Set(present.slice(1));
+              return prev.filter((c) => !drop.has(c.id)).map((c) => (c.id === base.id ? { ...c, items } : c));
+            });
+            note = `stacked ${present.length} images`;
+            break;
+          }
+          case 'flip': {
+            const id = Number(args.id);
+            const deck = imageCardsRef.current.find((c) => c.id === id);
+            if (!deck) { ok = false; note = `no image card with id ${id} (call list for ids)`; break; }
+            if (deck.items.length < 2) { ok = false; note = `image ${id} isn't a deck (only ${deck.items.length} photo)`; break; }
+            const dir = Number(args.dir) < 0 ? -1 : 1;
+            cycleImageCard(id, dir);
+            note = `flipped deck ${id} to ${dir < 0 ? 'previous' : 'next'}`;
+            break;
+          }
+          case 'separate': {
+            const id = Number(args.id);
+            const deck = imageCardsRef.current.find((c) => c.id === id);
+            if (!deck) { ok = false; note = `no image card with id ${id} (call list for ids)`; break; }
+            if (deck.items.length < 2) { ok = false; note = `image ${id} isn't a deck — nothing to separate`; break; }
+            spreadImageCard(id);
+            note = `separated deck ${id} into ${deck.items.length} cards`;
+            break;
+          }
           default:
             ok = false;
             note = `unknown intent verb: ${String(detail.verb)}`;
