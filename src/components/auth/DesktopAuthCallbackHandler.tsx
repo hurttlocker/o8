@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useRef } from 'react';
-import { useSignIn } from '@clerk/nextjs';
+import { useSignIn, useClerk } from '@clerk/nextjs';
 
 import { O8_AUTH_STATE_KEY } from '@/lib/auth/start-desktop-sign-in';
 
@@ -18,10 +18,13 @@ import { O8_AUTH_STATE_KEY } from '@/lib/auth/start-desktop-sign-in';
  */
 export function DesktopAuthCallbackHandler() {
   const { signIn } = useSignIn();
+  const clerk = useClerk();
   // Keep the latest future-resource in a ref so the listener can be installed
   // once on mount and always act on the current sign-in object.
   const signInRef = useRef(signIn);
   signInRef.current = signIn;
+  const clerkRef = useRef(clerk);
+  clerkRef.current = clerk;
   const processingRef = useRef(false);
 
   useEffect(() => {
@@ -69,6 +72,21 @@ export function DesktopAuthCallbackHandler() {
           if (finalizeError) {
             console.error('[auth] finalize failed:', finalizeError);
             return;
+          }
+          // finalize() activates the session server-side, but in the desktop
+          // flow there's no post-sign-in navigation, so Clerk's React signals
+          // don't always propagate — useUser() stays null until a manual app
+          // reload, leaving the avatar + account info blank. Explicitly set the
+          // created session active (idempotent if finalize already did) and
+          // reload the user resource so useUser() — and every useO8Auth()
+          // consumer — populates live, no reload needed.
+          try {
+            if (si.createdSessionId) {
+              await clerkRef.current.setActive({ session: si.createdSessionId });
+            }
+            await clerkRef.current.user?.reload();
+          } catch (activateErr) {
+            console.error('[auth] post-finalize session activation failed:', activateErr);
           }
           try {
             sessionStorage.removeItem(O8_AUTH_STATE_KEY);
