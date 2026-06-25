@@ -70,37 +70,59 @@ function labelFor(el: Element): string {
   return (text || value || el.getAttribute('title') || '').slice(0, 80);
 }
 
-/** The spectator layer — a ghost cursor glides in, ripples, fades. */
+/** The spectator layer — a PERSISTENT ghost cursor that glides to each target
+ *  the agent acts on (Claude-in-Chrome style), ripples on contact, and fades
+ *  after the agent goes idle. One per document, reused across actions so the
+ *  motion reads as one continuous cursor moving on the live page.
+ *  pointer-events:none — it never blocks the human's own pointer on the same
+ *  surface (the human + agent share the page). */
+const cursorByDoc = new WeakMap<Document, { cursor: HTMLDivElement; ripple: HTMLDivElement; hideTimer: ReturnType<typeof setTimeout> | null }>();
+
+function ensureCursor(doc: Document) {
+  const existing = cursorByDoc.get(doc);
+  if (existing && doc.body.contains(existing.cursor)) return existing;
+  const cursor = doc.createElement('div');
+  cursor.setAttribute('data-o8-agent-cursor', 'true');
+  cursor.setAttribute('style', [
+    'position:fixed;left:0;top:0;width:16px;height:16px;border-radius:50%',
+    'background:rgba(245,158,11,0.9);border:2px solid rgba(255,255,255,0.95)',
+    'box-shadow:0 0 0 4px rgba(245,158,11,0.22), 0 2px 10px rgba(0,0,0,0.4)',
+    'z-index:2147483600;pointer-events:none;opacity:0;transform:translate(-50%,-50%)',
+    'transition:left 320ms cubic-bezier(0.22,1,0.36,1),top 320ms cubic-bezier(0.22,1,0.36,1),opacity 220ms ease-out',
+  ].join(';'));
+  const ripple = doc.createElement('div');
+  ripple.setAttribute('data-o8-agent-cursor-ripple', 'true');
+  ripple.setAttribute('style', [
+    'position:fixed;left:0;top:0;width:16px;height:16px;border-radius:50%',
+    'border:2px solid rgba(245,158,11,0.7)',
+    'z-index:2147483599;pointer-events:none;opacity:0;transform:translate(-50%,-50%)',
+  ].join(';'));
+  doc.body.appendChild(cursor);
+  doc.body.appendChild(ripple);
+  const state = { cursor, ripple, hideTimer: null as ReturnType<typeof setTimeout> | null };
+  cursorByDoc.set(doc, state);
+  return state;
+}
+
 function paintCursor(doc: Document, x: number, y: number) {
   try {
-    const cursor = doc.createElement('div');
-    cursor.setAttribute('style', [
-      'position:fixed', `left:${Math.round(x)}px`, `top:${Math.round(y)}px`,
-      'width:14px;height:14px;border-radius:50%',
-      'background:rgba(245,158,11,0.85);border:2px solid rgba(255,255,255,0.9)',
-      'box-shadow:0 0 0 4px rgba(245,158,11,0.25), 0 2px 8px rgba(0,0,0,0.35)',
-      'z-index:2147483600;pointer-events:none;transform:translate(-50%,-50%)',
-    ].join(';'));
-    doc.body.appendChild(cursor);
-    const ripple = doc.createElement('div');
-    ripple.setAttribute('style', [
-      'position:fixed', `left:${Math.round(x)}px`, `top:${Math.round(y)}px`,
-      'width:14px;height:14px;border-radius:50%',
-      'border:2px solid rgba(245,158,11,0.7)',
-      'z-index:2147483599;pointer-events:none;transform:translate(-50%,-50%)',
-    ].join(';'));
-    doc.body.appendChild(ripple);
+    const state = ensureCursor(doc);
+    const { cursor, ripple } = state;
+    const left = `${Math.round(x)}px`;
+    const top = `${Math.round(y)}px`;
+    cursor.style.opacity = '1';
+    cursor.style.left = left;
+    cursor.style.top = top;
+    ripple.style.left = left;
+    ripple.style.top = top;
     if (typeof ripple.animate === 'function') {
       ripple.animate(
-        [{ transform: 'translate(-50%,-50%) scale(1)', opacity: 1 }, { transform: 'translate(-50%,-50%) scale(3.4)', opacity: 0 }],
-        { duration: 480, easing: 'ease-out' },
-      );
-      cursor.animate(
-        [{ opacity: 0 }, { opacity: 1, offset: 0.2 }, { opacity: 1, offset: 0.75 }, { opacity: 0 }],
-        { duration: 900, easing: 'ease-out' },
+        [{ transform: 'translate(-50%,-50%) scale(0.7)', opacity: 0.8 }, { transform: 'translate(-50%,-50%) scale(3.2)', opacity: 0 }],
+        { duration: 520, easing: 'ease-out' },
       );
     }
-    setTimeout(() => { cursor.remove(); ripple.remove(); }, 950);
+    if (state.hideTimer) clearTimeout(state.hideTimer);
+    state.hideTimer = setTimeout(() => { cursor.style.opacity = '0'; }, 2400);
   } catch {
     // theater is best-effort
   }
