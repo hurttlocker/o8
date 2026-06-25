@@ -52,8 +52,20 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     const el = ref.current;
     if (!el) return null;
     const r = el.getBoundingClientRect();
-    if (r.width < 1 || r.height < 1) return null;
-    return { x: r.left, y: r.top, w: r.width, h: r.height };
+    // Clamp to the visible viewport. The native child window is a SEPARATE OS
+    // window, NOT clipped by o8's CSS overflow:hidden the way an iframe is — so
+    // without this it paints PAST o8's window edges whenever the placeholder
+    // rect exceeds the viewport (a right panel dragged wider than fits, partial
+    // scroll, an off-screen edge). Intersect rect ∩ [0,0,innerW,innerH] so the
+    // native window matches exactly the clipped region the user actually sees.
+    const left = Math.max(0, r.left);
+    const top = Math.max(0, r.top);
+    const right = Math.min(window.innerWidth, r.right);
+    const bottom = Math.min(window.innerHeight, r.bottom);
+    const w = right - left;
+    const h = bottom - top;
+    if (w < 1 || h < 1) return null;
+    return { x: left, y: top, w, h };
   }, []);
 
   /** Push the current rect to the native window, deduped. */
