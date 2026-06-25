@@ -17,6 +17,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
+import { O8EnginePane } from './O8EnginePane';
 
 // ── live proxy ──
 // Loading a localhost dev server directly makes the iframe cross-origin with
@@ -108,8 +109,9 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
   const seeded = useRef(false);
   /** Agent-driving glow — pulses when an agent verb lands on this surface. */
   const [agentGlow, setAgentGlow] = useState(false);
-  /** URLs that broke when proxied (origin-sensitive SPAs) — load them direct. */
-  const [directFallback, setDirectFallback] = useState<Set<string>>(() => new Set());
+  /** URLs that blank out when proxied (auth-gated SPAs) — drive them in the
+   *  engine's real Chrome instead, where they render + stay grabbable. */
+  const [engineUrls, setEngineUrls] = useState<Set<string>>(() => new Set());
 
   // Agent verbs (o8_browser_* / `o8 browser`) drive this pane's iframe too.
   useEffect(() => { installBrowserAgent(); }, []);
@@ -258,35 +260,33 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
     if (activeTab?.url) openExternalUrl(activeTab.url);
   }, [activeTab]);
 
-  const iframeSrc = activeTab?.url
-    ? (directFallback.has(activeTab.url) ? activeTab.url : liveSrc(activeTab.url))
-    : '';
+  const iframeSrc = activeTab?.url ? liveSrc(activeTab.url) : '';
 
   // Origin-sensitive SPAs (Clerk/OAuth) render BLANK when proxied to our origin
   // — their frontend rejects the mismatched origin. Give the proxied page a
   // moment to hydrate; if it's same-origin but still empty, the proxy broke it,
-  // so reload the page DIRECTLY at its real origin (renders + human-interactive;
-  // cross-origin means the agent grab can't reach it — an inherent tradeoff).
+  // so hand the url to the engine pane, which drives it in real Chrome (renders,
+  // human-interactive, and agent-grabbable via surface:'engine').
   const handleIframeLoad = useCallback(() => {
     const iframe = iframeRef.current;
     const url = activeTab?.url;
-    if (!iframe || !url || !isLoopbackUrl(url) || directFallback.has(url)) return;
+    if (!iframe || !url || !isLoopbackUrl(url) || engineUrls.has(url)) return;
     window.setTimeout(() => {
       if (iframeRef.current !== iframe) return; // navigated away
       try {
         const doc = iframe.contentDocument;
         if (!doc) return; // already cross-origin — nothing to do
         // No visible text after the hydrate window → the proxy broke it
-        // (origin-sensitive SPA, or an empty redirect body). Reload direct.
+        // (origin-sensitive SPA, or an empty redirect body) → use the engine.
         const empty = (doc.body?.innerText || '').trim().length < 5;
         if (empty) {
-          setDirectFallback((prev) => new Set(prev).add(url));
+          setEngineUrls((prev) => new Set(prev).add(url));
         }
       } catch {
-        // cross-origin — can't inspect, which means it's already loading direct
+        // cross-origin — can't inspect; leave it as-is
       }
     }, 1500);
-  }, [activeTab?.url, directFallback]);
+  }, [activeTab?.url, engineUrls]);
 
   // If no tabs, show empty state with option to add
   if (tabs.length === 0) {
@@ -542,6 +542,8 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
               </span>
             )}
           </div>
+        ) : activeTab?.url && engineUrls.has(activeTab.url) ? (
+          <O8EnginePane url={activeTab.url} agentGlow={agentGlow} />
         ) : activeTab?.url ? (
           <>
             <iframe
