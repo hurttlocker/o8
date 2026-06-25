@@ -4,7 +4,7 @@
  * In-page browser agent (#1232 phase 1) — first-party browser control for
  * agents, against o8's OWN embedded browser surfaces (canvas browser cards
  * and the default-side Browser pane). Same-origin pages only — which, with
- * the picker proxies, means any localhost page.
+ * the embedded browser's live proxy, means any localhost page.
  *
  * Installed as `window.__o8BrowserAgent` by whichever browser surface
  * mounts first (idempotent). Callers reach it through evals: the operator
@@ -144,7 +144,7 @@ function noFrame(target?: BrowserAgentTarget) {
 }
 
 function crossOrigin(frame: HTMLIFrameElement) {
-  return { ok: false as const, error: `page is cross-origin (${realUrl(frame.src).slice(0, 120)}) — only local pages can be driven; reopen through the picker proxy or use a localhost URL`, url: realUrl(frame.src) };
+  return { ok: false as const, error: `page is cross-origin (${realUrl(frame.src).slice(0, 120)}) — the embedded browser drives same-origin/proxied local pages; for external URLs use the engine tier (surface: engine)`, url: realUrl(frame.src) };
 }
 
 function read(args?: BrowserAgentTarget & { selector?: string; maxChars?: number }) {
