@@ -2,10 +2,43 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
-import { browserAgentEval } from '@/lib/mcp/o8-webview-tools';
+import { browserAgentEval, buildNativeVerbEval } from '@/lib/mcp/o8-webview-tools';
 import { getBrowserEngine } from '@/lib/browser-engine/engine';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
+import { getApiBase } from '@/lib/panel/api-port';
+import { newNativeCid, awaitNativeResult } from '@/lib/browser/native-result-registry';
+
+type EmbeddedVerb = 'read' | 'click' | 'type' | 'probe' | 'grab';
+
+/**
+ * Try a verb against the NATIVE browser-view window (Stage 4). Triggered from the
+ * main webview (which has IPC): `browser_view_eval` evals the verb into
+ * browser-view and returns whether the window existed; the verb POSTs its result
+ * to the cid-only sink, which resolves the pending promise here. Returns
+ * `{ handled: false }` when the native window isn't up, so the caller falls back
+ * to the iframe path.
+ */
+async function tryNativeVerb(
+  client: O8WebviewClient,
+  verb: EmbeddedVerb,
+  args: Record<string, unknown>,
+): Promise<{ handled: boolean; result?: string }> {
+  const cid = newNativeCid();
+  const resultUrl = `${getApiBase()}/api/browser/native-result`;
+  const agentJs = buildNativeVerbEval(verb, args, cid, resultUrl);
+  const triggerCode = `(async () => { try { const ok = await window.__TAURI_INTERNALS__.invoke('browser_view_eval', { js: ${JSON.stringify(agentJs)} }); return JSON.stringify({ dispatched: ok === true }); } catch (e) { return JSON.stringify({ dispatched: false, error: String((e && e.message) || e) }); } })()`;
+  let dispatched = false;
+  try {
+    const triggerResult = await client.evalJs(triggerCode);
+    dispatched = JSON.parse(triggerResult.result).dispatched === true;
+  } catch {
+    dispatched = false;
+  }
+  if (!dispatched) return { handled: false };
+  const payload = await awaitNativeResult(cid, 8000);
+  return { handled: true, result: JSON.stringify(payload) };
+}
 
 /**
  * Browser-verb bridge for the `o8 browser` CLI (#1232) — gated in middleware
@@ -143,6 +176,31 @@ export async function POST(request: NextRequest) {
       if (packetId) recordAction(packetId, verb, args, true, url ?? undefined);
       return NextResponse.json({ ok: true, url, raw: result.result });
     }
+
+    // Native browser-view first (Stage 4) — the panel surface when the operator's
+    // native path is up. Skips 'canvas' (browser cards stay on the iframe path),
+    // and falls back to the iframe path below when the native window isn't open.
+    if (
+      (verb === 'read' || verb === 'click' || verb === 'type' || verb === 'grab' || verb === 'probe')
+      && args.surface !== 'canvas'
+    ) {
+      const native = await tryNativeVerb(client, verb, args);
+      if (native.handled) {
+        const raw = native.result ?? '{"ok":false,"error":"empty native result"}';
+        let ok = false;
+        let url: string | undefined;
+        try {
+          const parsed = JSON.parse(raw) as { ok?: boolean; url?: string };
+          ok = parsed.ok === true;
+          url = typeof parsed.url === 'string' ? parsed.url : undefined;
+        } catch {
+          // envelope stays raw
+        }
+        if (packetId && verb !== 'probe') recordAction(packetId, verb, args, ok, url, 'native');
+        return new NextResponse(raw, { headers: { 'content-type': 'application/json' } });
+      }
+    }
+
     if (verb === 'probe') {
       // One-shot probe — the CLI loops client-side for waits.
       const result = await client.evalJs(browserAgentEval('probe', args));
