@@ -77,6 +77,7 @@ import {
   updateOrchestratorMissionState,
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
+import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import { deriveParkedLanes } from '@/components/desktop/merge-beacon/derive';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import type {
@@ -2287,10 +2288,14 @@ function DashboardInner() {
         : sessionKey.startsWith('gemini-owned:') ? 'gemini'
         : sessionKey.startsWith('opencode-owned:') ? 'opencode'
         : 'codex';
+      // Fall back to the runtime's human label (e.g. "Codex") rather than a
+      // truncated session id — `sessionKey.split(':').pop().slice(0,12)` on an
+      // owned key (`codex-owned:codex-owned-<ts>-<uuid>`) yields the literal
+      // "codex-owned-", which leaked into the tab/packet label.
       const label = selectedSession?.name?.trim()
         || selectedSession?.surfaceLabel?.trim()
         || selectedSession?.currentTask?.trim()
-        || sessionKey.split(':').pop()?.slice(0, 12)
+        || ORCHESTRATOR_RUNTIMES[runtime]?.label
         || 'Session';
       target.handle.openCliChatSession({
         runtime,
