@@ -1,10 +1,10 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import type { PickedElement } from '@/lib/browser/element-picker-bridge';
+import type { GrabbedElement } from '@/lib/browser/grab';
 
 interface O8ElementPanelProps {
-  element: PickedElement;
+  element: GrabbedElement;
   onClose: () => void;
   onEditWithAI?: (context: string) => void;
   onOpenSource?: (file: string, line: number) => void;
@@ -26,7 +26,7 @@ const STYLE_ITEMS = [
   { key: 'display', label: 'display', swatch: false },
 ] as const;
 
-function buildDescriptorParts(element: PickedElement): DescriptorPart[] {
+function buildDescriptorParts(element: GrabbedElement): DescriptorPart[] {
   const parts: DescriptorPart[] = [{ text: `<${element.tagName.toLowerCase()}`, color: '#ffffff' }];
 
   element.classList.forEach((className) => {
@@ -69,20 +69,20 @@ function truncateDescriptorParts(parts: DescriptorPart[], maxLength: number): De
   return nextParts;
 }
 
-function buildPlainDescriptor(element: PickedElement): string {
+function buildPlainDescriptor(element: GrabbedElement): string {
   return buildDescriptorParts(element).map((part) => part.text).join('');
 }
 
-function buildTextTarget(element: PickedElement): string {
+function buildTextTarget(element: GrabbedElement): string {
   const classSuffix = element.classList.length > 0 ? `.${element.classList.join('.')}` : '';
   return `<${element.tagName.toLowerCase()}${classSuffix}>`;
 }
 
-function buildTextEditContext(element: PickedElement, nextText: string): string {
+function buildTextEditContext(element: GrabbedElement, nextText: string): string {
   return `Change the text of ${buildTextTarget(element)} from ${JSON.stringify(element.textContent)} to ${JSON.stringify(nextText)}`;
 }
 
-function buildEditContext(element: PickedElement, draftText: string): string {
+function buildEditContext(element: GrabbedElement, draftText: string): string {
   const details = [
     `Edit the selected browser element.`,
     `Element: ${buildPlainDescriptor(element)}`,
@@ -95,7 +95,7 @@ function buildEditContext(element: PickedElement, draftText: string): string {
   return details.join('\n');
 }
 
-function resolveSourceLocation(element: PickedElement) {
+function resolveSourceLocation(element: GrabbedElement) {
   const file = element.attributes['data-source-file']
     || element.attributes['data-file']
     || element.attributes['data-path']

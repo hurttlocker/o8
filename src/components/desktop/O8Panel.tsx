@@ -45,7 +45,6 @@ interface O8PanelProps {
   allRepos?: boolean;
   onSelectAllRepos?: () => void;
   previews?: DetectedLocalhostPreview[];
-  onEditWithAI?: (context: string) => void;
   onOpenFile?: (filePath: string) => void;
   prNumber?: number | null;
   prRepo?: string | null;
@@ -421,7 +420,6 @@ export function O8Panel({
   allRepos = false,
   onSelectAllRepos,
   previews = [],
-  onEditWithAI,
   onOpenFile,
   prNumber,
   prRepo,
@@ -585,8 +583,6 @@ export function O8Panel({
       return (
         <O8BrowserPane
           previews={previews}
-          onEditWithAI={onEditWithAI}
-          onOpenFile={onOpenFile}
           navigateToUrl={pendingBrowserUrl ?? browserUrl}
           onActiveUrlChange={onBrowserActiveUrlChange}
         />
@@ -732,7 +728,7 @@ export function O8Panel({
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' && !utilityShellActive ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8BrowserPane previews={previews} onEditWithAI={onEditWithAI} onOpenFile={onOpenFile} navigateToUrl={pendingBrowserUrl ?? browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
+        <O8BrowserPane previews={previews} navigateToUrl={pendingBrowserUrl ?? browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'activity' || activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8ActivityPane

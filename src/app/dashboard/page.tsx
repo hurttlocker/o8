@@ -122,6 +122,7 @@ import { useTileLayout } from './hooks/useTileLayout';
 import { useUIChrome } from './hooks/useUIChrome';
 import { useWorkspaceTerminal } from './hooks/useWorkspaceTerminal';
 import { useDesignMode } from '@/hooks/useDesignMode';
+import type { GrabbedElement } from '@/lib/browser/grab';
 import { createTileRegistry } from './tileRegistry';
 import { SettingsOverlay } from './SettingsOverlay';
 import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
@@ -146,6 +147,7 @@ const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then
 const LazyCommandPalette = lazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })));
 const LazyKeyboardShortcutsOverlay = lazy(() => import('@/components/desktop/KeyboardShortcutsOverlay').then(m => ({ default: m.KeyboardShortcutsOverlay })));
 const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })));
+const LazyO8ElementPanel = lazy(() => import('@/components/desktop/O8ElementPanel').then(m => ({ default: m.O8ElementPanel })));
 const LazyO8Panel = lazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })));
 // #888/#895 — packet-mode right panel (Spec / Agent Overview / Changes).
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
@@ -620,6 +622,9 @@ function DashboardInner() {
   }, []);
   const initialTileLayout = useMemo(() => createDefaultTileLayout(), []);
   const designMode = useDesignMode();
+  // The element grabbed by Design Mode (Cmd+Shift+D click) — shown in a
+  // floating O8ElementPanel until dismissed or sent to the agent.
+  const [grabbedElement, setGrabbedElement] = useState<GrabbedElement | null>(null);
 
   // ── Grouped state hooks ──
   const uiChrome = useUIChrome();
@@ -2645,12 +2650,9 @@ function DashboardInner() {
     });
   }, [openRightPanelFromUser, setDesktopDraftInjection]);
 
-  const handleDesignModeCapture = useCallback((contextText: string) => {
-    setThoughtsDraftInjection({
-      id: globalThis.crypto?.randomUUID?.() ?? `design-mode-${Date.now()}`,
-      text: contextText,
-    });
-  }, [setThoughtsDraftInjection]);
+  const handleDesignModeGrab = useCallback((grabbed: GrabbedElement) => {
+    setGrabbedElement(grabbed);
+  }, []);
 
   // #746 — Auto-directive proposer Accept callback. Re-uses the same draft
   // injection pipeline as design-mode capture so the orchestrator chat
@@ -4020,17 +4022,41 @@ function DashboardInner() {
           is active. Wrapping it in a guarded Suspense + lazy() keeps its
           ~500-line module out of the initial dashboard chunk; the chunk is
           only fetched once the user toggles design mode (Cmd+Shift+D). */}
-      {designMode.state.active ? (
+      {designMode.active ? (
         <Suspense fallback={null}>
           <LazyDesignModeOverlay
-            active={designMode.state.active}
-            selection={designMode.state.selection}
-            captureRequestId={designMode.captureRequestId}
-            onSelectionChange={designMode.setSelection}
-            onCapture={handleDesignModeCapture}
+            active={designMode.active}
+            onGrab={handleDesignModeGrab}
             onClose={designMode.close}
           />
         </Suspense>
+      ) : null}
+
+      {/* The grabbed element (Design Mode click) — a floating panel over the
+          whole dashboard, regardless of whether chrome or an embedded browser
+          was grabbed. "Edit with AI" routes the rich payload into the agent
+          chat; "Open Source" opens the inferred file in an inspector tab. */}
+      {grabbedElement ? (
+        <div style={{ position: 'fixed', bottom: 16, right: 16, width: 380, zIndex: 9998 }}>
+          <Suspense fallback={null}>
+            <LazyO8ElementPanel
+              element={grabbedElement}
+              onClose={() => setGrabbedElement(null)}
+              onEditWithAI={(context) => {
+                injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null);
+                setGrabbedElement(null);
+              }}
+              onOpenSource={(filePath) => {
+                const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
+                void (async () => {
+                  const target = await waitForWorkspaceTerminalTarget({});
+                  if (target) target.handle.openInspectorTab(tab);
+                  else openCanvasTab(tab);
+                })();
+              }}
+            />
+          </Suspense>
+        </div>
       ) : null}
 
       {/* Keyboard-shortcuts reference. Opened on ⌘/ or `?`, and from the
@@ -4634,7 +4660,6 @@ function DashboardInner() {
                           onSelectCommit={handleSelectCommit}
                           onSelectPR={handleReviewPR}
                           onSelectIssue={handleSelectIssue}
-                          onEditWithAI={(context) => injectPayloadIntoRepoChat({ reason: 'element-edit', text: context }, null)}
                           onOpenFile={(filePath) => {
                             const tab = { id: `file:${filePath}`, kind: 'file' as const, label: filePath.split('/').pop() ?? filePath, resourceId: filePath };
                             void (async () => {
