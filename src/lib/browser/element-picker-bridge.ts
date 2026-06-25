@@ -1,3 +1,5 @@
+import { SELECTOR_FOR_SOURCE } from './selector';
+
 export interface PickedElement {
   tagName: string;
   id: string;
@@ -35,6 +37,8 @@ const ELEMENT_PICKER_BRIDGE_SCRIPT = `(() => {
   window.__o8ElementPickerBridge = true;
   window.__o8ElementPickerBridgeInstalled = true;
 
+  ${SELECTOR_FOR_SOURCE}
+
   const state = { active: false, hovered: null, overlay: null };
 
   function trim(value, max) {
@@ -53,36 +57,6 @@ const ELEMENT_PICKER_BRIDGE_SCRIPT = `(() => {
     const classNames = Array.from(element.classList).slice(0, 2);
     if (classNames.length > 0) description += '.' + classNames.map((name) => cssEscape(name)).join('.');
     return description;
-  }
-
-  function uniqueSelector(element) {
-    if (element.id) return '#' + cssEscape(element.id);
-    const parts = [];
-    let current = element;
-
-    while (current && current !== document.body) {
-      let selector = current.tagName.toLowerCase();
-      if (current.id) {
-        parts.unshift('#' + cssEscape(current.id));
-        break;
-      }
-
-      if (typeof current.className === 'string' && current.className.trim()) {
-        selector += '.' + current.className.trim().split(/\\s+/).map((name) => cssEscape(name)).join('.');
-      }
-
-      const parent = current.parentElement;
-      if (parent) {
-        const siblings = Array.from(parent.children).filter((child) => child.tagName === current.tagName);
-        if (siblings.length > 1) selector += ':nth-child(' + (Array.from(parent.children).indexOf(current) + 1) + ')';
-      }
-
-      parts.unshift(selector);
-      current = current.parentElement;
-    }
-
-    if (current === document.body) parts.unshift('body');
-    return parts.join(' > ');
   }
 
   function collectAttributes(element) {
@@ -180,7 +154,7 @@ const ELEMENT_PICKER_BRIDGE_SCRIPT = `(() => {
         width: rect.width,
         height: rect.height,
       },
-      cssSelector: uniqueSelector(element),
+      cssSelector: selectorFor(element),
       computedStyles: {
         color: computed.color,
         backgroundColor: computed.backgroundColor,
