@@ -2385,11 +2385,18 @@ export default function CanvasGlassPreviewPage() {
   }, []);
 
   /** Dropped onto another photo → the two collapse into a stack (deck). */
-  const dropImageCard = useCallback((id: number, centerX: number, centerY: number) => {
+  const dropImageCard = useCallback((id: number) => {
     setDropTargetId(null);
     setImageCards((previous) => {
       const dragged = previous.find((card) => card.id === id);
       if (!dragged) return previous;
+      // Hit-test in CANVAS coords from the dragged card's own geometry — the
+      // SAME basis moveImageCard's live highlight uses. The drop once trusted
+      // the pointer's SCREEN clientX/Y, which only matched canvas space at
+      // zoom=1 / no pan and silently mis-targeted (or missed) the stack under
+      // zoom or pan (#agent-surface-ergonomics coord smell).
+      const centerX = dragged.x + dragged.w / 2;
+      const centerY = dragged.y + dragged.h / 2;
       const target = previous.find((card) => (
         card.id !== id
         && centerX >= card.x && centerX <= card.x + card.w
