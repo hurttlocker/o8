@@ -531,9 +531,9 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   // ── o8_browser_* — drive the page INSIDE o8's embedded browser ──
   // (canvas browser cards / the Browser tab), not the o8 UI itself.
-  // Same-origin pages only, which with the picker proxies means any
-  // localhost page. Actions paint a ghost cursor so the operator sees
-  // the agent working.
+  // Same-origin pages only, which with the embedded browser's live proxy
+  // means any localhost page. Actions paint a ghost cursor so the operator
+  // sees the agent working.
   {
     name: 'o8_browser_read',
     description: "Read the page INSIDE o8's embedded browser (canvas browser card or Browser tab): returns { url, title, text, interactive } where interactive lists clickable/typable elements with CSS selectors — the vocabulary for o8_browser_click / o8_browser_type. Use this FIRST to see the page before acting. Localhost pages only (cross-origin pages return an error envelope).",
@@ -548,7 +548,7 @@ export const O8_WEBVIEW_TOOLS: McpTool[] = [
   },
   {
     name: 'o8_browser_click',
-    description: "Click an element INSIDE o8's embedded browser by CSS selector (from o8_browser_read's interactive list or the element picker). Fires the full pointer/mouse sequence so React apps respond, and paints a ghost cursor + ripple the operator can see.",
+    description: "Click an element INSIDE o8's embedded browser by CSS selector (from o8_browser_read's interactive list or a Design Mode grab). Fires the full pointer/mouse sequence so React apps respond, and paints a ghost cursor + ripple the operator can see.",
     inputSchema: {
       type: 'object',
       properties: {
