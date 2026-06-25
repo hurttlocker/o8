@@ -2,6 +2,7 @@ import 'server-only';
 
 import { chromium, type Browser, type BrowserContext, type Page } from 'playwright-core';
 import { SELECTOR_FOR_SOURCE } from '@/lib/browser/selector';
+import { GRAB_PAYLOAD_SOURCE, type GrabbedElement } from '@/lib/browser/grab';
 
 /**
  * Browser engine (#1232 phase 3) — a REAL browser for agents, driving the
@@ -68,6 +69,19 @@ function collectPageStateScript(maxChars: number): string {
       text: text.length > maxChars ? (text.slice(0, maxChars) + '… [truncated ' + (text.length - maxChars) + ' chars]') : text,
       interactive,
     };
+  })()`;
+}
+
+/** Design-Mode grab as an injectable IIFE — embeds the shared selector + grab
+ *  payload sources so an engine-tier (external-URL) grab matches the in-page
+ *  agent's grab exactly. */
+function grabScript(selector: string): string {
+  return `(() => {
+    ${SELECTOR_FOR_SOURCE}
+    ${GRAB_PAYLOAD_SOURCE}
+    const el = document.querySelector(${JSON.stringify(selector)});
+    if (!el) return { ok: false, error: 'no element matches ' + ${JSON.stringify(selector)} };
+    return { ok: true, element: buildGrabbedElement(el, selectorFor(el)) };
   })()`;
 }
 
@@ -172,6 +186,15 @@ class BrowserEngine {
     await session.page.fill(selector, text, { timeout: ACTION_TIMEOUT_MS });
     if (submit) await session.page.press(selector, 'Enter', { timeout: ACTION_TIMEOUT_MS });
     return { ok: true, typed: text.length, into: selector, surface: 'engine', url: session.page.url() };
+  }
+
+  async grab(scope: string, selector: string): Promise<EngineEnvelope> {
+    const session = this.sessions.get(scope);
+    if (!session || session.page.isClosed()) return { ok: false, error: 'no engine page open for this scope — run `o8 browser open <url>` first' };
+    session.lastUsedAt = Date.now();
+    const result = (await session.page.evaluate(grabScript(selector))) as { ok: boolean; element?: GrabbedElement; error?: string };
+    if (!result.ok) return { ok: false, error: result.error ?? 'grab failed', surface: 'engine', url: session.page.url() };
+    return { ok: true, surface: 'engine', url: session.page.url(), element: result.element };
   }
 
   async probe(scope: string, selector: string, text?: string): Promise<EngineEnvelope> {
