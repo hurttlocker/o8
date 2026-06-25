@@ -30,6 +30,14 @@ export async function GET(request: NextRequest) {
   }
   try {
     const upstream = await fetch(url, { redirect: 'follow', headers: { accept: 'text/html,*/*' } });
+    // Origin-sensitive auth frameworks (Clerk, etc.) break when proxied to a
+    // different origin — their frontend API rejects the mismatched origin and
+    // the SPA renders blank. Detect the marker and hand the iframe the DIRECT
+    // url so it loads at its REAL origin (renders + interactive for the human;
+    // cross-origin, so the agent grab can't reach it — an inherent tradeoff).
+    if (upstream.headers.has('x-clerk-auth-status') || upstream.headers.has('x-clerk-auth-reason')) {
+      return NextResponse.redirect(url, 302);
+    }
     const type = upstream.headers.get('content-type') ?? 'text/html';
     if (!type.toLowerCase().includes('text/html')) {
       const body = await upstream.arrayBuffer();
