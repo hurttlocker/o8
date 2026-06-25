@@ -25,12 +25,11 @@ import { playOnboardingCue } from './onboarding/onboarding-sound';
 
 // ── Shared constants ──
 
-type OnboardingStep = 'open' | 'welcome' | 'repos' | 'runtimes' | 'dispatch' | 'import' | 'ready';
+type OnboardingStep = 'open' | 'repos' | 'runtimes' | 'dispatch' | 'import' | 'ready';
 
 const STEP_ORDER: OnboardingStep[] = ['open', 'repos', 'runtimes', 'dispatch', 'import', 'ready'];
 
 const FONT = 'var(--font-sans-system)';
-const MONO = '"SF Mono", ui-monospace, monospace';
 
 // ── Shared UI helpers ──
 
@@ -121,17 +120,6 @@ function StepIndicator({ steps, current }: { steps: OnboardingStep[]; current: O
   );
 }
 
-// ── Feature carousel data (Step 1) ──
-
-const FEATURES = [
-  { title: 'Command your AI agents', subtitle: 'Dispatch tasks to Claude, Codex, or any runtime. Watch them work in real-time.', previewLabel: 'Agent dashboard with live sessions' },
-  { title: 'Approve from anywhere', subtitle: 'Review code, approve merges, and steer agents from your phone.', previewLabel: 'Mobile approval surface' },
-  { title: 'Shared workspace context', subtitle: 'Keep repo state, approvals, and live sessions visible across every operator view.', previewLabel: 'Workspace context surface' },
-  { title: 'Every runtime, one dashboard', subtitle: 'Claude Code, Codex, Gemini — unified under one governance layer.', previewLabel: 'Multi-runtime workspace' },
-];
-
-const SLIDE_MS = 5000;
-
 // ── GitHub device flow state ──
 
 interface DeviceFlowState {
@@ -163,11 +151,9 @@ interface GithubRepo {
 export const Onboarding = memo(function Onboarding({ onComplete, completionError }: { onComplete: () => void; completionError?: string | null }) {
   const [step, setStep] = useState<OnboardingStep>('open');
 
-  // Step 1: Welcome
-  const [activeSlide, setActiveSlide] = useState(0);
+  // GitHub sign-in (used by the open step)
   const [githubFlow, setGithubFlow] = useState<DeviceFlowState>({ stage: 'idle' });
   const [githubDeviceFlowEnabled, setGithubDeviceFlowEnabled] = useState(false);
-  const slideTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const flowIdRef = useRef<string | null>(null);
 
@@ -198,19 +184,9 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
   // ── Cleanup timers ──
   useEffect(() => {
     return () => {
-      if (slideTimerRef.current) clearInterval(slideTimerRef.current);
       if (pollTimerRef.current) clearInterval(pollTimerRef.current);
     };
   }, []);
-
-  // ── Auto-advance carousel (step 1) ──
-  useEffect(() => {
-    if (step !== 'welcome') return;
-    slideTimerRef.current = setInterval(() => {
-      setActiveSlide(prev => (prev + 1) % FEATURES.length);
-    }, SLIDE_MS);
-    return () => { if (slideTimerRef.current) clearInterval(slideTimerRef.current); };
-  }, [step]);
 
   // ── Gate GitHub device CTA unless the bundled app has OAuth configured ──
   useEffect(() => {
@@ -376,81 +352,13 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
         <div style={{ marginBottom: 36, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, flexShrink: 0 }}>
           <div style={{ fontSize: 38, fontWeight: 800, letterSpacing: '-0.04em', color: 'var(--t-text-strong)', fontFamily: FONT }}>o8</div>
           <div style={{ fontSize: 11, fontWeight: 500, color: 'var(--t-text-muted)', letterSpacing: '0.06em', textTransform: 'uppercase' as const }}>
-            {step === 'welcome' ? 'Governance for autonomous teams'
-              : step === 'repos' ? 'Choose your repositories'
+            {step === 'repos' ? 'Choose your repositories'
               : step === 'runtimes' ? 'Your assistant engine'
               : step === 'dispatch' ? 'Default dispatch runtime'
               : step === 'import' ? 'Make o8 yours'
               : 'You\'re all set'}
           </div>
         </div>
-
-        {/* ── Step 1: Welcome + GitHub ── */}
-        {step === 'welcome' && (
-          <div style={{ display: 'flex', alignItems: 'center', gap: 48, maxWidth: 960, width: '100%' }}>
-            <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 8, minWidth: 0 }}>
-              {FEATURES.map((f, i) => (
-                <button key={i} type="button" onClick={() => { setActiveSlide(i); if (slideTimerRef.current) clearInterval(slideTimerRef.current); slideTimerRef.current = setInterval(() => setActiveSlide(p => (p + 1) % FEATURES.length), SLIDE_MS); }}
-                  style={{ display: 'flex', flexDirection: 'column', gap: 4, padding: '14px 18px', borderRadius: 14, border: 'none', background: i === activeSlide ? 'var(--t-glass-muted-strong)' : 'transparent', backdropFilter: i === activeSlide ? 'blur(12px)' : 'none', WebkitBackdropFilter: i === activeSlide ? 'blur(12px)' : 'none', cursor: 'pointer', textAlign: 'left', transition: 'background 300ms cubic-bezier(0.22, 1, 0.36, 1)', fontFamily: FONT } as React.CSSProperties}>
-                  <div style={{ fontSize: 15, fontWeight: 700, color: i === activeSlide ? 'var(--t-text-strong)' : 'var(--t-text-secondary)', letterSpacing: '-0.01em', transition: 'color 300ms cubic-bezier(0.22, 1, 0.36, 1)' }}>{f.title}</div>
-                  <div style={{ fontSize: 13, color: i === activeSlide ? 'var(--t-text-secondary)' : 'var(--t-text-faint)', lineHeight: 1.5, transition: 'color 300ms cubic-bezier(0.22, 1, 0.36, 1)' }}>{f.subtitle}</div>
-                </button>
-              ))}
-
-              {/* GitHub CTA */}
-              <div style={{ marginTop: 20 }}>
-                {githubDeviceFlowEnabled && (githubFlow.stage === 'idle' || githubFlow.stage === 'error') && (
-                  <GlassButton onClick={startGithubFlow}>
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0C5.37 0 0 5.37 0 12c0 5.31 3.435 9.795 8.205 11.385.6.105.825-.255.825-.57 0-.285-.015-1.23-.015-2.235-3.015.555-3.795-.735-4.035-1.41-.135-.345-.72-1.41-1.23-1.695-.42-.225-1.02-.78-.015-.795.945-.015 1.62.87 1.845 1.23 1.08 1.815 2.805 1.305 3.495.99.105-.78.42-1.305.765-1.605-2.67-.3-5.46-1.335-5.46-5.925 0-1.305.465-2.385 1.23-3.225-.12-.3-.54-1.53.12-3.18 0 0 1.005-.315 3.3 1.23.96-.27 1.98-.405 3-.405s2.04.135 3 .405c2.295-1.56 3.3-1.23 3.3-1.23.66 1.65.24 2.88.12 3.18.765.84 1.23 1.905 1.23 3.225 0 4.605-2.805 5.625-5.475 5.925.435.375.81 1.095.81 2.22 0 1.605-.015 2.895-.015 3.3 0 .315.225.69.825.57A12.02 12.02 0 0024 12c0-6.63-5.37-12-12-12z"/></svg>
-                    Sign in with GitHub
-                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
-                  </GlassButton>
-                )}
-                {githubFlow.stage === 'waiting' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 18px', borderRadius: 12, background: 'var(--t-glass-muted)', fontSize: 13, color: 'var(--t-text-secondary)' }}>
-                    <Spinner /> Connecting to GitHub...
-                  </div>
-                )}
-                {githubFlow.stage === 'polling' && (
-                  <GlassCard>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 13, fontWeight: 600, color: 'var(--t-text)' }}><Spinner /> Waiting for authorization...</div>
-                    {githubFlow.userCode && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 10 }}>
-                        <span style={{ fontSize: 11, color: 'var(--t-text-muted)' }}>Your code:</span>
-                        <span style={{ fontSize: 18, fontWeight: 700, fontFamily: MONO, letterSpacing: '0.12em', color: 'var(--t-text-strong)' }}>{githubFlow.userCode}</span>
-                      </div>
-                    )}
-                    <div style={{ fontSize: 11, color: 'var(--t-text-faint)', marginTop: 8 }}>A browser window should have opened. Enter the code above.</div>
-                  </GlassCard>
-                )}
-                {githubFlow.stage === 'success' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '12px 18px', borderRadius: 12, background: 'rgba(34, 197, 94, 0.12)', border: '1px solid rgba(34, 197, 94, 0.24)', fontSize: 14, fontWeight: 600, color: '#22c55e' }}>
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-                    Connected
-                  </div>
-                )}
-                {githubFlow.error && <div style={{ marginTop: 8, fontSize: 12, color: '#ef4444' }}>{githubFlow.error}</div>}
-              </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12 }}>
-                <button type="button" onClick={() => goNext()} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Skip for now</button>
-                <button type="button" onClick={() => openExternalUrl('https://o8.run/privacy')} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0, textDecoration: 'underline', textUnderlineOffset: 3 }}>Privacy</button>
-              </div>
-            </div>
-
-            {/* Preview */}
-            <div style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <div style={{ width: '100%', aspectRatio: '16 / 10', borderRadius: 14, background: 'var(--t-glass-muted)', backdropFilter: 'blur(8px)', WebkitBackdropFilter: 'blur(8px)', border: '1px solid var(--t-glass-border-strong)', boxShadow: 'var(--t-glass-shadow)', display: 'flex', alignItems: 'center', justifyContent: 'center', overflow: 'hidden', position: 'relative' } as React.CSSProperties}>
-                <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12, padding: 32 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--t-text-secondary)', textAlign: 'center' }}>{FEATURES[activeSlide].previewLabel}</div>
-                </div>
-                <div style={{ position: 'absolute', bottom: 16, left: 24, right: 24, height: 4, borderRadius: 2, background: 'var(--t-divider)', overflow: 'hidden' }}>
-                  <div key={activeSlide} style={{ height: '100%', borderRadius: 2, background: 'var(--t-text-faint)', animation: `onboardingProgress ${SLIDE_MS}ms linear forwards` }} />
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
 
         {/* ── Step 2: Repo Picker ── */}
         {step === 'repos' && (
@@ -746,7 +654,6 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
-        @keyframes onboardingProgress { from { width: 0%; } to { width: 100%; } }
         @keyframes spin { to { transform: rotate(360deg); } }
       `}} />
     </div>
