@@ -49,8 +49,24 @@ fn store_rect(x: f64, y: f64, w: f64, h: f64) {
 /// existing window instead of creating a new one. CSS logical px in; converted to
 /// physical screen coords against the main window. Returns a string error so the
 /// React side can surface a bad URL.
+///
+/// `init_script` (the panel passes `NATIVE_BROWSER_AGENT_SOURCE`) is registered
+/// via `.initialization_script` so `window.__o8BrowserAgent` installs in the page
+/// (every navigation, before page JS, main world) WITHOUT any Tauri capability —
+/// the native host evals into a webview it owns, which needs no IPC bridge. This
+/// keeps the untrusted localhost page free of `__TAURI_INTERNALS__` (see
+/// `native_browser_view_security` memory). The init script is baked at build time,
+/// so it only applies on first open; later opens reuse the existing window.
 #[cfg(target_os = "macos")]
-pub fn open(app: &tauri::AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -> Result<(), String> {
+pub fn open(
+    app: &tauri::AppHandle,
+    url: &str,
+    x: f64,
+    y: f64,
+    w: f64,
+    h: f64,
+    init_script: Option<&str>,
+) -> Result<(), String> {
     use tauri::{Manager, WebviewUrl, WebviewWindowBuilder};
 
     store_rect(x, y, w, h);
@@ -71,7 +87,7 @@ pub fn open(app: &tauri::AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -
 
     // Build hidden at the target size, position it, THEN show — so it never
     // flashes at the default center before snapping over the panel rect.
-    let win = WebviewWindowBuilder::new(app, BROWSER_VIEW_LABEL, WebviewUrl::External(parsed))
+    let mut builder = WebviewWindowBuilder::new(app, BROWSER_VIEW_LABEL, WebviewUrl::External(parsed))
         .title("o8 browser")
         .inner_size(w.max(1.0), h.max(1.0))
         .decorations(false)
@@ -83,7 +99,11 @@ pub fn open(app: &tauri::AppHandle, url: &str, x: f64, y: f64, w: f64, h: f64) -
         .visible(false)
         // OS drag-drop bridge is main-only; avoid the transparent+hardened
         // DragDrop crash trap (see `dragdropenabled_macos_trap` memory).
-        .disable_drag_drop_handler()
+        .disable_drag_drop_handler();
+    if let Some(script) = init_script {
+        builder = builder.initialization_script(script);
+    }
+    let win = builder
         .build()
         .map_err(|e| format!("[browser-view] failed to build window: {e}"))?;
 
@@ -212,7 +232,15 @@ fn attach_as_child(app: &tauri::AppHandle, child: &tauri::WebviewWindow) {
 
 // ── Non-macOS no-ops (o8 ships the native browser-view on macOS only) ──
 #[cfg(not(target_os = "macos"))]
-pub fn open(_app: &tauri::AppHandle, _url: &str, _x: f64, _y: f64, _w: f64, _h: f64) -> Result<(), String> {
+pub fn open(
+    _app: &tauri::AppHandle,
+    _url: &str,
+    _x: f64,
+    _y: f64,
+    _w: f64,
+    _h: f64,
+    _init_script: Option<&str>,
+) -> Result<(), String> {
     Ok(())
 }
 #[cfg(not(target_os = "macos"))]

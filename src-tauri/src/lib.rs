@@ -3026,9 +3026,12 @@ fn dock_set_hit_rect(x: f64, y: f64, w: f64, h: f64) {
 /// Browser content rect and navigate it to `url`. The React panel calls this on
 /// mount / URL change; idempotent (navigates + repositions an existing window).
 /// CSS logical px in (`getBoundingClientRect()`), converted to physical screen
-/// coords against the main window. See `browser_view.rs`.
+/// coords against the main window. `initScript` (the panel passes
+/// `NATIVE_BROWSER_AGENT_SOURCE`) installs the in-page agent via the builder's
+/// initialization_script — no Tauri capability, so the untrusted page never gets
+/// the IPC bridge (see `browser_view.rs`).
 #[cfg(target_os = "macos")]
-#[tauri::command]
+#[tauri::command(rename_all = "camelCase")]
 fn browser_view_open(
     app: tauri::AppHandle,
     url: String,
@@ -3036,8 +3039,9 @@ fn browser_view_open(
     y: f64,
     w: f64,
     h: f64,
+    init_script: Option<String>,
 ) -> Result<(), String> {
-    browser_view::open(&app, &url, x, y, w, h)
+    browser_view::open(&app, &url, x, y, w, h, init_script.as_deref())
 }
 
 /// Reposition/resize the browser-view child window over a new content rect
