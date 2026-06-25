@@ -292,13 +292,17 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
       flexDirection: 'column',
       gap: 16,
     }}>
-      <div style={{
-        fontSize: 13,
-        color: 'var(--t-text-secondary)',
-        lineHeight: 1.5,
-        textAlign: 'center',
-      }}>
-        Every packet you ship goes to one runtime by default. You can override per packet or change this later in Settings.
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, textAlign: 'center' }}>
+        <div style={{
+          fontSize: 13,
+          color: 'var(--t-text-secondary)',
+          lineHeight: 1.5,
+        }}>
+          Every packet you ship goes to one runtime by default. You can override per packet or change this later in Settings.
+        </div>
+        <div style={{ fontSize: 12, color: 'var(--t-text-faint)', lineHeight: 1.5 }}>
+          A <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>packet</span> is one task you hand to an agent; <span style={{ color: 'var(--t-text-muted)', fontWeight: 500 }}>dispatch</span> is sending it off.
+        </div>
       </div>
 
       <div style={{
