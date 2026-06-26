@@ -56,6 +56,11 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
    *  browser rect would render BEHIND it. When detected we hide the native window
    *  and paint a last-frame snapshot, then restore on close. */
   const occludedRef = useRef<boolean>(false);
+  /** Sticky occlusion forced by the dashboard (Design Mode grab card open): the
+   *  card lands over the BOTTOM of the native rect, which the geometric sampler
+   *  misses, so the dashboard tells us to hide explicitly. While true, the
+   *  geometric checkOcclusion must not un-hide. */
+  const forceOccludeRef = useRef<boolean>(false);
   /** Cached base64 PNG of the page (no data: prefix) painted while occluded. */
   const snapshotRef = useRef<string | null>(null);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -170,6 +175,9 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
   const checkOcclusion = useCallback(() => {
     const el = ref.current;
     if (!el || !visibleRef.current) return;
+    // Dashboard-forced occlusion (grab card open) wins over geometry — the card
+    // only covers the bottom of the rect, so the sampler would falsely un-hide.
+    if (forceOccludeRef.current) { setOccluded(true); return; }
     const r = el.getBoundingClientRect();
     if (r.width < 4 || r.height < 4) return;
     const paintsVisibly = (hit: Element): boolean => {
@@ -393,6 +401,23 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       controller?.abort();
     };
   }, []);
+
+  // Dashboard-forced occlusion: the Design Mode grab result card opens over the
+  // native window (an always-on-top OS window), so the dashboard signals us to
+  // hide it while the card is open + restore on close. The geometric sampler can't
+  // see a card that only covers the bottom of the rect, so this is explicit. Only
+  // the VISIBLE instance acts (dual-mount — a hidden one hiding the shared window
+  // would be wrong).
+  useEffect(() => {
+    const onForceOcclude = (event: Event) => {
+      if (!visibleRef.current) return;
+      const occlude = (event as CustomEvent<{ occlude?: boolean }>).detail?.occlude === true;
+      forceOccludeRef.current = occlude;
+      setOccluded(occlude);
+    };
+    window.addEventListener('o8:native-browser-occlude', onForceOcclude);
+    return () => window.removeEventListener('o8:native-browser-occlude', onForceOcclude);
+  }, [setOccluded]);
 
   // Hide the native window on unmount (keep it alive for a fast re-show — the
   // Browser tab closing entirely is what triggers browser_view_close upstream).

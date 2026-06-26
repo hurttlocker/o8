@@ -2671,6 +2671,13 @@ function DashboardInner() {
     return () => window.removeEventListener('o8:design-grab-result', onResult);
   }, [handleDesignModeGrab, designModeClose]);
 
+  // The grab result card opens over the native browser-view window (an always-on-
+  // top OS window that would otherwise hide it). Tell NativeBrowserSurface to hide
+  // the native window while the card is open, and restore it on close.
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('o8:native-browser-occlude', { detail: { occlude: grabbedElement != null } }));
+  }, [grabbedElement]);
+
   // #746 — Auto-directive proposer Accept callback. Re-uses the same draft
   // injection pipeline as design-mode capture so the orchestrator chat
   // composer pre-fills with the proposed directive text.
