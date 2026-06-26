@@ -6,6 +6,7 @@ import {
   withLockedState,
   writeOrchestratorControlPlaneState,
 } from '@/lib/orchestrator/control-plane';
+import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
@@ -214,7 +215,21 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
   const { result } = await withLockedState(async (current) => {
     const withReleases = markReleasedPackets(current, drainReleasedPackets());
     const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
-    const dispatched = await runDispatchTick(reconciled);
+    // #1293 — Persist the best-of-N fan-out's seed-consumption BEFORE dispatch.
+    // A seed packet (comparisonModels set, no comparisonGroupId) is consumed by
+    // fanOutComparisonPackets — replaced by its N sibling candidates. dispatch
+    // opens lanes + spawns owned sessions as side effects; if the tick later
+    // throws mid-dispatch, an un-persisted seed survives on disk and re-fans on
+    // the NEXT 10s tick, spawning fresh candidates every tick — an unbounded
+    // lane/session flood that wedges the inventory and burns compute. Writing
+    // the consumed state first makes the seed vanish immediately, so no dispatch
+    // failure can resurrect it. runDispatchTick fans out again internally, but
+    // that's a no-op now (the siblings already carry comparisonGroupId).
+    const fanned = fanOutComparisonPackets(reconciled);
+    if (fanned !== reconciled) {
+      writeOrchestratorControlPlaneState(fanned);
+    }
+    const dispatched = await runDispatchTick(fanned);
     const mission = writeOrchestratorControlPlaneState(dispatched);
     const dag = buildDagMetadata(mission.packets);
     const launched = countLaunchedPackets(reconciled, mission);
