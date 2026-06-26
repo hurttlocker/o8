@@ -24,6 +24,11 @@ const RUNTIME_INVENTORY_BUILD_TIMEOUT_MS = 3_500;
 const runtimeInventoryCache = new Map<string, { snapshot: FleetSnapshot; cachedAt: number }>();
 const runtimeInventoryInflight = new Map<string, { generation: number; promise: Promise<FleetSnapshot> }>();
 let runtimeInventoryGeneration = 0;
+// #1293 — retire dead/orphaned owned-session corpses continuously, not just at
+// startup (ws-server). Debounced so a 15s inventory tick doesn't re-list every
+// session dir on every build; the sweep is fire-and-forget and never blocks.
+const ORPHAN_SWEEP_DEBOUNCE_MS = 60_000;
+let lastOrphanSweepAt = 0;
 
 /** @returns {void} */
 export function invalidateRuntimeInventoryCache() {
@@ -541,6 +546,18 @@ export async function getRuntimeInventorySnapshot(
       }
     } catch {
       // Lane reconciliation is non-critical
+    }
+
+    // #1293 — self-heal: archive owned-session dirs that are dead and unbound
+    // (or bound only to a terminal lane) so corpses can't accumulate between
+    // restarts, inflate the agent count, or wedge the build. The startup sweep
+    // only fired once; this runs it on every build (debounced). Background +
+    // best-effort — it never blocks or fails the snapshot.
+    if (Date.now() - lastOrphanSweepAt > ORPHAN_SWEEP_DEBOUNCE_MS) {
+      lastOrphanSweepAt = Date.now();
+      void import('@/lib/lane/sweep-orphan-sessions')
+        .then((m) => m.sweepOrphanedOwnedSessions())
+        .catch(() => {});
     }
 
     const canCache = snapshot.meta.mode === 'live'
