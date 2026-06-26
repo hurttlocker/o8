@@ -12,6 +12,23 @@
     <string>Symon reads your calendar to answer "what's on my calendar" by voice.</string>
     <key>NSRemindersFullAccessUsageDescription</key>
     <string>Symon reads your reminders to answer "what's on my list" by voice.</string>
+    <!-- App Transport Security: the embedded native browser-view (a host-owned
+         child WebviewWindow) loads arbitrary HTTPS sites (Clerk auth apps, etc.).
+         Its in-page agent must POST grab/read/click results back to the local o8
+         server at http://127.0.0.1:<port>/api/browser/native-result. ATS blocks
+         HTTP requests made from an HTTPS page by default ("TypeError: Load failed"),
+         which kills the result channel on every real (HTTPS) site. Scope the
+         exception to web-content + local networking so ATS stays in force for the
+         rest of the app's network calls. (127.0.0.1/localhost are already exempt
+         from the web-platform mixed-content algorithm; this lifts only the ATS
+         network-layer block.) -->
+    <key>NSAppTransportSecurity</key>
+    <dict>
+        <key>NSAllowsArbitraryLoadsInWebContent</key>
+        <true/>
+        <key>NSAllowsLocalNetworking</key>
+        <true/>
+    </dict>
     <!-- Register o8 in Finder's "Open With" for any file (rank Alternate —
          listed, never stealing the default). Opens land on the canvas as
          file cards via RunEvent::Opened in lib.rs. -->
