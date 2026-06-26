@@ -215,21 +215,27 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
   const { result } = await withLockedState(async (current) => {
     const withReleases = markReleasedPackets(current, drainReleasedPackets());
     const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
-    // #1293 — Persist the best-of-N fan-out's seed-consumption BEFORE dispatch.
-    // A seed packet (comparisonModels set, no comparisonGroupId) is consumed by
-    // fanOutComparisonPackets — replaced by its N sibling candidates. dispatch
-    // opens lanes + spawns owned sessions as side effects; if the tick later
-    // throws mid-dispatch, an un-persisted seed survives on disk and re-fans on
-    // the NEXT 10s tick, spawning fresh candidates every tick — an unbounded
-    // lane/session flood that wedges the inventory and burns compute. Writing
-    // the consumed state first makes the seed vanish immediately, so no dispatch
-    // failure can resurrect it. runDispatchTick fans out again internally, but
-    // that's a no-op now (the siblings already carry comparisonGroupId).
+    // #1293 — best-of-N fan-out: a seed packet (comparisonModels set, no
+    // comparisonGroupId) is consumed by fanOutComparisonPackets — replaced by
+    // its N sibling candidates. Persist that consumption BEFORE dispatch so a
+    // mid-dispatch throw can't leave the seed on disk to re-fan next tick.
     const fanned = fanOutComparisonPackets(reconciled);
     if (fanned !== reconciled) {
       writeOrchestratorControlPlaneState(fanned);
     }
     const dispatched = await runDispatchTick(fanned);
+    // #1293 ROOT FIX — make withLockedState persist the post-dispatch state.
+    // withLockedState does a FINAL reconcile+write at end-of-lock, and its basis
+    // falls back to the (unmutated) pre-callback `current` when the callback
+    // returns a non-mission-state result (this one returns tick metadata). For a
+    // NORMAL packet that's harmless — reconcile(current) re-attaches the lane
+    // from the DB by matching packet id. But a best-of-N SEED has no lane and its
+    // candidate lanes are keyed by candidate ids, so reconcile(seed) keeps the
+    // bare seed — clobbering the fanned/dispatched writes and re-fanning the seed
+    // every single tick (observed: one seed fanned 16×). Mutating `current` with
+    // the dispatched state makes the final reconcile+write use it, so the seed is
+    // consumed for good.
+    Object.assign(current, dispatched);
     const mission = writeOrchestratorControlPlaneState(dispatched);
     const dag = buildDagMetadata(mission.packets);
     const launched = countLaunchedPackets(reconciled, mission);
