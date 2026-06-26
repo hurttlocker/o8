@@ -1006,14 +1006,30 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       };
     }
 
-    const allSessions: OwnedSessionRecord[] = [];
-    for (const sessionDir of sessionDirs) {
-      const filePath = metadataPath(sessionDir);
-      if (!(await pathExists(filePath))) continue;
-      const session = await loadSession(sessionDir);
-      await refreshSession(session);
-      allSessions.push(session);
-    }
+    // Refresh every session in parallel (#1293). A serial scan paid the
+    // per-session liveness probe (up to a 3s tmux-bridge timeout per dead run)
+    // one after another, so a flood of dead/resumable records — e.g. dozens of
+    // corpses left by a failed best-of-N fan-out — pushed the whole inventory
+    // build past its 3.5s hard timeout and wedged the observable in "warming"
+    // permanently. Parallel caps the wall-time at roughly one probe regardless
+    // of how many corpses pile up. One unreadable dir drops to null instead of
+    // rejecting the whole scan.
+    const settled = await Promise.all(
+      sessionDirs.map(async (sessionDir): Promise<OwnedSessionRecord | null> => {
+        try {
+          const filePath = metadataPath(sessionDir);
+          if (!(await pathExists(filePath))) return null;
+          const session = await loadSession(sessionDir);
+          await refreshSession(session);
+          return session;
+        } catch {
+          return null;
+        }
+      }),
+    );
+    const allSessions: OwnedSessionRecord[] = settled.filter(
+      (session): session is OwnedSessionRecord => session !== null,
+    );
 
     // Filter out stale sessions: no active run + last activity > 24h ago.
     const now = Date.now();

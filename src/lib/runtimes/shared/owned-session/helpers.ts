@@ -212,6 +212,12 @@ export function isPidAlive(pid?: number) {
 
 export async function isOwnedRunAlive(run?: OwnedRunRecord | null): Promise<boolean> {
   if (!run) return false;
+  // A run that already recorded a finish is terminal — never probe it (#1293).
+  // The tmux-bridge probe below has a 3s timeout; paying it once per dead run in
+  // a flood of resumable corpses (e.g. after a failed best-of-N fan-out) pushes
+  // the inventory build past its hard timeout and wedges the observable in
+  // "warming" forever. A finished run's process is gone by definition.
+  if (run.finishedAt) return false;
   if (isPidAlive(run.pid)) return true;
   if (run.tmuxSession) {
     return isBridgeSessionAlive(run.tmuxSession);
