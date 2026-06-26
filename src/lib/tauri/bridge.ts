@@ -171,6 +171,13 @@ export async function browserViewClose(): Promise<void> {
   await invoke<void>('browser_view_close');
 }
 
+/** Capture the native browser-view's on-screen content as a base64 PNG (data
+ *  is bare base64, no data: prefix) for the occlusion snapshot-swap. null
+ *  outside Tauri or if Screen Recording isn't granted. */
+export async function browserViewCapture(): Promise<string | null> {
+  return invoke<string>('browser_view_capture');
+}
+
 // ── OS file opens (Finder "Open With → o8", dock drop) ──
 
 /** Drain the paths the OS handed us — the canvas turns them into file cards. */
