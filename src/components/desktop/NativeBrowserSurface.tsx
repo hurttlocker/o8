@@ -358,10 +358,15 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     };
     const onDesignMode = (event: Event) => {
       const active = (event as CustomEvent<{ active?: boolean }>).detail?.active === true;
-      if (!active || !visibleRef.current) {
+      if (!active) {
         stopGrab();
         return;
       }
+      // Design Mode on: only the VISIBLE instance arms. O8Panel mounts
+      // NativeBrowserSurface TWICE (main + utility shell); a hidden instance must
+      // do NOTHING here — calling stopGrab would tear down the visible instance's
+      // design-grab on the shared native window (they drive one browser-view).
+      if (!visibleRef.current) return;
       controller?.abort();
       controller = new AbortController();
       const ctrl = controller;
