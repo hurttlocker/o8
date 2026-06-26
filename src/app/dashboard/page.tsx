@@ -187,6 +187,9 @@ const MAX_RIGHT_PANEL_WIDTH = 720;
 const MIN_O8_PANEL_WIDTH = 400;
 const MAX_O8_PANEL_WIDTH = 1200;
 const O8_SPEC_PANEL_TARGET_WIDTH = 600;
+// The N-up compare matrix needs width — two candidate columns fit comfortably at
+// ~960px; 3+ horizontally scroll (see ComparisonMatrix).
+const O8_COMPARE_PANEL_TARGET_WIDTH = 960;
 const RESPONSIVE_RIGHT_PANEL_COLLAPSE_WIDTH = 1180;
 const RESPONSIVE_LEFT_PANEL_COLLAPSE_WIDTH = 900;
 const RESPONSIVE_COMPACT_SHELL_WIDTH = 420;
@@ -547,6 +550,7 @@ function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
     || raw === 'files'
     || raw === 'side-chat'
     || raw === 'review'
+    || raw === 'compare'
     || raw === 'terminal'
   ) {
     return raw;
@@ -1076,12 +1080,21 @@ function DashboardInner() {
   }, [o8Width]);
   const [o8ActiveTab, setO8ActiveTab] = useState<O8Tab>(DEFAULT_O8_ACTIVE_TAB);
   const o8SpecAutoWidenedRef = useRef(false);
+  const o8CompareAutoWidenedRef = useRef(false);
   const handleO8TabChange = useCallback((tab: O8Tab) => {
     if (tab === 'spec' && !o8SpecAutoWidenedRef.current) {
       o8SpecAutoWidenedRef.current = true;
       setO8Width((current) => (
         current < O8_SPEC_PANEL_TARGET_WIDTH
           ? O8_SPEC_PANEL_TARGET_WIDTH
+          : current
+      ));
+    }
+    if (tab === 'compare' && !o8CompareAutoWidenedRef.current) {
+      o8CompareAutoWidenedRef.current = true;
+      setO8Width((current) => (
+        current < O8_COMPARE_PANEL_TARGET_WIDTH
+          ? O8_COMPARE_PANEL_TARGET_WIDTH
           : current
       ));
     }
@@ -2257,7 +2270,12 @@ function DashboardInner() {
   // the operator briefing pulse.
   const handleOpenO8Panel = useCallback((options: { repoPath?: string | null; tab?: O8Tab }) => {
     if (options.repoPath) setO8RepoPathOverride(options.repoPath);
-    setO8ActiveTab(normalizeO8ActiveTab(options.tab) ?? DEFAULT_O8_ACTIVE_TAB);
+    const nextTab = normalizeO8ActiveTab(options.tab) ?? DEFAULT_O8_ACTIVE_TAB;
+    if (nextTab === 'compare' && !o8CompareAutoWidenedRef.current) {
+      o8CompareAutoWidenedRef.current = true;
+      setO8Width((current) => (current < O8_COMPARE_PANEL_TARGET_WIDTH ? O8_COMPARE_PANEL_TARGET_WIDTH : current));
+    }
+    setO8ActiveTab(nextTab);
     setRightPanelKind('o8');
     openRightPanelFromUser();
   }, [openRightPanelFromUser]);
