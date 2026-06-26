@@ -200,7 +200,10 @@ export type LaneEventVerb =
   | 'brain_consulted'
   // Agent drove o8's embedded browser via `o8 browser` / o8_browser_* (#1232 phase 1).
   // Payload: { verb, selector?, surface?, ok, url? }
-  | 'browser_acted';
+  | 'browser_acted'
+  // Operator picked a best-of-N comparison winner (item 3). Recorded on the
+  // winner's lane. Payload: { groupId, winnerPacketId, archivedPacketIds }
+  | 'comparison_resolved';
 
 export type AgentReportReason =
   | 'needs_clarification'
