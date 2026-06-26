@@ -24,7 +24,19 @@ const NOOP_ROW_REF = () => {};
 
 const COLUMN_MIN_WIDTH = 440;
 
-export function ComparisonColumn({ candidate, index }: { candidate: ComparisonCandidate; index: number }) {
+export function ComparisonColumn({
+  candidate,
+  index,
+  onPick,
+  picking = false,
+  pickDisabled = false,
+}: {
+  candidate: ComparisonCandidate;
+  index: number;
+  onPick?: (packetId: string) => void;
+  picking?: boolean;
+  pickDisabled?: boolean;
+}) {
   const changes = useWorkspaceChanges(candidate.worktreePath);
   // Dry-run the merge gate once the candidate is settled — the column shows its
   // verdict (passes / blocked-by) so the operator picks with the gate in view.
@@ -151,6 +163,33 @@ export function ComparisonColumn({ candidate, index }: { candidate: ComparisonCa
           ))
         )}
       </div>
+      {onPick ? (
+        <div style={{ flexShrink: 0, paddingTop: 8, paddingBottom: 8, paddingLeft: 10, paddingRight: 10, borderTop: '1px solid var(--t-divider-subtle)' }}>
+          <button
+            type="button"
+            disabled={picking || pickDisabled || !candidate.complete}
+            onClick={() => onPick(packet.id)}
+            title={!candidate.complete ? 'Candidate still running' : 'Merge this candidate through the gate and archive the rest'}
+            style={{
+              width: '100%',
+              height: 32,
+              borderRadius: 8,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: 'var(--t-brand-orange, #FF5A1F)',
+              background: picking ? 'transparent' : 'rgba(255, 90, 31, 0.08)',
+              color: 'var(--t-brand-orange, #FF5A1F)',
+              fontSize: 12,
+              fontWeight: 500,
+              letterSpacing: '-0.1px',
+              cursor: picking || pickDisabled || !candidate.complete ? 'default' : 'pointer',
+              opacity: (pickDisabled && !picking) || !candidate.complete ? 0.45 : 1,
+            }}
+          >
+            {picking ? 'Merging through gate…' : 'Pick this winner'}
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }
