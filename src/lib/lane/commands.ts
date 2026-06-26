@@ -330,6 +330,17 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       ).length;
       if (priorLaunchAttempts >= LAUNCH_ATTEMPT_CAP) {
         setLaneStatus(command.laneId, 'failed', 'system', 'launch_attempts_exhausted');
+        // #1293 self-clean: drop the session binding on terminal exhaustion so
+        // the dead owned-session(s) from the failed attempts become orphans the
+        // continuous sweep archives — instead of lingering bound to this lane,
+        // inflating the agent count. The lane stays 'failed' (visible) so the
+        // operator can still see it and reset to retry. Retryable failures
+        // (launch_failed / launch_error → 'idle') keep their binding untouched.
+        try {
+          updateLane(command.laneId, { sessionKey: null }, 'system');
+        } catch (err) {
+          console.warn(`[lane] Failed to clear session binding on exhausted lane ${command.laneId}:`, err);
+        }
         return {
           ok: false,
           laneId: command.laneId,
