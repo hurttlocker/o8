@@ -1,0 +1,124 @@
+'use client';
+
+import type { CSSProperties } from 'react';
+
+import { useWorkspaceChanges } from '@/components/desktop/o8-panel/workspace-rail/ChangesList';
+import { ReviewFileRow } from '@/components/desktop/review/panel/ReviewFileRow';
+import type { ComparisonCandidate } from './useComparisonGroups';
+
+/**
+ * One column of the N-up compare matrix — a single best-of-N candidate's diff,
+ * read straight from its isolated worktree. Instances the SAME proven units the
+ * single-worktree Review surface uses (`useWorkspaceChanges` + `ReviewFileRow`),
+ * just parameterized by this candidate's `worktreePath`. Read-only here; the gated
+ * "pick winner" lands in a later stage.
+ */
+
+// Stable signal objects — the matrix doesn't drive ReviewFileRow's keyboard-nav /
+// bulk-collapse machinery (that's the single-column Review surface), so these are
+// inert. Hoisted so they keep referential identity across renders.
+const STABLE_COLLAPSE_SIGNAL: { open: boolean; nonce: number } = { open: false, nonce: 0 };
+const STABLE_FOCUS_SIGNAL: { path: string | null; nonce: number } = { path: null, nonce: 0 };
+const NOOP_ROW_REF = () => {};
+
+const COLUMN_MIN_WIDTH = 440;
+
+export function ComparisonColumn({ candidate, index }: { candidate: ComparisonCandidate; index: number }) {
+  const changes = useWorkspaceChanges(candidate.worktreePath);
+  const { packet } = candidate;
+  const model = packet.assignedModel || packet.runtime || `candidate ${index + 1}`;
+  const fileCount = changes.files.length;
+  // Open diffs inline for small changesets, collapse dense ones (each row
+  // lazy-fetches its diff on open, and a matrix multiplies that by N columns).
+  const initialOpen = fileCount > 0 && fileCount <= 5;
+
+  const columnStyle: CSSProperties = {
+    flex: `0 0 ${COLUMN_MIN_WIDTH}px`,
+    minWidth: COLUMN_MIN_WIDTH,
+    display: 'flex',
+    flexDirection: 'column',
+    minHeight: 0,
+    borderRight: '1px solid var(--t-divider-subtle)',
+  };
+
+  const headerStyle: CSSProperties = {
+    flexShrink: 0,
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 3,
+    paddingTop: 10,
+    paddingRight: 12,
+    paddingBottom: 10,
+    paddingLeft: 12,
+    borderBottom: '1px solid var(--t-divider-subtle)',
+  };
+
+  return (
+    <div style={columnStyle} data-comparison-column={packet.id}>
+      <div style={headerStyle}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            aria-hidden
+            style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--t-brand-orange, #FF5A1F)', flexShrink: 0 }}
+          />
+          <span
+            title={model}
+            style={{
+              fontSize: 12.5,
+              fontWeight: 500,
+              letterSpacing: '-0.1px',
+              color: 'var(--t-text)',
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {model}
+          </span>
+        </div>
+        <span
+          style={{
+            fontSize: 10.5,
+            fontWeight: 260,
+            letterSpacing: '-0.3px',
+            color: 'var(--t-text-muted)',
+            fontFamily: '"SF Mono", ui-monospace, monospace',
+          }}
+        >
+          {changes.loading && fileCount === 0
+            ? 'loading…'
+            : `${fileCount} file${fileCount === 1 ? '' : 's'} · +${changes.totalAdditions} −${changes.totalDeletions}`}
+        </span>
+      </div>
+      <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
+        {changes.error ? (
+          <div style={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 12, paddingRight: 12, fontSize: 11, color: 'var(--t-text-faint)' }}>
+            {changes.error}
+          </div>
+        ) : fileCount === 0 ? (
+          <div style={{ paddingTop: 12, paddingBottom: 12, paddingLeft: 12, paddingRight: 12, fontSize: 11, color: 'var(--t-text-faint)' }}>
+            {changes.loading ? 'Reading changes…' : 'No changes in this worktree.'}
+          </div>
+        ) : (
+          changes.files.map((file) => (
+            <ReviewFileRow
+              key={file.path}
+              file={file}
+              repoPath={candidate.worktreePath ?? ''}
+              mode="unified"
+              wrap={false}
+              wordDiff={false}
+              hideWhitespace={false}
+              richPreview
+              initialOpen={initialOpen}
+              collapseSignal={STABLE_COLLAPSE_SIGNAL}
+              focusSignal={STABLE_FOCUS_SIGNAL}
+              selected={false}
+              setRowRef={NOOP_ROW_REF}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
