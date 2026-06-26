@@ -176,6 +176,10 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       let n: Element | null = hit;
       for (let i = 0; i < 6 && n && n !== document.body; i++) {
         if (n === el || el.contains(n)) return false; // reached the placeholder — not an occluder
+        // Design Mode's overlay covers the whole screen but is meant to interact
+        // WITH the native browser (Stage 4b click-to-grab), not hide it — skip it
+        // so the native window stays visible + clickable while grabbing.
+        if (n.getAttribute('data-design-mode-overlay') === 'true') return false;
         const cs = getComputedStyle(n);
         if (cs.backgroundImage && cs.backgroundImage !== 'none') return true;
         if (cs.backdropFilter && cs.backdropFilter !== 'none') return true;
@@ -321,6 +325,56 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       if (raf) cancelAnimationFrame(raf);
     };
   }, [checkOcclusion]);
+
+  // Design Mode click-to-grab over the native window (Stage 4b). When Design Mode
+  // turns on while the browser is visible, ask the route to install the in-page
+  // grab handler and await the operator's click (long poll); the GrabbedElement
+  // comes back and we hand it to the dashboard's grab handler. Turning Design Mode
+  // off (or a completed grab) aborts the poll + tears the handler down.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let controller: AbortController | null = null;
+    const stopGrab = () => {
+      controller?.abort();
+      controller = null;
+      void fetch('/api/browser/agent', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ verb: 'stopdesigngrab', args: {} }),
+      }).catch(() => {});
+    };
+    const onDesignMode = (event: Event) => {
+      const active = (event as CustomEvent<{ active?: boolean }>).detail?.active === true;
+      if (!active || !visibleRef.current) {
+        stopGrab();
+        return;
+      }
+      controller?.abort();
+      controller = new AbortController();
+      const ctrl = controller;
+      fetch('/api/browser/agent', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ verb: 'designgrab', args: {} }),
+        signal: ctrl.signal,
+      })
+        .then((r) => (r.ok ? r.text() : null))
+        .then((text) => {
+          if (!text || ctrl.signal.aborted) return;
+          let parsed: { ok?: boolean; element?: unknown } | null = null;
+          try { parsed = JSON.parse(text); } catch { return; }
+          if (parsed && parsed.ok && parsed.element) {
+            window.dispatchEvent(new CustomEvent('o8:design-grab-result', { detail: { grabbed: parsed.element } }));
+          }
+        })
+        .catch(() => {});
+    };
+    window.addEventListener('o8:design-mode', onDesignMode);
+    return () => {
+      window.removeEventListener('o8:design-mode', onDesignMode);
+      controller?.abort();
+    };
+  }, []);
 
   // Hide the native window on unmount (keep it alive for a fast re-show — the
   // Browser tab closing entirely is what triggers browser_view_close upstream).

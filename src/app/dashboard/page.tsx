@@ -2654,6 +2654,23 @@ function DashboardInner() {
     setGrabbedElement(grabbed);
   }, []);
 
+  // Stage 4b — a click-to-grab inside the NATIVE browser-view window can't reach
+  // the DesignModeOverlay (it's a separate OS window), so NativeBrowserSurface
+  // grabs in-page and dispatches the result here. Route it to the same handler +
+  // exit Design Mode (the overlay's own onClose never fired for that click).
+  const designModeClose = designMode.close;
+  useEffect(() => {
+    const onResult = (event: Event) => {
+      const grabbed = (event as CustomEvent<{ grabbed?: GrabbedElement }>).detail?.grabbed;
+      if (grabbed) {
+        handleDesignModeGrab(grabbed);
+        designModeClose();
+      }
+    };
+    window.addEventListener('o8:design-grab-result', onResult);
+    return () => window.removeEventListener('o8:design-grab-result', onResult);
+  }, [handleDesignModeGrab, designModeClose]);
+
   // #746 — Auto-directive proposer Accept callback. Re-uses the same draft
   // injection pipeline as design-mode capture so the orchestrator chat
   // composer pre-fills with the proposed directive text.

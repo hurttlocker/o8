@@ -27,6 +27,14 @@ export function useDesignMode(): UseDesignModeResult {
   const close = useCallback(() => setActive(false), []);
   const toggle = useCallback(() => setActive((current) => !current), []);
 
+  // Broadcast the active state so decoupled surfaces can react — notably
+  // NativeBrowserSurface (Stage 4b), which drives the native browser-view's
+  // in-page click-to-grab when Design Mode is on (the click lands in that
+  // separate OS window, out of this overlay's reach).
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('o8:design-mode', { detail: { active } }));
+  }, [active]);
+
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       const key = event.key.toLowerCase();
