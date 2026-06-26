@@ -44,6 +44,15 @@ function normalizeExistingBranchPolicy(value: unknown): ExistingBranchPolicy | u
     : undefined;
 }
 
+// Best-of-N (item 3): the seed packet's comparison models. Clamp to ≤4 so the
+// N-up matrix stays honest at the panel's max width; empty → undefined (no fan-out).
+const MAX_COMPARISON_MODELS = 4;
+function normalizeComparisonModels(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const models = value.map((model) => String(model).trim()).filter(Boolean).slice(0, MAX_COMPARISON_MODELS);
+  return models.length > 0 ? models : undefined;
+}
+
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
@@ -100,6 +109,9 @@ export async function POST(request: NextRequest) {
       existingBranchPolicy,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
       ...(typeof record.huddle === 'boolean' ? { huddle: record.huddle } : {}),
+      ...(normalizeComparisonModels(record.comparisonModels)
+        ? { comparisonModels: normalizeComparisonModels(record.comparisonModels) }
+        : {}),
     });
     return operatorSuccess(result, 201);
   } catch (error) {

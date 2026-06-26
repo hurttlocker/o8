@@ -111,6 +111,8 @@ interface CreateMissionInput {
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
   huddle?: boolean;
+  /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
+  comparisonModels?: string[];
 }
 
 interface InlineIssue {
@@ -132,6 +134,8 @@ interface CreateMissionInlineInput {
   existingBranchPolicy?: ExistingBranchPolicy;
   useBrain?: boolean;
   huddle?: boolean;
+  /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
+  comparisonModels?: string[];
 }
 
 interface ApiSuccessResponse<T> {
@@ -385,6 +389,7 @@ export async function createMission(input: CreateMissionInput) {
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
+          comparisonModels: input.comparisonModels,
         } satisfies CreateMissionRequest),
       },
     );
@@ -426,6 +431,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           sequential: input.sequential,
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
+          comparisonModels: input.comparisonModels,
         } satisfies CreateMissionRequest),
       },
     );

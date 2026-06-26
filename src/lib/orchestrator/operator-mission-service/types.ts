@@ -41,6 +41,15 @@ export interface CreateMissionInput {
    * before editing. Armed per-mission; omit (default off) for clear packets.
    */
   huddle?: boolean;
+  /**
+   * Best-of-N (Orca-teardown item 3) — stamps the seed packet's
+   * `comparisonModels` so the scheduler fans it into N sibling candidates (one
+   * per model string), each in its own worktree/lane. The operator then compares
+   * the N diffs side-by-side and merges the winner through the review gate.
+   * Same model repeated (e.g. `['codex','codex','codex']`) races N attempts of
+   * the one runtime. Clamped to ≤4 at the route. Omit for a normal single packet.
+   */
+  comparisonModels?: string[];
 }
 
 export interface DispatchMissionInput {
