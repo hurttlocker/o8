@@ -305,6 +305,11 @@ export async function dispatchMission(input: DispatchMissionInput) {
       if (packet.queueState === 'held') packet.queueState = 'queued';
     }
     const afterDispatch = await runDispatchTick(current);
+    // #1293 — make withLockedState's end-of-lock reconcile+write use the
+    // post-dispatch state, not the unmutated pre-callback `current`. Without this
+    // a best-of-N seed survives the dispatch (its candidate lanes don't map back
+    // to the seed id under reconcile) and re-fans on the next headless tick.
+    Object.assign(current, afterDispatch);
     writeOrchestratorControlPlaneState(afterDispatch);
 
     const beforeByPacketId = new Map(before.packets.map((packet) => [packet.id, packet] as const));
