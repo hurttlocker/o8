@@ -109,15 +109,37 @@ export const MAX_PERSISTED_TABS = 50;
  * Orchestrator on every mount, so the persisted stub becomes a duplicate the
  * user sees as "two Orchestrator tabs."
  *
+ * Zombie shape 2 (#1293): best-of-N comparison CANDIDATE chat tabs. Candidates
+ * (`fanOutComparisonPackets`) carry a `-cmp-<n>` suffix on their packetId +
+ * branchTarget and are driven by the compare matrix + lane lifecycle — they are
+ * NEVER meant to persist as standalone restored tabs. A failed/aborted best-of-N
+ * left a dozen of them on disk that reopened as phantom "Agent working" tabs on
+ * every reboot (the `-cmp-` zombies). `stripOrchestratorZombies` only matched
+ * shape 1, so these survived. Strip any tab whose orchestrationPacket is a
+ * `-cmp-<n>` candidate.
+ *
  * Extend this function — not bespoke filters elsewhere — when new zombie
  * shapes are discovered. That's the whole point of having one source of truth.
  */
-export function stripPersistedTabs<T extends { id?: string; kind?: string }>(tabs: T[]): T[] {
+const COMPARISON_CANDIDATE_RE = /-cmp-\d+/;
+
+export function stripPersistedTabs<T extends {
+  id?: string;
+  kind?: string;
+  orchestrationPacket?: { packetId?: string; branchTarget?: string | null } | null;
+}>(tabs: T[]): T[] {
   return tabs.filter((tab) => {
     if (!tab || typeof tab !== 'object') return false;
     const id = typeof tab.id === 'string' ? tab.id : '';
     const kind = typeof tab.kind === 'string' ? tab.kind : '';
-    return !(kind !== 'orchestrator' && id.startsWith('orchestrator-'));
+    // Shape 1: orchestrator-prefixed id with a non-orchestrator kind.
+    if (kind !== 'orchestrator' && id.startsWith('orchestrator-')) return false;
+    // Shape 2 (#1293): best-of-N comparison candidate chat tabs.
+    const pkt = tab.orchestrationPacket;
+    if (pkt && (COMPARISON_CANDIDATE_RE.test(pkt.packetId ?? '') || COMPARISON_CANDIDATE_RE.test(pkt.branchTarget ?? ''))) {
+      return false;
+    }
+    return true;
   });
 }
 
