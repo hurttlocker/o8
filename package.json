@@ -14,7 +14,7 @@
     "dev:next": "sh -c 'next dev -p \"${PORT:-3001}\"'",
     "dev:ws": "NODE_OPTIONS=\"--import=./scripts/register-server-only-stub.mjs\" tsx src/ws-server.ts",
     "dev:all": "npm run dev:next & npm run dev:ws &",
-    "build": "sh -c 'env -u TURBOPACK NODE_ENV=production NODE_OPTIONS=--max-old-space-size=16384 next build --webpack'",
+    "build": "sh -c 'env -u TURBOPACK NODE_ENV=production NODE_OPTIONS=--max-old-space-size=24576 next build --webpack'",
     "start": "sh -c 'next start -p \"${PORT:-3001}\"'",
     "lint": "eslint .",
     "typecheck": "rm -rf .next/types .next/dev/types && next typegen && tsc --noEmit",
