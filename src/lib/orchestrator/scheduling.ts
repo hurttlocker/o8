@@ -450,64 +450,86 @@ export async function runDispatchTick(
           console.log(`[recovery] Packet ${candidate.id} recovery attempt ${recoveryCount}/${MAX_RECOVERY_DISPATCHES}`);
         }
 
-        const result = results[batchIndex];
-        if (result.status === 'fulfilled') {
-          if (result.value.kind === 'awaiting_review') {
+        // #1293 — a per-packet fold error (e.g. createLaneBinding → getLane, or a
+        // malformed dispatch result) must NEVER throw out of this .map. If it did,
+        // runDispatchTick would abort before the caller persists the dispatched
+        // state, leaving an already-dispatched packet stuck 'queued' — so the next
+        // tick re-dispatches it, opening a fresh lane + owned session every tick
+        // (the second runaway path, distinct from the seed re-fan). Catch
+        // per-packet so the tick always completes and persists; a fold failure
+        // degrades that single packet to 'blocked' (terminal for getDispatchBlocker).
+        try {
+          const result = results[batchIndex];
+          if (result.status === 'fulfilled') {
+            if (result.value.kind === 'awaiting_review') {
+              return {
+                ...candidate,
+                ...recoveryFields,
+                status: 'awaiting_review',
+                blockedReason: null,
+                lastEventAt: new Date().toISOString(),
+                lastEventLabel: 'session_recovery_autocommit',
+                lane: result.value.lane ?? candidate.lane ?? null,
+              };
+            }
+            const workerRouting = result.value.workerRouting;
+            if (!result.value.laneId) {
+              throw new Error('Dispatch returned no lane id.');
+            }
+
+            void publishRealtimeMutation({
+              mutation: {
+                mutationId: `packet-dispatch-${candidate.id}-${Date.now()}`,
+                source: 'server',
+                action: 'packet-dispatch',
+                status: 'completed',
+                runtime: workerRouting.selectedRuntime,
+                surfaceId: result.value.sessionKey ?? undefined,
+                sessionKey: result.value.sessionKey ?? undefined,
+                laneId: result.value.laneId ?? undefined,
+                packetId: candidate.id,
+                packetTitle: candidate.title,
+                packetReferenceLabel: candidate.referenceLabel,
+                repoPath: candidate.workspaceTargetPath ?? undefined,
+                branch: candidate.branchTarget,
+                note: `Dispatched ${candidate.referenceLabel} to ${workerRouting.selectedRuntime}`,
+                createdAt: new Date().toISOString(),
+                settledAt: new Date().toISOString(),
+              },
+              refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
+              sessionKeys: result.value.sessionKey ? [result.value.sessionKey] : [],
+              fresh: true,
+            });
             return {
               ...candidate,
               ...recoveryFields,
-              status: 'awaiting_review',
+              runtime: workerRouting.selectedRuntime,
+              workerIntent: workerRouting.workerIntent,
+              workerRouting,
+              status: 'launching',
               blockedReason: null,
-              lastEventAt: new Date().toISOString(),
-              lastEventLabel: 'session_recovery_autocommit',
-              lane: result.value.lane ?? candidate.lane ?? null,
+              lane: createLaneBinding(candidate, result.value.laneId, result.value.sessionKey, workerRouting),
             };
           }
-          const workerRouting = result.value.workerRouting;
 
-          void publishRealtimeMutation({
-            mutation: {
-              mutationId: `packet-dispatch-${candidate.id}-${Date.now()}`,
-              source: 'server',
-              action: 'packet-dispatch',
-              status: 'completed',
-              runtime: workerRouting.selectedRuntime,
-              surfaceId: result.value.sessionKey ?? undefined,
-              sessionKey: result.value.sessionKey ?? undefined,
-              laneId: result.value.laneId ?? undefined,
-              packetId: candidate.id,
-              packetTitle: candidate.title,
-              packetReferenceLabel: candidate.referenceLabel,
-              repoPath: candidate.workspaceTargetPath ?? undefined,
-              branch: candidate.branchTarget,
-              note: `Dispatched ${candidate.referenceLabel} to ${workerRouting.selectedRuntime}`,
-              createdAt: new Date().toISOString(),
-              settledAt: new Date().toISOString(),
-            },
-            refreshTargets: ['global', 'mobileInbox', 'sessionHistory'],
-            sessionKeys: result.value.sessionKey ? [result.value.sessionKey] : [],
-            fresh: true,
-          });
+          const reason = result.reason instanceof Error ? result.reason.message : 'Dispatch failed.';
+          console.error(`[dag-scheduler] Failed to dispatch packet ${candidate.id}: ${reason}`);
           return {
             ...candidate,
             ...recoveryFields,
-            runtime: workerRouting.selectedRuntime,
-            workerIntent: workerRouting.workerIntent,
-            workerRouting,
-            status: 'launching',
-            blockedReason: null,
-            lane: createLaneBinding(candidate, result.value.laneId!, result.value.sessionKey, workerRouting),
+            status: 'blocked',
+            blockedReason: reason,
+          };
+        } catch (foldErr) {
+          const msg = foldErr instanceof Error ? foldErr.message : 'Dispatch post-processing failed.';
+          console.error(`[dag-scheduler] Fold-back error for ${candidate.id} — marking blocked so the tick can't loop:`, msg);
+          return {
+            ...candidate,
+            ...recoveryFields,
+            status: 'blocked',
+            blockedReason: msg,
           };
         }
-
-        const reason = result.reason instanceof Error ? result.reason.message : 'Dispatch failed.';
-        console.error(`[dag-scheduler] Failed to dispatch packet ${candidate.id}: ${reason}`);
-        return {
-          ...candidate,
-          ...recoveryFields,
-          status: 'blocked',
-          blockedReason: reason,
-        };
       }),
     });
   }
