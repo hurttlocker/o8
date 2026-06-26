@@ -2,67 +2,81 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
-import { browserAgentEval, buildNativeVerbEval } from '@/lib/mcp/o8-webview-tools';
+import { browserAgentEval, nativeReturnEval } from '@/lib/mcp/o8-webview-tools';
 import { getBrowserEngine } from '@/lib/browser-engine/engine';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
-import { getApiBase } from '@/lib/panel/api-port';
-import { newNativeCid, awaitNativeResult } from '@/lib/browser/native-result-registry';
 
 type EmbeddedVerb = 'read' | 'click' | 'type' | 'probe' | 'grab';
 
 /**
- * Try a verb against the NATIVE browser-view window (Stage 4). Triggered from the
- * main webview (which has IPC): `browser_view_eval` evals the verb into
- * browser-view and returns whether the window existed; the verb POSTs its result
- * to the cid-only sink, which resolves the pending promise here. Returns
- * `{ handled: false }` when the native window isn't up, so the caller falls back
- * to the iframe path.
+ * Try a verb against the NATIVE browser-view window (Stage 4). The host evals the
+ * verb into the browser-view and PULLS its JSON result back via
+ * `browser_view_eval_result` (WKWebView evaluateJavaScript return value) — the
+ * page can't POST results to o8's HTTP server from an HTTPS origin (mixed content
+ * → "Load failed"), so the host reads the value instead of the page pushing it.
+ * Returns `{ handled: false }` when the native window isn't up, so the caller
+ * falls back to the iframe path.
  */
 async function tryNativeVerb(
   client: O8WebviewClient,
   verb: EmbeddedVerb,
   args: Record<string, unknown>,
 ): Promise<{ handled: boolean; result?: string }> {
-  const cid = newNativeCid();
-  const resultUrl = `${getApiBase()}/api/browser/native-result`;
-  const agentJs = buildNativeVerbEval(verb, args, cid, resultUrl);
-  const triggerCode = `(async () => { try { const ok = await window.__TAURI_INTERNALS__.invoke('browser_view_eval', { js: ${JSON.stringify(agentJs)} }); return JSON.stringify({ dispatched: ok === true }); } catch (e) { return JSON.stringify({ dispatched: false, error: String((e && e.message) || e) }); } })()`;
-  let dispatched = false;
+  const agentJs = nativeReturnEval(verb, args);
+  const triggerCode = `(async () => { try { const r = await window.__TAURI_INTERNALS__.invoke('browser_view_eval_result', { js: ${JSON.stringify(agentJs)}, timeoutMs: 8000 }); return JSON.stringify({ open: true, result: r }); } catch (e) { const m = String((e && e.message) || e); return JSON.stringify({ open: !/not open/i.test(m), error: m }); } })()`;
   try {
     const triggerResult = await client.evalJs(triggerCode);
-    dispatched = JSON.parse(triggerResult.result).dispatched === true;
+    const parsed = JSON.parse(triggerResult.result) as { open?: boolean; result?: string };
+    if (parsed.open !== true) return { handled: false };
+    const result = typeof parsed.result === 'string' && parsed.result.length
+      ? parsed.result
+      : '{"ok":false,"error":"empty native result"}';
+    return { handled: true, result };
   } catch {
-    dispatched = false;
+    return { handled: false };
   }
-  if (!dispatched) return { handled: false };
-  const payload = await awaitNativeResult(cid, 8000);
-  return { handled: true, result: JSON.stringify(payload) };
 }
 
 /**
  * Stage 4b — Design Mode click-to-grab over the native window. The click lands in
  * the native window, so the in-page agent installs a hover-highlight + one-shot
- * click handler (startDesignGrab) and POSTs the GrabbedElement back through the
- * cid-only channel. We await the operator's click (long timeout). Returns the
- * grab envelope, or an error if the native window isn't open.
+ * click handler (startDesignGrab) that stores the GrabbedElement on
+ * `window.__o8DesignGrabResult`. We arm it, then PULL that sink via the host
+ * (browser_view_eval_result) every 350ms while the operator hovers + clicks — the
+ * page can't POST from an HTTPS origin (mixed content). Returns the grab envelope,
+ * or an error if the native window isn't open / the operator never clicks.
  */
 async function startNativeDesignGrab(client: O8WebviewClient): Promise<string> {
-  const cid = newNativeCid();
-  const resultUrl = `${getApiBase()}/api/browser/native-result`;
-  const startJs = `(function(){ try { if (window.__o8BrowserAgent && window.__o8BrowserAgent.startDesignGrab) window.__o8BrowserAgent.startDesignGrab(${JSON.stringify(cid)}, ${JSON.stringify(resultUrl)}); } catch (e) {} })()`;
-  const triggerCode = `(async () => { try { const ok = await window.__TAURI_INTERNALS__.invoke('browser_view_eval', { js: ${JSON.stringify(startJs)} }); return JSON.stringify({ dispatched: ok === true }); } catch (e) { return JSON.stringify({ dispatched: false }); } })()`;
-  let dispatched = false;
+  const armJs = `(function(){ try { window.__o8DesignGrabResult = null; if (window.__o8BrowserAgent && window.__o8BrowserAgent.startDesignGrab) window.__o8BrowserAgent.startDesignGrab(); } catch (e) {} return { armed: true }; })()`;
+  const armTrigger = `(async () => { try { await window.__TAURI_INTERNALS__.invoke('browser_view_eval_result', { js: ${JSON.stringify(armJs)}, timeoutMs: 4000 }); return JSON.stringify({ open: true }); } catch (e) { const m = String((e && e.message) || e); return JSON.stringify({ open: !/not open/i.test(m) }); } })()`;
+  let open = false;
   try {
-    const triggerResult = await client.evalJs(triggerCode);
-    dispatched = JSON.parse(triggerResult.result).dispatched === true;
+    const triggerResult = await client.evalJs(armTrigger);
+    open = JSON.parse(triggerResult.result).open === true;
   } catch {
-    dispatched = false;
+    open = false;
   }
-  if (!dispatched) return JSON.stringify({ ok: false, error: 'native browser-view not open' });
-  // 3 minutes for the operator to hover + click the element they want.
-  const payload = await awaitNativeResult(cid, 180_000);
-  return JSON.stringify(payload);
+  if (!open) return JSON.stringify({ ok: false, error: 'native browser-view not open' });
+
+  // Poll the grab sink for up to 3 minutes while the operator hovers + clicks. The
+  // sink read clears itself so the next session starts fresh.
+  const pollJs = `(function(){ var r = window.__o8DesignGrabResult; if (r) { window.__o8DesignGrabResult = null; return r; } return null; })()`;
+  const pollTrigger = `(async () => { try { const r = await window.__TAURI_INTERNALS__.invoke('browser_view_eval_result', { js: ${JSON.stringify(pollJs)}, timeoutMs: 4000 }); return JSON.stringify({ r: r }); } catch (e) { return JSON.stringify({ r: null }); } })()`;
+  const deadline = Date.now() + 180_000;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 350));
+    let r: string | null = null;
+    try {
+      const triggerResult = await client.evalJs(pollTrigger);
+      r = (JSON.parse(triggerResult.result) as { r?: string | null }).r ?? null;
+    } catch {
+      r = null;
+    }
+    // eval_result NSJSON-encodes the sink: '' (unset) → keep polling; else grab JSON.
+    if (r && r.length > 0) return r;
+  }
+  return JSON.stringify({ ok: false, error: 'design-grab timed out' });
 }
 
 /** Tear down the in-page design-grab handler (Design Mode toggled off). */
