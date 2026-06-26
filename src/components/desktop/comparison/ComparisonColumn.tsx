@@ -5,6 +5,7 @@ import type { CSSProperties } from 'react';
 import { useWorkspaceChanges } from '@/components/desktop/o8-panel/workspace-rail/ChangesList';
 import { ReviewFileRow } from '@/components/desktop/review/panel/ReviewFileRow';
 import type { ComparisonCandidate } from './useComparisonGroups';
+import { useMergePreview } from './useMergePreview';
 
 /**
  * One column of the N-up compare matrix — a single best-of-N candidate's diff,
@@ -25,6 +26,9 @@ const COLUMN_MIN_WIDTH = 440;
 
 export function ComparisonColumn({ candidate, index }: { candidate: ComparisonCandidate; index: number }) {
   const changes = useWorkspaceChanges(candidate.worktreePath);
+  // Dry-run the merge gate once the candidate is settled — the column shows its
+  // verdict (passes / blocked-by) so the operator picks with the gate in view.
+  const preview = useMergePreview(candidate.packet.id, candidate.complete);
   const { packet } = candidate;
   const model = packet.assignedModel || packet.runtime || `candidate ${index + 1}`;
   const fileCount = changes.files.length;
@@ -89,6 +93,34 @@ export function ComparisonColumn({ candidate, index }: { candidate: ComparisonCa
             ? 'loading…'
             : `${fileCount} file${fileCount === 1 ? '' : 's'} · +${changes.totalAdditions} −${changes.totalDeletions}`}
         </span>
+        {candidate.complete ? (
+          <div style={{ display: 'flex', alignItems: 'center', gap: 5, marginTop: 1, minWidth: 0 }}>
+            {preview.loading ? (
+              <span style={{ fontSize: 10, fontWeight: 260, letterSpacing: '-0.2px', color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                checking gate…
+              </span>
+            ) : preview.wouldMerge === true ? (
+              <>
+                <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--t-success, #3fb950)', flexShrink: 0 }} />
+                <span style={{ fontSize: 10, fontWeight: 400, letterSpacing: '-0.2px', color: 'var(--t-success, #3fb950)' }}>Passes gate</span>
+              </>
+            ) : preview.wouldMerge === false ? (
+              <>
+                <span aria-hidden style={{ width: 6, height: 6, borderRadius: 999, background: 'var(--t-warning, #d29922)', flexShrink: 0 }} />
+                <span
+                  title={preview.blockers.join(', ')}
+                  style={{ fontSize: 10, fontWeight: 400, letterSpacing: '-0.2px', color: 'var(--t-warning, #d29922)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+                >
+                  {preview.blockers.length ? `Blocked: ${preview.blockers.join(', ')}` : 'Blocked by gate'}
+                </span>
+              </>
+            ) : (
+              <span style={{ fontSize: 10, fontWeight: 260, letterSpacing: '-0.2px', color: 'var(--t-text-faint)', fontFamily: '"SF Mono", ui-monospace, monospace' }}>
+                gate unavailable
+              </span>
+            )}
+          </div>
+        ) : null}
       </div>
       <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden' }}>
         {changes.error ? (
