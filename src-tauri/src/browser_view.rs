@@ -150,6 +150,72 @@ pub fn eval(app: &tauri::AppHandle, js: &str) -> bool {
     }
 }
 
+/// Eval `js` in the browser-view and RETURN its result (JSON-encoded).
+///
+/// Unlike `eval` (fire-and-forget), this captures the WKWebView
+/// `evaluateJavaScript:completionHandler:` return value — the host reading a value
+/// back from a webview it OWNS, which works at ANY page origin. That is the fix for
+/// the agent result channel: the in-page agent's own `fetch` POST to the local o8
+/// server is App-Transport-Security / mixed-content blocked on HTTPS pages
+/// (`TypeError: Load failed`), so the host PULLS the JSON the verb returns instead
+/// of the page pushing it over HTTP. `js` should evaluate to a JSON-serializable
+/// value; the completion result is NSJSON-encoded to a string (null → empty). Errs
+/// if the window is gone or the completion never fires within `timeout_ms`.
+#[cfg(target_os = "macos")]
+pub async fn eval_result(app: &tauri::AppHandle, js: String, timeout_ms: u64) -> Result<String, String> {
+    use tauri::Manager;
+    let win = app
+        .get_webview_window(BROWSER_VIEW_LABEL)
+        .ok_or_else(|| "browser-view not open".to_string())?;
+
+    let (tx, rx) = tokio::sync::oneshot::channel::<String>();
+    let tx = std::sync::Mutex::new(Some(tx));
+
+    win.with_webview(move |webview| {
+        // with_webview runs this closure on the main thread; WKWebView is
+        // main-thread only. The completion handler fires LATER on the main thread —
+        // safe because the awaiting command runs on the async runtime, not main.
+        use block2::RcBlock;
+        use objc2::{runtime::AnyObject, AnyThread};
+        use objc2_foundation::{
+            NSError, NSJSONSerialization, NSJSONWritingOptions, NSString, NSUTF8StringEncoding,
+        };
+        use objc2_web_kit::WKWebView;
+        // Safety: Tauri hands us the live WKWebView for this window's lifetime; the
+        // objc2 calls below mirror wry's own `eval` completion-handler path.
+        unsafe {
+            let view: &WKWebView = &*webview.inner().cast();
+            let handler = RcBlock::new(move |val: *mut AnyObject, _err: *mut NSError| {
+                let mut result = String::new();
+                if !val.is_null() {
+                    if let Ok(data) = NSJSONSerialization::dataWithJSONObject_options_error(
+                        &*val,
+                        NSJSONWritingOptions::FragmentsAllowed,
+                    ) {
+                        let s = NSString::alloc();
+                        if let Some(s) = NSString::initWithData_encoding(s, &data, NSUTF8StringEncoding) {
+                            result = s.to_string();
+                        }
+                    }
+                }
+                if let Ok(mut guard) = tx.lock() {
+                    if let Some(tx) = guard.take() {
+                        let _ = tx.send(result);
+                    }
+                }
+            });
+            view.evaluateJavaScript_completionHandler(&NSString::from_str(&js), Some(&handler));
+        }
+    })
+    .map_err(|e| format!("with_webview failed: {e}"))?;
+
+    match tokio::time::timeout(std::time::Duration::from_millis(timeout_ms), rx).await {
+        Ok(Ok(s)) => Ok(s),
+        Ok(Err(_)) => Err("browser-view eval channel closed".to_string()),
+        Err(_) => Err("browser-view eval timed out".to_string()),
+    }
+}
+
 /// Navigate the existing child window to a new URL (URL bar / tab switch /
 /// reload). No-op if the window isn't open.
 #[cfg(target_os = "macos")]
@@ -269,6 +335,10 @@ pub fn set_rect(_app: &tauri::AppHandle, _x: f64, _y: f64, _w: f64, _h: f64) {}
 #[cfg(not(target_os = "macos"))]
 pub fn eval(_app: &tauri::AppHandle, _js: &str) -> bool {
     false
+}
+#[cfg(not(target_os = "macos"))]
+pub async fn eval_result(_app: &tauri::AppHandle, _js: String, _timeout_ms: u64) -> Result<String, String> {
+    Err("native browser-view is macOS-only".to_string())
 }
 #[cfg(not(target_os = "macos"))]
 pub fn navigate(_app: &tauri::AppHandle, _url: &str) -> Result<(), String> {

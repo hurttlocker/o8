@@ -3070,6 +3070,20 @@ fn browser_view_eval(app: tauri::AppHandle, js: String) -> bool {
     browser_view::eval(&app, &js)
 }
 
+/// Eval `js` into the browser-view and RETURN its JSON result (the host pulling a
+/// value back from a webview it owns — works at ANY page origin, unlike the in-page
+/// agent's own fetch which HTTPS mixed-content blocks). `/api/browser/agent` uses
+/// this to read verb results + poll the design-grab sink. `timeoutMs` default 8s.
+#[cfg(target_os = "macos")]
+#[tauri::command(rename_all = "camelCase")]
+async fn browser_view_eval_result(
+    app: tauri::AppHandle,
+    js: String,
+    timeout_ms: Option<u64>,
+) -> Result<String, String> {
+    browser_view::eval_result(&app, js, timeout_ms.unwrap_or(8000)).await
+}
+
 /// Capture the browser-view window's on-screen content as a base64 PNG (occlusion
 /// snapshot-swap, Stage 5). The native window composites above o8's web content,
 /// so before hiding it for an overlay/drag we paint this last frame into the
@@ -3814,6 +3828,8 @@ pub fn run() {
             browser_view_navigate,
             #[cfg(target_os = "macos")]
             browser_view_eval,
+            #[cfg(target_os = "macos")]
+            browser_view_eval_result,
             #[cfg(target_os = "macos")]
             browser_view_capture,
             #[cfg(target_os = "macos")]
