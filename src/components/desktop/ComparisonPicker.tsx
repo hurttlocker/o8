@@ -10,6 +10,9 @@ interface ComparisonPickerProps {
   packets: OrchestratorPacket[];
   onPickWinner: (packetId: string) => void | Promise<void>;
   onDismiss: () => void;
+  /** Open the full N-up diff matrix (the compare O8Panel tab). When omitted, the
+   *  inline summary picker stands alone. */
+  onCompareDiffs?: () => void;
 }
 
 type PacketChangeCountMap = Record<string, number | null | undefined>;
@@ -80,6 +83,7 @@ export function ComparisonPicker({
   packets,
   onPickWinner,
   onDismiss,
+  onCompareDiffs,
 }: ComparisonPickerProps) {
   const [busyPacketId, setBusyPacketId] = useState<string | null>(null);
   const [changeCounts, setChangeCounts] = useState<PacketChangeCountMap>({});
@@ -203,6 +207,36 @@ export function ComparisonPicker({
           {orderedPackets.length}
         </div>
       </div>
+
+      {onCompareDiffs ? (
+        <button
+          type="button"
+          onClick={onCompareDiffs}
+          style={{
+            alignSelf: 'flex-start',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 6,
+            height: 30,
+            paddingTop: 0,
+            paddingBottom: 0,
+            paddingLeft: 12,
+            paddingRight: 12,
+            borderRadius: 8,
+            borderWidth: 1,
+            borderStyle: 'solid',
+            borderColor: 'var(--t-brand-orange, #FF5A1F)',
+            background: 'rgba(255, 90, 31, 0.08)',
+            color: 'var(--t-brand-orange, #FF5A1F)',
+            fontSize: 12,
+            fontWeight: 500,
+            letterSpacing: '-0.1px',
+            cursor: 'pointer',
+          }}
+        >
+          Compare diffs side by side
+        </button>
+      ) : null}
 
       <div
         style={{

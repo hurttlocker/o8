@@ -143,7 +143,9 @@ export function O8HeaderTabs({
   activeTab: O8Tab;
   onTabChange: (tab: O8Tab) => void;
 }) {
-  const visualActiveTab = activeTab === 'prs' ? 'activity' : activeTab;
+  // prs + compare are contextual surfaces without their own header pill — keep
+  // the Activity pill lit while they're active so the row doesn't look unselected.
+  const visualActiveTab = activeTab === 'prs' || activeTab === 'compare' ? 'activity' : activeTab;
 
   return (
     <div
