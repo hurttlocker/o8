@@ -121,7 +121,11 @@ libc = "0.2"
 #   - core-foundation: CFDictionary/CFString/CFRunLoop for the AX + tap plumbing.
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.6"
-objc2-foundation = "0.3"
+# NSString/NSData/NSJSONSerialization power browser_view::eval_result — the host
+# reads the WKWebView evaluateJavaScript return value back as JSON (see browser_view.rs).
+objc2-foundation = { version = "0.3", features = ["NSString", "NSData", "NSJSONSerialization", "NSError"] }
+# WKWebView.evaluateJavaScript_completionHandler for the same eval-with-return path.
+objc2-web-kit = { version = "0.3", features = ["WKWebView", "block2"] }
 core-graphics = "0.24"
 core-foundation = "0.10"
 objc2-app-kit = { version = "0.3", features = ["NSWorkspace", "NSRunningApplication", "NSPasteboard", "NSWindow", "NSScreen", "NSColor", "NSResponder", "NSView", "NSGraphics", "NSUserInterfaceItemIdentification"] }
