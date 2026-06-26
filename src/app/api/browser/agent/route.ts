@@ -41,6 +41,42 @@ async function tryNativeVerb(
 }
 
 /**
+ * Stage 4b — Design Mode click-to-grab over the native window. The click lands in
+ * the native window, so the in-page agent installs a hover-highlight + one-shot
+ * click handler (startDesignGrab) and POSTs the GrabbedElement back through the
+ * cid-only channel. We await the operator's click (long timeout). Returns the
+ * grab envelope, or an error if the native window isn't open.
+ */
+async function startNativeDesignGrab(client: O8WebviewClient): Promise<string> {
+  const cid = newNativeCid();
+  const resultUrl = `${getApiBase()}/api/browser/native-result`;
+  const startJs = `(function(){ try { if (window.__o8BrowserAgent && window.__o8BrowserAgent.startDesignGrab) window.__o8BrowserAgent.startDesignGrab(${JSON.stringify(cid)}, ${JSON.stringify(resultUrl)}); } catch (e) {} })()`;
+  const triggerCode = `(async () => { try { const ok = await window.__TAURI_INTERNALS__.invoke('browser_view_eval', { js: ${JSON.stringify(startJs)} }); return JSON.stringify({ dispatched: ok === true }); } catch (e) { return JSON.stringify({ dispatched: false }); } })()`;
+  let dispatched = false;
+  try {
+    const triggerResult = await client.evalJs(triggerCode);
+    dispatched = JSON.parse(triggerResult.result).dispatched === true;
+  } catch {
+    dispatched = false;
+  }
+  if (!dispatched) return JSON.stringify({ ok: false, error: 'native browser-view not open' });
+  // 3 minutes for the operator to hover + click the element they want.
+  const payload = await awaitNativeResult(cid, 180_000);
+  return JSON.stringify(payload);
+}
+
+/** Tear down the in-page design-grab handler (Design Mode toggled off). */
+async function stopNativeDesignGrab(client: O8WebviewClient): Promise<void> {
+  const stopJs = `(function(){ try { if (window.__o8BrowserAgent && window.__o8BrowserAgent.stopDesignGrab) window.__o8BrowserAgent.stopDesignGrab(); } catch (e) {} })()`;
+  const triggerCode = `(async () => { try { await window.__TAURI_INTERNALS__.invoke('browser_view_eval', { js: ${JSON.stringify(stopJs)} }); return '1'; } catch (e) { return '0'; } })()`;
+  try {
+    await client.evalJs(triggerCode);
+  } catch {
+    // best-effort teardown
+  }
+}
+
+/**
  * Browser-verb bridge for the `o8 browser` CLI (#1232) — gated in middleware
  * (loopback + token). Two tiers behind one contract:
  *
@@ -59,7 +95,7 @@ async function tryNativeVerb(
  * trail as a `browser_acted` event.
  */
 
-const VERBS = new Set(['read', 'click', 'type', 'probe', 'grab', 'open', 'close']);
+const VERBS = new Set(['read', 'click', 'type', 'probe', 'grab', 'open', 'close', 'designgrab', 'stopdesigngrab']);
 
 interface AgentBody {
   verb?: unknown;
@@ -150,6 +186,22 @@ export async function POST(request: NextRequest) {
   const args = (body?.args && typeof body.args === 'object' ? body.args : {}) as Record<string, unknown>;
   const packetId = typeof body?.packetId === 'string' && body.packetId ? body.packetId : null;
   const scope = packetId ?? 'operator';
+
+  // Native-only Design Mode click-to-grab (Stage 4b) — handled before engine
+  // routing (it drives the native browser-view agent, never the engine tier).
+  if (verb === 'designgrab' || verb === 'stopdesigngrab') {
+    try {
+      const client = webviewClient();
+      if (verb === 'designgrab') {
+        const result = await startNativeDesignGrab(client);
+        return new NextResponse(result, { headers: { 'content-type': 'application/json' } });
+      }
+      await stopNativeDesignGrab(client);
+      return NextResponse.json({ ok: true });
+    } catch (error) {
+      return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : 'design-grab failed' });
+    }
+  }
 
   // Tier routing — explicit surface wins; `open` splits on URL locality;
   // other verbs stick with the engine once the scope has a live page.
