@@ -237,7 +237,20 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     shownUrl.current = url;
     void browserViewOpen(url, rect, NATIVE_BROWSER_AGENT_SOURCE);
     scheduleSnapshot();
-  }, [url, computeRect, measureZoom, scheduleSnapshot]);
+    // Self-correct a stale open rect. The panel/window layout may not be settled
+    // when the tab first opens — especially right after the operator moves the
+    // o8 window between displays (mixed scale factors) — so re-measure the zoom +
+    // reposition a couple of beats later. syncRect dedupes, so a no-op when the
+    // first rect was already correct.
+    [160, 500].forEach((delay) => {
+      setTimeout(() => {
+        if (visibleRef.current && !occludedRef.current) {
+          measureZoom();
+          syncRect();
+        }
+      }, delay);
+    });
+  }, [url, computeRect, measureZoom, scheduleSnapshot, syncRect]);
 
   // Visibility: open when the placeholder appears on screen, hide when it leaves
   // (tab switched away → display:none → not intersecting). The native window is a
