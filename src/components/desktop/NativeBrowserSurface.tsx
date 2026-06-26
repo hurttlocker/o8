@@ -160,15 +160,36 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
   }, [syncRect, scheduleSnapshot]);
 
   /** Detect an o8 overlay painting over the browser rect: sample the rect's
-   *  center + corners with elementsFromPoint (CSS/layout coords). If the topmost
-   *  hit-testable element at any sample isn't the placeholder, something is on
-   *  top → occluded. The snapshot img is pointer-events:none so it's transparent
-   *  to this probe. */
+   *  center + corners with elementsFromPoint (CSS/layout coords). A hit only
+   *  counts as occluding if it actually PAINTS something visible — walk up from
+   *  the hit element and require a non-transparent background / image / blur
+   *  before reaching the placeholder. This skips the transparent full-screen
+   *  click-catcher wrappers that popovers/menus mount (which cover the rect but
+   *  paint nothing — a false hide otherwise). The snapshot img is
+   *  pointer-events:none so it's transparent to this probe. */
   const checkOcclusion = useCallback(() => {
     const el = ref.current;
     if (!el || !visibleRef.current) return;
     const r = el.getBoundingClientRect();
     if (r.width < 4 || r.height < 4) return;
+    const paintsVisibly = (hit: Element): boolean => {
+      let n: Element | null = hit;
+      for (let i = 0; i < 6 && n && n !== document.body; i++) {
+        if (n === el || el.contains(n)) return false; // reached the placeholder — not an occluder
+        const cs = getComputedStyle(n);
+        if (cs.backgroundImage && cs.backgroundImage !== 'none') return true;
+        if (cs.backdropFilter && cs.backdropFilter !== 'none') return true;
+        const bg = cs.backgroundColor || '';
+        if (bg && bg !== 'transparent') {
+          const m = bg.match(/rgba?\(([^)]+)\)/);
+          const parts = m ? m[1].split(',') : [];
+          const alpha = parts.length >= 4 ? parseFloat(parts[3]) : 1;
+          if (alpha > 0.02) return true;
+        }
+        n = n.parentElement;
+      }
+      return false;
+    };
     const inset = 6;
     const pts: Array<[number, number]> = [
       [r.left + r.width / 2, r.top + r.height / 2],
@@ -180,7 +201,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     let occluded = false;
     for (const [px, py] of pts) {
       const top = document.elementsFromPoint(px, py)[0];
-      if (top && top !== el && !el.contains(top) && !top.contains(el)) {
+      if (top && top !== el && !el.contains(top) && !top.contains(el) && paintsVisibly(top)) {
         occluded = true;
         break;
       }
