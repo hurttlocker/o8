@@ -18,6 +18,7 @@ import { openExternalUrl } from '@/lib/desktop/open-external';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import { installBrowserAgent } from '@/lib/browser-agent/page-agent';
 import { isTauri, browserViewNavigate } from '@/lib/tauri/bridge';
+import { useNativeBrowserViewFlag } from '@/lib/operator/use-native-browser-view';
 import { O8EnginePane } from './O8EnginePane';
 import { NativeBrowserSurface } from './NativeBrowserSurface';
 
@@ -115,15 +116,13 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
    *  engine's real Chrome instead, where they render + stay grabbable. */
   const [engineUrls, setEngineUrls] = useState<Set<string>>(() => new Set());
   /** Native browser-view path (docs/native-browser-webview-spec.md). Operator
-   *  opt-in via localStorage `o8:native-browser-view=1`; Stage 6 promotes it to
-   *  a Settings toggle + flips the default. Only in Tauri — the native child
-   *  window can't exist in the web/dev preview, where the iframe is the default.
-   *  When on, the native surface renders ANY url (incl. origin-locked Clerk), so
-   *  the proxy/iframe + engine-blank fallback are bypassed for tabs with a url. */
-  const [nativeEnabled] = useState<boolean>(() => {
-    if (!isTauri()) return false;
-    try { return window.localStorage.getItem('o8:native-browser-view') === '1'; } catch { return false; }
-  });
+   *  setting `nativeBrowserView` (default ON, Settings → Operator Defaults);
+   *  only in Tauri — the native child window can't exist in the web/dev preview,
+   *  where the iframe is the default. When on, the native surface renders ANY url
+   *  (incl. origin-locked Clerk), so the proxy/iframe + engine-blank fallback are
+   *  bypassed for tabs with a url. */
+  const [inTauri] = useState<boolean>(() => isTauri());
+  const nativeEnabled = useNativeBrowserViewFlag() && inTauri;
 
   // Agent verbs (o8_browser_* / `o8 browser`) drive this pane's iframe too.
   useEffect(() => { installBrowserAgent(); }, []);
