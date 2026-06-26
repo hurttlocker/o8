@@ -111,6 +111,11 @@ export const MISSION_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Huddle mode — a bidirectional alignment turn. When true, each worker reads the repo then posts its plan + any pushback (`o8 packet report --event huddle`) and STOPS before editing; you review it (the packet flips to awaiting_orchestrator) and steer it (steer_packet) to align before it implements. Arm it ONLY on packets worth aligning on first — ambiguous scope, risky/cross-cutting, or novel work. Omit (default off) for clear, well-specced packets so they don\'t pay the extra round-trip.',
         },
+        comparisonModels: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Best-of-N — race the task across N candidates (one per model string), each in its own isolated worktree. The operator then compares the N diffs side-by-side and merges the winner through the review gate, archiving the losers. Same model repeated (["codex","codex","codex"]) runs N attempts of one runtime; mix runtimes (["codex","gemini"]) to compare them. Max 4. Omit for a single packet. Use when a task is worth a bake-off — risky, ambiguous, or when you want the best of several attempts.',
+        },
       },
       required: ['repoPath'],
     },
@@ -802,6 +807,12 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const existingBranchPolicy = parseExistingBranchPolicy(args.existingBranchPolicy);
     const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
     const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
+    // Best-of-N (item 3): clamp candidates to ≤4 (the handler calls the service
+    // directly, so it does its own clamp like the create-mission route does).
+    const comparisonModelsRaw = Array.isArray(args.comparisonModels)
+      ? args.comparisonModels.map((model) => String(model).trim()).filter(Boolean).slice(0, 4)
+      : [];
+    const comparisonModels = comparisonModelsRaw.length > 0 ? comparisonModelsRaw : undefined;
 
     if (inlineIssues) {
       // #453 — Auto-assign synthetic numbers starting at 90001 when not provided
@@ -825,6 +836,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         existingBranchPolicy,
         useBrain,
         huddle,
+        comparisonModels,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
@@ -856,6 +868,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       existingBranchPolicy,
       useBrain,
       huddle,
+      comparisonModels,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {
