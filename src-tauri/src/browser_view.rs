@@ -198,6 +198,12 @@ pub async fn eval_result(app: &tauri::AppHandle, js: String, timeout_ms: u64) ->
                         }
                     }
                 }
+                // JS `null`/`undefined` return as NSNull (a real object, not nil), so
+                // NSJSON yields the string "null". Normalize to empty so callers can
+                // treat "" as "no value yet" — the design-grab poll depends on this.
+                if result == "null" {
+                    result.clear();
+                }
                 if let Ok(mut guard) = tx.lock() {
                     if let Some(tx) = guard.take() {
                         let _ = tx.send(result);
