@@ -3070,6 +3070,18 @@ fn browser_view_eval(app: tauri::AppHandle, js: String) -> bool {
     browser_view::eval(&app, &js)
 }
 
+/// Capture the browser-view window's on-screen content as a base64 PNG (occlusion
+/// snapshot-swap, Stage 5). The native window composites above o8's web content,
+/// so before hiding it for an overlay/drag we paint this last frame into the
+/// placeholder — the page reads as frozen, not blank. Same `screencapture -R`
+/// region grab as the report-issue capture; None if the window is gone or Screen
+/// Recording isn't granted.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+fn browser_view_capture(app: tauri::AppHandle) -> Option<String> {
+    agent::screen::capture_window(&app, browser_view::BROWSER_VIEW_LABEL)
+}
+
 /// Close + destroy the browser-view child window (Browser tab closed / teardown).
 #[cfg(target_os = "macos")]
 #[tauri::command]
@@ -3802,6 +3814,8 @@ pub fn run() {
             browser_view_navigate,
             #[cfg(target_os = "macos")]
             browser_view_eval,
+            #[cfg(target_os = "macos")]
+            browser_view_capture,
             #[cfg(target_os = "macos")]
             browser_view_close,
             #[cfg(target_os = "macos")]
