@@ -168,15 +168,21 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     if (!el) return;
     const ro = new ResizeObserver(() => syncRect());
     ro.observe(el);
-    // A window resize is also where page-zoom changes surface (Cmd +/- changes
-    // innerWidth/innerHeight) — remeasure the zoom before repositioning. Scroll
-    // and panel-divider drags (ResizeObserver) don't change zoom, so they skip it.
+    // A window resize is also where page-zoom changes surface — remeasure the
+    // zoom before repositioning. Scroll and panel-divider drags (ResizeObserver)
+    // don't change zoom, so they skip it.
     const onResize = () => { measureZoom(); syncRect(); };
     const onScroll = () => syncRect();
     window.addEventListener('resize', onResize);
     window.addEventListener('scroll', onScroll, true);
+    // The o8 UI-zoom (lib/appearance/ui-zoom.ts) sets html.style.zoom, which does
+    // NOT fire a window resize — observe the <html> style so the native window
+    // tracks a live zoom change instead of drifting until the next reopen.
+    const htmlObserver = new MutationObserver(() => { measureZoom(); syncRect(); });
+    htmlObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] });
     return () => {
       ro.disconnect();
+      htmlObserver.disconnect();
       window.removeEventListener('resize', onResize);
       window.removeEventListener('scroll', onScroll, true);
     };
