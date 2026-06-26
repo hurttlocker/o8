@@ -1062,6 +1062,7 @@ function OrchestratorTabInner({
               packets={group.packets}
               onPickWinner={handlePickComparisonWinner}
               onDismiss={() => handleDismissComparisonGroup(group.groupId)}
+              onCompareDiffs={() => data?.onOpenO8Panel?.({ tab: 'compare' })}
             />
           ))}
         </div>

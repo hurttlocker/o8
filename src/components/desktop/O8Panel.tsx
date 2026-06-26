@@ -16,6 +16,9 @@ import { O8BrowserPane } from './O8BrowserPane';
 import { O8InboxPane } from './O8InboxPane';
 import { O8SpecPane } from './o8-panel/O8SpecPane';
 import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
+import { ComparisonMatrix } from './comparison/ComparisonMatrix';
+import { useComparisonGroups } from './comparison/useComparisonGroups';
+import { useOrchestratorData } from './orchestrator-data-context';
 import { ReviewPanel } from './review/ReviewPanel';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import { ProjectChangesOverview } from './o8-panel/ProjectChangesOverview';
@@ -444,6 +447,12 @@ export function O8Panel({
   const activeTab = externalTab ?? 'activity';
   const activeUtilityTab = isRightUtilityTab(activeTab) ? activeTab : null;
   const utilityShellActive = activeTab === 'launcher' || activeUtilityTab !== null;
+  // Best-of-N compare matrix (item 3) — the first ready comparison group, read
+  // from mission state. useOrchestratorData returns null outside the provider, so
+  // this is inert when there's no orchestrator context.
+  const orchestratorData = useOrchestratorData();
+  const { readyGroups: compareReadyGroups } = useComparisonGroups(orchestratorData?.missionState);
+  const compareGroup = compareReadyGroups[0] ?? null;
   const [utilityTabs, setUtilityTabs] = useState<RightUtilityTab[]>([]);
   const [localSelectedFile, setLocalSelectedFile] = useState<string | null>(null);
   // #1169 — orchestrator-driven browser open. The o8:open-browser window event
@@ -760,6 +769,15 @@ export function O8Panel({
             />
           )}
         />
+      </div>
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'compare' ? 'flex' : 'none', flexDirection: 'column' }}>
+        {compareGroup ? (
+          <ComparisonMatrix group={compareGroup} />
+        ) : (
+          <div style={{ paddingTop: 16, paddingRight: 16, paddingBottom: 16, paddingLeft: 16, fontSize: 12, lineHeight: 1.5, color: 'var(--t-text-faint)' }}>
+            No comparison ready yet. Dispatch a best-of-N mission (set comparisonModels on create_mission) and the candidates land here side by side once they finish.
+          </div>
+        )}
       </div>
     </div>
   );

@@ -9,4 +9,5 @@ export type O8Tab =
   | 'files'
   | 'side-chat'
   | 'review'
+  | 'compare'
   | 'terminal';
