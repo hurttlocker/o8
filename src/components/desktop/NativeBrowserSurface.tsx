@@ -25,6 +25,8 @@ import {
   browserViewOpen,
   browserViewSetRect,
   browserViewHide,
+  browserViewShow,
+  browserViewCapture,
   type BrowserViewRect,
 } from '@/lib/tauri/bridge';
 import { NATIVE_BROWSER_AGENT_SOURCE } from '@/lib/browser/native-agent-source';
@@ -49,6 +51,15 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
   const shownUrl = useRef<string>('');
   /** Page-zoom factor: visual-viewport px ÷ layout (CSS) px. 1 at 100%. */
   const zoomRef = useRef<number>(1);
+  /** Occlusion state (Stage 5): the native window composites ABOVE o8's web
+   *  content, so any overlay (⌘K palette, modal, dictation pill) that crosses the
+   *  browser rect would render BEHIND it. When detected we hide the native window
+   *  and paint a last-frame snapshot, then restore on close. */
+  const occludedRef = useRef<boolean>(false);
+  /** Cached base64 PNG of the page (no data: prefix) painted while occluded. */
+  const snapshotRef = useRef<string | null>(null);
+  const imgRef = useRef<HTMLImageElement>(null);
+  const snapshotTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   /** Measure the o8 webview's page zoom (Cmd +/-). getBoundingClientRect returns
    *  CSS px in the (possibly zoomed) LAYOUT viewport, but the native child window
@@ -99,7 +110,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
 
   /** Push the current rect to the native window, deduped. */
   const syncRect = useCallback(() => {
-    if (!visibleRef.current) return;
+    if (!visibleRef.current || occludedRef.current) return;
     const rect = computeRect();
     if (!rect) return;
     const key = rectKey(rect);
@@ -108,9 +119,80 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     void browserViewSetRect(rect);
   }, [computeRect]);
 
+  /** Capture a fresh snapshot for the occlusion swap, debounced — only while the
+   *  window is visible + NOT occluded (else screencapture grabs the overlay or a
+   *  hidden region). The frozen frame is stale-tolerant (shown under an overlay
+   *  the user is focused on), so exact timing doesn't matter. */
+  const scheduleSnapshot = useCallback(() => {
+    if (snapshotTimer.current) clearTimeout(snapshotTimer.current);
+    snapshotTimer.current = setTimeout(() => {
+      if (!visibleRef.current || occludedRef.current) return;
+      void browserViewCapture().then((png) => { if (png) snapshotRef.current = png; });
+    }, 900);
+  }, []);
+
+  /** Enter/leave the occluded state: hide the native window + paint the snapshot
+   *  so the o8 overlay underneath shows without a blank gap; restore on leave. */
+  const setOccluded = useCallback((occluded: boolean) => {
+    if (occluded === occludedRef.current) return;
+    occludedRef.current = occluded;
+    const img = imgRef.current;
+    if (occluded) {
+      if (img) {
+        if (snapshotRef.current) {
+          img.src = `data:image/png;base64,${snapshotRef.current}`;
+          img.style.display = 'block';
+        } else {
+          img.style.display = 'none';
+        }
+      }
+      void browserViewHide();
+    } else {
+      void browserViewShow();
+      // The layout may have shifted while hidden — force a reposition.
+      lastRect.current = '';
+      syncRect();
+      // Hold the snapshot a beat so the native window paints before we drop it
+      // (no one-frame gap during the show), then refresh it for next time.
+      if (img) setTimeout(() => { img.style.display = 'none'; }, 220);
+      scheduleSnapshot();
+    }
+  }, [syncRect, scheduleSnapshot]);
+
+  /** Detect an o8 overlay painting over the browser rect: sample the rect's
+   *  center + corners with elementsFromPoint (CSS/layout coords). If the topmost
+   *  hit-testable element at any sample isn't the placeholder, something is on
+   *  top → occluded. The snapshot img is pointer-events:none so it's transparent
+   *  to this probe. */
+  const checkOcclusion = useCallback(() => {
+    const el = ref.current;
+    if (!el || !visibleRef.current) return;
+    const r = el.getBoundingClientRect();
+    if (r.width < 4 || r.height < 4) return;
+    const inset = 6;
+    const pts: Array<[number, number]> = [
+      [r.left + r.width / 2, r.top + r.height / 2],
+      [r.left + inset, r.top + inset],
+      [r.right - inset, r.top + inset],
+      [r.left + inset, r.bottom - inset],
+      [r.right - inset, r.bottom - inset],
+    ];
+    let occluded = false;
+    for (const [px, py] of pts) {
+      const top = document.elementsFromPoint(px, py)[0];
+      if (top && top !== el && !el.contains(top) && !top.contains(el)) {
+        occluded = true;
+        break;
+      }
+    }
+    setOccluded(occluded);
+  }, [setOccluded]);
+
   /** Open/navigate the native window over the placeholder (only when visible). */
   const openHere = useCallback(() => {
     if (!visibleRef.current || !url) return;
+    occludedRef.current = false;
+    if (imgRef.current) imgRef.current.style.display = 'none';
     measureZoom();
     const rect = computeRect();
     if (!rect) {
@@ -122,13 +204,15 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
         lastRect.current = rectKey(retry);
         shownUrl.current = url;
         void browserViewOpen(url, retry, NATIVE_BROWSER_AGENT_SOURCE);
+        scheduleSnapshot();
       });
       return;
     }
     lastRect.current = rectKey(rect);
     shownUrl.current = url;
     void browserViewOpen(url, rect, NATIVE_BROWSER_AGENT_SOURCE);
-  }, [url, computeRect, measureZoom]);
+    scheduleSnapshot();
+  }, [url, computeRect, measureZoom, scheduleSnapshot]);
 
   // Visibility: open when the placeholder appears on screen, hide when it leaves
   // (tab switched away → display:none → not intersecting). The native window is a
@@ -144,8 +228,15 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
         const nowVisible = !!entry && entry.isIntersecting && entry.intersectionRatio > 0;
         if (nowVisible === visibleRef.current) return;
         visibleRef.current = nowVisible;
-        if (nowVisible) openHere();
-        else void browserViewHide();
+        if (nowVisible) {
+          openHere();
+        } else {
+          // Tab switched away — drop occlusion state so a stale snapshot/hidden
+          // flag never carries into the next show.
+          occludedRef.current = false;
+          if (imgRef.current) imgRef.current.style.display = 'none';
+          void browserViewHide();
+        }
       },
       { threshold: 0 },
     );
@@ -188,6 +279,28 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     };
   }, [syncRect, measureZoom]);
 
+  // Occlusion detection (Stage 5). o8 overlays (⌘K/⌘⇧K palettes, modals, the
+  // dictation pill, settings) portal into <body>, so a body childList mutation
+  // is the primary trigger; a slow poll is the safety net for overlays that
+  // toggle visibility in place. Each check is one elementsFromPoint sweep,
+  // rAF-coalesced so a burst of mutations costs at most one probe per frame.
+  useEffect(() => {
+    if (!isTauri()) return;
+    let raf = 0;
+    const schedule = () => {
+      if (raf) return;
+      raf = requestAnimationFrame(() => { raf = 0; checkOcclusion(); });
+    };
+    const mo = new MutationObserver(schedule);
+    mo.observe(document.body, { childList: true });
+    const poll = setInterval(schedule, 500);
+    return () => {
+      mo.disconnect();
+      clearInterval(poll);
+      if (raf) cancelAnimationFrame(raf);
+    };
+  }, [checkOcclusion]);
+
   // Hide the native window on unmount (keep it alive for a fast re-show — the
   // Browser tab closing entirely is what triggers browser_view_close upstream).
   useEffect(() => {
@@ -201,12 +314,34 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       ref={ref}
       data-o8-native-browser="panel"
       style={{
+        position: 'relative',
         width: '100%',
         height: '100%',
         background: 'transparent',
         boxShadow: agentGlow ? 'inset 0 0 0 1.5px rgba(245,158,11,0.75)' : 'none',
         transition: 'box-shadow 200ms ease-out',
       }}
-    />
+    >
+      {/* Occlusion snapshot — the page's last frame, painted while the native
+          window is hidden for an overlay so the area never goes blank.
+          pointer-events:none keeps it transparent to the elementsFromPoint probe
+          and to the human's pointer. */}
+      {/* eslint-disable-next-line @next/next/no-img-element -- transient base64
+          snapshot data-URL, not a remote/LCP image; next/image can't optimize it. */}
+      <img
+        ref={imgRef}
+        alt=""
+        aria-hidden="true"
+        style={{
+          display: 'none',
+          position: 'absolute',
+          inset: 0,
+          width: '100%',
+          height: '100%',
+          objectFit: 'fill',
+          pointerEvents: 'none',
+        }}
+      />
+    </div>
   );
 }
