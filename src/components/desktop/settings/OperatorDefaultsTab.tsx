@@ -48,6 +48,7 @@ interface OperatorDefaults {
   experimentalGemini: boolean;
   experimentalChat: boolean;
   experimentalCanvas: boolean;
+  nativeBrowserView: boolean;
   classAComposer: ClassAComposer;
   inAppOrchestratorEnabled: boolean;
   brainUseClaudeCli: boolean;
@@ -786,6 +787,21 @@ export function OperatorDefaultsTab() {
           }
         />
         {values.experimentalCanvas ? <CanvasGlassTuner /> : null}
+        <Row
+          label="Native browser-view"
+          description="Render the embedded Browser pane in a host-owned native window instead of the iframe/proxy — origin-sensitive auth apps (Clerk) render natively AND stay agent-grabbable, with no engine-JPEG lag. On by default; turn off to fall back to the iframe path. macOS desktop only."
+          source={sources.nativeBrowserView}
+          disabledReason={sources?.nativeBrowserView === 'env' ? envDisabledReason : undefined}
+          right={
+            <SettingsToggleButton
+              checked={values.nativeBrowserView}
+              disabled={sources?.nativeBrowserView === 'env' || busyField === 'nativeBrowserView'}
+              onChange={(next) => {
+                void updateField('nativeBrowserView', next);
+              }}
+            />
+          }
+        />
       </section>
 
       {/* 06 — Q&A COMPOSER */}

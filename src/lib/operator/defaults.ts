@@ -120,6 +120,11 @@ export interface OperatorDefaults {
    * for when it flips back on).
    */
   experimentalCanvas: boolean;
+  /** Native browser-view: render the embedded Browser pane in a host-owned child
+   *  WebviewWindow (origin-sensitive auth apps render natively + stay
+   *  agent-grabbable) instead of the iframe/proxy + engine-JPEG fallback.
+   *  On by default; the iframe path is the fallback when off. macOS desktop only. */
+  nativeBrowserView: boolean;
   /**
    * Q&A Class A composer model (#971). Production-only knob — eval mode keeps
    * its OpenRouter Sonnet 4.6 path either way.
@@ -180,6 +185,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   experimentalGemini: false,
   experimentalChat: false,
   experimentalCanvas: false,
+  nativeBrowserView: true,
   classAComposer: 'auto',
   // ON by default post-#1097. Subscription pool, not Agent SDK pool. See the
   // docstring above on the field for the rationale.
@@ -330,6 +336,13 @@ function envExperimentalCanvas(): boolean | null {
   return null;
 }
 
+function envNativeBrowserView(): boolean | null {
+  const raw = process.env.O8_NATIVE_BROWSER_VIEW;
+  if (raw === '1') return true;
+  if (raw === '0') return false;
+  return null;
+}
+
 function envClassAComposer(): ClassAComposer | null {
   const raw = process.env.O8_CLASS_A_COMPOSER?.trim();
   if (raw && isClassAComposer(raw)) return raw;
@@ -375,6 +388,7 @@ interface StoredOperatorDefaults {
   experimentalGemini?: boolean;
   experimentalChat?: boolean;
   experimentalCanvas?: boolean;
+  nativeBrowserView?: boolean;
   classAComposer?: ClassAComposer;
   inAppOrchestratorEnabled?: boolean;
   brainUseClaudeCli?: boolean;
@@ -448,6 +462,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (typeof stored.experimentalCanvas === 'boolean') {
     result.experimentalCanvas = stored.experimentalCanvas;
   }
+  if (typeof stored.nativeBrowserView === 'boolean') {
+    result.nativeBrowserView = stored.nativeBrowserView;
+  }
   if (isClassAComposer(stored.classAComposer)) {
     result.classAComposer = stored.classAComposer;
   }
@@ -482,6 +499,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envGemini = envExperimentalGemini();
   const envChat = envExperimentalChat();
   const envCanvas = envExperimentalCanvas();
+  const envNative = envNativeBrowserView();
   const envComposer = envClassAComposer();
   const envInApp = envInAppOrchestratorEnabled();
   const envBrainCli = envBrainUseClaudeCli();
@@ -506,6 +524,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     experimentalGemini: envGemini ?? fileValues.experimentalGemini ?? OPERATOR_DEFAULTS_FALLBACK.experimentalGemini,
     experimentalChat: envChat ?? fileValues.experimentalChat ?? OPERATOR_DEFAULTS_FALLBACK.experimentalChat,
     experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas,
+    nativeBrowserView: envNative ?? fileValues.nativeBrowserView ?? OPERATOR_DEFAULTS_FALLBACK.nativeBrowserView,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
     inAppOrchestratorEnabled:
       envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled,
@@ -533,6 +552,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     experimentalGemini: envGemini !== null ? 'env' : fileValues.experimentalGemini !== undefined ? 'file' : 'default',
     experimentalChat: envChat !== null ? 'env' : fileValues.experimentalChat !== undefined ? 'file' : 'default',
     experimentalCanvas: envCanvas !== null ? 'env' : fileValues.experimentalCanvas !== undefined ? 'file' : 'default',
+    nativeBrowserView: envNative !== null ? 'env' : fileValues.nativeBrowserView !== undefined ? 'file' : 'default',
     classAComposer: envComposer !== null ? 'env' : fileValues.classAComposer !== undefined ? 'file' : 'default',
     inAppOrchestratorEnabled:
       envInApp !== null ? 'env' : fileValues.inAppOrchestratorEnabled !== undefined ? 'file' : 'default',
@@ -657,6 +677,9 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.experimentalCanvas !== undefined) {
     stored.experimentalCanvas = Boolean(update.experimentalCanvas);
+  }
+  if (update.nativeBrowserView !== undefined) {
+    stored.nativeBrowserView = Boolean(update.nativeBrowserView);
   }
   if (update.classAComposer !== undefined) {
     if (!isClassAComposer(update.classAComposer)) {
