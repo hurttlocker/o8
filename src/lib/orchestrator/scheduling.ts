@@ -1,5 +1,4 @@
 import { execFile, execFileSync } from 'node:child_process';
-import { randomUUID } from 'node:crypto';
 import { promisify } from 'node:util';
 
 import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
@@ -10,6 +9,7 @@ import { getLane } from '@/lib/lane/registry';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
+import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { getProjectContext } from '@/lib/projects/context';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import {
@@ -43,68 +43,6 @@ function isGitRepoSync(repoPath: string) {
   } catch {
     return false;
   }
-}
-
-function buildComparisonGroupId() {
-  return `cmp-${Date.now()}-${randomUUID().slice(0, 8)}`;
-}
-
-function fanOutComparisonPackets(state: OrchestratorMissionState): OrchestratorMissionState {
-  const activeComparisonGroups = new Set(state.activeComparisonGroups ?? []);
-  const nextPackets: OrchestratorPacket[] = [];
-  let changed = false;
-
-  for (const packet of state.packets) {
-    const comparisonModels = (packet.comparisonModels ?? [])
-      .map((model) => model.trim())
-      .filter(Boolean);
-    const shouldFanOut = comparisonModels.length > 0 && !packet.comparisonGroupId;
-
-    if (!shouldFanOut) {
-      nextPackets.push(packet);
-      continue;
-    }
-
-    changed = true;
-    const comparisonGroupId = buildComparisonGroupId();
-    activeComparisonGroups.add(comparisonGroupId);
-    console.log(
-      `[best-of-n] Fanning out ${packet.id} into ${comparisonModels.length} comparison lane${comparisonModels.length === 1 ? '' : 's'} (${comparisonModels.join(', ')})`,
-    );
-
-    comparisonModels.forEach((model, index) => {
-      nextPackets.push({
-        ...packet,
-        id: `${packet.id}-cmp-${index}`,
-        title: `${packet.title} (${model})`,
-        branchTarget: `${packet.branchTarget}-cmp-${index}`,
-        queueState: 'queued',
-        releaseState: 'pending',
-        status: 'queued',
-        blockedReason: null,
-        lastEventAt: null,
-        lastEventLabel: null,
-        archivedAt: null,
-        review: null,
-        lane: null,
-        comparisonModels: undefined,
-        comparisonGroupId,
-        comparisonIndex: index,
-        assignedModel: model,
-      });
-    });
-  }
-
-  if (!changed) {
-    return state;
-  }
-
-  return normalizeOrchestratorMissionState({
-    ...state,
-    packets: nextPackets,
-    activeComparisonGroups: [...activeComparisonGroups],
-    updatedAt: new Date().toISOString(),
-  });
 }
 
 function createLaneBinding(
