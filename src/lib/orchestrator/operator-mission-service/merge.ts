@@ -16,6 +16,7 @@ const loadDirectiveMerges = () => import('@/lib/cortex/directive-merges');
 const loadLaneCommands = () => import('@/lib/lane/commands');
 const loadPreviewMerge = () => import('@/lib/lane/preview-merge');
 const loadLaneRegistry = () => import('@/lib/lane/registry');
+const loadLaneEvents = () => import('@/lib/lane/events');
 const loadControlPlane = () => import('@/lib/orchestrator/control-plane');
 const loadDag = () => import('@/lib/orchestrator/dag');
 const loadDispatch = () => import('@/lib/orchestrator/dispatch');
@@ -566,10 +567,14 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
     { currentMissionState },
     { withLockedState },
     { archiveLane },
+    { submitPacketReview },
+    { recordLaneEvent },
   ] = await Promise.all([
     loadShared(),
     loadControlPlane(),
     loadLaneRegistry(),
+    loadReview(),
+    loadLaneEvents(),
   ]);
   const state = currentMissionState();
   const winner = state.packets.find((candidate) => candidate.id === input.packetId);
@@ -628,6 +633,31 @@ export async function pickComparisonWinner(input: PickComparisonWinnerInput) {
       }
     }
   });
+
+  // Gap A (governance): record the operator's pick as an APPROVING review BEFORE
+  // the merge, so the gate sees a HEAD-matched review instead of falling through to
+  // risk-tier and stalling on a pending "human review required". submitPacketReview
+  // captures the winner's current HEAD itself. Best-effort: a failed record must not
+  // swallow the merge attempt (the gate still surfaces any real blocker).
+  try {
+    await submitPacketReview({ packetId: winner.id, findings: [], approved: true });
+  } catch (error) {
+    console.error('[comparison-pick] winner review record failed:', error);
+  }
+
+  // Gap B (audit): the pick is a first-class, governed decision — record it on the
+  // winner's lane so the ledger answers "why W over X, Y" (parity with browser_acted).
+  if (winner.lane?.laneId) {
+    try {
+      recordLaneEvent(winner.lane.laneId, 'comparison_resolved', 'user', {
+        groupId: comparisonGroupId,
+        winnerPacketId: winner.id,
+        archivedPacketIds,
+      });
+    } catch (error) {
+      console.error('[comparison-pick] comparison_resolved event failed:', error);
+    }
+  }
 
   const mergeResult = await approveAndMergePacket({
     packetId: winner.id,

@@ -1,5 +1,6 @@
 'use client';
 
+import { useCallback, useState } from 'react';
 import type { CSSProperties } from 'react';
 
 import { ComparisonColumn } from './ComparisonColumn';
@@ -16,6 +17,31 @@ import type { ComparisonGroup } from './useComparisonGroups';
  * width (2 fit at the auto-widened ~960px, 3+ scroll) — width honesty over cramming.
  */
 export function ComparisonMatrix({ group }: { group: ComparisonGroup }) {
+  const [pickingId, setPickingId] = useState<string | null>(null);
+  const [pickError, setPickError] = useState<string | null>(null);
+
+  const handlePick = useCallback(async (packetId: string) => {
+    setPickingId(packetId);
+    setPickError(null);
+    try {
+      const response = await fetch('/api/orchestrator/comparison-pick', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId }),
+      });
+      const payload = (await response.json().catch(() => null)) as { ok?: boolean; error?: { message?: string } } | null;
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error?.message ?? `Pick failed (${response.status}).`);
+      }
+      // Success — pickComparisonWinner recorded the approving review, archived the
+      // losers, and merged the winner through the 5-layer gate. The group clears from
+      // mission state on the next refresh, which empties this matrix; stay busy until then.
+    } catch (error) {
+      setPickError(error instanceof Error ? error.message : 'Pick failed.');
+      setPickingId(null);
+    }
+  }, []);
+
   const containerStyle: CSSProperties = {
     display: 'flex',
     flexDirection: 'column',
@@ -54,9 +80,33 @@ export function ComparisonMatrix({ group }: { group: ComparisonGroup }) {
           {group.candidates.length} sealed worktrees · pick the winner
         </span>
       </div>
+      {pickError ? (
+        <div
+          role="alert"
+          style={{
+            flexShrink: 0,
+            paddingTop: 8,
+            paddingBottom: 8,
+            paddingLeft: 12,
+            paddingRight: 12,
+            fontSize: 11,
+            color: 'var(--t-danger, #f85149)',
+            borderBottom: '1px solid var(--t-divider-subtle)',
+          }}
+        >
+          {pickError}
+        </div>
+      ) : null}
       <div style={rowStyle}>
         {group.candidates.map((candidate, index) => (
-          <ComparisonColumn key={candidate.packet.id} candidate={candidate} index={index} />
+          <ComparisonColumn
+            key={candidate.packet.id}
+            candidate={candidate}
+            index={index}
+            onPick={handlePick}
+            picking={pickingId === candidate.packet.id}
+            pickDisabled={pickingId !== null}
+          />
         ))}
       </div>
     </div>
