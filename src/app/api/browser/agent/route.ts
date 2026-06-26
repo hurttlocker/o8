@@ -73,8 +73,9 @@ async function startNativeDesignGrab(client: O8WebviewClient): Promise<string> {
     } catch {
       r = null;
     }
-    // eval_result NSJSON-encodes the sink: '' (unset) → keep polling; else grab JSON.
-    if (r && r.length > 0) return r;
+    // eval_result returns '' (unset) — and defensively skip a literal 'null' — so
+    // only a real grab envelope ends the poll.
+    if (r && r.length > 0 && r !== 'null') return r;
   }
   return JSON.stringify({ ok: false, error: 'design-grab timed out' });
 }
