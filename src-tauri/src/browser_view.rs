@@ -290,6 +290,13 @@ fn reposition(app: &tauri::AppHandle, win: &tauri::WebviewWindow, x: f64, y: f64
     let phys_h = (h * scale).max(1.0);
     let _ = win.set_position(PhysicalPosition::new(phys_x, phys_y));
     let _ = win.set_size(PhysicalSize::new(phys_w, phys_h));
+    // Re-assert the child-above-parent relationship on every reposition. set_size /
+    // set_position drop the child behind the parent — visible on a resize-GROW, where
+    // the parent's frame expands over the child's area and never re-orders it above
+    // (shrink covers less, so it survived; the operator hit this going full-screen →
+    // windowed). addChildWindow is idempotent for the same parent, so re-adding here
+    // keeps it ordered above through open(), set_rect() (resize/scroll), and show().
+    attach_as_child(app, win);
 }
 
 /// Make the child window a macOS child of `main` via `addChildWindow:ordered:`.
