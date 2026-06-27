@@ -53,8 +53,10 @@ One binary serves the human (headless) **and** the agents (self-orchestration) o
 ### 3. Side-by-side N-worktree diff/merge "pick the winner" surface (moat-compounding — neither has shipped it)
 Both market "compare & merge the winner"; **neither built the N-up diff matrix.** Build it first → own the narrative, and wire it straight into our review-gate (`o8_merge_preview` → `submit_review` → `approve_and_merge`), which Orca lacks.
 
-### 4. Detached daemon crash-survival
+### 4. Detached daemon crash-survival — 📋 PLANNED
 Orca's PTYs live in a **detached process, checkpointed to disk every 5s**; agents survive an app crash and cold-restore (Orca: `src/main/daemon/`). o8 sessions die with the Next/ws-server lifecycle (we document this pain). A resilience layer so a hot-reload or crash doesn't kill live agent state.
+
+> **Full plan: [`docs/daemon-crash-survival.md`](./daemon-crash-survival.md).** Key finding: it's wire-up, not a daemon build. Workers today are non-detached node-pty children of the ws-server (die by SIGHUP), but the detach primitive (`createTmuxSession`, real `-d` + `remain-on-exit`) is already built with ZERO callers, the transcript already persists continuously (worker `tee`→`.jsonl`), and the boot pipeline already scans/reconciles/salvages. The gap: detach the worker spawn + add a boot RE-ATTACH path (vs today's finalize/salvage). One fork — detach mechanism: **B detached-process+`.jsonl` replay (recommended, no dep)** vs A tmux (live PTY re-attach, tmux dep) vs C custom daemon (over-build).
 
 ### 5. Mobile E2EE + per-device tokens
 Per-connection ephemeral Curve25519 ECDH → XSalsa20-Poly1305 + per-device revocable tokens + forward secrecy (Orca: `src/main/runtime/rpc/e2ee-channel.ts`, `device-registry.ts`) vs. our single shared bearer token. A security upgrade for the mobile surface. **Keep our web-push edge** — Orca has no cloud push, so a backgrounded phone misses events.
