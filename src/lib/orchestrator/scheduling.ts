@@ -5,7 +5,7 @@ import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
-import { getLane } from '@/lib/lane/registry';
+import { getLane, findLaneByPacket } from '@/lib/lane/registry';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
@@ -101,6 +101,8 @@ interface LaunchDispatchResult {
 interface RecoveryDispatchContext {
   lane: OrchestratorLaneBinding | null;
   worktreePath: string | null;
+  laneId: string | null;
+  baseBranch: string;
 }
 
 function isDispatchReadyStatus(packet: OrchestratorPacket) {
@@ -132,14 +134,32 @@ async function dispatchOrRecoverPacket(
   recoveryContext?: RecoveryDispatchContext | null,
 ): Promise<DispatchResult> {
   if (packet.status === 'recovering' && recoveryContext?.worktreePath) {
-    const hasUncommittedChanges = await hasUncommittedWorktreeChanges(recoveryContext.worktreePath);
-    if (hasUncommittedChanges) {
-      await autoCommitRecoveryWorktree(recoveryContext.worktreePath);
+    const worktreePath = recoveryContext.worktreePath;
+    const hasUncommittedChanges = await hasUncommittedWorktreeChanges(worktreePath);
+    // #1293 — a silent-exited worker often ALREADY COMMITTED its diff (it does the
+    // work, commits, passes checks, then exits without `turn.completed`). Salvage
+    // committed work too — not just uncommitted — so the lane finalizes to review
+    // FROM ITS OWN WORKTREE instead of falling through to dispatchPacket, which
+    // opens a fresh, disconnected `isolate` worktree and orphans the real work
+    // (the silent_exit_but_work_present loop). Only a genuinely empty worktree
+    // (silent_exit_no_work) redispatches.
+    let reviewable = hasUncommittedChanges;
+    if (!reviewable) {
+      try {
+        const { hasReviewableCompletionDiff } = await import('@/lib/supervisor/completion-verification');
+        reviewable = await hasReviewableCompletionDiff(worktreePath, recoveryContext.baseBranch);
+      } catch { /* probe failed — fall through to redispatch */ }
+    }
+    if (reviewable) {
+      if (hasUncommittedChanges) {
+        await autoCommitRecoveryWorktree(worktreePath);
+      }
 
-      if (recoveryContext.lane?.laneId) {
+      const laneId = recoveryContext.laneId ?? recoveryContext.lane?.laneId ?? null;
+      if (laneId) {
         const reviewResult = await dispatchLaneCommand({
           verb: 'request_review',
-          laneId: recoveryContext.lane.laneId,
+          laneId,
           actor: 'orchestrator',
         });
         if (!reviewResult.ok) {
@@ -149,7 +169,7 @@ async function dispatchOrRecoverPacket(
 
       return {
         kind: 'awaiting_review',
-        laneId: recoveryContext.lane?.laneId ?? null,
+        laneId: recoveryContext.laneId ?? recoveryContext.lane?.laneId ?? null,
         sessionKey: null,
         lane: recoveryContext.lane
           ? {
@@ -287,14 +307,24 @@ export async function runDispatchTick(
   let nextState = normalizeOrchestratorMissionState(state);
   nextState = fanOutComparisonPackets(nextState);
   const recoveryContextByPacketId = new Map(
-    nextState.packets.flatMap((packet) => (
-      packet.status === 'recovering'
-        ? [[packet.id, {
-            lane: packet.lane ?? null,
-            worktreePath: packet.lane?.repoPath ?? null,
-          }] as const]
-        : []
-    )),
+    nextState.packets.flatMap((packet) => {
+      if (packet.status !== 'recovering') return [];
+      // #1293 — recover into the LANE's OWN worktree (where a silent-exited
+      // worker's committed work lives), NOT the main repo. The old code read
+      // `packet.lane?.repoPath` (the main checkout, always clean), so recovery
+      // never found the work and always redispatched a fresh, disconnected
+      // worktree. The reconciler also nulls `packet.lane` on the recovering
+      // transition, so resolve the lane row by packetId for the authoritative
+      // worktreePath + baseBranch + laneId.
+      const row = findLaneByPacket(packet.id);
+      const worktreePath = packet.lane?.worktreePath ?? row?.worktreePath ?? null;
+      return [[packet.id, {
+        lane: packet.lane ?? null,
+        worktreePath,
+        laneId: packet.lane?.laneId ?? row?.id ?? null,
+        baseBranch: row?.baseBranch ?? 'main',
+      } satisfies RecoveryDispatchContext] as const];
+    }),
   );
 
   // Compute predicted files for all packets (used by overlap gate + dashboard)
