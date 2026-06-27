@@ -1,7 +1,3 @@
-import { previewPacketMerge } from '@/lib/lane/preview-merge';
-import { approveAndMergePacket } from '@/lib/mcp/operator-mission-tools';
-import { getIdempotent, setIdempotent } from '@/lib/orchestrator/idempotency-cache';
-import { withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
 import {
   type McpTool,
   type McpToolResult,
@@ -143,33 +139,22 @@ export async function handleReject(args: Record<string, unknown>): Promise<McpTo
   }
 }
 
-function buildIdempotencyKey(packetId: string, clientKey: string): string {
-  return `approve_and_merge:${packetId}:${clientKey}`;
-}
-
 export async function handleApproveAndMerge(args: Record<string, unknown>): Promise<McpToolResult> {
   const packetId = requiredString(args, 'packetId');
-  const clientKey = optionalString(args, 'idempotencyKey');
-  const cacheKey = clientKey ? buildIdempotencyKey(packetId, clientKey) : null;
-
-  if (cacheKey) {
-    const cached = getIdempotent<Record<string, unknown>>(cacheKey);
-    if (cached) {
-      return jsonResult({ ...cached, idempotencyReplay: true });
-    }
-  }
-
   try {
-    // #622 — wrapper guarantees synchronous worktree cleanup before return.
-    const result = await withSynchronousWorktreeCleanup(packetId, () => approveAndMergePacket({
-      packetId,
-      commitMessage: optionalString(args, 'commitMessage') || undefined,
-      expectedHeadSha: optionalString(args, 'expectedHeadSha') || undefined,
-    }));
-    if (cacheKey) {
-      setIdempotent(cacheKey, result as unknown as Record<string, unknown>);
-    }
-    return jsonResult(result);
+    // #2 Stage 5: route through /api/orchestrator/merge — idempotency + the
+    // synchronous worktree-cleanup now live server-side in that route, so every
+    // client inherits them instead of this MCP process owning a private copy.
+    const res = await apiFetch('/api/orchestrator/merge', {
+      method: 'POST',
+      body: JSON.stringify({
+        packetId,
+        commitMessage: optionalString(args, 'commitMessage') || undefined,
+        expectedHeadSha: optionalString(args, 'expectedHeadSha') || undefined,
+        idempotencyKey: optionalString(args, 'idempotencyKey') || undefined,
+      }),
+    }) as { ok?: boolean; result?: Record<string, unknown> };
+    return jsonResult(res.result ?? res);
   } catch (error) {
     console.error(`${'[mcp-operator]'} approve_and_merge failed: ${errorText(error)}`);
     return textResult(`Failed to approve and merge: ${errorText(error)}`, true);
@@ -179,7 +164,9 @@ export async function handleApproveAndMerge(args: Record<string, unknown>): Prom
 export async function handleMergePreview(args: Record<string, unknown>): Promise<McpToolResult> {
   const packetId = requiredString(args, 'packetId');
   try {
-    const preview = previewPacketMerge(packetId);
+    // #2 Stage 5: route through /api/orchestrator/merge-preview (in-process
+    // previewPacketMerge retired here) so CLI + MCP share one gate-preview path.
+    const preview = await apiFetch(`/api/orchestrator/merge-preview?packetId=${encodeURIComponent(packetId)}`);
     return jsonResult(preview);
   } catch (error) {
     console.error(`${'[mcp-operator]'} o8_merge_preview failed: ${errorText(error)}`);
