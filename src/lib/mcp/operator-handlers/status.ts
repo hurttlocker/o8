@@ -6,23 +6,12 @@ import {
   requiredString,
   textResult,
 } from './shared';
-import { findLaneByPacket, setLaneStatus } from '@/lib/lane/registry';
-
-const NO_STEERABLE_SESSION = 'Packet has no steerable session — use rerun_with_feedback instead.';
-
 async function steerSession(sessionKey: string, message: string): Promise<Record<string, unknown>> {
   const result = await apiFetch('/api/runtime/action', {
     method: 'POST',
     body: JSON.stringify({ action: 'steer', surfaceId: sessionKey, message }),
   }) as Record<string, unknown>;
   return result;
-}
-
-function steerFailureNote(result: Record<string, unknown>): string | null {
-  if (result.ok !== false && typeof result.error !== 'string') return null;
-  if (typeof result.note === 'string') return result.note;
-  if (typeof result.error === 'string') return result.error;
-  return 'Runtime steer failed.';
 }
 
 export const STATUS_TOOLS: McpTool[] = [
@@ -295,28 +284,14 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
   try {
     const packetId = requiredString(args, 'packetId');
     const message = requiredString(args, 'message');
-    const lane = findLaneByPacket(packetId);
-    if (!lane?.sessionKey) {
-      return textResult(NO_STEERABLE_SESSION, true);
-    }
-
-    const steerResult = await steerSession(lane.sessionKey, message);
-    const steerFailure = steerFailureNote(steerResult);
-    if (steerFailure) {
-      return textResult(`Failed to steer packet: ${steerFailure}`, true);
-    }
-
-    const updatedLane = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
-    if (!updatedLane || updatedLane.status !== 'running') {
-      return textResult(NO_STEERABLE_SESSION, true);
-    }
-
-    return jsonResult({
-      ok: true,
-      packetId,
-      laneId: lane.id,
-      note: 'Steered packet via warm session.',
-    });
+    // #2 Stage 4: route through /api/orchestrator/steer-packet so the lane
+    // resolution + status flip run in the Next process (the live registry +
+    // warm-session pool), not this MCP process's stale registry instance.
+    const res = await apiFetch('/api/orchestrator/steer-packet', {
+      method: 'POST',
+      body: JSON.stringify({ packetId, message }),
+    }) as { ok?: boolean; result?: Record<string, unknown> };
+    return jsonResult({ ok: true, ...(res.result ?? {}) });
   } catch (err) {
     console.error(`[o8-operator] steer_packet failed: ${err}`);
     return textResult(`Failed to steer packet: ${err}`, true);

@@ -41,6 +41,7 @@ import {
   runPacketRerun,
   runPacketReset,
   runPacketRetry,
+  runPacketSteer,
 } from './commands/packet/recover.js';
 import { runSpec } from './commands/spec.js';
 import { runTeam } from './commands/team.js';
@@ -145,6 +146,7 @@ commands:
   packet reset         wipe a stuck packet's worktree + lane (then mission dispatch)
   packet retry         reset but KEEP the worktree (resume work; then mission dispatch)
   packet rerun         fresh worker with --feedback (relaunches immediately)
+  packet steer         nudge a packet's warm session with --message (layer-3 escalation)
   packet merge-preview dry-run the 5-layer merge gate (wouldMerge + blockers)
   packet report        append an agent_report event for this packet
   packet capture       screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
@@ -228,6 +230,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'reset') return runPacketReset(args.mode, args.rest);
       if (secondary === 'retry') return runPacketRetry(args.mode, args.rest);
       if (secondary === 'rerun') return runPacketRerun(args.mode, args.rest);
+      if (secondary === 'steer') return runPacketSteer(args.mode, args.rest);
       if (secondary === 'merge-preview') return runPacketMergePreview(args.mode, args.rest);
       if (secondary === 'report') return runPacketReport(args.mode, args.rest);
       if (secondary === 'capture') return runPacketCapture(args.mode, args.rest);
