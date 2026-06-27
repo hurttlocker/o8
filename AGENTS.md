@@ -63,7 +63,7 @@ o8 packet approve-merge [--packet <id>] [--commit-message "..."]   # FROM A WORK
 
 # Mission orchestration — fan out sub-work to fellow agents and track it without leaving the CLI.
 o8 mission create --title "..." [--body "..."] [--repo <path>] [--compare m1,m2] [--runtime r]   # create a mission from an inline task (--compare seeds a best-of-N)
-o8 mission dispatch [--mission <id>]    # dispatch a created mission's packets to workers
+o8 mission dispatch [--mission <id>] [--wait]   # dispatch a created mission's packets (returns once launch is initiated; --wait blocks for the full launch + count)
 o8 mission status   [--mission <id>] [--cost]                          # mission + packet state
 o8 mission wait     [--mission <id>] [--packet <id>] [--timeout <ms>]  # block until a packet hits a review/terminal state (wakeReason in the payload)
 o8 mission tail     [--mission <id>] [--timeout <ms>]                  # stream packet status transitions until terminal

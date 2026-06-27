@@ -16,13 +16,26 @@ export async function POST(request: NextRequest) {
   }
 
   const record = asRecord(body) ?? {};
+  const missionId = typeof record.missionId === 'string' && record.missionId.trim()
+    ? record.missionId.trim()
+    : undefined;
+
+  // dispatchMission awaits the full worker launch (Codex spawn + worktree
+  // creation), which can take minutes — blocking the HTTP response that whole
+  // time. `wait:false` (the CLI default) fires the launch on the persistent Next
+  // server and returns once it's initiated; callers track progress via
+  // `/api/orchestrator/status`. `wait` defaults to true so the MCP dispatch_mission
+  // tool keeps its synchronous dispatched-count contract.
+  const wait = record.wait !== false;
+  if (!wait) {
+    void dispatchMission({ missionId }).catch((error) => {
+      console.error('[orchestrator] async dispatch failed:', error instanceof Error ? error.message : error);
+    });
+    return operatorSuccess({ initiated: true, async: true, missionId: missionId ?? null });
+  }
 
   try {
-    const result = await dispatchMission({
-      missionId: typeof record.missionId === 'string' && record.missionId.trim()
-        ? record.missionId.trim()
-        : undefined,
-    });
+    const result = await dispatchMission({ missionId });
     return operatorSuccess(result);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to dispatch mission.';
