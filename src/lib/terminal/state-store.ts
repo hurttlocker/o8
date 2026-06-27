@@ -9,6 +9,8 @@ const LEGACY_STATE_FILE = path.join(STATE_DIR, 'terminal-state.json');
 interface TerminalStateTab {
   id?: string;
   repoPath?: string | null;
+  /** Last-known tmux session name (set for persistent dash terminals). */
+  tmuxSession?: string | null;
 }
 
 interface TerminalStateFile {
@@ -125,6 +127,40 @@ export function pruneTerminalStateForRepoPath(repoPath: string) {
     updatedFiles,
     removedFiles,
   };
+}
+
+/**
+ * #6 persistent terminals — collect every tmux session name referenced by a
+ * persisted tab across all scope files (+ the legacy file). This is the durable
+ * "is this session still owned by a tab?" source the dash-session GC keys on —
+ * NOT the in-memory attachment map, which is empty after a crash. On any read
+ * failure the caller must treat the result as authoritative-empty-only when it
+ * also succeeded reading tmux; callers should skip GC entirely if this throws.
+ */
+export function collectPersistedTmuxSessions(): Set<string> {
+  const sessions = new Set<string>();
+
+  const fileSet = new Set<string>(
+    existsSync(STATE_SCOPE_DIR)
+      ? readdirSync(STATE_SCOPE_DIR)
+        .filter((file) => file.endsWith('.json'))
+        .map((file) => path.join(STATE_SCOPE_DIR, file))
+      : [],
+  );
+  if (existsSync(LEGACY_STATE_FILE)) {
+    fileSet.add(LEGACY_STATE_FILE);
+  }
+
+  for (const filePath of fileSet) {
+    const parsed = readTerminalState(filePath);
+    if (!parsed || !Array.isArray(parsed.tabs)) continue;
+    for (const tab of parsed.tabs) {
+      const name = tab.tmuxSession?.trim();
+      if (name) sessions.add(name);
+    }
+  }
+
+  return sessions;
 }
 
 export function getTerminalStateMtime(filePath: string) {
