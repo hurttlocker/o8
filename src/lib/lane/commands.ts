@@ -249,6 +249,32 @@ async function createLaneActionApproval(
   return { ok: false, laneId: lane.id, note: input.note, approvalId: approval.id };
 }
 
+/**
+ * #2 Stage 5b — worker-context merge governance. A dispatched worker that calls
+ * `o8 packet approve-merge` cannot merge its own work to main; this raises an
+ * operator approval card (the SAME primitive + lane-merge continuation as the
+ * file-size gate above). When the operator approves it, /api/panel/approvals
+ * dispatches the continuation through the full merge gate. Capability symmetry
+ * for the agent, the review-inversion moat intact for the operator.
+ */
+export async function raiseWorkerMergeApproval(
+  lane: Lane,
+  input: { commitMessage?: string; expectedHeadSha?: string; reviewSummary?: string } = {},
+): Promise<LaneCommandResult> {
+  return createLaneActionApproval(lane, 'orchestrator', {
+    verb: 'merge',
+    commitMessage: input.commitMessage,
+    expectedHeadSha: input.expectedHeadSha,
+    reviewSummary: input.reviewSummary,
+    title: 'Worker requested merge to main',
+    description: 'A dispatched worker reached the merge step via `o8 packet approve-merge`. Per governance a worker cannot merge its own work to main — approve to run the merge through the gate, or reject to send it back.',
+    summary: `Worker merge request: ${lane.branch} → ${lane.baseBranch}`,
+    risk: 'medium',
+    policyRuleId: 'worker-merge-governance',
+    note: 'Worker-initiated merge held for operator approval.',
+  });
+}
+
 export async function dispatch(command: LaneCommand): Promise<LaneCommandResult> {
   const actor: LaneEventActor = command.actor ?? 'user';
 

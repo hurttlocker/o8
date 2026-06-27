@@ -20,6 +20,7 @@ import { runAsk } from './commands/ask.js';
 import { runBrowser } from './commands/browser.js';
 import { runDoctor } from './commands/doctor.js';
 import { runCortexObserve } from './commands/cortex.js';
+import { runInbox } from './commands/inbox.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runMission } from './commands/mission.js';
 import { runStatus } from './commands/status.js';
@@ -39,6 +40,7 @@ import { runPacketCommit } from './commands/packet/commit.js';
 import {
   runPacketMergePreview,
   runPacketRerun,
+  runPacketApproveMerge,
   runPacketReset,
   runPacketRetry,
   runPacketSteer,
@@ -128,6 +130,9 @@ commands:
   mission status       mission + packet state [--mission <id>] [--cost]
   mission wait         block until a packet hits a review/terminal state [--timeout --poll]
   mission tail         stream packet status transitions until terminal [--timeout --poll]
+  inbox list           pending governance approvals (--all includes resolved)
+  inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
+  inbox reject <id>    reject a pending approval
   task list            current task pool grouped by ready/running/review/etc.
   task create          add a project-backed task to the ready pool
   task brief <id>      project-backed task brief for a packet or lane
@@ -147,6 +152,7 @@ commands:
   packet retry         reset but KEEP the worktree (resume work; then mission dispatch)
   packet rerun         fresh worker with --feedback (relaunches immediately)
   packet steer         nudge a packet's warm session with --message (layer-3 escalation)
+  packet approve-merge merge through the gate (operator) — worker-context raises an approval card
   packet merge-preview dry-run the 5-layer merge gate (wouldMerge + blockers)
   packet report        append an agent_report event for this packet
   packet capture       screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
@@ -208,6 +214,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     }
     case 'mission':
       return runMission(args.mode, secondary, args.rest);
+    case 'inbox':
+      return runInbox(args.mode, secondary, args.rest);
     case 'task': {
       if (secondary === 'list') return runTaskList(args.mode, args.rest);
       if (secondary === 'create') return runTaskCreate(args.mode, args.rest);
@@ -231,6 +239,7 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'retry') return runPacketRetry(args.mode, args.rest);
       if (secondary === 'rerun') return runPacketRerun(args.mode, args.rest);
       if (secondary === 'steer') return runPacketSteer(args.mode, args.rest);
+      if (secondary === 'approve-merge') return runPacketApproveMerge(args.mode, args.rest);
       if (secondary === 'merge-preview') return runPacketMergePreview(args.mode, args.rest);
       if (secondary === 'report') return runPacketReport(args.mode, args.rest);
       if (secondary === 'capture') return runPacketCapture(args.mode, args.rest);
