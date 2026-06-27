@@ -33,6 +33,12 @@ export interface OwnedRunRecord {
   outcome: OwnedRunOutcome;
   interruptRequestedAt?: string;
   tmuxSession?: string;
+  // #4 crash-survival — how this run's process was spawned, so boot re-discovery
+  // knows whether to re-bind it (detached survivors keep running through a
+  // ws-server/app crash) vs salvage it. 'bridge' = ws-server-owned PTY (dies with
+  // ws-server, today's default); 'detached' = setsid+unref child that outlives
+  // both node processes, transcript streaming to stdoutPath.
+  detachMode?: 'bridge' | 'detached';
 }
 
 export interface OwnedSessionRecord {
