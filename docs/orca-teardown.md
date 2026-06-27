@@ -45,7 +45,7 @@ Orca is **shallow exactly where we're deep** (governance, memory, approvals) and
 5. **Shared cursor + unified glow** — continuous agent cursor; standardize the agent-driving indicator (cursor + glow) across canvas AND panel.
 6. **Audit + sweep** — `recordLaneEvent` for human-initiated grabs; final orphan grep; tsc + tests.
 
-### 2. CLI-as-control-plane symmetry (moat-compounding) — 📋 PLANNED
+### 2. CLI-as-control-plane symmetry (moat-compounding) — ✅ SHIPPED (0.1.511)
 One binary serves the human (headless) **and** the agents (self-orchestration) over one socket; skills are docs teaching agents which verbs exist. o8 has the `o8` CLI + MCP — unify so an agent orchestrates by shelling one binary on `$PATH`. Deepens our agent-control story. Orca refs: `skills/orca-cli/SKILL.md`, `skills/orchestration/SKILL.md`.
 
 > **Full plan: [`docs/cli-control-plane-symmetry.md`](./cli-control-plane-symmetry.md).** Key finding: the shared control-plane core already exists (`src/lib/orchestrator/operator-mission-service/`, reached via gated `/api/orchestrator/*`); both MCP and the CLI are already thin HTTP clients of it. So it's a symmetry + governance pass (add CLI commands on existing routes), not a rebuild — one route extraction (`steer-packet`) + a merge-seam move + a worker-context approval guard so a worker can't self-merge to `main`. 7 staged steps, each tsc-clean + committable.
