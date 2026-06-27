@@ -44,7 +44,16 @@ A deep trace of the boot path found the re-bind is **largely emergent** from Sta
 - Orphan sweep + the silent-exit detector are **already alive-gated** on `isOwnedRunAlive` (`isPidAlive(pid)` → true for a detached survivor) — neither finalizes a live survivor.
 - Interrupt (`process.kill(-pid)` on the setsid group) and resume (`threadId` from the `.jsonl`) already survive.
 
-So: **Stage 1 ✅** (committed `c8f0a3bf` — gated detached spawn + `detachMode`). **Stage 2 ✅** (re-bind observability log in `reconcile.ts` + `tests/crash-survival.test.ts` locking the liveness contract). **Stage 3 ✅ already-satisfied** (sweep + silent-exit alive-gating, now guarded by the contract test). **Remaining:** a live dogfood (ship → kill ws-server mid-run → confirm the worker survives + the lane resumes `running`), then flip `O8_CRASH_SURVIVABLE_WORKERS` ON by default. **Stage 4 (orchestrator-turn survival)** is the separable larger gap — file as fast-follow. **Stage 5 (warm scrollback)** stays optional.
+So: **Stage 1 ✅** (committed `c8f0a3bf` — gated detached spawn + `detachMode`). **Stage 2 ✅** (re-bind observability log in `reconcile.ts` + `tests/crash-survival.test.ts` locking the liveness contract). **Stage 3 ✅ already-satisfied** (sweep + silent-exit alive-gating, now guarded by the contract test). **Stage 4 (orchestrator-turn survival)** filed as fast-follow [#1297](https://github.com/hurttlocker/o8/issues/1297). **Stage 5 (warm scrollback)** stays optional.
+
+### Live kill-test — PASSED on 0.1.512 (2026-06-27)
+
+Dogfooded with `O8_CRASH_SURVIVABLE_WORKERS=1` (set via `launchctl setenv` so the installed app's Node children inherit it):
+- Dispatched a worker via `o8 mission create/dispatch` — it spawned **`detachMode: detached`**, session-leader `Ss`, no tmux.
+- **Killed ws-server** (`kill -9`) → worker still running. **Then killed the whole app** (Tauri + Next, `-9`) → worker survived, orphaned, and *kept writing* its transcript (101 → 8932 → 9353 bytes) while the app was dead.
+- Relaunched → `reconcileStuckLanes` **re-bound the survivor**: `[crash-survival] re-bound 1 surviving worker(s)`, lane resumed `running` (not salvaged), supervisor re-attached (heartbeats), transcript live on screen. Window position preserved across every restart.
+
+**Remaining:** flip `crashSurvivableWorkersEnabled()` default ON (raw-terminal tab degrades to `.jsonl` tail for all workers — the accepted Option-B trade-off). The running app is already crash-survivable via the launchd env.
 
 ## Target model + stages (each tsc-clean + committable + a kill-test)
 
