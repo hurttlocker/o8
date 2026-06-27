@@ -2,10 +2,14 @@
 
 import type { CSSProperties } from 'react';
 
-import { useWorkspaceChanges } from '@/components/desktop/o8-panel/workspace-rail/ChangesList';
 import { ReviewFileRow } from '@/components/desktop/review/panel/ReviewFileRow';
 import type { ComparisonCandidate } from './useComparisonGroups';
+import { useComparisonDiff } from './useComparisonDiff';
 import { useMergePreview } from './useMergePreview';
+
+// Best-of-N candidates branch from the repo's default branch; the compare shows
+// each candidate's committed diff vs this base (three-dot, merge-base relative).
+const COMPARISON_BASE = 'main';
 
 /**
  * One column of the N-up compare matrix — a single best-of-N candidate's diff,
@@ -37,7 +41,7 @@ export function ComparisonColumn({
   picking?: boolean;
   pickDisabled?: boolean;
 }) {
-  const changes = useWorkspaceChanges(candidate.worktreePath);
+  const changes = useComparisonDiff(candidate.worktreePath, COMPARISON_BASE);
   // Dry-run the merge gate once the candidate is settled — the column shows its
   // verdict (passes / blocked-by) so the operator picks with the gate in view.
   const preview = useMergePreview(candidate.packet.id, candidate.complete);
@@ -149,6 +153,7 @@ export function ComparisonColumn({
               key={file.path}
               file={file}
               repoPath={candidate.worktreePath ?? ''}
+              diffBase={COMPARISON_BASE}
               mode="unified"
               wrap={false}
               wordDiff={false}
