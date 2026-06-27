@@ -34,7 +34,17 @@ A worker survives a crash only if its process is detached from BOTH node process
 - **B — detached process + transcript replay** *(recommended)*: spawn the worker `detached:true` + `setsid` + `.unref()`, output to the same `.jsonl` (the existing rare *fallback* path already does exactly this — `store.ts:595-604`). Worker survives orphaned to init; on boot we **re-bind** by pid-probe + `.jsonl` replay. **No new dependency**, reuses an existing path. Loses the live *raw PTY* re-attach — but o8 workers are `codex exec --json` streaming to the lane, where **the `.jsonl` IS the stream**, so the lane transcript restores fully; only the "watch the raw terminal" nicety degrades to a `.jsonl` tail.
 - **C — a real custom daemon** (Orca's literal design): a separate supervisor process owning all workers, checkpointed every 5s. Most robust, but the largest build — and redundant given the `.jsonl` + ws-server-as-daemon already exist.
 
-> **DECISION NEEDED.** Recommend **B** for the worker tier (no dependency, reuses the existing detached path, the `.jsonl` is already the source of truth), with **A (tmux)** as an optional later enhancement for operators who want live raw-terminal re-attach. Avoid **C** — it rebuilds what `.jsonl` + ws-server already provide. *(If you want the "watch the recovered terminal live" magic to be the headline, pick A and accept the tmux dep.)*
+> **DECISION (locked 2026-06-27): Option B — detached process + `.jsonl` replay.** No new dependency, reuses the existing detached-spawn path (`store.ts:595-604`), and the `.jsonl` is already the source of truth for `codex exec --json` workers. The live raw-terminal watch degrades to a `.jsonl` tail (acceptable — the lane transcript is the real signal). tmux (A) stays available as a future enhancement for live-PTY re-attach if wanted; C is not pursued.
+
+## Status (2026-06-27): worker tier feature-complete behind the flag
+
+A deep trace of the boot path found the re-bind is **largely emergent** from Stage 1 + existing infra, not a build:
+- The lane transcript is read from the `.jsonl` (runtime-agnostic poll), **not** the PTY — so a PTY-less detached survivor's transcript already reaches the UI (the existing detached fallback already proves this).
+- `reconcileStuckLanes` already **re-binds** a survivor by `sessionKey` and leaves its lane `running` (`reconcile.ts:232`).
+- Orphan sweep + the silent-exit detector are **already alive-gated** on `isOwnedRunAlive` (`isPidAlive(pid)` → true for a detached survivor) — neither finalizes a live survivor.
+- Interrupt (`process.kill(-pid)` on the setsid group) and resume (`threadId` from the `.jsonl`) already survive.
+
+So: **Stage 1 ✅** (committed `c8f0a3bf` — gated detached spawn + `detachMode`). **Stage 2 ✅** (re-bind observability log in `reconcile.ts` + `tests/crash-survival.test.ts` locking the liveness contract). **Stage 3 ✅ already-satisfied** (sweep + silent-exit alive-gating, now guarded by the contract test). **Remaining:** a live dogfood (ship → kill ws-server mid-run → confirm the worker survives + the lane resumes `running`), then flip `O8_CRASH_SURVIVABLE_WORKERS` ON by default. **Stage 4 (orchestrator-turn survival)** is the separable larger gap — file as fast-follow. **Stage 5 (warm scrollback)** stays optional.
 
 ## Target model + stages (each tsc-clean + committable + a kill-test)
 
