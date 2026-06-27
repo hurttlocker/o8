@@ -21,6 +21,7 @@ import { runBrowser } from './commands/browser.js';
 import { runDoctor } from './commands/doctor.js';
 import { runCortexObserve } from './commands/cortex.js';
 import { runLaneTouches } from './commands/lane.js';
+import { runMission } from './commands/mission.js';
 import { runStatus } from './commands/status.js';
 import { runRun } from './commands/run.js';
 import { runVersion } from './commands/version.js';
@@ -115,6 +116,11 @@ commands:
   browser close        end this scope's engine (headless Chrome) session
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
+  mission create       create a mission from an inline task (--title --body [--compare m1,m2])
+  mission dispatch     dispatch a created mission's packets to workers [--mission <id>]
+  mission status       mission + packet state [--mission <id>] [--cost]
+  mission wait         block until a packet hits a review/terminal state [--timeout --poll]
+  mission tail         stream packet status transitions until terminal [--timeout --poll]
   task list            current task pool grouped by ready/running/review/etc.
   task create          add a project-backed task to the ready pool
   task brief <id>      project-backed task brief for a packet or lane
@@ -188,6 +194,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'touches') return runLaneTouches(args.mode, args.rest);
       throw unknownSubcommandError('lane', secondary);
     }
+    case 'mission':
+      return runMission(args.mode, secondary, args.rest);
     case 'task': {
       if (secondary === 'list') return runTaskList(args.mode, args.rest);
       if (secondary === 'create') return runTaskCreate(args.mode, args.rest);

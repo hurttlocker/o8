@@ -1,0 +1,315 @@
+/**
+ * `o8 mission …` — mission lifecycle from the CLI.
+ *
+ * CLI-as-control-plane symmetry (Orca teardown #2, Stage 1). These verbs lived
+ * only in the operator MCP server; they are thin clients of the same gated
+ * `/api/orchestrator/*` routes the MCP already calls, so the human operator
+ * (headless) and a self-orchestrating agent both drive a mission from one
+ * binary. No business logic here — fetch + JSON shape, per the CLI charter.
+ *
+ *   o8 mission create   --title "…" [--body "…"] [--repo <path>] [--runtime r]
+ *                       [--model m] [--constraints "…"] [--sequential]
+ *                       [--compare m1,m2] [--huddle] [--brain] [--number n]
+ *   o8 mission dispatch [--mission <id>]
+ *   o8 mission status   [--mission <id>] [--cost]
+ *   o8 mission wait     [--mission <id>] [--packet <id>] [--timeout ms] [--poll ms]
+ *   o8 mission tail     [--mission <id>] [--timeout ms] [--poll ms]
+ */
+
+import { apiFetch, CliError, EXIT } from '../api.js';
+import { resolveConfig } from '../config.js';
+import {
+  printHumanHeading,
+  printHumanKv,
+  printJson,
+  type OutputMode,
+} from '../output.js';
+
+interface OperatorResponse<T> {
+  ok: boolean;
+  result?: T;
+  error?: { message?: string } | string;
+}
+
+interface CreateMissionResult {
+  missionId: string;
+  packets: Array<{ id: string; title: string; wave: number }>;
+  branchPreparation?: unknown[];
+}
+
+interface MissionStatusPacket {
+  id: string;
+  title?: string;
+  status?: string;
+  wave?: number;
+}
+
+interface MissionStatusResult {
+  missionId: string;
+  packets?: MissionStatusPacket[];
+  [key: string]: unknown;
+}
+
+// Mirror of PACKET_TERMINAL_STATUSES in operator-handlers/mission.ts — the set
+// `wait_for_mission_ready` treats as "ready for the operator". Kept in sync by
+// the Stage-7 parity audit; duplicated here because the CLI is a standalone
+// bundle that cannot import from `@/lib`.
+const PACKET_TERMINAL_STATUSES = new Set(['awaiting_review', 'released', 'failed', 'archived']);
+
+function flag(rest: string[], name: string): string | null {
+  for (let i = 0; i < rest.length; i++) {
+    const tok = rest[i];
+    if (tok === `--${name}`) return rest[i + 1] ?? '';
+    if (tok.startsWith(`--${name}=`)) return tok.slice(name.length + 3);
+  }
+  return null;
+}
+
+function hasFlag(rest: string[], name: string): boolean {
+  return rest.includes(`--${name}`);
+}
+
+function responseError(payload: OperatorResponse<unknown> | null | undefined, fallback: string): string {
+  const error = payload?.error;
+  if (typeof error === 'string' && error.trim()) return error;
+  if (error && typeof error === 'object' && typeof error.message === 'string' && error.message.trim()) {
+    return error.message;
+  }
+  return fallback;
+}
+
+function unwrap<T>(payload: OperatorResponse<T> | null, fallback: string): T {
+  if (!payload?.ok || payload.result === undefined) {
+    throw new CliError('mission_failed', responseError(payload, fallback), EXIT.CONFLICT);
+  }
+  return payload.result;
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function packetSignature(packets: MissionStatusPacket[] | undefined): string {
+  return (packets ?? []).map((p) => `${p.id}:${p.status ?? ''}`).sort().join('|');
+}
+
+async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<number> {
+  const title = flag(rest, 'title');
+  if (!title?.trim()) {
+    throw new CliError(
+      'invalid_args',
+      'o8 mission create requires --title.',
+      EXIT.INVALID_ARGS,
+      'Example: o8 mission create --title "Add a health route" --body "Create /api/health returning 200."',
+    );
+  }
+  const repoPath = flag(rest, 'repo')?.trim() || process.cwd();
+  const numberRaw = flag(rest, 'number');
+  // Inline tasks need a positive issue number the service accepts. Synthesize a
+  // high synthetic number when the caller didn't supply one (matches the
+  // >=90001 convention used elsewhere for inline dispatch).
+  const number = numberRaw && Number.isFinite(Number(numberRaw))
+    ? Number(numberRaw)
+    : 90001 + (Date.now() % 9000);
+
+  const compareRaw = flag(rest, 'compare');
+  const comparisonModels = compareRaw
+    ? compareRaw.split(',').map((m) => m.trim()).filter(Boolean)
+    : undefined;
+
+  const body: Record<string, unknown> = {
+    repoPath,
+    issues: [{ number, title: title.trim(), body: flag(rest, 'body')?.trim() || '', url: '' }],
+  };
+  const runtime = flag(rest, 'runtime');
+  if (runtime) body.runtime = runtime;
+  const model = flag(rest, 'model');
+  if (model) body.model = model;
+  const constraints = flag(rest, 'constraints');
+  if (constraints) body.constraints = constraints;
+  if (hasFlag(rest, 'sequential')) body.sequential = true;
+  if (hasFlag(rest, 'huddle')) body.huddle = true;
+  if (hasFlag(rest, 'brain')) body.useBrain = true;
+  if (comparisonModels && comparisonModels.length > 0) body.comparisonModels = comparisonModels;
+
+  const cfg = resolveConfig();
+  const res = await apiFetch<OperatorResponse<CreateMissionResult>>(cfg, '/api/orchestrator/create-mission', {
+    method: 'POST',
+    body,
+  });
+  const result = unwrap(res.data, 'Mission creation was rejected.');
+
+  const payload = { schema: 'o8/cli/mission.create/v1', mission: result };
+  if (mode.human) {
+    printHumanHeading('mission create');
+    printHumanKv([
+      ['mission', result.missionId],
+      ['packets', String(result.packets.length)],
+      ...result.packets.map((p) => [`  · ${p.id}`, `${p.title} (wave ${p.wave})`] as [string, string]),
+    ]);
+  } else {
+    printJson(payload);
+  }
+  return 0;
+}
+
+async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<number> {
+  const missionId = flag(rest, 'mission')?.trim() || undefined;
+  const cfg = resolveConfig();
+  const res = await apiFetch<OperatorResponse<unknown>>(cfg, '/api/orchestrator/dispatch', {
+    method: 'POST',
+    body: missionId ? { missionId } : {},
+  });
+  const result = unwrap(res.data, 'Mission dispatch was rejected.');
+
+  const payload = { schema: 'o8/cli/mission.dispatch/v1', dispatch: result };
+  if (mode.human) {
+    printHumanHeading('mission dispatch');
+    printHumanKv([['mission', missionId ?? '(active)'], ['result', 'dispatched']]);
+  } else {
+    printJson(payload);
+  }
+  return 0;
+}
+
+async function fetchStatus(missionId: string | undefined, includeCost: boolean): Promise<MissionStatusResult> {
+  const cfg = resolveConfig();
+  const res = await apiFetch<OperatorResponse<MissionStatusResult>>(cfg, '/api/orchestrator/status', {
+    query: { ...(missionId ? { missionId } : {}), ...(includeCost ? { includeCost: 'true' } : {}) },
+  });
+  return unwrap(res.data, 'Unable to read mission status.');
+}
+
+async function runMissionStatus(mode: OutputMode, rest: string[]): Promise<number> {
+  const missionId = flag(rest, 'mission')?.trim() || undefined;
+  const result = await fetchStatus(missionId, hasFlag(rest, 'cost'));
+
+  const payload = { schema: 'o8/cli/mission.status/v1', status: result };
+  if (mode.human) {
+    printHumanHeading('mission status');
+    printHumanKv([
+      ['mission', result.missionId || '(none)'],
+      ...(result.packets ?? []).map((p) => [`  · ${p.id}`, `${p.status ?? '?'} — ${p.title ?? ''}`] as [string, string]),
+    ]);
+  } else {
+    printJson(payload);
+  }
+  return 0;
+}
+
+async function runMissionWait(mode: OutputMode, rest: string[]): Promise<number> {
+  const missionId = flag(rest, 'mission')?.trim() || undefined;
+  const packetFilter = flag(rest, 'packet')?.trim() || null;
+  const timeoutMs = Math.max(1000, Math.min(30 * 60 * 1000, Number(flag(rest, 'timeout')) || 10 * 60 * 1000));
+  const pollMs = Math.max(1000, Number(flag(rest, 'poll')) || 3000);
+
+  const terminalOf = (s: MissionStatusResult) => (s.packets ?? []).find(
+    (p) => (!packetFilter || p.id === packetFilter) && typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status),
+  ) ?? null;
+
+  const baseline = await fetchStatus(missionId, false);
+  let snapshot = baseline;
+  let wakeReason: 'already-terminal' | 'state-change' | 'timeout' = 'timeout';
+  const baselineTerminal = terminalOf(baseline);
+  if (baselineTerminal) {
+    wakeReason = 'already-terminal';
+  } else {
+    const baselineSig = packetSignature(baseline.packets);
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+      if (Date.now() >= deadline) break;
+      const next = await fetchStatus(missionId, false);
+      snapshot = next;
+      if (terminalOf(next) || packetSignature(next.packets) !== baselineSig) {
+        wakeReason = 'state-change';
+        break;
+      }
+    }
+  }
+
+  const terminalPacket = terminalOf(snapshot);
+  const payload = {
+    schema: 'o8/cli/mission.wait/v1',
+    wakeReason,
+    terminalPacketId: terminalPacket?.id ?? null,
+    status: snapshot,
+  };
+  if (mode.human) {
+    printHumanHeading('mission wait');
+    printHumanKv([
+      ['mission', snapshot.missionId || '(none)'],
+      ['wake', wakeReason],
+      ['terminal packet', terminalPacket?.id ?? '(none)'],
+      ...(snapshot.packets ?? []).map((p) => [`  · ${p.id}`, p.status ?? '?'] as [string, string]),
+    ]);
+  } else {
+    printJson(payload);
+  }
+  // Timeout is a soft outcome, not an error — exit 0 with wakeReason so the
+  // caller branches on the field, not the code.
+  return 0;
+}
+
+async function runMissionTail(mode: OutputMode, rest: string[]): Promise<number> {
+  const missionId = flag(rest, 'mission')?.trim() || undefined;
+  const timeoutMs = Math.max(1000, Math.min(30 * 60 * 1000, Number(flag(rest, 'timeout')) || 10 * 60 * 1000));
+  const pollMs = Math.max(1000, Number(flag(rest, 'poll')) || 3000);
+
+  const deadline = Date.now() + timeoutMs;
+  const lastStatus = new Map<string, string>();
+  let allTerminal = false;
+
+  const emit = (event: Record<string, unknown>) => {
+    if (mode.human) {
+      process.stdout.write(`${String(event.packetId)}  ${String(event.from ?? '∅')} → ${String(event.status)}\n`);
+    } else {
+      printJson({ schema: 'o8/cli/mission.tail.event/v1', ...event });
+    }
+  };
+
+  while (Date.now() < deadline && !allTerminal) {
+    const snapshot = await fetchStatus(missionId, false);
+    const packets = snapshot.packets ?? [];
+    for (const p of packets) {
+      const prev = lastStatus.get(p.id);
+      const cur = p.status ?? '?';
+      if (prev !== cur) {
+        emit({ packetId: p.id, from: prev ?? null, status: cur, title: p.title ?? '' });
+        lastStatus.set(p.id, cur);
+      }
+    }
+    allTerminal = packets.length > 0 && packets.every(
+      (p) => typeof p.status === 'string' && PACKET_TERMINAL_STATUSES.has(p.status),
+    );
+    if (allTerminal) break;
+    await sleep(Math.min(pollMs, Math.max(0, deadline - Date.now())));
+  }
+
+  if (!mode.human) {
+    printJson({ schema: 'o8/cli/mission.tail/v1', done: allTerminal, reason: allTerminal ? 'all-terminal' : 'timeout' });
+  }
+  return 0;
+}
+
+export async function runMission(mode: OutputMode, secondary: string | undefined, rest: string[]): Promise<number> {
+  switch (secondary) {
+    case 'create':
+      return runMissionCreate(mode, rest);
+    case 'dispatch':
+      return runMissionDispatch(mode, rest);
+    case 'status':
+      return runMissionStatus(mode, rest);
+    case 'wait':
+      return runMissionWait(mode, rest);
+    case 'tail':
+      return runMissionTail(mode, rest);
+    default:
+      throw new CliError(
+        'unknown_mission_subcommand',
+        `Unknown mission subcommand: ${secondary ?? '(none)'}`,
+        EXIT.INVALID_ARGS,
+        'Subcommands: create | dispatch | status | wait | tail. Run `o8 --help`.',
+      );
+  }
+}
