@@ -126,7 +126,7 @@ commands:
   cortex observe       propose a worker observation for the orchestrator
   lane touches         active lanes touching a path or packet diff
   mission create       create a mission from an inline task (--title --body [--compare m1,m2])
-  mission dispatch     dispatch a created mission's packets to workers [--mission <id>]
+  mission dispatch     dispatch a created mission's packets to workers (async; --wait blocks for launch) [--mission <id>]
   mission status       mission + packet state [--mission <id>] [--cost]
   mission wait         block until a packet hits a review/terminal state [--timeout --poll]
   mission tail         stream packet status transitions until terminal [--timeout --poll]

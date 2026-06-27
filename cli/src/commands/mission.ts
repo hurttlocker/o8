@@ -155,17 +155,25 @@ async function runMissionCreate(mode: OutputMode, rest: string[]): Promise<numbe
 
 async function runMissionDispatch(mode: OutputMode, rest: string[]): Promise<number> {
   const missionId = flag(rest, 'mission')?.trim() || undefined;
+  // Default async: launching workers (Codex spawn + worktrees) takes minutes;
+  // returning once dispatch is initiated keeps the CLI snappy. `--wait` blocks
+  // for the full launch + the dispatched-count. Either way, `o8 mission status`
+  // / `o8 mission wait` track progress.
+  const wait = hasFlag(rest, 'wait');
   const cfg = resolveConfig();
-  const res = await apiFetch<OperatorResponse<unknown>>(cfg, '/api/orchestrator/dispatch', {
+  const res = await apiFetch<OperatorResponse<{ initiated?: boolean; dispatched?: number }>>(cfg, '/api/orchestrator/dispatch', {
     method: 'POST',
-    body: missionId ? { missionId } : {},
+    body: { ...(missionId ? { missionId } : {}), wait },
   });
   const result = unwrap(res.data, 'Mission dispatch was rejected.');
 
   const payload = { schema: 'o8/cli/mission.dispatch/v1', dispatch: result };
   if (mode.human) {
     printHumanHeading('mission dispatch');
-    printHumanKv([['mission', missionId ?? '(active)'], ['result', 'dispatched']]);
+    printHumanKv([
+      ['mission', missionId ?? '(active)'],
+      ['result', wait ? `dispatched ${result.dispatched ?? '?'} packet(s)` : 'initiated (track: o8 mission status)'],
+    ]);
   } else {
     printJson(payload);
   }
