@@ -5,12 +5,17 @@
  */
 
 /**
- * Opt-in flag (default OFF). When set, owned workers spawn detached (setsid+unref)
- * instead of through the ws-server PTY bridge, so they outlive a ws-server restart
- * / full app crash. Off keeps today's bridge-primary behavior exactly. Flip the
- * default ON once Stage 2's boot re-attach has shipped and been dogfooded.
+ * Default ON since the live kill-test passed on 0.1.512 (worker spawned detached,
+ * survived a full app crash, re-bound on relaunch). Owned workers spawn detached
+ * (setsid+unref) so they outlive a ws-server restart / full app crash; boot
+ * re-binds the survivor. Set `O8_CRASH_SURVIVABLE_WORKERS=0` (or false/off/no) to
+ * fall back to the legacy ws-server PTY bridge (gets the raw-terminal tab back,
+ * loses crash-survival). NOTE: this covers DISPATCHED AGENT WORKERS only —
+ * interactive terminals + the orchestrator's in-flight turn are separate (see
+ * docs/daemon-crash-survival.md, teardown #6, and #1297).
  */
 export function crashSurvivableWorkersEnabled(): boolean {
   const raw = process.env.O8_CRASH_SURVIVABLE_WORKERS?.trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+  if (raw === undefined || raw === '') return true;
+  return !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no');
 }
