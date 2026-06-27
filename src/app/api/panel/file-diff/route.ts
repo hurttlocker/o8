@@ -11,6 +11,11 @@ export async function GET(request: Request) {
   const workspaceParam = searchParams.get('workspace') ?? searchParams.get('repoPath');
   // #1081 — the "Hide whitespace" overflow toggle maps to `git diff -w`.
   const wsArgs = searchParams.get('ignoreWhitespace') === '1' ? ['-w'] : [];
+  // #1293 — best-of-N compare: when `base` is set, show the candidate's COMMITTED
+  // diff (`git diff <base>...HEAD`, three-dot from the merge-base) instead of the
+  // working-tree diff vs HEAD. A candidate commits its work, so the working tree
+  // is clean (or holds incidental WIP); the committed diff is what to compare.
+  const baseRef = (searchParams.get('base') || '').trim();
 
   if (!filePath) {
     return NextResponse.json({ error: 'path param required' }, { status: 400 });
@@ -20,6 +25,21 @@ export async function GET(request: Request) {
   let root = DEFAULT_ROOT;
   if (workspaceParam) {
     root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', home) : workspaceParam;
+  }
+
+  // #1293 — committed-diff mode for the best-of-N compare matrix.
+  if (baseRef) {
+    try {
+      const diff = execFileSync('git', ['diff', '--no-color', ...wsArgs, `${baseRef}...HEAD`, '--', filePath], {
+        cwd: root,
+        encoding: 'utf-8',
+        timeout: 5000,
+        maxBuffer: 512 * 1024,
+      });
+      return NextResponse.json({ path: filePath, diff, stagedDiff: '' });
+    } catch (error) {
+      return NextResponse.json({ path: filePath, diff: '', error: error instanceof Error ? error.message : 'diff failed' });
+    }
   }
 
   try {

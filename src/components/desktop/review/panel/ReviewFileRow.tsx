@@ -35,6 +35,7 @@ type PreviewPayload =
 const ReviewFileRow = memo(function ReviewFileRow({
   file,
   repoPath,
+  diffBase,
   mode,
   wrap,
   wordDiff,
@@ -48,6 +49,9 @@ const ReviewFileRow = memo(function ReviewFileRow({
 }: {
   file: ReviewChangedFile;
   repoPath: string;
+  /** #1293 — when set, fetch the COMMITTED diff (`<base>...HEAD`) instead of the
+   *  working-tree diff vs HEAD. Used by the best-of-N compare matrix. */
+  diffBase?: string;
   mode: DiffMode;
   wrap: boolean;
   wordDiff: boolean;
@@ -103,6 +107,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
     setDiff(null);
     const params = new URLSearchParams({ path: file.path, workspace: repoPath });
     if (hideWhitespace) params.set('ignoreWhitespace', '1');
+    if (diffBase) params.set('base', diffBase);
     fetch(`/api/panel/file-diff?${params.toString()}`, { signal: controller.signal })
       .then(async (response) => {
         const data = (await response.json().catch(() => ({}))) as { diff?: string; stagedDiff?: string; error?: string };
@@ -128,7 +133,7 @@ const ReviewFileRow = memo(function ReviewFileRow({
     };
     // file.additions/deletions are deps so the row re-fetches when
     // useWorkspaceChanges reports the file's diff stats changed (#1084).
-  }, [open, previewActive, file.path, repoPath, hideWhitespace, file.additions, file.deletions]);
+  }, [open, previewActive, file.path, repoPath, diffBase, hideWhitespace, file.additions, file.deletions]);
 
   // #1088: rich-preview fetch. Renders the new version of the file as
   // rendered content (markdown / image) instead of the unified diff.
