@@ -1187,6 +1187,31 @@ function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
   }
 }
 
+/**
+ * #6 persistent terminals — capture a dash session's scrollback history so a
+ * re-attach after a restart/crash restores what scrolled off-screen (a bare
+ * `tmux attach` only repaints the visible viewport). `-S -` = from the start of
+ * history, `-e` = keep colour/style escapes. Bounded to the ring size; empty on
+ * any failure. Caller trims the trailing visible rows (the attach repaints them).
+ */
+function captureTmuxPane(sessionName: string): string {
+  try {
+    return execFileSync(
+      resolveTmuxBinary(),
+      ['capture-pane', '-p', '-e', '-S', '-', '-t', sessionName],
+      {
+        timeout: 4000,
+        encoding: 'utf-8',
+        maxBuffer: TERMINAL_SCROLLBACK_MAX_BYTES,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        env: sanitizePtyEnv() as NodeJS.ProcessEnv,
+      },
+    );
+  } catch {
+    return '';
+  }
+}
+
 function reapOrphanDashSessions() {
   if (!dashPersistentTerminalsEnabled()) return;
   const sessions = listDashTmuxSessionsWithAge();
@@ -3296,6 +3321,57 @@ function handleTerminalAttach(client: ClientState, msg: Record<string, unknown>)
     return;
   }
 
+  // #6 persistent terminals — re-attach to a dash session that survived a
+  // ws-server restart / app crash. After a restart the in-memory map is empty,
+  // so the create-from-pending path above misses; but the detached tmux session
+  // is still alive. Spawn a fresh attach-client PTY over it and replay the pane
+  // history (the scrollback ring is empty on a cold re-attach).
+  if (
+    isDashTerminalSession(sessionName)
+    && dashPersistentTerminalsEnabled()
+    && tmuxSessionExists(sessionName)
+  ) {
+    try {
+      const ptyProcess = spawnTmuxAttachPty(sessionName, cols, rows);
+      const now = Date.now();
+      attachment = {
+        id: randomUUID(),
+        sessionName,
+        kind: 'dash-shell',
+        ptyProcess,
+        clientIds: new Set([client.id]),
+        cols,
+        rows,
+        batchBuffer: '',
+        batchTimer: null,
+        lastOutputAt: now,
+        createdAt: now,
+        orphanTimer: null,
+        scrollbackChunks: [],
+        scrollbackBytes: 0,
+      };
+      terminalAttachments.set(sessionName, attachment);
+      client.terminalSessions.add(sessionName);
+      registerTerminalAttachment(attachment);
+      // Seed the ring with tmux's pane history, minus the trailing visible rows
+      // (the `tmux attach` repaints those itself — trimming avoids a duplicated
+      // current screen at the seam).
+      const history = captureTmuxPane(sessionName);
+      if (history) {
+        const lines = history.replace(/\n+$/, '').split('\n');
+        const keep = lines.length > rows ? lines.slice(0, lines.length - rows).join('\n') : '';
+        if (keep) appendScrollback(attachment, `${keep}\n`);
+      }
+      sendTerminal(client, 'attached', { sessionName });
+      sendTerminalScrollback(client, attachment);
+      console.log(`[ws-server] [persistent-terminals] re-attached surviving dash session ${sessionName}`);
+      return;
+    } catch (err) {
+      console.error(`[ws-server] [persistent-terminals] re-attach failed for ${sessionName}:`, err instanceof Error ? err.message : String(err));
+      // fall through to the standard "no longer exists" reply
+    }
+  }
+
   if (isDashTerminalSession(sessionName)) {
     sendTerminal(client, 'error', { sessionName, error: 'Dashboard terminal session no longer exists. Create a new shell.' });
     return;
@@ -3752,9 +3828,16 @@ const httpServer = createServer((req, res) => {
       return;
     }
 
-    const sessions = [...terminalAttachments.values()]
+    const inMemory = [...terminalAttachments.values()]
       .filter((attachment) => attachment.kind === 'dash-shell')
       .map((attachment) => attachment.sessionName);
+    // #6 persistent terminals — after a ws-server restart the in-memory map is
+    // empty, but surviving dash sessions are still alive in tmux. Union them so
+    // the client-side restore (checkAliveSessions) re-attaches instead of
+    // respawning a fresh shell. Gated — off-path keeps the in-memory-only list.
+    const sessions = dashPersistentTerminalsEnabled()
+      ? [...new Set([...inMemory, ...listDashTmuxSessionsWithAge().map((s) => s.name)])]
+      : inMemory;
     res.writeHead(200, { 'Content-Type': 'application/json' });
     res.end(JSON.stringify({ sessions }));
     return;
