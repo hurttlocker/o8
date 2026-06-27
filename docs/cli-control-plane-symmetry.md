@@ -42,7 +42,12 @@ Proposed policy (the verbs split into two tiers):
 
 How we tell worker from operator: not by auth (the loopback bearer token is shared). By **context** — dispatched workers get an `O8_WORKER_PACKET_ID` (or reuse the cwd→packet resolution) stamped at dispatch; the merge route reads it and applies the policy. This is the single new server-side check the moat requires.
 
-> **DECISION (locked 2026-06-27): a worker-context `approve-merge` raises an operator approval card — it does NOT auto-merge to `main`.** Capability is symmetric; authority stays governed. A human headless operator call executes directly. The card lands in the same governance inbox surfaced by `o8 status` / `o8_status`, and the operator clears it with `o8 inbox approve <id>`.
+> **DECISION (locked 2026-06-27, Option 1 — "the moat as a verb, not a wall"): a worker-context `approve-merge` raises an operator approval card; it does NOT auto-merge to `main`, and it is NOT an error.** Gate on **context, not the verb** — same `approve-merge` for everyone, behavior differs by caller:
+> - **Worker (agent in a packet worktree):** does not merge. Pushes the merge-preview/diff onto an approval card in the Stage-6 inbox and **returns immediately** with a clean `submitted — pending operator approval` status (a legit outcome, not a dead-end error). The agent drives the entire loop; the one thing it can never do is silently merge its own work to `main`. It does not block waiting.
+> - **Operator (human, headless):** merges directly, as today.
+> - **The merge itself**, once the operator approves the card, runs through the server-side idempotent `approve_and_merge` (Stage-5 normalization) so every client inherits the same safety.
+>
+> Why not hard-block: an error is a dead-end and surfaces by accident — worse coordination, not better. The card keeps full capability symmetry while preserving the review-inversion, which is the moat. **Zero net-new infra** — it wires straight into the Stage-6 inbox approve/reject queue.
 
 ## Command namespace
 
@@ -54,21 +59,21 @@ Every command is a thin `apiFetch` to an existing route via the shared `cli/src/
 
 ## Staged plan (each stage: tsc-clean + lint-clean + committable + a test)
 
-**Stage 0 — Lock decisions.** Namespace (above) + the governance tier (the DECISION). No code.
+**Stage 1 — Lock decisions.** Namespace (above) + the governance tier (the DECISION, locked Option 1). No code. ✅ DONE.
 
-**Stage 1 — Mission lifecycle (read-first).** `o8 mission status | wait | tail`, then `create | dispatch`. Thin route calls; `wait`/`tail` reimplement the MCP poll loops over `/api/orchestrator/status` (+ the packet WS tail the CLI already has in `packet log --follow`). Test: CLI smoke on a fresh `CORTEX_IDE_DATA_DIR` — create → dispatch → status reaches a terminal state.
+**Stage 2 — Mission lifecycle.** `o8 mission create | dispatch | status | wait | tail`. Thin route calls; `wait` mirrors `wait_for_mission_ready`'s terminal/signature-change semantics, `tail` prints packet status transitions until terminal. ✅ DONE (commit c0e0e159) — verified live: create → status-by-id round-trips; tsc + cli typecheck clean.
 
-**Stage 2 — Packet recovery.** `o8 packet reset | retry | rerun | merge-preview`. Pure route calls. Test: each verb's route is in `GATED_PREFIXES` (extend `tests/middleware-gate.test.ts`); CLI smoke for reset+retry on a stuck packet.
+**Stage 3 — Packet recovery.** `o8 packet reset | retry | rerun | merge-preview`. Pure route calls. Test: each verb's route is in `GATED_PREFIXES` (extend `tests/middleware-gate.test.ts`); CLI smoke for reset+retry on a stuck packet.
 
-**Stage 3 — Steer extraction.** New `/api/orchestrator/steer-packet` route + service fn; repoint the MCP `steer_packet` handler at it (delete the in-process tangle); add `o8 packet steer`. Test: gate test for the new route + a unit test for the service fn; confirm MCP still steers.
+**Stage 4 — Steer extraction.** New `/api/orchestrator/steer-packet` route + service fn; repoint the MCP `steer_packet` handler at it (delete the in-process tangle); add `o8 packet steer`. Test: gate test for the new route + a unit test for the service fn; confirm MCP still steers.
 
-**Stage 4 — Merge-seam normalization.** Move idempotency + synchronous worktree-cleanup into the merge route/service; repoint MCP `approve_and_merge` + `o8_merge_preview` onto routes; add `o8 packet approve-merge` honoring the Stage-0 governance tier. Test: idempotent double-merge returns the cached result regardless of caller (MCP vs CLI); worker-context merge raises a card (per decision).
+**Stage 5 — Merge-seam normalization.** Move idempotency + synchronous worktree-cleanup into the merge route/service; repoint MCP `approve_and_merge` + `o8_merge_preview` onto routes; add `o8 packet approve-merge` honoring the locked governance tier. Test: idempotent double-merge returns the cached result regardless of caller (MCP vs CLI); worker-context merge raises a card (per decision).
 
-**Stage 5 — Governance inbox.** `o8 inbox list | approve | reject | send | history`. Thin calls to `/api/panel/approvals` + `/api/orchestrator/delegate` + transcript. Test: gate cases + CLI approve/reject round-trip.
+**Stage 6 — Governance inbox.** `o8 inbox list | approve | reject | send | history`. Thin calls to `/api/panel/approvals` + `/api/orchestrator/delegate` + transcript. **Worker-context `approve-merge` lands its card here** (the Stage-5 wiring resolves into this queue). Test: gate cases + CLI approve/reject round-trip + worker-context merge → card appears → operator approve → merges.
 
-**Stage 6 — Skills are docs.** Teach agents the new verbs: extend `AGENTS.md` (the agent CLI section) + a focused `docs/agent-cli-control-plane.md` skill doc + the orchestrator instructions (`src/lib/lane/orchestrator.md`) so an agent self-orchestrates by shelling `o8 mission …` instead of re-deriving. Update CLAUDE.md's agent-CLI pointer. (Spec-ingested → also reaches the Brain.)
+**Stage 7 — Skills are docs.** Teach agents the new verbs: extend `AGENTS.md` (the agent CLI section) + a focused `docs/agent-cli-control-plane.md` skill doc + the orchestrator instructions (`src/lib/lane/orchestrator.md`) so an agent self-orchestrates by shelling `o8 mission …` instead of re-deriving. Update CLAUDE.md's agent-CLI pointer. (Spec-ingested → also reaches the Brain.)
 
-**Stage 7 — Parity audit + sweep.** A parity table/test asserting every control-plane verb has BOTH an MCP tool AND a CLI command backed by the SAME route. Remove now-superseded MCP in-process shortcuts. Full `tsc` + `npm test` + an end-to-end CLI mission smoke on a fresh DB. Update `docs/vocabulary.md` if any label diverges.
+**Stage 8 — Parity audit + sweep.** A parity table/test asserting every control-plane verb has BOTH an MCP tool AND a CLI command backed by the SAME route. Remove now-superseded MCP in-process shortcuts. Full `tsc` + `npm test` + an end-to-end CLI mission smoke on a fresh DB. Update `docs/vocabulary.md` if any label diverges.
 
 ## Acceptance
 
