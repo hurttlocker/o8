@@ -53,29 +53,29 @@ describe('#4 crash-survival — detached survivor liveness contract', () => {
   });
 });
 
-describe('#4 crash-survival — feature flag (default OFF)', () => {
+describe('#4 crash-survival — feature flag (default ON since the 0.1.512 kill-test)', () => {
   const prior = process.env.O8_CRASH_SURVIVABLE_WORKERS;
   afterEach(() => {
     if (prior === undefined) delete process.env.O8_CRASH_SURVIVABLE_WORKERS;
     else process.env.O8_CRASH_SURVIVABLE_WORKERS = prior;
   });
 
-  it('is OFF when unset (production stays bridge-primary until dogfood flips it)', () => {
+  it('is ON when unset (the dogfood-verified default)', () => {
     delete process.env.O8_CRASH_SURVIVABLE_WORKERS;
-    expect(crashSurvivableWorkersEnabled()).toBe(false);
+    expect(crashSurvivableWorkersEnabled()).toBe(true);
   });
 
-  it('accepts 1 / true / on / yes (case-insensitive)', () => {
-    for (const v of ['1', 'true', 'on', 'YES', ' On ']) {
+  it('only an explicit 0 / false / off / no opts OUT (back to the PTY bridge)', () => {
+    for (const v of ['0', 'false', 'off', 'NO', ' Off ']) {
       process.env.O8_CRASH_SURVIVABLE_WORKERS = v;
-      expect(crashSurvivableWorkersEnabled()).toBe(true);
+      expect(crashSurvivableWorkersEnabled()).toBe(false);
     }
   });
 
-  it('treats 0 / false / empty / garbage as OFF', () => {
-    for (const v of ['0', 'false', '', 'off', 'maybe']) {
+  it('stays ON for 1 / true / empty / anything else', () => {
+    for (const v of ['1', 'true', 'on', '', 'maybe']) {
       process.env.O8_CRASH_SURVIVABLE_WORKERS = v;
-      expect(crashSurvivableWorkersEnabled()).toBe(false);
+      expect(crashSurvivableWorkersEnabled()).toBe(true);
     }
   });
 });

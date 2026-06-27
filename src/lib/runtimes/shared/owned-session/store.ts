@@ -577,12 +577,12 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       NO_COLOR: '1',
     };
 
-    // #4 Stage 1 — crash-survivable workers (opt-in, default off). When enabled we
-    // skip the ws-server PTY bridge and spawn the worker detached (setsid+unref)
-    // so it outlives a ws-server restart / full app crash, transcript streaming
-    // to stdoutPath. Default off keeps today's bridge-primary path byte-identical
-    // until Stage 2's boot re-attach lands. The detached block below is the SAME
-    // code that has always been the bridge's fallback.
+    // #4 — crash-survivable workers (default ON since the 0.1.512 kill-test). When
+    // enabled we skip the ws-server PTY bridge and spawn the worker detached
+    // (setsid+unref) so it outlives a ws-server restart / full app crash, transcript
+    // streaming to stdoutPath; boot re-binds the survivor. Set
+    // O8_CRASH_SURVIVABLE_WORKERS=0 to fall back to the bridge. The detached block
+    // below is the SAME code that has always been the bridge's fallback.
     if (!crashSurvivableWorkersEnabled()) {
       try {
         const result = await spawnBridgeTerminalSession({
