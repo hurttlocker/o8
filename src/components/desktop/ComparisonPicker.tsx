@@ -383,18 +383,13 @@ export function ComparisonPicker({
                   </div>
                 ) : null}
 
-                {packet.lastEventLabel ? (
-                  <div
-                    style={{
-                      fontSize: 12,
-                      fontWeight: 500,
-                      color: 'var(--t-text-muted)',
-                      lineHeight: 1.4,
-                    }}
-                  >
-                    {packet.lastEventLabel}
-                  </div>
-                ) : null}
+                {/* #1293 — the raw lastEventLabel was noise here: a long prompt
+                    blob for one candidate ("IDE-launched Codex run active. ##
+                    Project Brief…") and a bare "dispatch_started" for another.
+                    The card is a compact entry — model + file count + the
+                    "Compare diffs side by side" CTA; the full per-candidate state
+                    + diff lives in the compare matrix, so the noisy status line
+                    is dropped here. */}
               </div>
 
               <button

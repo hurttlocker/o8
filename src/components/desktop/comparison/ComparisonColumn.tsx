@@ -26,7 +26,11 @@ const STABLE_COLLAPSE_SIGNAL: { open: boolean; nonce: number } = { open: false, 
 const STABLE_FOCUS_SIGNAL: { path: string | null; nonce: number } = { path: null, nonce: 0 };
 const NOOP_ROW_REF = () => {};
 
+// Preferred column width (flex basis). Columns GROW to fill the panel and SHRINK
+// to the floor below, so 2 candidates always fit the panel (both pick buttons
+// visible, no cut-off) while 3+ fall back to horizontal scroll. #1293.
 const COLUMN_MIN_WIDTH = 440;
+const COLUMN_FLOOR_WIDTH = 340;
 
 export function ComparisonColumn({
   candidate,
@@ -53,8 +57,8 @@ export function ComparisonColumn({
   const initialOpen = fileCount > 0 && fileCount <= 5;
 
   const columnStyle: CSSProperties = {
-    flex: `0 0 ${COLUMN_MIN_WIDTH}px`,
-    minWidth: COLUMN_MIN_WIDTH,
+    flex: `1 1 ${COLUMN_MIN_WIDTH}px`,
+    minWidth: COLUMN_FLOOR_WIDTH,
     display: 'flex',
     flexDirection: 'column',
     minHeight: 0,
