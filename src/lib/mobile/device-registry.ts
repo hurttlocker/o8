@@ -14,6 +14,7 @@
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 
 import { getSqlite } from '@/lib/db';
+import { writeActiveTokenHashes } from '@/lib/mobile/device-token-file';
 
 export interface MobileDevice {
   id: string;
@@ -40,6 +41,18 @@ const ENROLL_CODE_TTL_MS = 5 * 60 * 1000;
 
 export function hashToken(token: string): string {
   return createHash('sha256').update(token, 'utf8').digest('hex');
+}
+
+/**
+ * Rebuild the middleware's derived active-token-hash file from the DB. Called
+ * after every enroll/revoke so the (DB-free) middleware sees the change.
+ */
+function syncTokenFile(): void {
+  const sqlite = getSqlite();
+  const rows = sqlite
+    .prepare(`SELECT token_hash FROM mobile_devices WHERE revoked_at IS NULL`)
+    .all() as Array<{ token_hash: string }>;
+  writeActiveTokenHashes(rows.map((r) => r.token_hash));
 }
 
 function toDevice(row: DeviceRow): MobileDevice {
@@ -106,6 +119,7 @@ export function enrollDevice(input: { identityPublicKey: string; deviceLabel?: s
        VALUES (?, ?, ?, ?)`,
     )
     .run(deviceId, hashToken(deviceToken), input.deviceLabel?.trim() || null, input.identityPublicKey);
+  syncTokenFile();
   return { deviceId, deviceToken };
 }
 
@@ -145,5 +159,6 @@ export function revokeDevice(deviceId: string): boolean {
   const result = sqlite
     .prepare(`UPDATE mobile_devices SET revoked_at = datetime('now') WHERE id = ? AND revoked_at IS NULL`)
     .run(deviceId);
+  if (result.changes > 0) syncTokenFile();
   return result.changes > 0;
 }

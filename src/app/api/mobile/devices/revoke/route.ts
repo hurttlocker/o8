@@ -1,0 +1,40 @@
+/**
+ * Revoke a paired device (platform teardown #5). Operator-only (gated like the rest
+ * of /api/mobile/*). Marks the device revoked + rewrites the active-token-hash
+ * file, so the device's HTTP calls fail at the middleware immediately and its
+ * next WS reconnect is refused. (Force-closing a LIVE WS connection lands with
+ * the Stage-2 channel work.)
+ */
+
+export const dynamic = 'force-dynamic';
+
+import { NextResponse, type NextRequest } from 'next/server';
+import { revokeDevice } from '@/lib/mobile/device-registry';
+
+interface RevokeBody {
+  deviceId?: unknown;
+}
+
+export async function POST(req: NextRequest) {
+  let body: RevokeBody;
+  try {
+    body = (await req.json()) as RevokeBody;
+  } catch {
+    return NextResponse.json({ error: 'Invalid JSON' }, { status: 400 });
+  }
+
+  const deviceId = typeof body.deviceId === 'string' ? body.deviceId.trim() : '';
+  if (!deviceId) {
+    return NextResponse.json({ error: 'deviceId required' }, { status: 400 });
+  }
+
+  try {
+    const revoked = revokeDevice(deviceId);
+    return NextResponse.json({ revoked });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Revoke failed' },
+      { status: 500 },
+    );
+  }
+}

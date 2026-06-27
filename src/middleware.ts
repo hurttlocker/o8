@@ -20,7 +20,7 @@
 
 import { clerkMiddleware } from '@clerk/nextjs/server';
 import { NextResponse, type NextRequest } from 'next/server';
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { readFileSync, existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import {
@@ -30,6 +30,9 @@ import {
   isLoopbackHostname,
 } from '@/lib/auth/loopback-request';
 import { migrateDataDirOnce } from '@/lib/data-dir-migration';
+// DB-free reader of the registry's derived active-token-hash file (#5). Importing
+// this does NOT pull better-sqlite3 into the middleware bundle — it is pure fs.
+import { readActiveTokenHashes } from '@/lib/mobile/device-token-file';
 
 migrateDataDirOnce();
 
@@ -96,6 +99,11 @@ const ALLOWLIST_ANY_METHOD: RegExp[] = [
   /^\/api\/panel\/github-device(\/|$)/,
   /^\/api\/panel\/github-auth(\/|$)/,
   /^\/api\/v2\/auth(\/|$)/,
+  // Mobile device enrollment (#5): an UNPAIRED phone has no bearer token yet, so
+  // this bootstrap POST bypasses the bearer gate. It is NOT unauthenticated — the
+  // handler requires a valid single-use enroll code (and the E2EE flag) before
+  // minting a per-device token.
+  /^\/api\/mobile\/enroll(\/|$)/,
 ];
 
 /**
@@ -260,6 +268,18 @@ function tokenMatches(presented: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
+/**
+ * Per-device token (#5): accept a bearer that sha256-hashes to an ACTIVE enrolled
+ * device. The hash is a one-way function and the active set is read from the
+ * registry's derived file (DB-free), so no constant-time compare is needed — a
+ * revoked device drops out of the set the instant the registry rewrites it.
+ */
+function isActiveDeviceToken(presented: string): boolean {
+  if (!presented) return false;
+  const hash = createHash('sha256').update(presented, 'utf-8').digest('hex');
+  return readActiveTokenHashes().has(hash);
+}
+
 function isAllowlisted(pathname: string, method: string): boolean {
   // Any-method allowlist (OAuth handshakes).
   if (ALLOWLIST_ANY_METHOD.some((p) => p.test(pathname))) return true;
@@ -307,16 +327,25 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
   // Bearer-token fallback for non-loopback callers (Tailscale, mobile Safari
   // hitting the dev port over LAN). The presented token MUST match the
   // panel bearer token persisted in ~/.o8/ws-token.
+  const auth = req.headers.get('authorization');
+  const bearer = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
+  const queryToken = req.nextUrl.searchParams.get('token')?.trim() ?? '';
+
   const panelToken = loadPanelToken();
   if (panelToken) {
-    const auth = req.headers.get('authorization');
-    if (auth?.startsWith('Bearer ') && tokenMatches(auth.slice(7).trim(), panelToken)) {
+    if (bearer && tokenMatches(bearer, panelToken)) {
       return NextResponse.next();
     }
-    const queryToken = req.nextUrl.searchParams.get('token');
     if (queryToken && tokenMatches(queryToken, panelToken)) {
       return NextResponse.next();
     }
+  }
+
+  // Per-device token (#5) — additive, always checked (a no-op until a device
+  // enrolls). Lets a per-device-token phone reach the gated mobile surface; the
+  // shared ws-token above keeps desktop + legacy phones working unchanged.
+  if (isActiveDeviceToken(bearer) || isActiveDeviceToken(queryToken)) {
+    return NextResponse.next();
   }
 
   return NextResponse.json(
