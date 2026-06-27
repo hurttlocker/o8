@@ -36,6 +36,12 @@ import { runPacketScope } from './commands/packet/scope.js';
 import { runPacketRuntimeDrift } from './commands/packet/runtime-drift.js';
 import { runPacketDiff } from './commands/packet/diff.js';
 import { runPacketCommit } from './commands/packet/commit.js';
+import {
+  runPacketMergePreview,
+  runPacketRerun,
+  runPacketReset,
+  runPacketRetry,
+} from './commands/packet/recover.js';
 import { runSpec } from './commands/spec.js';
 import { runTeam } from './commands/team.js';
 import {
@@ -136,6 +142,10 @@ commands:
   packet commit -m ".." stage + commit the worktree with an explicit pathspec
   packet heartbeat     update the current packet lane heartbeat
   packet review        approve + merge a reviewed packet
+  packet reset         wipe a stuck packet's worktree + lane (then mission dispatch)
+  packet retry         reset but KEEP the worktree (resume work; then mission dispatch)
+  packet rerun         fresh worker with --feedback (relaunches immediately)
+  packet merge-preview dry-run the 5-layer merge gate (wouldMerge + blockers)
   packet report        append an agent_report event for this packet
   packet capture       screenshot the agent's app as visual proof (--url --label --before/--after --clip/--full-page --wait-for --hover/--click)
   packet mirror-proof  mirror the packet's before/after proof onto a GitHub PR (--pr <n> [--repo owner/repo])
@@ -215,6 +225,10 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       if (secondary === 'commit') return runPacketCommit(args.mode, args.rest);
       if (secondary === 'heartbeat') return runPacketHeartbeat(args.mode, args.rest);
       if (secondary === 'review') return runPacketReview(args.mode, args.rest);
+      if (secondary === 'reset') return runPacketReset(args.mode, args.rest);
+      if (secondary === 'retry') return runPacketRetry(args.mode, args.rest);
+      if (secondary === 'rerun') return runPacketRerun(args.mode, args.rest);
+      if (secondary === 'merge-preview') return runPacketMergePreview(args.mode, args.rest);
       if (secondary === 'report') return runPacketReport(args.mode, args.rest);
       if (secondary === 'capture') return runPacketCapture(args.mode, args.rest);
       if (secondary === 'mirror-proof') return runPacketMirrorProof(args.mode, args.rest);
