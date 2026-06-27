@@ -154,6 +154,35 @@ async function runPacketMergePreview(mode: OutputMode, rest: string[]): Promise<
   return 0;
 }
 
+async function runPacketSteer(mode: OutputMode, rest: string[]): Promise<number> {
+  const message = flag(rest, 'message')?.trim();
+  if (!message) {
+    throw new CliError(
+      'invalid_args',
+      'o8 packet steer requires --message.',
+      EXIT.INVALID_ARGS,
+      'Example: o8 packet steer --message "Also handle the empty-input case."',
+    );
+  }
+  const packetId = await resolvePacketId(flag(rest, 'packet'));
+  const cfg = resolveConfig();
+  const res = await apiFetch<OperatorResponse<{ laneId?: string; note?: string }>>(cfg, '/api/orchestrator/steer-packet', {
+    method: 'POST',
+    body: { packetId, message },
+  });
+  if (!res.data?.ok) {
+    throw new CliError('steer_failed', responseError(res.data, 'Packet steer was rejected.'), EXIT.CONFLICT);
+  }
+  const payload = { schema: 'o8/cli/packet.steer/v1', packet: { id: packetId, result: res.data.result } };
+  if (mode.human) {
+    printHumanHeading('packet steer');
+    printHumanKv([['packet', packetId], ['lane', res.data.result?.laneId ?? '?'], ['note', res.data.result?.note ?? 'steered']]);
+  } else {
+    printJson(payload);
+  }
+  return 0;
+}
+
 export async function runPacketReset(mode: OutputMode, rest: string[]): Promise<number> {
   return doReset(mode, rest, true, 'reset');
 }
@@ -162,4 +191,4 @@ export async function runPacketRetry(mode: OutputMode, rest: string[]): Promise<
   return doReset(mode, rest, false, 'retry');
 }
 
-export { runPacketRerun, runPacketMergePreview };
+export { runPacketRerun, runPacketMergePreview, runPacketSteer };
