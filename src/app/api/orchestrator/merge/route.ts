@@ -1,10 +1,20 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { loadMergeModule } from '@/lib/orchestrator/operator-mission-service/merge-warmup';
+import { getIdempotent, setIdempotent } from '@/lib/orchestrator/idempotency-cache';
+import { withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
+
+// #2 Stage 5 — idempotency + synchronous worktree-cleanup live HERE now (was in
+// the MCP approve_and_merge handler, MCP-process-local). Server-side means every
+// client — MCP, the `o8 packet approve-merge` CLI, future mobile — inherits the
+// same dedupe + clean-tree-on-return guarantee through this one route.
+function buildIdempotencyKey(packetId: string, clientKey: string): string {
+  return `approve_and_merge:${packetId}:${clientKey}`;
+}
 
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
@@ -21,9 +31,21 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'packetId is required.', 400);
   }
 
+  const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
+    ? record.idempotencyKey.trim()
+    : null;
+  const cacheKey = clientKey ? buildIdempotencyKey(packetId, clientKey) : null;
+  if (cacheKey) {
+    const cached = getIdempotent<Record<string, unknown>>(cacheKey);
+    if (cached) {
+      return operatorSuccess({ ...cached, idempotencyReplay: true });
+    }
+  }
+
   try {
     const { approveAndMergePacket } = await loadMergeModule();
-    const result = await approveAndMergePacket({
+    // #622 — guarantee a clean working tree before control returns to any client.
+    const result = await withSynchronousWorktreeCleanup(packetId, () => approveAndMergePacket({
       packetId,
       commitMessage: typeof record.commitMessage === 'string' && record.commitMessage.trim()
         ? record.commitMessage.trim()
@@ -31,7 +53,10 @@ export async function POST(request: NextRequest) {
       expectedHeadSha: typeof record.expectedHeadSha === 'string' && record.expectedHeadSha.trim()
         ? record.expectedHeadSha.trim()
         : undefined,
-    });
+    }));
+    if (cacheKey) {
+      setIdempotent(cacheKey, result as unknown as Record<string, unknown>);
+    }
     return operatorSuccess(result);
   } catch (error) {
     const { isHeadShaMismatchError } = await loadMergeModule();
