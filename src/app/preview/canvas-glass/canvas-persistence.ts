@@ -31,7 +31,9 @@ export interface CanvasSnapshotV1 {
   v: 1;
   activeRepoPath: string | null;
   dockOpen: boolean;
-  term: Array<SnapGeometry & { cwd: string | null; cwdLabel: string | null }>;
+  /** `sessionName` (#6) lets a surviving tmux-backed shell re-attach on restore
+   *  instead of respawning fresh; absent on older snapshots / dead sessions. */
+  term: Array<SnapGeometry & { cwd: string | null; cwdLabel: string | null; sessionName?: string | null }>;
   file: Array<SnapGeometry & { path: string }>;
   image: Array<SnapGeometry & { aspect: number; items: Array<{ src: string; name: string }> }>;
   browser: Array<SnapGeometry & { tabs: BrowserTab[]; activeTabId: number }>;

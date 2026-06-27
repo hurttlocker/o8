@@ -41,6 +41,7 @@ import {
   type CanvasGlassSettings,
 } from '@/lib/canvas-mode/glass-settings';
 import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canvas';
+import { checkAliveSessions } from '@/lib/terminal/tab-state';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { isTauri, onFileOpenRequest, setCanvasBackdropBlur, setCanvasMaterial, takePendingFileOpens } from '@/lib/tauri/bridge';
 import { useDesktopWebSocket } from '@/components/desktop/hooks/useDesktopWebSocket';
@@ -1627,6 +1628,38 @@ export default function CanvasGlassPreviewPage() {
     sendTerminalCreate(120, 30, requestId, cwd ?? undefined);
   }, [findFreeSpot, sendTerminalCreate]);
 
+  // #6 persistent terminals — re-attach a canvas shell whose tmux session
+  // survived a restart/crash instead of respawning fresh. The card is created
+  // with `sessionName` already set, so XtermPanel mounts keyed on it and its
+  // mount effect sends terminal-attach (the ws-server re-attach path replays
+  // scrollback). cdSentRef is pre-seeded so the cd+clear on first attach does
+  // NOT run — the surviving shell keeps its own cwd and history.
+  const reattachTerminal = useCallback((sessionName: string, cwd: string | null, cwdLabel: string | null, at?: SnapGeometry) => {
+    const id = nextIdRef.current;
+    nextIdRef.current += 1;
+    firstSpawnRef.current = false;
+    zPeakRef.current = Math.min(zPeakRef.current + 1, 39);
+    const z = zPeakRef.current;
+    const spot = at ?? findFreeSpot(560, 336);
+    liveSessionsRef.current.add(sessionName);
+    cdSentRef.current.add(sessionName);
+    setTermCards((previous) => [...previous, {
+      id,
+      requestId: `cnv-term-${id}-reattach`,
+      sessionName,
+      exited: false,
+      live: false,
+      revealHold: false,
+      x: spot.x,
+      y: spot.y,
+      w: at?.w ?? 560,
+      h: at?.h ?? 300,
+      z,
+      cwd,
+      cwdLabel,
+    }]);
+  }, [findFreeSpot]);
+
   const moveTermCard = useCallback((id: number, x: number, y: number) => {
     setTermCards((previous) => previous.map((card) => (card.id === id ? { ...card, x, y } : card)));
   }, []);
@@ -2195,14 +2228,29 @@ export default function CanvasGlassPreviewPage() {
     ];
     if (snap.term.length) {
       // The terminal ws needs a beat to connect before create requests land.
-      setTimeout(() => snap.term.forEach((saved) => spawnTerminal(saved.cwd, saved.cwdLabel, saved)), 1200);
+      // #6 persistent terminals — re-attach saved shells whose tmux session
+      // survived (checkAliveSessions unions live tmux sessions under the flag);
+      // respawn the rest fresh, exactly as before.
+      setTimeout(() => {
+        void (async () => {
+          const names = snap.term.map((saved) => saved.sessionName).filter((name): name is string => Boolean(name));
+          const alive = names.length ? await checkAliveSessions(names) : new Set<string>();
+          snap.term.forEach((saved) => {
+            if (saved.sessionName && alive.has(saved.sessionName)) {
+              reattachTerminal(saved.sessionName, saved.cwd, saved.cwdLabel, saved);
+            } else {
+              spawnTerminal(saved.cwd, saved.cwdLabel, saved);
+            }
+          });
+        })();
+      }, 1200);
     }
     void Promise.allSettled(settles).then(() => {
       // Every fetch-backed card has landed (or dropped) — release the save
       // guard, padded past the terminal respawn timer.
       persistArmedAtRef.current = Math.min(persistArmedAtRef.current, Date.now() + 2000);
     });
-  }, [pickThread, spawnDiffCard, spawnFileCard, spawnTerminal, spawnWorktreeDiffCard]);
+  }, [pickThread, spawnDiffCard, spawnFileCard, spawnTerminal, reattachTerminal, spawnWorktreeDiffCard]);
 
   // Save: one debounced snapshot whenever anything persistent changes.
   // The signature string IS the snapshot body — transient fields (term
@@ -2211,7 +2259,7 @@ export default function CanvasGlassPreviewPage() {
   const persistSignature = useMemo(() => JSON.stringify({
     activeRepoPath,
     dockOpen,
-    term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel })),
+    term: termCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, cwd: card.cwd, cwdLabel: card.cwdLabel, sessionName: card.sessionName })),
     file: fileCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, path: card.path })),
     image: imageCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, items: card.items })),
     video: videoCards.map((card) => ({ x: Math.round(card.x), y: Math.round(card.y), w: card.w, h: card.h, aspect: card.aspect, mediaId: card.mediaId, name: card.name })),
