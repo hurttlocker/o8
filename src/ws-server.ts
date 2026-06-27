@@ -120,7 +120,11 @@ import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-rea
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
 import { selectOrphanDashSessions, type DashSessionInfo } from './lib/terminal/dash-gc';
-import { resolveDeviceByToken } from './lib/mobile/device-registry';
+import { resolveDeviceByToken, isDeviceActive, type MobileDevice } from './lib/mobile/device-registry';
+import { getServerIdentity } from './lib/mobile/e2ee-identity';
+import { startServerHandshake, completeServerHandshake, type ServerHandshake } from './lib/mobile/e2ee-channel';
+import { encryptFrame, decryptFrame, isEncryptedFrame } from './lib/mobile/e2ee-crypto';
+import { isLoopbackAddress } from './lib/auth/loopback-request';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import { bootAutomationsScheduler } from './lib/automations/scheduler';
 import type {
@@ -738,6 +742,23 @@ interface ClientState {
   backpressureQueue: string[];
   /** Timer that periodically flushes the backpressure queue */
   flushTimer: ReturnType<typeof setInterval> | null;
+  /** Per-device id (#5) — set for per-device-token connections; drives revoke-disconnect. */
+  deviceId?: string | null;
+  /** Mobile E2EE channel state (#5) — undefined for loopback/legacy (plaintext). */
+  e2ee?: E2eeConnectionState;
+}
+
+/**
+ * #5 mobile E2EE per-connection state. `awaiting-init` — hello sent, waiting for
+ * the client's e2ee-init (or the fallback timer → plaintext). `encrypted` — key
+ * agreed, every frame is wrapped. Absent entirely = plaintext (loopback/legacy).
+ */
+interface E2eeConnectionState {
+  state: 'awaiting-init' | 'encrypted';
+  handshake?: ServerHandshake;
+  sessionKey?: Uint8Array;
+  /** Falls back to plaintext if the client never completes the handshake. */
+  helloTimer?: ReturnType<typeof setTimeout>;
 }
 
 async function getMobileInboxSnapshot(options: { fresh?: boolean } = {}) {
@@ -1533,11 +1554,88 @@ function stopFlushTimer(client: ClientState) {
   }
 }
 
+// ── Mobile E2EE channel (#5) ──
+// Wrap/unwrap the WS frame payload for handshaken remote clients. Loopback +
+// legacy clients have no `e2ee` state, so wireForClient is a pass-through and
+// the path is byte-identical to before.
+
+const E2EE_HANDSHAKE_TIMEOUT_MS = 2500; // no e2ee-init by now → plaintext fallback
+
+/** Encrypt a plaintext frame for an ENCRYPTED client; pass-through otherwise. */
+function wireForClient(client: ClientState, plaintext: string): string {
+  if (client.e2ee?.state === 'encrypted' && client.e2ee.sessionKey) {
+    return JSON.stringify(encryptFrame(plaintext, client.e2ee.sessionKey));
+  }
+  return plaintext;
+}
+
+/** Initial per-client state (inbox + orchestrator snapshot). Deferred past the
+ *  handshake for E2EE clients so it never goes out in plaintext. */
+function sendInitialClientState(client: ClientState): void {
+  void syncClientInbox(client);
+  sendOrchestratorThreadSnapshot(client);
+}
+
+/** Offer E2EE to a remote per-device-token client: send a signed hello, arm the
+ *  plaintext-fallback timer. Initial state is withheld until the channel is up. */
+function initiateE2eeHandshake(client: ClientState, device: MobileDevice): void {
+  try {
+    const { handshake, hello } = startServerHandshake(getServerIdentity(), device.identityPublicKey);
+    // Send hello while the connection is still "plaintext" (e2ee unset) so the
+    // awaiting-init suppression in send/sendRaw doesn't block it; THEN enter the
+    // handshake window. hello is plaintext (it establishes the key) but signed.
+    send(client, { channel: 'system', event: 'e2ee-hello', data: hello });
+    client.e2ee = { state: 'awaiting-init', handshake };
+    client.e2ee.helloTimer = setTimeout(() => {
+      // Old/no-RNG client never answered — fall back to plaintext (negotiated).
+      if (client.e2ee?.state === 'awaiting-init') {
+        console.log(`[mobile-e2ee] ${client.id} did not complete handshake — plaintext fallback`);
+        client.e2ee = undefined;
+        sendInitialClientState(client);
+      }
+    }, E2EE_HANDSHAKE_TIMEOUT_MS);
+  } catch (error) {
+    console.warn(`[mobile-e2ee] handshake init failed for ${client.id}: ${error instanceof Error ? error.message : String(error)}`);
+    client.e2ee = undefined;
+    sendInitialClientState(client);
+  }
+}
+
+/** Handle the client's e2ee-init: verify + derive the session key, then deliver
+ *  an encrypted e2ee-ready + the (now encrypted) initial state. */
+function handleE2eeInit(client: ClientState, msg: Record<string, unknown>): void {
+  const e2ee = client.e2ee;
+  if (!e2ee || e2ee.state !== 'awaiting-init' || !e2ee.handshake) return;
+  if (e2ee.helloTimer) { clearTimeout(e2ee.helloTimer); e2ee.helloTimer = undefined; }
+  const result = completeServerHandshake(e2ee.handshake, {
+    clientEphPub: msg.clientEphPub,
+    clientNonce: msg.clientNonce,
+    clientSig: msg.clientSig,
+  });
+  if ('error' in result) {
+    console.warn(`[mobile-e2ee] ${client.id} handshake rejected: ${result.error}`);
+    try { client.ws.close(4403, 'e2ee handshake failed'); } catch { /* already gone */ }
+    return;
+  }
+  e2ee.sessionKey = result.sessionKey;
+  e2ee.handshake = undefined;
+  e2ee.state = 'encrypted';
+  // First encrypted frame — the client decrypting it confirms key agreement.
+  send(client, { channel: 'system', event: 'e2ee-ready' });
+  sendInitialClientState(client);
+  console.log(`[mobile-e2ee] ${client.id} channel encrypted`);
+}
+
 function send(client: ClientState, msg: Record<string, unknown>) {
   if (client.ws.readyState !== WebSocket.OPEN) return;
-  const json = JSON.stringify(msg);
+  // #5 — during the E2EE handshake window, suppress app frames so nothing leaks
+  // in plaintext before the key is agreed. The post-ready full sync + durable-
+  // channel safety-net polling recover anything dropped in this sub-second gap.
+  if (client.e2ee?.state === 'awaiting-init') return;
+  const plaintext = JSON.stringify(msg);
+  const json = wireForClient(client, plaintext);
   if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) {
-    if (isLossyMessage(json)) return; // safe to drop
+    if (isLossyMessage(plaintext)) return; // safe to drop
     // Queue durable message for later delivery
     if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
       client.backpressureQueue.shift(); // drop oldest if queue is full
@@ -1552,7 +1650,7 @@ function send(client: ClientState, msg: Record<string, unknown>) {
     if (client.backpressureQueue.length > 0) {
       // Flush paused mid-drain (buffer re-pressured) — sending now would jump
       // ahead of queued durable messages and reorder them.
-      if (isLossyMessage(json)) return;
+      if (isLossyMessage(plaintext)) return;
       if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
         client.backpressureQueue.shift();
       }
@@ -1566,12 +1664,16 @@ function send(client: ClientState, msg: Record<string, unknown>) {
 
 function sendRaw(client: ClientState, preStringified: string) {
   if (client.ws.readyState !== WebSocket.OPEN) return;
+  if (client.e2ee?.state === 'awaiting-init') return; // #5 handshake window — suppress
+  // Lossy/durable is decided from the PLAINTEXT (the channel); the wire is the
+  // per-client encrypted frame for an E2EE client, or the plaintext otherwise.
+  const wire = wireForClient(client, preStringified);
   if (client.ws.bufferedAmount > BACKPRESSURE_LIMIT) {
     if (isLossyMessage(preStringified)) return; // safe to drop
     if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
       client.backpressureQueue.shift();
     }
-    client.backpressureQueue.push(preStringified);
+    client.backpressureQueue.push(wire);
     startFlushTimer(client);
     return;
   }
@@ -1582,12 +1684,12 @@ function sendRaw(client: ClientState, preStringified: string) {
       if (client.backpressureQueue.length >= BACKPRESSURE_QUEUE_LIMIT) {
         client.backpressureQueue.shift();
       }
-      client.backpressureQueue.push(preStringified);
+      client.backpressureQueue.push(wire);
       startFlushTimer(client);
       return;
     }
   }
-  client.ws.send(preStringified);
+  client.ws.send(wire);
 }
 
 function broadcast(msg: Record<string, unknown>, filter?: (c: ClientState) => boolean) {
@@ -2473,6 +2575,21 @@ const clients = new Map<string, ClientState>();
 function handleClientMessage(client: ClientState, raw: string) {
   let msg: Record<string, unknown>;
   try { msg = JSON.parse(raw); } catch { return; }
+
+  // #5 E2EE — once the channel is encrypted, every inbound frame is an
+  // {e2ee,n,c} envelope; decrypt it back to the real message before routing.
+  if (isEncryptedFrame(msg)) {
+    if (client.e2ee?.state !== 'encrypted' || !client.e2ee.sessionKey) return; // can't decrypt — drop
+    const plaintext = decryptFrame(msg, client.e2ee.sessionKey);
+    if (!plaintext) return; // bad/forged frame — drop
+    try { msg = JSON.parse(plaintext); } catch { return; }
+  }
+
+  // #5 E2EE — the client's handshake response (plaintext, signed).
+  if (msg.type === 'e2ee-init') {
+    handleE2eeInit(client, msg);
+    return;
+  }
 
   switch (msg.type) {
     case 'subscribe':
@@ -4419,16 +4536,22 @@ const wss = new WebSocketServer({
   verifyClient: (info, done) => {
     const url = new URL(info.req.url ?? '', `http://${info.req.headers.host}`);
     const token = url.searchParams.get('token') ?? '';
+    const req = info.req as typeof info.req & { __o8Device?: MobileDevice | null; __o8Remote?: boolean };
+    // Remote vs loopback (drives whether E2EE is offered) — socket peer truth.
+    req.__o8Remote = !isLoopbackAddress(req.socket?.remoteAddress ?? '127.0.0.1');
+    req.__o8Device = null;
     if (token === WS_TOKEN) {
       done(true);
       return;
     }
-    // Per-device token (#5) — accept an active (non-revoked) enrolled device.
-    // Additive: a no-op until a device enrolls; the shared token above keeps the
-    // desktop webview + legacy phones working. A revoked device fails here on its
-    // next reconnect.
+    // Per-device token (#5) — accept an active (non-revoked) enrolled device, and
+    // stash it so the connection handler can offer the E2EE handshake. Additive:
+    // a no-op until a device enrolls; the shared token above keeps the desktop
+    // webview + legacy phones working. A revoked device fails here on next reconnect.
     try {
-      if (token && resolveDeviceByToken(token)) {
+      const device = token ? resolveDeviceByToken(token) : null;
+      if (device) {
+        req.__o8Device = device;
         done(true);
         return;
       }
@@ -4439,7 +4562,10 @@ const wss = new WebSocketServer({
   },
 });
 
-wss.on('connection', (ws) => {
+wss.on('connection', (ws, req) => {
+  const upgrade = req as typeof req & { __o8Device?: MobileDevice | null; __o8Remote?: boolean };
+  const device = upgrade.__o8Device ?? null;
+  const remote = upgrade.__o8Remote === true;
   const client: ClientState = {
     id: randomUUID(),
     ws,
@@ -4452,12 +4578,13 @@ wss.on('connection', (ws) => {
     packetTailSubscriptions: new Set(),
     backpressureQueue: [],
     flushTimer: null,
+    deviceId: device?.id ?? null,
   };
 
   clients.set(client.id, client);
   console.log(`[ws-server] Client connected: ${client.id} (${clients.size} total)`);
 
-  // Send welcome with connection info
+  // Send welcome with connection info (plaintext — precedes any E2EE handshake)
   send(client, {
     channel: 'system',
     event: 'connected',
@@ -4468,9 +4595,14 @@ wss.on('connection', (ws) => {
     },
   });
 
-  // Send initial inbox
-  void syncClientInbox(client);
-  sendOrchestratorThreadSnapshot(client);
+  // #5 — a REMOTE per-device-token client gets the E2EE handshake offered; its
+  // initial state is withheld until the channel is encrypted (or falls back to
+  // plaintext). Loopback + legacy (shared-token) clients get it now, unchanged.
+  if (remote && device) {
+    initiateE2eeHandshake(client, device);
+  } else {
+    sendInitialClientState(client);
+  }
   startBrowserDiscoveryRealtimeLoop();
 
   ws.on('message', (raw) => {
@@ -4482,6 +4614,7 @@ wss.on('connection', (ws) => {
   ws.on('close', () => {
     // Stop backpressure flush timer
     stopFlushTimer(client);
+    if (client.e2ee?.helloTimer) clearTimeout(client.e2ee.helloTimer);
     client.backpressureQueue.length = 0;
     // Detach from all terminal sessions
     for (const sessionName of client.terminalSessions) {
@@ -4513,6 +4646,21 @@ setInterval(() => {
     client.ws.ping();
   }
 }, PING_INTERVAL_MS);
+
+// #5 — revoke-disconnect sweep. Revocation drops a device from the HTTP gate
+// immediately (the token-hash file) and refuses its next WS reconnect; this
+// closes a still-LIVE WS within ~20s so an open mobile session can't linger.
+setInterval(() => {
+  for (const client of clients.values()) {
+    if (!client.deviceId) continue;
+    try {
+      if (!isDeviceActive(client.deviceId)) {
+        console.log(`[mobile-e2ee] closing revoked device connection ${client.id} (device ${client.deviceId})`);
+        try { client.ws.close(4401, 'device revoked'); } catch { /* already gone */ }
+      }
+    } catch { /* DB hiccup — try again next sweep */ }
+  }
+}, 20_000);
 
 // ── Git watcher — push diff stats + file changes on changes ──
 
