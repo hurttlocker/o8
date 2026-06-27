@@ -85,6 +85,18 @@ import type {
 } from './types';
 import { stageMissingCliRun } from './missing-cli';
 
+/**
+ * #4 crash-survival — opt-in flag (default OFF). When set, owned workers spawn
+ * detached (setsid+unref) instead of through the ws-server PTY bridge, so they
+ * outlive a ws-server restart / full app crash. Off keeps today's bridge-primary
+ * behavior exactly. Flip the default ON once Stage 2's boot re-attach has shipped
+ * and been dogfooded.
+ */
+export function crashSurvivableWorkersEnabled(): boolean {
+  const raw = process.env.O8_CRASH_SURVIVABLE_WORKERS?.trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+}
+
 export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSessionStore {
   const runtimeId = adapter.runtimeId;
   const surfacePrefix = adapter.surfaceIdPrefix;
@@ -561,6 +573,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
 
     let pid = 0;
     let terminalSessionName: string | undefined;
+    let detachMode: 'bridge' | 'detached' = 'bridge';
 
     const bridgeSessionName = tmuxSessionName(runtimeId, runId);
     const cliCmd = [binary, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
@@ -575,17 +588,25 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       NO_COLOR: '1',
     };
 
-    try {
-      const result = await spawnBridgeTerminalSession({
-        sessionName: bridgeSessionName,
-        shellCommand: shellCmd,
-        cwd: session.repoPath,
-        env: spawnEnv,
-      });
-      terminalSessionName = result.sessionName;
-      pid = typeof result.pid === 'number' ? result.pid : 0;
-    } catch {
-      // bridge spawn failed — fall through to detached spawn
+    // #4 Stage 1 — crash-survivable workers (opt-in, default off). When enabled we
+    // skip the ws-server PTY bridge and spawn the worker detached (setsid+unref)
+    // so it outlives a ws-server restart / full app crash, transcript streaming
+    // to stdoutPath. Default off keeps today's bridge-primary path byte-identical
+    // until Stage 2's boot re-attach lands. The detached block below is the SAME
+    // code that has always been the bridge's fallback.
+    if (!crashSurvivableWorkersEnabled()) {
+      try {
+        const result = await spawnBridgeTerminalSession({
+          sessionName: bridgeSessionName,
+          shellCommand: shellCmd,
+          cwd: session.repoPath,
+          env: spawnEnv,
+        });
+        terminalSessionName = result.sessionName;
+        pid = typeof result.pid === 'number' ? result.pid : 0;
+      } catch {
+        // bridge spawn failed — fall through to detached spawn
+      }
     }
 
     if (!terminalSessionName) {
@@ -602,6 +623,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
         });
         child.unref();
         pid = child.pid ?? 0;
+        detachMode = 'detached';
       } finally {
         closeSync(stdoutFd);
         closeSync(stderrFd);
@@ -618,6 +640,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       stderrPath,
       outcome: 'running',
       tmuxSession: terminalSessionName,
+      detachMode,
     };
 
     session.latestPrompt = prompt;
