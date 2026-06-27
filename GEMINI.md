@@ -57,10 +57,12 @@ You are running as a **worker** in that pipeline. A Claude orchestrator designed
 ## How to verify your diff before committing
 
 ```bash
-npx tsc --noEmit      # must pass, always
-npm run lint          # should pass for touched files
-git diff main...HEAD  # self-review gate before the <self-review> block
+npx tsc --noEmit             # must pass, always — the one blocking gate
+npx eslint <changed files>   # advisory, CHANGED FILES ONLY — never repo-wide `npm run lint` (slow; blocks nothing)
+git diff main...HEAD         # self-review gate before the <self-review> block
 ```
+
+Do not block completion waiting on a slow or repo-wide check — finalize the moment typecheck passes and your changed-file checks are clean. o8 runs the authoritative typecheck + change-scoped rule-check at the merge gate.
 
 ## When you're blocked
 

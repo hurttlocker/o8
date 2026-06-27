@@ -390,6 +390,7 @@ export async function buildPacketPrompt(
     captureProofSection,
     brainSection,
     learnedRuleSection,
+    'Verification discipline — SPEED MATTERS: the ONE blocking gate is `npx tsc --noEmit`. Lint is advisory: run it scoped to the files you changed (`npx eslint <your changed files>`), NEVER the repo-wide `npm run lint` — that walks the whole codebase and can stall the lane for 10+ minutes even on a one-file change. Do NOT keep the lane running while you wait on a slow or repo-wide check. o8 runs the authoritative typecheck + change-scoped rule-check at the merge gate, so finalize the moment typecheck passes and your changed-file checks are clean — a committed, typecheck-clean packet is done; report completion immediately instead of waiting on advisory output.',
     ...buildPacketSelfReviewInstructions(baseBranch),
     'CRITICAL: Before reporting completion, you MUST commit all changes: run `git add -A && git commit -m "<descriptive message>"`. Uncommitted changes will be lost when the worktree is cleaned up.',
     'Stay within this packet scope. Surface blockers, review handoffs, and required operator decisions explicitly.',
