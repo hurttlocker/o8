@@ -57,6 +57,10 @@ How we tell worker from operator: not by auth (the loopback bearer token is shar
 
 Every command is a thin `apiFetch` to an existing route via the shared `cli/src/api.ts` client + the hand-rolled two-level switch dispatcher in `cli/src/index.ts` (add an import + a `case` + a USAGE line + a `commands/<group>.ts`). Output stays the `schema: 'o8/cli/<cmd>/v1'` JSON contract via `printJson`.
 
+## Status (2026-06-27): stages 1–8 implemented
+
+All eight stages are code-complete and committed; `tests/control-plane-parity.test.ts` asserts every verb's shared backing route exists (11 cases green). The remaining item is the end-to-end live verification (Stage 8's smoke), which runs after the 0.1.511 ship: `o8 mission create → dispatch → wait` (also confirms the lint-stall fix lands no multi-minute stall) → `o8 packet steer` → worker `o8 packet approve-merge` raises a card → `o8 inbox approve` merges through the gate.
+
 ## Staged plan (each stage: tsc-clean + lint-clean + committable + a test)
 
 **Stage 1 — Lock decisions.** Namespace (above) + the governance tier (the DECISION, locked Option 1). No code. ✅ DONE.
