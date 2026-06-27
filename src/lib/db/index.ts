@@ -903,6 +903,21 @@ function ensureTables(sqlite: Database.Database): void {
       dismissed_at INTEGER NOT NULL,
       reason TEXT
     );
+
+    -- Mobile E2EE (platform teardown #5) — per-device revocable tokens. We store the
+    -- token HASH only (the token is shown once at enrollment); identity_public_key
+    -- is the device's Ed25519 handshake key. The shared ~/.o8/ws-token stays valid
+    -- alongside these for the desktop webview + migration.
+    CREATE TABLE IF NOT EXISTS mobile_devices (
+      id TEXT PRIMARY KEY,
+      token_hash TEXT NOT NULL UNIQUE,
+      device_label TEXT,
+      identity_public_key TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      last_seen_at TEXT,
+      revoked_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_mobile_devices_token_hash ON mobile_devices(token_hash);
   `);
 
   ensureApprovalContextColumns(sqlite);
