@@ -144,6 +144,16 @@ export function resolveDeviceByToken(token: string): MobileDevice | null {
   return toDevice({ ...row, last_seen_at: seenAt?.last_seen_at ?? row.last_seen_at });
 }
 
+/** Is this device still active (exists + not revoked)? Used by the WS revoke sweep. */
+export function isDeviceActive(deviceId: string): boolean {
+  if (!deviceId) return false;
+  const sqlite = getSqlite();
+  const row = sqlite
+    .prepare(`SELECT 1 FROM mobile_devices WHERE id = ? AND revoked_at IS NULL`)
+    .get(deviceId) as { 1: number } | undefined;
+  return Boolean(row);
+}
+
 /** List devices (newest first) for the operator's "Paired devices" surface. */
 export function listDevices(): MobileDevice[] {
   const sqlite = getSqlite();
