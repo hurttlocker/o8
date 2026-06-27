@@ -61,6 +61,14 @@ const execFileAsync = promisify(execFile);
 
 const SILENT_EXIT_TICK_MS = 30_000;
 const LANE_INACTIVITY_GRACE_MS = 300_000;
+// #1293 — short grace before we PROBE a lane's session. The long grace above
+// only matters when liveness is UNCERTAIN (don't yank a possibly-still-thinking
+// agent). A DEFINITIVELY-dead owned session (process gone) should be salvaged as
+// soon as it's been quiet briefly — otherwise a committed silent-exit sits
+// `running` for 5 minutes. This also removes the salvage asymmetry: a candidate
+// that committed its work emits more-recent lane events than one that didn't, so
+// under a single long grace the committed one crossed the threshold much later.
+const SILENT_EXIT_DEAD_GRACE_MS = 45_000;
 const GIT_COMMAND_TIMEOUT_MS = 15_000;
 const GIT_COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 
@@ -507,12 +515,19 @@ async function silentExitTick(): Promise<void> {
       if (lane.lastEventLabel?.startsWith(SILENT_EXIT_EVENT_PREFIX)) continue;
 
       const lastEventMs = lane.lastEventAt ? new Date(lane.lastEventAt).getTime() : 0;
-      if (!Number.isFinite(lastEventMs) || now - lastEventMs < LANE_INACTIVITY_GRACE_MS) {
+      const inactiveMs = Number.isFinite(lastEventMs) ? now - lastEventMs : 0;
+      // Short grace before probing so a dead session doesn't sit for the full
+      // 5-min window. The probe below gives the real verdict.
+      if (inactiveMs < SILENT_EXIT_DEAD_GRACE_MS) {
         continue;
       }
 
       const alive = await probeSessionAlive(lane);
-      if (alive !== false) continue; // undefined = can't tell, true = still alive
+      if (alive === true) continue; // still alive — leave it
+      // alive === undefined means we can't tell (e.g. a discovered/operator
+      // session); keep the conservative long grace before acting. alive === false
+      // is a definitively-dead owned session — salvage now.
+      if (alive === undefined && inactiveMs < LANE_INACTIVITY_GRACE_MS) continue;
 
       // Re-read lane state to guard against concurrent updates between the
       // initial listActiveLanes() and our decision to act. If someone else
