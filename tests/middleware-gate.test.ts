@@ -250,6 +250,27 @@ describe('panelGateMiddleware — allowlists and bypasses', () => {
     expect(res.status).toBe(200);
   });
 
+  it('allows /api/mobile/enroll POST from LAN (#5 bootstrap — handler auths the enroll code)', () => {
+    // An unpaired phone has no bearer token yet; enrollment bypasses the gate and
+    // the route handler requires a valid single-use enroll code instead.
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/mobile/enroll', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+
+  it('still gates the rest of /api/mobile/* from LAN without a token (#5 — only enroll is open)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/mobile/devices', {
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
   it('bypasses worker-protocol routes (they run their own bearer auth)', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/worker/poll', {

@@ -120,6 +120,7 @@ import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-rea
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
 import { selectOrphanDashSessions, type DashSessionInfo } from './lib/terminal/dash-gc';
+import { resolveDeviceByToken } from './lib/mobile/device-registry';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import { bootAutomationsScheduler } from './lib/automations/scheduler';
 import type {
@@ -4417,12 +4418,24 @@ const wss = new WebSocketServer({
   },
   verifyClient: (info, done) => {
     const url = new URL(info.req.url ?? '', `http://${info.req.headers.host}`);
-    const token = url.searchParams.get('token');
-    if (token !== WS_TOKEN) {
-      done(false, 401, 'Unauthorized');
+    const token = url.searchParams.get('token') ?? '';
+    if (token === WS_TOKEN) {
+      done(true);
       return;
     }
-    done(true);
+    // Per-device token (#5) — accept an active (non-revoked) enrolled device.
+    // Additive: a no-op until a device enrolls; the shared token above keeps the
+    // desktop webview + legacy phones working. A revoked device fails here on its
+    // next reconnect.
+    try {
+      if (token && resolveDeviceByToken(token)) {
+        done(true);
+        return;
+      }
+    } catch {
+      // DB not ready / lookup error → fall through to reject.
+    }
+    done(false, 401, 'Unauthorized');
   },
 });
 
