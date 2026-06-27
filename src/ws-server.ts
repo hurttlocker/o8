@@ -1104,7 +1104,8 @@ function spawnDashShellPty(
 // @/lib/terminal/tmux.ts (which carries the test + doc).
 function dashPersistentTerminalsEnabled(): boolean {
   const raw = process.env.O8_PERSISTENT_TERMINALS?.trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+  if (raw === undefined || raw === '') return true;
+  return !(raw === '0' || raw === 'false' || raw === 'off' || raw === 'no');
 }
 
 /**
@@ -1147,6 +1148,9 @@ function createDashTmuxSessionSync(
     // Large scrollback so Stage-3 capture-pane recovers real history; NO
     // remain-on-exit so the user's `exit` ends the session (interactive semantics).
     execFileSync(tmuxBin, ['set-option', '-t', sessionName, 'history-limit', '50000'], { timeout: 3000, stdio: 'ignore' });
+    // Persistence must be INVISIBLE — hide the tmux status bar so a backed
+    // terminal looks byte-identical to a plain shell (no green chrome row).
+    execFileSync(tmuxBin, ['set-option', '-t', sessionName, 'status', 'off'], { timeout: 3000, stdio: 'ignore' });
     console.log(`[ws-server] Created persistent dash tmux session: ${sessionName}`);
     return true;
   } catch (err) {
