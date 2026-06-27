@@ -1,5 +1,7 @@
 # Persistent / Crash-Survivable Terminals — Plan
 
+> **✅ SHIPPED — 0.1.514, default ON.** All 5 stages landed; the live kill-test passed (a canvas terminal survived `kill -9` of both ws-server and the app, re-attached with full scrollback, took new live commands). The tmux status bar is hidden so persistence is invisible. Stage map below is kept as the build record.
+
 *platform teardown item #6, + the natural follow-on to daemon crash-survival (#4). Goal: interactive terminal tiles, canvas terminals, and the global terminal survive a ws-server restart / full app crash and **re-attach with scrollback** on relaunch — so the answer to "is everything still there?" becomes a flat yes.*
 
 ## The principle
