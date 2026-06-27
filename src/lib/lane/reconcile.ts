@@ -5,6 +5,7 @@ import { createApproval } from '@/lib/approvals/store';
 import { listLanes, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { getRuntime } from '@/lib/runtimes';
+import { crashSurvivableWorkersEnabled } from '@/lib/runtimes/shared/owned-session/crash-survival';
 
 function isStuckLane(lane: Lane) {
   return lane.status === 'running' || lane.status === 'launching';
@@ -215,6 +216,12 @@ export function reconcileOrphanedWorktrees(): number {
 export async function reconcileStuckLanes(): Promise<void> {
   const candidateLanes = listLanes().filter(isStuckLane);
   let recoveredCount = 0;
+  // #4 Stage 2 — a stuck (running/launching) lane whose session is still in the
+  // live set is RE-BOUND (left intact). When crash-survivable workers are on, a
+  // re-bind across a ws-server/app restart means a detached worker outlived the
+  // crash and its lane resumes running with the transcript intact — the
+  // crash-survival win. Counted here for the boot observability log below.
+  let reboundCount = 0;
 
   if (candidateLanes.length === 0) {
     console.log('[reconcile] Checked 0 lanes, recovered 0 stuck lanes');
@@ -230,6 +237,7 @@ export async function reconcileStuckLanes(): Promise<void> {
     }
 
     if (lane.sessionKey && liveSessionKeys.has(lane.sessionKey)) {
+      reboundCount += 1;
       continue;
     }
 
@@ -250,4 +258,7 @@ export async function reconcileStuckLanes(): Promise<void> {
   }
 
   console.log(`[reconcile] Checked ${candidateLanes.length} lanes, recovered ${recoveredCount} stuck lanes`);
+  if (reboundCount > 0 && crashSurvivableWorkersEnabled()) {
+    console.log(`[crash-survival] re-bound ${reboundCount} surviving worker(s) on reconcile — lanes resumed running, transcripts intact`);
+  }
 }

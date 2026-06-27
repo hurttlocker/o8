@@ -84,18 +84,7 @@ import type {
   OwnedTailGroup,
 } from './types';
 import { stageMissingCliRun } from './missing-cli';
-
-/**
- * #4 crash-survival — opt-in flag (default OFF). When set, owned workers spawn
- * detached (setsid+unref) instead of through the ws-server PTY bridge, so they
- * outlive a ws-server restart / full app crash. Off keeps today's bridge-primary
- * behavior exactly. Flip the default ON once Stage 2's boot re-attach has shipped
- * and been dogfooded.
- */
-export function crashSurvivableWorkersEnabled(): boolean {
-  const raw = process.env.O8_CRASH_SURVIVABLE_WORKERS?.trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
-}
+import { crashSurvivableWorkersEnabled } from './crash-survival';
 
 export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSessionStore {
   const runtimeId = adapter.runtimeId;
