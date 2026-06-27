@@ -4702,16 +4702,32 @@ async function bootstrapWsServer() {
         // Degrades gracefully: no match (lane already archived/gone) → undefined →
         // prior behavior.
         let existingLaneId: string | undefined;
+        let existingWorktree: string | undefined;
         if (retryOfSurfaceId) {
           try {
             const { findLaneBySession } = await import('@/lib/lane/registry');
-            existingLaneId = findLaneBySession(retryOfSurfaceId)?.id ?? undefined;
+            const lane = findLaneBySession(retryOfSurfaceId);
+            existingLaneId = lane?.id ?? undefined;
+            existingWorktree = lane?.worktreePath ?? undefined;
           } catch { /* best-effort — fall back to a fresh lane */ }
         }
+        // #1293 — RESUME the retry IN THE LANE'S EXISTING WORKTREE when it still
+        // exists. The old code always isolated a fresh worktree with the changed
+        // "(retry N)" taskName, which orphaned the prior session's committed work:
+        // the lane kept its original worktree_path while the new session ran in a
+        // disconnected `<task>-retry-N` tree (the silent-exit / retry-worktree
+        // disconnect that left the lane stuck `running`/`failed` and never
+        // reviewing). Reusing the worktree keeps the work in one place and the
+        // lane connected, so the next salvage finalizes it to review. Only
+        // isolate a fresh tree when the original is gone (the archived-worktree
+        // case the original comment guarded against booting at the main repo).
+        const launchBody = (existingWorktree && existsSync(existingWorktree))
+          ? { runtime: 'codex', prompt, repoPath: existingWorktree, cwd: existingWorktree, taskName, isolate: false, skipSetup: true, existingLaneId }
+          : { runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName, isolate: true, existingLaneId };
         const res = await fetchWithRetry(buildNextUrl('/api/runtime/launch'), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ runtime: 'codex', prompt, repoPath, cwd: repoPath, taskName, isolate: true, existingLaneId }),
+          body: JSON.stringify(launchBody),
           signal: AbortSignal.timeout(15000),
         });
         const data = await res.json() as { ok?: boolean; surfaceId?: string };
