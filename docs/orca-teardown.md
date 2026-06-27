@@ -61,8 +61,10 @@ Orca's PTYs live in a **detached process, checkpointed to disk every 5s**; agent
 ### 5. Mobile E2EE + per-device tokens
 Per-connection ephemeral Curve25519 ECDH → XSalsa20-Poly1305 + per-device revocable tokens + forward secrecy (Orca: `src/main/runtime/rpc/e2ee-channel.ts`, `device-registry.ts`) vs. our single shared bearer token. A security upgrade for the mobile surface. **Keep our web-push edge** — Orca has no cloud push, so a backgrounded phone misses events.
 
-### 6. Persistent terminal scrollback
+### 6. Persistent terminal scrollback — 📋 PLANNED
 WebGL xterm serialized to disk and replayed on restart with a "session restored" banner. Durable terminals.
+
+> **Full plan: [`docs/persistent-terminals.md`](./persistent-terminals.md).** Key finding: `o8 run` already does this (spawns into a `cortex-run-*` tmux session backed by a disk registry reconciled against `tmux ls`) — the feature is "make interactive terminals do what `o8 run` already does." Interactive tiles/canvas/global are plain `$SHELL -l` PTYs in ws-server memory (die on restart); the fix composes already-built pieces — the dead-code `createTmuxSession`, the existing `spawnTmuxAttachPty`, the persisted `PersistedTab.tmuxSession` identity, the alive/dead restore split. No fork (tmux is the right tool for interactive shells + already o8's model). 5 stages, gated behind `O8_PERSISTENT_TERMINALS` then flipped ON after a kill-test (the #4 playbook).
 
 ### 7. Written, enforced styleguide
 Feedback-timing tiers (0–100ms none / 100ms–1s disabled / 1–3s spinner / 3s+ stage labels), sibling-cohesion + button-hierarchy as **review-gating** rules (Orca: `docs/STYLEGUIDE.md`). Same instinct as hurttlocker — codify the interaction-timing half we haven't written down yet.
