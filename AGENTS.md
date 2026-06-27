@@ -54,6 +54,24 @@ o8 packet mirror-proof --pr <n> [--repo owner/repo] [--packet <id>]  # mirror th
 o8 packet log [id] [--follow] [--since <cursor>]                     # read or tail this packet's lane events
 o8 packet runtime-drift                # detect + warn when the lane's bound runtime drifted (exit 5 on drift)
 o8 packet review --approve [--commit-message "..."]                  # approve + merge a reviewed packet
+o8 packet reset [--packet <id>] [--reason "..."]        # wipe a stuck packet's worktree + lane, then `o8 mission dispatch` to relaunch
+o8 packet retry [--packet <id>] [--reason "..."]        # like reset but KEEP the worktree (resume the work in place)
+o8 packet rerun --feedback "..." [--packet <id>]        # fresh worker with feedback (relaunches immediately)
+o8 packet steer --message "..." [--packet <id>]         # nudge a packet's warm session (layer-3 escalation, cheaper than rerun)
+o8 packet merge-preview [--packet <id>]                 # dry-run the 5-layer merge gate (wouldMerge + blockers), no mutation
+o8 packet approve-merge [--packet <id>] [--commit-message "..."]   # FROM A WORKER this does NOT merge — it raises an operator approval card and returns status "pending_operator_approval". You cannot merge your own work to main; that is the operator's call. Track the card with `o8 inbox list`.
+
+# Mission orchestration — fan out sub-work to fellow agents and track it without leaving the CLI.
+o8 mission create --title "..." [--body "..."] [--repo <path>] [--compare m1,m2] [--runtime r]   # create a mission from an inline task (--compare seeds a best-of-N)
+o8 mission dispatch [--mission <id>]    # dispatch a created mission's packets to workers
+o8 mission status   [--mission <id>] [--cost]                          # mission + packet state
+o8 mission wait     [--mission <id>] [--packet <id>] [--timeout <ms>]  # block until a packet hits a review/terminal state (wakeReason in the payload)
+o8 mission tail     [--mission <id>] [--timeout <ms>]                  # stream packet status transitions until terminal
+
+# Governance inbox — the operator approval queue; worker approve-merge cards land here.
+o8 inbox list [--all]                  # pending approvals (--all includes resolved)
+o8 inbox approve <id>                  # OPERATOR action: approve a card → runs the deferred action (e.g. a held merge)
+o8 inbox reject <id>                   # OPERATOR action: reject a pending approval
 
 # Task pool (project-backed work queue)
 o8 task list [--include-done] [--include-brief] [--project <id>] [--repo <path>]   # pool grouped ready/running/review/blocked/done
