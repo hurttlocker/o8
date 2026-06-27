@@ -31,6 +31,37 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'packetId is required.', 400);
   }
 
+  // #2 Stage 5b — worker-context governance. When the caller is a dispatched
+  // worker (the CLI sets requestedByWorker after detecting a packet worktree),
+  // we do NOT merge: raise an operator approval card and return immediately with
+  // a clean pending status. The operator clears it (o8 inbox approve), which
+  // dispatches the lane-merge continuation through the full gate. A human
+  // operator call (requestedByWorker absent) falls through and merges directly.
+  if (record.requestedByWorker === true) {
+    const { findLaneByPacket } = await import('@/lib/lane/registry');
+    const lane = findLaneByPacket(packetId);
+    if (!lane) {
+      return operatorError('lane_not_found', `No lane found for packet ${packetId}.`, 404);
+    }
+    try {
+      const { raiseWorkerMergeApproval } = await import('@/lib/lane/commands');
+      const result = await raiseWorkerMergeApproval(lane, {
+        commitMessage: typeof record.commitMessage === 'string' ? record.commitMessage.trim() || undefined : undefined,
+        expectedHeadSha: typeof record.expectedHeadSha === 'string' ? record.expectedHeadSha.trim() || undefined : undefined,
+      });
+      return operatorSuccess({
+        merged: false,
+        status: 'pending_operator_approval',
+        approvalId: result.approvalId ?? null,
+        laneId: result.laneId,
+        note: result.note,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to raise merge approval.';
+      return operatorError('approval_failed', message, 500, error);
+    }
+  }
+
   const clientKey = typeof record.idempotencyKey === 'string' && record.idempotencyKey.trim()
     ? record.idempotencyKey.trim()
     : null;

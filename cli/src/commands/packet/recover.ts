@@ -21,7 +21,7 @@ import {
   printJson,
   type OutputMode,
 } from '../../output.js';
-import { resolveLaneFromCwd } from './worktree-resolve.js';
+import { detectWorktree, resolveLaneFromCwd } from './worktree-resolve.js';
 
 interface OperatorResponse<T> {
   ok: boolean;
@@ -183,6 +183,61 @@ async function runPacketSteer(mode: OutputMode, rest: string[]): Promise<number>
   return 0;
 }
 
+// Worker context: a dispatched worker runs inside a packet worktree (or carries
+// O8_WORKER_PACKET_ID, stamped at dispatch). The CLI honestly reports this so the
+// merge route raises an operator approval card instead of merging — the moat.
+// `--as-operator` is the escape hatch for an operator working inside a worktree.
+function isWorkerContext(rest: string[]): boolean {
+  if (rest.includes('--as-operator')) return false;
+  if (process.env.O8_WORKER_PACKET_ID) return true;
+  return detectWorktree(process.cwd()) !== null;
+}
+
+async function runPacketApproveMerge(mode: OutputMode, rest: string[]): Promise<number> {
+  const packetId = await resolvePacketId(flag(rest, 'packet'));
+  const worker = isWorkerContext(rest);
+  const cfg = resolveConfig();
+  const res = await apiFetch<OperatorResponse<{ merged?: boolean; status?: string; approvalId?: string; note?: string }>>(cfg, '/api/orchestrator/merge', {
+    method: 'POST',
+    body: {
+      packetId,
+      commitMessage: flag(rest, 'commit-message')?.trim() || undefined,
+      expectedHeadSha: flag(rest, 'expected-sha')?.trim() || undefined,
+      idempotencyKey: flag(rest, 'idempotency-key')?.trim() || undefined,
+      ...(worker ? { requestedByWorker: true } : {}),
+    },
+  });
+  if (!res.data?.ok) {
+    throw new CliError('merge_failed', responseError(res.data, 'Merge was rejected.'), EXIT.CONFLICT);
+  }
+  const result = res.data.result;
+  const pending = result?.status === 'pending_operator_approval';
+  const payload = {
+    schema: 'o8/cli/packet.approve-merge/v1',
+    packet: { id: packetId },
+    context: worker ? 'worker' : 'operator',
+    pending,
+    result,
+  };
+  if (mode.human) {
+    printHumanHeading('packet approve-merge');
+    if (pending) {
+      printHumanKv([
+        ['packet', packetId],
+        ['context', 'worker'],
+        ['status', 'pending operator approval'],
+        ['approval', result?.approvalId ?? '?'],
+        ['next', 'operator: o8 inbox approve ' + (result?.approvalId ?? '<id>')],
+      ]);
+    } else {
+      printHumanKv([['packet', packetId], ['merged', result?.merged ? 'yes' : 'no'], ['note', result?.note ?? '']]);
+    }
+  } else {
+    printJson(payload);
+  }
+  return 0;
+}
+
 export async function runPacketReset(mode: OutputMode, rest: string[]): Promise<number> {
   return doReset(mode, rest, true, 'reset');
 }
@@ -191,4 +246,4 @@ export async function runPacketRetry(mode: OutputMode, rest: string[]): Promise<
   return doReset(mode, rest, false, 'retry');
 }
 
-export { runPacketRerun, runPacketMergePreview, runPacketSteer };
+export { runPacketRerun, runPacketMergePreview, runPacketSteer, runPacketApproveMerge };
