@@ -118,6 +118,8 @@ import {
 } from './lib/operator/defaults';
 import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-reaper';
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
+import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
+import { selectOrphanDashSessions, type DashSessionInfo } from './lib/terminal/dash-gc';
 import { bootCompactorScheduler } from './lib/cortex/compactor-scheduler';
 import { bootAutomationsScheduler } from './lib/automations/scheduler';
 import type {
@@ -1150,6 +1152,99 @@ function createDashTmuxSessionSync(
   } catch (err) {
     console.warn(`[ws-server] dash tmux create failed for ${sessionName}, falling back to plain shell: ${err instanceof Error ? err.message : String(err)}`);
     return false;
+  }
+}
+
+// #6 persistent terminals — orphan dash-session GC. Under persistence, dash
+// terminals live in detached tmux sessions that survive a restart/crash; the
+// flip side is a leak — a session whose tab was closed (or whose app crashed
+// before cleanup) has no owner. This bounded sweep reaps `cortex-dash-*`
+// sessions referenced by no persisted tab and no live client. Cadence mirrors
+// the managed-runs reconcile; the kill decision is the pure dash-gc policy.
+const DASH_GC_INTERVAL_MS = 30 * 60 * 1000;
+const DASH_GC_MIN_AGE_MS = 5 * 60 * 1000;
+const DASH_GC_MAX_SESSIONS = 64;
+let dashGcTimer: ReturnType<typeof setInterval> | null = null;
+
+/** One `tmux list-sessions` → live `cortex-dash-*` sessions with creation age. */
+function listDashTmuxSessionsWithAge(): DashSessionInfo[] {
+  try {
+    const out = execFileSync(
+      resolveTmuxBinary(),
+      ['list-sessions', '-F', '#{session_name} #{session_created}'],
+      { timeout: 4000, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], env: sanitizePtyEnv() as NodeJS.ProcessEnv },
+    );
+    const rows: DashSessionInfo[] = [];
+    for (const line of out.split('\n')) {
+      const [name, created] = line.trim().split(/\s+/);
+      if (!name || !name.startsWith('cortex-dash-')) continue;
+      const sec = Number(created);
+      rows.push({ name, createdMs: Number.isFinite(sec) && sec > 0 ? sec * 1000 : 0 });
+    }
+    return rows;
+  } catch {
+    return [];
+  }
+}
+
+function reapOrphanDashSessions() {
+  if (!dashPersistentTerminalsEnabled()) return;
+  const sessions = listDashTmuxSessionsWithAge();
+  if (sessions.length === 0) return;
+
+  // Durable reference set FIRST — never reap on a failed read of persisted tabs
+  // (after a crash the in-memory map is empty; persisted tabs are the only
+  // owner record, so a read failure must abort the sweep, not reap survivors).
+  let referenced: Set<string>;
+  try {
+    referenced = collectPersistedTmuxSessions();
+  } catch {
+    return;
+  }
+  // A session with live clients is referenced too — covers the brief
+  // create→persist window before the tab file is flushed.
+  for (const [name, att] of terminalAttachments) {
+    if (att.clientIds.size > 0) referenced.add(name);
+  }
+
+  const toKill = selectOrphanDashSessions(sessions, referenced, {
+    nowMs: Date.now(),
+    minAgeMs: DASH_GC_MIN_AGE_MS,
+    maxSessions: DASH_GC_MAX_SESSIONS,
+  });
+  if (toKill.length === 0) return;
+
+  const tmuxBin = resolveTmuxBinary();
+  for (const name of toKill) {
+    // Tear down any warm-but-detached local PTY view first (0-client survivors
+    // from the reaper's persistence path), then kill the tmux session.
+    const att = terminalAttachments.get(name);
+    if (att) {
+      if (att.orphanTimer) clearTimeout(att.orphanTimer);
+      if (att.batchTimer) clearTimeout(att.batchTimer);
+      try { att.ptyProcess.kill(); } catch { /* already gone */ }
+      terminalAttachments.delete(name);
+    }
+    try {
+      execFileSync(tmuxBin, ['kill-session', '-t', name], { timeout: 3000, stdio: 'ignore', env: sanitizePtyEnv() as NodeJS.ProcessEnv });
+    } catch { /* already gone */ }
+  }
+  console.log(`[ws-server] [persistent-terminals] GC reaped ${toKill.length} orphan dash tmux session(s)`);
+}
+
+function startDashSessionGc() {
+  if (dashGcTimer) return;
+  dashGcTimer = setInterval(() => {
+    try { reapOrphanDashSessions(); } catch { /* best effort */ }
+  }, DASH_GC_INTERVAL_MS);
+  dashGcTimer.unref?.();
+  console.log('[ws-server] [persistent-terminals] orphan dash-session GC started');
+}
+
+function stopDashSessionGc() {
+  if (dashGcTimer) {
+    clearInterval(dashGcTimer);
+    dashGcTimer = null;
   }
 }
 
@@ -3363,6 +3458,20 @@ function removeClientFromTerminal(clientId: string, sessionName: string) {
   // If no more clients, destroy the PTY handle and clean up the tmux session
   if (attachment.clientIds.size === 0) {
     if (attachment.kind === 'dash-shell') {
+      // #6 persistent terminals — when persistence is on, a dash PTY is a
+      // `tmux attach` client over a detached session, so detaching costs us
+      // nothing to keep. Hold BOTH the session and the warm PTY view so
+      // reconnect is instant and the scrollback ring survives; the periodic GC
+      // sweep (reapOrphanDashSessions) reaps sessions whose tab is gone. The
+      // legacy off-path keeps the 30-min reap of the in-memory shell PTY.
+      if (dashPersistentTerminalsEnabled()) {
+        if (attachment.orphanTimer) {
+          clearTimeout(attachment.orphanTimer);
+          attachment.orphanTimer = null;
+        }
+        console.log(`[ws-server] [persistent-terminals] ${sessionName} detached — keeping tmux session + view warm`);
+        return;
+      }
       if (attachment.orphanTimer) clearTimeout(attachment.orphanTimer);
       attachment.orphanTimer = setTimeout(() => {
         const latest = terminalAttachments.get(sessionName);
@@ -5149,6 +5258,9 @@ async function bootstrapWsServer() {
     stopHeadlessLoop = startHeadlessTickBridge(10_000);
     startWorktreeReaper();
     startLaneZombieReaper();
+    // #6 persistent terminals — bounded GC for orphan dash tmux sessions, only
+    // when persistence is on (off-path leaves no sessions to reap).
+    if (dashPersistentTerminalsEnabled()) startDashSessionGc();
     // Heal-bot AND-gates two toggles (epic #1044 / follow-up #1048):
     //   1. `healBotEnabled` — existing toggle, "do you want auto-fix at all"
     //   2. `inAppOrchestratorEnabled` — added in v0.1.138, "do you have any
@@ -5210,6 +5322,7 @@ function shutdown(signal: string) {
   stopDocWatcherLoop = null;
   stopWorktreeReaper();
   stopLaneZombieReaper();
+  stopDashSessionGc();
   clearInterval(stallCheckTimer);
   if (runtimeRefreshTimer) clearTimeout(runtimeRefreshTimer);
   if (mobileRefreshTimer) clearTimeout(mobileRefreshTimer);
