@@ -12,6 +12,20 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+// ── Feature flag ──
+
+/**
+ * #6 persistent / crash-survivable terminals — opt-in flag (default OFF). When on,
+ * interactive dash terminals spawn INSIDE a tmux session (instead of a plain
+ * ws-server-child PTY) so they outlive a ws-server restart / app crash and
+ * re-attach with scrollback on relaunch. Off keeps today's plain-shell behavior
+ * exactly. Flip the default ON after the kill-test dogfood (the #4 playbook).
+ */
+export function persistentTerminalsEnabled(): boolean {
+  const raw = process.env.O8_PERSISTENT_TERMINALS?.trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+}
+
 // ── Availability cache ──
 
 let tmuxAvailableCache: boolean | null = null;
