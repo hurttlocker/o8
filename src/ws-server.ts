@@ -321,7 +321,13 @@ async function triggerHeadlessSprintTick(releasePacketIds?: string[]) {
   return fetchNextJson<{ ok: boolean }>('/api/orchestrator/headless-tick', {
     method: 'POST',
     body: releasePacketIds && releasePacketIds.length > 0 ? { releasePacketIds } : {},
-    timeoutMs: 15_000,
+    // #1293 — a real tick can take 20-30s (per-packet git worktree add + fetch +
+    // rebase onto origin). The server caps itself at TICK_DEADLINE_MS = 30s
+    // (headless-loop.ts) and its singleton prevents overlapping/duplicate ticks,
+    // so the only cost of a too-short fetch timeout is false "Tick bridge failed:
+    // operation aborted due to timeout" noise that masks real failures. Hold the
+    // fetch just above the server deadline so it reflects the actual outcome.
+    timeoutMs: 35_000,
   });
 }
 

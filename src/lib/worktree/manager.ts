@@ -1126,6 +1126,23 @@ export class WorktreeManager {
       } catch {
         // Non-fatal — the worktree still works, just may leak the file.
       }
+
+      // .git/info/exclude only hides UNTRACKED files. When o8 dispatches into a
+      // repo where .claude/settings.json is TRACKED (o8 self-hosting!), the
+      // injected hooks show as `M .claude/settings.json` and any `git add -A`
+      // (an agent's own commit, or the recovery-salvage auto-commit) ships it as
+      // scope creep. `--skip-worktree` hides a TRACKED file's local modifications
+      // from `git status` + `git add`, while the agent still reads the hooks.
+      // Best-effort: harmlessly errors when the file is untracked (exclude covers
+      // that case) or not yet in the index.
+      try {
+        await execFileAsync('git', ['update-index', '--skip-worktree', '.claude/settings.json'], {
+          cwd: worktreePath,
+          timeout: 10_000,
+        });
+      } catch {
+        // untracked / not-in-index — the exclude above handles it
+      }
     } catch {
       // Best-effort — don't block worktree creation if hook injection fails
       console.log('[worktree] hook injection failed (non-fatal)');
