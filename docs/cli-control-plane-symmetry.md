@@ -57,9 +57,16 @@ How we tell worker from operator: not by auth (the loopback bearer token is shar
 
 Every command is a thin `apiFetch` to an existing route via the shared `cli/src/api.ts` client + the hand-rolled two-level switch dispatcher in `cli/src/index.ts` (add an import + a `case` + a USAGE line + a `commands/<group>.ts`). Output stays the `schema: 'o8/cli/<cmd>/v1'` JSON contract via `printJson`.
 
-## Status (2026-06-27): stages 1–8 implemented
+## Status (2026-06-27): stages 1–8 SHIPPED + verified live (0.1.511)
 
-All eight stages are code-complete and committed; `tests/control-plane-parity.test.ts` asserts every verb's shared backing route exists (11 cases green). The remaining item is the end-to-end live verification (Stage 8's smoke), which runs after the 0.1.511 ship: `o8 mission create → dispatch → wait` (also confirms the lint-stall fix lands no multi-minute stall) → `o8 packet steer` → worker `o8 packet approve-merge` raises a card → `o8 inbox approve` merges through the gate.
+All eight stages are code-complete, committed, and `tests/control-plane-parity.test.ts` asserts every verb's shared backing route exists (11 cases green). **End-to-end live verification passed on 0.1.511**, driven entirely through the new CLI:
+
+- `o8 mission create` → `o8 mission dispatch` launched a real Codex worker (single packet, `fan=0`, own worktree).
+- Worker reached `reviewing` (`review_ready`) at **t+101s** — the lint-stall fix holds (no multi-minute repo-wide-lint stall; wrote only the one intended file).
+- Worker-context `o8 packet approve-merge` (run from the worktree) returned `merged:false, status:'pending_operator_approval'` and raised an approval card with the diff attached — **it did not merge**.
+- `o8 inbox list` surfaced the card; `o8 inbox approve <id>` dispatched the held merge through the gate, which PR-only mode correctly blocked ("open a PR; a human merges"). `main` unchanged throughout.
+
+The moat held as a verb: the agent drove the entire loop, the one thing it could not do was silently merge its own work to `main`.
 
 ## Staged plan (each stage: tsc-clean + lint-clean + committable + a test)
 
