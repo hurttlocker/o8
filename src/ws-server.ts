@@ -1097,6 +1097,62 @@ function spawnDashShellPty(
   });
 }
 
+// #6 persistent terminals — opt-in (default OFF). Inlined to avoid threading an
+// import through this 5000-line module; mirrors persistentTerminalsEnabled() in
+// @/lib/terminal/tmux.ts (which carries the test + doc).
+function dashPersistentTerminalsEnabled(): boolean {
+  const raw = process.env.O8_PERSISTENT_TERMINALS?.trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'on' || raw === 'yes';
+}
+
+/**
+ * #6 persistent terminals — create (or confirm) a tmux session for an interactive
+ * dash terminal so the shell survives a ws-server restart / app crash. Synchronous
+ * (a terminal create is a deliberate user action; the brief block is fine), gated
+ * behind O8_PERSISTENT_TERMINALS, and returns false on ANY failure so the caller
+ * falls back to the legacy plain-shell PTY (no regression on no-tmux machines).
+ * Keeps the cortex-dash-* name so all existing prefix logic survives.
+ */
+function createDashTmuxSessionSync(
+  sessionName: string,
+  cols: number,
+  rows: number,
+  requestedCwd?: string,
+): boolean {
+  if (!dashPersistentTerminalsEnabled()) return false;
+  let tmuxBin: string;
+  try {
+    tmuxBin = resolveTmuxBinary();
+  } catch {
+    return false;
+  }
+  const shell = resolvePreferredShell();
+  const env = sanitizePtyEnv();
+  env.CORTEX_TERMINAL_SESSION_NAME = sessionName;
+  const cwd = (requestedCwd && existsSync(requestedCwd) ? requestedCwd : undefined)
+    ?? process.env.HOME ?? homedir() ?? '/tmp';
+  try {
+    // Idempotent: an existing session (re-attach after restart) is reused as-is.
+    try {
+      execFileSync(tmuxBin, ['has-session', '-t', sessionName], { timeout: 3000, stdio: 'ignore' });
+      return true;
+    } catch { /* not present — create it below */ }
+    execFileSync(tmuxBin, [
+      'new-session', '-d', '-s', sessionName,
+      '-x', String(cols), '-y', String(rows),
+      shell, '-l',
+    ], { cwd, timeout: 8000, env: env as NodeJS.ProcessEnv });
+    // Large scrollback so Stage-3 capture-pane recovers real history; NO
+    // remain-on-exit so the user's `exit` ends the session (interactive semantics).
+    execFileSync(tmuxBin, ['set-option', '-t', sessionName, 'history-limit', '50000'], { timeout: 3000, stdio: 'ignore' });
+    console.log(`[ws-server] Created persistent dash tmux session: ${sessionName}`);
+    return true;
+  } catch (err) {
+    console.warn(`[ws-server] dash tmux create failed for ${sessionName}, falling back to plain shell: ${err instanceof Error ? err.message : String(err)}`);
+    return false;
+  }
+}
+
 function spawnManagedCommandPty(
   sessionName: string,
   shellCommand: string,
@@ -3032,7 +3088,13 @@ function materializePendingDashSession(
 
   const nextCols = typeof cols === 'number' ? cols : pending.cols;
   const nextRows = typeof rows === 'number' ? rows : pending.rows;
-  const ptyProcess = spawnDashShellPty(sessionName, nextCols, nextRows, pending.cwd);
+  // #6 persistent terminals — when enabled + tmux is available, back the dash
+  // shell with a tmux session (survives a crash) and attach a PTY view to it;
+  // otherwise the legacy plain-shell PTY. createDashTmuxSessionSync returns false
+  // (gate off / no tmux / failure) → graceful fallback.
+  const ptyProcess = createDashTmuxSessionSync(sessionName, nextCols, nextRows, pending.cwd)
+    ? spawnTmuxAttachPty(sessionName, nextCols, nextRows)
+    : spawnDashShellPty(sessionName, nextCols, nextRows, pending.cwd);
   const now = Date.now();
   const attachment: TerminalAttachment = {
     id: randomUUID(),
