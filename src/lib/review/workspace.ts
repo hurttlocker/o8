@@ -213,7 +213,7 @@ function isReviewNoisePath(path: string) {
   return REVIEW_NOISE_PREFIXES.some((prefix) => trimmed.startsWith(prefix));
 }
 
-function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string, stagedPaths?: Set<string>, unstagedPaths?: Set<string>) {
+export function parseChangedFiles(nameStatusRaw: string, numStatRaw: string, untrackedRaw: string, stagedPaths?: Set<string>, unstagedPaths?: Set<string>) {
   const changed = new Map<string, ReviewChangedFile>();
 
   for (const line of nameStatusRaw.split('\n').filter(Boolean)) {
