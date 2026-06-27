@@ -1,0 +1,22 @@
+/**
+ * Paired-device list (Orca teardown #5) — the operator's "Paired devices"
+ * surface. Gated like the rest of /api/mobile/* (loopback desktop passes; a
+ * cross-origin caller needs the token). Returns device metadata only — never the
+ * token or its hash.
+ */
+
+export const dynamic = 'force-dynamic';
+
+import { NextResponse } from 'next/server';
+import { listDevices } from '@/lib/mobile/device-registry';
+
+export async function GET() {
+  try {
+    return NextResponse.json({ devices: listDevices() });
+  } catch (error) {
+    return NextResponse.json(
+      { error: error instanceof Error ? error.message : 'Failed to list devices' },
+      { status: 500 },
+    );
+  }
+}
