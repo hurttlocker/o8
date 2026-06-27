@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, mkdirSync, existsSync, readdirSync, statSync } from 'fs';
 import path from 'path';
 import { listRepos } from '@/lib/repos/registry';
+import { listLanes } from '@/lib/lane/registry';
 import { buildRepoStateScope, stripPersistedTabs } from '@/lib/terminal/tab-state';
 
 const HOME = process.env.HOME ?? '/tmp';
@@ -47,6 +48,42 @@ function stripOrchestratorZombies(data: unknown) {
   const sanitized = stripPersistedTabs(tabs);
   if (sanitized.length === tabs.length) return data;
   const current = data as { activeTabId?: string };
+  const activeStillPresent = sanitized.some((tab) => tab.id === current.activeTabId);
+  return {
+    ...current,
+    tabs: sanitized,
+    activeTabId: activeStillPresent ? current.activeTabId : (sanitized[0]?.id ?? ''),
+  };
+}
+
+/**
+ * #1293 — strip chat tabs whose orchestrationPacket's lane no longer exists in
+ * the DB. A `kind:'chat'` packet tab whose lane was DELETED (e.g. a runaway
+ * cleanup that removed lanes) survives restore as a phantom "Agent working" tab:
+ * the client reconciler (`closeRetiredChatTabs`) only matches packetIds from
+ * lanes still returned by `/api/lanes`, so a deleted lane's packetId never enters
+ * its set and the tab is never closed. This runs server-side on load where we
+ * have DB access — drop any chat tab whose packetId maps to NO lane. Tabs bound
+ * to a lane that still exists (active OR archived) are kept; only orphans go.
+ * On any DB error we keep everything (never strip on a failed lookup).
+ */
+function stripChatTabsWithMissingLane(data: unknown): unknown {
+  if (!data || typeof data !== 'object') return data;
+  const tabs = (data as { tabs?: Array<{ kind?: string; id?: string; orchestrationPacket?: { packetId?: string } | null }> }).tabs;
+  if (!Array.isArray(tabs) || tabs.length === 0) return data;
+  let livePacketIds: Set<string>;
+  try {
+    livePacketIds = new Set(listLanes().map((lane) => lane.packetId).filter((id): id is string => Boolean(id)));
+  } catch {
+    return data;
+  }
+  const sanitized = tabs.filter((tab) => {
+    const pkt = tab?.orchestrationPacket?.packetId;
+    if (tab?.kind !== 'chat' || !pkt) return true; // not a packet-backed chat tab — keep
+    return livePacketIds.has(pkt); // keep only if its lane still exists
+  });
+  if (sanitized.length === tabs.length) return data;
+  const current = data as { activeTabId?: string; [key: string]: unknown };
   const activeStillPresent = sanitized.some((tab) => tab.id === current.activeTabId);
   return {
     ...current,
@@ -192,7 +229,7 @@ export async function GET(request: Request) {
     const stateFile = getStateFile(scope);
 
     if (existsSync(stateFile)) {
-      const data = stripOrchestratorZombies(filterStateToRegisteredRepos(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots));
+      const data = stripChatTabsWithMissingLane(stripOrchestratorZombies(filterStateToRegisteredRepos(JSON.parse(readFileSync(stateFile, 'utf-8')), repoRoots)));
       if (!data) {
         return NextResponse.json(null, { status: 404 });
       }
