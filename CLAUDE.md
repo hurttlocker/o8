@@ -375,7 +375,8 @@ If you're documenting a route here, also confirm it's in `GATED_PREFIXES` (or `A
 
 1. **[`hurttlocker.md`](./hurttlocker.md)** — operator-locked typography, icon vocabulary, layout primitives, hover patterns, row geometry. The locked spec for every list/row/chrome surface.
 2. **[`DESIGN.md`](./DESIGN.md)** — palette, design language, motif vocabulary.
-3. **`src/lib/theme/`** — actual `--t-*` token values per palette × surface combination.
+3. **[`STYLEGUIDE.md`](./STYLEGUIDE.md)** — the interaction half (review-gating): feedback-timing tiers, sibling cohesion, button hierarchy. Read before adding a control, a loading state, or a group of sibling elements.
+4. **`src/lib/theme/`** — actual `--t-*` token values per palette × surface combination.
 
 Stable invariants that *don't* live in the spec files (because they're framework rules, not design choices):
 - **Apple HIG**: 44px minimum touch targets.

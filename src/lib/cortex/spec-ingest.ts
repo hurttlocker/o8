@@ -44,7 +44,7 @@ import { refreshDirectiveFts } from '@/lib/db/v14-fts5-migration';
 import { captionImagesInSpec } from '@/lib/cortex/spec-image-captions';
 import { invalidateAnswerCache } from '@/lib/cortex/qa/ask';
 
-const ROOT_SPEC_FILES = ['README.md', 'CLAUDE.md', 'AGENTS.md', 'DESIGN.md', 'THEME.md'] as const;
+const ROOT_SPEC_FILES = ['README.md', 'CLAUDE.md', 'AGENTS.md', 'DESIGN.md', 'THEME.md', 'STYLEGUIDE.md'] as const;
 const SPEC_SUBDIRS = ['docs'] as const;
 const MIN_SECTION_BODY_CHARS = 40;
 const MAX_FRONT_MATTER_TITLE_CHARS = 160;
