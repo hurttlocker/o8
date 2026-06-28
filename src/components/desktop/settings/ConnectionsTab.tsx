@@ -14,14 +14,13 @@ import { OPEN_MOBILE_PAIRING_EVENT } from '@/lib/desktop/events';
 import { Smartphone } from '../lucide-shims';
 import {
   APP_FONT_STACK,
-  ComingSoonBanner,
-  HairlineRule,
   RamsButton,
   SectionLabel,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { PairedDevicesSection } from './PairedDevicesSection';
 
 export function ConnectionsTab() {
   const showPairingQr = useCallback(() => {
@@ -66,12 +65,7 @@ export function ConnectionsTab() {
       {/* 02 — PAIRED DEVICES */}
       <section>
         <SectionLabel number="02">PAIRED DEVICES</SectionLabel>
-        <div style={{ marginTop: 4 }}>
-          <ComingSoonBanner message="The list of paired phones, per-device revoke, and local-network discovery are coming soon. Pairing works today via the QR code above." />
-        </div>
-        <div style={{ marginTop: 20 }}>
-          <HairlineRule />
-        </div>
+        <PairedDevicesSection />
       </section>
     </div>
   );
