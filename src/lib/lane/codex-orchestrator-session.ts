@@ -110,6 +110,12 @@ function tomlKey(key: string): string {
   return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
 }
 
+// TODO(tool-spine-convergence): orphaned-managed-section leak. This only strips
+// sections whose name is in the CURRENT server set. A section o8 wrote on a
+// previous run for a server since removed/disabled (e.g. a deleted external)
+// is NOT recognized as managed, so it lingers as if it were user config. Fix in
+// the convergence phase (after A-F parity) — not here; the parity steps are
+// behavior-preserving by contract.
 function isManagedMcpSection(sectionName: string, serverNames: string[]): boolean {
   return serverNames.some((name) => {
     const bare = `mcp_servers.${name}`;
