@@ -144,6 +144,22 @@ export function resolveDeviceByToken(token: string): MobileDevice | null {
   return toDevice({ ...row, last_seen_at: seenAt?.last_seen_at ?? row.last_seen_at });
 }
 
+/**
+ * Does this token belong to a KNOWN-but-REVOKED device? Lets the WS gate tell a
+ * revoked reconnect apart from a totally-unknown token, so it can return a clean
+ * 4401 close (deterministic "you were revoked" signal) instead of a generic
+ * upgrade rejection the phone can't distinguish from a network blip.
+ */
+export function isTokenRevoked(token: string): boolean {
+  const trimmed = token?.trim();
+  if (!trimmed) return false;
+  const sqlite = getSqlite();
+  const row = sqlite
+    .prepare(`SELECT 1 FROM mobile_devices WHERE token_hash = ? AND revoked_at IS NOT NULL`)
+    .get(hashToken(trimmed)) as { 1: number } | undefined;
+  return Boolean(row);
+}
+
 /** Is this device still active (exists + not revoked)? Used by the WS revoke sweep. */
 export function isDeviceActive(deviceId: string): boolean {
   if (!deviceId) return false;
