@@ -9,7 +9,7 @@
 
 import assert from 'node:assert';
 
-import { enrollDevice, resolveDeviceByToken, listDevices, revokeDevice, hashToken } from '@/lib/mobile/device-registry';
+import { enrollDevice, resolveDeviceByToken, listDevices, revokeDevice, hashToken, isTokenRevoked } from '@/lib/mobile/device-registry';
 
 function main(): void {
   const { deviceId, deviceToken } = enrollDevice({ identityPublicKey: 'ZmFrZS1wdWJrZXk=', deviceLabel: 'Test iPhone' });
@@ -30,9 +30,12 @@ function main(): void {
   // the stored hash must equal sha256(token); the raw token must never be stored
   assert(hashToken(deviceToken).length === 64, 'hash is sha256 hex');
 
+  assert(isTokenRevoked(deviceToken) === false, 'active token is not flagged revoked');
   assert(revokeDevice(deviceId) === true, 'revoke transitions an active device');
   assert(revokeDevice(deviceId) === false, 'second revoke is a no-op');
   assert(resolveDeviceByToken(deviceToken) === null, 'revoked token no longer resolves');
+  assert(isTokenRevoked(deviceToken) === true, 'revoked token is flagged (drives the 4401 close)');
+  assert(isTokenRevoked('totally-unknown') === false, 'unknown token is NOT flagged revoked (→ 401 reject)');
   assert(listDevices()[0].revokedAt, 'revokedAt is stamped + still listed');
 
   console.log('[mobile-device-registry-smoke] PASS');
