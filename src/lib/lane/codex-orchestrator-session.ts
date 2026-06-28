@@ -15,8 +15,9 @@ import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFile
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
-import { getMcpServersConfig } from './orchestrator-mcp-config';
 import type { OrchestratorMcpServersConfig } from './orchestrator-mcp-config';
+import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
+import { serializeCodexMcpServers, toCodexServersMap } from '@/lib/mcp/tool-spine/emit-codex';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
   readOrchestratorBackendSessionId,
@@ -101,16 +102,12 @@ function historyThreadKey(threadId?: string | null): string | null {
   return normalized ? normalized.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 96) : null;
 }
 
+// tomlKey is retained here because the managed-section STRIP logic
+// (isManagedMcpSection/stripManagedMcpSections) below quotes server names the
+// same way the serializer does. The serializer + its other TOML helpers moved
+// to @/lib/mcp/tool-spine/emit-codex (Step C).
 function tomlKey(key: string): string {
   return /^[A-Za-z0-9_-]+$/.test(key) ? key : JSON.stringify(key);
-}
-
-function tomlString(value: string): string {
-  return JSON.stringify(value);
-}
-
-function tomlStringArray(values: string[]): string {
-  return `[${values.map((value) => tomlString(value)).join(', ')}]`;
 }
 
 function isManagedMcpSection(sectionName: string, serverNames: string[]): boolean {
@@ -146,51 +143,9 @@ function stripManagedMcpSections(configToml: string, serverNames: string[]): str
   return nextLines.join('\n').trimEnd();
 }
 
-function serializeStringMap(sectionName: string, values: Record<string, string> | undefined): string[] {
-  if (!values || Object.keys(values).length === 0) {
-    return [];
-  }
-
-  return [
-    `[${sectionName}]`,
-    ...Object.entries(values)
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([key, value]) => `${tomlKey(key)} = ${tomlString(value)}`),
-  ];
-}
-
-function serializeCodexMcpServers(servers: OrchestratorMcpServersConfig): string {
-  const lines: string[] = [];
-
-  for (const [name, server] of Object.entries(servers)) {
-    if (lines.length > 0) {
-      lines.push('');
-    }
-
-    const serverSection = `mcp_servers.${tomlKey(name)}`;
-    lines.push(`[${serverSection}]`);
-    if (server.type === 'http') {
-      lines.push('type = "http"');
-      lines.push(`url = ${tomlString(server.url)}`);
-      const headerLines = serializeStringMap(`${serverSection}.headers`, server.headers);
-      if (headerLines.length > 0) {
-        lines.push('', ...headerLines);
-      }
-      continue;
-    }
-
-    lines.push(`command = ${tomlString(server.command)}`);
-    lines.push(`args = ${tomlStringArray(server.args)}`);
-    const envLines = serializeStringMap(`${serverSection}.env`, server.env);
-    if (envLines.length > 0) {
-      lines.push('', ...envLines);
-    }
-  }
-
-  return lines.join('\n');
-}
-
-function mergeCodexMcpConfig(baseConfigToml: string, servers: OrchestratorMcpServersConfig): string {
+// Exported for the Step-C parity smoke — the parity unit is the full merged
+// config.toml (strip + join + trailing newline), not just the serialized blocks.
+export function mergeCodexMcpConfig(baseConfigToml: string, servers: OrchestratorMcpServersConfig): string {
   const serverNames = Object.keys(servers);
   const retainedConfig = stripManagedMcpSections(baseConfigToml, serverNames);
   const mcpConfig = serializeCodexMcpServers(servers);
@@ -222,7 +177,7 @@ export function ensureCodexHome(repoPath: string): string {
     : '';
   const mergedConfig = mergeCodexMcpConfig(
     userConfigToml,
-    getMcpServersConfig(normalizedRepoPath),
+    toCodexServersMap(buildToolRegistry(normalizedRepoPath)),
   );
   const configPath = join(codexHome, 'config.toml');
   writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });
