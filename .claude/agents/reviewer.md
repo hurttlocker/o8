@@ -20,6 +20,13 @@ When reviewing changes:
    - No Material Design patterns
    - Console logging must use [feature-name] prefix
    - No throwing in API routes
+2b. For UI changes, check STYLEGUIDE.md (interaction rules, review-gating):
+   - Feedback timing: every mutating control enters a disabled/busy state on
+     press; no spinner under 100ms; named stages (not an endless spinner) past 3s
+   - Sibling cohesion: elements in a group (.map rows, button clusters, tabs)
+     share one geometry source — flag accidental one-off snowflakes
+   - Button hierarchy: exactly one primary action per view; destructive actions
+     use the danger role + an inline confirm strip (no bare one-tap, no overflow menus)
 3. Look for common React bugs:
    - Render loops (state updates in effects without proper deps)
    - Missing cleanup in useEffect
