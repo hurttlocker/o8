@@ -120,7 +120,7 @@ import { startWorktreeReaper, stopWorktreeReaper } from './lib/lane/worktree-rea
 import { startLaneZombieReaper, stopLaneZombieReaper } from './lib/lane/reaper';
 import { collectPersistedTmuxSessions } from './lib/terminal/state-store';
 import { selectOrphanDashSessions, type DashSessionInfo } from './lib/terminal/dash-gc';
-import { resolveDeviceByToken, isDeviceActive, type MobileDevice } from './lib/mobile/device-registry';
+import { resolveDeviceByToken, isDeviceActive, isTokenRevoked, type MobileDevice } from './lib/mobile/device-registry';
 import { getServerIdentity } from './lib/mobile/e2ee-identity';
 import { startServerHandshake, completeServerHandshake, type ServerHandshake } from './lib/mobile/e2ee-channel';
 import { encryptFrame, decryptFrame, isEncryptedFrame } from './lib/mobile/e2ee-crypto';
@@ -4536,7 +4536,11 @@ const wss = new WebSocketServer({
   verifyClient: (info, done) => {
     const url = new URL(info.req.url ?? '', `http://${info.req.headers.host}`);
     const token = url.searchParams.get('token') ?? '';
-    const req = info.req as typeof info.req & { __o8Device?: MobileDevice | null; __o8Remote?: boolean };
+    const req = info.req as typeof info.req & {
+      __o8Device?: MobileDevice | null;
+      __o8Remote?: boolean;
+      __o8RevokedClose?: boolean;
+    };
     // Remote vs loopback (drives whether E2EE is offered) — socket peer truth.
     req.__o8Remote = !isLoopbackAddress(req.socket?.remoteAddress ?? '127.0.0.1');
     req.__o8Device = null;
@@ -4547,11 +4551,19 @@ const wss = new WebSocketServer({
     // Per-device token (#5) — accept an active (non-revoked) enrolled device, and
     // stash it so the connection handler can offer the E2EE handshake. Additive:
     // a no-op until a device enrolls; the shared token above keeps the desktop
-    // webview + legacy phones working. A revoked device fails here on next reconnect.
+    // webview + legacy phones working.
     try {
       const device = token ? resolveDeviceByToken(token) : null;
       if (device) {
         req.__o8Device = device;
+        done(true);
+        return;
+      }
+      // Known-but-REVOKED token → accept the upgrade, then close 4401 immediately
+      // (handled in the connection handler) so the phone gets a deterministic
+      // "revoked" signal on reconnect, not an ambiguous upgrade failure.
+      if (token && isTokenRevoked(token)) {
+        req.__o8RevokedClose = true;
         done(true);
         return;
       }
@@ -4563,7 +4575,17 @@ const wss = new WebSocketServer({
 });
 
 wss.on('connection', (ws, req) => {
-  const upgrade = req as typeof req & { __o8Device?: MobileDevice | null; __o8Remote?: boolean };
+  const upgrade = req as typeof req & {
+    __o8Device?: MobileDevice | null;
+    __o8Remote?: boolean;
+    __o8RevokedClose?: boolean;
+  };
+  // #5 — a revoked token was accepted only to deliver a clean 4401 close. Send it
+  // and drop the socket without registering a client (no data is ever exchanged).
+  if (upgrade.__o8RevokedClose) {
+    try { ws.close(4401, 'device revoked'); } catch { /* already gone */ }
+    return;
+  }
   const device = upgrade.__o8Device ?? null;
   const remote = upgrade.__o8Remote === true;
   const client: ClientState = {
