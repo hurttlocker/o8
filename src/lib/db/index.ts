@@ -918,6 +918,21 @@ function ensureTables(sqlite: Database.Database): void {
       revoked_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_mobile_devices_token_hash ON mobile_devices(token_hash);
+
+    -- Mobile inline diff comments (orca teardown #9) — operator line notes from
+    -- the phone, anchored to a file + line of an agent session's diff. Read by
+    -- the desktop review surface + injected into the agent's iterate prompt.
+    CREATE TABLE IF NOT EXISTS mobile_diff_comments (
+      id TEXT PRIMARY KEY,
+      session_key TEXT NOT NULL,
+      path TEXT NOT NULL,
+      line_number INTEGER NOT NULL,
+      side TEXT NOT NULL DEFAULT 'new',
+      text TEXT NOT NULL,
+      created_at TEXT NOT NULL DEFAULT (datetime('now')),
+      resolved_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_mobile_diff_comments_session ON mobile_diff_comments(session_key);
   `);
 
   ensureApprovalContextColumns(sqlite);
