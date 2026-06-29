@@ -85,6 +85,19 @@ function resolveOperatorMcpServerPath(): { command: string; path: string } {
   return { command: 'npx', path: devSource };
 }
 
+// Binary-resolution shape — read this before any new emission surface that
+// resolves the operator/cortex binary (Set-B routes, Gemini/OpenClaw wiring).
+//
+//   PACKAGED (O8_BUNDLED_MCP_PATH set): { command: <O8_NODE_BIN|node>, args: [<bundled .mjs>] }
+//   DEV      (no bundled binary):       { command: "npx",             args: ["tsx", <src .ts>] }
+//
+// "tsx-vs-npx / spec risk #3": the legacy Set-B builders preferred a resolved
+// tsx path (`{command: "/abs/tsx", args: [src]}`) — same server under tsx, a
+// different invocation. The registry standardizes on the npx/tsx form, so in DEV
+// the emitted shape differs from the old Set-B output (cosmetic, functionally
+// equivalent); in PACKAGED mode both collapse to the identical node+bundled
+// form. THEREFORE every byte-for-byte parity proof runs in PACKAGED mode — the
+// shape that actually ships. (Spec risk register item #3.)
 function argsForMcpServer(server: { command: string; path: string }): string[] {
   return server.command === 'npx' ? ['tsx', server.path] : [server.path];
 }
