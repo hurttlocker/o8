@@ -33,9 +33,11 @@ export const dynamic = 'force-dynamic';
 import { NextResponse } from 'next/server';
 import { existsSync, statSync } from 'node:fs';
 import { userInfo } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
+import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
+import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
 
 function findCommand(name: string): string | null {
   try {
@@ -46,95 +48,10 @@ function findCommand(name: string): string | null {
   }
 }
 
-function buildServerConfig(): { command: string; args: string[]; env: Record<string, string> } {
-  // Bundled packaged app signals this via env var written by the Tauri Rust sidecar.
-  const bundled = process.env.O8_BUNDLED_MCP_PATH;
-  if (bundled && existsSync(bundled)) {
-    // Prefer the node path the Tauri sidecar resolved via login shell
-    // (handles nvm/fnm/volta that Finder's minimal PATH misses).
-    const nodeBin = process.env.O8_NODE_BIN || findCommand('node') || 'node';
-    return {
-      command: nodeBin,
-      args: [bundled],
-      env: { O8_API_BASE: getApiBase() },
-    };
-  }
-
-  // Dev checkout: use tsx against the TS source.
-  const repoRoot = resolve(process.cwd());
-  const tsSource = join(repoRoot, 'src', 'lib', 'mcp', 'operator-mcp-server.ts');
-  if (!existsSync(tsSource)) {
-    // Running outside the repo and no bundled binary — this is a broken install.
-    return {
-      command: 'npx',
-      args: ['tsx', 'src/lib/mcp/operator-mcp-server.ts'],
-      env: { O8_API_BASE: getApiBase() },
-    };
-  }
-
-  const tsxBin = findCommand('tsx');
-  if (tsxBin) {
-    return {
-      command: tsxBin,
-      args: [tsSource],
-      env: { O8_API_BASE: getApiBase() },
-    };
-  }
-
-  return {
-    command: 'npx',
-    args: ['tsx', tsSource],
-    env: { O8_API_BASE: getApiBase() },
-  };
-}
-
-/**
- * Resolve the codebase-memory-mcp binary path.
- *
- * #739 (the Tauri sidecar) downloads the static binary on first launch into
- * `~/.o8/bin/codebase-memory-mcp` (`.exe` on Windows) and sets
- * `O8_CODEBASE_MEMORY_BIN` to the resolved path. Because the env var only
- * inherits into children spawned AFTER the download completes, we also fall
- * back to the deterministic path so external installs (Claude Desktop /
- * Claude Code outside the o8 process) can still locate the binary.
- *
- * Returns null when neither source resolves to a real executable. Callers
- * MUST treat null as "skip the entry" so cold first launch (binary not yet
- * downloaded) doesn't break Claude Code session boot.
- */
-function resolveCodebaseMemoryBin(): string | null {
-  const fromEnv = process.env.O8_CODEBASE_MEMORY_BIN;
-  if (fromEnv && fromEnv.trim() && existsSync(fromEnv)) {
-    return fromEnv;
-  }
-
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  if (!home) return null;
-
-  const fileName = process.platform === 'win32'
-    ? 'codebase-memory-mcp.exe'
-    : 'codebase-memory-mcp';
-  const deterministic = join(home, '.o8', 'bin', fileName);
-  if (existsSync(deterministic)) {
-    return deterministic;
-  }
-
-  return null;
-}
-
-/**
- * Build the codebase-memory MCP server entry, or null if the binary isn't
- * available. The binary defaults to MCP-stdio mode when invoked with no args.
- */
-function buildCodebaseMemoryConfig(): { command: string; args: string[]; env: Record<string, string> } | null {
-  const bin = resolveCodebaseMemoryBin();
-  if (!bin) return null;
-  return {
-    command: bin,
-    args: [],
-    env: {},
-  };
-}
+// The o8 + codebase-memory server config comes from the Tool-Spine
+// claude-desktop projection (Set B) — see the GET handler. repoPath is
+// irrelevant to this surface (cortex/externals filtered out); process.cwd()
+// keeps resolver inputs identical to the old builder.
 
 function buildInstructions(): { claudeDesktop: string; claudeCode: string } {
   const home = process.env.HOME || '';
@@ -161,13 +78,9 @@ function buildInstructions(): { claudeDesktop: string; claudeCode: string } {
 
 export async function GET() {
   try {
-    const server = buildServerConfig();
-    const codebaseMemory = buildCodebaseMemoryConfig();
-
-    const mcpServers: Record<string, unknown> = { o8: server };
-    if (codebaseMemory) {
-      mcpServers['codebase-memory'] = codebaseMemory;
-    }
+    const mcpServers = toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, unknown>;
+    const server = mcpServers['o8'];
+    const codebaseMemory = mcpServers['codebase-memory'] ?? null;
     const fullConfig = { mcpServers };
 
     const nodeBin = findCommand('node');
