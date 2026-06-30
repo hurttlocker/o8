@@ -20,9 +20,11 @@ import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 
 /**
  * The set of orchestrator backends. `hermes` drives Hermes via the generic ACP
- * backend; `acp` is the generic escape hatch for any other ACP agent.
+ * backend; `acp` is the generic escape hatch for any other ACP agent. `collide`
+ * is the Mixture-of-Agents fusion brain (moa.ts) — a backend whose proposers +
+ * aggregator are themselves backends; it is a BRAIN only, never a worker runtime.
  */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp';
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide';
 
 /**
  * The single runtime validation point for the backend-id union. Callers that
@@ -31,7 +33,8 @@ export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' |
  * comparison — so adding a backend is one edit here (union + guard), not N.
  */
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
-  return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes' || value === 'acp';
+  return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes'
+    || value === 'acp' || value === 'collide';
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
