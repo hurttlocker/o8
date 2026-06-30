@@ -18,6 +18,7 @@ import type { OrchestratorEvent } from './orchestrator-stream-events';
 import type { OrchestratorMcpServersConfig } from './orchestrator-mcp-config';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { serializeCodexMcpServers, toCodexServersMap } from '@/lib/mcp/tool-spine/emit-codex';
+import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import {
   readOrchestratorBackendSessionId,
@@ -45,6 +46,12 @@ export type CodexOrchestratorPermissionMode = 'full' | 'plan';
 
 export interface SendToCodexOrchestratorOptions {
   permissionMode?: CodexOrchestratorPermissionMode;
+  /**
+   * MCP tool profile. `'propose'` (Collide proposer) strips the operator
+   * (dispatch) server from this turn's Codex config.toml — the run can read +
+   * use cortex but cannot dispatch work. Defaults to `'full'`. See `ToolProfile`.
+   */
+  toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
   model?: string;
   signal?: AbortSignal;
@@ -173,9 +180,13 @@ function syncCodexAuthFiles(codexHome: string): void {
   }
 }
 
-export function ensureCodexHome(repoPath: string): string {
+export function ensureCodexHome(repoPath: string, profile: ToolProfile = 'full'): string {
   const normalizedRepoPath = normalizeRepoPath(repoPath);
-  const codexHome = join(CODEX_ORCHESTRATOR_HOME_DIR, repoHash(normalizedRepoPath));
+  // 'propose' (Collide proposer) gets its OWN CODEX_HOME so its operator-stripped
+  // config.toml can't be clobbered by a concurrent full-profile turn for the same
+  // repo. 'full' keeps the original dir — byte-identical content + path.
+  const suffix = profile === 'propose' ? '-propose' : '';
+  const codexHome = join(CODEX_ORCHESTRATOR_HOME_DIR, `${repoHash(normalizedRepoPath)}${suffix}`);
   mkdirSync(codexHome, { recursive: true });
 
   const userConfigToml = existsSync(USER_CODEX_CONFIG_PATH)
@@ -183,7 +194,7 @@ export function ensureCodexHome(repoPath: string): string {
     : '';
   const mergedConfig = mergeCodexMcpConfig(
     userConfigToml,
-    toCodexServersMap(buildToolRegistry(normalizedRepoPath)),
+    toCodexServersMap(buildToolRegistry(normalizedRepoPath, { profile })),
   );
   const configPath = join(codexHome, 'config.toml');
   writeFileSync(configPath, mergedConfig, { encoding: 'utf8', mode: 0o600 });
@@ -351,7 +362,9 @@ export async function sendToCodexOrchestrator(
   session.status = 'busy';
   let codexHome: string;
   try {
-    codexHome = ensureCodexHome(session.repoPath);
+    // A 'propose' turn gets the operator-stripped (read-only proposer) config —
+    // Collide's dispatch lockout.
+    codexHome = ensureCodexHome(session.repoPath, options.toolProfile ?? 'full');
   } catch (err) {
     session.status = 'dead';
     const note = `Failed to prepare Codex MCP config: ${err instanceof Error ? err.message : String(err)}`;
