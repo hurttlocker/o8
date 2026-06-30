@@ -184,8 +184,8 @@ export function buildToolRegistry(repoPath: string): ToolRegistry {
     name: 'operator',
     source: 'builtin',
     label: 'o8 Operator',
-    surfaces: ['claude-orchestrator', 'codex-orchestrator', 'claude-desktop', 'openclaw', 'gemini'],
-    surfaceNames: { 'claude-desktop': 'o8', openclaw: 'o8', gemini: 'o8' },
+    surfaces: ['claude-orchestrator', 'codex-orchestrator', 'claude-desktop', 'openclaw', 'gemini', 'opencode'],
+    surfaceNames: { 'claude-desktop': 'o8', openclaw: 'o8', gemini: 'o8', opencode: 'o8' },
     config: {
       type: 'stdio',
       command: operatorServer.command,
@@ -225,7 +225,7 @@ export function buildToolRegistry(repoPath: string): ToolRegistry {
       name: 'codebase-memory',
       source: 'builtin',
       label: 'Codebase Memory',
-      surfaces: ['claude-desktop', 'gemini'],
+      surfaces: ['claude-desktop', 'gemini', 'opencode'],
       config: {
         type: 'stdio',
         command: codebaseMemoryBin,
