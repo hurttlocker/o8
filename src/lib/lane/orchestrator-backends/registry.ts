@@ -24,6 +24,7 @@ import {
 } from '@/lib/lane/orchestrator-session';
 import { resolveInAppOrchestratorEnabledSync, resolveOrchestratorBackendSync } from '@/lib/operator/defaults';
 import { openclawBackend } from './openclaw';
+import { acpBackend, hermesBackend } from './acp';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 
 // ── Delegate backends ────────────────────────────────────────────────────────
@@ -75,6 +76,8 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
   claude: claudeBackend,
   codex: codexBackend,
   openclaw: openclawBackend,
+  hermes: hermesBackend,
+  acp: acpBackend,
 };
 
 /** The default backend — also the fallback for any unregistered id. */

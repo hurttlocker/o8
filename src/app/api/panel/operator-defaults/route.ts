@@ -179,8 +179,8 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
   if (body.orchestratorBackend !== undefined) {
     const raw = body.orchestratorBackend;
-    if (raw !== 'auto' && raw !== 'codex' && raw !== 'claude' && raw !== 'openclaw') {
-      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw".');
+    if (raw !== 'auto' && raw !== 'codex' && raw !== 'claude' && raw !== 'openclaw' && raw !== 'hermes') {
+      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes".');
     }
     update.orchestratorBackend = raw;
   }
