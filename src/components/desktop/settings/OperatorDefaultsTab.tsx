@@ -30,7 +30,7 @@ type SettingSource = 'env' | 'file' | 'default';
 type DispatchRuntime = 'codex' | 'gemini' | 'opencode';
 type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 type WorkersUseBrain = 'off' | 'auto' | 'all';
-type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw';
+type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes';
 
 interface OperatorDefaults {
   parallelCap: number;
@@ -341,6 +341,16 @@ function PickerMenu<T extends string>({ value, options, onChange, disabled, minW
 export function OperatorDefaultsTab() {
   const [data, setData] = useState<OperatorDefaultsResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  // Hermes (ACP backend) only appears in the backend picker when its binary is present.
+  const [hermesAvailable, setHermesAvailable] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/setup/orchestrator-backends')
+      .then((r) => r.json())
+      .then((d) => { if (alive) setHermesAvailable(Boolean(d?.hermes)); })
+      .catch(() => { /* picker just omits Hermes */ });
+    return () => { alive = false; };
+  }, []);
   const [notice, setNotice] = useState<string | null>(null);
   const [busyField, setBusyField] = useState<keyof OperatorDefaults | null>(null);
 
@@ -861,11 +871,13 @@ export function OperatorDefaultsTab() {
           description={
             values.orchestratorBackend === 'openclaw'
               ? 'OpenClaw — the governed openclaw orchestrator drives chat + background turns and dispatches Codex workers through o8. A per-request backend (e.g. mobile) still overrides.'
-              : values.orchestratorBackend === 'codex'
-                ? 'Codex — forces Codex GPT-5.5 xhigh as the orchestrator brain (ignores the toggle below).'
-                : values.orchestratorBackend === 'claude'
-                  ? 'Claude — forces the Claude Code REPL as the orchestrator brain (ignores the toggle below).'
-                  : 'Auto (default) — follow the in-app orchestrator toggle below (Claude when on, Codex when off). Byte-identical to prior behavior.'
+              : values.orchestratorBackend === 'hermes'
+                ? 'Hermes — the governed Hermes agent (via ACP) drives turns and dispatches Codex workers through o8. Needs a model provider configured (hermes setup).'
+                : values.orchestratorBackend === 'codex'
+                  ? 'Codex — forces Codex GPT-5.5 xhigh as the orchestrator brain (ignores the toggle below).'
+                  : values.orchestratorBackend === 'claude'
+                    ? 'Claude — forces the Claude Code REPL as the orchestrator brain (ignores the toggle below).'
+                    : 'Auto (default) — follow the in-app orchestrator toggle below (Claude when on, Codex when off). Byte-identical to prior behavior.'
           }
           source={sources.orchestratorBackend}
           disabledReason={sources?.orchestratorBackend === 'env' ? envDisabledReason : undefined}
@@ -877,6 +889,7 @@ export function OperatorDefaultsTab() {
                 { value: 'codex', label: 'Codex' },
                 { value: 'claude', label: 'Claude' },
                 { value: 'openclaw', label: 'OpenClaw' },
+                ...(hermesAvailable || values.orchestratorBackend === 'hermes' ? [{ value: 'hermes' as const, label: 'Hermes' }] : []),
               ]}
               onChange={(next) => { void updateField('orchestratorBackend', next); }}
               disabled={sources?.orchestratorBackend === 'env' || busyField === 'orchestratorBackend'}

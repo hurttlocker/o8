@@ -82,7 +82,7 @@ import {
   getOrchestratorBackend,
   resolveOrchestratorBackendId,
 } from './lib/lane/orchestrator-backends/registry';
-import type { OrchestratorBackendId } from './lib/lane/orchestrator-backends/types';
+import { isOrchestratorBackendId, type OrchestratorBackendId } from './lib/lane/orchestrator-backends/types';
 import type { OrchestratorEvent } from './lib/lane/orchestrator-stream-events';
 import {
   startSupervisorLoop,
@@ -869,7 +869,7 @@ function orchestratorRouteSessionName(sessionName: string, threadId: string | nu
  */
 function resolveMsgBackendId(msg: Record<string, unknown>): OrchestratorBackendId {
   const raw = msg.backend;
-  if (raw === 'codex' || raw === 'claude' || raw === 'openclaw') return raw;
+  if (isOrchestratorBackendId(raw)) return raw;
   return resolveOrchestratorBackendId();
 }
 
