@@ -6,6 +6,7 @@ import type {
   ReviewPullRequestSummary,
 } from '@/lib/fleet/types';
 import type { MobileApprovalCard } from '@/lib/approvals/types';
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 import type { CompactionTrigger } from '@/lib/runtimes/compaction-detector';
 
@@ -278,8 +279,9 @@ export interface MobileActionResponse {
 
 export type MobileOrchestratorRuntime = 'claude-code' | 'codex' | 'gemini' | 'opencode' | 'unknown';
 
-/** The orchestrator backend that ran a thread — distinct from the worker `runtime`. */
-export type MobileOrchestratorBackend = 'codex' | 'claude' | 'openclaw';
+/** The orchestrator backend that ran a thread — distinct from the worker `runtime`.
+ *  Derived from the single backend-id source so it tracks new backends (hermes/acp). */
+export type MobileOrchestratorBackend = OrchestratorBackendId;
 
 export type MobileOrchestratorThreadStatus = 'idle' | 'ready' | 'busy';
 
