@@ -30,6 +30,7 @@ type SettingSource = 'env' | 'file' | 'default';
 type DispatchRuntime = 'codex' | 'gemini' | 'opencode';
 type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 type WorkersUseBrain = 'off' | 'auto' | 'all';
+type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw';
 
 interface OperatorDefaults {
   parallelCap: number;
@@ -53,6 +54,7 @@ interface OperatorDefaults {
   inAppOrchestratorEnabled: boolean;
   brainUseClaudeCli: boolean;
   workersUseBrain: WorkersUseBrain;
+  orchestratorBackend: OrchestratorBackendSetting;
 }
 
 interface OperatorDefaultsResponse {
@@ -854,6 +856,33 @@ export function OperatorDefaultsTab() {
           <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>O8_IN_APP_ORCHESTRATOR_ENABLED</span>{' '}
           overrides.
         </p>
+        <Row
+          label="Orchestrator backend"
+          description={
+            values.orchestratorBackend === 'openclaw'
+              ? 'OpenClaw — the governed openclaw orchestrator drives chat + background turns and dispatches Codex workers through o8. A per-request backend (e.g. mobile) still overrides.'
+              : values.orchestratorBackend === 'codex'
+                ? 'Codex — forces Codex GPT-5.5 xhigh as the orchestrator brain (ignores the toggle below).'
+                : values.orchestratorBackend === 'claude'
+                  ? 'Claude — forces the Claude Code REPL as the orchestrator brain (ignores the toggle below).'
+                  : 'Auto (default) — follow the in-app orchestrator toggle below (Claude when on, Codex when off). Byte-identical to prior behavior.'
+          }
+          source={sources.orchestratorBackend}
+          disabledReason={sources?.orchestratorBackend === 'env' ? envDisabledReason : undefined}
+          right={
+            <SegmentedControl<OrchestratorBackendSetting>
+              value={values.orchestratorBackend}
+              options={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'codex', label: 'Codex' },
+                { value: 'claude', label: 'Claude' },
+                { value: 'openclaw', label: 'OpenClaw' },
+              ]}
+              onChange={(next) => { void updateField('orchestratorBackend', next); }}
+              disabled={sources?.orchestratorBackend === 'env' || busyField === 'orchestratorBackend'}
+            />
+          }
+        />
         <Row
           label="In-app orchestrator runtime"
           description={values.inAppOrchestratorEnabled ? 'On — chat + background features use Claude Opus 4.8 via the claude CLI interactive REPL. Bills your Claude Code MAX subscription pool (same as running claude in Terminal). No API key, no per-token charge.' : 'Off (default) — chat + background features use Codex GPT-5.5 xhigh (free with Codex sub). Auto-review writes verdicts to log but does not create approval cards yet (#1045).'}

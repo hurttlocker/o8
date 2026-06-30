@@ -58,6 +58,14 @@ function isWorkersUseBrain(value: unknown): value is WorkersUseBrain {
   return value === 'off' || value === 'auto' || value === 'all';
 }
 
+/** Which backend drives the in-app Orchestrator. 'auto' = the legacy
+ *  inAppOrchestratorEnabled derivation; a specific id forces that backend. */
+export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw';
+
+function isOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
+  return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw';
+}
+
 export interface OperatorDefaults {
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -156,6 +164,15 @@ export interface OperatorDefaults {
   brainUseClaudeCli: boolean;
   /** See {@link WorkersUseBrain}. Default 'auto'. */
   workersUseBrain: WorkersUseBrain;
+  /**
+   * Which backend drives the in-app Orchestrator. **'auto' (default)** = the
+   * legacy derivation from {@link inAppOrchestratorEnabled} (toggle ON → Claude,
+   * OFF → Codex), byte-identical to pre-setting behavior. A specific value forces
+   * that backend — including **'openclaw'** (the governed openclaw orchestrator,
+   * previously reachable only via a per-request mobile `backend` field). A
+   * per-request `msg.backend` still overrides this. Env: `O8_ORCHESTRATOR_BACKEND`.
+   */
+  orchestratorBackend: OrchestratorBackendSetting;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -194,6 +211,9 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // anyone with a Claude sub. Independent of the orchestrator toggle (2026-06-22).
   brainUseClaudeCli: true,
   workersUseBrain: 'auto',
+  // 'auto' → defer to inAppOrchestratorEnabled (legacy claude/codex derivation),
+  // so the default is byte-identical to pre-setting behavior.
+  orchestratorBackend: 'auto',
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -207,6 +227,13 @@ export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: OrchestratorRuntime; label
   { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — use when you have a Claude sub.' },
   { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3.1 Pro CLI — fastest for parallel fan-out.' },
   { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
+];
+
+export const ORCHESTRATOR_BACKEND_OPTIONS: Array<{ value: OrchestratorBackendSetting; label: string; detail: string }> = [
+  { value: 'auto', label: 'Auto', detail: 'Follow the in-app orchestrator toggle below (Claude when on, Codex when off).' },
+  { value: 'codex', label: 'Codex', detail: 'Codex GPT-5.5 xhigh — free for ChatGPT Plus / Codex subscribers.' },
+  { value: 'claude', label: 'Claude', detail: 'Claude Code REPL — subscription-billed (Claude Max pool).' },
+  { value: 'openclaw', label: 'OpenClaw', detail: 'Governed openclaw orchestrator — dispatches Codex workers through o8.' },
 ];
 
 export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'power-user'; label: string; value: number }> = [
@@ -369,6 +396,12 @@ function envWorkersUseBrain(): WorkersUseBrain | null {
   return null;
 }
 
+function envOrchestratorBackend(): OrchestratorBackendSetting | null {
+  const raw = process.env.O8_ORCHESTRATOR_BACKEND?.trim();
+  if (raw && isOrchestratorBackendSetting(raw)) return raw;
+  return null;
+}
+
 // ── File helpers ──
 
 interface StoredOperatorDefaults {
@@ -393,6 +426,7 @@ interface StoredOperatorDefaults {
   inAppOrchestratorEnabled?: boolean;
   brainUseClaudeCli?: boolean;
   workersUseBrain?: WorkersUseBrain;
+  orchestratorBackend?: OrchestratorBackendSetting;
 }
 
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
@@ -477,6 +511,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (isWorkersUseBrain(stored.workersUseBrain)) {
     result.workersUseBrain = stored.workersUseBrain;
   }
+  if (isOrchestratorBackendSetting(stored.orchestratorBackend)) {
+    result.orchestratorBackend = stored.orchestratorBackend;
+  }
   return result;
 }
 
@@ -504,6 +541,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envInApp = envInAppOrchestratorEnabled();
   const envBrainCli = envBrainUseClaudeCli();
   const envBrain = envWorkersUseBrain();
+  const envOrchBackend = envOrchestratorBackend();
 
   const resolved: OperatorDefaults = {
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
@@ -531,6 +569,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     brainUseClaudeCli:
       envBrainCli ?? fileValues.brainUseClaudeCli ?? OPERATOR_DEFAULTS_FALLBACK.brainUseClaudeCli,
     workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
+    orchestratorBackend: envOrchBackend ?? fileValues.orchestratorBackend ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorBackend,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -559,6 +598,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     brainUseClaudeCli:
       envBrainCli !== null ? 'env' : fileValues.brainUseClaudeCli !== undefined ? 'file' : 'default',
     workersUseBrain: envBrain !== null ? 'env' : fileValues.workersUseBrain !== undefined ? 'file' : 'default',
+    orchestratorBackend: envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -699,6 +739,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.workersUseBrain = update.workersUseBrain;
   }
+  if (update.orchestratorBackend !== undefined) {
+    if (!isOrchestratorBackendSetting(update.orchestratorBackend)) {
+      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw".');
+    }
+    stored.orchestratorBackend = update.orchestratorBackend;
+  }
 
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
@@ -777,4 +823,14 @@ export function resolveBrainUseClaudeCliSync(): boolean {
 
 export function resolveWorkersUseBrainSync(): WorkersUseBrain {
   return getOperatorDefaultsSync().values.workersUseBrain;
+}
+
+/**
+ * Which backend drives the in-app Orchestrator. 'auto' means "defer to
+ * {@link resolveInAppOrchestratorEnabledSync}" — the registry's
+ * `resolveOrchestratorBackendId` applies that fallback so 'auto' is byte-identical
+ * to the pre-setting derivation.
+ */
+export function resolveOrchestratorBackendSync(): OrchestratorBackendSetting {
+  return getOperatorDefaultsSync().values.orchestratorBackend;
 }
