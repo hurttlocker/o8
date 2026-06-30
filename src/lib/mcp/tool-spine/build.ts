@@ -20,7 +20,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
-import type { ServerEntry, ToolRegistry } from './registry';
+import type { ServerEntry, ToolProfile, ToolRegistry } from './registry';
 
 /** Resolve repo slug from git remote. */
 function detectRepoSlug(repoPath: string): string {
@@ -149,8 +149,16 @@ function resolveCodebaseMemoryBin(): string | null {
  *   2. operator         — ALL surfaces (renamed "o8" on external surfaces)
  *   3. cortex           — orchestrator surfaces only
  *   4. codebase-memory  — external surfaces only, omitted when the binary is absent
+ *
+ * `options.profile` projects the catalog by trust class. `'full'` (default) is
+ * today's behavior, BYTE-IDENTICAL to the no-arg call. `'propose'` is the
+ * read-only proposer profile (Collide): it strips the operator server (dispatch)
+ * while keeping cortex (read-only memory) — the #1075 lockout (see `ToolProfile`).
  */
-export function buildToolRegistry(repoPath: string): ToolRegistry {
+export function buildToolRegistry(
+  repoPath: string,
+  options?: { profile?: ToolProfile },
+): ToolRegistry {
   const repoSlug = detectRepoSlug(repoPath);
   const { getApiBase } = require('@/lib/panel/api-port') as typeof import('@/lib/panel/api-port');
   const apiBase = getApiBase();
@@ -235,5 +243,14 @@ export function buildToolRegistry(repoPath: string): ToolRegistry {
     });
   }
 
-  return { repoPath, entries };
+  // Profile projection. `'propose'` (Collide's read-only proposer) strips the
+  // operator server so a proposer cannot dispatch_mission / approve_and_merge;
+  // cortex (read-only memory) stays. `'full'` returns the catalog untouched —
+  // byte-identical to the legacy no-arg path. The #1075 dispatch lockout.
+  const profile = options?.profile ?? 'full';
+  const projected = profile === 'propose'
+    ? entries.filter((entry) => entry.id !== 'builtin:operator')
+    : entries;
+
+  return { repoPath, entries: projected };
 }
