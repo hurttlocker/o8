@@ -98,6 +98,13 @@ interface OrchestratorSendOptions {
    */
   swarm?: boolean;
   /**
+   * Collide / MoA mode. When true, the turn routes to the `collide` backend:
+   * Claude + Codex propose independently (read-only), Claude synthesizes + does
+   * the work. Sets `backend: 'collide'` on the outbound payload; the swarm hint
+   * is NOT applied (Collide is its own fusion). Mutually exclusive with swarm.
+   */
+  collide?: boolean;
+  /**
    * Composer picture pills. ThoughtsChatPanel has always passed these; the
    * wire silently dropped them until 2026-06-12 — now they ride the
    * orchestrator-send payload and reach the model as image blocks.
@@ -814,7 +821,9 @@ export function useOrchestratorStream(
     const model = options?.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
     const displayMessage = options?.displayMessage?.trim() || message;
     const localEntriesAfterUser = options?.localEntriesAfterUser ?? [];
-    const swarm = options?.swarm === true;
+    const collide = options?.collide === true;
+    // Collide is its own fusion — the swarm hint does not apply on a Collide turn.
+    const swarm = options?.swarm === true && !collide;
 
     void (async () => {
       const activeRepoPath = repoPathRef.current;
@@ -919,6 +928,8 @@ export function useOrchestratorStream(
         permissionMode,
         ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
         model,
+        // Collide routes to the MoA backend; resolveMsgBackendId honors msg.backend.
+        ...(collide ? { backend: 'collide' } : {}),
         ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
       });
       const delivered = await deliverOrchestratorPayload({

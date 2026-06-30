@@ -60,10 +60,11 @@ function isWorkersUseBrain(value: unknown): value is WorkersUseBrain {
 
 /** Which backend drives the in-app Orchestrator. 'auto' = the legacy
  *  inAppOrchestratorEnabled derivation; a specific id forces that backend. */
-export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes';
+export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
 
 function isOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
-  return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes';
+  return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw'
+    || value === 'hermes' || value === 'collide';
 }
 
 export interface OperatorDefaults {
@@ -235,6 +236,7 @@ export const ORCHESTRATOR_BACKEND_OPTIONS: Array<{ value: OrchestratorBackendSet
   { value: 'claude', label: 'Claude', detail: 'Claude Code REPL — subscription-billed (Claude Max pool).' },
   { value: 'openclaw', label: 'OpenClaw', detail: 'Governed openclaw orchestrator — dispatches Codex workers through o8.' },
   { value: 'hermes', label: 'Hermes', detail: 'Hermes via ACP — needs Hermes installed + a model provider configured (hermes setup).' },
+  { value: 'collide', label: 'Collide', detail: 'Mixture-of-Agents: Claude + Codex propose independently, Claude synthesizes + does the work — the upgraded Claude.' },
 ];
 
 export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'power-user'; label: string; value: number }> = [
@@ -742,7 +744,7 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.orchestratorBackend !== undefined) {
     if (!isOrchestratorBackendSetting(update.orchestratorBackend)) {
-      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw".');
+      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide".');
     }
     stored.orchestratorBackend = update.orchestratorBackend;
   }

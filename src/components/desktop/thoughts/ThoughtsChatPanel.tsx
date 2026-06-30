@@ -134,6 +134,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
    */
   swarmEnabled?: boolean;
   onSetSwarm?: (enabled: boolean) => void;
+  collideEnabled?: boolean;
+  onSetCollide?: (enabled: boolean) => void;
   repoLabel?: string | null;
   emptyStateOverride?: React.ReactNode;
   // Slot rendered BELOW the composer input when no messages have
@@ -200,6 +202,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   onTogglePermission,
   swarmEnabled = false,
   onSetSwarm,
+  collideEnabled = false,
+  onSetCollide,
   repoLabel,
   emptyStateOverride,
   composerBelowSlot,
@@ -1399,8 +1403,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       displayMessage: request.displayMessage,
       localEntriesAfterUser,
       swarm: swarmEnabled,
+      collide: collideEnabled,
     });
-  }, [orchStream, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled]);
+  }, [orchStream, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled, collideEnabled]);
 
   const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
     if (!isOrchestratorMode || isChatMode) return false;
@@ -1497,6 +1502,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             thinkingEffort,
             model: orchestratorModel,
             swarm: swarmEnabled,
+            collide: collideEnabled,
             ...(attachments ? { attachments } : {}),
           });
           clearAttachments();
@@ -1632,6 +1638,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         thinkingEffort,
         model: orchestratorModel,
         swarm: swarmEnabled,
+        collide: collideEnabled,
         ...(attachments ? { attachments } : {}),
       };
       if (!resolvedRepoPath) {
@@ -1694,7 +1701,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, waitingForReply]);
+  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -1726,6 +1733,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           thinkingEffort,
           model: orchestratorModel,
           swarm: swarmEnabled,
+          collide: collideEnabled,
           ...(attachments ? { attachments } : {}),
         });
         clearAttachments();
@@ -1736,7 +1744,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
-  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, waitingForReply]);
+  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
   queuedSteerSendNowRef.current = sendNow;
 
   // ⌘⏎ steer handlers. enqueueSteer routes the typed input through the queue:
@@ -2093,6 +2101,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         adaptiveEnabled={adaptiveThinkingEnabled}
         swarmEnabled={swarmEnabled}
         onSetSwarm={onSetSwarm}
+        collideEnabled={collideEnabled}
+        onSetCollide={onSetCollide}
         permissionMode={permissionMode}
         onTogglePermission={onTogglePermission}
         repoLabel={composerRepoLabel}

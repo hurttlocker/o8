@@ -750,6 +750,8 @@ export function InputButtons({
   adaptiveEnabled = true,
   swarmEnabled = false,
   onSetSwarm,
+  collideEnabled = false,
+  onSetCollide,
   permissionMode,
   onTogglePermission,
   repoLabel,
@@ -784,6 +786,9 @@ export function InputButtons({
   /** UltraCode / swarm tier — Claude fans work out to native sub-agents + Codex. */
   swarmEnabled?: boolean;
   onSetSwarm?: (enabled: boolean) => void;
+  /** Collide / MoA tier — Claude + Codex propose independently, Claude synthesizes. */
+  collideEnabled?: boolean;
+  onSetCollide?: (enabled: boolean) => void;
   permissionMode?: 'full' | 'plan';
   onTogglePermission?: () => void;
   repoLabel?: string | null;
@@ -916,6 +921,42 @@ export function InputButtons({
           </svg>
         )}
       </button>
+
+      {/* Collide / MoA toggle — icon-only, sibling to the permission chip.
+          Active = accent-tinted; Claude + Codex collide, Claude synthesizes. */}
+      {onSetCollide ? (
+        <button
+          type="button"
+          onClick={() => onSetCollide(!collideEnabled)}
+          title={collideEnabled
+            ? 'Collide ON — Claude + Codex propose, Claude synthesizes. Click to turn off.'
+            : 'Collide — Claude + Codex propose independently, Claude synthesizes the upgraded answer.'}
+          style={{
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            width: 24,
+            height: 24,
+            borderRadius: 6,
+            borderWidth: 0,
+            background: collideEnabled ? 'var(--t-accent-soft)' : 'transparent',
+            color: collideEnabled ? 'var(--t-accent)' : 'var(--t-text-faint)',
+            cursor: 'pointer',
+            transition: 'color 120ms, background 120ms',
+          }}
+          onMouseEnter={(event) => {
+            if (!collideEnabled) event.currentTarget.style.color = 'var(--t-text)';
+          }}
+          onMouseLeave={(event) => {
+            if (!collideEnabled) event.currentTarget.style.color = 'var(--t-text-faint)';
+          }}
+        >
+          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" style={{ display: 'block', flexShrink: 0 }}>
+            <circle cx="9" cy="12" r="6" />
+            <circle cx="15" cy="12" r="6" />
+          </svg>
+        </button>
+      ) : null}
       </div>
 
       {/* Right action cluster — pinned, never shrinks or clips. */}
