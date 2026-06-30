@@ -17,8 +17,11 @@
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
-/** The set of orchestrator backends. `openclaw` is registered in a later step. */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw';
+/**
+ * The set of orchestrator backends. `hermes` drives Hermes via the generic ACP
+ * backend; `acp` is the generic escape hatch for any other ACP agent.
+ */
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp';
 
 /**
  * The single runtime validation point for the backend-id union. Callers that
@@ -27,7 +30,7 @@ export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw';
  * comparison — so adding a backend is one edit here (union + guard), not N.
  */
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
-  return value === 'codex' || value === 'claude' || value === 'openclaw';
+  return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes' || value === 'acp';
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';

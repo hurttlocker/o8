@@ -11,25 +11,26 @@ import { describe, it, expect } from 'vitest';
 
 import { isOrchestratorBackendId } from './types';
 
-/** The exact expression that lived inline at every call site, pre-3a. */
-const legacy = (v: unknown): boolean => v === 'codex' || v === 'claude' || v === 'openclaw';
+/** The full union, inlined — the single source the guard must equal. */
+const inlined = (v: unknown): boolean =>
+  v === 'codex' || v === 'claude' || v === 'openclaw' || v === 'hermes' || v === 'acp';
 
 describe('isOrchestratorBackendId', () => {
-  it('accepts exactly the three existing ids', () => {
-    expect(isOrchestratorBackendId('codex')).toBe(true);
-    expect(isOrchestratorBackendId('claude')).toBe(true);
-    expect(isOrchestratorBackendId('openclaw')).toBe(true);
+  it('accepts exactly the registered backend ids', () => {
+    for (const id of ['codex', 'claude', 'openclaw', 'hermes', 'acp']) {
+      expect(isOrchestratorBackendId(id)).toBe(true);
+    }
   });
 
-  it('rejects everything else (including the Step-1 "auto" and the not-yet-added "hermes")', () => {
-    for (const v of ['auto', 'hermes', 'acp', 'Codex', 'CLAUDE', '', ' codex', 'codex ', null, undefined, 0, 1, {}, [], true, false]) {
+  it('rejects everything else (including the Step-1 setting "auto")', () => {
+    for (const v of ['auto', 'Codex', 'CLAUDE', 'HERMES', '', ' codex', 'codex ', null, undefined, 0, 1, {}, [], true, false]) {
       expect(isOrchestratorBackendId(v)).toBe(false);
     }
   });
 
-  it('matches the legacy inlined expression for arbitrary inputs', () => {
-    for (const v of ['codex', 'claude', 'openclaw', 'auto', 'hermes', 'acp', '', null, undefined, 42, {}, [], 'CLAUDE', ' openclaw']) {
-      expect(isOrchestratorBackendId(v)).toBe(legacy(v));
+  it('matches the inlined union expression for arbitrary inputs (single validation point)', () => {
+    for (const v of ['codex', 'claude', 'openclaw', 'hermes', 'acp', 'auto', '', null, undefined, 42, {}, [], 'CLAUDE', ' openclaw']) {
+      expect(isOrchestratorBackendId(v)).toBe(inlined(v));
     }
   });
 });

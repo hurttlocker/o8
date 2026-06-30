@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
-import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
@@ -41,7 +41,7 @@ function normalizeNullableDate(value: unknown): string | null | undefined {
 }
 
 /** The orchestrator backend that produced this thread, if the client tagged it. */
-function normalizeBackend(value: unknown): 'codex' | 'claude' | 'openclaw' | undefined {
+function normalizeBackend(value: unknown): OrchestratorBackendId | undefined {
   return isOrchestratorBackendId(value) ? value : undefined;
 }
 
@@ -78,7 +78,7 @@ function isThoughtsThread(tabId: unknown): tabId is string {
   return typeof tabId === 'string' && tabId.startsWith('thoughts-');
 }
 
-function inferBackendFromModel(model: string | undefined): 'codex' | 'claude' | 'openclaw' | undefined {
+function inferBackendFromModel(model: string | undefined): OrchestratorBackendId | undefined {
   const normalized = model?.toLowerCase();
   if (!normalized) return undefined;
   if (normalized.includes('openclaw')) return 'openclaw';
@@ -96,7 +96,7 @@ function inferBackendFromSessionIds(
 }
 
 function defaultModelForBackend(
-  backend: 'codex' | 'claude' | 'openclaw' | undefined | null,
+  backend: OrchestratorBackendId | undefined | null,
 ): string | undefined {
   if (backend === 'claude') return 'claude-code';
   if (backend === 'codex') return 'codex';
@@ -162,7 +162,7 @@ export async function POST(request: NextRequest) {
   let repoPath: string | undefined;
   let repoBranch: string | undefined;
   let remoteUrl: string | null | undefined;
-  let backend: 'codex' | 'claude' | 'openclaw' | undefined;
+  let backend: OrchestratorBackendId | undefined;
   let agent: string | undefined;
   let archivedAt: string | null | undefined;
   let orchestratorVisible: boolean | undefined;
