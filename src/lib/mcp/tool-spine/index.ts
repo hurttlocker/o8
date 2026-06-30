@@ -13,3 +13,4 @@ export * from './emit-codex';
 export * from './emit-claude-desktop';
 export * from './emit-openclaw';
 export * from './emit-gemini';
+export * from './emit-opencode';

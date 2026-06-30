@@ -23,7 +23,8 @@ export type ToolSurface =
   | 'codex-orchestrator' //  Codex config.toml          (Set A)
   | 'claude-desktop' //      ~/.claude.json             (Set B)
   | 'openclaw' //            ~/.openclaw-o8/openclaw.json (Set B)
-  | 'gemini'; //             ~/.gemini/settings.json     (NEW — closes the gap)
+  | 'gemini' //              ~/.gemini/settings.json     (Set B)
+  | 'opencode'; //           ~/.config/opencode/opencode.json (Set B)
 
 /** Inert in Phase 1; the vault-phase credential-injection hook. */
 export interface SecretRef {
