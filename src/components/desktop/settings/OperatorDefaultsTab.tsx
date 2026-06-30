@@ -30,7 +30,7 @@ type SettingSource = 'env' | 'file' | 'default';
 type DispatchRuntime = 'codex' | 'gemini' | 'opencode';
 type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 type WorkersUseBrain = 'off' | 'auto' | 'all';
-type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes';
+type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
 
 interface OperatorDefaults {
   parallelCap: number;
@@ -873,11 +873,13 @@ export function OperatorDefaultsTab() {
               ? 'OpenClaw — the governed openclaw orchestrator drives chat + background turns and dispatches Codex workers through o8. A per-request backend (e.g. mobile) still overrides.'
               : values.orchestratorBackend === 'hermes'
                 ? 'Hermes — the governed Hermes agent (via ACP) drives turns and dispatches Codex workers through o8. Needs a model provider configured (hermes setup).'
-                : values.orchestratorBackend === 'codex'
-                  ? 'Codex — forces Codex GPT-5.5 xhigh as the orchestrator brain (ignores the toggle below).'
-                  : values.orchestratorBackend === 'claude'
-                    ? 'Claude — forces the Claude Code REPL as the orchestrator brain (ignores the toggle below).'
-                    : 'Auto (default) — follow the in-app orchestrator toggle below (Claude when on, Codex when off). Byte-identical to prior behavior.'
+                : values.orchestratorBackend === 'collide'
+                  ? 'Collide (MoA) — Claude + Codex propose independently (read-only), Claude synthesizes + does the work. The upgraded Claude. Draws the Claude Max pool ~2× faster (2 Claude + 1 Codex turn).'
+                  : values.orchestratorBackend === 'codex'
+                    ? 'Codex — forces Codex GPT-5.5 xhigh as the orchestrator brain (ignores the toggle below).'
+                    : values.orchestratorBackend === 'claude'
+                      ? 'Claude — forces the Claude Code REPL as the orchestrator brain (ignores the toggle below).'
+                      : 'Auto (default) — follow the in-app orchestrator toggle below (Claude when on, Codex when off). Byte-identical to prior behavior.'
           }
           source={sources.orchestratorBackend}
           disabledReason={sources?.orchestratorBackend === 'env' ? envDisabledReason : undefined}
@@ -890,6 +892,7 @@ export function OperatorDefaultsTab() {
                 { value: 'claude', label: 'Claude' },
                 { value: 'openclaw', label: 'OpenClaw' },
                 ...(hermesAvailable || values.orchestratorBackend === 'hermes' ? [{ value: 'hermes' as const, label: 'Hermes' }] : []),
+                { value: 'collide', label: 'Collide' },
               ]}
               onChange={(next) => { void updateField('orchestratorBackend', next); }}
               disabled={sources?.orchestratorBackend === 'env' || busyField === 'orchestratorBackend'}
