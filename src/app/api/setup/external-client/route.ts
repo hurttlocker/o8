@@ -28,7 +28,9 @@ import { existsSync } from 'node:fs';
 import { execFile, execFileSync, spawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { join } from 'node:path';
-import { getApiBase } from '@/lib/panel/api-port';
+import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
+import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
+import { hermesAddArgs, openclawSetPayload } from '@/lib/mcp/external-client-args';
 
 const execFileAsync = promisify(execFile);
 
@@ -87,19 +89,7 @@ function resolveCli(name: string): string | null {
   return null;
 }
 
-// ── o8 MCP server config (mirrors /api/setup/claude-desktop) ──
-
-function findCommand(name: string): string | null {
-  try {
-    const which = execFileSync('command', ['-v', name], {
-      encoding: 'utf-8',
-      shell: '/bin/sh',
-    } as never).trim();
-    return which || null;
-  } catch {
-    return null;
-  }
-}
+// ── o8 MCP server config: the Tool-Spine claude-desktop projection ──
 
 interface McpServerConfig {
   command: string;
@@ -107,34 +97,14 @@ interface McpServerConfig {
   env: Record<string, string>;
 }
 
+// external-client forwards ONLY the operator entry (named "o8") — never
+// codebase-memory or DB externals — so it picks the `o8` key out of the Set-B
+// projection. repoPath is irrelevant to this surface (cortex/externals filtered
+// out); process.cwd() keeps resolver inputs identical to the old builder.
 function buildServerConfig(): McpServerConfig {
-  const bundled = process.env.O8_BUNDLED_MCP_PATH;
-  if (bundled && existsSync(bundled)) {
-    const nodeBin = process.env.O8_NODE_BIN || findCommand('node') || 'node';
-    return {
-      command: nodeBin,
-      args: [bundled],
-      env: { O8_API_BASE: getApiBase() },
-    };
-  }
-
-  const repoRoot = process.cwd();
-  const tsSource = join(repoRoot, 'src', 'lib', 'mcp', 'operator-mcp-server.ts');
-  const tsxBin = findCommand('tsx');
-
-  if (existsSync(tsSource) && tsxBin) {
-    return {
-      command: tsxBin,
-      args: [tsSource],
-      env: { O8_API_BASE: getApiBase() },
-    };
-  }
-
-  return {
-    command: 'npx',
-    args: ['tsx', tsSource],
-    env: { O8_API_BASE: getApiBase() },
-  };
+  const projected = toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, unknown>;
+  const o8 = projected['o8'] as { command: string; args: string[]; env?: Record<string, string> };
+  return { command: o8.command, args: o8.args, env: o8.env ?? {} };
 }
 
 // ── Hermes ──
@@ -164,13 +134,7 @@ async function hermesInstall(cliPath: string, server: McpServerConfig): Promise<
   // `hermes mcp add` connects to the server, lists its tools, and then prompts
   // `Enable all N tools? [Y/n/select]:` interactively. We write `Y\n` to stdin
   // so the install runs unattended.
-  const args = ['mcp', 'add', 'o8', '--command', server.command];
-  if (server.args.length > 0) {
-    args.push('--args', ...server.args);
-  }
-  for (const [k, v] of Object.entries(server.env)) {
-    args.push('--env', `${k}=${v}`);
-  }
+  const args = hermesAddArgs(server);
 
   await new Promise<void>((resolve, reject) => {
     const child = spawn(cliPath, args, { stdio: ['pipe', 'pipe', 'pipe'] });
@@ -243,11 +207,7 @@ async function openclawStatus(cliPath: string): Promise<{ registered: boolean; r
 }
 
 async function openclawInstall(cliPath: string, server: McpServerConfig): Promise<void> {
-  const payload = JSON.stringify({
-    command: server.command,
-    args: server.args,
-    env: server.env,
-  });
+  const payload = openclawSetPayload(server);
   await execFileAsync(cliPath, ['mcp', 'set', 'o8', payload], {
     timeout: 30000,
     maxBuffer: 4 * 1024 * 1024,

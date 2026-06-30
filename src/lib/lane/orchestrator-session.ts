@@ -39,7 +39,8 @@ import {
 } from '@/lib/lane/orchestrator-stream-events';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
-import { getMcpServersConfig } from './orchestrator-mcp-config';
+import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
+import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 
 // ── Types ──
 
@@ -297,9 +298,11 @@ function ensureMcpConfig(repoPath: string): string {
   if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
 
   const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}.json`);
-  const config = {
-    mcpServers: getMcpServersConfig(repoPath),
-  };
+  // Tool-Spine: the Claude orchestrator surface projection. toClaudeJson emits
+  // the full `{ mcpServers }` envelope; the stringify (2-space, no trailing
+  // newline) is unchanged, so the written file is byte-identical to the legacy
+  // `{ mcpServers: getMcpServersConfig(repoPath) }` form (Step B).
+  const config = toClaudeJson(buildToolRegistry(repoPath));
 
   writeFileSync(configPath, JSON.stringify(config, null, 2));
   console.log(`[orchestrator-session] MCP config written to ${configPath}`);

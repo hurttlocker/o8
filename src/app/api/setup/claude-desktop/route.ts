@@ -21,10 +21,12 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync, statSync } from 'node:fs';
-import { join, dirname } from 'node:path';
-import { execSync } from 'node:child_process';
-import { getApiBase } from '@/lib/panel/api-port';
+import { existsSync, statSync } from 'node:fs';
+import { join } from 'node:path';
+import { readClaudeConfig, atomicWriteConfig } from '@/lib/mcp/claude-desktop-config-io';
+import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
+import { entriesForSurface } from '@/lib/mcp/tool-spine/registry';
+import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
 
 // ── Config path resolution ──
 
@@ -48,135 +50,13 @@ function getTargetConfigPath(target: Target): string {
   return join(home, '.claude.json');
 }
 
-// ── Server config builder (mirrors /api/setup/mcp-config) ──
-
-function findCommand(name: string): string | null {
-  try {
-    const which = execSync(`command -v ${name} 2>/dev/null`, { encoding: 'utf-8' }).trim();
-    return which || null;
-  } catch {
-    return null;
-  }
-}
-
-interface McpServerConfig {
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-}
-
-function buildServerConfig(): McpServerConfig {
-  const bundled = process.env.O8_BUNDLED_MCP_PATH;
-  if (bundled && existsSync(bundled)) {
-    // Prefer the node path the Tauri sidecar resolved via login shell
-    // (handles nvm/fnm/volta that Finder's minimal PATH misses).
-    const nodeBin = process.env.O8_NODE_BIN || findCommand('node') || 'node';
-    return {
-      command: nodeBin,
-      args: [bundled],
-      env: { O8_API_BASE: getApiBase() },
-    };
-  }
-
-  const repoRoot = process.cwd();
-  const tsSource = join(repoRoot, 'src', 'lib', 'mcp', 'operator-mcp-server.ts');
-  const tsxBin = findCommand('tsx');
-
-  if (existsSync(tsSource) && tsxBin) {
-    return {
-      command: tsxBin,
-      args: [tsSource],
-      env: { O8_API_BASE: getApiBase() },
-    };
-  }
-
-  return {
-    command: 'npx',
-    args: ['tsx', tsSource],
-    env: { O8_API_BASE: getApiBase() },
-  };
-}
-
-/**
- * Resolve the codebase-memory-mcp binary, falling back from the env var the
- * Tauri sidecar sets (#739) to the deterministic install path. Returns null
- * when neither resolves — in which case the caller MUST omit the entry so
- * cold first launch doesn't break Claude Code session boot.
- */
-function resolveCodebaseMemoryBin(): string | null {
-  const fromEnv = process.env.O8_CODEBASE_MEMORY_BIN;
-  if (fromEnv && fromEnv.trim() && existsSync(fromEnv)) {
-    return fromEnv;
-  }
-
-  const home = process.env.HOME || process.env.USERPROFILE || '';
-  if (!home) return null;
-
-  const fileName = process.platform === 'win32'
-    ? 'codebase-memory-mcp.exe'
-    : 'codebase-memory-mcp';
-  const deterministic = join(home, '.o8', 'bin', fileName);
-  if (existsSync(deterministic)) {
-    return deterministic;
-  }
-
-  return null;
-}
-
-function buildCodebaseMemoryConfig(): McpServerConfig | null {
-  const bin = resolveCodebaseMemoryBin();
-  if (!bin) return null;
-  return {
-    command: bin,
-    args: [],
-    env: {},
-  };
-}
-
-// ── Tolerant JSON read ──
-
-interface ClaudeConfig {
-  mcpServers?: Record<string, unknown>;
-  [key: string]: unknown;
-}
-
-function readClaudeConfig(path: string): ClaudeConfig {
-  if (!existsSync(path)) return {};
-  try {
-    const raw = readFileSync(path, 'utf-8').trim();
-    if (!raw) return {};
-    return JSON.parse(raw) as ClaudeConfig;
-  } catch {
-    // Malformed — return empty so the caller can decide whether to bail or
-    // overwrite with a fresh file.
-    return {};
-  }
-}
-
-function atomicWriteConfig(path: string, config: ClaudeConfig): void {
-  const dir = dirname(path);
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true });
-  }
-
-  // Back up the existing file before overwriting.
-  if (existsSync(path)) {
-    const backupPath = `${path}.o8-backup-${Date.now()}`;
-    try {
-      copyFileSync(path, backupPath);
-    } catch {
-      // Don't block the write on a failed backup.
-    }
-  }
-
-  const tmpPath = `${path}.o8-tmp`;
-  writeFileSync(tmpPath, JSON.stringify(config, null, 2) + '\n', 'utf-8');
-
-  // On Unix we could rename() atomically, but on all supported platforms
-  // Node's writeFileSync + rename is good enough for a config file.
-  const { renameSync } = require('node:fs') as typeof import('node:fs');
-  renameSync(tmpPath, path);
-}
+// ── Server config: the Tool-Spine claude-desktop projection ──
+//
+// The operator ("o8") + codebase-memory entries (type stripped for stdio) come
+// from one registry projection — `toClaudeDesktopJson` for the merge write,
+// `entriesForSurface(..., 'claude-desktop')` for the install list. repoPath is
+// irrelevant to this surface (cortex/externals are filtered out), so any path
+// works; process.cwd() keeps the resolver inputs identical to the old builder.
 
 // ── Routes ──
 
@@ -199,8 +79,9 @@ export async function GET(request: Request) {
     const existingEntry = existingServers['o8'];
     const existingCodebaseMemoryEntry = existingServers['codebase-memory'];
 
-    const proposed = buildServerConfig();
-    const proposedCodebaseMemory = buildCodebaseMemoryConfig();
+    const projected = toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, unknown>;
+    const proposed = projected['o8'];
+    const proposedCodebaseMemory = projected['codebase-memory'] ?? null;
 
     const alreadyUpToDate = Boolean(
       existingEntry
@@ -274,19 +155,14 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, action: 'no-op', path, detail: 'o8 was not registered' });
     }
 
-    servers['o8'] = buildServerConfig();
-
-    // codebase-memory is opt-in: only register when the binary resolves.
-    // Cold first launch (binary not yet downloaded) skips this gracefully so
-    // session boot doesn't break.
-    const codebaseMemory = buildCodebaseMemoryConfig();
-    const installed: string[] = ['o8'];
-    if (codebaseMemory) {
-      servers['codebase-memory'] = codebaseMemory;
-      installed.push('codebase-memory');
-    }
-
-    atomicWriteConfig(path, config);
+    // Merge via the Tool-Spine claude-desktop projection: spreads every existing
+    // server + top-level key, overwrites only o8 + codebase-memory, strips the
+    // stdio `type`. codebase-memory is opt-in — the registry omits it when its
+    // binary is absent (cold first launch), so it's simply not in `installed`.
+    const registry = buildToolRegistry(process.cwd());
+    const installed = entriesForSurface(registry, 'claude-desktop').map((entry) => entry.name);
+    const merged = toClaudeDesktopJson(registry, config);
+    atomicWriteConfig(path, merged);
 
     return NextResponse.json({
       ok: true,
@@ -294,7 +170,7 @@ export async function POST(request: Request) {
       target,
       path,
       installed,
-      codebaseMemoryAvailable: Boolean(codebaseMemory),
+      codebaseMemoryAvailable: installed.includes('codebase-memory'),
       detail:
         target === 'claude-desktop'
           ? 'Restart Claude Desktop to load the o8 tools.'
