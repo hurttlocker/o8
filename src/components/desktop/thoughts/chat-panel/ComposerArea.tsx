@@ -187,6 +187,9 @@ interface ComposerAreaProps {
   /** UltraCode / swarm tier — surfaced in the thinking dropdown. */
   swarmEnabled?: boolean;
   onSetSwarm?: (enabled: boolean) => void;
+  /** Collide / MoA tier — icon chip sibling to the permission toggle. */
+  collideEnabled?: boolean;
+  onSetCollide?: (enabled: boolean) => void;
   permissionMode: ThoughtsChatPermissionMode;
   onTogglePermission?: () => void;
   repoLabel?: string | null;
@@ -245,6 +248,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   adaptiveEnabled,
   swarmEnabled,
   onSetSwarm,
+  collideEnabled,
+  onSetCollide,
   permissionMode,
   onTogglePermission,
   repoLabel,
@@ -775,6 +780,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             adaptiveEnabled={adaptiveEnabled}
             swarmEnabled={isOrchestratorMode ? swarmEnabled : false}
             onSetSwarm={isOrchestratorMode ? onSetSwarm : undefined}
+            collideEnabled={isOrchestratorMode ? collideEnabled : false}
+            onSetCollide={isOrchestratorMode ? onSetCollide : undefined}
             permissionMode={permissionMode}
             onTogglePermission={onTogglePermission}
             repoLabel={showReasoningControls ? repoLabel : null}
