@@ -12,6 +12,7 @@ import { join } from 'node:path';
 import { homedir } from 'node:os';
 import { performance } from 'node:perf_hooks';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
+import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
@@ -41,7 +42,7 @@ function normalizeNullableDate(value: unknown): string | null | undefined {
 
 /** The orchestrator backend that produced this thread, if the client tagged it. */
 function normalizeBackend(value: unknown): 'codex' | 'claude' | 'openclaw' | undefined {
-  return value === 'codex' || value === 'claude' || value === 'openclaw' ? value : undefined;
+  return isOrchestratorBackendId(value) ? value : undefined;
 }
 
 /** The openclaw agent id that produced this thread, if the client tagged it. */
