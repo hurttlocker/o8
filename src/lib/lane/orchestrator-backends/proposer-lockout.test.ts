@@ -34,10 +34,45 @@ describe('classifyProposerTool', () => {
     expect(classifyProposerTool('steer_packet')).toBe('dispatch');
   });
 
-  it('lets read-only tools through (proposers may read + use cortex)', () => {
-    for (const t of ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'TodoWrite', 'mcp__cortex__cortex_ask']) {
+  it('lets genuinely read-only tools through (native reads + allowlisted cortex reads)', () => {
+    for (const t of ['Read', 'Grep', 'Glob', 'WebFetch', 'WebSearch', 'TodoWrite']) {
       expect(classifyProposerTool(t)).toBe('safe');
     }
+    // cortex is a MIXED surface — only the allowlisted read tools are safe.
+    for (const t of [
+      'mcp__cortex__cortex_ask', 'mcp__cortex__cortex_read_packets', 'mcp__cortex__cortex_read_transcript',
+      'mcp__cortex__cortex_fleet_status', 'mcp__cortex__cortex_list_approvals', 'mcp__cortex__cortex_list_issues',
+      'mcp__cortex__cortex_list_prs', 'mcp__cortex__cortex_list_projects', 'mcp__cortex__cortex_ci_status',
+      'cortex__cortex_ask', // Codex form
+    ]) {
+      expect(classifyProposerTool(t)).toBe('safe');
+    }
+  });
+
+  it('flags cortex MUTATORS as dispatch — the hole the review found (cortex is MIXED, not read-only memory)', () => {
+    // cortex_launch_agent POSTs /api/orchestrator/delegate → dispatches a worker.
+    expect(classifyProposerTool('mcp__cortex__cortex_launch_agent')).toBe('dispatch');
+    expect(classifyProposerTool('cortex__cortex_launch_agent')).toBe('dispatch'); // Codex surface
+    expect(classifyProposerTool('cortex_launch_agent')).toBe('dispatch'); // bare
+    for (const verb of [
+      'cortex_steer_agent', 'cortex_interrupt_agent', 'cortex_resolve_approval', 'cortex_update_packet',
+      'cortex_propose_spec', 'cortex_create_project', 'cortex_delete_project', 'cortex_set_repo_role',
+      'cortex_add_repo_to_project', 'cortex_remove_repo_from_project', 'cortex_create_project_from_suggestion',
+      'cortex_dismiss_project_suggestion', 'cortex_refresh_project_suggestions', 'cortex_suggest_projects',
+    ]) {
+      expect(classifyProposerTool(`mcp__cortex__${verb}`)).toBe('dispatch');
+      expect(classifyProposerTool(`cortex__${verb}`)).toBe('dispatch');
+    }
+    // The two cortex tools without a `cortex_` prefix — register_mcp (mutator)
+    // and lane_touches (not allowlisted) — fail closed too.
+    expect(classifyProposerTool('mcp__cortex__register_mcp')).toBe('dispatch');
+    expect(classifyProposerTool('mcp__cortex__lane_touches')).toBe('dispatch');
+  });
+
+  it('fails closed on UNKNOWN cortex tools (a tool added later must opt in, not fall through)', () => {
+    expect(classifyProposerTool('mcp__cortex__cortex_some_future_mutator')).toBe('dispatch');
+    expect(classifyProposerTool('cortex__cortex_brand_new_thing')).toBe('dispatch');
+    expect(classifyProposerTool('cortex_anything_not_allowlisted')).toBe('dispatch');
   });
 });
 
