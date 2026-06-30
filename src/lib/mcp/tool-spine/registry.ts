@@ -26,6 +26,16 @@ export type ToolSurface =
   | 'gemini' //              ~/.gemini/settings.json     (Set B)
   | 'opencode'; //           ~/.config/opencode/opencode.json (Set B)
 
+/**
+ * Tool profile — which trust class of servers a surface receives for one turn.
+ *  - `'full'`    → every server the surface is a member of (today's behavior).
+ *  - `'propose'` → the read-only proposer profile (Collide/MoA): the operator
+ *    server — which carries dispatch_mission / create_mission / approve_and_merge
+ *    — is OMITTED so a proposer physically cannot dispatch work; cortex
+ *    (read-only memory) is retained. The #1075 dispatch lockout, as data.
+ */
+export type ToolProfile = 'full' | 'propose';
+
 /** Inert in Phase 1; the vault-phase credential-injection hook. */
 export interface SecretRef {
   vaultKey: string;
