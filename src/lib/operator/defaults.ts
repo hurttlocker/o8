@@ -60,10 +60,10 @@ function isWorkersUseBrain(value: unknown): value is WorkersUseBrain {
 
 /** Which backend drives the in-app Orchestrator. 'auto' = the legacy
  *  inAppOrchestratorEnabled derivation; a specific id forces that backend. */
-export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw';
+export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes';
 
 function isOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
-  return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw';
+  return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes';
 }
 
 export interface OperatorDefaults {
@@ -234,6 +234,7 @@ export const ORCHESTRATOR_BACKEND_OPTIONS: Array<{ value: OrchestratorBackendSet
   { value: 'codex', label: 'Codex', detail: 'Codex GPT-5.5 xhigh — free for ChatGPT Plus / Codex subscribers.' },
   { value: 'claude', label: 'Claude', detail: 'Claude Code REPL — subscription-billed (Claude Max pool).' },
   { value: 'openclaw', label: 'OpenClaw', detail: 'Governed openclaw orchestrator — dispatches Codex workers through o8.' },
+  { value: 'hermes', label: 'Hermes', detail: 'Hermes via ACP — needs Hermes installed + a model provider configured (hermes setup).' },
 ];
 
 export const PARALLEL_CAP_PRESETS: Array<{ key: 'conservative' | 'balanced' | 'power-user'; label: string; value: number }> = [

@@ -1,6 +1,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
+import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
 
 export const ORCHESTRATOR_HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
@@ -168,7 +169,7 @@ function normalizeSessionIds(value: unknown): Record<string, string | null> {
 }
 
 function normalizeBackend(value: unknown): MobileOrchestratorBackend | null {
-  return value === 'openclaw' || value === 'codex' || value === 'claude' ? value : null;
+  return isOrchestratorBackendId(value) ? value : null;
 }
 
 function normalizeAgent(value: unknown): string | null {
