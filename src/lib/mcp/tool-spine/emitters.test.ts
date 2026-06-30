@@ -16,6 +16,7 @@ import { toCodexToml } from './emit-codex';
 import { toClaudeDesktopJson } from './emit-claude-desktop';
 import { toOpenclawJson } from './emit-openclaw';
 import { toGeminiSettings } from './emit-gemini';
+import { toOpencodeJson } from './emit-opencode';
 
 const fixture: ToolRegistry = {
   repoPath: '/repo',
@@ -41,8 +42,8 @@ const fixture: ToolRegistry = {
       name: 'operator',
       source: 'builtin',
       label: 'o8 Operator',
-      surfaces: ['claude-orchestrator', 'codex-orchestrator', 'claude-desktop', 'openclaw', 'gemini'],
-      surfaceNames: { 'claude-desktop': 'o8', openclaw: 'o8', gemini: 'o8' },
+      surfaces: ['claude-orchestrator', 'codex-orchestrator', 'claude-desktop', 'openclaw', 'gemini', 'opencode'],
+      surfaceNames: { 'claude-desktop': 'o8', openclaw: 'o8', gemini: 'o8', opencode: 'o8' },
       config: { type: 'stdio', command: 'npx', args: ['tsx', 'operator.ts'], env: { O8_API_BASE: 'http://127.0.0.1:3001' } },
     },
     {
@@ -63,7 +64,7 @@ const fixture: ToolRegistry = {
       name: 'codebase-memory',
       source: 'builtin',
       label: 'Codebase Memory',
-      surfaces: ['claude-desktop', 'gemini'],
+      surfaces: ['claude-desktop', 'gemini', 'opencode'],
       config: { type: 'stdio', command: '/bin/cm', args: [], env: {} },
     },
   ],
@@ -218,5 +219,33 @@ describe('toGeminiSettings', () => {
       ],
     };
     expect(toGeminiSettings(httpReg)).toEqual({ mcpServers: { remote: { httpUrl: 'https://h/mcp', headers: { A: 'b' } } } });
+  });
+});
+
+describe('toOpencodeJson', () => {
+  it('emits o8 + codebase-memory under `mcp`; type:local with folded command array; empty environment omitted', () => {
+    expect(toOpencodeJson(fixture)).toEqual({
+      mcp: {
+        o8: { type: 'local', command: ['npx', 'tsx', 'operator.ts'], environment: { O8_API_BASE: 'http://127.0.0.1:3001' } },
+        'codebase-memory': { type: 'local', command: ['/bin/cm'] },
+      },
+    });
+  });
+
+  it('maps http transport to type:remote with url (+headers)', () => {
+    const httpReg: ToolRegistry = {
+      repoPath: '/repo',
+      entries: [
+        {
+          id: 'external:remote',
+          name: 'remote',
+          source: 'external',
+          label: 'remote',
+          surfaces: ['opencode'],
+          config: { type: 'http', url: 'https://h/mcp', headers: { A: 'b' } },
+        },
+      ],
+    };
+    expect(toOpencodeJson(httpReg)).toEqual({ mcp: { remote: { type: 'remote', url: 'https://h/mcp', headers: { A: 'b' } } } });
   });
 });
