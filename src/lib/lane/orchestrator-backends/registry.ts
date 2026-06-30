@@ -22,7 +22,7 @@ import {
   getOrchestratorSession,
   sendToOrchestrator,
 } from '@/lib/lane/orchestrator-session';
-import { resolveInAppOrchestratorEnabledSync } from '@/lib/operator/defaults';
+import { resolveInAppOrchestratorEnabledSync, resolveOrchestratorBackendSync } from '@/lib/operator/defaults';
 import { openclawBackend } from './openclaw';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 
@@ -87,15 +87,19 @@ export function getOrchestratorBackend(id: OrchestratorBackendId): OrchestratorB
 /**
  * Resolve the active orchestrator backend id.
  *
- * Until the openclaw backend ships there is no dedicated operator setting, so
- * this derives directly from the legacy `inAppOrchestratorEnabled` boolean —
- * behavior is byte-identical to the pre-registry dual-path branches:
- *   - toggle OFF (default) → Codex GPT-5.5 xhigh
- *   - toggle ON            → Claude
- * The openclaw step swaps this for an `orchestratorBackend` operator setting
- * that falls back to this same derivation.
+ * The `orchestratorBackend` operator setting picks the backend:
+ *   - **'auto' (default)** → defer to the legacy `inAppOrchestratorEnabled`
+ *     boolean, BYTE-IDENTICAL to the pre-setting behavior:
+ *       · toggle OFF (default) → Codex GPT-5.5 xhigh
+ *       · toggle ON            → Claude
+ *   - a specific id ('codex' | 'claude' | 'openclaw') → forces that backend,
+ *     which is how OpenClaw becomes selectable from the desktop.
+ * A per-request `msg.backend` still overrides this (see ws-server's
+ * `resolveMsgBackendId`).
  */
 export function resolveOrchestratorBackendId(): OrchestratorBackendId {
+  const setting = resolveOrchestratorBackendSync();
+  if (setting !== 'auto') return setting;
   return resolveInAppOrchestratorEnabledSync() ? 'claude' : 'codex';
 }
 
