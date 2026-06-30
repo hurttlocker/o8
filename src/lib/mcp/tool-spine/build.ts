@@ -247,7 +247,14 @@ export function buildToolRegistry(
   // Profile projection. `'propose'` (Collide's read-only proposer) is the #1075
   // dispatch lockout, applied STRUCTURALLY here:
   //   1. drop the operator server entirely (dispatch_mission / approve_and_merge);
-  //   2. cortex is a MIXED surface — read tools alongside mutators, most
+  //   2. drop EVERY external (user-configured) MCP server. o8 can't know which
+  //      external tool writes (a Postgres write, a GitHub/Linear mutation), and
+  //      these would fire in a consumed proposer side-thread outside the
+  //      aggregator's review — so a proposer gets NO external servers at all.
+  //      Strip-all, not allowlist: a proposer has native Read/Grep/Glob + the 9
+  //      cortex reads, which is all it needs to propose. (A deliberate read-only
+  //      external opt-in would be a later feature, never the default.)
+  //   3. cortex is a MIXED surface — read tools alongside mutators, most
   //      dangerously `cortex_launch_agent` (it POSTs /api/orchestrator/delegate
   //      and dispatches a worker). It is NOT read-only memory. So we relaunch it
   //      with CORTEX_READONLY=1, which makes the cortex server advertise + accept
@@ -258,7 +265,7 @@ export function buildToolRegistry(
   const profile = options?.profile ?? 'full';
   const projected = profile === 'propose'
     ? entries
-        .filter((entry) => entry.id !== 'builtin:operator')
+        .filter((entry) => entry.id !== 'builtin:operator' && entry.source !== 'external')
         .map((entry) =>
           entry.id === 'builtin:cortex' && entry.config.type === 'stdio'
             ? { ...entry, config: { ...entry.config, env: { ...entry.config.env, CORTEX_READONLY: '1' } } }

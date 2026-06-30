@@ -16,12 +16,26 @@ import assert from 'node:assert';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeServersMap } from '@/lib/mcp/tool-spine/emit-claude';
 import { toCodexServersMap } from '@/lib/mcp/tool-spine/emit-codex';
+import { insertExternalMcpServer } from '@/lib/mcp/external-servers';
 
 function main(): void {
   const repo = process.cwd();
 
+  // Seed a user external MCP server — it must ride the FULL orchestrator surface
+  // but be STRIPPED from the propose (proposer) profile on both surfaces.
+  insertExternalMcpServer({ name: 'smoke-ext', transport: 'stdio', command: 'echo', args: ['hi'], enabled: true });
+
   const full = buildToolRegistry(repo);
   const propose = buildToolRegistry(repo, { profile: 'propose' });
+
+  // ── External strip — present in full, ABSENT in propose, on BOTH surfaces.
+  const claudeFullMap = toClaudeServersMap(full);
+  const codexFullMap = toCodexServersMap(full);
+  assert('smoke-ext' in claudeFullMap, 'Claude FULL config HAS the external server');
+  assert('smoke-ext' in codexFullMap, 'Codex FULL config HAS the external server');
+  assert(!('smoke-ext' in toClaudeServersMap(propose)), 'Claude propose config has NO external server');
+  assert(!('smoke-ext' in toCodexServersMap(propose)), 'Codex propose config has NO external server');
+  assert(propose.entries.every((e) => e.source !== 'external'), 'propose registry has ZERO external entries');
 
   // ── Entry level — operator present in full, ABSENT in propose; cortex in both.
   const fullIds = new Set(full.entries.map((e) => e.id));

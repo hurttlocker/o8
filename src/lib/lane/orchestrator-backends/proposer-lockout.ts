@@ -86,6 +86,11 @@ export function classifyProposerTool(name: string): ProposerToolClass {
   // cortex tool (mutators, dispatch like cortex_launch_agent, unknown) → dispatch.
   const cortex = cortexToolName(name);
   if (cortex !== null) return CORTEX_READONLY_TOOLS.has(cortex) ? 'safe' : 'dispatch';
+  // Any OTHER MCP-namespaced tool is an EXTERNAL (user-configured) server tool —
+  // proposers get NO external servers (the propose profile strips them), so an
+  // `mcp__<server>__*` that reached here is a leak. Fail closed (belt-and-suspenders
+  // to the structural strip; reverses the fail-open default that hid the cortex hole).
+  if (/^mcp__/i.test(name)) return 'dispatch';
   if (WRITE_EXECUTE_TOOLS.has(name)) return 'write';
   return 'safe';
 }
