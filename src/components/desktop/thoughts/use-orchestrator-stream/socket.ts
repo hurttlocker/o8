@@ -263,6 +263,58 @@ export function createOrchestratorMessageHandler(
         break;
       }
 
+      // ── Collide (MoA) pre-roll. The proposers buffer; these two events drive the
+      //    faint, collapsible "proposals collided" card that precedes the answer.
+      //    Proposer text NEVER becomes assistant text — only the aggregator streams.
+      case 'collide-phase': {
+        const phase = msg.data?.phase === 'synthesizing' ? 'synthesizing' : 'proposing';
+        const proposers = Array.isArray(msg.data?.proposers) ? (msg.data!.proposers as string[]) : [];
+        if (options.statusRef.current !== 'busy') {
+          options.statusRef.current = 'busy';
+          options.setStatus('busy');
+        }
+        if (phase === 'proposing') {
+          options.setMessages((prev) => [...prev, {
+            id: `collide-${Date.now()}`,
+            role: 'system' as const,
+            text: '',
+            collide: { phase: 'proposing', proposers, proposals: [] },
+            timestamp: Date.now(),
+            timestampLabel: formatTimestampLabel(Date.now()),
+          }]);
+        } else {
+          // synthesizing — collapse the most recent active collide card.
+          options.setMessages((prev) => {
+            const idx = [...prev].reverse().findIndex((m) => m.collide && m.collide.phase === 'proposing');
+            if (idx < 0) return prev;
+            const realIdx = prev.length - 1 - idx;
+            const next = [...prev];
+            next[realIdx] = { ...next[realIdx], collide: { ...next[realIdx].collide!, phase: 'synthesizing' } };
+            return next;
+          });
+        }
+        break;
+      }
+
+      case 'collide-proposal': {
+        const proposer = typeof msg.data?.proposer === 'string' ? msg.data.proposer : 'proposer';
+        const text = typeof msg.data?.text === 'string' ? msg.data.text : '';
+        const breach = msg.data?.breach === true;
+        options.setMessages((prev) => {
+          const idx = [...prev].reverse().findIndex((m) => m.collide && m.collide.phase === 'proposing');
+          if (idx < 0) return prev;
+          const realIdx = prev.length - 1 - idx;
+          const next = [...prev];
+          const card = next[realIdx].collide!;
+          next[realIdx] = {
+            ...next[realIdx],
+            collide: { ...card, proposals: [...card.proposals, { proposer, text, breach }] },
+          };
+          return next;
+        });
+        break;
+      }
+
       case 'error': {
         if (options.statusRef.current !== 'busy' && options.messagesRef.current.length === 0) break;
         const error = typeof msg.data?.error === 'string' ? msg.data.error : 'Unknown error';
