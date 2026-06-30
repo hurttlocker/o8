@@ -35,6 +35,8 @@ import type {
   OrchestratorSessionInfo,
   OrchestratorTurnOptions,
 } from './types';
+import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
+import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -426,6 +428,42 @@ function linkProfileDir(name: string): void {
 }
 
 /**
+ * Build the governed o8 profile object from the operator's source openclaw
+ * config: headless (channels/bindings dropped), agents governed (#1075), gateway
+ * on the dedicated o8 port, and `mcp.servers` locked to o8 ONLY (every other
+ * source mcp server is dropped — the governed profile exposes only o8's tools).
+ *
+ * The o8 entry is supplied by the caller. Post-F that's the Tool-Spine registry
+ * projection (o8 owns its own entry) rather than the source passthrough — that
+ * is the ONLY value that differs between the old and new behavior; everything
+ * else here is a pure function of `source` and is unchanged. Exported for the
+ * Step-F containment test.
+ */
+export function buildGovernedO8Profile(source: Record<string, unknown>, o8Entry: unknown): Record<string, unknown> {
+  const sourceAgents = (source.agents as Record<string, unknown> | undefined) ?? {};
+  const sourceAgentList = Array.isArray(sourceAgents.list)
+    ? (sourceAgents.list as Array<Record<string, unknown>>)
+    : [];
+  const sourceGateway = (source.gateway as Record<string, unknown> | undefined) ?? {};
+
+  return {
+    ...source,
+    // Headless orchestrator — drop the operator's messaging surface so the o8
+    // gateway never starts their Telegram/Discord. `undefined` keys are omitted
+    // by JSON.stringify.
+    channels: undefined,
+    bindings: undefined,
+    agents: {
+      ...sourceAgents,
+      list: sourceAgentList.map(governOpenclawAgent),
+    },
+    mcp: { servers: { o8: o8Entry } },
+    // Dedicated gateway port — never the operator's personal gateway (:18789).
+    gateway: { ...sourceGateway, port: readOpenclawGatewayPort() ?? OPENCLAW_GATEWAY_PORT_BASE },
+  };
+}
+
+/**
  * Ensure the isolated `o8` openclaw profile exists at ~/.openclaw-o8.
  *
  * Derives the profile config from the operator's working openclaw config —
@@ -479,24 +517,18 @@ export function ensureOpenclawProfile(): void {
         + 'Register it via o8 Settings -> MCP before using the openclaw orchestrator.',
     );
   }
+  // TODO(tool-spine-convergence): this throw is vestigial post-F — o8's mcp entry
+  // is now EMITTED from the registry below, not the read sourceMcpServers.o8 (the
+  // read survives only as a presence check). Removing the throw = the self-heal
+  // (auto-register o8 from the registry), which the spec gates separately.
 
-  const sourceGateway = (source.gateway as Record<string, unknown> | undefined) ?? {};
-
-  const o8Config = {
-    ...source,
-    // Headless orchestrator — drop the operator's messaging surface so the o8
-    // gateway never starts their Telegram/Discord. `undefined` keys are omitted
-    // by JSON.stringify.
-    channels: undefined,
-    bindings: undefined,
-    agents: {
-      ...sourceAgents,
-      list: sourceAgentList.map(governOpenclawAgent),
-    },
-    mcp: { servers: { o8: o8McpServer } },
-    // Dedicated gateway port — never the operator's personal gateway (:18789).
-    gateway: { ...sourceGateway, port: readOpenclawGatewayPort() ?? OPENCLAW_GATEWAY_PORT_BASE },
-  };
+  // o8 owns its own mcp entry: emit it from the Tool-Spine registry instead of
+  // passing through whatever the user pre-registered. repoPath is irrelevant to
+  // the openclaw surface (operator-only; cortex/externals filtered out).
+  const o8Config = buildGovernedO8Profile(
+    source,
+    toOpenclawJson(buildToolRegistry(process.cwd())).servers.o8,
+  );
 
   writeFileSync(OPENCLAW_O8_CONFIG, `${JSON.stringify(o8Config, null, 2)}\n`, { mode: 0o600 });
   // Schema marker — sidecar in ~/.o8, NOT in the config (openclaw rejects
