@@ -177,6 +177,14 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.workersUseBrain = raw;
   }
 
+  if (body.orchestratorBackend !== undefined) {
+    const raw = body.orchestratorBackend;
+    if (raw !== 'auto' && raw !== 'codex' && raw !== 'claude' && raw !== 'openclaw') {
+      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw".');
+    }
+    update.orchestratorBackend = raw;
+  }
+
   return update;
 }
 
