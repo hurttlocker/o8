@@ -35,18 +35,57 @@ const WRITE_EXECUTE_TOOLS = new Set([
 /**
  * o8 operator-MCP dispatch/governance verbs. Matched by name so the guard is
  * surface-independent: Claude prefixes MCP tools `mcp__operator__<verb>`, Codex
- * surfaces them bare. The whole `mcp__operator__` namespace is forbidden to a
- * proposer (the propose profile removes that server entirely), and the bare
+ * surfaces them `operator__<verb>`. The whole operator namespace is forbidden to
+ * a proposer (the propose profile removes that server entirely), and the bare
  * dispatch/governance verbs are caught defensively in case a surface renames it.
  */
 const DISPATCH_TOOL_PATTERN =
   /^mcp__operator__|(?:^|__)(?:dispatch_mission|create_mission|approve_and_merge|submit_review|rerun_with_feedback|retry_packet|reset_packet|steer_packet|o8_send|o8_approve|o8_reject)\b/i;
+
+/**
+ * cortex is a MIXED surface — read tools live alongside MUTATORS, most
+ * dangerously `cortex_launch_agent` (it POSTs /api/orchestrator/delegate and
+ * dispatches a worker). This is the ONLY set of cortex tools a read-only
+ * proposer may call. ALLOWLIST, not denylist: anything else on the cortex server
+ * — every mutator, and any cortex tool added later — classifies as dispatch and
+ * fails closed. Mirrors `CORTEX_READONLY_TOOLS` in cortex-mcp-server.ts (the
+ * structural read-only profile); keep the two in sync.
+ */
+const CORTEX_READONLY_TOOLS = new Set<string>([
+  'cortex_ask',
+  'cortex_read_packets',
+  'cortex_read_transcript',
+  'cortex_fleet_status',
+  'cortex_list_approvals',
+  'cortex_list_issues',
+  'cortex_list_prs',
+  'cortex_list_projects',
+  'cortex_ci_status',
+]);
+
+/**
+ * If `name` is a cortex-server tool, return its bare tool name; else null.
+ * Handles Claude (`mcp__cortex__<tool>`), Codex (`cortex__<tool>` / `cortex.<tool>`),
+ * the bare `cortex_*` verb form, and the two non-`cortex_`-prefixed cortex tools
+ * (`lane_touches`, `register_mcp`) so the allowlist check below is fail-closed.
+ */
+function cortexToolName(name: string): string | null {
+  const m = /^(?:mcp__cortex__|cortex__|cortex\.)(.+)$/i.exec(name);
+  if (m) return m[1];
+  if (/^cortex_/i.test(name)) return name;
+  if (name === 'lane_touches' || name === 'register_mcp') return name;
+  return null;
+}
 
 export type ProposerToolClass = 'write' | 'dispatch' | 'safe';
 
 /** Classify a tool name from a read-only proposer's perspective. */
 export function classifyProposerTool(name: string): ProposerToolClass {
   if (DISPATCH_TOOL_PATTERN.test(name)) return 'dispatch';
+  // cortex MIXED surface — only the allowlisted read tools are safe; every other
+  // cortex tool (mutators, dispatch like cortex_launch_agent, unknown) → dispatch.
+  const cortex = cortexToolName(name);
+  if (cortex !== null) return CORTEX_READONLY_TOOLS.has(cortex) ? 'safe' : 'dispatch';
   if (WRITE_EXECUTE_TOOLS.has(name)) return 'write';
   return 'safe';
 }

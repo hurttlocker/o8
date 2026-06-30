@@ -31,8 +31,10 @@ export type ToolSurface =
  *  - `'full'`    → every server the surface is a member of (today's behavior).
  *  - `'propose'` → the read-only proposer profile (Collide/MoA): the operator
  *    server — which carries dispatch_mission / create_mission / approve_and_merge
- *    — is OMITTED so a proposer physically cannot dispatch work; cortex
- *    (read-only memory) is retained. The #1075 dispatch lockout, as data.
+ *    — is OMITTED so a proposer physically cannot dispatch work. cortex is a
+ *    MIXED surface (read tools + mutators like `cortex_launch_agent`, which
+ *    dispatches a worker), so it is relaunched read-only (CORTEX_READONLY=1) —
+ *    only its allowlisted read tools survive. The #1075 dispatch lockout, as data.
  */
 export type ToolProfile = 'full' | 'propose';
 

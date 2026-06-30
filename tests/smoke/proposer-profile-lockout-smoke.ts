@@ -45,6 +45,19 @@ function main(): void {
   assert(!('operator' in codexPropose), 'Codex propose config has NO operator server');
   assert('cortex' in codexPropose, 'Codex propose config HAS cortex');
 
+  // ── cortex is MIXED — the propose profile relaunches it READ-ONLY on BOTH
+  //    surfaces (CORTEX_READONLY=1), so the dispatch/mutator tools (launch_agent,
+  //    steer_agent, …) never reach the proposer's MCP config. Full profile must
+  //    NOT carry the flag (byte-identical).
+  const cortexEnv = (m: Record<string, unknown>): Record<string, string> => {
+    const c = m.cortex as { env?: Record<string, string> } | undefined;
+    return c?.env ?? {};
+  };
+  assert(cortexEnv(claudePropose).CORTEX_READONLY === '1', 'Claude propose cortex is CORTEX_READONLY=1');
+  assert(cortexEnv(codexPropose).CORTEX_READONLY === '1', 'Codex propose cortex is CORTEX_READONLY=1');
+  assert(cortexEnv(claudeFull).CORTEX_READONLY === undefined, 'Claude FULL cortex has NO read-only flag');
+  assert(cortexEnv(codexFull).CORTEX_READONLY === undefined, 'Codex FULL cortex has NO read-only flag');
+
   // ── Zero behavior change — profile:'full' is byte-identical to the no-arg call.
   assert.deepStrictEqual(
     buildToolRegistry(repo, { profile: 'full' }),
