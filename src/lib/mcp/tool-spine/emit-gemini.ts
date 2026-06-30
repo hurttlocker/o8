@@ -27,3 +27,29 @@ export function toGeminiSettings(r: ToolRegistry): { mcpServers: Record<string, 
   }
   return { mcpServers };
 }
+
+/** A Gemini CLI settings.json — mcpServers + arbitrary other top-level keys. */
+export interface GeminiSettings {
+  mcpServers?: Record<string, unknown>;
+  [key: string]: unknown;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Merge-preserving projection (mirrors `toClaudeDesktopJson`): write ONLY o8's
+ * managed entries into the user's settings, leaving every other server + every
+ * other top-level key (security / general / ui / tools …) byte-identical. I/O
+ * (read, atomic write, `.o8-backup`, trailing newline) stays in the caller.
+ */
+export function toGeminiSettingsMerged(r: ToolRegistry, existing: GeminiSettings): GeminiSettings {
+  const next: GeminiSettings = { ...existing };
+  const servers: Record<string, unknown> = { ...(isRecord(existing.mcpServers) ? existing.mcpServers : {}) };
+  for (const [name, entry] of Object.entries(toGeminiSettings(r).mcpServers)) {
+    servers[name] = entry;
+  }
+  next.mcpServers = servers;
+  return next;
+}
