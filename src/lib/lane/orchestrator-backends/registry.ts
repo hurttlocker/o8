@@ -1,70 +1,25 @@
 /**
  * Orchestrator backend registry.
  *
- * Resolves the active orchestrator backend and exposes Codex + Claude as
- * `OrchestratorBackend` implementations. Both are thin delegates — they call
- * straight into the existing, UNMODIFIED `orchestrator-session.ts` (Claude)
- * and `codex-orchestrator-session.ts` (Codex) modules. Adding a backend
- * (openclaw, Hermes) is one new file + one entry in `BACKENDS`.
+ * Resolves the active orchestrator backend. Each backend is an
+ * `OrchestratorBackend` implementation living in its own sibling file
+ * (`claude.ts`, `codex.ts`, `openclaw.ts`, `acp.ts`) — registered here in
+ * `BACKENDS`. The Codex/Claude delegates call straight into the existing,
+ * UNMODIFIED `orchestrator-session.ts` / `codex-orchestrator-session.ts`
+ * modules. Adding a backend is one new file + one entry in `BACKENDS`.
  *
  * Orchestrator call sites use `getActiveOrchestratorBackend()` instead of
  * branching on `inAppOrchestratorEnabled` directly — the registry is the
  * single chokepoint that knows which backend is active.
  */
 
-import {
-  ensureCodexOrchestratorSession,
-  getCodexOrchestratorSession,
-  sendToCodexOrchestrator,
-} from '@/lib/lane/codex-orchestrator-session';
-import {
-  ensureOrchestratorSession,
-  getOrchestratorSession,
-  sendToOrchestrator,
-} from '@/lib/lane/orchestrator-session';
 import { resolveInAppOrchestratorEnabledSync, resolveOrchestratorBackendSync } from '@/lib/operator/defaults';
+import { claudeBackend } from './claude';
+import { codexBackend } from './codex';
 import { openclawBackend } from './openclaw';
 import { acpBackend, hermesBackend } from './acp';
+import { collideBackend } from './moa';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
-
-// ── Delegate backends ────────────────────────────────────────────────────────
-
-const claudeBackend: OrchestratorBackend = {
-  id: 'claude',
-  label: 'Claude',
-  peekSession(repoPath, _agent, threadId) {
-    const session = getOrchestratorSession(repoPath, threadId);
-    return session ? { sessionName: session.sessionName, status: session.status } : null;
-  },
-  ensureSession(repoPath, _agent, threadId) {
-    const session = ensureOrchestratorSession(repoPath, threadId);
-    return { sessionName: session.sessionName, status: session.status };
-  },
-  sendTurn(repoPath, message, onEvent, options) {
-    return sendToOrchestrator(ensureOrchestratorSession(repoPath, options?.threadId), message, onEvent, options);
-  },
-};
-
-const codexBackend: OrchestratorBackend = {
-  id: 'codex',
-  label: 'Codex',
-  peekSession(repoPath, _agent, threadId) {
-    const session = getCodexOrchestratorSession(repoPath, threadId);
-    return session ? { sessionName: session.sessionName, status: session.status } : null;
-  },
-  ensureSession(repoPath, _agent, threadId) {
-    const session = ensureCodexOrchestratorSession(repoPath, threadId);
-    return { sessionName: session.sessionName, status: session.status };
-  },
-  sendTurn(repoPath, message, onEvent, options) {
-    return sendToCodexOrchestrator(
-      ensureCodexOrchestratorSession(repoPath, options?.threadId),
-      message,
-      onEvent,
-      options,
-    );
-  },
-};
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
@@ -78,6 +33,7 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
   openclaw: openclawBackend,
   hermes: hermesBackend,
   acp: acpBackend,
+  collide: collideBackend,
 };
 
 /** The default backend — also the fallback for any unregistered id. */

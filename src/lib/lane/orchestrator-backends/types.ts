@@ -16,12 +16,15 @@
 
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 
 /**
  * The set of orchestrator backends. `hermes` drives Hermes via the generic ACP
- * backend; `acp` is the generic escape hatch for any other ACP agent.
+ * backend; `acp` is the generic escape hatch for any other ACP agent. `collide`
+ * is the Mixture-of-Agents fusion brain (moa.ts) — a backend whose proposers +
+ * aggregator are themselves backends; it is a BRAIN only, never a worker runtime.
  */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp';
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide';
 
 /**
  * The single runtime validation point for the backend-id union. Callers that
@@ -30,7 +33,8 @@ export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' |
  * comparison — so adding a backend is one edit here (union + guard), not N.
  */
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
-  return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes' || value === 'acp';
+  return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes'
+    || value === 'acp' || value === 'collide';
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
@@ -38,6 +42,13 @@ export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';
 export interface OrchestratorTurnOptions {
   /** `'full'` runs autonomously; `'plan'` requires approval for writes. */
   permissionMode?: 'full' | 'plan';
+  /**
+   * MCP tool profile for the turn. `'full'` (default) gives the backend its full
+   * server surface; `'propose'` strips the operator (dispatch) server so the run
+   * is a read-only proposer that cannot hand off work — Collide's #1075 lockout.
+   * Pairs with `permissionMode: 'plan'` (execute lockout) for a proposer turn.
+   */
+  toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
   model?: string;
   /** UI/history thread id (thoughts-*), used to isolate backend session identity. */

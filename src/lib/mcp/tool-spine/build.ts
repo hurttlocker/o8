@@ -20,7 +20,7 @@ import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { externalServerToMcpConfig, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
-import type { ServerEntry, ToolRegistry } from './registry';
+import type { ServerEntry, ToolProfile, ToolRegistry } from './registry';
 
 /** Resolve repo slug from git remote. */
 function detectRepoSlug(repoPath: string): string {
@@ -149,8 +149,17 @@ function resolveCodebaseMemoryBin(): string | null {
  *   2. operator         — ALL surfaces (renamed "o8" on external surfaces)
  *   3. cortex           — orchestrator surfaces only
  *   4. codebase-memory  — external surfaces only, omitted when the binary is absent
+ *
+ * `options.profile` projects the catalog by trust class. `'full'` (default) is
+ * today's behavior, BYTE-IDENTICAL to the no-arg call. `'propose'` is the
+ * read-only proposer profile (Collide): it strips the operator server (dispatch)
+ * and relaunches the MIXED cortex surface read-only (CORTEX_READONLY=1, only its
+ * allowlisted read tools survive) — the #1075 lockout (see `ToolProfile`).
  */
-export function buildToolRegistry(repoPath: string): ToolRegistry {
+export function buildToolRegistry(
+  repoPath: string,
+  options?: { profile?: ToolProfile },
+): ToolRegistry {
   const repoSlug = detectRepoSlug(repoPath);
   const { getApiBase } = require('@/lib/panel/api-port') as typeof import('@/lib/panel/api-port');
   const apiBase = getApiBase();
@@ -235,5 +244,34 @@ export function buildToolRegistry(repoPath: string): ToolRegistry {
     });
   }
 
-  return { repoPath, entries };
+  // Profile projection. `'propose'` (Collide's read-only proposer) is the #1075
+  // dispatch lockout, applied STRUCTURALLY here:
+  //   1. drop the operator server entirely (dispatch_mission / approve_and_merge);
+  //   2. drop EVERY external (user-configured) MCP server. o8 can't know which
+  //      external tool writes (a Postgres write, a GitHub/Linear mutation), and
+  //      these would fire in a consumed proposer side-thread outside the
+  //      aggregator's review — so a proposer gets NO external servers at all.
+  //      Strip-all, not allowlist: a proposer has native Read/Grep/Glob + the 9
+  //      cortex reads, which is all it needs to propose. (A deliberate read-only
+  //      external opt-in would be a later feature, never the default.)
+  //   3. cortex is a MIXED surface — read tools alongside mutators, most
+  //      dangerously `cortex_launch_agent` (it POSTs /api/orchestrator/delegate
+  //      and dispatches a worker). It is NOT read-only memory. So we relaunch it
+  //      with CORTEX_READONLY=1, which makes the cortex server advertise + accept
+  //      ONLY its allowlisted read tools (the dispatch/mutator verbs never reach
+  //      the proposer's MCP config). Fail-closed: a cortex tool added later is
+  //      hidden until it opts into the allowlist.
+  // `'full'` returns the catalog untouched — byte-identical to the legacy no-arg path.
+  const profile = options?.profile ?? 'full';
+  const projected = profile === 'propose'
+    ? entries
+        .filter((entry) => entry.id !== 'builtin:operator' && entry.source !== 'external')
+        .map((entry) =>
+          entry.id === 'builtin:cortex' && entry.config.type === 'stdio'
+            ? { ...entry, config: { ...entry.config, env: { ...entry.config.env, CORTEX_READONLY: '1' } } }
+            : entry,
+        )
+    : entries;
+
+  return { repoPath, entries: projected };
 }

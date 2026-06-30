@@ -41,6 +41,7 @@ import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
+import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 
 // ── Types ──
 
@@ -293,16 +294,23 @@ export async function rehydrateOrchestratorSessions(): Promise<void> {
   return startupRehydrationPromise;
 }
 
-/** Generate a temporary MCP config file for orchestrator context sources. */
-function ensureMcpConfig(repoPath: string): string {
+/** Generate a temporary MCP config file for orchestrator context sources.
+ *
+ * `profile` selects the tool surface: `'full'` (default) is unchanged — same
+ * path, byte-identical content. `'propose'` (Collide proposer) strips the
+ * operator server and writes to a SEPARATE `-propose` file so a concurrent
+ * full-profile turn for the same repo can never clobber it back to a config
+ * that carries dispatch (the #1075 lockout would otherwise race). */
+function ensureMcpConfig(repoPath: string, profile: ToolProfile = 'full'): string {
   if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
 
-  const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}.json`);
+  const suffix = profile === 'propose' ? '-propose' : '';
+  const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}${suffix}.json`);
   // Tool-Spine: the Claude orchestrator surface projection. toClaudeJson emits
   // the full `{ mcpServers }` envelope; the stringify (2-space, no trailing
   // newline) is unchanged, so the written file is byte-identical to the legacy
   // `{ mcpServers: getMcpServersConfig(repoPath) }` form (Step B).
-  const config = toClaudeJson(buildToolRegistry(repoPath));
+  const config = toClaudeJson(buildToolRegistry(repoPath, { profile }));
 
   writeFileSync(configPath, JSON.stringify(config, null, 2));
   console.log(`[orchestrator-session] MCP config written to ${configPath}`);
@@ -489,6 +497,12 @@ export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-8';
 
 export interface SendToOrchestratorOptions {
   permissionMode?: OrchestratorPermissionMode;
+  /**
+   * MCP tool profile. `'propose'` (Collide proposer) strips the operator
+   * (dispatch) server from this turn's MCP config — the run can read + use
+   * cortex but cannot dispatch work. Defaults to `'full'`. See `ToolProfile`.
+   */
+  toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
   model?: string;
   /**
@@ -558,8 +572,9 @@ export async function sendToOrchestrator(
 
   session.status = 'busy';
 
-  // Generate MCP config so Claude Code can use Cortex tools
-  const mcpConfigPath = ensureMcpConfig(session.repoPath);
+  // Generate MCP config so Claude Code can use Cortex tools. A 'propose' turn
+  // gets the operator-stripped (read-only proposer) surface — Collide's lockout.
+  const mcpConfigPath = ensureMcpConfig(session.repoPath, options.toolProfile ?? 'full');
 
   // Map manual thinking effort to Claude Code CLI's --effort flag. Adaptive
   // is represented by omitting the flag entirely so Claude Code self-regulates.
