@@ -120,9 +120,11 @@ const defaultDeps: MoaDeps = {
 };
 
 /** The proposer's private side-thread id — structural independence from the
- *  main thread and from the other proposers. */
-function proposeThreadId(mainThreadId: string | null | undefined, backendId: OrchestratorBackendId): string {
-  return `${mainThreadId ?? 'default'}::collide-propose::${backendId}`;
+ *  main thread and from the other proposers. Indexed by POSITION (not backend
+ *  id) so two same-backend proposers (reachable via O8_COLLIDE_PROPOSERS) get
+ *  distinct threads instead of racing one shared session. */
+function proposeThreadId(mainThreadId: string | null | undefined, index: number, backendId: OrchestratorBackendId): string {
+  return `${mainThreadId ?? 'default'}::collide-propose::${index}-${backendId}`;
 }
 
 /**
@@ -185,6 +187,7 @@ function childSignal(parent?: AbortSignal): { signal: AbortSignal; abort: () => 
 async function runProposal(
   deps: MoaDeps,
   participant: MoaParticipant,
+  index: number,
   repoPath: string,
   message: string,
   mainThreadId: string | null,
@@ -222,7 +225,7 @@ async function runProposal(
         toolProfile: 'propose',
         model: participant.model,
         thinkingEffort: participant.thinkingEffort,
-        threadId: proposeThreadId(mainThreadId, participant.backend),
+        threadId: proposeThreadId(mainThreadId, index, participant.backend),
         signal: child.signal,
       },
     );
@@ -279,11 +282,19 @@ export function makeMoaBackend(
       onEvent({ type: 'collide_phase', phase: 'proposing', proposers: config.proposers.map((p) => labelFor(p.backend)) });
 
       const proposals = await Promise.all(
-        config.proposers.map(async (participant) => {
-          const proposal = await runProposal(deps, participant, repoPath, message, mainThreadId, signal);
-          // Faint pre-roll card — buffered, not streamed. The breach marker keeps a
-          // tripped proposer visible (excluded) rather than silently dropped.
-          onEvent({ type: 'collide_proposal', proposer: proposal.proposer, text: proposal.text, breach: proposal.breach });
+        config.proposers.map(async (participant, index) => {
+          const proposal = await runProposal(deps, participant, index, repoPath, message, mainThreadId, signal);
+          // Faint pre-roll card — buffered, not streamed. On a breach the text is
+          // REDACTED AT SOURCE: a proposer that tried to act doesn't get its
+          // pre-breach buffered text across the wire at all (the render layer also
+          // hides it, but it must never leave the server). The marker stays so the
+          // tripped proposer is visibly excluded rather than silently dropped.
+          onEvent({
+            type: 'collide_proposal',
+            proposer: proposal.proposer,
+            text: proposal.breach ? '' : proposal.text,
+            breach: proposal.breach,
+          });
           return proposal;
         }),
       );

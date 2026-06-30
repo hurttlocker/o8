@@ -96,6 +96,28 @@ const REPO_PATH = process.env.CORTEX_REPO_PATH || '';
 const REPO_SLUG = process.env.CORTEX_REPO_SLUG || '';
 const WS_TOKEN = process.env.WS_TOKEN?.trim() || getOrCreateWsToken();
 
+// ── Read-only profile (Collide proposer / #1075 dispatch lockout) ──
+//
+// cortex is a MIXED surface: read tools (ask, read_packets, …) live alongside
+// MUTATORS — most dangerously `cortex_launch_agent`, whose handler POSTs
+// /api/orchestrator/delegate and dispatches a Codex worker. A read-only Collide
+// proposer must NOT be handed any of that. When CORTEX_READONLY=1 this server
+// advertises + accepts ONLY the allowlisted read tools; everything else (incl.
+// any cortex tool added later, and every mutator) FAILS CLOSED. Allowlist, not
+// denylist — new tools must opt IN to being proposer-safe, never fall through.
+const CORTEX_READONLY = process.env.CORTEX_READONLY === '1';
+const CORTEX_READONLY_TOOLS = new Set<string>([
+  'cortex_ask',
+  'cortex_read_packets',
+  'cortex_read_transcript',
+  'cortex_fleet_status',
+  'cortex_list_approvals',
+  'cortex_list_issues',
+  'cortex_list_prs',
+  'cortex_list_projects',
+  'cortex_ci_status',
+]);
+
 // ── Tool Definitions ──
 
 const TOOLS: McpTool[] = [
@@ -1435,13 +1457,22 @@ async function handleMessage(msg: JsonRpcRequest): Promise<void> {
       send({
         jsonrpc: '2.0',
         id,
-        result: { tools: TOOLS },
+        // Read-only profile advertises ONLY the allowlisted read tools — the
+        // dispatch/mutator tools (launch_agent, steer_agent, …) never reach a
+        // Collide proposer's MCP config in the first place.
+        result: { tools: CORTEX_READONLY ? TOOLS.filter((t) => CORTEX_READONLY_TOOLS.has(t.name)) : TOOLS },
       });
       break;
 
     case 'tools/call': {
       const toolName = (params as Record<string, unknown>)?.name as string;
       const toolArgs = ((params as Record<string, unknown>)?.arguments ?? {}) as Record<string, unknown>;
+      // Fail-closed: even if a client calls a non-advertised tool by name, a
+      // read-only server rejects anything outside the allowlist (#1075).
+      if (CORTEX_READONLY && !CORTEX_READONLY_TOOLS.has(toolName)) {
+        send({ jsonrpc: '2.0', id, result: textResult(`Tool '${toolName}' is not available in read-only mode.`, true) });
+        break;
+      }
       const handler = TOOL_HANDLERS[toolName];
       if (!handler) {
         send({ jsonrpc: '2.0', id, result: textResult(`Unknown tool: ${toolName}`, true) });

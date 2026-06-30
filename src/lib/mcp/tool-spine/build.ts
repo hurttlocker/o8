@@ -153,7 +153,8 @@ function resolveCodebaseMemoryBin(): string | null {
  * `options.profile` projects the catalog by trust class. `'full'` (default) is
  * today's behavior, BYTE-IDENTICAL to the no-arg call. `'propose'` is the
  * read-only proposer profile (Collide): it strips the operator server (dispatch)
- * while keeping cortex (read-only memory) — the #1075 lockout (see `ToolProfile`).
+ * and relaunches the MIXED cortex surface read-only (CORTEX_READONLY=1, only its
+ * allowlisted read tools survive) — the #1075 lockout (see `ToolProfile`).
  */
 export function buildToolRegistry(
   repoPath: string,
@@ -243,13 +244,26 @@ export function buildToolRegistry(
     });
   }
 
-  // Profile projection. `'propose'` (Collide's read-only proposer) strips the
-  // operator server so a proposer cannot dispatch_mission / approve_and_merge;
-  // cortex (read-only memory) stays. `'full'` returns the catalog untouched —
-  // byte-identical to the legacy no-arg path. The #1075 dispatch lockout.
+  // Profile projection. `'propose'` (Collide's read-only proposer) is the #1075
+  // dispatch lockout, applied STRUCTURALLY here:
+  //   1. drop the operator server entirely (dispatch_mission / approve_and_merge);
+  //   2. cortex is a MIXED surface — read tools alongside mutators, most
+  //      dangerously `cortex_launch_agent` (it POSTs /api/orchestrator/delegate
+  //      and dispatches a worker). It is NOT read-only memory. So we relaunch it
+  //      with CORTEX_READONLY=1, which makes the cortex server advertise + accept
+  //      ONLY its allowlisted read tools (the dispatch/mutator verbs never reach
+  //      the proposer's MCP config). Fail-closed: a cortex tool added later is
+  //      hidden until it opts into the allowlist.
+  // `'full'` returns the catalog untouched — byte-identical to the legacy no-arg path.
   const profile = options?.profile ?? 'full';
   const projected = profile === 'propose'
-    ? entries.filter((entry) => entry.id !== 'builtin:operator')
+    ? entries
+        .filter((entry) => entry.id !== 'builtin:operator')
+        .map((entry) =>
+          entry.id === 'builtin:cortex' && entry.config.type === 'stdio'
+            ? { ...entry, config: { ...entry.config, env: { ...entry.config.env, CORTEX_READONLY: '1' } } }
+            : entry,
+        )
     : entries;
 
   return { repoPath, entries: projected };

@@ -131,6 +131,8 @@ describe('Collide fusion engine', () => {
       | undefined;
     expect(breachEvent).toBeDefined();
     expect(breachEvent!.proposer).toBe('Codex');
+    // Redacted at source — the breached proposer's buffered text never leaves the server.
+    expect(breachEvent!.text).toBe('');
 
     const agg = claudeCalls.find(isAggregatorCall)!;
     expect(agg.message).not.toContain('CODEX_SECRET_PLAN'); // quarantined
@@ -140,16 +142,52 @@ describe('Collide fusion engine', () => {
     expect(claudeCalls.filter(isAggregatorCall)).toHaveLength(1);
   });
 
-  it('(e) proposers are independent — distinct side-thread ids, separate from main', async () => {
+  it('(d2) a proposer attempting cortex_launch_agent (the dispatch hole) aborts + is excluded', async () => {
+    // THE finding: cortex is mixed; cortex_launch_agent dispatches a worker. A
+    // proposer that calls it must be caught + quarantined, never reach synthesis.
+    const events: OrchestratorEvent[] = [];
+    const { backend, claudeCalls } = setup({
+      codexEvents: [
+        { type: 'text', text: 'CODEX_WANTS_TO_DISPATCH' },
+        { type: 'tool_use', id: 't1', name: 'mcp__cortex__cortex_launch_agent', input: { task: 'go' } },
+      ],
+    });
+    await backend.sendTurn('/repo', 'build X', (e) => events.push(e), { threadId: MAIN_THREAD });
+
+    const breach = events.find((e) => e.type === 'collide_proposal' && e.breach) as
+      | Extract<OrchestratorEvent, { type: 'collide_proposal' }> | undefined;
+    expect(breach).toBeDefined();
+    expect(breach!.text).toBe(''); // redacted
+    const agg = claudeCalls.find(isAggregatorCall)!;
+    expect(agg.message).not.toContain('CODEX_WANTS_TO_DISPATCH'); // quarantined out of synthesis
+    expect(claudeCalls.filter(isAggregatorCall)).toHaveLength(1);
+  });
+
+  it('(e) proposers are independent — distinct side-thread ids (indexed by position), separate from main', async () => {
     const { backend, claudeCalls, codexCalls } = setup({});
     await backend.sendTurn('/repo', 'build X', () => {}, { threadId: MAIN_THREAD });
 
     const claudeProp = claudeCalls.find(isProposerCall)!.options?.threadId;
     const codexProp = codexCalls.find(isProposerCall)!.options?.threadId;
-    expect(claudeProp).toBe('thoughts-test::collide-propose::claude');
-    expect(codexProp).toBe('thoughts-test::collide-propose::codex');
+    expect(claudeProp).toBe('thoughts-test::collide-propose::0-claude');
+    expect(codexProp).toBe('thoughts-test::collide-propose::1-codex');
     expect(claudeProp).not.toBe(codexProp);
     expect(claudeProp).not.toBe(MAIN_THREAD);
+  });
+
+  it('(e2) two SAME-backend proposers get distinct threads (no shared-session race)', async () => {
+    const calls: MockCall[] = [];
+    const codex = mockBackend('codex', calls, () => [{ type: 'text', text: 'p' }, { type: 'done', sessionId: 's', cost: null }]);
+    const deps: MoaDeps = { resolveBackend: () => codex };
+    const twoCodex: MoaConfig = {
+      id: 'collide', label: 'Collide',
+      proposers: [{ backend: 'codex' }, { backend: 'codex' }],
+      aggregator: { backend: 'codex' },
+    };
+    await makeMoaBackend(twoCodex, deps).sendTurn('/repo', 'X', () => {}, { threadId: MAIN_THREAD });
+    const threads = calls.filter(isProposerCall).map((c) => c.options?.threadId);
+    expect(threads).toEqual(['thoughts-test::collide-propose::0-codex', 'thoughts-test::collide-propose::1-codex']);
+    expect(new Set(threads).size).toBe(2); // distinct — no race
   });
 
   it('(f) only the aggregator streams as the visible answer; composer model overrides aggregator', async () => {
