@@ -18,6 +18,7 @@ import { claudeBackend } from './claude';
 import { codexBackend } from './codex';
 import { openclawBackend } from './openclaw';
 import { acpBackend, hermesBackend } from './acp';
+import { collideBackend } from './moa';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 
 // ── Registry ─────────────────────────────────────────────────────────────────
@@ -32,6 +33,7 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
   openclaw: openclawBackend,
   hermes: hermesBackend,
   acp: acpBackend,
+  collide: collideBackend,
 };
 
 /** The default backend — also the fallback for any unregistered id. */

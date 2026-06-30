@@ -2692,7 +2692,7 @@ function handleOrchestratorUnsubscribe(client: ClientState, msg: Record<string, 
   // `backend` alone, drop every subscription for that backend; without either
   // (legacy clients) drop every subscription for this client.
   const raw = msg.backend;
-  if (raw !== 'codex' && raw !== 'claude' && raw !== 'openclaw') {
+  if (!isOrchestratorBackendId(raw)) {
     for (const key of orchestratorSubscriptions.keys()) {
       if (key.startsWith(`${client.id}::`)) orchestratorSubscriptions.delete(key);
     }
@@ -3006,6 +3006,25 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
               backend: backend.id,
               agent: agentTag,
             },
+          });
+          break;
+
+        // ── Collide (MoA) — proposer pre-roll. Forwarded to the faint card; NEVER
+        //    accumulated into assistantTextAccum so only the aggregator's reply is
+        //    the persisted, visible answer.
+        case 'collide_phase':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'collide-phase',
+            data: { phase: event.phase, proposers: event.proposers ?? [], repoPath, threadId, backend: backend.id, agent: agentTag },
+          });
+          break;
+
+        case 'collide_proposal':
+          wsMsg = JSON.stringify({
+            channel: 'orchestrator',
+            event: 'collide-proposal',
+            data: { proposer: event.proposer, text: event.text, breach: event.breach ?? false, repoPath, threadId, backend: backend.id, agent: agentTag },
           });
           break;
 

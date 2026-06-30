@@ -4,7 +4,13 @@ export type OrchestratorEvent =
   | { type: 'tool_use'; id?: string | null; name: string; input: unknown }
   | { type: 'tool_result'; id?: string | null; name: string; input?: unknown; output: string }
   | { type: 'done'; sessionId: string | null; cost: number | null }
-  | { type: 'error'; error: string };
+  | { type: 'error'; error: string }
+  // ── Collide (MoA) — emitted ONLY by the collide backend (moa.ts). Proposer
+  //    text is buffered, not streamed, so it never pollutes the visible answer
+  //    or the persisted assistant text; these two carry it to the faint pre-roll
+  //    card. The aggregator's reply still flows through `text` as the sole answer.
+  | { type: 'collide_phase'; phase: 'proposing' | 'synthesizing'; proposers?: string[] }
+  | { type: 'collide_proposal'; proposer: string; text: string; breach?: boolean };
 
 type ContentBlock = {
   type?: string;
