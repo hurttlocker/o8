@@ -163,6 +163,27 @@ describe('Collide fusion engine', () => {
     expect(claudeCalls.filter(isAggregatorCall)).toHaveLength(1);
   });
 
+  it('(d3) a proposer attempting an EXTERNAL MCP tool is caught + quarantined', async () => {
+    // Externals (a user's Postgres/GitHub/Linear MCP) ride no proposer surface;
+    // a proposer that emits one must be caught + excluded, never reach synthesis.
+    const events: OrchestratorEvent[] = [];
+    const { backend, claudeCalls } = setup({
+      codexEvents: [
+        { type: 'text', text: 'CODEX_WANTS_EXTERNAL' },
+        { type: 'tool_use', id: 't1', name: 'mcp__github__create_issue', input: { title: 'x' } },
+      ],
+    });
+    await backend.sendTurn('/repo', 'build X', (e) => events.push(e), { threadId: MAIN_THREAD });
+
+    const breach = events.find((e) => e.type === 'collide_proposal' && e.breach) as
+      | Extract<OrchestratorEvent, { type: 'collide_proposal' }> | undefined;
+    expect(breach).toBeDefined();
+    expect(breach!.text).toBe(''); // redacted
+    const agg = claudeCalls.find(isAggregatorCall)!;
+    expect(agg.message).not.toContain('CODEX_WANTS_EXTERNAL'); // quarantined out of synthesis
+    expect(claudeCalls.filter(isAggregatorCall)).toHaveLength(1);
+  });
+
   it('(e) proposers are independent — distinct side-thread ids (indexed by position), separate from main', async () => {
     const { backend, claudeCalls, codexCalls } = setup({});
     await backend.sendTurn('/repo', 'build X', () => {}, { threadId: MAIN_THREAD });

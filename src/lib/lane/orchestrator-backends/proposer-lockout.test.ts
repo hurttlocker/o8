@@ -74,6 +74,17 @@ describe('classifyProposerTool', () => {
     expect(classifyProposerTool('cortex__cortex_brand_new_thing')).toBe('dispatch');
     expect(classifyProposerTool('cortex_anything_not_allowlisted')).toBe('dispatch');
   });
+
+  it('flags EXTERNAL MCP server tools as dispatch — proposers get NO external servers', () => {
+    // The propose profile strips every external server, so any mcp__<server>__*
+    // that isn't operator/cortex is a leak → fail closed (belt-and-suspenders).
+    for (const t of [
+      'mcp__postgres__execute_sql', 'mcp__github__create_issue', 'mcp__linear__create_issue',
+      'mcp__slack__post_message', 'mcp__filesystem__write_file', 'mcp__some_unknown_server__any_tool',
+    ]) {
+      expect(classifyProposerTool(t)).toBe('dispatch');
+    }
+  });
 });
 
 describe('assertProposerEventAllowed — the lockout regression guard (9d)', () => {
