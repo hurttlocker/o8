@@ -4,6 +4,7 @@ import { Fragment, forwardRef } from 'react';
 import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { SuggestedReplies } from '../SuggestedReplies';
 import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
+import { CollideProposalCard } from './CollideProposalCard';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 
 interface ChatMessageListProps {
@@ -145,6 +146,15 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
             && msg.id === suggestedReplyMessageId
             && onSelectSuggestion
             && onDismissSuggestions;
+          // Collide pre-roll — render the faint proposals card instead of the
+          // default message body (the entry carries no assistant text of its own).
+          if (msg.collide) {
+            return (
+              <Fragment key={msg.id}>
+                <CollideProposalCard collide={msg.collide} />
+              </Fragment>
+            );
+          }
           return (
             <Fragment key={msg.id}>
               <DesktopAgentMessage

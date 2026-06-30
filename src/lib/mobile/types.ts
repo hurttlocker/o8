@@ -214,6 +214,16 @@ export interface MobileTranscriptEntry {
   };
   /** Structured orchestrator status event (mission complete / merge / heal) — rendered as OrchestratorStatusCard. */
   statusEvent?: import('@/lib/orchestrator/status-events').OrchestratorStatusEventData;
+  /**
+   * Collide (MoA) pre-roll — the faint, collapsible "two proposals collided"
+   * card that precedes the synthesized answer. Present only on Collide turns;
+   * rendered as CollideProposalCard instead of the default message body.
+   */
+  collide?: {
+    phase: 'proposing' | 'synthesizing';
+    proposers: string[];
+    proposals: Array<{ proposer: string; text: string; breach: boolean }>;
+  };
 }
 
 export interface MobileRuntimeTailGroup {
