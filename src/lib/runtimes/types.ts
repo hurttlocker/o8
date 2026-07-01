@@ -1,6 +1,7 @@
 import type { BrowserSurfaceSummary } from '@/lib/browser/types';
 import type { CompactionEvent } from '@/lib/runtimes/compaction-detector';
 import type { DispatchCapability } from '@/lib/runtimes/shared/turn-dispatcher';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 /**
  * Universal Agent Runtime Contract
@@ -161,6 +162,8 @@ export interface LaunchOptions {
   cwd: string;
   prompt: string;
   model?: string;
+  /** Requested reasoning effort — applied per-runtime (codex today); a no-op elsewhere. */
+  effort?: ThinkingEffort;
   worktreeFlag?: string;
   worktreePath?: string;
   laneId?: string;

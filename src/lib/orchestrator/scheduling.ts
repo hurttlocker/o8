@@ -230,6 +230,7 @@ async function dispatchPacket(
     // This ensures Gemini/opencode dispatches actually pin the flagship model
     // from the capability map instead of letting the CLI pick a cheaper default.
     model: (workerRouting.selectedModel ?? getRuntimeCapability(workerRouting.selectedRuntime).defaultModel) ?? undefined,
+    effort: workerRouting.selectedEffort ?? undefined,
     actor: 'orchestrator',
   });
 
