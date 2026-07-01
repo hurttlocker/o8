@@ -711,7 +711,14 @@ export function useOrchestratorStream(
             autoCompactArmedRef.current = true;
             return;
           }
-          await primeCompactedSession(repoPath, payload);
+          // setTranscript:false — auto-compaction is a SILENT background op: it
+          // compacts the server session but must NOT replace the visible
+          // transcript, or it wipes ephemeral entries (the Collide "N proposals
+          // collided" card, system notes) that live only in the client array.
+          // Matches the two send-flow compaction call sites, which already pass
+          // false; this path was the lone outlier that dropped the Collide card
+          // on a later turn.
+          await primeCompactedSession(repoPath, payload, { setTranscript: false });
         } catch {
           autoCompactArmedRef.current = true;
         } finally {
