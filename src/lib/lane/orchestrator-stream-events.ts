@@ -28,20 +28,30 @@ interface ToolCallTracker {
   recordToolUse: (tool: { id?: string | null; name: string; input: unknown }) => void;
   resolveToolResult: (toolUseId?: string | null) => { id?: string | null; name: string; input: unknown } | null;
   /**
-   * Mark a content block index as having streamed text via a `content_block_delta`
-   * event. Used to dedupe the trailing `assistant` summary event, which re-emits
-   * the full assembled text for every block — without this guard, every
-   * delta-streamed turn would render the response twice in the chat bubble.
+   * Mark that text streamed via a `content_block_delta` this turn. Used to dedupe
+   * the trailing `assistant` summary event, which re-emits the full assembled text
+   * for every block — without this guard, every delta-streamed turn renders the
+   * response twice in the chat bubble.
    */
   recordTextDelta: (index: number) => void;
   /** True if `recordTextDelta` was called for this content block index this turn. */
   hasStreamedText: (index: number) => boolean;
+  /**
+   * True if ANY text streamed this turn (any index). Content-based, not
+   * position-based: the assistant replay's content array compacts/shifts when
+   * thinking blocks are present, so index-matching mis-fires and re-emits —
+   * doubling the answer (the Collide aggregator hit this live). If any text
+   * streamed, the replay is redundant → skip it wholesale. Mirrors the fix
+   * already in claude-code/stream-json-parser.ts (a9d94b51).
+   */
+  hasAnyStreamedText: () => boolean;
 }
 
 export function createToolCallTracker(): ToolCallTracker {
   const pendingById = new Map<string, { id?: string | null; name: string; input: unknown }>();
   const pendingQueue: Array<{ id?: string | null; name: string; input: unknown }> = [];
   const streamedTextIndices = new Set<number>();
+  let anyStreamedText = false;
 
   return {
     recordToolUse(tool) {
@@ -70,9 +80,13 @@ export function createToolCallTracker(): ToolCallTracker {
     },
     recordTextDelta(index) {
       streamedTextIndices.add(index);
+      anyStreamedText = true;
     },
     hasStreamedText(index) {
       return streamedTextIndices.has(index);
+    },
+    hasAnyStreamedText() {
+      return anyStreamedText;
     },
   };
 }
@@ -163,8 +177,12 @@ export function processStreamEvent(
       content.forEach((rawBlock, index) => {
         const block = rawBlock as ContentBlock;
         if (block.type === 'text' && typeof block.text === 'string') {
-          if (tracker.hasStreamedText(index)) {
-            console.log(`[stream-dedupe] skipping assistant text block ${index} (already streamed via deltas, ${block.text.length} chars)`);
+          // Content-based dedup (not index-based): if ANY text streamed via
+          // deltas this turn, the assistant event is a redundant full replay —
+          // skip it. Index-matching mis-fired when the replay's content array
+          // shifted (thinking blocks), doubling the Collide aggregator's answer.
+          if (tracker.hasAnyStreamedText()) {
+            console.log(`[stream-dedupe] skipping assistant text block ${index} (text already streamed via deltas this turn, ${block.text.length} chars)`);
             return;
           }
           onEvent({ type: 'text', text: block.text });

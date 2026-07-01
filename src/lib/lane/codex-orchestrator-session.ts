@@ -6,6 +6,15 @@
  *
  * Uses a per-repo sandbox CODEX_HOME with a merged config.toml so Codex can
  * call the same operator + cortex MCP tools as the Claude orchestrator path.
+ *
+ * COLD by design (unlike the WARMED Claude orchestrator-session.ts, which keeps
+ * a resident `claude` process across turns). `codex exec` is a BATCH command —
+ * it reads its prompt from argv, ignores stdin, and exits when the turn ends, so
+ * there is no resident-process path to warm short of Codex's server/proto mode.
+ * Conversation continuity is `codex exec resume <threadId>` — the exec-resume
+ * floor. Warming the Codex path is a separate, larger follow-up (wire the Codex
+ * app-server / proto interface); NOT built here. In Collide this means the Codex
+ * PROPOSER stays cold while the Claude proposer + aggregator warm.
  */
 
 import { spawn } from 'node:child_process';
