@@ -43,6 +43,59 @@ function isClassAComposer(value: unknown): value is ClassAComposer {
 }
 
 /**
+ * Targeting Machine tier — which CLI / model / effort to use for a role. The
+ * Targeting Machine has two symmetric triads: `targetingTriage` (the cheap
+ * scorer/rationale tier, default low effort) and `targetingAction` (the premium
+ * "point a real agent here" tier, default high effort). `model: ''` = the
+ * runtime's default model. Each subfield is env-overridable:
+ * `O8_TRIAGE_RUNTIME` / `O8_TRIAGE_MODEL` / `O8_TRIAGE_EFFORT` (and `O8_ACTION_*`).
+ */
+export interface TargetingTier {
+  runtime: OrchestratorRuntime;
+  /** Model id; '' = the runtime's default model. */
+  model: string;
+  effort: ThinkingEffort;
+}
+
+export function isTargetingTier(value: unknown): value is TargetingTier {
+  if (!value || typeof value !== 'object') return false;
+  const o = value as Record<string, unknown>;
+  return isDispatchRuntime(o.runtime) && typeof o.model === 'string' && isThinkingEffort(o.effort);
+}
+
+/** Coerce a stored/persisted value into a full tier, filling gaps from `fallback`. */
+export function coerceStoredTier(raw: unknown, fallback: TargetingTier): TargetingTier | undefined {
+  if (!raw || typeof raw !== 'object') return undefined;
+  const o = raw as Record<string, unknown>;
+  return {
+    runtime: isDispatchRuntime(o.runtime) ? o.runtime : fallback.runtime,
+    model: typeof o.model === 'string' ? o.model : fallback.model,
+    effort: isThinkingEffort(o.effort) ? o.effort : fallback.effort,
+  };
+}
+
+/** Per-subfield env overrides for a tier — returns only the subfields env set. */
+function envTargetingTier(prefix: 'TRIAGE' | 'ACTION'): Partial<TargetingTier> | null {
+  const out: Partial<TargetingTier> = {};
+  const runtime = process.env[`O8_${prefix}_RUNTIME`]?.trim();
+  if (runtime && isDispatchRuntime(runtime)) out.runtime = runtime;
+  const model = process.env[`O8_${prefix}_MODEL`];
+  if (typeof model === 'string') out.model = model.trim();
+  const effort = process.env[`O8_${prefix}_EFFORT`]?.trim();
+  if (effort && isThinkingEffort(effort)) out.effort = effort;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
+/** Merge env (partial) over file (full) over fallback, subfield by subfield. */
+export function mergeTier(env: Partial<TargetingTier> | null, file: TargetingTier | undefined, fallback: TargetingTier): TargetingTier {
+  return {
+    runtime: env?.runtime ?? file?.runtime ?? fallback.runtime,
+    model: env?.model ?? file?.model ?? fallback.model,
+    effort: env?.effort ?? file?.effort ?? fallback.effort,
+  };
+}
+
+/**
  * "Workers use the Brain" (2026-06-11). Whether dispatched worker agents get
  * Engineering Brain access (`o8 ask`) injected into their packet prompt.
  *   - `off`  — workers never told about the Brain.
@@ -174,6 +227,10 @@ export interface OperatorDefaults {
    * per-request `msg.backend` still overrides this. Env: `O8_ORCHESTRATOR_BACKEND`.
    */
   orchestratorBackend: OrchestratorBackendSetting;
+  /** Targeting Machine — the cheap triage/rationale tier (default low effort). */
+  targetingTriage: TargetingTier;
+  /** Targeting Machine — the premium "point a real agent here" tier (default high). */
+  targetingAction: TargetingTier;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -215,6 +272,11 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // 'auto' → defer to inAppOrchestratorEnabled (legacy claude/codex derivation),
   // so the default is byte-identical to pre-setting behavior.
   orchestratorBackend: 'auto',
+  // Targeting Machine tiers. Both default to Codex (the shipping dispatch worker),
+  // differentiated by effort — cheap triage at low, premium action at high. The
+  // operator can point triage at a cheaper runtime/model (gemini, a local model).
+  targetingTriage: { runtime: 'codex', model: '', effort: 'low' },
+  targetingAction: { runtime: 'codex', model: '', effort: 'high' },
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -430,6 +492,8 @@ interface StoredOperatorDefaults {
   brainUseClaudeCli?: boolean;
   workersUseBrain?: WorkersUseBrain;
   orchestratorBackend?: OrchestratorBackendSetting;
+  targetingTriage?: TargetingTier;
+  targetingAction?: TargetingTier;
 }
 
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
@@ -517,6 +581,10 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (isOrchestratorBackendSetting(stored.orchestratorBackend)) {
     result.orchestratorBackend = stored.orchestratorBackend;
   }
+  const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
+  if (storedTriage) result.targetingTriage = storedTriage;
+  const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
+  if (storedAction) result.targetingAction = storedAction;
   return result;
 }
 
@@ -545,6 +613,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envBrainCli = envBrainUseClaudeCli();
   const envBrain = envWorkersUseBrain();
   const envOrchBackend = envOrchestratorBackend();
+  const envTriage = envTargetingTier('TRIAGE');
+  const envAction = envTargetingTier('ACTION');
 
   const resolved: OperatorDefaults = {
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
@@ -573,6 +643,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
       envBrainCli ?? fileValues.brainUseClaudeCli ?? OPERATOR_DEFAULTS_FALLBACK.brainUseClaudeCli,
     workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
     orchestratorBackend: envOrchBackend ?? fileValues.orchestratorBackend ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorBackend,
+    targetingTriage: mergeTier(envTriage, fileValues.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage),
+    targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -602,6 +674,8 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
       envBrainCli !== null ? 'env' : fileValues.brainUseClaudeCli !== undefined ? 'file' : 'default',
     workersUseBrain: envBrain !== null ? 'env' : fileValues.workersUseBrain !== undefined ? 'file' : 'default',
     orchestratorBackend: envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
+    targetingTriage: envTriage !== null ? 'env' : fileValues.targetingTriage !== undefined ? 'file' : 'default',
+    targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -748,6 +822,18 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.orchestratorBackend = update.orchestratorBackend;
   }
+  if (update.targetingTriage !== undefined) {
+    if (!isTargetingTier(update.targetingTriage)) {
+      throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');
+    }
+    stored.targetingTriage = update.targetingTriage;
+  }
+  if (update.targetingAction !== undefined) {
+    if (!isTargetingTier(update.targetingAction)) {
+      throw new Error('targetingAction must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');
+    }
+    stored.targetingAction = update.targetingAction;
+  }
 
   await mkdir(path.dirname(filePath), { recursive: true });
   await writeFile(filePath, `${JSON.stringify(stored, null, 2)}\n`, 'utf8');
@@ -836,4 +922,14 @@ export function resolveWorkersUseBrainSync(): WorkersUseBrain {
  */
 export function resolveOrchestratorBackendSync(): OrchestratorBackendSetting {
   return getOperatorDefaultsSync().values.orchestratorBackend;
+}
+
+/** The Targeting Machine's cheap triage/rationale tier (env > file > fallback). */
+export function resolveTargetingTriageSync(): TargetingTier {
+  return getOperatorDefaultsSync().values.targetingTriage;
+}
+
+/** The Targeting Machine's premium "point a real agent here" tier. */
+export function resolveTargetingActionSync(): TargetingTier {
+  return getOperatorDefaultsSync().values.targetingAction;
 }
