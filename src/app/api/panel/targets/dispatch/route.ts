@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 
 import { getScores } from '@/lib/targeting/store';
 import { resolveTargetingRouting } from '@/lib/targeting/routing';
+import { logDispatchChoice } from '@/lib/targeting/observability';
 import { createMission, dispatchMission } from '@/lib/orchestrator/operator-mission-service';
 
 /**
@@ -58,6 +59,14 @@ export async function POST(request: Request) {
     });
 
     await dispatchMission({ missionId: mission.missionId });
+
+    // Observability seed for the future recalibration loop — the operator's
+    // ground-truth choice (which file, at what score/tier).
+    logDispatchChoice({
+      repoPath, path: filePath, missionId: mission.missionId,
+      tier: routing.tier, runtime: routing.runtime, model: routing.model || null, effort: routing.effort,
+      impact: score.impact, opportunity: score.opportunity, score: score.score,
+    });
 
     return NextResponse.json({
       ok: true,
