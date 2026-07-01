@@ -928,9 +928,9 @@ export function InputButtons({
         <button
           type="button"
           onClick={() => onSetCollide(!collideEnabled)}
-          title={collideEnabled
-            ? 'Collide ON — Claude + Codex propose, Claude synthesizes. Click to turn off.'
-            : 'Collide — Claude + Codex propose independently, Claude synthesizes the upgraded answer.'}
+          aria-label={`Collide (Claude + Codex)${collideEnabled ? ' — on' : ''}`}
+          aria-pressed={collideEnabled}
+          title={`Collide — Claude and Codex each take a pass independently, then Claude fuses the best of both into one answer. Two frontier models thinking together, on your own subscriptions. Sharper when the problem's worth it, a touch slower. Toggle per message.${collideEnabled ? ' (On — click to turn off.)' : ''}`}
           style={{
             display: 'inline-flex',
             alignItems: 'center',
