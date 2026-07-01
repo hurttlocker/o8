@@ -185,6 +185,19 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.orchestratorBackend = raw;
   }
 
+  const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {
+    if (!raw || typeof raw !== 'object') throw new Error(`${name} must be an object { runtime, model, effort }.`);
+    const o = raw as Record<string, unknown>;
+    if (o.runtime !== 'codex' && o.runtime !== 'claude-code' && o.runtime !== 'gemini' && o.runtime !== 'opencode') {
+      throw new Error(`${name}.runtime must be one of "codex", "claude-code", "gemini", "opencode".`);
+    }
+    if (typeof o.model !== 'string') throw new Error(`${name}.model must be a string ('' = runtime default).`);
+    if (!isThinkingEffort(o.effort)) throw new Error(`${name}.effort must be a valid thinking effort.`);
+    return { runtime: o.runtime, model: o.model, effort: o.effort };
+  };
+  if (body.targetingTriage !== undefined) update.targetingTriage = validateTier(body.targetingTriage, 'targetingTriage');
+  if (body.targetingAction !== undefined) update.targetingAction = validateTier(body.targetingAction, 'targetingAction');
+
   return update;
 }
 
