@@ -1,5 +1,6 @@
 // Orchestrator domain types — runtimes, packets, lanes
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 export type OrchestrationMode = 'fleet' | 'single' | 'chat';
@@ -13,9 +14,15 @@ export interface WorkerRouting {
   requestedProvider: WorkerProvider | null;
   requestedRuntime: OrchestratorRuntime | null;
   requestedModel: string | null;
+  /** Requested reasoning effort — carried through so it survives round-trips. */
+  requestedEffort: ThinkingEffort | null;
   selectedProvider: WorkerProvider;
   selectedRuntime: OrchestratorRuntime;
   selectedModel: string | null;
+  /** Effort actually applied — the request when the selected runtime supports a
+   *  reasoning-effort surface (codex / claude-code), else null (gemini/opencode
+   *  don't, so it's a clean no-op). */
+  selectedEffort: ThinkingEffort | null;
   enforcement: 'codex_only_production' | 'dispatchable_runtimes';
   confidence: WorkerRoutingConfidence;
   reason: string;
