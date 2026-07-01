@@ -9,10 +9,14 @@
  *          [--permission-mode plan | --dangerously-skip-permissions] \
  *          --mcp-config <path> --model <name> [--resume <id>]
  *
- * Each turn writes a single JSON message to the process's stdin and then
- * closes stdin to signal completion; claude streams events to stdout and
- * exits cleanly when the turn is done. Conversation context persists via
- * `--resume SESSION_ID` on follow-up messages.
+ * The `claude` process is kept RESIDENT across turns (warm-pool — see the
+ * "Warm resident-process pool" section below). Each turn writes a single JSON
+ * message to the still-open stdin and settles on the stream `result` event; the
+ * process lives on for the next turn instead of exiting. First turn cold
+ * (~6-9s bootstrap + MCP fork), every turn after warm. The proc bakes its config
+ * (model / permission mode / tool profile / effort / MCP config) at spawn, so a
+ * change recycles it; conversation context persists in the live process (and via
+ * `--resume SESSION_ID` on a recycle).
  *
  * Subscription-billed. NO `-p` flag — that's the Agent SDK path which is
  * capped. See [[claude_code_interactive_repl_pivot]] +

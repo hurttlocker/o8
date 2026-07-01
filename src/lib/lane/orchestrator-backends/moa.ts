@@ -279,6 +279,13 @@ export function makeMoaBackend(
       const signal = options?.signal;
 
       // ── Phase A — parallel independent proposals (read-only) ─────────────────
+      // Warm-pool note: the Claude proposer routes through orchestrator-session.ts
+      // (RESIDENT process — warm after the first turn). The Codex proposer routes
+      // through codex-orchestrator-session.ts, which is COLD by design (`codex
+      // exec` is batch, no resident-process path short of Codex's proto mode) —
+      // warming it is a separate follow-up. So a Collide turn warms the Claude
+      // proposer + the Claude aggregator; the Codex proposer stays at the
+      // exec-resume floor.
       onEvent({ type: 'collide_phase', phase: 'proposing', proposers: config.proposers.map((p) => labelFor(p.backend)) });
 
       const proposals = await Promise.all(
