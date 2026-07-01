@@ -250,6 +250,9 @@ function normalizeWorkerRouting(value: unknown, runtime: OrchestratorRuntime, wo
     requestedProvider: normalizeWorkerProvider(routing.requestedProvider),
     requestedRuntime: normalizeRequestedRuntime(routing.requestedRuntime) ?? runtime,
     requestedModel: routing.requestedModel,
+    // Carry requestedEffort through the round-trip so selectedEffort survives a
+    // reload before launch (normalize re-derives via resolveWorkerRouting).
+    requestedEffort: routing.requestedEffort,
     confidence,
     source: 'orchestrator-state',
   });
