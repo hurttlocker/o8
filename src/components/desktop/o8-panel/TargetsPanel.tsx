@@ -110,10 +110,13 @@ export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; a
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--t-bg)' }}>
-      {/* Header */}
+      {/* Header. Right padding reserves room for the floating Ask-o8 icon that
+          O8Panel renders over the top-right of non-excluded tabs (position
+          absolute, right:12, 26px button → occupies the rightmost 38px; +6 gap
+          = 44). Without this the Re-scan button sits under the sparkle (#1309). */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
-        paddingTop: 10, paddingRight: 14, paddingBottom: 10, paddingLeft: 14,
+        paddingTop: 10, paddingRight: 44, paddingBottom: 10, paddingLeft: 14,
         borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider)',
       }}>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
