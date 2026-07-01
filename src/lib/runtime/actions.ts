@@ -1,4 +1,5 @@
 import type { AgentSummary } from '@/lib/fleet/types';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { markRepoOriginConfigured, markRepoOriginMissing } from '@/lib/repos/origin-readiness';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
@@ -51,6 +52,8 @@ export interface RuntimeLaunchRequest {
   runtime: RuntimeId;
   prompt: string;
   model?: string;
+  /** Requested reasoning effort — passed to the runtime's launch; per-runtime no-op. */
+  effort?: ThinkingEffort;
   clientMutationId?: string;
   cwd?: string;
   repoPath?: string;
@@ -395,6 +398,7 @@ export async function launchRuntimeSurface(payload: RuntimeLaunchRequest): Promi
     cwd,
     prompt: launchPrompt,
     model: payload.model,
+    effort: payload.effort,
     worktreeFlag: launchWorktree?.claudeWorktreeFlag,
     worktreePath: launchWorktree?.worktree?.path,
     laneId: payload.existingLaneId ?? undefined,

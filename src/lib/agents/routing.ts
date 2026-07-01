@@ -6,6 +6,12 @@ import type {
   WorkerRoutingConfidence,
 } from '@/lib/orchestrator/types';
 import { listDispatchableRuntimes } from '@/lib/orchestrator/runtime-capabilities';
+import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+
+// Runtimes with a reasoning-effort surface. codex → `-c model_reasoning_effort`,
+// claude-code → `--effort`. gemini/opencode have none, so a requested effort is a
+// clean no-op there (selectedEffort stays null and no launch flag is emitted).
+const EFFORT_CAPABLE_RUNTIMES: readonly OrchestratorRuntime[] = ['codex', 'claude-code'];
 
 // Codex stays the always-on fallback workhorse when no dispatchable runtime is
 // requested. Other runtimes (Gemini today) are honored when the capability map
@@ -54,9 +60,17 @@ export interface ResolveWorkerRoutingInput {
   requestedProvider?: unknown;
   requestedRuntime?: unknown;
   requestedModel?: unknown;
+  requestedEffort?: unknown;
   source?: string;
   confidence?: WorkerRoutingConfidence;
   reason?: string;
+}
+
+function normalizeEffort(value: unknown): ThinkingEffort | null {
+  // 'adaptive' means "let the runtime decide" — treat as no explicit effort so
+  // the launch stays at the runtime default (parity). Only a concrete tier is
+  // carried.
+  return isThinkingEffort(value) && value !== 'adaptive' ? value : null;
 }
 
 export function normalizeWorkerIntent(value: unknown): WorkerIntent {
@@ -105,6 +119,7 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
   const requestedProvider = normalizeWorkerProvider(input.requestedProvider);
   const requestedRuntime = normalizeRequestedRuntime(input.requestedRuntime);
   const requestedModel = normalizeModel(input.requestedModel);
+  const requestedEffort = normalizeEffort(input.requestedEffort);
 
   // Honor a requested runtime when the capability map marks it dispatchable
   // (Codex + Gemini today). Anything else — including a request for a
@@ -121,14 +136,22 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
     && (requestedRuntime === null || requestedRuntime === selectedRuntime)
     && (requestedProvider === null || requestedProvider === selectedProvider);
 
+  // Effort applies only when the selected runtime has a reasoning-effort surface;
+  // on gemini/opencode it's a clean no-op (null → no launch flag).
+  const selectedEffort = requestedEffort && EFFORT_CAPABLE_RUNTIMES.includes(selectedRuntime)
+    ? requestedEffort
+    : null;
+
   return {
     workerIntent,
     requestedProvider,
     requestedRuntime,
     requestedModel,
+    requestedEffort,
     selectedProvider,
     selectedRuntime,
     selectedModel: modelTargetsSelected ? requestedModel : null,
+    selectedEffort,
     enforcement: PRODUCTION_AGENT_ENFORCEMENT,
     confidence: input.confidence ?? routingConfidence(workerIntent),
     reason: input.reason ?? routingReason({

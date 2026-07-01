@@ -1,6 +1,7 @@
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import type { MergeCheckResult } from '@/lib/lane/preview-merge';
 import type { OrchestratorRuntime, WorkerIntent, WorkerProvider } from '@/lib/orchestrator/types';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export interface LoadedIssue {
   number: number;
@@ -25,6 +26,10 @@ export interface CreateMissionInput {
   requestedProvider?: WorkerProvider | null;
   requestedRuntime?: OrchestratorRuntime | null;
   requestedModel?: string | null;
+  /** Requested worker reasoning effort. Applied at launch only for runtimes with
+   *  a reasoning-effort surface (codex/claude-code); a no-op elsewhere. Omit for
+   *  today's behavior (runtime default). */
+  requestedEffort?: ThinkingEffort | null;
   constraints: string;
   /** When true, packets are chained sequentially (P2 after P1, etc.). Default: false (parallel). */
   sequential?: boolean;
