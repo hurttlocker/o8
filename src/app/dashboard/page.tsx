@@ -3426,8 +3426,20 @@ function DashboardInner() {
       .map((l) => ({ laneId: l.id, packetId: l.packetId, status: l.status, sessionKey: l.sessionKey, lastEventLabel: l.lastEventLabel, branch: l.branch, repoPath: l.repoPath, label: l.label }));
   }, [domainLanesRaw]);
   // Footer merge beacon — fleet-wide "parked, needs you" lanes (review +
-  // escalation gates), derived from the same already-live lanes poll.
-  const parkedLanes = useMemo(() => deriveParkedLanes(domainLanes), [domainLanes]);
+  // escalation gates), derived from the same already-live lanes poll. Exclude
+  // lanes whose PACKET has merged/released/archived — the lane summary status can
+  // lag (stale-stuck at 'reviewing' after the packet closed), which left a
+  // just-merged packet counting as "1 ready" in the beacon.
+  const closedPacketIds = useMemo(() => {
+    const closed = new Set<string>();
+    for (const packet of thoughtsMissionState.packets) {
+      if (packet.releaseState === 'released' || packet.archivedAt || packet.status === 'archived') {
+        closed.add(packet.id);
+      }
+    }
+    return closed;
+  }, [thoughtsMissionState.packets]);
+  const parkedLanes = useMemo(() => deriveParkedLanes(domainLanes, closedPacketIds), [domainLanes, closedPacketIds]);
 
   useEffect(() => {
     if (!tileLayoutHydrated) return;

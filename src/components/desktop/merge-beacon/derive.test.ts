@@ -37,4 +37,20 @@ describe('deriveParkedLanes', () => {
     ]);
     expect(parked[0]).toMatchObject({ branch: 'feat/x', repoPath: '/r', label: 'Fix x' });
   });
+
+  it('excludes a lane whose PACKET is closed even if the lane status is stale-stuck at reviewing (the "1 ready" bug)', () => {
+    const lanes = [
+      lane({ laneId: 'merged', status: 'reviewing', packetId: 'pkt-merged' }), // packet merged+archived, lane status lagged
+      lane({ laneId: 'live', status: 'reviewing', packetId: 'pkt-live' }),     // genuinely still parked
+    ];
+    const closed = new Set(['pkt-merged']);
+    const parked = deriveParkedLanes(lanes, closed);
+    expect(parked.map((p) => p.laneId)).toEqual(['live']); // the merged one dropped
+  });
+
+  it('with no closed set, behaves exactly as before (parity)', () => {
+    const lanes = [lane({ laneId: 'a', status: 'reviewing' })];
+    expect(deriveParkedLanes(lanes).map((p) => p.laneId)).toEqual(['a']);
+    expect(deriveParkedLanes(lanes, new Set()).map((p) => p.laneId)).toEqual(['a']);
+  });
 });
