@@ -49,6 +49,10 @@ import {
   handleSpecSuggest,
 } from '@/lib/mcp/operator-handlers/spec';
 import {
+  TARGETING_TOOLS,
+  handleTargets,
+} from '@/lib/mcp/operator-handlers/targeting';
+import {
   MISSION_TOOLS,
   handleCreateMission,
   handleDispatchMission,
@@ -506,6 +510,7 @@ const TOOLS: McpTool[] = [
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_operator_defaults'),
   ...CORTEX_TOOLS,
   ...SPEC_TOOLS,
+  ...TARGETING_TOOLS,
   ...O8_WEBVIEW_TOOLS,
   ...CANVAS_TOOLS,
   ...LOOP_OBSERVABILITY_TOOLS,
@@ -547,6 +552,7 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_operator_defaults: handleOperatorDefaults,
   cortex_propose_observation: handleProposeObservation,
   cortex_ask: handleAsk,
+  o8_targets: handleTargets,
   o8_spec_read: handleSpecRead,
   o8_spec_review_index: handleSpecReviewIndex,
   o8_spec_pending_feedback: handleSpecPendingFeedback,
