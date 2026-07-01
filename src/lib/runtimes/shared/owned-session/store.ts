@@ -515,7 +515,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
 
     let args: string[];
     if (mode === 'launch') {
-      args = adapter.launchArgs({ cwd: session.repoPath, prompt, model: session.model });
+      args = adapter.launchArgs({ cwd: session.repoPath, prompt, model: session.model, effort: session.effort });
     } else {
       const built = adapter.resumeArgs({ threadId: session.threadId ?? '', prompt, model: session.model });
       if (!built) {
@@ -668,6 +668,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       latestPrompt: prompt,
       latestSummary: compactText(prompt, 140) || `Owned ${adapter.squadShortName} session launched from o8.`,
       model: request.model?.trim() || adapter.defaultModel || undefined,
+      effort: request.effort,
       reviewDisposition: 'watching',
       reviewDispositionUpdatedAt: nowIso(),
       recentRuns: [],
