@@ -55,6 +55,14 @@ interface OperatorDefaults {
   brainUseClaudeCli: boolean;
   workersUseBrain: WorkersUseBrain;
   orchestratorBackend: OrchestratorBackendSetting;
+  targetingTriage: TargetingTierUI;
+  targetingAction: TargetingTierUI;
+}
+
+interface TargetingTierUI {
+  runtime: DispatchRuntime;
+  model: string;
+  effort: ThinkingEffort;
 }
 
 interface OperatorDefaultsResponse {
@@ -682,6 +690,56 @@ export function OperatorDefaultsTab() {
               disabled={thinkingEnv || busyField === 'thinkingEffort'}
               minWidth={180}
             />
+          }
+        />
+        <Row
+          label="Targeting — triage tier"
+          description="The cheap tier the Targeting Machine uses to triage the repo + write rationales, and to dispatch trivial files. Runtime + effort (model via O8_TRIAGE_MODEL / MCP). Default: Codex at low effort."
+          source={sources.targetingTriage}
+          disabledReason={sources?.targetingTriage === 'env' ? envDisabledReason : undefined}
+          right={
+            <div style={{ display: 'flex', gap: 6 }}>
+              <PickerMenu<DispatchRuntime>
+                value={values.targetingTriage.runtime}
+                options={DISPATCH_RUNTIME_OPTIONS.filter((opt) =>
+                  (opt.value !== 'opencode' || values.experimentalOpencode) && (opt.value !== 'gemini' || values.experimentalGemini))}
+                onChange={(next) => { void updateField('targetingTriage', { ...values.targetingTriage, runtime: next }); }}
+                disabled={sources?.targetingTriage === 'env' || busyField === 'targetingTriage'}
+                minWidth={120}
+              />
+              <PickerMenu<ThinkingEffort>
+                value={values.targetingTriage.effort}
+                options={THINKING_EFFORT_OPTIONS}
+                onChange={(next) => { void updateField('targetingTriage', { ...values.targetingTriage, effort: next }); }}
+                disabled={sources?.targetingTriage === 'env' || busyField === 'targetingTriage'}
+                minWidth={120}
+              />
+            </div>
+          }
+        />
+        <Row
+          label="Targeting — action tier"
+          description="The premium tier for 'point a real agent here' — the Dispatch button + hard-file routing. Default: Codex at high effort."
+          source={sources.targetingAction}
+          disabledReason={sources?.targetingAction === 'env' ? envDisabledReason : undefined}
+          right={
+            <div style={{ display: 'flex', gap: 6 }}>
+              <PickerMenu<DispatchRuntime>
+                value={values.targetingAction.runtime}
+                options={DISPATCH_RUNTIME_OPTIONS.filter((opt) =>
+                  (opt.value !== 'opencode' || values.experimentalOpencode) && (opt.value !== 'gemini' || values.experimentalGemini))}
+                onChange={(next) => { void updateField('targetingAction', { ...values.targetingAction, runtime: next }); }}
+                disabled={sources?.targetingAction === 'env' || busyField === 'targetingAction'}
+                minWidth={120}
+              />
+              <PickerMenu<ThinkingEffort>
+                value={values.targetingAction.effort}
+                options={THINKING_EFFORT_OPTIONS}
+                onChange={(next) => { void updateField('targetingAction', { ...values.targetingAction, effort: next }); }}
+                disabled={sources?.targetingAction === 'env' || busyField === 'targetingAction'}
+                minWidth={120}
+              />
+            </div>
           }
         />
         <Row
