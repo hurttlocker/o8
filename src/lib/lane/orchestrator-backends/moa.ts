@@ -64,7 +64,19 @@ export interface MoaProposal {
   breach: boolean;
   /** True when the turn hit the subscription weekly cap (degrade signal). */
   capped: boolean;
+  /** True when the proposer exceeded the timeout and was aborted + excluded. */
+  timedOut: boolean;
 }
+
+/**
+ * Per-proposer timeout (the hang fix). A proposer that doesn't return within this
+ * window is aborted and excluded so Phase A always terminates. Generous — a legit
+ * deep proposal reads + reasons; a proposer past this is stuck. Env-overridable.
+ */
+const PROPOSER_TIMEOUT_MS = Math.max(
+  30_000,
+  parseInt(process.env.O8_COLLIDE_PROPOSER_TIMEOUT_MS || '', 10) || 300_000,
+);
 
 /**
  * Heuristic: does an error look like the Claude subscription weekly cap?
@@ -105,6 +117,8 @@ const PROPOSABLE: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = 
 export interface MoaDeps {
   /** Resolve a backend id → instance. Injectable for tests. */
   resolveBackend: (id: OrchestratorBackendId) => OrchestratorBackend;
+  /** Per-proposer timeout override (tests inject a tiny value). */
+  proposerTimeoutMs?: number;
 }
 
 const defaultDeps: MoaDeps = {
@@ -199,54 +213,77 @@ async function runProposal(
   let text = '';
   let breach: ProposerLockoutError | null = null;
   let lastError: string | null = null;
+  let timedOut = false;
 
-  try {
-    await backend.sendTurn(
-      repoPath,
-      message,
-      (event) => {
-        if (breach) return; // already tripped — ignore the rest of this turn
-        try {
-          // LIVE lockout — a proposer that tries to write/dispatch is caught here.
-          assertProposerEventAllowed(event, proposerLabel);
-        } catch (err) {
-          breach = err instanceof ProposerLockoutError ? err : new ProposerLockoutError('unknown', 'write', proposerLabel);
-          console.error(`[collide] LOCKOUT BREACH — ${proposerLabel} attempted to act; aborting proposer. ${breach.message}`);
-          child.abort(); // SIGTERM the proposer subprocess
-          return;
-        }
-        if (event.type === 'text') text += event.text;
-        else if (event.type === 'error') lastError = event.error;
-        // proposer thinking / read-only tool calls are consumed, never surfaced
-        // as the visible answer (only the aggregator streams).
-      },
-      {
-        permissionMode: 'plan',
-        toolProfile: 'propose',
-        model: participant.model,
-        thinkingEffort: participant.thinkingEffort,
-        threadId: proposeThreadId(mainThreadId, index, participant.backend),
-        signal: child.signal,
-      },
-    );
-  } catch (err) {
-    if (!breach) lastError = err instanceof Error ? err.message : String(err);
-  } finally {
-    child.dispose();
-  }
+  const runTurn = (async () => {
+    try {
+      await backend.sendTurn(
+        repoPath,
+        message,
+        (event) => {
+          if (breach) return; // already tripped — ignore the rest of this turn
+          try {
+            // LIVE lockout — a proposer that tries to write/dispatch is caught here.
+            assertProposerEventAllowed(event, proposerLabel);
+          } catch (err) {
+            breach = err instanceof ProposerLockoutError ? err : new ProposerLockoutError('unknown', 'write', proposerLabel);
+            console.error(`[collide] LOCKOUT BREACH — ${proposerLabel} attempted to act; aborting proposer. ${breach.message}`);
+            child.abort(); // SIGTERM the proposer subprocess
+            return;
+          }
+          if (event.type === 'text') text += event.text;
+          else if (event.type === 'error') lastError = event.error;
+          // proposer thinking / read-only tool calls are consumed, never surfaced
+          // as the visible answer (only the aggregator streams).
+        },
+        {
+          permissionMode: 'plan',
+          toolProfile: 'propose',
+          model: participant.model,
+          thinkingEffort: participant.thinkingEffort,
+          threadId: proposeThreadId(mainThreadId, index, participant.backend),
+          signal: child.signal,
+        },
+      );
+    } catch (err) {
+      if (!breach) lastError = err instanceof Error ? err.message : String(err);
+    }
+  })();
 
-  const capped = !breach && lastError !== null && looksLikeClaudeCapError(lastError);
+  // GUARANTEE termination (the 17-min hang fix): a proposer that doesn't return
+  // within the bounded window is aborted and excluded. The race resolves on the
+  // timeout even if sendTurn never settles, so Phase A's Promise.all can NEVER
+  // hang forever. Collide aggregates with whatever DID return (or degrades to
+  // the single-Claude path when all proposers are excluded).
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const timeoutMs = deps.proposerTimeoutMs ?? PROPOSER_TIMEOUT_MS;
+  const timeoutRace = new Promise<void>((res) => {
+    timer = setTimeout(() => {
+      timedOut = true;
+      console.warn(`[collide] proposer ${proposerLabel} exceeded ${timeoutMs}ms — aborting; aggregating without it.`);
+      child.abort();
+      res();
+    }, timeoutMs);
+  });
+
+  await Promise.race([runTurn, timeoutRace]);
+  if (timer) clearTimeout(timer);
+  child.dispose();
+
+  const capped = !breach && !timedOut && lastError !== null && looksLikeClaudeCapError(lastError);
   let finalText = text.trim();
   if (!finalText && !breach) {
-    // Cap-degrade ladder rung (a): a capped proposer is dropped → Collide Lite.
-    finalText = capped
-      ? `(skipped — ${proposerLabel}'s weekly cap reached; Collide ran Lite this turn)`
-      : lastError
-        ? `(${proposerLabel} proposal unavailable: ${lastError})`
-        : '';
+    finalText = timedOut
+      ? `(${proposerLabel} timed out — excluded; Collide aggregated without it)`
+      // Cap-degrade ladder rung (a): a capped proposer is dropped → Collide Lite.
+      : capped
+        ? `(skipped — ${proposerLabel}'s weekly cap reached; Collide ran Lite this turn)`
+        : lastError
+          ? `(${proposerLabel} proposal unavailable: ${lastError})`
+          : '';
   }
 
-  return { proposer: proposerLabel, backendId: participant.backend, text: finalText, breach: breach !== null, capped };
+  return { proposer: proposerLabel, backendId: participant.backend, text: finalText, breach: breach !== null, capped, timedOut };
 }
 
 /**
