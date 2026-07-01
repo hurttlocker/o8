@@ -13,6 +13,8 @@
  * without breaking the user's mental model of the work in progress.
  */
 
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
+
 // ── Lane Status ──
 
 /**
@@ -106,6 +108,7 @@ export type LaneCommand =
       laneId: string;
       prompt: string;
       model?: string;
+      effort?: ThinkingEffort;
       actor?: LaneEventActor;
     }
   | {

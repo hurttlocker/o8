@@ -80,6 +80,7 @@ export async function createMission(input: CreateMissionInput) {
     requestedProvider: input.requestedProvider,
     requestedRuntime: input.requestedRuntime ?? input.runtime,
     requestedModel: input.requestedModel,
+    requestedEffort: input.requestedEffort,
     source: 'mission-create',
   });
   const branchPreparation = await prepareMissionBranches({
@@ -108,6 +109,7 @@ export async function createMission(input: CreateMissionInput) {
           requestedProvider: input.requestedProvider,
           requestedRuntime: issue.runtime,
           requestedModel: input.requestedModel,
+          requestedEffort: input.requestedEffort,
           source: 'mission-create-packet',
         })
       : workerRouting;

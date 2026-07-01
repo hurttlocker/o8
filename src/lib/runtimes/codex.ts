@@ -232,7 +232,7 @@ export const codexRuntime: AgentRuntime = {
     // `ollama:`/`lmstudio:` default) reaches every dispatch path, scoped to o8
     // workers. A per-mission model still wins.
     const model = opts.model ?? (resolveDefaultDispatchModelSync() || undefined);
-    const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt, model });
+    const result = await launchOwnedCodexSession({ cwd: opts.cwd, prompt: opts.prompt, model, effort: opts.effort });
     if (result.ok && result.surfaceId) {
       scheduleCodexUsageDispatch(result.surfaceId, startedAtMs, undefined, opts.laneId, model, () =>
         waitForOwnedRunToFinish(result.surfaceId, startedAtMs));
