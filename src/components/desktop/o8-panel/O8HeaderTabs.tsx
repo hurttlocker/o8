@@ -41,6 +41,17 @@ function IconInbox({ size = 16, color = 'currentColor' }: { size?: number; color
   );
 }
 
+// Crosshair — "aim your agents here". The v1 wedge; a prominent main tab.
+function IconTargets({ size = 16, color = 'currentColor' }: { size?: number; color?: string }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke={color} strokeWidth="1.9" strokeLinecap="round" style={{ display: 'block', width: size, height: size, minWidth: size, minHeight: size, flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+    </svg>
+  );
+}
+
 // Icon colors track the palette text color (dark on paper, light on graphite).
 const O8_ICON_ACTIVE = 'var(--t-text)';
 const O8_ICON_INACTIVE = 'var(--t-text-muted)';
@@ -56,6 +67,7 @@ interface O8TabDef {
 const O8_TABS: O8TabDef[] = [
   { id: 'workspace', label: 'Workspace', icon: (c) => <IconWorkspace size={15} color={c} /> },
   { id: 'activity', label: 'Activity', icon: (c) => <IconActivity size={15} color={c} /> },
+  { id: 'targets', label: 'Targeting', icon: (c) => <IconTargets size={15} color={c} /> },
   { id: 'inbox', label: 'Inbox', icon: (c) => <IconInbox size={15} color={c} /> },
   // Iconoir PageEdit — operator-locked for the o8.md spec tab. Document
   // with a pencil reads as "the spec the agent is annotating."
