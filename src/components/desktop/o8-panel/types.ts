@@ -10,4 +10,5 @@ export type O8Tab =
   | 'side-chat'
   | 'review'
   | 'compare'
+  | 'targets'
   | 'terminal';
