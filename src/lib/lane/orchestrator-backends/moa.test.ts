@@ -231,13 +231,46 @@ describe('Collide fusion engine', () => {
     expect(agg.options?.model).toBe('composer-picked-model');
     expect(agg.options?.permissionMode).toBe('plan');
   });
+
+  it('(g) a HANGING proposer times out — Collide still terminates + aggregates without it', async () => {
+    const claudeCalls: MockCall[] = [];
+    const codexCalls: MockCall[] = [];
+    const claude = mockBackend('claude', claudeCalls, (call) =>
+      isProposerCall(call)
+        ? [{ type: 'text', text: 'CLAUDE_PROPOSAL' }, { type: 'done', sessionId: 'c1', cost: null }]
+        : [{ type: 'text', text: 'SYNTHESIZED ANSWER' }, { type: 'done', sessionId: 'agg', cost: null }]);
+    // Codex proposer HANGS — its sendTurn never resolves. The per-proposer
+    // timeout must abort it and let Phase A finish.
+    const codex: OrchestratorBackend = {
+      id: 'codex', label: 'codex',
+      peekSession: () => null,
+      ensureSession: () => ({ sessionName: 'codex-sess', status: 'ready' }),
+      sendTurn: (_repo, message, _onEvent, options) => {
+        codexCalls.push({ message, options });
+        return new Promise<void>(() => {}); // never resolves
+      },
+    };
+    const deps: MoaDeps = { resolveBackend: (id) => (id === 'codex' ? codex : claude), proposerTimeoutMs: 30 };
+
+    const events: OrchestratorEvent[] = [];
+    // The whole point: this AWAIT must resolve (no hang), well under any real timeout.
+    await makeMoaBackend(CONFIG, deps).sendTurn('/repo', 'build X', (e) => events.push(e), { threadId: MAIN_THREAD });
+
+    // Terminated: the aggregator ran exactly once despite the hung proposer.
+    expect(claudeCalls.filter(isAggregatorCall)).toHaveLength(1);
+    const agg = claudeCalls.find(isAggregatorCall)!;
+    expect(agg.message).toContain('CLAUDE_PROPOSAL');            // the proposer that returned
+    expect(agg.message).toMatch(/timed out|excluded/i);         // the hung one marked excluded
+    // The hung proposer still surfaced a (timed-out) collide_proposal card entry.
+    expect(events.some((e) => e.type === 'collide_proposal' && e.proposer === 'Codex')).toBe(true);
+  });
 });
 
 describe('buildAggregatorMessage', () => {
   it('labels the aggregator-self proposal vs the second opinion', () => {
     const proposals: MoaProposal[] = [
-      { proposer: 'Claude', backendId: 'claude', text: 'pass A', breach: false, capped: false },
-      { proposer: 'Codex', backendId: 'codex', text: 'pass B', breach: false, capped: false },
+      { proposer: 'Claude', backendId: 'claude', text: 'pass A', breach: false, capped: false, timedOut: false },
+      { proposer: 'Codex', backendId: 'codex', text: 'pass B', breach: false, capped: false, timedOut: false },
     ];
     const msg = buildAggregatorMessage('do the thing', proposals, 'claude');
     expect(msg).toContain('Your own first independent pass (Claude)');
@@ -248,7 +281,7 @@ describe('buildAggregatorMessage', () => {
 
   it('quarantines a breached proposal body', () => {
     const proposals: MoaProposal[] = [
-      { proposer: 'Codex', backendId: 'codex', text: 'SHOULD_NOT_APPEAR', breach: true, capped: false },
+      { proposer: 'Codex', backendId: 'codex', text: 'SHOULD_NOT_APPEAR', breach: true, capped: false, timedOut: false },
     ];
     const msg = buildAggregatorMessage('x', proposals, 'claude');
     expect(msg).not.toContain('SHOULD_NOT_APPEAR');

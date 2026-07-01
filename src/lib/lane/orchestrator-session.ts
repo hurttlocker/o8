@@ -9,10 +9,14 @@
  *          [--permission-mode plan | --dangerously-skip-permissions] \
  *          --mcp-config <path> --model <name> [--resume <id>]
  *
- * Each turn writes a single JSON message to the process's stdin and then
- * closes stdin to signal completion; claude streams events to stdout and
- * exits cleanly when the turn is done. Conversation context persists via
- * `--resume SESSION_ID` on follow-up messages.
+ * The `claude` process is kept RESIDENT across turns (warm-pool — see the
+ * "Warm resident-process pool" section below). Each turn writes a single JSON
+ * message to the still-open stdin and settles on the stream `result` event; the
+ * process lives on for the next turn instead of exiting. First turn cold
+ * (~6-9s bootstrap + MCP fork), every turn after warm. The proc bakes its config
+ * (model / permission mode / tool profile / effort / MCP config) at spawn, so a
+ * change recycles it; conversation context persists in the live process (and via
+ * `--resume SESSION_ID` on a recycle).
  *
  * Subscription-billed. NO `-p` flag — that's the Agent SDK path which is
  * capped. See [[claude_code_interactive_repl_pivot]] +
@@ -411,6 +415,8 @@ export function requestOrchestratorSessionReset(repoPath: string, threadId?: str
   const session = sessions.get(sessionName);
   if (session) {
     session.claudeSessionId = null;
+    // Reset = fresh conversation — recycle the resident proc (it holds the old one).
+    if (session.proc) killOrchestratorProc(session, getWarmState(sessionName));
   }
   if (normalizedThreadId) {
     writeOrchestratorBackendSessionId(normalizedThreadId, 'claude', null);
@@ -422,10 +428,10 @@ export function requestOrchestratorSessionReset(repoPath: string, threadId?: str
 /**
  * Request a graceful orchestrator reload. Unlike `requestOrchestratorSessionReset`,
  * this PRESERVES the `claudeSessionId` so the next user turn resumes the
- * existing transcript via `--resume`. The in-flight MCP config is rewritten
- * on every turn in `ensureMcpConfig()`, so simply letting the next turn spawn
- * is enough to pick up a newly-registered external MCP server. Used by the
- * conversational `cortex.register_mcp` flow.
+ * existing transcript via `--resume`. A RESIDENT proc bakes its MCP config at
+ * spawn, so we recycle it here (the mcpConfigHash check would catch it on the
+ * next turn anyway, but recycling now makes the config change take effect
+ * immediately). Used by the conversational `cortex.register_mcp` flow.
  *
  * Callers are expected to also broadcast a `notice` event to WS subscribers
  * so the UI can show a reload banner (see ws-server `/internal/orchestrator-reload`).
@@ -440,6 +446,9 @@ export function reloadOrchestratorSession(repoPath: string, threadId?: string | 
   const normalizedThreadId = normalizeThreadId(threadId);
   const sessionName = orchestratorSessionName(normalizedRepoPath, normalizedThreadId);
   const session = sessions.get(sessionName);
+  // MCP-config change → recycle the resident proc so the next turn spawns with
+  // the new config (a resident proc bakes config at spawn).
+  if (session?.proc) killOrchestratorProc(session, getWarmState(sessionName));
   return {
     repoPath: normalizedRepoPath,
     sessionName,
@@ -527,10 +536,306 @@ function attachmentToImageBlock(att: { dataUri: string }): { type: 'image'; sour
   return { type: 'image', source: { type: 'base64', media_type: match[1], data: match[2] } };
 }
 
+// ── Warm resident-process pool ──────────────────────────────────────────────
+//
+// Each orchestrator session keeps its `claude` process RESIDENT across turns
+// (ported from claude-code/interactive-session.ts — same CLI, same
+// assertNoPrintFlag billing guard). First turn cold (~6-9s bootstrap + MCP
+// fork); every turn after warm. The proc bakes {cwd, model, permissionMode,
+// toolProfile, effort, mcpConfigHash} at spawn, so a change to any of those
+// RECYCLES it. Turns settle on the stream `result` event (not proc close) so
+// the process lives on. Both the Claude proposer AND the aggregator route
+// through here, so this warms 2 of Collide's 3 turns + plain-Claude/auto-review/
+// intake for free.
+//
+// LOCKOUT (safety-critical): a resident proc keeps stdin OPEN, which removes the
+// "stdin closes ⇒ an approval can never be answered" layer of the proposer
+// read-only guarantee. So a PLAN-mode proc that emits ANY permission request
+// (can_use_tool / ExitPlanMode) is KILLED on the spot — the strongest possible
+// auto-deny, and one that needs no knowledge of the (UNDOCUMENTED) stream-json
+// permission-response envelope. The write can't land: can_use_tool is emitted
+// BEFORE execution and the proc is dead before it could proceed. assertNoPrint-
+// Flag stays on the warm spawn; assertProposerEventAllowed remains the backstop.
+
+const IDLE_REAP_MS = 30 * 60_000;
+const MAX_LIVE_PROCS = 4; // mirror the Brain's warm-repl-pool cap
+
+interface OrchestratorProcConfig {
+  cwd: string;
+  model: string;
+  permissionMode: OrchestratorPermissionMode;
+  toolProfile: ToolProfile;
+  effort: ThinkingEffort;
+  mcpConfigHash: string;
+}
+
+interface OrchestratorActiveTurn {
+  onEvent: (e: OrchestratorEvent) => void;
+  captureEvent: (e: OrchestratorEvent) => void;
+  resolve: () => void;
+  reject: (err: Error) => void;
+  timeout: ReturnType<typeof setTimeout>;
+  abortSignal: AbortSignal | null;
+  abortListener: (() => void) | null;
+  settled: boolean;
+  toolTracker: ReturnType<typeof createToolCallTracker>;
+  turnSessionId: string | null;
+  cost: number | null;
+  lastAssistantText: string;
+  sawToolUseAfterText: boolean;
+  launchAgentCallCount: number;
+}
+
+interface WarmState {
+  procConfig: OrchestratorProcConfig | null;
+  activeTurn: OrchestratorActiveTurn | null;
+  idleTimer: ReturnType<typeof setTimeout> | null;
+  stdoutLineBuffer: string;
+  stderrBuffer: string;
+  lastUsedAt: number;
+}
+
+const warmStates = new Map<string, WarmState>();
+
+export function getWarmState(sessionName: string): WarmState {
+  let w = warmStates.get(sessionName);
+  if (!w) {
+    w = { procConfig: null, activeTurn: null, idleTimer: null, stdoutLineBuffer: '', stderrBuffer: '', lastUsedAt: Date.now() };
+    warmStates.set(sessionName, w);
+  }
+  return w;
+}
+
+/** Hash the MCP-config content a proc would bake — recycle the proc on change. */
+function mcpConfigContentHash(repoPath: string, toolProfile: ToolProfile): string {
+  try {
+    const json = JSON.stringify(toClaudeJson(buildToolRegistry(repoPath, { profile: toolProfile })));
+    return createHash('sha256').update(json).digest('hex').slice(0, 16);
+  } catch {
+    return 'unknown';
+  }
+}
+
+function procConfigMatches(a: OrchestratorProcConfig | null, b: OrchestratorProcConfig): boolean {
+  return !!a && a.cwd === b.cwd && a.model === b.model && a.permissionMode === b.permissionMode
+    && a.toolProfile === b.toolProfile && a.effort === b.effort && a.mcpConfigHash === b.mcpConfigHash;
+}
+
+function clearIdleTimer(w: WarmState): void {
+  if (w.idleTimer) { clearTimeout(w.idleTimer); w.idleTimer = null; }
+}
+
+function scheduleIdleReap(session: OrchestratorSession, w: WarmState): void {
+  clearIdleTimer(w);
+  if (session.status === 'dead' || !session.proc) return;
+  w.idleTimer = setTimeout(() => {
+    console.log(`[orchestrator-session] idle-reap ${session.sessionName}`);
+    killOrchestratorProc(session, w);
+  }, IDLE_REAP_MS);
+}
+
+/** SIGTERM (then SIGKILL) the resident proc; the session recycles next turn. */
+function killOrchestratorProc(session: OrchestratorSession, w: WarmState): void {
+  clearIdleTimer(w);
+  const proc = session.proc;
+  session.proc = null;
+  w.procConfig = null;
+  session.status = 'dead';
+  if (proc && proc.exitCode === null && proc.signalCode === null) {
+    proc.kill('SIGTERM');
+    setTimeout(() => { if (proc.exitCode === null && proc.signalCode === null) proc.kill('SIGKILL'); }, 2_000);
+  }
+}
+
+function liveOrchestratorProcCount(): number {
+  let n = 0;
+  for (const s of sessions.values()) if (s.proc) n += 1;
+  return n;
+}
+
+/** At MAX_LIVE, reap the least-recently-used IDLE proc (never a busy one). */
+function reapIdleForCapacity(exceptSessionName: string): void {
+  if (liveOrchestratorProcCount() < MAX_LIVE_PROCS) return;
+  let lru: { session: OrchestratorSession; w: WarmState } | null = null;
+  for (const s of sessions.values()) {
+    if (s.sessionName === exceptSessionName || !s.proc || s.status !== 'ready') continue;
+    const w = warmStates.get(s.sessionName);
+    if (!w) continue;
+    if (!lru || w.lastUsedAt < lru.w.lastUsedAt) lru = { session: s, w };
+  }
+  if (lru) {
+    console.log(`[orchestrator-session] MAX_LIVE (${MAX_LIVE_PROCS}) — reaping idle ${lru.session.sessionName}`);
+    killOrchestratorProc(lru.session, lru.w);
+  }
+}
+
+/** ExitPlanMode / can_use_tool / control_request — the escalate-to-execute gate
+ *  that a resident PLAN-mode proc must never get answered. */
+const PERMISSION_TOOL_NAMES = new Set(['ExitPlanMode', 'exit_plan_mode', 'permission_request', 'request_permission']);
+export function detectPermissionRequest(raw: Record<string, unknown>): boolean {
+  const type = typeof raw.type === 'string' ? raw.type : '';
+  if (type === 'can_use_tool' || type === 'control_request' || type === 'permission_request') return true;
+  const bareName = typeof raw.name === 'string' ? raw.name
+    : typeof raw.tool_name === 'string' ? raw.tool_name
+      : typeof raw.tool === 'string' ? raw.tool : '';
+  if (bareName && PERMISSION_TOOL_NAMES.has(bareName)) return true;
+  const block = raw.content_block as Record<string, unknown> | undefined;
+  if (block && block.type === 'tool_use' && typeof block.name === 'string' && PERMISSION_TOOL_NAMES.has(block.name)) return true;
+  const content = (raw.message as Record<string, unknown> | undefined)?.content;
+  if (Array.isArray(content)) {
+    for (const b of content) {
+      const bb = b as Record<string, unknown> | null;
+      if (bb && bb.type === 'tool_use' && typeof bb.name === 'string' && PERMISSION_TOOL_NAMES.has(bb.name)) return true;
+    }
+  }
+  return false;
+}
+
+/** Settle the active turn — emit `done` (+ an error event on a bad crash), run
+ *  the narrate-and-exit / false-dispatch telemetry, resolve, and (if the proc is
+ *  still alive) leave it READY + schedule the idle reap. */
+function settleOrchestratorTurn(session: OrchestratorSession, w: WarmState, error: Error | null): void {
+  const turn = w.activeTurn;
+  if (!turn || turn.settled) return;
+  turn.settled = true;
+  clearTimeout(turn.timeout);
+  if (turn.abortSignal && turn.abortListener) {
+    turn.abortSignal.removeEventListener('abort', turn.abortListener);
+    turn.abortListener = null;
+  }
+  w.activeTurn = null;
+  w.lastUsedAt = Date.now();
+  if (turn.turnSessionId) session.claudeSessionId = turn.turnSessionId;
+
+  if (!error) {
+    const tail = turn.lastAssistantText.trim().slice(-1200);
+    const hasSummaryMarker = /VERDICT\s*[#-]|Dispatched\s+\d+\s+agent/i.test(tail);
+    if (turn.sawToolUseAfterText || !hasSummaryMarker) {
+      console.warn(`[orchestrator-session] narrate-and-exit suspected for ${session.sessionName}: sawToolUseAfterText=${turn.sawToolUseAfterText} hasSummaryMarker=${hasSummaryMarker} tailLen=${tail.length}`);
+    }
+    const dispatchClaimPattern = /\b(dispatched|launched|fired|launching|polling|kicked off)\b/i;
+    if (turn.launchAgentCallCount === 0 && dispatchClaimPattern.test(turn.lastAssistantText)) {
+      console.warn(`[orchestrator-session] FALSE-DISPATCH suspected for ${session.sessionName}: launchAgentCallCount=0 but text claims dispatch — text sample: ${JSON.stringify(turn.lastAssistantText.slice(-200))}`);
+    }
+  }
+
+  turn.onEvent({ type: 'done', sessionId: turn.turnSessionId, cost: turn.cost });
+  if (error) turn.onEvent({ type: 'error', error: error.message });
+
+  if (session.proc && session.status !== 'dead') {
+    session.status = 'ready';
+    scheduleIdleReap(session, w);
+  }
+  turn.resolve();
+}
+
+export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: WarmState): void {
+  const proc = session.proc;
+  if (!proc) return;
+
+  proc.stdout?.on('data', (chunk: Buffer) => {
+    w.stdoutLineBuffer += chunk.toString('utf-8');
+    const lines = w.stdoutLineBuffer.split('\n');
+    w.stdoutLineBuffer = lines.pop() ?? '';
+    for (const line of lines) {
+      if (!line.trim()) continue;
+      let raw: Record<string, unknown>;
+      try { raw = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
+
+      // LOCKOUT auto-deny — a plan-mode proc that asks to escalate is killed.
+      if (w.procConfig?.permissionMode === 'plan' && detectPermissionRequest(raw)) {
+        console.warn(`[orchestrator-session] LOCKOUT auto-deny — plan-mode proc ${session.sessionName} emitted a permission request; killing (write blocked).`);
+        settleOrchestratorTurn(session, w, null); // proposal text already captured
+        killOrchestratorProc(session, w);
+        return;
+      }
+
+      const turn = w.activeTurn;
+      if (!turn) continue; // stray output between turns
+      processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
+      if (raw.type === 'result') settleOrchestratorTurn(session, w, null);
+    }
+  });
+
+  proc.stderr?.on('data', (chunk: Buffer) => {
+    w.stderrBuffer += chunk.toString('utf-8');
+    if (w.stderrBuffer.length > 4_000) w.stderrBuffer = w.stderrBuffer.slice(-4_000);
+  });
+
+  proc.on('error', (err) => {
+    clearIdleTimer(w);
+    session.proc = null;
+    w.procConfig = null;
+    session.status = 'dead';
+    const turn = w.activeTurn;
+    if (turn && !turn.settled) {
+      turn.settled = true;
+      clearTimeout(turn.timeout);
+      w.activeTurn = null;
+      turn.onEvent({ type: 'error', error: err.message });
+      turn.reject(err);
+    }
+  });
+
+  proc.on('close', (code) => {
+    clearIdleTimer(w);
+    session.proc = null;
+    w.procConfig = null;
+    if (w.activeTurn && !w.activeTurn.settled) {
+      // Crashed / killed mid-turn — flush the tail then settle (error event only
+      // on a non-clean exit, matching the cold path).
+      if (w.stdoutLineBuffer.trim()) {
+        try {
+          const raw = JSON.parse(w.stdoutLineBuffer) as Record<string, unknown>;
+          const turn = w.activeTurn;
+          processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
+        } catch { /* ignore */ }
+      }
+      w.stdoutLineBuffer = '';
+      const stderr = w.stderrBuffer.trim();
+      settleOrchestratorTurn(session, w, code === 0 || code === null ? null : new Error(stderr.slice(0, 500) || `orchestrator proc exited with code ${code}`));
+    }
+    session.status = 'dead'; // proc gone → next turn respawns (auto-recover)
+  });
+}
+
+/** Spawn a fresh resident proc with the baked config. First-turn cold. */
+function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, config: OrchestratorProcConfig): void {
+  const mcpConfigPath = ensureMcpConfig(session.repoPath, config.toolProfile);
+  const args: string[] = [
+    '--input-format', 'stream-json',
+    '--output-format', 'stream-json',
+    '--include-partial-messages',
+    ...(config.permissionMode === 'plan' ? ['--permission-mode', 'plan'] : ['--dangerously-skip-permissions']),
+    '--verbose',
+    '--mcp-config', mcpConfigPath,
+    '--model', config.model,
+  ];
+  if (config.effort && config.effort !== 'adaptive') args.push('--effort', config.effort);
+  if (session.claudeSessionId) args.push('--resume', session.claudeSessionId);
+  else args.push('--append-system-prompt', buildOrchestratorSystemPrompt(session.repoPath));
+
+  // #1066 billing guard — the orchestrator REPL must stay subscription-billed.
+  assertNoPrintFlag(args, 'Orchestrator REPL session');
+
+  const proc = spawn(CLAUDE_BIN, args, {
+    cwd: session.repoPath,
+    env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  session.proc = proc;
+  w.procConfig = config;
+  w.stdoutLineBuffer = '';
+  w.stderrBuffer = '';
+  attachOrchestratorProcHandlers(session, w);
+  console.log(`[orchestrator-session] spawned warm proc ${session.sessionName} (${config.permissionMode}/${config.toolProfile})`);
+}
+
 /**
- * Sends a message to the orchestrator. Spawns a claude process that outputs
- * stream-json. Calls `onEvent` for each parsed event. Returns when the
- * process exits.
+ * Sends a message to the orchestrator through its RESIDENT `claude` process
+ * (warm-pool). Spawns on the first turn / after a config change; reuses the
+ * live process on every turn after. Calls `onEvent` for each parsed event;
+ * resolves when the turn settles on the stream `result`.
  */
 export async function sendToOrchestrator(
   session: OrchestratorSession,
@@ -539,8 +844,10 @@ export async function sendToOrchestrator(
   options: SendToOrchestratorOptions = {},
 ): Promise<void> {
   const permissionMode: OrchestratorPermissionMode = options.permissionMode ?? 'full';
-  const thinkingEffort = options.thinkingEffort;
+  const thinkingEffort: ThinkingEffort = options.thinkingEffort ?? 'adaptive';
   const model = options.model?.trim() || DEFAULT_ORCHESTRATOR_MODEL;
+  const toolProfile: ToolProfile = options.toolProfile ?? 'full';
+  const w = getWarmState(session.sessionName);
 
   // Steer-Now / queue preempt: the ws-server aborts the prior turn's
   // controller before calling sendTurn, so a still-'busy' session here means a
@@ -557,6 +864,7 @@ export async function sendToOrchestrator(
     session.status = 'ready';
     session.claudeSessionId = null;
     session.proc = null;
+    w.procConfig = null;
   }
   // Still busy after the settle window — a genuinely concurrent turn that was
   // never interrupted, or a hung proc. Reject as before. The `session.status =
@@ -568,259 +876,138 @@ export async function sendToOrchestrator(
 
   if (consumeOrchestratorResetSignal(session.repoPath, session.threadId)) {
     session.claudeSessionId = null;
+    // A reset means a fresh conversation — recycle the warm proc (it holds the old one).
+    if (session.proc) killOrchestratorProc(session, w);
+  }
+
+  // Write the MCP config (idempotent) + compute the desired resident-proc config.
+  // A 'propose' turn gets the operator-stripped read-only surface — Collide's
+  // lockout. The config baked into the resident proc is compared each turn.
+  ensureMcpConfig(session.repoPath, toolProfile);
+  const desiredConfig: OrchestratorProcConfig = {
+    cwd: session.repoPath,
+    model,
+    permissionMode,
+    toolProfile,
+    effort: thinkingEffort,
+    mcpConfigHash: mcpConfigContentHash(session.repoPath, toolProfile),
+  };
+
+  // Recycle the resident proc when its baked config no longer matches (model /
+  // permission mode / tool profile / effort / MCP-config content change).
+  if (session.proc && !procConfigMatches(w.procConfig, desiredConfig)) {
+    console.log(`[orchestrator-session] recycle ${session.sessionName} — config changed`);
+    killOrchestratorProc(session, w);
+  }
+
+  // Spawn a fresh proc when there's no warm one (first turn / after recycle).
+  if (!session.proc) {
+    reapIdleForCapacity(session.sessionName);
+    try {
+      spawnOrchestratorProc(session, w, desiredConfig);
+    } catch (error) {
+      session.status = 'dead';
+      const e = error instanceof Error ? error : new Error(String(error));
+      onEvent({ type: 'error', error: e.message });
+      throw e;
+    }
   }
 
   session.status = 'busy';
+  clearIdleTimer(w);
 
-  // Generate MCP config so Claude Code can use Cortex tools. A 'propose' turn
-  // gets the operator-stripped (read-only proposer) surface — Collide's lockout.
-  const mcpConfigPath = ensureMcpConfig(session.repoPath, options.toolProfile ?? 'full');
+  // Build the message payload (attachments → image blocks). Same CLI contract
+  // as interactive-session.ts; the message is written to the RESIDENT proc's
+  // still-open stdin (no stdin.end() — the proc lives on for the next turn).
+  const imageBlocks = (options.attachments ?? [])
+    .map(attachmentToImageBlock)
+    .filter((block): block is NonNullable<typeof block> => block !== null);
+  const content: string | Array<Record<string, unknown>> = imageBlocks.length > 0
+    ? [{ type: 'text', text: message }, ...imageBlocks]
+    : message;
+  const payload = `${JSON.stringify({ type: 'user', message: { role: 'user', content } })}\n`;
 
-  // Map manual thinking effort to Claude Code CLI's --effort flag. Adaptive
-  // is represented by omitting the flag entirely so Claude Code self-regulates.
-  const effortMap = {
-    low: 'low',
-    medium: 'medium',
-    high: 'high',
-    max: 'max',
-    xhigh: 'xhigh',
-  } as const;
-
-  // Interactive REPL flags — `--input-format stream-json` puts claude into
-  // the subscription-billed REPL path (no `-p`). We pass the actual message
-  // via stdin (JSON-encoded) below, then close stdin to signal turn end.
-  const args: string[] = [
-    '--input-format', 'stream-json',
-    '--output-format', 'stream-json',
-    '--include-partial-messages',
-    ...(permissionMode === 'plan'
-      ? ['--permission-mode', 'plan']
-      : ['--dangerously-skip-permissions']),
-    '--verbose',
-    '--mcp-config', mcpConfigPath,
-    '--model', model,
-  ];
-  if (thinkingEffort && thinkingEffort !== 'adaptive') {
-    args.push('--effort', effortMap[thinkingEffort]);
-  }
-
-  // Resume existing conversation if we have a session ID
-  if (session.claudeSessionId) {
-    args.push('--resume', session.claudeSessionId);
-  } else {
-    // First message — inject orchestrator identity and context
-    args.push('--append-system-prompt', buildOrchestratorSystemPrompt(session.repoPath));
-  }
-
-  // #1066 billing guard — the orchestrator REPL must stay subscription-billed.
-  assertNoPrintFlag(args, 'Orchestrator REPL session');
-
-  return new Promise<void>((resolve, reject) => {
-    const proc = spawn(CLAUDE_BIN, args, {
-      cwd: session.repoPath,
-      env: {
-        ...process.env,
-        FORCE_COLOR: '0',
-        NO_COLOR: '1',
-        O8_MANAGED_SESSION: '1',
-      },
-      // Interactive REPL mode — stdin must be writable so we can pipe the
-      // user's message in as a JSON event (no `-p` flag). Closing stdin
-      // after the write signals end-of-input and claude exits cleanly when
-      // the turn completes.
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    session.proc = proc;
-
-    // Write the message as a single JSON event then close stdin. Format
-    // matches what interactive-session.ts uses for the chat tab — same CLI
-    // contract. With attachments the content becomes a block array so the
-    // images reach the model alongside the text.
-    const imageBlocks = (options.attachments ?? [])
-      .map(attachmentToImageBlock)
-      .filter((block): block is NonNullable<typeof block> => block !== null);
-    const content: string | Array<Record<string, unknown>> = imageBlocks.length > 0
-      ? [{ type: 'text', text: message }, ...imageBlocks]
-      : message;
-    const payload = `${JSON.stringify({
-      type: 'user',
-      message: {
-        role: 'user',
-        content,
-      },
-    })}\n`;
-    try {
-      proc.stdin?.write(payload, 'utf8');
-      proc.stdin?.end();
-    } catch (error) {
-      // stdin write failures will surface via the proc 'error' / 'exit'
-      // handlers further down. Log here so the cause is visible in dev.
-      console.warn(`[orchestrator-session] stdin write failed for ${session.sessionName}:`, error);
+  return new Promise<void>((resolvePromise, rejectPromise) => {
+    const proc = session.proc;
+    if (!proc || !proc.stdin || proc.stdin.destroyed) {
+      session.status = 'dead';
+      const e = new Error('Orchestrator resident proc stdin is not writable');
+      onEvent({ type: 'error', error: e.message });
+      rejectPromise(e);
+      return;
     }
 
-    // #457 — Process timeout: kill the claude process if it hangs
-    const processTimeout = setTimeout(() => {
+    // #457 — Hang watchdog. Kills the resident proc (surfacing WHY) if the turn
+    // never settles on a `result`.
+    const timeout = setTimeout(() => {
       console.warn(`[orchestrator-session] Process timeout (${PROCESS_TIMEOUT_MS}ms) — killing ${session.sessionName}`);
-      // Surface the kill to the chat surface so the user sees WHY the turn
-      // stopped emitting. Without this the UI just freezes mid-investigation
-      // with no terminating assistant message — looks like a hang. The error
-      // event is rendered by the chat as a small system-style note at the
-      // tail of the turn.
       const minutes = Math.round(PROCESS_TIMEOUT_MS / 60_000);
       onEvent({
         type: 'error',
         error: `Orchestrator hit the ${minutes}-minute watchdog limit and was terminated — a turn running this long has almost certainly hung. Re-send your message to continue.`,
       });
-      proc.kill('SIGTERM');
-      // Force kill after 5s if SIGTERM doesn't work
-      setTimeout(() => {
-        if (!proc.killed) proc.kill('SIGKILL');
-      }, 5_000);
+      settleOrchestratorTurn(session, w, null);
+      killOrchestratorProc(session, w);
     }, PROCESS_TIMEOUT_MS);
 
-    // #624 — User-initiated interrupt. The AbortSignal is the plumbing; the
-    // actual stop is SIGTERM to the streaming claude subprocess (same mechanism
-    // the timeout path above uses). Events already delivered via onEvent stay
-    // in the transcript — we only suppress NEW output after the abort.
-    const userAbortSignal = options.signal;
-    let userAbortListener: (() => void) | null = null;
-    if (userAbortSignal) {
-      if (userAbortSignal.aborted) {
-        console.log(`[orchestrator-session] Abort requested before spawn listener attached — killing ${session.sessionName}`);
-        proc.kill('SIGTERM');
-      } else {
-        userAbortListener = () => {
-          console.log(`[orchestrator-session] User interrupt — killing ${session.sessionName}`);
-          if (!proc.killed) proc.kill('SIGTERM');
-          setTimeout(() => {
-            if (!proc.killed) proc.kill('SIGKILL');
-          }, 2_000);
-        };
-        userAbortSignal.addEventListener('abort', userAbortListener, { once: true });
-      }
-    }
-    const detachUserAbortListener = () => {
-      if (userAbortSignal && userAbortListener) {
-        userAbortSignal.removeEventListener('abort', userAbortListener);
-        userAbortListener = null;
-      }
+    const turn: OrchestratorActiveTurn = {
+      onEvent,
+      captureEvent: () => {},
+      resolve: resolvePromise,
+      reject: rejectPromise,
+      timeout,
+      abortSignal: options.signal ?? null,
+      abortListener: null,
+      settled: false,
+      toolTracker: createToolCallTracker(),
+      turnSessionId: session.claudeSessionId,
+      cost: null,
+      lastAssistantText: '',
+      sawToolUseAfterText: false,
+      launchAgentCallCount: 0,
     };
-
-    let lineBuffer = '';
-    let sessionId: string | null = session.claudeSessionId;
-    let cost: number | null = null;
-    const toolTracker = createToolCallTracker();
-    // Accumulate the tail of the assistant's final text so we can detect
-    // narrate-and-exit turns — where the model runs tools and then ends the
-    // turn without emitting a VERDICT or Dispatched summary.
-    let lastAssistantText = '';
-    let sawToolUseAfterText = false;
-    let launchAgentCallCount = 0;
-    const captureEvent = (e: OrchestratorEvent) => {
+    // Narrate-and-exit / false-dispatch telemetry state lives on the turn.
+    turn.captureEvent = (e: OrchestratorEvent) => {
       if (e.type === 'text') {
-        lastAssistantText += e.text;
-        sawToolUseAfterText = false;
+        turn.lastAssistantText += e.text;
+        turn.sawToolUseAfterText = false;
       } else if (e.type === 'tool_use') {
-        sawToolUseAfterText = true;
-        // Track cortex_launch_agent specifically so we can catch the
-        // "claimed dispatch but didn't fire" failure mode distinctly from
-        // generic narrate-and-exit. See the runtime check on turn close.
+        turn.sawToolUseAfterText = true;
         if (e.name === 'cortex_launch_agent' || e.name === 'mcp__cortex__cortex_launch_agent') {
-          launchAgentCallCount += 1;
+          turn.launchAgentCallCount += 1;
         }
       }
       onEvent(e);
     };
+    w.activeTurn = turn;
 
-    proc.stdout?.on('data', (chunk: Buffer) => {
-      lineBuffer += chunk.toString('utf-8');
-      const lines = lineBuffer.split('\n');
-      lineBuffer = lines.pop() ?? ''; // Keep incomplete last line
-
-      for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const event = JSON.parse(line) as Record<string, unknown>;
-          processStreamEvent(event, captureEvent, (id) => { sessionId = id; }, (c) => { cost = c; }, toolTracker);
-        } catch {
-          // Not JSON — ignore
-        }
+    // #624 — User interrupt. Kills the resident proc (sacrificed for the
+    // interrupt; the next turn spawns cold) and settles this turn.
+    if (options.signal) {
+      if (options.signal.aborted) {
+        settleOrchestratorTurn(session, w, null);
+        killOrchestratorProc(session, w);
+        return;
       }
-    });
+      turn.abortListener = () => {
+        console.log(`[orchestrator-session] User interrupt — killing ${session.sessionName}`);
+        settleOrchestratorTurn(session, w, null);
+        killOrchestratorProc(session, w);
+      };
+      options.signal.addEventListener('abort', turn.abortListener, { once: true });
+    }
 
-    // Capture stderr for error reporting
-    let stderr = '';
-    proc.stderr?.on('data', (chunk: Buffer) => {
-      stderr += chunk.toString('utf-8');
-    });
-
-    proc.on('error', (err) => {
-      clearTimeout(processTimeout);
-      detachUserAbortListener();
+    try {
+      proc.stdin.write(payload, 'utf8', (error?: Error | null) => {
+        if (error) {
+          console.warn(`[orchestrator-session] stdin write failed for ${session.sessionName}:`, error);
+          session.status = 'dead';
+          settleOrchestratorTurn(session, w, error);
+        }
+      });
+    } catch (error) {
       session.status = 'dead';
-      session.proc = null;
-      onEvent({ type: 'error', error: err.message });
-      reject(err);
-    });
-
-    proc.on('close', (code) => {
-      clearTimeout(processTimeout);
-      detachUserAbortListener();
-      session.proc = null;
-
-      // Process any remaining buffer
-      if (lineBuffer.trim()) {
-        try {
-          const event = JSON.parse(lineBuffer) as Record<string, unknown>;
-          processStreamEvent(event, captureEvent, (id) => { sessionId = id; }, (c) => { cost = c; }, toolTracker);
-        } catch {
-          // ignore
-        }
-      }
-
-      // Update session state
-      if (sessionId) session.claudeSessionId = sessionId;
-      session.status = code === 0 ? 'ready' : 'dead';
-
-      // Narrate-and-exit telemetry: a clean-exit turn should END with a text
-      // summary that includes a VERDICT or Dispatched marker. If the last
-      // assistant content was a tool call and no subsequent text was emitted,
-      // the model silently dropped the turn — log it so we can measure how
-      // often the new prompt rules are holding.
-      if (code === 0) {
-        const tail = lastAssistantText.trim().slice(-1200);
-        const hasSummaryMarker = /VERDICT\s*[#\-]|Dispatched\s+\d+\s+agent/i.test(tail);
-        if (sawToolUseAfterText || !hasSummaryMarker) {
-          console.warn(
-            `[orchestrator-session] narrate-and-exit suspected for ${session.sessionName}: ` +
-            `sawToolUseAfterText=${sawToolUseAfterText} hasSummaryMarker=${hasSummaryMarker} ` +
-            `tailLen=${tail.length}`,
-          );
-        }
-
-        // Dispatch-word check: if the orchestrator claims it dispatched but no
-        // cortex_launch_agent actually fired, this is the failure mode from the
-        // 2026-04-16 session — operator reads "#X dispatched" and walks away
-        // while the lane never existed. Distinct from generic narrate-and-exit
-        // because the operator can't tell from the text alone. Log at WARN
-        // with a dedicated marker so telemetry and tail-readers spot it fast.
-        const dispatchClaimPattern = /\b(dispatched|launched|fired|launching|polling|kicked off)\b/i;
-        if (launchAgentCallCount === 0 && dispatchClaimPattern.test(lastAssistantText)) {
-          console.warn(
-            `[orchestrator-session] FALSE-DISPATCH suspected for ${session.sessionName}: ` +
-            `launchAgentCallCount=0 but text claims dispatch — text sample: ` +
-            JSON.stringify(lastAssistantText.slice(-200)),
-          );
-        }
-      }
-
-      onEvent({ type: 'done', sessionId, cost });
-
-      if (code !== 0 && stderr) {
-        onEvent({ type: 'error', error: stderr.slice(0, 500) });
-      }
-
-      resolve();
-    });
+      settleOrchestratorTurn(session, w, error instanceof Error ? error : new Error(String(error)));
+    }
   });
 }
