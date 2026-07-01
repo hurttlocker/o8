@@ -26,9 +26,21 @@ export interface ParkedLane {
   label?: string;
 }
 
-export function deriveParkedLanes(lanes: DomainLaneSummary[]): ParkedLane[] {
+/**
+ * @param closedPacketIds packetIds whose packet is merged / released / archived
+ *   (terminal). A lane's `status` can lag behind its packet — a packet merges +
+ *   archives while the lane summary is still stale-stuck at 'reviewing' — which
+ *   left the just-merged lane counting as "1 ready" in the footer beacon. Gating
+ *   on the PACKET's terminal state (which IS updated on merge) drops it: a
+ *   closed/merged/archived lane must never count as ready.
+ */
+export function deriveParkedLanes(
+  lanes: DomainLaneSummary[],
+  closedPacketIds?: ReadonlySet<string>,
+): ParkedLane[] {
   return lanes
     .filter((l) => PARKED_STATUSES.has(l.status))
+    .filter((l) => !closedPacketIds?.has(l.packetId))
     .map((l) => ({
       laneId: l.laneId,
       packetId: l.packetId,
