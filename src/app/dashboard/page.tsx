@@ -551,6 +551,7 @@ function normalizeO8ActiveTab(raw: string | null | undefined): O8Tab | null {
     || raw === 'side-chat'
     || raw === 'review'
     || raw === 'compare'
+    || raw === 'targets'
     || raw === 'terminal'
   ) {
     return raw;
