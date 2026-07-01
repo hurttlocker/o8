@@ -439,6 +439,7 @@ export async function dispatchTask(taskId: string, input: TaskDispatchInput = {}
     laneId: lane.id,
     prompt: buildDispatchPrompt(task, workerRouting, input.message),
     model: workerRouting.selectedModel ?? undefined,
+    effort: workerRouting.selectedEffort ?? undefined,
     actor,
   });
 

@@ -41,6 +41,7 @@ import {
   type ParsedRunLog,
 } from '@/lib/runtimes/shared/owned-session';
 import { codexModelArgs } from './local-model';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 // Re-export the fleet additions shape under its original Codex name.
 export type { OwnedCodexFleetAdditions } from '@/lib/runtimes/shared/owned-session';
@@ -51,6 +52,7 @@ export type OwnedCodexLaunchRequest = {
   cwd: string;
   prompt: string;
   model?: string;
+  effort?: ThinkingEffort;
 };
 
 export type OwnedCodexLaunchResponse = {
@@ -228,7 +230,19 @@ function toolOutputPreview(value: unknown) {
 // to o8-dispatched workers; the user's interactive Codex.app is untouched.
 const DISABLE_IMAGE_TOOL = ['-c', 'tools.image_generation=false'];
 
-function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: string }): string[] {
+/**
+ * Codex reasoning-effort flag. Emitted ONLY for an explicit tier — undefined /
+ * 'adaptive' → [] so the launch stays at Codex's default (parity: unset effort
+ * produces byte-identical args to before this feature). `max` → `xhigh` (Codex's
+ * top tier), mirroring the orchestrator's reasoningEffortFromThinkingEffort.
+ */
+export function codexReasoningEffortArgs(effort?: ThinkingEffort): string[] {
+  if (!effort || effort === 'adaptive') return [];
+  const mapped = effort === 'max' ? 'xhigh' : effort; // low | medium | high | xhigh
+  return ['-c', `model_reasoning_effort=${mapped}`];
+}
+
+export function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string[] {
   return [
     'exec',
     '--json',
@@ -241,6 +255,8 @@ function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: string }): 
     // `ollama:<model>` / `lmstudio:<model>` → run this worker on a LOCAL model
     // (--oss --local-provider …); a plain name → --model; empty → Codex default.
     ...codexModelArgs(ctx.model),
+    // Per-runtime effort surface — no-op unless an explicit tier was requested.
+    ...codexReasoningEffortArgs(ctx.effort),
     ctx.prompt,
   ];
 }
