@@ -49,11 +49,16 @@ export async function POST(request: Request) {
     ].join('\n');
 
     const mission = await createMission({
-      issues: [{ number: 0, title: `Targeting: ${filePath}`, body: brief, url: '' }],
+      // Inline issues require a positive synthetic number (normalizeLoadedIssue
+      // rejects 0); mirror the create_mission MCP convention (90001+).
+      issues: [{ number: 90001, title: `Targeting: ${filePath}`, body: brief, url: '' }],
       repoPath,
       runtime: routing.runtime,
       requestedRuntime: routing.runtime,
       requestedModel: routing.model || null,
+      // Close the loop: the tier's effort now reaches the worker launch (cheap
+      // triage → low, premium action → high). A no-op for gemini/opencode tiers.
+      requestedEffort: routing.effort,
       constraints: '',
       workerIntent: routing.tier === 'triage' ? 'light_worker' : 'heavy_worker',
     });
