@@ -21,6 +21,7 @@ import { useComparisonGroups } from './comparison/useComparisonGroups';
 import { useOrchestratorData } from './orchestrator-data-context';
 import { ReviewPanel } from './review/ReviewPanel';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
+import { TargetsPanel } from './o8-panel/TargetsPanel';
 import { ProjectChangesOverview } from './o8-panel/ProjectChangesOverview';
 import { AllFilesTree } from './o8-panel/workspace-rail/AllFilesTree';
 import { FileViewer } from './o8-panel/workspace-rail/FileViewer';
@@ -778,6 +779,10 @@ export function O8Panel({
             No comparison ready yet. Dispatch a best-of-N mission (set comparisonModels on create_mission) and the candidates land here side by side once they finish.
           </div>
         )}
+      </div>
+
+      <div style={{ flex: 1, minHeight: 0, display: activeTab === 'targets' ? 'flex' : 'none', flexDirection: 'column' }}>
+        <TargetsPanel repoPath={repoPath} active={activeTab === 'targets'} />
       </div>
     </div>
   );

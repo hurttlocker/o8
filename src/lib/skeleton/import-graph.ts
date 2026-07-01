@@ -209,3 +209,34 @@ export function getInboundImporters(
   importers.sort();
   return importers;
 }
+
+/**
+ * Inbound-importer COUNT for every cached file in the repo, computed in a SINGLE
+ * pass — the centrality signal for the Targeting Machine. Calling
+ * `getInboundImporters` per file is O(N²) (each call re-walks every file); this
+ * walks the repo once (O(N × avg-imports)) and returns `relativePath → count`
+ * with the same resolve-then-exact-or-stripped matching. Every cached file is a
+ * key (0 when nothing imports it).
+ */
+export function getInboundImporterCounts(repoPath: string): Map<string, number> {
+  const all = getAllCached(repoPath);
+  const counts = new Map<string, number>();
+  const strippedIndex = new Map<string, string>(); // strippedPath → relativePath
+  for (const f of all) {
+    counts.set(f.relativePath, 0);
+    strippedIndex.set(stripExtension(f.relativePath), f.relativePath);
+  }
+
+  for (const file of all) {
+    const targets = new Set<string>(); // dedupe: a file importing X twice counts once
+    for (const specifier of file.imports) {
+      const resolved = resolveImportSpecifier(repoPath, file.relativePath, specifier);
+      if (!resolved) continue;
+      const target = counts.has(resolved) ? resolved : strippedIndex.get(stripExtension(resolved));
+      if (target && target !== file.relativePath) targets.add(target);
+    }
+    for (const t of targets) counts.set(t, (counts.get(t) ?? 0) + 1);
+  }
+
+  return counts;
+}
