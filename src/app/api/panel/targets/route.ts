@@ -8,6 +8,7 @@ import { scoreTargets, DEFAULT_TOP_N } from '@/lib/targeting/scorer';
 import { applyLlmRationales } from '@/lib/targeting/rationale';
 import { pickTier } from '@/lib/targeting/routing';
 import { replaceScores } from '@/lib/targeting/store';
+import { logTriageRun } from '@/lib/targeting/observability';
 
 /**
  * The Targeting Machine — GET the ranked "where to point your agents" list for a
@@ -38,9 +39,9 @@ export async function GET(request: Request) {
     // The rationale money-shot: upgrade the top files' one-liners with the cheap
     // triage model (heuristic fallback per file). Opt out with ?rationales=heuristic
     // for an instant heuristic-only list.
-    const targets = searchParams.get('rationales') === 'heuristic'
-      ? scored
-      : await applyLlmRationales(scored);
+    const rationaleMode = searchParams.get('rationales') === 'heuristic' ? 'heuristic' as const : 'llm' as const;
+    const targets = rationaleMode === 'heuristic' ? scored : await applyLlmRationales(scored);
+    logTriageRun(repoPath, targets, rationaleMode);
     try {
       replaceScores(repoPath, targets);
     } catch (err) {
