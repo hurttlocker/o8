@@ -12,6 +12,7 @@ import type {
   RuntimeReviewCommandEvidence,
   SquadSummary,
 } from '@/lib/fleet/types';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 // ── Run / session primitives ─────────────────────────────────────────────────
 
@@ -56,6 +57,8 @@ export interface OwnedSessionRecord {
   latestPrompt: string;
   latestSummary: string;
   model?: string;
+  /** Requested reasoning effort — applied per-runtime at launch (codex only today). */
+  effort?: ThinkingEffort;
   reviewDisposition?: OwnedReviewDisposition;
   reviewDispositionUpdatedAt?: string;
   activeRun?: OwnedRunRecord;
@@ -122,6 +125,8 @@ export interface OwnedLaunchRequest {
   cwd: string;
   prompt: string;
   model?: string;
+  /** Requested reasoning effort — a per-runtime no-op unless the adapter uses it. */
+  effort?: ThinkingEffort;
 }
 
 export interface OwnedLaunchResponse {
@@ -195,7 +200,7 @@ export interface OwnedRuntimeAdapter {
   defaultModel?: string;
 
   /** Build argv for a fresh (launch) run. */
-  launchArgs(ctx: { cwd: string; prompt: string; model?: string }): string[];
+  launchArgs(ctx: { cwd: string; prompt: string; model?: string; effort?: ThinkingEffort }): string[];
 
   /**
    * Build argv for a resume run. Return null to signal this runtime cannot

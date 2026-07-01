@@ -403,6 +403,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           branchName: lane.branch,
           baseBranch: lane.baseBranch,
           model: command.model,
+          effort: command.effort,
           isolate: !lane.worktreePath,
           skipSetup: true,
           existingLaneId: command.laneId,
