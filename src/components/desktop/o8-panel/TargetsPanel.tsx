@@ -20,8 +20,11 @@ interface TargetRow {
   opportunity: number;
   score: number;
   rationale: string;
+  tier?: 'triage' | 'action';
   signals: { loc: number; symbolCount: number; outboundImports: number; inbound: number; churn: number };
 }
+
+type DispatchState = { status: 'busy' } | { status: 'done'; runtime: string; tier: string } | { status: 'error'; error: string };
 
 interface TargetsResponse {
   ok: boolean;
@@ -56,7 +59,29 @@ function PipBar({ label, value }: { label: string; value: number }) {
 export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; active?: boolean }) {
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [data, setData] = useState<TargetsResponse | null>(null);
+  const [dispatched, setDispatched] = useState<Record<string, DispatchState>>({});
   const loadedRepoRef = useRef<string | null>(null);
+
+  const dispatch = useCallback(async (path: string) => {
+    if (!repoPath) return;
+    setDispatched((prev) => ({ ...prev, [path]: { status: 'busy' } }));
+    try {
+      const res = await fetch('/api/panel/targets/dispatch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ repoPath, path }),
+      });
+      const json = await res.json();
+      setDispatched((prev) => ({
+        ...prev,
+        [path]: json.ok
+          ? { status: 'done', runtime: json.runtime ?? 'agent', tier: json.tier ?? '' }
+          : { status: 'error', error: json.error ?? 'dispatch failed' },
+      }));
+    } catch (err) {
+      setDispatched((prev) => ({ ...prev, [path]: { status: 'error', error: err instanceof Error ? err.message : 'failed' } }));
+    }
+  }, [repoPath]);
 
   const load = useCallback(async () => {
     if (!repoPath) return;
@@ -145,13 +170,16 @@ export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; a
                   paddingTop: 1, textAlign: 'right',
                 }}>{i + 1}</span>
 
-                {/* Path + rationale */}
+                {/* Path + tier chip + rationale */}
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
-                  <span style={{
-                    fontSize: 11.5, color: 'var(--t-text)', letterSpacing: '-0.005em',
-                    overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap',
-                    fontFamily: 'var(--font-mono, ui-monospace, monospace)',
-                  }} title={t.path}>{t.path}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 }}>
+                    <span style={{
+                      fontSize: 11.5, color: 'var(--t-text)', letterSpacing: '-0.005em',
+                      overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0,
+                      fontFamily: 'var(--font-mono, ui-monospace, monospace)',
+                    }} title={t.path}>{t.path}</span>
+                    {t.tier ? <TierChip tier={t.tier} /> : null}
+                  </div>
                   <span style={{
                     fontSize: 10.5, fontWeight: 300, lineHeight: 1.4, color: 'var(--t-text-muted)',
                   }}>{t.rationale}</span>
@@ -168,12 +196,54 @@ export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; a
                     letterSpacing: '-0.02em',
                   }} title={`impact ${t.impact} × opportunity ${t.opportunity}`}>{t.score}</span>
                 </div>
+
+                {/* Dispatch */}
+                <DispatchAction state={dispatched[t.path]} onDispatch={() => void dispatch(t.path)} />
               </div>
             </div>
           ))
         )}
       </div>
     </div>
+  );
+}
+
+function TierChip({ tier }: { tier: 'triage' | 'action' }) {
+  const action = tier === 'action';
+  return (
+    <span
+      title={action ? 'Premium action tier — a real agent at high effort' : 'Cheap triage tier — small, bounded work'}
+      style={{
+        flexShrink: 0, fontSize: 8.5, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em',
+        paddingTop: 1, paddingBottom: 1, paddingLeft: 5, paddingRight: 5, borderRadius: 5,
+        color: action ? 'var(--t-accent)' : 'var(--t-text-muted)',
+        background: action ? 'var(--t-accent-soft)' : 'transparent',
+        borderWidth: 1, borderStyle: 'solid', borderColor: action ? 'var(--t-accent-border, transparent)' : 'var(--t-divider-subtle)',
+      }}
+    >{tier}</span>
+  );
+}
+
+function DispatchAction({ state, onDispatch }: { state?: DispatchState; onDispatch: () => void }) {
+  if (state?.status === 'done') {
+    return <span style={{ flexShrink: 0, fontSize: 9.5, fontWeight: 400, color: 'var(--t-accent)', width: 66, textAlign: 'right' }} title={`Dispatched to ${state.runtime} (${state.tier})`}>→ {state.runtime}</span>;
+  }
+  if (state?.status === 'error') {
+    return <span style={{ flexShrink: 0, fontSize: 9.5, color: 'var(--t-text-faint)', width: 66, textAlign: 'right' }} title={state.error}>failed</span>;
+  }
+  return (
+    <button
+      type="button"
+      onClick={onDispatch}
+      disabled={state?.status === 'busy'}
+      title="Point an agent at this file (routes to the tier's runtime/model)"
+      style={{
+        flexShrink: 0, width: 66, fontSize: 10, fontWeight: 400,
+        color: state?.status === 'busy' ? 'var(--t-text-muted)' : 'var(--t-text)',
+        background: 'var(--t-input-bg)', borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider-subtle)',
+        borderRadius: 6, paddingTop: 3, paddingBottom: 3, cursor: state?.status === 'busy' ? 'default' : 'pointer',
+      }}
+    >{state?.status === 'busy' ? 'Sending…' : 'Dispatch'}</button>
   );
 }
 

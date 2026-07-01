@@ -6,6 +6,7 @@ import { homedir } from 'node:os';
 import { collectSignals } from '@/lib/targeting/signals';
 import { scoreTargets, DEFAULT_TOP_N } from '@/lib/targeting/scorer';
 import { applyLlmRationales } from '@/lib/targeting/rationale';
+import { pickTier } from '@/lib/targeting/routing';
 import { replaceScores } from '@/lib/targeting/store';
 
 /**
@@ -52,7 +53,9 @@ export async function GET(request: Request) {
       repoPath,
       count: targets.length,
       scoredAt: new Date().toISOString(),
-      targets,
+      // Stamp each file's dispatch tier (cheap triage vs premium action) so the
+      // row can show the chip + the Dispatch button knows where it'll route.
+      targets: targets.map((t) => ({ ...t, tier: pickTier(t.signals) })),
     });
   } catch (err) {
     return NextResponse.json(
