@@ -21,6 +21,7 @@ import { useComparisonGroups } from './comparison/useComparisonGroups';
 import { useOrchestratorData } from './orchestrator-data-context';
 import { ReviewPanel } from './review/ReviewPanel';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
+import { TargetsPanel } from './o8-panel/TargetsPanel';
 import { ProjectChangesOverview } from './o8-panel/ProjectChangesOverview';
 import { AllFilesTree } from './o8-panel/workspace-rail/AllFilesTree';
 import { FileViewer } from './o8-panel/workspace-rail/FileViewer';
@@ -32,9 +33,9 @@ import type { RepoRegistryEntry } from '@/lib/repos/types';
 
 const LazyOrchestratorTab = lazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })));
 
-type RightUtilityTab = Extract<O8Tab, 'files' | 'side-chat' | 'browser' | 'review' | 'terminal'>;
+type RightUtilityTab = Extract<O8Tab, 'files' | 'side-chat' | 'browser' | 'review' | 'targets' | 'terminal'>;
 
-const RIGHT_UTILITY_TAB_IDS: RightUtilityTab[] = ['files', 'side-chat', 'browser', 'review', 'terminal'];
+const RIGHT_UTILITY_TAB_IDS: RightUtilityTab[] = ['files', 'side-chat', 'browser', 'review', 'targets', 'terminal'];
 
 function isRightUtilityTab(tab: O8Tab): tab is RightUtilityTab {
   return RIGHT_UTILITY_TAB_IDS.includes(tab as RightUtilityTab);
@@ -101,6 +102,17 @@ function ReviewIcon({ size = 18 }: { size?: number }) {
 
 function TerminalIcon({ size = 18 }: { size?: number }) {
   return <TablerTerminal size={size} strokeWidth={1.6} style={{ display: 'block', flexShrink: 0 }} />;
+}
+
+// Targeting — a crosshair ("aim your agents here").
+function TargetIcon({ size = 18 }: { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
+      <circle cx="12" cy="12" r="8" />
+      <circle cx="12" cy="12" r="3" />
+      <path d="M12 2v3M12 19v3M2 12h3M19 12h3" />
+    </svg>
+  );
 }
 
 function PlusIcon({ size = 16 }: { size?: number }) {
@@ -175,6 +187,7 @@ const RIGHT_UTILITY_TABS: RightUtilityDefinition[] = [
   { id: 'side-chat', label: 'Side chat', description: 'Start a side conversation', icon: ChatIcon },
   { id: 'browser', label: 'Browser', description: 'Open a website', icon: BrowserIcon },
   { id: 'review', label: 'Review', description: 'View code changes', icon: ReviewIcon },
+  { id: 'targets', label: 'Targeting', description: 'Where to point your agents', icon: TargetIcon },
   { id: 'terminal', label: 'Terminal', description: 'Start an interactive shell', icon: TerminalIcon },
 ];
 
@@ -596,6 +609,10 @@ export function O8Panel({
           onActiveUrlChange={onBrowserActiveUrlChange}
         />
       );
+    }
+
+    if (tab === 'targets') {
+      return <TargetsPanel repoPath={repoPath} active={active} />;
     }
 
     if (tab === 'review') {
