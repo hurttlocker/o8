@@ -5,6 +5,7 @@ import { homedir } from 'node:os';
 
 import { collectSignals } from '@/lib/targeting/signals';
 import { scoreTargets, DEFAULT_TOP_N } from '@/lib/targeting/scorer';
+import { applyLlmRationales } from '@/lib/targeting/rationale';
 import { replaceScores } from '@/lib/targeting/store';
 
 /**
@@ -32,7 +33,13 @@ export async function GET(request: Request) {
       });
     }
 
-    const targets = scoreTargets(signals, limit);
+    const scored = scoreTargets(signals, limit);
+    // The rationale money-shot: upgrade the top files' one-liners with the cheap
+    // triage model (heuristic fallback per file). Opt out with ?rationales=heuristic
+    // for an instant heuristic-only list.
+    const targets = searchParams.get('rationales') === 'heuristic'
+      ? scored
+      : await applyLlmRationales(scored);
     try {
       replaceScores(repoPath, targets);
     } catch (err) {
