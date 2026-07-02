@@ -107,103 +107,17 @@ const ALLOWLIST_ANY_METHOD: RegExp[] = [
 ];
 
 /**
- * Worker protocol routes are authenticated inside each handler against the
- * worker_tokens table (or, for /api/cloud/*, the cloud-workers config files).
- * Workers run off-host (customer laptops, Kubernetes, Vercel Sandbox), so the
- * loopback-origin check does not apply here and they must bypass the panel
- * ws-token gate entirely. Each handler runs its own Bearer check.
- *
- * /api/cloud/* — Cursor-style self-hosted worker pool (issue #514). Auth via
- * service-account keys in ~/.cortex-ide/cloud-workers/ via verifyCloudWorkerKey.
- * /api/worker/* — push-based remote-customer runtime (earlier work).
+ * Self-authenticating routes bypass the loopback/token gate because they are
+ * reachable OFF-HOST by design and verify their own credential in the handler:
+ *   /api/worker/*        — worker protocol, Bearer against the worker_tokens table.
+ *   /api/cloud/*         — self-hosted worker pool, verifyCloudWorkerKey (#514).
+ *   /api/github/webhook  — GitHub delivery, HMAC-SHA256 (github-broker/auth.ts).
+ * EVERYTHING else under /api/* is DENIED by default (see the gate below) — there
+ * is no fail-open "ungated family" any more. To expose a new route publicly, add
+ * it to ALLOWLIST_READ_ONLY (GET) or, for a self-authenticating external caller,
+ * here — never by omission. Full per-family rationale: docs/loopback-api.md.
  */
-const WORKER_PREFIXES = ['/api/worker/', '/api/cloud/'];
-
-/**
- * Path prefixes that require auth. Everything else (pages, static, etc.) is
- * passed through untouched. Narrow this down — don't over-gate.
- */
-const GATED_PREFIXES = [
-  '/api/panel/',
-  '/api/orchestrator/',
-  // Browser-agent verb bridge (drives the embedded browser) — exact subpath
-  // only: /api/browser/proxy must stay open, iframes can't send a bearer.
-  '/api/browser/agent',
-  // Engine tier (headless Chrome live view + verbs) — loopback img tags pass.
-  '/api/browser/engine',
-  // Native browser-view secure result sink — the injected agent POSTs here from
-  // loopback (passes); external callers are blocked. cid-only, no state reach.
-  '/api/browser/native-result',
-  // Canvas intent bus (Symon / local agents drive the canvas surface).
-  '/api/canvas/',
-  '/api/runtime/',
-  '/api/lanes',
-  '/api/worktrees',
-  '/api/review/',
-  '/api/board/',
-  '/api/command-center/',
-  '/api/claude-code/',
-  '/api/codex/',
-  '/api/operator/',
-  // Orchestrator chat backend is local-gated here and Clerk-authenticated in
-  // the route handler.
-  '/api/v2/chat',
-  // File read/WRITE inside registered repos (LLM chat "Apply to File").
-  // Was ungated — a LAN client could edit repo files without the token.
-  '/api/v2/files',
-  // File-path autocomplete + content read for chat context injection. Was
-  // ungated and, with no repo header, defaulted repoRoot to process.cwd() and
-  // shelled out to git — so a cross-origin page could reach it with zero
-  // knowledge (CSRF). Gate it loopback/token-only (the sink is also now
-  // shell-free; see api/v2/context/files/route.ts).
-  '/api/v2/context',
-  // Cortex memory/directive surface — local-only by design. Even read-only
-  // endpoints leak operator preferences and repo names; gate them too.
-  '/api/cortex/',
-  // Projects model (epic #899) — leaks repo names and operator-curated
-  // groupings. Loopback-only with bearer-token fallback for LAN clients.
-  '/api/projects',
-  // Automations (Superset borrow) — reads + writes scheduled agent runs.
-  // Owner emails, prompts, and dispatch can all leak; gate loopback-only.
-  '/api/automations',
-  // o8.md spec surface — reads/writes a repo-local file. Repo path is
-  // operator-trusted; we don't expose this cross-origin without a token.
-  '/api/repo-spec',
-  // Dictation (transcribe + polish) hits paid OpenRouter endpoints with
-  // the operator's key. Loopback-only so a LAN client can't drain credits.
-  '/api/dictation/',
-  // Voice realtime — mints OpenAI gpt-realtime ephemeral session tokens from
-  // the operator's (BYOK) key. Loopback-only so a LAN client can't mint tokens
-  // that bill the operator's OpenAI account. (src/lib/voice/realtime-access.ts)
-  '/api/voice/',
-  // One-way beta feedback intake posts operator reports to the private team
-  // webhook. Keep it same-origin/loopback so the webhook can't be abused.
-  '/api/feedback/',
-  // o8 team peer presence — reads local agent-coordination files; loopback only.
-  '/api/team/',
-  // Setup routes are gated too — GET is allowlisted above, POST needs loopback
-  // or a token (so an evil cross-origin page can't POST to /api/setup/claude-desktop
-  // and silently write to the user's Claude config).
-  '/api/setup/',
-  // The ENTIRE mobile family. It includes the agent-control surface
-  // (/api/mobile/action approves merges + launches workers), transcript/history
-  // readers, and the token-issuing pairing endpoint. Mobile clients already
-  // send `Authorization: Bearer <ws-token>` on every call (token delivered via
-  // the pairing QR / loopback-embedded meta tag), so gating costs them nothing.
-  // /api/mobile/push/public-key stays read-only allow-listed above.
-  '/api/mobile/',
-  // CLI + LLM proxies spawn agent CLIs / spend the operator's LLM keys.
-  // Desktop callers are loopback; nothing legitimate calls these from LAN
-  // without the token.
-  '/api/v2/proxy/',
-  // Connector imports (ChatGPT export upload) parse large archives in-process
-  // and write profile data into the operator's Brain context.
-  '/api/connectors/',
-  // Beta founding invites (#beta-referral) — the operator's share-able invite
-  // codes + sent/redeemed state. Leaks codes + the operator handle; loopback-
-  // only. No trailing slash so the bare list route (/api/invites) gates too.
-  '/api/invites',
-];
+const SELF_AUTH_PREFIXES = ['/api/worker/', '/api/cloud/', '/api/github/webhook'];
 
 function isTrustedLocalRequest(req: NextRequest): boolean {
   // Tier 1 — socket truth. The bundled production server stamps the real TCP
@@ -289,12 +203,15 @@ function isAllowlisted(pathname: string, method: string): boolean {
   return false;
 }
 
-function needsGate(pathname: string): boolean {
-  return GATED_PREFIXES.some((prefix) => pathname.startsWith(prefix));
-}
-
-function isWorkerRoute(pathname: string): boolean {
-  return WORKER_PREFIXES.some((prefix) => pathname.startsWith(prefix));
+/**
+ * True for a self-authenticating route (worker protocol + HMAC webhook). Uses a
+ * trailing-boundary match so a prefix entry can't accidentally cover a sibling
+ * path — the structural fix for the trailing-slash gate gap (§MED-2).
+ */
+function isSelfAuthRoute(pathname: string): boolean {
+  return SELF_AUTH_PREFIXES.some((p) =>
+    p.endsWith('/') ? pathname.startsWith(p) : pathname === p || pathname.startsWith(`${p}/`),
+  );
 }
 
 function optionalEnv(name: string): string | undefined {
@@ -307,19 +224,23 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
   const { pathname } = req.nextUrl;
   const method = req.method.toUpperCase();
 
-  // Worker protocol uses its own bearer auth checked inside the route handler.
-  // Bypass the loopback+ws-token gate.
-  if (isWorkerRoute(pathname)) {
+  // Self-authenticating routes (worker protocol + HMAC webhook) run their own
+  // auth in-handler and bypass the loopback/token gate.
+  if (isSelfAuthRoute(pathname)) {
     return NextResponse.next();
   }
 
-  // Short-circuit: non-API requests and allowlisted paths always pass.
-  if (!needsGate(pathname) || isAllowlisted(pathname, method)) {
+  // Explicit public allowlist (setup GETs, OAuth handshakes, VAPID key, enroll).
+  if (isAllowlisted(pathname, method)) {
     return NextResponse.next();
   }
 
-  // Loopback / same-origin requests pass without a token (default case for
-  // desktop app, MCP server, curl from localhost).
+  // DEFAULT-DENY. The matcher restricts this middleware to /api/*, so every
+  // remaining request is a state-touching API route. It passes ONLY from a
+  // loopback origin (socket truth — desktop app, MCP server, curl from
+  // localhost) or with a valid ws/device token — never by omission. This closes
+  // the fail-open + trailing-slash gate class (SECURITY_AUDIT_2026-07-02
+  // §HIGH-1/MED-2): an unlisted new /api/* route is denied, not exposed.
   if (isTrustedLocalRequest(req)) {
     return NextResponse.next();
   }
