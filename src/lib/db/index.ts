@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 28;
+const DB_SCHEMA_VERSION = 29;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -185,7 +185,30 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   // #beta-referral — `beta_invites` table (the operator's founding invite set).
   // CREATE TABLE IF NOT EXISTS + index, safe on every boot.
   ensureBetaInvitesTable(sqlite);
+  // Schema v29 (#1329) — `session_rules` table: operator-authored rules scoped
+  // to one orchestrator thread. Ephemeral (die with the thread). CREATE TABLE
+  // IF NOT EXISTS + index, safe on every boot.
+  ensureSessionRulesTable(sqlite);
   migrateProjectsLedgerJsonIfNeeded(sqlite);
+}
+
+/**
+ * Schema v29 (#1329) — session rules. Operator-authored, thread-scoped rules
+ * pinned into every orchestrator turn + inherited by dispatched workers. Keyed
+ * by orchestrator thread id (e.g. `thoughts-…`). See `session-rules-store.ts`.
+ */
+function ensureSessionRulesTable(sqlite: Database.Database): void {
+  sqlite.exec(`
+    CREATE TABLE IF NOT EXISTS session_rules (
+      id TEXT PRIMARY KEY,
+      thread_id TEXT NOT NULL,
+      text TEXT NOT NULL,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT (datetime('now'))
+    );
+    CREATE INDEX IF NOT EXISTS idx_session_rules_thread
+      ON session_rules(thread_id, active, created_at);
+  `);
 }
 
 function ensureAutomationsTable(sqlite: Database.Database): void {
