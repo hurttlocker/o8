@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { spawn, type ChildProcess } from 'child_process';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 
 // ── Active dev server processes ──
 const activeServers = new Map<string, {
@@ -31,6 +32,12 @@ export async function GET() {
 
 // POST — start a dev server
 export async function POST(req: NextRequest) {
+  // Operator-only: this spawns an arbitrary shell (`sh -c <command>` below). A
+  // dispatched worker (local-worker token) must never reach this RCE primitive
+  // (SECURITY_AUDIT_2026-07-02 §HIGH-3). Only the desktop repo-card UI calls it.
+  if (resolveRequestPrincipal(req) === 'worker') {
+    return NextResponse.json({ error: 'Starting a dev server is operator-only.' }, { status: 403 });
+  }
   try {
     const body = await req.json() as {
       repoPath: string;
