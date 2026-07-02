@@ -3740,10 +3740,36 @@ pub fn run() {
             let user = std::env::var("USER").unwrap_or_else(|_| "default".into());
             format!("/tmp/tauri-mcp-o8-{}.sock", user)
         });
+        // Require an auth token on the webview-control socket. Without it the
+        // plugin processes every command UNAUTHENTICATED, so any same-uid process
+        // (incl. a dispatched worker) could `execute_js` arbitrary JS into the
+        // operator's authenticated webview (SECURITY_AUDIT_2026-07-02 §HIGH-5).
+        // The plugin writes the token to `<socket>.token` (0600); the operator
+        // MCP server reads it there (o8-webview-client.ts resolveAuthToken). A
+        // per-launch random token means a stale/guessed value never works.
+        fn generate_mcp_socket_token() -> String {
+            use std::io::Read;
+            // 32 random bytes -> hex. The socket is Unix-only (macOS/Linux), so
+            // /dev/urandom is available; read it for a CSPRNG token.
+            if let Ok(mut f) = std::fs::File::open("/dev/urandom") {
+                let mut buf = [0u8; 32];
+                if f.read_exact(&mut buf).is_ok() {
+                    return buf.iter().map(|b| format!("{:02x}", b)).collect();
+                }
+            }
+            // Fallback (not expected where the Unix socket lives): time + pid.
+            let nanos = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0);
+            format!("{:032x}{:08x}", nanos, std::process::id())
+        }
+        let socket_token = generate_mcp_socket_token();
         builder = builder.plugin(tauri_plugin_mcp::init_with_config(
             tauri_plugin_mcp::PluginConfig::new("o8".to_string())
                 .start_socket_server(true)
                 .socket_path(socket_path.into())
+                .auth_token(socket_token)
                 // #932: pin the default webview label so emit_to('main') resolves
                 // deterministically against the webview registry, not the
                 // ambiguous window-vs-webview label scope. Without this, JS-side
