@@ -15,6 +15,9 @@
  */
 
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join } from 'node:path';
 
 // ── Constants ──
 
@@ -25,12 +28,32 @@ const ENV_MASTER_KEY = 'O8_MASTER_KEY';
 const KEYCHAIN_SERVICE = 'ai.o8.master-key';
 const KEYCHAIN_ACCOUNT = 'default';
 
+function dataDir(): string {
+  return process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8');
+}
+
 /**
- * Dev-only static key. Reproducible across restarts when Keychain is absent
- * (e.g. `npm run dev`). NEVER used when a real Keychain entry exists.
- * 32 bytes = 256 bits, URL-safe base64.
+ * Read (or first-run create) a persisted random master key file at
+ * ~/.o8/master-key, mode 0600. This replaces the former hardcoded all-zeros
+ * "dev static key", which made AES-256-GCM encryption-at-rest worthless on any
+ * platform without the macOS Keychain (SECURITY_AUDIT_2026-07-02 §MED-1). The
+ * key is reproducible across restarts (persisted) but secret (random + 0600).
  */
-const DEV_STATIC_KEY = 'AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA';
+function readOrCreateKeyFile(): string {
+  const keyPath = join(dataDir(), 'master-key');
+  try {
+    if (existsSync(keyPath)) {
+      const existing = readFileSync(keyPath, 'utf-8').trim();
+      if (existing.length >= 40) return existing;
+    }
+  } catch {
+    // Unreadable — fall through to (re)create.
+  }
+  const key = generateKey();
+  mkdirSync(dataDir(), { recursive: true });
+  writeFileSync(keyPath, key, { encoding: 'utf-8', mode: 0o600 });
+  return key;
+}
 
 // ── Master key resolution ──
 
@@ -143,7 +166,7 @@ export async function resolveMasterKey(): Promise<string> {
         keychainKey = newKey;
         console.log('[master-key] Generated and stored new key in macOS Keychain');
       } else {
-        console.warn('[master-key] Failed to write key to Keychain, using dev fallback');
+        console.warn('[master-key] Failed to write key to Keychain, using persisted key file');
       }
     } else {
       console.log('[master-key] Resolved from macOS Keychain');
@@ -154,9 +177,9 @@ export async function resolveMasterKey(): Promise<string> {
     }
   }
 
-  // 3. Static dev fallback.
-  console.warn('[master-key] Using static dev fallback key — Keychain unavailable');
-  _cachedKey = DEV_STATIC_KEY;
+  // 3. Persisted random key file (0600) — non-macOS, or if the Keychain is
+  //    unavailable. NEVER a hardcoded constant (§MED-1).
+  _cachedKey = readOrCreateKeyFile();
   return _cachedKey;
 }
 

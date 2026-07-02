@@ -46,7 +46,7 @@ import { readFileSync, statSync, watch, existsSync } from 'node:fs';
 import { basename, extname, join, resolve } from 'node:path';
 import { execSync, execFile, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, timingSafeEqual } from 'node:crypto';
 import { homedir } from 'node:os';
 import { promisify } from 'node:util';
 import { migrateDataDirOnce } from '@/lib/data-dir-migration';
@@ -3856,9 +3856,19 @@ function terminateTerminalSession(sessionName: string, signal: string = 'SIGTERM
   broadcastLifecycle(sessionName, 'killed');
 }
 
+/** Constant-time equality for the ws-token (avoids a timing side-channel). */
+function wsTokenMatches(presented: string): boolean {
+  if (!presented || !WS_TOKEN) return false;
+  const a = Buffer.from(presented, 'utf-8');
+  const b = Buffer.from(WS_TOKEN, 'utf-8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
+}
+
 function isAuthorizedInternalRequest(req: import('http').IncomingMessage) {
   const auth = req.headers.authorization ?? '';
-  return auth === `Bearer ${WS_TOKEN}`;
+  const token = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  return wsTokenMatches(token);
 }
 
 // ── Server startup ──
@@ -4563,7 +4573,7 @@ const wss = new WebSocketServer({
     // Remote vs loopback (drives whether E2EE is offered) — socket peer truth.
     req.__o8Remote = !isLoopbackAddress(req.socket?.remoteAddress ?? '127.0.0.1');
     req.__o8Device = null;
-    if (token === WS_TOKEN) {
+    if (wsTokenMatches(token)) {
       done(true);
       return;
     }
