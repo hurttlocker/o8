@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { steerPacket } from '@/lib/orchestrator/operator-mission-service';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
@@ -18,6 +19,13 @@ export const dynamic = 'force-dynamic';
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+
+  // Operator/orchestrator-only: steering a packet is a control-plane verb; a
+  // dispatched worker has no business steering any packet (incl. others'). It
+  // presents the local-worker token via its CLI (§HIGH-4).
+  if (resolveRequestPrincipal(request) === 'worker') {
+    return operatorError('forbidden', 'Steering packets is operator-only; a dispatched worker cannot call this.', 403);
+  }
 
   const body = await parseJsonBody(request);
   const record = asRecord(body);

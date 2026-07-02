@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { rerunWithFeedback } from '@/lib/orchestrator/operator-mission-service';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
@@ -11,6 +12,12 @@ const MAX_FEEDBACK_LENGTH = 4000;
 export async function POST(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
+
+  // Operator/orchestrator-only control verb — a dispatched worker cannot rerun
+  // any packet (§HIGH-4).
+  if (resolveRequestPrincipal(request) === 'worker') {
+    return operatorError('forbidden', 'Rerunning packets is operator-only; a dispatched worker cannot call this.', 403);
+  }
 
   const body = await parseJsonBody(request);
   const record = asRecord(body);
