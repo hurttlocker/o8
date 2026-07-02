@@ -69,4 +69,17 @@ describe('packet control fields survive normalize', () => {
     const normalized = normalizeOrchestratorMissionState(stateWithPacket({}));
     expect(normalized.packets[0].operatorStopped).toBeUndefined();
   });
+
+  // #1329 — the originating orchestrator thread id lives only on the packet.
+  // Dropped ⇒ session-rule inheritance silently severs on the next round-trip
+  // (worker prompts lose the binding block, rules_applied never records).
+  it('preserves orchestratorThreadId across a normalize round-trip', () => {
+    const normalized = normalizeOrchestratorMissionState(stateWithPacket({ orchestratorThreadId: 'thoughts-123' }));
+    expect(normalized.packets[0].orchestratorThreadId).toBe('thoughts-123');
+  });
+
+  it('does not invent orchestratorThreadId when it was never set', () => {
+    const normalized = normalizeOrchestratorMissionState(stateWithPacket({}));
+    expect(normalized.packets[0].orchestratorThreadId).toBeUndefined();
+  });
 });

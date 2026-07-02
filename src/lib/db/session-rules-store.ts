@@ -97,10 +97,13 @@ export function listSessionRules(threadId: string): SessionRuleRecord[] {
   const thread = normalizeThreadId(threadId);
   if (!thread) return [];
   const db = getSqlite();
+  // rowid tiebreaker: datetime('now') is second-resolution, so rules added in
+  // the same second would otherwise sort by random UUID — rowid is insertion
+  // order, which is the order the operator wrote them.
   const rows = db.prepare(`
     SELECT * FROM session_rules
      WHERE thread_id = ? AND active = 1
-     ORDER BY created_at ASC, id ASC
+     ORDER BY created_at ASC, rowid ASC
   `).all(thread) as SessionRuleRow[];
   return rows.map(rowToRecord);
 }
