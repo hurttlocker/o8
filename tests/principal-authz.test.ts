@@ -1,0 +1,205 @@
+/**
+ * Principal capability matrix, driven through the REAL route handlers (RF-1).
+ *
+ * WHY THIS EXISTS — the "green tests encode the premise" gap, incident-proven.
+ * The unit test src/lib/auth/principal.test.ts calls resolveRequestPrincipal()
+ * with hand-built args and proves the classifier works IN ISOLATION. That is
+ * exactly the premise-encoding anti-pattern: it never proves a governance route
+ * actually CALLS the resolver on the path a worker takes. This suite imports each
+ * mutating control-plane route module and invokes its handler with a constructed
+ * Request that carries (or lacks) the local-worker token — so the assertion is
+ * "the real endpoint denies the worker", not "the guard function returns 'worker'".
+ *
+ * Capability matrix asserted (RF-1 §1.3), per principal:
+ *   - operator (no worker token, loopback)  → allowed / reaches real logic
+ *   - worker   (local-worker token)          → 403 (or governance card), never mutates
+ *   - unauthenticated remote (LAN, no token) → 401 at the real entry point
+ *
+ * The worker-token file + ws-token file are written to a temp data dir BEFORE any
+ * import, because worker-token.ts and the DB resolve their dir at module load.
+ */
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import { join } from 'node:path';
+
+import { describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+
+// Realtime publisher fans out over WS + touches the network; stub it so the
+// approvals handler runs its GOVERNANCE logic without side effects.
+vi.mock('@/lib/realtime/publisher', () => ({
+  publishRealtimeMutation: vi.fn(async () => {}),
+}));
+
+const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-principal-authz-'));
+const WORKER_TOKEN = 'local-worker-token-cafebabe0123456789abcdef01';
+const WS_TOKEN = 'operator-ws-token-0123456789abcdefaaaa';
+writeFileSync(join(dataDir, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf-8');
+writeFileSync(join(dataDir, 'ws-token'), `${WS_TOKEN}\n`, 'utf-8');
+process.env.O8_DATA_DIR = dataDir;
+process.env.CORTEX_IDE_DATA_DIR = dataDir;
+
+// Dynamic imports — must resolve the data dir set above.
+const approvals = await import('@/app/api/panel/approvals/route');
+const steer = await import('@/app/api/orchestrator/steer-packet/route');
+const reset = await import('@/app/api/orchestrator/reset-packet/route');
+const rerun = await import('@/app/api/orchestrator/rerun-with-feedback/route');
+const sessionRules = await import('@/app/api/orchestrator/session-rules/route');
+const devServer = await import('@/app/api/panel/dev-server/route');
+const fileIo = await import('@/app/api/panel/file-io/route');
+const { createTestApproval, getApproval } = await import('@/lib/approvals/store');
+const { panelGateMiddleware } = await import('@/middleware');
+
+type Principal = 'operator' | 'worker';
+
+/** A loopback request (so in-handler requirePanelAuth passes) carrying the
+ *  worker token when principal='worker'. This is how a dispatched worker's `o8`
+ *  CLI actually calls the loopback API. */
+function req(
+  url: string,
+  { principal, method = 'POST', body }: { principal: Principal; method?: string; body?: unknown },
+): NextRequest {
+  const headers: Record<string, string> = { host: 'localhost:3001' };
+  if (principal === 'worker') headers.authorization = `Bearer ${WORKER_TOKEN}`;
+  return new NextRequest(url, {
+    method,
+    headers,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+/** A genuine off-host LAN request with no credential — the unauthenticated
+ *  remote principal, denied at the middleware entry point. */
+function lanReq(url: string, method = 'POST'): NextRequest {
+  return new NextRequest(url.replace('localhost', '192.168.1.50'), {
+    method,
+    headers: { host: '192.168.1.50:3001' },
+  });
+}
+
+describe('principal-authz — approvals resolve (CRIT-1: a worker cannot self-approve)', () => {
+  const url = 'http://localhost:3001/api/panel/approvals';
+
+  it('WORKER token → 403, and the approval stays PENDING (no state transition)', async () => {
+    const approval = createTestApproval('sess:crit1-worker');
+    const res = await approvals.POST(req(url, { principal: 'worker', body: { action: 'approve', id: approval.id } }));
+    expect(res.status).toBe(403);
+    // Prove the real side effect did NOT happen — the card is untouched.
+    expect(getApproval(approval.id)?.status).toBe('pending');
+  });
+
+  it('OPERATOR (no worker token) → resolves the SAME card to approved', async () => {
+    const approval = createTestApproval('sess:crit1-operator');
+    const res = await approvals.POST(req(url, { principal: 'operator', body: { action: 'approve', id: approval.id } }));
+    expect(res.status).toBe(200);
+    expect(getApproval(approval.id)?.status).toBe('approved');
+  });
+
+  it('unauthenticated REMOTE → denied at the middleware entry point (401)', () => {
+    // /api/panel/approvals has no in-handler auth; the middleware IS its gate.
+    expect(panelGateMiddleware(lanReq(url)).status).toBe(401);
+  });
+});
+
+// Control-plane verbs that reject a worker outright (HIGH-4). For the operator
+// principal we assert the request is NOT rejected as a worker (it reaches real
+// logic and fails later on the missing packet — a 4xx/5xx that is NOT 403),
+// which proves the principal gate distinguishes without needing a live packet.
+describe('principal-authz — packet control verbs reject worker principals (HIGH-4)', () => {
+  const cases: Array<{ name: string; url: string; POST: (r: NextRequest) => Promise<Response>; body: unknown }> = [
+    { name: 'steer-packet', url: 'http://localhost:3001/api/orchestrator/steer-packet', POST: steer.POST, body: { packetId: 'pkt-x', message: 'go' } },
+    { name: 'reset-packet', url: 'http://localhost:3001/api/orchestrator/reset-packet', POST: reset.POST, body: { packetId: 'pkt-x' } },
+    { name: 'rerun-with-feedback', url: 'http://localhost:3001/api/orchestrator/rerun-with-feedback', POST: rerun.POST, body: { packetId: 'pkt-x', feedback: 'redo' } },
+  ];
+
+  for (const c of cases) {
+    it(`${c.name}: WORKER → 403`, async () => {
+      const res = await c.POST(req(c.url, { principal: 'worker', body: c.body }));
+      expect(res.status).toBe(403);
+    });
+
+    it(`${c.name}: OPERATOR → NOT 403 (passes the principal gate, reaches real logic)`, async () => {
+      const res = await c.POST(req(c.url, { principal: 'operator', body: c.body }));
+      expect(res.status).not.toBe(403);
+      expect(res.status).not.toBe(401);
+    });
+
+    it(`${c.name}: unauthenticated REMOTE → 401 (in-handler requirePanelAuth)`, async () => {
+      const res = await c.POST(lanReq(c.url));
+      expect(res.status).toBe(401);
+    });
+  }
+});
+
+describe('principal-authz — session rules writes are operator-only (#1329 HIGH-4)', () => {
+  const url = 'http://localhost:3001/api/orchestrator/session-rules';
+
+  it('POST: WORKER → 403; OPERATOR → 200 and the rule is persisted', async () => {
+    const workerRes = await sessionRules.POST(req(url, { principal: 'worker', body: { threadId: 't-1', text: 'no shortcuts' } }));
+    expect(workerRes.status).toBe(403);
+
+    const opRes = await sessionRules.POST(req(url, { principal: 'operator', body: { threadId: 't-1', text: 'no shortcuts' } }));
+    expect(opRes.status).toBe(200);
+    const json = await opRes.json();
+    // operatorSuccess wraps the payload as { ok, result }.
+    expect(json.result?.rule?.text).toBe('no shortcuts');
+  });
+
+  it('DELETE: WORKER → 403 (a worker may READ the rules that govern it, never edit)', async () => {
+    const res = await sessionRules.DELETE(req(`${url}?id=some-rule`, { principal: 'worker', method: 'DELETE' }));
+    expect(res.status).toBe(403);
+  });
+
+  it('GET (read) is allowed for a worker — inheritance requires reading the rules', async () => {
+    const res = await sessionRules.GET(req(`${url}?threadId=t-1`, { principal: 'worker', method: 'GET' }));
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('principal-authz — shell/RCE primitive is operator-only (HIGH-3 dev-server)', () => {
+  const url = 'http://localhost:3001/api/panel/dev-server';
+
+  it('WORKER → 403 before any shell spawn', async () => {
+    const res = await devServer.POST(req(url, { principal: 'worker', body: { repoPath: '/tmp', command: 'echo hi' } }));
+    expect(res.status).toBe(403);
+  });
+
+  it('OPERATOR → NOT 403 (passes the principal gate; missing fields → 400)', async () => {
+    const res = await devServer.POST(req(url, { principal: 'operator', body: {} }));
+    expect(res.status).toBe(400); // reached real handler: repoPath/command required
+  });
+});
+
+describe('principal-authz — worker file access is confined to registered repos (HIGH-6)', () => {
+  const url = 'http://localhost:3001/api/panel/file-io';
+
+  it('WORKER reading an arbitrary absolute path (/etc/hosts) → 403', async () => {
+    const res = await fileIo.GET(req(`${url}?path=${encodeURIComponent('/etc/hosts')}`, { principal: 'worker', method: 'GET' }));
+    expect(res.status).toBe(403);
+  });
+
+  it('OPERATOR reading the same arbitrary path → NOT 403 (terminal-grade operator tool)', async () => {
+    // The file exists on macOS/Linux CI runners; operator passes the worker gate
+    // and reads it (200) — the point is it is NOT the worker 403.
+    const res = await fileIo.GET(req(`${url}?path=${encodeURIComponent('/etc/hosts')}`, { principal: 'operator', method: 'GET' }));
+    expect(res.status).not.toBe(403);
+  });
+});
+
+// Fail-closed sweep: the absence of a credential must never read as operator.
+describe('principal-authz — fail-closed: unknown/absent principal is denied on every mutating verb', () => {
+  const mutating = [
+    'http://192.168.1.50:3001/api/panel/approvals',
+    'http://192.168.1.50:3001/api/orchestrator/steer-packet',
+    'http://192.168.1.50:3001/api/orchestrator/reset-packet',
+    'http://192.168.1.50:3001/api/orchestrator/rerun-with-feedback',
+    'http://192.168.1.50:3001/api/orchestrator/session-rules',
+    'http://192.168.1.50:3001/api/orchestrator/merge',
+    'http://192.168.1.50:3001/api/panel/dev-server',
+    'http://192.168.1.50:3001/api/panel/file-io',
+  ];
+
+  it.each(mutating)('LAN POST with no credential is 401 at the gate: %s', (url) => {
+    expect(panelGateMiddleware(lanReq(url)).status).toBe(401);
+  });
+});
