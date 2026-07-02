@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { readFile, stat } from 'node:fs/promises';
 import { extname } from 'node:path';
 import { existsSync } from 'node:fs';
+import { confineToRoots } from '@/lib/fs/safe-path';
 
 const MIME_MAP: Record<string, string> = {
   '.png': 'image/png',
@@ -29,13 +30,10 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: 'path param required' }, { status: 400 });
   }
 
-  // Resolve ~ to HOME
-  const home = process.env.HOME || require('os').homedir();
-  const resolved = filePath.startsWith('~') ? filePath.replace('~', home) : filePath;
-
-  // Security: must be under allowed roots
-  const allowed = ALLOWED_ROOTS.some(root => resolved.startsWith(root));
-  if (!allowed) {
+  // Security: normalize (collapsing any `..`) and confine to an allowed root.
+  // A plain startsWith on the un-normalized path let `~/../../etc/x` escape.
+  const resolved = confineToRoots(filePath, ALLOWED_ROOTS);
+  if (!resolved) {
     return NextResponse.json({ error: 'Path not allowed' }, { status: 403 });
   }
 

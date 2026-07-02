@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolvePortInfo } from '@/lib/panel/api-port';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,13 +24,40 @@ export const dynamic = 'force-dynamic';
 
 const LOCAL_TARGET = /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?([/?#]|$)/i;
 
+/**
+ * Deny targeting o8's OWN api/ws ports. Without this, browser/proxy is an SSRF
+ * that launders a request into the loopback-gated API: the internal fetch
+ * originates from 127.0.0.1, so the middleware trusts it as loopback and the
+ * gate is bypassed (SECURITY_AUDIT_2026-07-02 §CRIT-3, Chain A/B).
+ */
+function targetsOwnPort(url: string): boolean {
+  try {
+    const { apiPort, wsPort } = resolvePortInfo();
+    const port = parseInt(new URL(url).port || '80', 10);
+    return port === apiPort || port === wsPort;
+  } catch {
+    // Unparseable → treat as suspicious and deny.
+    return true;
+  }
+}
+
 export async function GET(request: NextRequest) {
   const url = request.nextUrl.searchParams.get('url') ?? '';
   if (!LOCAL_TARGET.test(url)) {
     return NextResponse.json({ error: 'localhost targets only' }, { status: 400 });
   }
+  if (targetsOwnPort(url)) {
+    return NextResponse.json({ error: 'cannot proxy the o8 server itself' }, { status: 400 });
+  }
   try {
-    const upstream = await fetch(url, { redirect: 'follow', headers: { accept: 'text/html,*/*' } });
+    // redirect:'manual' — never follow a redirect server-side. A followed
+    // redirect escapes the localhost allow-list (→ metadata/external/own-API
+    // SSRF). On a 3xx we hand the iframe the DIRECT url so the browser follows
+    // it in its own context (matching the Clerk fallback below).
+    const upstream = await fetch(url, { redirect: 'manual', headers: { accept: 'text/html,*/*' } });
+    if (upstream.status >= 300 && upstream.status < 400) {
+      return NextResponse.redirect(url, 302);
+    }
     // Origin-sensitive auth frameworks (Clerk, etc.) break when proxied to a
     // different origin — their frontend API rejects the mismatched origin and
     // the SPA renders blank. Detect the marker and hand the iframe the DIRECT

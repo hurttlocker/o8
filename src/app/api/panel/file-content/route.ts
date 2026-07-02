@@ -2,11 +2,9 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { readFile } from 'node:fs/promises';
-import { join } from 'node:path';
-import os from 'node:os';
 import { existsSync } from 'node:fs';
-
-const DEFAULT_ROOT = process.env.CORTEX_IDE_REVIEW_REPO_ROOT || process.cwd();
+import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
+import { expandHome, safeJoin } from '@/lib/fs/safe-path';
 
 export async function GET(request: Request) {
   try {
@@ -18,16 +16,23 @@ export async function GET(request: Request) {
       return NextResponse.json({ content: null, error: 'path param required' }, { status: 400 });
     }
 
-    const home = process.env.HOME || os.homedir();
-    let root = DEFAULT_ROOT;
+    // Resolve the root. A caller-supplied workspace MUST be a registered repo —
+    // never an arbitrary root. This closes the CRIT-3 arbitrary-read where
+    // workspace=/ turned the guard into a no-op (SECURITY_AUDIT_2026-07-02 §CRIT-3).
+    let root: string | null;
     if (workspaceParam) {
-      root = workspaceParam.startsWith('~') ? workspaceParam.replace('~', home) : workspaceParam;
+      const { repoRoot } = await resolveRegisteredRepoScope(expandHome(workspaceParam));
+      root = repoRoot;
+      if (!root) {
+        return NextResponse.json({ content: null, error: 'Workspace is not a registered repository' }, { status: 400 });
+      }
+    } else {
+      root = getDefaultLlmRepoRoot();
     }
 
-    const fullPath = join(root, filePath);
-
-    // Basic path traversal protection
-    if (!fullPath.startsWith(root)) {
+    // Normalize + confine: the file must stay inside the resolved root.
+    const fullPath = safeJoin(root, filePath);
+    if (!fullPath) {
       return NextResponse.json({ content: null, error: 'Path traversal not allowed' }, { status: 403 });
     }
 
