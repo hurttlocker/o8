@@ -362,7 +362,7 @@ function NoReposCallout({ onAddProject }: { onAddProject?: (mode?: 'scratch' | '
             borderWidth: 0,
             borderRadius: 999,
             background: 'var(--t-text)',
-            color: 'var(--t-bg-card)',
+            color: 'var(--t-chat-surface-bg)',
             opacity: hovered ? 0.88 : 1,
             cursor: 'pointer',
             fontFamily: 'var(--font-sans-system)',
