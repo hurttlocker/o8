@@ -45,6 +45,47 @@ function isGlobalScope(scope: string): boolean {
   return scope === 'global' || scope === '';
 }
 
+// ── Source-file grouping (#1346) ──
+// Spec-ingest writes directive titles as `<repoSlug>/<relPath> — <heading>`
+// (see spec-ingest.ts). Recover the source file so a wall of ingested rows can
+// collapse to "N directives — from AGENTS.md, CLAUDE.md, …" and group on expand.
+// Operator-authored directives that don't follow the format land under "Other".
+function directiveSourceFile(d: DirectiveRow): string {
+  const dash = d.title.indexOf(' — ');
+  if (dash === -1) return 'Other';
+  let src = d.title.slice(0, dash).trim();
+  if (d.repoName && src.startsWith(`${d.repoName}/`)) src = src.slice(d.repoName.length + 1);
+  return src || 'Other';
+}
+
+/** Section heading (the part after ` — `); the whole title when there's no prefix. */
+function directiveHeading(d: DirectiveRow): string {
+  const dash = d.title.indexOf(' — ');
+  if (dash === -1) return d.title;
+  return d.title.slice(dash + 3).trim() || d.title;
+}
+
+/** Group directives by source file, preserving first-seen order. */
+function groupBySource(rows: DirectiveRow[]): Array<[string, DirectiveRow[]]> {
+  const map = new Map<string, DirectiveRow[]>();
+  for (const d of rows) {
+    const key = directiveSourceFile(d);
+    const bucket = map.get(key);
+    if (bucket) bucket.push(d); else map.set(key, [d]);
+  }
+  return Array.from(map.entries());
+}
+
+/** Distinct source files in first-seen order — powers the collapsed summary. */
+function distinctSources(rows: DirectiveRow[]): string[] {
+  const seen: string[] = [];
+  for (const d of rows) {
+    const key = directiveSourceFile(d);
+    if (!seen.includes(key)) seen.push(key);
+  }
+  return seen;
+}
+
 function TierBadge({ label }: { label: string }) {
   return (
     <span style={{
@@ -87,6 +128,85 @@ function SectionLabel({ children }: { children: string }) {
   );
 }
 
+function Chevron({ expanded }: { expanded: boolean }) {
+  return (
+    <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"
+      style={{ display: 'block', flexShrink: 0, transform: expanded ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 120ms' }}>
+      <path d="m9 18 6-6-6-6" />
+    </svg>
+  );
+}
+
+/**
+ * An inherited directive tier (Repo / Global). Collapsed by default to a single
+ * summary row so a spec-ingested repo (100+ directives) reads as "what governs
+ * this session," not a file dump (#1346). Expands to the directives grouped by
+ * source file. An empty tier renders its labelled zero-state, no toggle.
+ */
+function CollapsibleDirectiveTier({ badgeLabel, nounLabel, rows, expanded, onToggle }: {
+  badgeLabel: string;
+  nounLabel: string;
+  rows: DirectiveRow[];
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  if (rows.length === 0) {
+    return (
+      <>
+        <SectionLabel>{badgeLabel}</SectionLabel>
+        <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)', paddingLeft: 8, paddingRight: 8, paddingBottom: 4 }}>
+          No {nounLabel} directives.
+        </div>
+      </>
+    );
+  }
+
+  const sources = distinctSources(rows);
+  const preview = sources.length > 4 ? `${sources.slice(0, 3).join(', ')} +${sources.length - 3} more` : sources.join(', ');
+  const groups = groupBySource(rows);
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-expanded={expanded}
+        aria-label={`${rows.length} ${nounLabel} directive${rows.length === 1 ? '' : 's'}${sources.length ? ` from ${sources.join(', ')}` : ''}`}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 6, width: '100%', textAlign: 'left',
+          paddingTop: 6, paddingBottom: 6, paddingLeft: 8, paddingRight: 6, borderRadius: 6,
+          borderWidth: 0, background: 'transparent', cursor: 'pointer', fontFamily: 'var(--font-sans-system)',
+          transition: 'background 120ms',
+        }}
+        onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-hover)'; }}
+        onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
+      >
+        <TierBadge label={badgeLabel} />
+        <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.3, color: 'var(--t-text-secondary)', overflowWrap: 'anywhere' }}>
+          {rows.length} {nounLabel} directive{rows.length === 1 ? '' : 's'}{preview ? ` — from ${preview}` : ''}
+        </span>
+        <span style={{ display: 'inline-flex', color: 'var(--t-text-faint)', flexShrink: 0 }}>
+          <Chevron expanded={expanded} />
+        </span>
+      </button>
+      {expanded && groups.map(([source, groupRows]) => (
+        <div key={source} style={{ display: 'flex', flexDirection: 'column', gap: 1, paddingLeft: 10, paddingBottom: 2 }}>
+          <div style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0.02em', color: 'var(--t-text-faint)', paddingLeft: 8, paddingTop: 3, paddingBottom: 1 }}>
+            {source} · {groupRows.length}
+          </div>
+          {groupRows.map((directive) => (
+            <div key={directive.id} style={{ display: 'flex', alignItems: 'flex-start', gap: 6, paddingTop: 2, paddingBottom: 2, paddingLeft: 8, paddingRight: 6 }}>
+              <span style={{ flex: 1, minWidth: 0, fontSize: 11.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.3, color: 'var(--t-text)', overflowWrap: 'anywhere' }}>
+                {directiveHeading(directive)}
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </>
+  );
+}
+
 export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) {
   const anchorRef = useRef<HTMLButtonElement | null>(null);
   const [open, setOpen] = useState(false);
@@ -98,6 +218,9 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
   // pressed × disables until its DELETE round-trip lands.
   const [removingId, setRemovingId] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
+  // Inherited tiers collapse to a summary row by default (#1346).
+  const [repoExpanded, setRepoExpanded] = useState(false);
+  const [globalExpanded, setGlobalExpanded] = useState(false);
 
   const loadSessionRules = useCallback(async () => {
     if (!threadId) {
@@ -180,7 +303,10 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
 
   const repoDirectives = directives.filter((d) => !isGlobalScope(d.scope));
   const globalDirectives = directives.filter((d) => isGlobalScope(d.scope));
-  const total = sessionRules.length + repoDirectives.length + globalDirectives.length;
+  // Chip counts SESSION rules only — the operator's own rules — so a spec-ingested
+  // repo's 100+ inherited directives don't bury the number that means "mine" (#1346).
+  // The popover carries the full per-tier breakdown.
+  const sessionCount = sessionRules.length;
   const lit = open || sessionRules.length > 0;
 
   const ruleRowStyle = {
@@ -200,7 +326,7 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
         ref={anchorRef}
         type="button"
         onClick={() => setOpen((prev) => !prev)}
-        aria-label={`Session rules (${total} active)`}
+        aria-label={`Session rules — ${sessionCount} session, ${repoDirectives.length} repo, ${globalDirectives.length} global`}
         aria-expanded={open}
         title="Rules governing this session — session rules are pinned into every turn and inherited by dispatched agents."
         onMouseEnter={() => setHovered(true)}
@@ -233,7 +359,7 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
           <path d="m3 12 1 1 2-2" />
           <path d="m3 18 1 1 2-2" />
         </svg>
-        <span>{total > 0 ? `Rules · ${total}` : 'Rules'}</span>
+        <span>{sessionCount > 0 ? `Rules · ${sessionCount}` : 'Rules'}</span>
       </button>
 
       <ComposerPopover anchorRef={anchorRef} open={open} onClose={() => setOpen(false)} align="start">
@@ -371,43 +497,21 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
             </div>
           )}
 
-          <SectionLabel>Repo</SectionLabel>
-          {repoDirectives.length === 0 ? (
-            <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)', paddingLeft: 8, paddingRight: 8, paddingBottom: 4 }}>
-              No repo directives.
-            </div>
-          ) : repoDirectives.map((directive) => (
-            <div key={directive.id} style={ruleRowStyle}>
-              <TierBadge label="Repo" />
-              <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.3, color: 'var(--t-text)', overflowWrap: 'anywhere' }}>
-                  {directive.title}
-                </span>
-                <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>
-                  Cortex directive · {directive.repoName || directive.scope}
-                </span>
-              </span>
-            </div>
-          ))}
+          <CollapsibleDirectiveTier
+            badgeLabel="Repo"
+            nounLabel="repo"
+            rows={repoDirectives}
+            expanded={repoExpanded}
+            onToggle={() => setRepoExpanded((prev) => !prev)}
+          />
 
-          <SectionLabel>Global</SectionLabel>
-          {globalDirectives.length === 0 ? (
-            <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text-faint)', paddingLeft: 8, paddingRight: 8, paddingBottom: 4 }}>
-              No global directives.
-            </div>
-          ) : globalDirectives.map((directive) => (
-            <div key={directive.id} style={ruleRowStyle}>
-              <TierBadge label="Global" />
-              <span style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                <span style={{ fontSize: 12, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.3, color: 'var(--t-text)', overflowWrap: 'anywhere' }}>
-                  {directive.title}
-                </span>
-                <span style={{ fontSize: 9.5, fontWeight: 300, letterSpacing: '-0.4px', color: 'var(--t-text-faint)' }}>
-                  Cortex directive · global scope
-                </span>
-              </span>
-            </div>
-          ))}
+          <CollapsibleDirectiveTier
+            badgeLabel="Global"
+            nounLabel="global"
+            rows={globalDirectives}
+            expanded={globalExpanded}
+            onToggle={() => setGlobalExpanded((prev) => !prev)}
+          />
         </div>
       </ComposerPopover>
     </>
