@@ -29,6 +29,16 @@ export interface TTSEngineState {
   playbackRate: number;
   activeMessageId: string | null;
   usingFallback: boolean;
+  /** The source block currently being spoken, for voice-playback line
+   *  highlighting (desktop native path only — mirrors the Rust `o8:tts-chunk`
+   *  event). `null` when idle or on the web fallback (no boundary signal). */
+  activeChunk: {
+    messageId: string;
+    srcStart: number;
+    srcEnd: number;
+    chunkIndex: number;
+    chunkCount: number;
+  } | null;
 }
 
 type StateListener = (state: TTSEngineState) => void;
@@ -45,6 +55,7 @@ class TTSEngineImpl {
     playbackRate: 1,
     activeMessageId: null,
     usingFallback: false,
+    activeChunk: null,
   };
   private animFrameId: number | null = null;
   // Set up the native `o8:tts-state` subscription exactly once (desktop only).
@@ -111,8 +122,9 @@ class TTSEngineImpl {
       // single-flight supersedes any current playback, so we deliberately do
       // NOT stop() first: a stop would emit a spurious `idle` that races the
       // new `playing` and clears activeMessageId.
-      await invoke('tts_speak', { text });
-      // state transitions ('playing' → 'idle') arrive via o8:tts-state.
+      await invoke('tts_speak', { text, messageId });
+      // state transitions ('playing' → 'idle') arrive via o8:tts-state, and the
+      // spoken-block spans (for line highlighting) via o8:tts-chunk.
     } catch (err) {
       console.warn('[TTS] Native tts_speak failed, using web path:', err);
       await this.playViaWeb(text, messageId);
@@ -125,18 +137,37 @@ class TTSEngineImpl {
     if (this.tauriListenerSetup) return;
     this.tauriListenerSetup = true;
     import('@tauri-apps/api/event')
-      .then(({ listen }) =>
-        listen<{ state?: 'idle' | 'playing' | 'paused' }>('o8:tts-state', (e) => {
+      .then(({ listen }) => {
+        void listen<{ state?: 'idle' | 'playing' | 'paused' }>('o8:tts-state', (e) => {
           const next = e.payload?.state;
           if (next === 'playing') {
             this.updateState({ state: 'playing' });
           } else if (next === 'paused') {
             this.updateState({ state: 'paused' });
           } else if (next === 'idle') {
-            this.updateState({ state: 'idle', activeMessageId: null, currentTime: 0, duration: 0 });
+            // Clear the highlight alongside the active message on stop/complete;
+            // leave activeChunk untouched on paused/playing.
+            this.updateState({ state: 'idle', activeMessageId: null, activeChunk: null, currentTime: 0, duration: 0 });
           }
-        }),
-      )
+        });
+        void listen<{ messageId?: string; chunkIndex?: number; chunkCount?: number; srcStart?: number; srcEnd?: number }>('o8:tts-chunk', (e) => {
+          const p = e.payload;
+          // Only reflect chunks for the message we believe is active — guards a
+          // late chunk from a playback that a newer speak already superseded.
+          if (!p || typeof p.messageId !== 'string' || p.messageId !== this._state.activeMessageId) {
+            return;
+          }
+          this.updateState({
+            activeChunk: {
+              messageId: p.messageId,
+              srcStart: p.srcStart ?? 0,
+              srcEnd: p.srcEnd ?? 0,
+              chunkIndex: p.chunkIndex ?? 0,
+              chunkCount: p.chunkCount ?? 0,
+            },
+          });
+        });
+      })
       .catch((err) => {
         console.warn('[TTS] o8:tts-state subscribe failed:', err);
         this.tauriListenerSetup = false; // allow a retry on the next play

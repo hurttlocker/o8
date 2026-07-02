@@ -154,10 +154,29 @@ pub fn toggle_pause() -> bool {
 /// single-flight: a new call STOPS the previous playback). Any failure before
 /// audio plays falls back to the macOS `say` binary. Returns immediately;
 /// playback happens off-thread.
+///
+/// Thin wrapper: every non-message caller (Symon, filler, term-watch, agent
+/// confirms, the Ask answer path) keeps the classic no-messageId behavior —
+/// `build_chunks` chunking and no `o8:tts-chunk` events — byte-for-byte
+/// unchanged from before voice-playback line highlighting existed.
 pub fn play_thread(text: String, config: TtsConfig) {
+    play_thread_with_message(text, config, None);
+}
+
+/// Speak `text`, optionally attributing playback to `message_id`. When `Some`
+/// (the message play button), the ORIGINAL text is chunked at BLOCK (`\n\n`)
+/// boundaries with byte spans (`build_chunks_with_spans`) and an `o8:tts-chunk`
+/// event fires as each chunk STARTS playing, so the renderer can highlight the
+/// spoken line. When `None`, the classic `build_chunks` path runs and no new
+/// event is emitted.
+pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Option<String>) {
     if text.trim().is_empty() {
         return;
     }
+
+    // Spans index into the ORIGINAL text (exactly what the renderer paints), so
+    // capture it BEFORE the lossy speech normalization below.
+    let raw_text = text.clone();
 
     // Normalize for SPEECH only (the displayed/pasted text keeps the original):
     // strip markdown/ANSI/tables/code-fences, expand currency/units/numbers, and
@@ -243,13 +262,29 @@ pub fn play_thread(text: String, config: TtsConfig) {
         let mut tts_failed_before_audio = false;
 
         rt.block_on(async {
-            let chunks = build_chunks(&text);
-            let chunks = if chunks.is_empty() {
-                vec![text.clone()]
+            // Chunk the text. With a messageId we split at BLOCK boundaries and
+            // carry each chunk's source span so the renderer can highlight the
+            // spoken line; otherwise the classic chunker (identical to legacy).
+            let chunk_specs: Vec<(String, Option<(usize, usize)>)> = if message_id.is_some() {
+                let spans = build_chunks_with_spans(&raw_text);
+                if spans.is_empty() {
+                    vec![(text.clone(), None)]
+                } else {
+                    spans
+                        .into_iter()
+                        .map(|c| (c.text, Some((c.src_start, c.src_end))))
+                        .collect()
+                }
             } else {
-                chunks
+                let chunks = build_chunks(&text);
+                let chunks = if chunks.is_empty() {
+                    vec![text.clone()]
+                } else {
+                    chunks
+                };
+                chunks.into_iter().map(|t| (t, None)).collect()
             };
-            log::info!("[tts] split into {} chunk(s)", chunks.len());
+            log::info!("[tts] split into {} chunk(s)", chunk_specs.len());
 
             // Audio device + sink, created on this thread.
             let (_stream, handle) = match rodio::OutputStream::try_default() {
@@ -289,9 +324,9 @@ pub fn play_thread(text: String, config: TtsConfig) {
             // One-chunk lookahead: `pending` always holds the audio for chunk
             // `i`, synthesized on the previous iteration, so there is no silent
             // network gap between chunks.
-            let mut pending = Some(synthesize_chunk(&chunks[0], &config, 0).await);
+            let mut pending = Some(synthesize_chunk(&chunk_specs[0].0, &config, 0).await);
 
-            for i in 0..chunks.len() {
+            for i in 0..chunk_specs.len() {
                 // Stop / supersede check between chunks.
                 if !is_active.load(Ordering::SeqCst)
                     || generation.load(Ordering::SeqCst) != my_gen
@@ -334,12 +369,23 @@ pub fn play_thread(text: String, config: TtsConfig) {
                 match appended {
                     Ok(()) => {
                         any_chunk_played = true;
+                        // As this chunk STARTS playing, tell the renderer which
+                        // SOURCE block it covers so the spoken line highlights +
+                        // scroll-follows. Only with a messageId (the play button)
+                        // and while this thread is still the current generation.
+                        if let (Some(mid), Some((src_start, src_end))) =
+                            (message_id.as_ref(), chunk_specs[i].1)
+                        {
+                            if generation.load(Ordering::SeqCst) == my_gen {
+                                emit_tts_chunk(mid, i, chunk_specs.len(), src_start, src_end);
+                            }
+                        }
                         // Drain chunk `i` while synthesizing chunk `i+1` in
                         // parallel, so the next audio is ready the moment this
                         // one finishes.
                         let prefetch = async {
-                            if i + 1 < chunks.len() {
-                                Some(synthesize_chunk(&chunks[i + 1], &config, i + 1).await)
+                            if i + 1 < chunk_specs.len() {
+                                Some(synthesize_chunk(&chunk_specs[i + 1].0, &config, i + 1).await)
                             } else {
                                 None
                             }
@@ -491,6 +537,30 @@ fn emit_tts_state(state: &str) {
     }
 }
 
+/// Emit `o8:tts-chunk` as a chunk starts playing, so the message renderer can
+/// highlight the SOURCE block being spoken and scroll it into view. Broadcast to
+/// `main` only (the dock never renders message bodies). Mirrors `emit_tts_state`
+/// but carries the block span instead of a state string.
+fn emit_tts_chunk(
+    message_id: &str,
+    chunk_index: usize,
+    chunk_count: usize,
+    src_start: usize,
+    src_end: usize,
+) {
+    use tauri::Emitter;
+    if let Some(app) = super::app_handle() {
+        let payload = serde_json::json!({
+            "messageId": message_id,
+            "chunkIndex": chunk_index,
+            "chunkCount": chunk_count,
+            "srcStart": src_start,
+            "srcEnd": src_end,
+        });
+        let _ = app.emit("o8:tts-chunk", payload);
+    }
+}
+
 fn provider_label(config: &TtsConfig) -> &'static str {
     match config.provider {
         super::TtsProvider::ElevenLabs => "ElevenLabs",
@@ -535,6 +605,96 @@ fn build_chunks(extracted: &str) -> Vec<String> {
         }
     }
     chunks
+}
+
+/// One spoken chunk plus the byte span of its SOURCE block in the ORIGINAL
+/// (pre-normalization) text — so a chunk can tell the renderer which
+/// `\n\n`-delimited block to highlight while it plays. Every sub-chunk of a
+/// block carries that block's span, so highlighting lands at block/paragraph
+/// granularity (the only structure that survives `prepare_text_for_speech`).
+struct SpokenChunk {
+    text: String,
+    src_start: usize,
+    src_end: usize,
+}
+
+/// Like `build_chunks`, but scans the ORIGINAL text and tracks the byte span of
+/// each `\n\n`-delimited block. `prepare_text_for_speech` runs PER BLOCK; blocks
+/// that normalize to empty (e.g. code fences) yield no chunk, so the highlight
+/// naturally skips them. The short lead chunk is carved from the FIRST spoken
+/// block only, preserving first-audio latency.
+fn build_chunks_with_spans(raw: &str) -> Vec<SpokenChunk> {
+    let mut chunks: Vec<SpokenChunk> = Vec::new();
+    let bytes = raw.as_bytes();
+    let len = raw.len();
+    let mut block_start = 0usize;
+    let mut idx = 0usize;
+    // `\n` is ASCII (0x0A) and never a UTF-8 continuation byte, so scanning the
+    // raw bytes for it can't land mid-codepoint — the slices below stay valid.
+    let mut lead_pending = true;
+
+    loop {
+        let at_end = idx >= len;
+        let is_sep = !at_end && bytes[idx] == b'\n' && idx + 1 < len && bytes[idx + 1] == b'\n';
+        if at_end || is_sep {
+            append_block(&raw[block_start..idx], block_start, idx, &mut lead_pending, &mut chunks);
+            if at_end {
+                break;
+            }
+            // Skip the whole run of newlines so a blank run doesn't emit an
+            // empty block (matches `split("\n\n")`'s trim-and-skip behavior).
+            idx += 2;
+            while idx < len && bytes[idx] == b'\n' {
+                idx += 1;
+            }
+            block_start = idx;
+        } else {
+            idx += 1;
+        }
+    }
+    chunks
+}
+
+/// Normalize one source block for speech and push its sub-chunk(s), each tagged
+/// with the block's byte span. On the first spoken block, carve the short lead
+/// chunk (≤ `LEAD_CHUNK_CHARS`) so the initial round-trip returns fast.
+fn append_block(
+    block_raw: &str,
+    src_start: usize,
+    src_end: usize,
+    lead_pending: &mut bool,
+    out: &mut Vec<SpokenChunk>,
+) {
+    let spoken_owned = crate::speech_text::prepare_text_for_speech(block_raw);
+    let spoken = spoken_owned.trim();
+    if spoken.is_empty() {
+        return;
+    }
+
+    let body: &str = if *lead_pending {
+        *lead_pending = false;
+        let (lead, remainder) = carve_lead_chunk(spoken, LEAD_CHUNK_CHARS);
+        if !lead.is_empty() {
+            out.push(SpokenChunk { text: lead, src_start, src_end });
+            remainder
+        } else {
+            spoken
+        }
+    } else {
+        spoken
+    };
+
+    let body = body.trim();
+    if body.is_empty() {
+        return;
+    }
+    if body.len() <= MAX_CHUNK_CHARS {
+        out.push(SpokenChunk { text: body.to_string(), src_start, src_end });
+    } else {
+        for piece in split_long_paragraph(body) {
+            out.push(SpokenChunk { text: piece, src_start, src_end });
+        }
+    }
 }
 
 /// Takes the first sentence-ish slice (≤ `max` chars) as a short lead chunk.

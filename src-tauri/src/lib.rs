@@ -2964,8 +2964,8 @@ fn stt_set_input_device(device_uid: String) -> Result<(), String> {
 /// `!Send`), so it returns immediately and never blocks the webview. macOS only.
 #[cfg(target_os = "macos")]
 #[tauri::command]
-fn tts_speak(text: String) {
-    tts::playback::play_thread(text, tts::load_config());
+fn tts_speak(text: String, message_id: Option<String>) {
+    tts::playback::play_thread_with_message(text, tts::load_config(), message_id);
 }
 
 /// Stop any active TTS playback immediately (the "say"/Ask voice). Single-flight
