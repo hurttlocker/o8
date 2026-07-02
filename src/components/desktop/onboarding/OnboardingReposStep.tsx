@@ -142,6 +142,10 @@ export function OnboardingReposStep({
   const [loading, setLoading] = useState(true);
   const [reposError, setReposError] = useState<string | null>(null);
   const [addingFolder, setAddingFolder] = useState(false);
+  // True only while a just-picked folder is being registered (POST in flight).
+  // Distinct from `addingFolder` (which also covers the native picker) so we can
+  // pin a pending row and keep the empty state from re-flashing mid-add (#1344).
+  const [registering, setRegistering] = useState(false);
   // Per-repo clone progress (#1339): key → status while Continue clones + registers.
   const [rowStatus, setRowStatus] = useState<Record<string, 'cloning' | 'done' | 'error'>>({});
   const [saving, setSaving] = useState(false);
@@ -187,6 +191,9 @@ export function OnboardingReposStep({
     try {
       const folderPath = await pickFolderPath();
       if (!folderPath) return;
+      // Folder chosen — registration is now in flight. Pin the pending state so
+      // the empty state doesn't re-flash before the repo row renders (#1344).
+      setRegistering(true);
       const response = await fetch('/api/panel/repos', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -210,6 +217,7 @@ export function OnboardingReposStep({
       setReposError(err instanceof Error ? err.message : 'Unable to add that folder.');
     } finally {
       setAddingFolder(false);
+      setRegistering(false);
     }
   }, [addingFolder]);
 
@@ -362,10 +370,22 @@ export function OnboardingReposStep({
             />
           )}
 
-          {/* Authenticated but zero repos anywhere — explicit empty state */}
-          {authenticated === true && allItems.length === 0 && !reposError && (
+          {/* Registering a just-picked folder — pinned pending row so the empty
+              state never re-flashes during the add round-trip (#1344). */}
+          {registering && allItems.length === 0 && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 20, justifyContent: 'center', color: 'var(--t-text-secondary)', fontSize: 13 }}>
+              <Spinner /> Adding repository&hellip;
+            </div>
+          )}
+
+          {/* Zero repos anywhere — copy branched on GitHub connection so an
+              unconnected machine never references a GitHub account it was never
+              linked to (#1344). */}
+          {allItems.length === 0 && !reposError && !registering && (
             <div style={{ padding: 20, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13, lineHeight: 1.5 }}>
-              No repos found on your GitHub account. Use &ldquo;Choose a folder on this Mac&rdquo; below, or add repos later from the dashboard.
+              {authenticated === false
+                ? <>Add a local repository folder to get started.</>
+                : <>No repos found on your GitHub account. Use &ldquo;Choose a folder on this Mac&rdquo; below, or add repos later from the dashboard.</>}
             </div>
           )}
 
