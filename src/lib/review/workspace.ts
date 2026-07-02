@@ -45,6 +45,14 @@ export interface WorkspaceReviewSnapshotOptions {
   workspacePath?: string | null;
   repoSlug?: string | null;
   allowFallbackPullRequests?: boolean;
+  /**
+   * Skip every network `gh` call (PR list, PR files, linked-issue lookups) and
+   * return only the local git working-tree data (changedFiles + branch +
+   * repoSlug). The Workspace changes view consumes only those fields, so this
+   * turns a multi-second cold-network snapshot into a sub-second local-git read
+   * on freshly-added repos. See #1340.
+   */
+  changesOnly?: boolean;
 }
 
 export function invalidateReviewSnapshotCache() {
@@ -576,6 +584,7 @@ function reviewSnapshotCacheKey(options: WorkspaceReviewSnapshotOptions) {
     path.resolve(options.workspacePath || REVIEW_REPO_ROOT),
     options.repoSlug || REVIEW_REPO_SLUG || '',
     options.allowFallbackPullRequests === false ? 'strict' : 'fallback',
+    options.changesOnly ? 'changes-only' : 'full',
   ].join('::');
 }
 
@@ -606,6 +615,8 @@ export async function getWorkspaceReviewSnapshot(options: WorkspaceReviewSnapsho
 async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOptions = {}): Promise<WorkflowReviewSnapshot> {
   const repoRoot = path.resolve(options.workspacePath || REVIEW_REPO_ROOT);
   const allowFallbackPullRequests = options.allowFallbackPullRequests !== false;
+  const changesOnly = options.changesOnly === true;
+  const startedAt = Date.now();
   const warnings: string[] = [];
 
   const runInContext = async (command: string, args: string[]) => {
@@ -649,7 +660,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     tryRunInContext('git', ['log', '--format=%H%x09%h%x09%s', '-8']),
     tryRunInContext('git', ['rev-parse', 'HEAD']),
     tryRunInContext('git', ['worktree', 'list', '--porcelain']),
-    repoSlug
+    repoSlug && !changesOnly
       ? tryRunInContext('gh', [
           'pr',
           'list',
@@ -663,7 +674,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
           'number,title,url,headRefName,baseRefName,isDraft,reviewDecision,state,body',
         ])
       : Promise.resolve(''),
-    repoSlug && allowFallbackPullRequests
+    repoSlug && allowFallbackPullRequests && !changesOnly
       ? tryRunInContext('gh', [
           'pr',
           'list',
@@ -704,7 +715,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     linkedIssueNumbers: parseLinkedIssueNumbers(pullRequest.body),
   }));
 
-  const pullRequestFiles = pullRequests[0] && repoSlug
+  const pullRequestFiles = pullRequests[0] && repoSlug && !changesOnly
     ? parseJson<PullRequestFileSummary[]>(
         await tryRunInContext('gh', [
           'api',
@@ -724,7 +735,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
       : 'Working tree clean.';
 
   const linkedIssueNumbers = pullRequests.flatMap((pullRequest) => pullRequest.linkedIssueNumbers ?? []);
-  const activeIssues = repoSlug
+  const activeIssues = repoSlug && !changesOnly
     ? (await Promise.all(
         (linkedIssueNumbers.length ? linkedIssueNumbers : [FALLBACK_ACTIVE_ISSUE_NUMBER])
           .filter((value, index, list) => Number.isFinite(value) && list.indexOf(value) === index)
@@ -744,7 +755,7 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     : [];
   const activeIssue = activeIssues[0];
 
-  if (repoSlug && !activeIssues.length) {
+  if (!changesOnly && repoSlug && !activeIssues.length) {
     if (linkedIssueNumbers.length) {
       warnings.push('Unable to load the linked GitHub issues for the current review lane.');
     } else if (Number.isFinite(FALLBACK_ACTIVE_ISSUE_NUMBER)) {
@@ -754,13 +765,17 @@ async function _fetchWorkspaceReviewSnapshot(options: WorkspaceReviewSnapshotOpt
     // entirely — the "no active review" state is the correct default.
   }
 
-  if (!pullRequests.length) {
+  if (!changesOnly && !pullRequests.length) {
     warnings.push('No open GitHub pull request is attached to the current branch yet.');
   }
 
   if (!worktrees.length) {
     warnings.push('No git worktree data was found.');
   }
+
+  console.log(
+    `[workspace-perf] snapshot ${changesOnly ? 'changes-only' : 'full'} repo=${repoSlug || repoRoot} files=${changedFiles.length} in ${Date.now() - startedAt}ms`,
+  );
 
   return {
     generatedAt: new Date().toISOString(),

@@ -27,6 +27,10 @@ export async function GET(request: Request) {
     const workspacePath = searchParams.get('workspace');
     const repoSlug = searchParams.get('repo');
     const strictBranch = searchParams.get('strictBranch') === '1';
+    // The Workspace changes view only needs local git working-tree data. When
+    // changesOnly=1 the snapshot skips every network `gh` call — the slow path
+    // that made a freshly-added repo blank for ~13s on first open (#1340).
+    const changesOnly = searchParams.get('changesOnly') === '1';
 
     // Do not let a missing workspace param silently fall through to
     // process.cwd(). The client is expected to pass an absolute workspace
@@ -43,6 +47,7 @@ export async function GET(request: Request) {
       workspacePath,
       repoSlug,
       allowFallbackPullRequests: !strictBranch,
+      changesOnly,
     });
     return NextResponse.json(snapshot, {
       headers: {
