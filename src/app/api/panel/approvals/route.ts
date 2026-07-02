@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { applyApprovedFileEdit } from '@/lib/approvals/file-edit';
 import { applyApprovedSpecUpdate } from '@/lib/approvals/spec-update';
 import { invalidateCommandCenterSnapshotCaches } from '@/lib/command-center/snapshot';
@@ -150,6 +151,19 @@ export async function POST(request: NextRequest) {
 
   if (action !== 'approve' && action !== 'reject') {
     return NextResponse.json({ ok: false, error: 'Unknown action' }, { status: 400 });
+  }
+
+  // Operator-only: a dispatched worker must NOT resolve approvals. Approving a
+  // lane-merge continuation re-dispatches the merge as actor:'user', which skips
+  // every governance gate (file-size, security/budget merge-gate, durable-review,
+  // merge-policy). A worker self-approving its own card is the CRIT-1 moat
+  // collapse. The worker presents O8_WORKER_TOKEN via its CLI; the operator
+  // webview + orchestrator MCP never do. (SECURITY_AUDIT_2026-07-02 §CRIT-1.)
+  if (resolveRequestPrincipal(request) === 'worker') {
+    return NextResponse.json(
+      { ok: false, error: 'Approvals are operator-only; a worker cannot resolve them.' },
+      { status: 403, headers: { 'Cache-Control': 'no-store, max-age=0' } },
+    );
   }
 
   const id = typeof body.id === 'string' ? body.id.trim() : '';
