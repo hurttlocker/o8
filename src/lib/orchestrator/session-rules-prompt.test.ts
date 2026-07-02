@@ -57,6 +57,23 @@ describe('per-turn injection (withSessionRules)', () => {
     addSessionRule('thoughts-leak-src', 'private to source thread');
     expect(withSessionRules('msg', 'thoughts-leak-other')).toBe('msg');
   });
+
+  // In-band dispatch teaching — the mechanism that makes worker inheritance
+  // reachable end-to-end: nothing else ever tells the model its own thread id,
+  // so the turn block must carry the id + the create_mission instruction.
+  it('teaches the model its thread id + the orchestratorThreadId dispatch arg', () => {
+    addSessionRule('thoughts-teach', 'a binding rule');
+    const turn = withSessionRules('user msg', 'thoughts-teach');
+    expect(turn).toContain('orchestratorThreadId: "thoughts-teach"');
+    expect(turn).toContain('create_mission');
+  });
+
+  it('keeps the teaching line OUT of worker-facing blocks (no teachDispatch)', () => {
+    addSessionRule('thoughts-worker-block', 'a binding rule');
+    const block = buildSessionRulesBlock('thoughts-worker-block');
+    expect(block).toContain('- a binding rule');
+    expect(block).not.toContain('orchestratorThreadId');
+  });
 });
 
 describe('buildSessionRulesBlock', () => {
