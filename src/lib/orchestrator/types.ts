@@ -238,6 +238,16 @@ export interface OrchestratorPacket {
    * the selected runtime while preserving requested future providers.
    */
   workerRouting?: WorkerRouting;
+  /**
+   * Originating orchestrator thread id (#1329). Stamped at mission creation
+   * when the dispatch came from an orchestrator thread that has session rules.
+   * `buildPacketPrompt` reads it to inherit that thread's "Operator session
+   * rules (binding)" block, and dispatch records a `rules_applied` lane event
+   * snapshotting the exact rules. Undefined on legacy / thread-less dispatches
+   * — absence simply means no session-rule inheritance (graceful degrade,
+   * mirrors the {@link OrchestratorPacket.useBrain} precedent).
+   */
+  orchestratorThreadId?: string | null;
   /** Rendered packet prompt body (surfaced in details popover). Optional. */
   prompt?: string;
   /** Files allowed to be touched by this packet. Alias of predictedFiles when present. */

@@ -4,6 +4,7 @@ import { ComposerPopover } from './chat-panel/ComposerPopover';
 import { AttachFilesButton } from './AttachFilesButton';
 import { SparklesIcon } from './ThoughtsIcons';
 import { MicButton } from './MicButton';
+import { SessionRulesChip } from './SessionRulesChip';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
@@ -754,6 +755,7 @@ export function InputButtons({
   onSetCollide,
   permissionMode,
   onTogglePermission,
+  sessionRulesThreadId,
   repoLabel,
   displayMessagesCount = 0,
   working = false,
@@ -791,6 +793,12 @@ export function InputButtons({
   onSetCollide?: (enabled: boolean) => void;
   permissionMode?: 'full' | 'plan';
   onTogglePermission?: () => void;
+  /**
+   * Session rules (#1329). `undefined` = surface doesn't carry session rules
+   * (CLI lanes) → chip hidden. `null` = orchestrator surface, thread not yet
+   * minted → chip shows read-only tiers. String = active thread, fully editable.
+   */
+  sessionRulesThreadId?: string | null;
   repoLabel?: string | null;
   /**
    * Transcript size in the parent panel. When > 0 the chat is no longer
@@ -921,6 +929,13 @@ export function InputButtons({
           </svg>
         )}
       </button>
+
+      {/* Session rules (#1329) — "Rules · N" chip, sibling to the permission
+          chip. Lists the merged Session/Repo/Global rule set; session tier is
+          editable inline. Only on orchestrator surfaces (undefined = hidden). */}
+      {sessionRulesThreadId !== undefined ? (
+        <SessionRulesChip threadId={sessionRulesThreadId} repoPath={repoPath} />
+      ) : null}
 
       {/* Collide / MoA toggle — icon-only, sibling to the permission chip.
           Active = accent-tinted; Claude + Codex collide, Claude synthesizes. */}

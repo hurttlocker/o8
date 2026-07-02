@@ -206,7 +206,11 @@ export type LaneEventVerb =
   | 'browser_acted'
   // Operator picked a best-of-N comparison winner (item 3). Recorded on the
   // winner's lane. Payload: { groupId, winnerPacketId, archivedPacketIds }
-  | 'comparison_resolved';
+  | 'comparison_resolved'
+  // Session rules governed this packet at dispatch (#1329). Snapshot of the
+  // exact operator session rules injected into the worker prompt, so review is
+  // "what changed, under which constraints." Payload: { threadId, ruleCount, rules }
+  | 'rules_applied';
 
 export type AgentReportReason =
   | 'needs_clarification'

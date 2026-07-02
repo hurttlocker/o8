@@ -116,6 +116,10 @@ export const MISSION_TOOLS: McpTool[] = [
           items: { type: 'string' },
           description: 'Best-of-N — race the task across N candidates (one per model string), each in its own isolated worktree. The operator then compares the N diffs side-by-side and merges the winner through the review gate, archiving the losers. Same model repeated (["codex","codex","codex"]) runs N attempts of one runtime; mix runtimes (["codex","gemini"]) to compare them. Max 4. Omit for a single packet. Use when a task is worth a bake-off — risky, ambiguous, or when you want the best of several attempts.',
         },
+        orchestratorThreadId: {
+          type: 'string',
+          description: 'Session-rule inheritance (#1329) — your active orchestrator thread id (e.g. "thoughts-…"). When set, every worker prompt carries the thread\'s active "Operator session rules (binding)" block and dispatch records a rules_applied lane event. Omit when dispatching outside a rule-bearing thread.',
+        },
       },
       required: ['repoPath'],
     },
@@ -807,6 +811,9 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const existingBranchPolicy = parseExistingBranchPolicy(args.existingBranchPolicy);
     const useBrain = typeof args.useBrain === 'boolean' ? args.useBrain : undefined;
     const huddle = typeof args.huddle === 'boolean' ? args.huddle : undefined;
+    // #1329 — session-rule inheritance. When the orchestrator passes its active
+    // thread id, workers inherit that thread's operator session rules.
+    const orchestratorThreadId = optionalString(args, 'orchestratorThreadId') || undefined;
     // Best-of-N (item 3): clamp candidates to ≤4 (the handler calls the service
     // directly, so it does its own clamp like the create-mission route does).
     const comparisonModelsRaw = Array.isArray(args.comparisonModels)
@@ -837,6 +844,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
         useBrain,
         huddle,
         comparisonModels,
+        orchestratorThreadId,
       });
       if (shouldDispatch && createResult && !('error' in createResult)) {
         // Fire-and-forget: dispatch can take 30–60s on its own, and the
@@ -869,6 +877,7 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
       useBrain,
       huddle,
       comparisonModels,
+      orchestratorThreadId,
     });
     if (shouldDispatch && createResult && !('error' in createResult)) {
       void dispatchMission({ missionId: createResult.missionId }).catch((err) => {
