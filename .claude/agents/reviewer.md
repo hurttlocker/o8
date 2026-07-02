@@ -36,6 +36,13 @@ When reviewing changes:
    - Command injection in Bash calls
    - Path traversal in file operations
    - Unsanitized user input
-5. Report findings with file:line references
+5. Real-path test coverage (the reachability rule — see CLAUDE.md "Real-path tests"):
+   - If the diff adds a cross-process seam, a prompt-taught tool argument, or a
+     principal/authorization check, flag it when the ONLY new test exercises the
+     guard/helper with direct arguments and never drives the real entry point
+     (route handler, prompt assembler, dispatch chain) against persisted state.
+     Cite incidents #1305 (proposer-lockout) and #1329 (session-rule inheritance):
+     green isolation tests hid an unreachable path in both.
+6. Report findings with file:line references
 
 Do NOT suggest improvements or refactors. Only report actual bugs and rule violations.
