@@ -1,0 +1,194 @@
+/**
+ * Filesystem-driven middleware policy coverage (RF-2 class-killer).
+ *
+ * WHY THIS EXISTS — the "green tests encode the premise" gap. A hand-written
+ * gate suite (tests/middleware-gate.test.ts) only exercises the routes the
+ * author remembered to list. A route added later with no gate ships silently.
+ * This suite discovers routes the way Next.js does — by walking
+ * `src/app/api/**\/route.ts` on disk — and asserts EVERY real route resolves to
+ * an explicit middleware policy. A new route (or a new public allowlist entry
+ * nobody mirrored here) FAILS the build instead of shipping unclassified.
+ *
+ * The policy manifest below mirrors src/middleware.ts. Each discovered route is
+ * classified into exactly one of {self-auth, public-any, public-read, gated} and
+ * the middleware's ACTUAL behavior (from LAN, from loopback) is asserted to
+ * match. Default is `gated` — an unclassified route that the middleware lets
+ * through from LAN trips the `else → expect deny` branch and reddens the suite.
+ */
+import { mkdtempSync, writeFileSync, readdirSync, statSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+
+import { describe, expect, it, vi } from 'vitest';
+import { NextRequest } from 'next/server';
+
+vi.mock('@clerk/nextjs/server', () => ({
+  clerkMiddleware: (handler: unknown) => handler,
+}));
+
+const TEST_TOKEN = 'vitest-route-coverage-token-0123456789';
+const dataDir = mkdtempSync(path.join(os.tmpdir(), 'o8-route-cov-'));
+writeFileSync(path.join(dataDir, 'ws-token'), `${TEST_TOKEN}\n`, 'utf-8');
+process.env.O8_DATA_DIR = dataDir;
+process.env.CORTEX_IDE_DATA_DIR = dataDir;
+
+const { panelGateMiddleware } = await import('@/middleware');
+
+// ── Route discovery — walk the ACTUAL filesystem, same source of truth as Next.
+
+const API_ROOT = path.join(process.cwd(), 'src', 'app', 'api');
+
+function walkRouteFiles(dir: string): string[] {
+  const out: string[] = [];
+  for (const entry of readdirSync(dir)) {
+    const full = path.join(dir, entry);
+    if (statSync(full).isDirectory()) {
+      out.push(...walkRouteFiles(full));
+    } else if (entry === 'route.ts' || entry === 'route.tsx') {
+      out.push(full);
+    }
+  }
+  return out;
+}
+
+/**
+ * File path → concrete request pathname, exactly how Next.js maps the App
+ * Router: strip the `src/app` prefix + `/route.ts`, drop `(route-group)`
+ * segments, and substitute dynamic segments with a concrete value so the path
+ * is a real URL the middleware can classify.
+ */
+function fileToPathname(file: string): string {
+  const rel = path.relative(path.join(process.cwd(), 'src', 'app'), file);
+  const segments = rel
+    .split(path.sep)
+    .slice(0, -1) // drop the route.ts filename
+    .filter((seg) => !(seg.startsWith('(') && seg.endsWith(')'))) // route groups are path-invisible
+    .map((seg) => {
+      if (seg.startsWith('[[...') && seg.endsWith(']]')) return 'seg/sub'; // optional catch-all
+      if (seg.startsWith('[...') && seg.endsWith(']')) return 'seg/sub'; // catch-all
+      if (seg.startsWith('[') && seg.endsWith(']')) return 'seg'; // dynamic
+      return seg;
+    });
+  return `/${segments.join('/')}`;
+}
+
+const routeFiles = walkRouteFiles(API_ROOT);
+const routes = routeFiles.map((file) => ({ file, pathname: fileToPathname(file) }));
+
+// ── Policy manifest (mirrors src/middleware.ts). Adding a route to any bucket
+//    here is the deliberate act of classifying a route as public — the whole
+//    point is that it CANNOT happen by omission.
+
+const SELF_AUTH = [/^\/api\/worker(\/|$)/, /^\/api\/cloud(\/|$)/, /^\/api\/github\/webhook(\/|$)/];
+const PUBLIC_ANY = [
+  /^\/api\/panel\/github-device(\/|$)/,
+  /^\/api\/panel\/github-auth(\/|$)/,
+  /^\/api\/v2\/auth(\/|$)/,
+  /^\/api\/mobile\/enroll(\/|$)/,
+];
+const PUBLIC_READ = [
+  /^\/api\/setup(\/|$)/,
+  /^\/api\/panel\/github-device(\/|$)/,
+  /^\/api\/panel\/github-auth(\/|$)/,
+  /^\/api\/panel\/status(\/|$)/,
+  /^\/api\/v2\/auth(\/|$)/,
+  /^\/api\/mobile\/push\/public-key(\/|$)/,
+];
+
+type Policy = 'self-auth' | 'public-any' | 'public-read' | 'gated';
+
+function expectedPolicy(pathname: string): Policy {
+  if (SELF_AUTH.some((p) => p.test(pathname))) return 'self-auth';
+  if (PUBLIC_ANY.some((p) => p.test(pathname))) return 'public-any';
+  if (PUBLIC_READ.some((p) => p.test(pathname))) return 'public-read';
+  return 'gated';
+}
+
+const LAN = '192.168.1.50:3001';
+const LOOPBACK = 'localhost:3001';
+
+function status(pathname: string, method: string, host: string): number {
+  const req = new NextRequest(`http://${host.split(':')[0]}:3001${pathname}`, {
+    method,
+    headers: { host },
+  });
+  return panelGateMiddleware(req).status;
+}
+
+describe('route-coverage — every /api route resolves to an explicit middleware policy', () => {
+  it('discovers a substantial number of route files (sanity: the walker works)', () => {
+    // If this drops to near-zero the walker broke and every assertion below is
+    // vacuously green — the exact failure mode this whole suite guards against.
+    expect(routes.length).toBeGreaterThan(100);
+  });
+
+  it.each(routes.map((r) => [r.pathname, r.file] as const))(
+    'classifies %s and the middleware agrees',
+    (pathname) => {
+      const policy = expectedPolicy(pathname);
+      const getLan = status(pathname, 'GET', LAN);
+      const postLan = status(pathname, 'POST', LAN);
+
+      // Operator surface is ALWAYS reachable from loopback — no route is left in
+      // an implicit "denied to everyone" limbo.
+      expect(status(pathname, 'GET', LOOPBACK)).toBe(200);
+
+      if (policy === 'self-auth' || policy === 'public-any') {
+        // Reachable off-host by design (self-authing handler or OAuth handshake).
+        expect(getLan).toBe(200);
+        expect(postLan).toBe(200);
+      } else if (policy === 'public-read') {
+        // GET is public; writes still hit the gate.
+        expect(getLan).toBe(200);
+        expect(postLan).toBe(401);
+      } else {
+        // GATED — the default. A route that reaches this branch but is silently
+        // public from LAN means someone added a public route without listing it
+        // in the manifest above: this assertion reddens.
+        expect(getLan).toBe(401);
+        expect(postLan).toBe(401);
+      }
+    },
+  );
+
+  it('every public/self-auth manifest entry maps to a real route on disk (no stale allowlist)', () => {
+    // A manifest pattern that matches NO real route is dead config that hides
+    // intent — force it to be pruned.
+    const allPublic = [...SELF_AUTH, ...PUBLIC_ANY, ...PUBLIC_READ];
+    for (const pattern of allPublic) {
+      const matched = routes.some((r) => pattern.test(r.pathname));
+      expect(matched, `manifest pattern ${pattern} matches no route file`).toBe(true);
+    }
+  });
+
+  it('the vast majority of real routes are GATED (default-deny holds across the tree)', () => {
+    const gated = routes.filter((r) => expectedPolicy(r.pathname) === 'gated');
+    // Sanity floor: if this collapses, the classifier started treating routes as
+    // public en masse.
+    expect(gated.length).toBeGreaterThan(routes.length * 0.8);
+  });
+});
+
+// ── Path-boundary / trailing-slash cases (the original fail-open class). These
+//    are explicit because they probe the seam BETWEEN a public prefix and its
+//    neighbors — a filesystem walk can't synthesize a `/api/workerfoo` sibling.
+
+describe('route-coverage — path-boundary safety (trailing-slash / prefix confusion)', () => {
+  it('a gated base and its trailing-slash + child are all denied from LAN', () => {
+    expect(status('/api/board', 'GET', LAN)).toBe(401);
+    expect(status('/api/board/', 'GET', LAN)).toBe(401);
+    expect(status('/api/board/anything', 'GET', LAN)).toBe(401);
+  });
+
+  it('a self-auth prefix does NOT leak to a look-alike sibling path', () => {
+    // `/api/worker` is self-auth; `/api/workerfoo` must NOT inherit the bypass.
+    expect(status('/api/worker/poll', 'POST', LAN)).toBe(200);
+    expect(status('/api/workerfoo', 'POST', LAN)).toBe(401);
+    expect(status('/api/worker-secrets', 'GET', LAN)).toBe(401);
+  });
+
+  it('a public-read prefix does NOT leak writes on a look-alike sibling', () => {
+    expect(status('/api/setup/status', 'GET', LAN)).toBe(200); // real public read
+    expect(status('/api/setupfoo', 'GET', LAN)).toBe(401); // sibling is gated
+  });
+});
