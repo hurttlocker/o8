@@ -18,6 +18,7 @@ function ArrowDownIcon({ size = 13 }: { size?: number }) {
   return <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}><path d="M12 5v14" /><path d="m19 12-7 7-7-7" /></svg>;
 }
 
+import { noteUserScroll } from '@/lib/tts/scroll-follow';
 import { AgentStatusDot } from '../AgentStatusDot';
 import { CompactionNode } from '../CompactionNode';
 import { renderLLMMarkdown } from '../LLMMarkdown';
@@ -148,7 +149,7 @@ function ChatSurfaceBase({
         </div>
       ) : null}
 
-      <div ref={scrollRef} className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingTop: isEmpty ? 0 : 24, paddingRight: 'var(--cortex-chat-gutter)', paddingBottom: 24, paddingLeft: 'var(--cortex-chat-gutter)', position: 'relative' }}>
+      <div ref={scrollRef} className="cortex-scroll-fade-y cortex-themed-scroll" onWheel={noteUserScroll} onTouchMove={noteUserScroll} style={{ flex: 1, overflowY: 'auto', paddingTop: isEmpty ? 0 : 24, paddingRight: 'var(--cortex-chat-gutter)', paddingBottom: 24, paddingLeft: 'var(--cortex-chat-gutter)', position: 'relative' }}>
         {/* Floating history toggle — shown only in the empty state, since
             the inline meta bar is hidden there. Gives users a discoverable
             way to browse past conversations without stacking chrome bars. */}

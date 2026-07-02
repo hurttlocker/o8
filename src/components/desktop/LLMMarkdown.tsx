@@ -787,6 +787,48 @@ export function renderInline(text: string): React.ReactNode {
   return parts.length === 1 ? parts[0] : <>{parts}</>;
 }
 
+// ── Voice-playback line highlighting helpers ──
+
+// Highlight wash for the block currently being read aloud. Theme-token
+// background only (never raw rgba, never borderLeft). A small negative margin +
+// matching padding bleeds the wash past the text edges; base offsets are folded
+// in so the active block doesn't jump when it lights up.
+function ttsWash(
+  active: boolean,
+  base?: { ml?: number; mr?: number; pl?: number; pr?: number },
+): React.CSSProperties {
+  if (!active) return {};
+  const ml = base?.ml ?? 0;
+  const mr = base?.mr ?? 0;
+  const pl = base?.pl ?? 0;
+  const pr = base?.pr ?? 0;
+  return {
+    background: 'var(--t-accent-soft)',
+    marginLeft: ml - 8,
+    marginRight: mr - 8,
+    paddingLeft: pl + 8,
+    paddingRight: pr + 8,
+    borderRadius: 6,
+    transition: 'background-color 200ms ease',
+  };
+}
+
+// UTF-8 byte length — the Rust engine's spans are UTF-8 byte offsets. LLM output
+// is full of multi-byte chars (curly quotes, em-dashes, emoji) where this
+// diverges from String.length (UTF-16 units), so counting bytes is what keeps
+// the highlight aligned with the spoken block.
+function utf8ByteLength(str: string): number {
+  let bytes = 0;
+  for (let i = 0; i < str.length; i++) {
+    const code = str.charCodeAt(i);
+    if (code < 0x80) bytes += 1;
+    else if (code < 0x800) bytes += 2;
+    else if (code >= 0xd800 && code <= 0xdbff) { bytes += 4; i++; } // surrogate pair → 4 bytes
+    else bytes += 3;
+  }
+  return bytes;
+}
+
 // ── Main markdown renderer ──
 
 export function renderLLMMarkdown(text: string, opts?: {
@@ -798,6 +840,10 @@ export function renderLLMMarkdown(text: string, opts?: {
   isStreaming?: boolean;
   /** #525 — wired to the streaming-card Stop button when provided. */
   onInterruptStream?: () => void;
+  /** Voice-playback line highlighting: the [srcStart, srcEnd) UTF-8 byte span of
+   *  the block currently being spoken (offsets into `text`). Block(s) whose
+   *  source bytes intersect this range get a soft accent wash + data-tts-active. */
+  activeHighlightRange?: [number, number];
 }): React.ReactNode[] {
   // Handle <think>...</think> blocks — render as italic, smaller, muted text
   const processedText = text.replace(/<think>([\s\S]*?)(<\/think>|$)/g, (_match, content, closer) => {
@@ -808,6 +854,25 @@ export function renderLLMMarkdown(text: string, opts?: {
 
   const nodes: React.ReactNode[] = [];
   const lines = processedText.split('\n');
+
+  // Voice-playback line highlighting: the Rust engine chunks this SAME text and
+  // emits byte spans against it. The <think> rewrite above shifts offsets, so
+  // highlighting is disabled whenever a marker was injected (processedText
+  // diverges from text); when absent, processedText === text and each source
+  // line's UTF-8 byte offset lines up with the engine's spans.
+  const highlightRange = opts?.activeHighlightRange && processedText === text
+    ? opts.activeHighlightRange
+    : null;
+  let lineByteOffsets: number[] | null = null;
+  if (highlightRange) {
+    lineByteOffsets = new Array(lines.length);
+    let acc = 0;
+    for (let k = 0; k < lines.length; k++) {
+      lineByteOffsets[k] = acc;
+      acc += utf8ByteLength(lines[k]) + 1; // + 1 for the '\n' that split() removed
+    }
+  }
+
   let inCodeBlock = false;
   let codeContent = '';
   let codeLang = '';
@@ -818,6 +883,13 @@ export function renderLLMMarkdown(text: string, opts?: {
 
   while (i < lines.length) {
     const line = lines[i];
+
+    // Does this source line's byte range intersect the spoken block's span?
+    const lineActive = !!(
+      highlightRange && lineByteOffsets
+      && lineByteOffsets[i] < highlightRange[1]
+      && lineByteOffsets[i] + utf8ByteLength(line) > highlightRange[0]
+    );
 
     // Thinking block markers
     if (line === '%%THINK_START%%') {
@@ -932,7 +1004,7 @@ export function renderLLMMarkdown(text: string, opts?: {
     // Blockquote
     if (line.startsWith('> ')) {
       nodes.push(
-        <div key={`q-${i}`} style={{
+        <div key={`q-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{
           borderLeft: `3px solid ${THEME_ACCENT}`,
           paddingTop: 4,
           paddingBottom: 4,
@@ -945,6 +1017,7 @@ export function renderLLMMarkdown(text: string, opts?: {
           borderRadius: '0 6px 6px 0',
           fontSize: 13,
           lineHeight: 1.5,
+          ...ttsWash(lineActive, { pl: 12 }),
         }}>
           {renderInline(line.slice(2))}
         </div>
@@ -955,19 +1028,19 @@ export function renderLLMMarkdown(text: string, opts?: {
 
     // Headings
     if (line.startsWith('#### ')) {
-      nodes.push(<div key={`h4-${i}`} style={{ fontSize: 13, fontWeight: 600, marginTop: 12, marginBottom: 4, color: 'var(--t-text)' }}>{renderInline(line.slice(5))}</div>);
+      nodes.push(<div key={`h4-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 13, fontWeight: 600, marginTop: 12, marginBottom: 4, color: 'var(--t-text)', ...ttsWash(lineActive) }}>{renderInline(line.slice(5))}</div>);
       i++; continue;
     }
     if (line.startsWith('### ')) {
-      nodes.push(<div key={`h3-${i}`} style={{ fontSize: 14, fontWeight: 600, marginTop: 14, marginBottom: 4, color: 'var(--t-text)' }}>{renderInline(line.slice(4))}</div>);
+      nodes.push(<div key={`h3-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 14, fontWeight: 600, marginTop: 14, marginBottom: 4, color: 'var(--t-text)', ...ttsWash(lineActive) }}>{renderInline(line.slice(4))}</div>);
       i++; continue;
     }
     if (line.startsWith('## ')) {
-      nodes.push(<div key={`h2-${i}`} style={{ fontSize: 16, fontWeight: 600, marginTop: 16, marginBottom: 4, color: 'var(--t-text-strong)' }}>{renderInline(line.slice(3))}</div>);
+      nodes.push(<div key={`h2-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 16, fontWeight: 600, marginTop: 16, marginBottom: 4, color: 'var(--t-text-strong)', ...ttsWash(lineActive) }}>{renderInline(line.slice(3))}</div>);
       i++; continue;
     }
     if (line.startsWith('# ')) {
-      nodes.push(<div key={`h1-${i}`} style={{ fontSize: 18, fontWeight: 700, marginTop: 18, marginBottom: 6, color: 'var(--t-text-strong)' }}>{renderInline(line.slice(2))}</div>);
+      nodes.push(<div key={`h1-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 18, fontWeight: 700, marginTop: 18, marginBottom: 6, color: 'var(--t-text-strong)', ...ttsWash(lineActive) }}>{renderInline(line.slice(2))}</div>);
       i++; continue;
     }
 
@@ -975,7 +1048,7 @@ export function renderLLMMarkdown(text: string, opts?: {
     const olMatch = line.match(/^(\d+)\.\s+(.+)/);
     if (olMatch) {
       nodes.push(
-        <div key={`ol-${i}`} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: 14, lineHeight: 1.6 }}>
+        <div key={`ol-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: 14, lineHeight: 1.6, ...ttsWash(lineActive, { ml: 4 }) }}>
           <span style={{ color: 'var(--t-text-muted)', flexShrink: 0, fontWeight: 500, minWidth: 16, textAlign: 'right' }}>{olMatch[1]}.</span>
           <span>{renderInline(olMatch[2])}</span>
         </div>
@@ -986,7 +1059,7 @@ export function renderLLMMarkdown(text: string, opts?: {
     // Unordered list
     if (line.match(/^[-*+]\s+/)) {
       nodes.push(
-        <div key={`ul-${i}`} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: 14, lineHeight: 1.6 }}>
+        <div key={`ul-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ display: 'flex', gap: 8, marginLeft: 4, fontSize: 14, lineHeight: 1.6, ...ttsWash(lineActive, { ml: 4 }) }}>
           <span style={{ color: 'var(--t-text-muted)', flexShrink: 0 }}>•</span>
           <span>{renderInline(line.replace(/^[-*+]\s+/, ''))}</span>
         </div>
@@ -1009,7 +1082,7 @@ export function renderLLMMarkdown(text: string, opts?: {
     // strong section break (~22px); adjacent sentences without a blank
     // still get the 8px breathing room.
     nodes.push(
-      <div key={`p-${i}`} style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--t-text)', marginBottom: 8 }}>
+      <div key={`p-${i}`} data-tts-active={lineActive ? 'true' : undefined} style={{ fontSize: 14, lineHeight: 1.7, color: 'var(--t-text)', marginBottom: 8, ...ttsWash(lineActive) }}>
         {renderInline(line)}
       </div>
     );
