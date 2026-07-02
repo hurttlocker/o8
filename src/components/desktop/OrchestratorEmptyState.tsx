@@ -27,6 +27,7 @@ import {
   Plus as IconoirPlus,
 } from 'iconoir-react';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
+import { OrchestratorProjectPicker } from './orchestrator/OrchestratorProjectPicker';
 
 interface QuickAction {
   id: string;
@@ -107,7 +108,10 @@ function OrchestratorEmptyStateBase(props: OrchestratorEmptyStateProps) {
     return (
       <NoWorkspaceCallout
         noReposAtAll={noReposAtAll}
+        workspaceTargets={workspaceTargets}
+        onSelectProject={props.onSelectProject}
         onAddProject={onAddProject}
+        onWorkWithoutProject={props.onWorkWithoutProject}
       />
     );
   }
@@ -240,16 +244,37 @@ function QuickActionPills({ onActionClick }: { onActionClick: (prompt: string) =
  */
 function NoWorkspaceCallout({
   noReposAtAll,
+  workspaceTargets,
+  onSelectProject,
   onAddProject,
+  onWorkWithoutProject,
 }: {
   noReposAtAll: boolean;
+  workspaceTargets: OrchestratorWorkspaceTarget[];
+  onSelectProject?: (target: OrchestratorWorkspaceTarget) => void;
   onAddProject?: (mode?: 'scratch' | 'existing') => void;
+  onWorkWithoutProject?: () => void;
 }) {
+  // Repos exist but none is scoped to this thread → let the operator pick one
+  // explicitly (the "Which project?" picker) instead of silently guessing —
+  // guessing bled stale mission cards across projects and showed an ambiguous
+  // "build in <blank>" hero. (2026-07-02)
+  if (!noReposAtAll) {
+    return (
+      <OrchestratorProjectPicker
+        workspaceTargets={workspaceTargets}
+        onSelectProject={onSelectProject}
+        onAddProject={onAddProject}
+        onWorkWithoutProject={onWorkWithoutProject}
+      />
+    );
+  }
+  return <NoReposCallout onAddProject={onAddProject} />;
+}
+
+// No repos registered at all → lead with the add-a-repo CTA (unchanged).
+function NoReposCallout({ onAddProject }: { onAddProject?: (mode?: 'scratch' | 'existing') => void }) {
   const [hovered, setHovered] = useState(false);
-  const title = noReposAtAll ? 'Add a repo to get started' : 'Pick a repo to get started';
-  const sub = noReposAtAll
-    ? 'The orchestrator builds inside a repo. Add one and I can start working with you.'
-    : 'The orchestrator builds inside a repo. Choose one below, or add another to begin.';
   return (
     <div
       style={{
@@ -304,7 +329,7 @@ function NoWorkspaceCallout({
             margin: 0,
           }}
         >
-          {title}
+          Add a repo to get started
         </h1>
         <p
           style={{
@@ -318,7 +343,7 @@ function NoWorkspaceCallout({
             textWrap: 'balance',
           }}
         >
-          {sub}
+          The orchestrator builds inside a repo. Add one and I can start working with you.
         </p>
         <button
           type="button"
