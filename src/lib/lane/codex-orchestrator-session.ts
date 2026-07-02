@@ -165,6 +165,43 @@ function stripManagedMcpSections(configToml: string, serverNames: string[]): str
   return nextLines.join('\n').trimEnd();
 }
 
+/**
+ * Strip the operator's `[marketplaces.*]` and `[plugins.*]` sections from the
+ * worker's sandbox config. The worker inherits the operator's `~/.codex/config.toml`,
+ * but it does NOT need the operator's codex plugins — and on a heavy plugin config
+ * (remote git-cloned marketplaces, hundreds of MB of cache) codex's `startup_sync`
+ * re-clones + refreshes them on EVERY launch. That stall starves the worker before
+ * it can attach: the lane cycles launching → idle → `launch_attempts_exhausted`.
+ * Keeping the worker's config plugin-free lets it boot straight into the turn.
+ * (env fix 2026-07-02 — diagnosed a full dispatch outage down to this + a codex
+ * code-signing crash under macOS 26.)
+ */
+export function stripPluginSections(configToml: string): string {
+  if (!configToml.trim()) {
+    return '';
+  }
+
+  const lines = configToml.replace(/\r\n/g, '\n').split('\n');
+  const nextLines: string[] = [];
+  let skippingPluginSection = false;
+
+  for (const line of lines) {
+    const sectionMatch = line.match(/^\s*\[([^\]]+)]\s*(?:#.*)?$/);
+    if (sectionMatch) {
+      const name = sectionMatch[1].trim();
+      skippingPluginSection = name === 'marketplaces'
+        || name.startsWith('marketplaces.')
+        || name === 'plugins'
+        || name.startsWith('plugins.');
+    }
+    if (!skippingPluginSection) {
+      nextLines.push(line);
+    }
+  }
+
+  return nextLines.join('\n').trimEnd();
+}
+
 // Exported for the Step-C parity smoke — the parity unit is the full merged
 // config.toml (strip + join + trailing newline), not just the serialized blocks.
 export function mergeCodexMcpConfig(baseConfigToml: string, servers: OrchestratorMcpServersConfig): string {
@@ -198,8 +235,10 @@ export function ensureCodexHome(repoPath: string, profile: ToolProfile = 'full')
   const codexHome = join(CODEX_ORCHESTRATOR_HOME_DIR, `${repoHash(normalizedRepoPath)}${suffix}`);
   mkdirSync(codexHome, { recursive: true });
 
+  // Strip the operator's plugins/marketplaces so the worker doesn't hang on
+  // codex's per-launch plugin startup_sync (see stripPluginSections above).
   const userConfigToml = existsSync(USER_CODEX_CONFIG_PATH)
-    ? readFileSync(USER_CODEX_CONFIG_PATH, 'utf8')
+    ? stripPluginSections(readFileSync(USER_CODEX_CONFIG_PATH, 'utf8'))
     : '';
   const mergedConfig = mergeCodexMcpConfig(
     userConfigToml,
