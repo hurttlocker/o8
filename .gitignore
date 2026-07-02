@@ -8,6 +8,9 @@ build/
 .env.*
 # But DO track the example — devs need it as a reference on clone.
 !.env.example
+# Release-time build config (device-flow client id, etc.) — deployment-specific,
+# baked into signed builds by scripts/tauri-export.mjs. Track only the template.
+o8.release.json
 coverage/
 *.log
 *.tsbuildinfo
