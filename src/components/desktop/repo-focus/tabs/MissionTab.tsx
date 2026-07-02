@@ -13,7 +13,7 @@ function CheckIcon({ packet }: { packet: OrchestratorPacket }) {
   const state = packetVisualState(packet);
   if (state === 'merged') {
     return (
-      <span style={{ width: 18, height: 18, borderRadius: '50%', background: '#16a34a', color: 'var(--t-bg-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <span style={{ width: 18, height: 18, borderRadius: '50%', background: '#16a34a', color: '#ffffff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <svg width={12} height={12} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
           <path d="m5 13 4 4L19 7" />
         </svg>
@@ -22,7 +22,7 @@ function CheckIcon({ packet }: { packet: OrchestratorPacket }) {
   }
   if (state === 'failed') {
     return (
-      <span style={{ width: 18, height: 18, borderRadius: '50%', background: '#ef4444', color: 'var(--t-bg-card)', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+      <span style={{ width: 18, height: 18, borderRadius: '50%', background: '#ef4444', color: '#ffffff', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
         <svg width={11} height={11} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" aria-hidden>
           <path d="M6 6l12 12" />
           <path d="M18 6 6 18" />
