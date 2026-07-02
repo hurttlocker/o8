@@ -113,6 +113,8 @@ interface CreateMissionInput {
   huddle?: boolean;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
+  /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
+  orchestratorThreadId?: string;
 }
 
 interface InlineIssue {
@@ -136,6 +138,8 @@ interface CreateMissionInlineInput {
   huddle?: boolean;
   /** Best-of-N (item 3) — forwarded to the create-mission API, clamped ≤4 there. */
   comparisonModels?: string[];
+  /** #1329 — the orchestrator's active thread id, so workers inherit its session rules. */
+  orchestratorThreadId?: string;
 }
 
 interface ApiSuccessResponse<T> {
@@ -390,6 +394,7 @@ export async function createMission(input: CreateMissionInput) {
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
           comparisonModels: input.comparisonModels,
+          orchestratorThreadId: input.orchestratorThreadId,
         } satisfies CreateMissionRequest),
       },
     );
@@ -432,6 +437,7 @@ export async function createMissionInline(input: CreateMissionInlineInput) {
           existingBranchPolicy: input.existingBranchPolicy,
           useBrain: input.useBrain,
           comparisonModels: input.comparisonModels,
+          orchestratorThreadId: input.orchestratorThreadId,
         } satisfies CreateMissionRequest),
       },
     );

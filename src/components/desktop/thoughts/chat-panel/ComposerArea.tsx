@@ -194,6 +194,8 @@ interface ComposerAreaProps {
   onSetCollide?: (enabled: boolean) => void;
   permissionMode: ThoughtsChatPermissionMode;
   onTogglePermission?: () => void;
+  /** Session rules (#1329) — forwarded to InputButtons; undefined hides the chip. */
+  sessionRulesThreadId?: string | null;
   repoLabel?: string | null;
   displayMessagesCount: number;
   hasAssistantActivity: boolean;
@@ -255,6 +257,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   onSetCollide,
   permissionMode,
   onTogglePermission,
+  sessionRulesThreadId,
   repoLabel,
   displayMessagesCount,
   hasAssistantActivity,
@@ -828,6 +831,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             onSetCollide={isOrchestratorMode ? onSetCollide : undefined}
             permissionMode={permissionMode}
             onTogglePermission={onTogglePermission}
+            sessionRulesThreadId={sessionRulesThreadId}
             repoLabel={showReasoningControls ? repoLabel : null}
             displayMessagesCount={displayMessagesCount}
             working={isOrchestratorMode && displayWaiting}
