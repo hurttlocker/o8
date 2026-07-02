@@ -1,33 +1,30 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { timingSafeEqual } from 'node:crypto';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { headersIndicateLoopback } from '@/lib/auth/loopback-request';
 
-const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '::1']);
-
-function isLoopbackHost(hostname?: string | null) {
-  if (!hostname) return false;
-  return LOOPBACK_HOSTS.has(hostname);
+/**
+ * In-handler loopback trust. Delegates to the SHARED loopback-request logic so
+ * it cannot diverge from the middleware gate: socket truth (`x-o8-client-addr`,
+ * stamped by the bundled server and unspoofable) wins when present, otherwise a
+ * loopback Host header (dev fallback).
+ *
+ * The previous implementation read `origin === req.nextUrl.origin` and trusted
+ * `sec-fetch-site: same-origin|none` with no loopback-Host requirement — both
+ * client-forgeable, so a non-browser LAN client bypassed it with one header
+ * (SECURITY_AUDIT_2026-07-02 §HIGH-1). Every route touching state is also gated
+ * by src/middleware.ts (default-deny); this stays as defense-in-depth.
+ */
+export function isTrustedPanelRequest(req: NextRequest) {
+  return headersIndicateLoopback((name) => req.headers.get(name));
 }
 
-export function isTrustedPanelRequest(req: NextRequest) {
-  const origin = req.headers.get('origin');
-  if (origin) {
-    try {
-      const url = new URL(origin);
-      if (isLoopbackHost(url.hostname)) return true;
-    } catch {
-      // Ignore malformed origins and fall through to other checks.
-    }
-
-    if (origin === req.nextUrl.origin) return true;
-  }
-
-  const fetchSite = req.headers.get('sec-fetch-site');
-  if (fetchSite === 'same-origin' || fetchSite === 'none') return true;
-
-  // Some local desktop/Tauri requests omit browser fetch headers entirely.
-  if (!origin && !fetchSite && isLoopbackHost(req.nextUrl.hostname)) return true;
-
-  return false;
+/** Constant-time token comparison (length leak is fine — the token is fixed-size). */
+function tokenMatches(presented: string, expected: string): boolean {
+  const a = Buffer.from(presented, 'utf-8');
+  const b = Buffer.from(expected, 'utf-8');
+  if (a.length !== b.length) return false;
+  return timingSafeEqual(a, b);
 }
 
 export function requirePanelAuth(req: NextRequest): NextResponse | null {
@@ -37,8 +34,8 @@ export function requirePanelAuth(req: NextRequest): NextResponse | null {
 
   const panelApiToken = getOrCreateWsToken().trim();
   const auth = req.headers.get('authorization');
-  const token = auth?.startsWith('Bearer ') ? auth.slice(7) : req.nextUrl.searchParams.get('token');
-  if (!panelApiToken || token !== panelApiToken) {
+  const token = (auth?.startsWith('Bearer ') ? auth.slice(7) : req.nextUrl.searchParams.get('token'))?.trim() ?? '';
+  if (!panelApiToken || !tokenMatches(token, panelApiToken)) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 });
   }
 
