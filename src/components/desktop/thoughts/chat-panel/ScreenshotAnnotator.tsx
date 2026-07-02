@@ -580,7 +580,7 @@ function Toolbar({
           borderRadius: 8,
           borderWidth: 0,
           background: 'var(--t-text)',
-          color: 'var(--t-bg-card)',
+          color: 'var(--t-chat-surface-bg)',
           fontSize: 12.5,
           fontWeight: 500,
           cursor: 'pointer',
