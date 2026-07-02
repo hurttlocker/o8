@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { resolveOpenRouterRoute, type InferenceRoute } from '@/lib/cortex/qa/llm/inference-route';
 import { TOOLS, executeTool, toolsForOpenAI } from '@/lib/llm/tools';
+import { BRAIN_READ_ONLY_TOOLS } from '@/lib/llm/brain-tools';
 
 export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
@@ -383,6 +384,17 @@ export async function POST(request: NextRequest): Promise<Response> {
               args: parsedArgs,
             }));
             try {
+              // Read-only allowlist: the Brain composer must never run a
+              // mutating/shell tool ungated (§HIGH-7). Decline anything not on
+              // the allowlist instead of executing it.
+              if (!BRAIN_READ_ONLY_TOOLS.has(call.function.name)) {
+                const declineMsg = `Tool "${call.function.name}" is not available in the Brain composer (read-only). Run it from the orchestrator, which routes through the approval gate.`;
+                controller.enqueue(encodeEvent({
+                  type: 'tool_result', id: call.id, name: call.function.name, content: declineMsg, sources: [],
+                }));
+                conversation.push({ role: 'tool', tool_call_id: call.id, name: call.function.name, content: declineMsg });
+                continue;
+              }
               const toolResult = await executeTool(call.function.name, parsedArgs, repoRoot);
               controller.enqueue(encodeEvent({
                 type: 'tool_result',
