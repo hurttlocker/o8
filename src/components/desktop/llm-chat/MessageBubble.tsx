@@ -1,6 +1,8 @@
-import { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import { Check, ChevronRight, Copy, FileText, Pencil } from '../lucide-shims';
 
+import { ttsEngine, type TTSEngineState } from '@/lib/tts/engine';
+import { userScrolledRecently } from '@/lib/tts/scroll-follow';
 import { MessageActions } from '../MessageActions';
 import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
 import { renderLLMMarkdown } from '../LLMMarkdown';
@@ -181,6 +183,34 @@ function MessageBubbleBase({
   const [bookmarked, setBookmarked] = useState(false);
   const [hovered, setHovered] = useState(false);
   const isUser = message.role === 'user';
+
+  // Voice-playback line highlighting — track the source span of the block being
+  // read aloud while THIS message plays, and scroll-follow it. Mirrors
+  // DesktopAgentMessage / MessageActions.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [activeRange, setActiveRange] = useState<[number, number] | null>(null);
+  useEffect(() => {
+    return ttsEngine.subscribe((state: TTSEngineState) => {
+      const chunk = state.activeChunk;
+      if (chunk && chunk.messageId === message.id) {
+        setActiveRange((prev) =>
+          prev && prev[0] === chunk.srcStart && prev[1] === chunk.srcEnd
+            ? prev
+            : [chunk.srcStart, chunk.srcEnd],
+        );
+      } else {
+        setActiveRange((prev) => (prev === null ? prev : null));
+      }
+    });
+  }, [message.id]);
+  useEffect(() => {
+    if (!activeRange) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const activeEl = root.querySelector('[data-tts-active="true"]');
+    if (!activeEl || userScrolledRecently()) return;
+    activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [activeRange]);
   const syntheticNarrativeToolCall = !isUser && !(message.toolCalls?.length) ? toolCallFromNarrative(message.content) : null;
   const visibleContent = !isUser && syntheticNarrativeToolCall ? '' : message.content;
   const hasVisibleContent = visibleContent.trim().length > 0;
@@ -197,7 +227,7 @@ function MessageBubbleBase({
   }, [visibleContent]);
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 4, animation: isLast ? 'llmFadeIn 200ms ease-out' : undefined }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
+    <div ref={rootRef} style={{ display: 'flex', flexDirection: 'column', alignItems: isUser ? 'flex-end' : 'flex-start', gap: 4, animation: isLast ? 'llmFadeIn 200ms ease-out' : undefined }} onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)}>
       {isUser || hasVisibleContent ? (
         <div style={{ maxWidth: isUser ? '85%' : '90%', paddingTop: isUser ? 8 : 16, paddingRight: isUser ? 14 : 0, paddingBottom: isUser ? 8 : 16, paddingLeft: isUser ? 14 : 0, borderRadius: isUser ? '14px 14px 4px 14px' : 0, background: isUser ? 'rgba(99, 138, 255, 0.13)' : message.isError ? 'rgba(239,68,68,0.12)' : 'transparent', color: isUser ? 'var(--t-text)' : message.isError ? '#dc2626' : 'var(--t-text)', fontSize: 13, fontWeight: isUser ? 380 : 360, lineHeight: '1.55', letterSpacing: '-0.005em', fontFamily: 'var(--font-sans-system)', wordBreak: 'break-word', ...(isUser ? { whiteSpace: 'pre-wrap' as const } : {}) }}>
           {isUser ? (
@@ -211,7 +241,7 @@ function MessageBubbleBase({
                 </div>
               ) : null}
             </>
-          ) : renderLLMMarkdown(visibleContent, { onApplyToFile, onApplyDiff, onOpenInCanvas, onRunInTerminal })}
+          ) : renderLLMMarkdown(visibleContent, { onApplyToFile, onApplyDiff, onOpenInCanvas, onRunInTerminal, activeHighlightRange: activeRange ?? undefined })}
         </div>
       ) : null}
 

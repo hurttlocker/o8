@@ -7,6 +7,7 @@ import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
 import { CollideProposalCard } from './CollideProposalCard';
 import { MissionCompleteGroupCard } from './MissionCompleteGroupCard';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { noteUserScroll } from '@/lib/tts/scroll-follow';
 
 // A run of ≥2 consecutive mission-complete cards collapses into ONE aggregate
 // (MissionCompleteGroupCard); everything else renders as its own message. Keys
@@ -134,7 +135,12 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
     displayMessages[displayMessages.length - 1]?.text?.toLowerCase().includes('compact');
 
   return (
-    <div className="thoughts-scroll cortex-scroll-fade-y cortex-themed-scroll" style={{
+    <div
+      className="thoughts-scroll cortex-scroll-fade-y cortex-themed-scroll"
+      // Voice-playback scroll-follow yields to a manual scroll gesture here.
+      onWheel={noteUserScroll}
+      onTouchMove={noteUserScroll}
+      style={{
       flex: 1,
       overflowY: 'auto',
       paddingTop: 14,

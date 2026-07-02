@@ -1,7 +1,9 @@
 'use client';
 
-import { memo, useCallback, useEffect, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { FileText } from './lucide-shims';
+import { ttsEngine, type TTSEngineState } from '@/lib/tts/engine';
+import { userScrolledRecently } from '@/lib/tts/scroll-follow';
 import { CommandStripNode } from '@/components/desktop/CommandStripNode';
 import { CompactionNode } from '@/components/desktop/CompactionNode';
 import { ThinkingStrip } from '@/components/desktop/orchestrator/ThinkingStrip';
@@ -253,6 +255,37 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
     }
   }, [repoPath]);
 
+  // Voice-playback line highlighting: track the source span of the block being
+  // read aloud, but only while THIS message is the one playing. Mirrors the
+  // ttsEngine.subscribe wiring in MessageActions.
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [activeRange, setActiveRange] = useState<[number, number] | null>(null);
+  useEffect(() => {
+    return ttsEngine.subscribe((state: TTSEngineState) => {
+      const chunk = state.activeChunk;
+      if (chunk && chunk.messageId === entry.id) {
+        setActiveRange((prev) =>
+          prev && prev[0] === chunk.srcStart && prev[1] === chunk.srcEnd
+            ? prev
+            : [chunk.srcStart, chunk.srcEnd],
+        );
+      } else {
+        setActiveRange((prev) => (prev === null ? prev : null));
+      }
+    });
+  }, [entry.id]);
+
+  // Scroll-follow: keep the spoken block in view as it advances, unless the user
+  // just scrolled away to read elsewhere.
+  useEffect(() => {
+    if (!activeRange) return;
+    const root = rootRef.current;
+    if (!root) return;
+    const activeEl = root.querySelector('[data-tts-active="true"]');
+    if (!activeEl || userScrolledRecently()) return;
+    activeEl.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+  }, [activeRange]);
+
   // renderLLMMarkdown does heavy line-by-line parsing + regex matching to
   // produce React nodes. Memoize per (text + handler identity) so renders
   // triggered by sibling state (e.g. hover on meta row) skip re-parsing.
@@ -263,8 +296,9 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       onApplyDiff: repoPath ? handleApplyDiff : undefined,
       onOpenInCanvas,
       onRunInTerminal,
+      activeHighlightRange: activeRange ?? undefined,
     }) : null,
-    [hasText, revealedText, onApplyToFile, onOpenInCanvas, onRunInTerminal, repoPath, handleApplyDiff],
+    [hasText, revealedText, onApplyToFile, onOpenInCanvas, onRunInTerminal, repoPath, handleApplyDiff, activeRange],
   );
 
   const handlePinToggle = useCallback(() => {
@@ -372,7 +406,7 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   );
 
   return (
-    <div style={{
+    <div ref={rootRef} style={{
       display: 'flex',
       flexDirection: 'column',
       alignItems: 'flex-start',
