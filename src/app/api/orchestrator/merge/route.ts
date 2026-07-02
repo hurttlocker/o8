@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { loadMergeModule } from '@/lib/orchestrator/operator-mission-service/merge-warmup';
 import { getIdempotent, setIdempotent } from '@/lib/orchestrator/idempotency-cache';
 import { withSynchronousWorktreeCleanup } from '@/lib/orchestrator/worktree-cleanup';
@@ -32,12 +33,19 @@ export async function POST(request: NextRequest) {
   }
 
   // #2 Stage 5b — worker-context governance. When the caller is a dispatched
-  // worker (the CLI sets requestedByWorker after detecting a packet worktree),
-  // we do NOT merge: raise an operator approval card and return immediately with
-  // a clean pending status. The operator clears it (o8 inbox approve), which
-  // dispatches the lane-merge continuation through the full gate. A human
-  // operator call (requestedByWorker absent) falls through and merges directly.
-  if (record.requestedByWorker === true) {
+  // worker we do NOT merge: raise an operator approval card and return a clean
+  // pending status. The operator clears it (o8 inbox approve), which dispatches
+  // the lane-merge continuation through the full gate. A human operator call
+  // falls through and merges directly.
+  //
+  // Worker context is derived from the request PRINCIPAL (the local-worker token
+  // its CLI presents), not just the self-asserted `requestedByWorker` body flag —
+  // otherwise a worker could omit the flag and take the direct-merge path
+  // (SECURITY_AUDIT_2026-07-02 §HIGH-4). The body flag is retained as an
+  // additional signal for older CLIs.
+  const isWorkerContext = record.requestedByWorker === true
+    || resolveRequestPrincipal(request) === 'worker';
+  if (isWorkerContext) {
     const { findLaneByPacket } = await import('@/lib/lane/registry');
     const lane = findLaneByPacket(packetId);
     if (!lane) {
