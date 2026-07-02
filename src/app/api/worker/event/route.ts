@@ -5,6 +5,7 @@ import type { PollEvent } from '@/lib/runtimes/remote';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import { getLane } from '@/lib/lane/registry';
 import { verifyWorkerToken } from '@/lib/worker/auth';
+import { isValidGitRefName } from '@/lib/git/ref-name';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -127,9 +128,13 @@ export async function POST(request: Request) {
           `)
           .run(now, runId);
       } else if (type === 'branch_pushed') {
-        const remoteBranch = isRecord(payload) && typeof payload.branch === 'string'
-          ? payload.branch.trim() || null
-          : null;
+        // Validate the worker-reported branch as a git ref before storing it —
+        // it later flows to `git fetch origin <branch>`, where a `-`-leading
+        // value is a git argument injection (§MED-3). Invalid → null.
+        const rawBranch = isRecord(payload) && typeof payload.branch === 'string'
+          ? payload.branch.trim()
+          : '';
+        const remoteBranch = rawBranch && isValidGitRefName(rawBranch) ? rawBranch : null;
         sqlite
           .prepare(`
             UPDATE worker_runs

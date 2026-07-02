@@ -8,7 +8,7 @@
  * - search_code: Search through codebase with grep
  */
 
-import { execSync } from 'node:child_process';
+import { execSync, execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync, statSync, existsSync, unlinkSync, mkdirSync } from 'node:fs';
 import { join, relative, dirname } from 'node:path';
 import { createGithubIssue, readGithubIssueOrPr, createPullRequest } from '@/lib/github/tools';
@@ -734,13 +734,14 @@ function listFiles(dirPath?: string, pattern?: string, repoRoot: string | null =
       return { content: 'Error: Path outside repository' };
     }
 
-    let cmd = `find "${resolved}" -maxdepth 1 -not -name ".*" -not -name "node_modules"`;
-    if (pattern) {
-      cmd = `find "${resolved}" -maxdepth 2 -name "${pattern}" -not -path "*/node_modules/*" -not -path "*/.next/*" | head -30`;
-    }
-
-    const output = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim();
-    const entries = output.split('\n').filter(Boolean).map(f => {
+    // execFile with array args — `pattern` is a literal argv token, never a
+    // shell string (was `find … -name "${pattern}"` via execSync = injection,
+    // SECURITY_AUDIT_2026-07-02 §HIGH-2). `head -30` is replaced by a JS slice.
+    const findArgs = pattern
+      ? [resolved, '-maxdepth', '2', '-name', pattern, '-not', '-path', '*/node_modules/*', '-not', '-path', '*/.next/*']
+      : [resolved, '-maxdepth', '1', '-not', '-name', '.*', '-not', '-name', 'node_modules'];
+    const output = execFileSync('find', findArgs, { encoding: 'utf-8', timeout: 5000, maxBuffer: 8 * 1024 * 1024 }).trim();
+    const entries = output.split('\n').filter(Boolean).slice(0, 30).map(f => {
       const relPath = relative(repoRoot, f);
       try {
         const s = statSync(f);
@@ -763,13 +764,27 @@ function searchCode(query: string, filePattern?: string, maxResults?: number, re
     }
 
     const max = Math.min(maxResults || 10, 20);
-    let cmd = `cd "${repoRoot}" && grep -rn --include="*.ts" --include="*.tsx" --include="*.js" --include="*.json" --include="*.md"`;
-    if (filePattern) {
-      cmd = `cd "${repoRoot}" && grep -rn --include="${filePattern}"`;
+    // execFile with array args — `query`/`filePattern` are literal argv tokens,
+    // never a shell string (was `grep … "${query}" | head` via execSync =
+    // command injection, SECURITY_AUDIT_2026-07-02 §HIGH-2). `-e` fixes `query`
+    // as the pattern even if it leads with `-`; cwd replaces `cd`; JS slice
+    // replaces `head`. grep exits 1 on no-match — that is not an error.
+    const includes = filePattern
+      ? [`--include=${filePattern}`]
+      : ['--include=*.ts', '--include=*.tsx', '--include=*.js', '--include=*.json', '--include=*.md'];
+    let raw: string;
+    try {
+      raw = execFileSync('grep', ['-rn', ...includes, '-e', query, '.'], {
+        cwd: repoRoot,
+        encoding: 'utf-8',
+        timeout: 5000,
+        maxBuffer: 8 * 1024 * 1024,
+      });
+    } catch (err) {
+      if ((err as { status?: number }).status === 1) return { content: 'No matches found' };
+      throw err;
     }
-    cmd += ` "${query.replace(/"/g, '\\"')}" . | head -${max}`;
-
-    const output = execSync(cmd, { encoding: 'utf-8', timeout: 5000 }).trim();
+    const output = raw.split('\n').filter(Boolean).slice(0, max).join('\n').trim();
 
     if (!output) return { content: 'No matches found' };
 
