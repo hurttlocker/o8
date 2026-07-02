@@ -2105,6 +2105,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSetCollide={onSetCollide}
         permissionMode={permissionMode}
         onTogglePermission={onTogglePermission}
+        // Session rules (#1329) — orchestrator threads only. null (not yet
+        // minted) still shows the read-only Repo/Global tiers in the chip.
+        sessionRulesThreadId={isOrchestratorMode && !isChatMode ? threadId : undefined}
         repoLabel={composerRepoLabel}
         displayMessagesCount={displayMessages.length}
         hasAssistantActivity={hasAssistantActivity}
