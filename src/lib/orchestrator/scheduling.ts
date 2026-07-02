@@ -6,6 +6,8 @@ import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget'
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { getLane, findLaneByPacket } from '@/lib/lane/registry';
+import { recordLaneEvent } from '@/lib/lane/events';
+import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
 import { clearStaleLaneBinding, getDispatchableWave } from '@/lib/orchestrator/dag';
 import { normalizeOrchestratorMissionState, packetReleaseBlockedBy } from '@/lib/orchestrator/store';
@@ -236,6 +238,24 @@ async function dispatchPacket(
 
   if (!launchResult.ok) {
     throw new Error(launchResult.note || 'Unable to launch session.');
+  }
+
+  // #1329 — audit trail. Snapshot the exact session rules that governed this
+  // packet at dispatch, so review reads as "what changed, under which
+  // constraints." Best-effort — a bad read never blocks the launch.
+  if (packet.orchestratorThreadId) {
+    try {
+      const rules = listSessionRuleTexts(packet.orchestratorThreadId);
+      if (rules.length > 0) {
+        recordLaneEvent(laneResult.laneId, 'rules_applied', 'orchestrator', {
+          threadId: packet.orchestratorThreadId,
+          ruleCount: rules.length,
+          rules,
+        });
+      }
+    } catch (error) {
+      console.warn('[session-rules] failed to record rules_applied event', error);
+    }
   }
 
   return {

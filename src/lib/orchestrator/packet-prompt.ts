@@ -7,6 +7,7 @@ import { getTopRulesForPacket, readRepoScopedRules } from '@/lib/dispatch/rules-
 import { readAttemptLearnings, type AttemptLearning } from '@/lib/orchestrator/attempt-log';
 import { readPacketCompletionContext } from '@/lib/orchestrator/context-relay';
 import { buildPacketSpecPromptSection } from '@/lib/orchestrator/packet-spec';
+import { buildSessionRulesBlock } from '@/lib/orchestrator/session-rules-prompt';
 import { buildPacketSelfReviewInstructions } from '@/lib/orchestrator/self-review';
 import type { OrchestratorPacket, PacketContext } from '@/lib/orchestrator/types';
 import { truncateText } from '@/lib/util/text';
@@ -305,6 +306,11 @@ export async function buildPacketPrompt(
   // setting ('auto' = non-frontier runtimes only). Tells the worker about
   // `o8 ask` so it queries org memory instead of re-deriving it via search.
   const brainSection = resolvePacketBrainEnabled(packet) ? BRAIN_PROMPT_SECTION : null;
+  // #1329 — worker inheritance. The dispatching orchestrator thread's active
+  // session rules ("Operator session rules (binding)") flow into the worker so
+  // a rule set in the thread governs every Codex worker dispatched from it.
+  // Null when the packet has no originating thread or that thread has no rules.
+  const sessionRulesSection = buildSessionRulesBlock(packet.orchestratorThreadId);
   // Huddle mode (#1282) — armed per-mission by the orchestrator. When on, the
   // worker posts its plan + pushback and STOPS before editing, so Claude and
   // Codex align on the approach before implementation.
@@ -367,9 +373,15 @@ export async function buildPacketPrompt(
   if (brainSection) {
     console.log(`[brain-access] Injected Engineering Brain instructions for packet ${packet.id} (runtime=${packet.runtime})`);
   }
+  if (sessionRulesSection) {
+    console.log(`[session-rules] Injected session rules for packet ${packet.id} (thread=${packet.orchestratorThreadId})`);
+  }
 
   return [
     contextBlock || null,
+    // Session rules ride at the TOP — binding operator constraints the worker
+    // reads before the task itself.
+    sessionRulesSection,
     `Packet: ${packet.title}`,
     packet.summary ? `Summary: ${packet.summary}` : null,
     livePacketSpec,
