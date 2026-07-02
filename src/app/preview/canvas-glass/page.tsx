@@ -215,7 +215,7 @@ type SearchHit =
 const CANVAS_MODEL_OPTIONS: Array<{ value: string; label: string }> = [
   { value: 'claude-fable-5', label: 'Fable 5' },
   { value: 'claude-opus-4-8', label: 'Opus 4.8' },
-  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { value: 'claude-sonnet-5', label: 'Sonnet 5' },
 ];
 const CANVAS_ORCA_MODEL_KEY = 'o8:canvas-orca-model';
 const CANVAS_ORCA_EFFORT_KEY = 'o8:canvas-orca-effort';

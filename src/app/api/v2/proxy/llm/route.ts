@@ -116,6 +116,7 @@ function supportsAnthropicAdaptiveThinking(model: string): boolean {
   return normalizedModel.includes('claude-opus-4-8')
     || normalizedModel.includes('claude-opus-4-7')
     || normalizedModel.includes('claude-opus-4-6')
+    || normalizedModel.includes('claude-sonnet-5')
     || normalizedModel.includes('claude-sonnet-4-6')
     || normalizedModel.includes('claude-mythos-preview');
 }

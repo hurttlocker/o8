@@ -297,7 +297,7 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
   // Agent model mapping
   const agentModels: Record<string, { provider: string; model: string }> = {
     flash: { provider: 'google', model: 'gemini-2.5-flash' },
-    sonnet: { provider: 'anthropic', model: 'claude-sonnet-4-6' },
+    sonnet: { provider: 'anthropic', model: 'claude-sonnet-5' },
     opus: { provider: 'anthropic', model: 'claude-opus-4-8' },
   };
 

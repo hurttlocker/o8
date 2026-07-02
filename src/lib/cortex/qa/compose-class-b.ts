@@ -97,7 +97,7 @@ export async function composeClassB(
 /**
  * Eval-mode Class B path. Routes the Sonnet system+user prompt through the
  * REPL one-shot adapter (subscription-billed, #1124) instead of either Sonnet
- * CLI streaming or paid OpenRouter `anthropic/claude-sonnet-4-6`. Same
+ * CLI streaming or paid OpenRouter `anthropic/claude-sonnet-5`. Same
  * adapter the production Class B path uses (`callSonnet`) — just non-streaming
  * because eval cares about final answer correctness, not TTFT.
  *

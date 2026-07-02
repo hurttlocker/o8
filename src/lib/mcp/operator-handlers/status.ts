@@ -147,13 +147,13 @@ export const STATUS_TOOLS: McpTool[] = [
   {
     name: 'o8_operator_defaults',
     description:
-      'Read or set the global operator-panel defaults that govern dispatches — the programmatic equivalent of Settings → Operator. Call with NO args to read the current defaults. Pass any subset to update; returns the updated defaults. USE THIS to pick the orchestrator brain before a mission (e.g. Sonnet for routine sweeps, Opus for hard problems) or to tune governance for a sprint. Settings are GLOBAL and persist across missions: read first, change what you need, restore prior values after if the change was for one mission only. Example: o8_operator_defaults({orchestratorModel: "claude-sonnet-4-6", thinkingEffort: "high"}).',
+      'Read or set the global operator-panel defaults that govern dispatches — the programmatic equivalent of Settings → Operator. Call with NO args to read the current defaults. Pass any subset to update; returns the updated defaults. USE THIS to pick the orchestrator brain before a mission (e.g. Sonnet for routine sweeps, Opus for hard problems) or to tune governance for a sprint. Settings are GLOBAL and persist across missions: read first, change what you need, restore prior values after if the change was for one mission only. Example: o8_operator_defaults({orchestratorModel: "claude-sonnet-5", thinkingEffort: "high"}).',
     inputSchema: {
       type: 'object',
       properties: {
         orchestratorModel: {
           type: 'string',
-          description: 'Orchestrator model id, e.g. "claude-opus-4-8" or "claude-sonnet-4-6". Non-empty string.',
+          description: 'Orchestrator model id, e.g. "claude-opus-4-8" or "claude-sonnet-5". Non-empty string.',
         },
         thinkingEffort: {
           type: 'string',

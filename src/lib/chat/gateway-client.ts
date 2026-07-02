@@ -8,7 +8,7 @@ import path from 'node:path';
 import type { ChatHistoryMessage } from '@/lib/chat/types';
 
 export const FREE_CHAT_MODEL_ID = 'deepseek/deepseek-v3.2';
-export const PAID_CHAT_MODEL_ID = 'anthropic/claude-sonnet-4.6';
+export const PAID_CHAT_MODEL_ID = 'anthropic/claude-sonnet-5';
 export const CHAT_GATEWAY_PROVIDER = 'deepseek';
 
 const ENC_PREFIX = 'enc:' as const;
