@@ -41,6 +41,13 @@ export interface CreateMissionInput {
    */
   useBrain?: boolean;
   /**
+   * Originating orchestrator thread id (#1329). When set, every packet in the
+   * mission inherits the thread's active session rules (via `buildPacketPrompt`)
+   * and dispatch stamps a `rules_applied` lane event. Omit for thread-less
+   * dispatches (no session-rule inheritance).
+   */
+  orchestratorThreadId?: string | null;
+  /**
    * Huddle mode (#1282) — stamps every packet's `huddle`. When true, each
    * worker aligns with the orchestrator (posts plan + pushback, then STOPS)
    * before editing. Armed per-mission; omit (default off) for clear packets.

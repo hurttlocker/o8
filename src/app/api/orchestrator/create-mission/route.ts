@@ -109,6 +109,11 @@ export async function POST(request: NextRequest) {
       existingBranchPolicy,
       ...(typeof record.useBrain === 'boolean' ? { useBrain: record.useBrain } : {}),
       ...(typeof record.huddle === 'boolean' ? { huddle: record.huddle } : {}),
+      // #1329 — carry the dispatching orchestrator thread id so workers inherit
+      // its session rules. Optional; thread-less callers omit it.
+      ...(typeof record.orchestratorThreadId === 'string' && record.orchestratorThreadId.trim()
+        ? { orchestratorThreadId: record.orchestratorThreadId.trim() }
+        : {}),
       ...(normalizeComparisonModels(record.comparisonModels)
         ? { comparisonModels: normalizeComparisonModels(record.comparisonModels) }
         : {}),
