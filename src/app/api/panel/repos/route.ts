@@ -10,6 +10,7 @@ import {
   updateRepo,
   validateRepo,
 } from '@/lib/repos/registry';
+import { cloneRepoToDefaultLocation, RepoCloneError } from '@/lib/repos/clone';
 import { removeRepoPathFromProjects } from '@/lib/repos/projects';
 import { removeRepoFromAllProjects } from '@/lib/projects/store';
 import { enrichRepoReadiness, enrichRepoReadinessList } from '@/lib/repos/readiness';
@@ -159,6 +160,25 @@ export async function POST(request: Request) {
         triggerScan(repo.localPath);
         startChangePolling(repo.localPath);
         return NextResponse.json({ repo }, { status: 201 });
+      }
+      case 'clone': {
+        // #1339 — onboarding GitHub selections used to POST { cloneUrl } into a
+        // handler with no clone case (400 localPath required, swallowed client-side).
+        if (!('cloneUrl' in body) || !body.cloneUrl?.trim()) {
+          return NextResponse.json({ error: 'cloneUrl is required.' }, { status: 400 });
+        }
+        try {
+          const { localPath } = await cloneRepoToDefaultLocation(body.cloneUrl, 'name' in body ? body.name : undefined);
+          const repo = await enrichRepoReadiness(await addRepo(localPath));
+          triggerScan(repo.localPath);
+          startChangePolling(repo.localPath);
+          return NextResponse.json({ repo }, { status: 201 });
+        } catch (error) {
+          if (error instanceof RepoCloneError) {
+            return NextResponse.json({ error: error.message }, { status: error.statusCode });
+          }
+          throw error;
+        }
       }
       case 'update': {
         if (!('id' in body) || !body.id) {
