@@ -85,6 +85,7 @@ import type {
 } from './types';
 import { stageMissingCliRun } from './missing-cli';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
+import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
 
 export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSessionStore {
   const runtimeId = adapter.runtimeId;
@@ -575,6 +576,11 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       ...adapterEnv,
       FORCE_COLOR: '0',
       NO_COLOR: '1',
+      // Mark the dispatched worker's identity. Its `o8` CLI sends this as the
+      // Bearer, so governance routes (e.g. POST /api/panel/approvals) can deny a
+      // worker resolving its own approval — the CRIT-1 moat. The operator webview
+      // + orchestrator MCP never carry it. (SECURITY_AUDIT_2026-07-02 §CRIT-1.)
+      O8_WORKER_TOKEN: getOrCreateLocalWorkerToken(),
     };
 
     // #4 — crash-survivable workers (default ON since the 0.1.512 kill-test). When
