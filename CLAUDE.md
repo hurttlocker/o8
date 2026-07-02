@@ -438,6 +438,10 @@ GitHub Actions macOS runners failed because of billing. Local `npm run ship` tak
 
 `~/.tauri/cortex-ide.key` is the minisign private key. Its pubkey is embedded in `tauri.conf.json` under `plugins.updater.pubkey`. DON'T rotate without re-signing every future release — the installed app will refuse the update if the signature doesn't validate.
 
+### Release-time build config — device-flow GitHub client id (#1338)
+
+The device-flow "Connect GitHub" CTA only renders when `GITHUB_OAUTH_CLIENT_ID` is present in the packaged server's env. Client IDs are PUBLIC, so `scripts/tauri-export.mjs` bakes it into the generated `out/server/server.js` wrapper at prebuild time, sourced from a `GITHUB_OAUTH_CLIENT_ID` build env var OR `o8.release.json` at the repo root (gitignored — copy `o8.release.example.json` and paste the client id once). Absent → the build behaves exactly as before (device flow disabled). Set it once and every `npm run ship` carries it.
+
 ### o8_view_* webview tools (lets Claude drive the installed app)
 
 The production build includes the `tauri-plugin-mcp` Rust crate via the `dev-mcp-plugin` Cargo feature (always-on now in `tauri:build:signed`). On launch it opens a Unix socket at `/tmp/tauri-mcp-o8-<user>.sock`. The **operator MCP server** connects to that socket and exposes the 12 `o8_view_*` webview tools (full list under "Webview control tools" in MCP servers above).
