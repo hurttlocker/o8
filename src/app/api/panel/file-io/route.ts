@@ -21,6 +21,23 @@ import { promisify } from 'node:util';
 import { readFile, stat, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, normalize } from 'node:path';
+import { resolveRequestPrincipal } from '@/lib/auth/principal';
+import { isPathInRegisteredRepo } from '@/lib/llm/repo-scope';
+
+/**
+ * A dispatched worker (local-worker token) may only touch files inside a
+ * registered repo — never an arbitrary absolute path — so it cannot escape its
+ * worktree to overwrite ~/.zshrc / a launchd plist etc. (§HIGH-6). The operator
+ * keeps full arbitrary-path access (this card is a terminal-grade operator tool).
+ */
+async function denyWorkerOutsideRepo(request: Request, absPath: string): Promise<NextResponse | null> {
+  if (resolveRequestPrincipal(request) !== 'worker') return null;
+  if (await isPathInRegisteredRepo(absPath)) return null;
+  return NextResponse.json(
+    { error: 'Workers may only access files inside a registered repository.' },
+    { status: 403 },
+  );
+}
 
 const execFileAsync = promisify(execFile);
 
@@ -50,6 +67,8 @@ export async function GET(request: Request) {
   if (!path) {
     return NextResponse.json({ error: 'Absolute path required' }, { status: 400 });
   }
+  const workerDenied = await denyWorkerOutsideRepo(request, path);
+  if (workerDenied) return workerDenied;
   try {
     const info = await stat(path);
     if (!info.isFile()) {
@@ -85,6 +104,8 @@ export async function PUT(request: Request) {
   if (!path) {
     return NextResponse.json({ error: 'Absolute path required' }, { status: 400 });
   }
+  const workerDenied = await denyWorkerOutsideRepo(request, path);
+  if (workerDenied) return workerDenied;
   try {
     // Edit-existing-files only — the card opens what's already on disk.
     const before = await stat(path);

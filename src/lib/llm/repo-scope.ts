@@ -2,7 +2,20 @@ import 'server-only';
 
 import path from 'node:path';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
-import { findRepoByLocalPath } from '@/lib/repos/registry';
+import { findRepoByLocalPath, listRepos } from '@/lib/repos/registry';
+import { confineToRoots } from '@/lib/fs/safe-path';
+
+/**
+ * True if `absPath` is equal to, or nested inside, ANY registered repo root
+ * (normalized — no `..` escape). Used to confine a dispatched worker's file
+ * access to real repos so it cannot escape its worktree to ~/.zshrc etc.
+ * (SECURITY_AUDIT_2026-07-02 §HIGH-6). The operator is not constrained by this.
+ */
+export async function isPathInRegisteredRepo(absPath: string): Promise<boolean> {
+  const repos = await listRepos().catch(() => [] as RepoRegistryEntry[]);
+  const roots = repos.map((r) => r.localPath).filter((p): p is string => Boolean(p));
+  return confineToRoots(absPath, roots) !== null;
+}
 
 export const LLM_REPO_PATH_HEADER = 'x-cortex-repo-path';
 
