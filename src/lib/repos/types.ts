@@ -80,6 +80,12 @@ export interface RepoRegistryAddBody {
   localPath: string;
 }
 
+export interface RepoRegistryCloneBody {
+  action: 'clone';
+  cloneUrl: string;
+  name?: string;
+}
+
 export interface RepoRegistryUpdateBody {
   action: 'update';
   id: string;
@@ -96,5 +102,6 @@ export interface RepoRegistryTouchBody {
 export type RepoRegistryPostBody =
   | RepoRegistryValidateBody
   | RepoRegistryAddBody
+  | RepoRegistryCloneBody
   | RepoRegistryUpdateBody
   | RepoRegistryTouchBody;

@@ -15,10 +15,11 @@
  * Full-screen takeover, frosted glass background, no sidebar.
  */
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useRef, useState } from 'react';
 import type { ExtractedProfile, ImportProgress } from '@/lib/connectors/chatgpt/types';
 import { OnboardingDispatchStep } from './onboarding/OnboardingDispatchStep';
 import { OnboardingRuntimeStep, type DetectedRuntime } from './onboarding/OnboardingRuntimeStep';
+import { OnboardingReposStep, type DeviceFlowState } from './onboarding/OnboardingReposStep';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import { OnboardingOpen } from './onboarding/OnboardingOpen';
 import { playOnboardingCue } from './onboarding/onboarding-sound';
@@ -120,29 +121,7 @@ function StepIndicator({ steps, current }: { steps: OnboardingStep[]; current: O
   );
 }
 
-// ── GitHub device flow state ──
-
-interface DeviceFlowState {
-  stage: 'idle' | 'waiting' | 'polling' | 'success' | 'error';
-  userCode?: string;
-  verificationUrl?: string;
-  error?: string;
-}
-
-// ── Repo types ──
-
-interface GithubRepo {
-  id: number;
-  full_name: string;
-  name: string;
-  description: string | null;
-  language: string | null;
-  stargazers_count: number;
-  updated_at: string;
-  private: boolean;
-  default_branch: string;
-  clone_url: string;
-}
+// ── GitHub device flow state (DeviceFlowState imported from OnboardingReposStep) ──
 
 // ════════════════════════════════════════════════════════════
 // ── Main Component ──
@@ -157,11 +136,9 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
   const pollTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const flowIdRef = useRef<string | null>(null);
 
-  // Step 2: Repos
-  const [githubRepos, setGithubRepos] = useState<GithubRepo[]>([]);
-  const [reposLoading, setReposLoading] = useState(false);
-  const [selectedRepos, setSelectedRepos] = useState<Set<string>>(new Set());
-  const [repoSearch, setRepoSearch] = useState('');
+  // Step 2: Repos — the repos step owns its own fetch/selection state; the parent
+  // only keeps the final configured count for the "ready" summary.
+  const [configuredRepoCount, setConfiguredRepoCount] = useState(0);
 
   // Step 3: Runtimes
   const [runtimes, setRuntimes] = useState<DetectedRuntime[]>([]);
@@ -175,9 +152,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
   const goNext = useCallback(() => {
     const idx = STEP_ORDER.indexOf(step);
     if (idx < STEP_ORDER.length - 1) {
-      const nextStep = STEP_ORDER[idx + 1];
-      if (nextStep === 'repos') setReposLoading(true);
-      setStep(nextStep);
+      setStep(STEP_ORDER[idx + 1]);
     }
   }, [step]);
 
@@ -196,26 +171,6 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
       .catch(() => setGithubDeviceFlowEnabled(false));
   }, []);
 
-  // ── Fetch repos when entering step 2 ──
-  useEffect(() => {
-    if (step !== 'repos') return;
-    fetch('/api/panel/github-status')
-      .then(r => r.json())
-      .then(async (status) => {
-        if (!status.authenticated) { setReposLoading(false); return; }
-        // Fetch repos via gh CLI
-        try {
-          const res = await fetch('/api/panel/repos?source=github&limit=50');
-          if (res.ok) {
-            const data = await res.json();
-            setGithubRepos(Array.isArray(data.repos) ? data.repos : Array.isArray(data) ? data : []);
-          }
-        } catch { /* silent */ }
-        setReposLoading(false);
-      })
-      .catch(() => setReposLoading(false));
-  }, [step]);
-
   // ── GitHub auth ──
   const csrfTokenRef = useRef<string | null>(null);
   // Hard-cap device-code polling so a wedged endpoint (persistent 5xx/429,
@@ -223,7 +178,7 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
   // 5s interval × 120 attempts = 10 min — matches GitHub's device flow expiry.
   const pollAttemptsRef = useRef(0);
   const MAX_POLL_ATTEMPTS = 120;
-  const startGithubFlow = useCallback(async () => {
+  const startGithubFlow = useCallback(async (onSuccess?: () => void) => {
     setGithubFlow({ stage: 'waiting' });
     pollAttemptsRef.current = 0;
     try {
@@ -257,7 +212,10 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
           if (pd.status === 'complete') {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
             setGithubFlow({ stage: 'success' });
-            setTimeout(() => goNext(), 1000);
+            // From the open step, advance forward; from the repos step, the caller
+            // passes onSuccess (re-fetch repos + stay put).
+            if (onSuccess) setTimeout(() => onSuccess(), 1000);
+            else setTimeout(() => goNext(), 1000);
           } else if (pd.status === 'expired' || pd.error) {
             if (pollTimerRef.current) clearInterval(pollTimerRef.current);
             setGithubFlow({ stage: 'error', error: pd.error || 'Expired. Try again.' });
@@ -268,38 +226,6 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
       setGithubFlow({ stage: 'error', error: 'Network error.' });
     }
   }, [goNext]);
-
-  // ── Repo selection ──
-  const toggleRepo = useCallback((fullName: string) => {
-    setSelectedRepos(prev => {
-      const next = new Set(prev);
-      if (next.has(fullName)) next.delete(fullName);
-      else next.add(fullName);
-      return next;
-    });
-  }, []);
-
-  const filteredRepos = useMemo(() => {
-    if (!repoSearch.trim()) return githubRepos;
-    const q = repoSearch.toLowerCase();
-    return githubRepos.filter(r => r.full_name.toLowerCase().includes(q) || (r.description ?? '').toLowerCase().includes(q));
-  }, [githubRepos, repoSearch]);
-
-  const saveSelectedRepos = useCallback(async () => {
-    // Register selected repos via the registry API
-    for (const fullName of selectedRepos) {
-      const repo = githubRepos.find(r => r.full_name === fullName);
-      if (!repo) continue;
-      try {
-        await fetch('/api/panel/repos', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ cloneUrl: repo.clone_url, name: repo.name }),
-        });
-      } catch { /* silent */ }
-    }
-    goNext();
-  }, [selectedRepos, githubRepos, goNext]);
 
   // ── Import ──
   const handleImportFile = useCallback(async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -362,117 +288,19 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
 
         {/* ── Step 2: Repo Picker ── */}
         {step === 'repos' && (
-          <div style={{ maxWidth: 640, width: '100%', display: 'flex', flexDirection: 'column', gap: 16 }}>
-            <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.5, textAlign: 'center' }}>
-              Select the repositories you want o8 to manage. You can always add more later.
-            </div>
-
-            {/* Search */}
-            <input
-              type="text"
-              value={repoSearch}
-              onChange={(e) => setRepoSearch(e.target.value)}
-              placeholder="Search repos..."
-              style={{
-                width: '100%',
-                paddingTop: 10,
-                paddingBottom: 10,
-                paddingLeft: 14,
-                paddingRight: 14,
-                borderRadius: 10,
-                border: '1px solid var(--t-glass-border-strong)',
-                background: 'var(--t-glass-muted)',
-                backdropFilter: 'blur(8px)',
-                WebkitBackdropFilter: 'blur(8px)',
-                color: 'var(--t-text)',
-                fontSize: 13,
-                fontFamily: FONT,
-                outline: 'none',
-                boxSizing: 'border-box',
-              } as React.CSSProperties}
-            />
-
-            {/* Repo list */}
-            <div style={{
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 4,
-              maxHeight: 340,
-              overflowY: 'auto',
-              paddingRight: 4,
-            }}>
-              {reposLoading ? (
-                <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: 20, justifyContent: 'center', color: 'var(--t-text-secondary)', fontSize: 13 }}>
-                  <Spinner /> Loading your repositories...
-                </div>
-              ) : filteredRepos.length === 0 ? (
-                <div style={{ padding: 20, textAlign: 'center', color: 'var(--t-text-muted)', fontSize: 13 }}>
-                  {githubRepos.length === 0 ? 'No repos found. You can add repos manually from the dashboard.' : 'No repos match your search.'}
-                </div>
-              ) : (
-                filteredRepos.map((repo) => {
-                  const selected = selectedRepos.has(repo.full_name);
-                  return (
-                    <button
-                      key={repo.id}
-                      type="button"
-                      onClick={() => toggleRepo(repo.full_name)}
-                      style={{
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: 12,
-                        padding: '10px 14px',
-                        borderRadius: 10,
-                        border: selected ? '1px solid var(--t-accent-border)' : '1px solid transparent',
-                        background: selected ? 'var(--t-accent-soft)' : 'transparent',
-                        cursor: 'pointer',
-                        textAlign: 'left',
-                        fontFamily: FONT,
-                        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-                      }}
-                    >
-                      {/* Checkbox */}
-                      <div style={{
-                        width: 18,
-                        height: 18,
-                        borderRadius: 5,
-                        border: selected ? '2px solid var(--t-accent)' : '2px solid var(--t-text-faint)',
-                        background: selected ? 'var(--t-accent)' : 'transparent',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        flexShrink: 0,
-                        transition: 'all 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-                      }}>
-                        {selected && (
-                          <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5"/></svg>
-                        )}
-                      </div>
-                      <div style={{ flex: 1, minWidth: 0 }}>
-                        <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--t-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{repo.full_name}</div>
-                        {repo.description && (
-                          <div style={{ fontSize: 11, color: 'var(--t-text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 2 }}>{repo.description}</div>
-                        )}
-                      </div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-                        {repo.language && <span style={{ fontSize: 10, fontWeight: 600, color: 'var(--t-text-faint)' }}>{repo.language}</span>}
-                        {repo.private && <span style={{ fontSize: 9, fontWeight: 700, padding: '2px 6px', borderRadius: 999, background: 'var(--t-divider)', color: 'var(--t-text-muted)' }}>Private</span>}
-                      </div>
-                    </button>
-                  );
-                })
-              )}
-            </div>
-
-            {/* Actions */}
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginTop: 8 }}>
-              <button type="button" onClick={goNext} style={{ border: 'none', background: 'transparent', color: 'var(--t-text-faint)', fontSize: 12, cursor: 'pointer', fontFamily: FONT, padding: 0 }}>Skip</button>
-              <GlassButton primary onClick={saveSelectedRepos} disabled={selectedRepos.size === 0}>
-                {selectedRepos.size > 0 ? `Continue with ${selectedRepos.size} repo${selectedRepos.size > 1 ? 's' : ''}` : 'Select repos to continue'}
+          <OnboardingReposStep
+            deviceFlowEnabled={githubDeviceFlowEnabled}
+            githubFlow={githubFlow}
+            onConnectGithub={(onSuccess) => { void startGithubFlow(onSuccess); }}
+            onSkip={goNext}
+            onContinue={(count) => { setConfiguredRepoCount(count); goNext(); }}
+            renderContinueButton={({ label, onClick, disabled }) => (
+              <GlassButton primary onClick={onClick} disabled={disabled}>
+                {label}
                 <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M5 12h14M12 5l7 7-7 7"/></svg>
               </GlassButton>
-            </div>
-          </div>
+            )}
+          />
         )}
 
         {/* ── Step 3: Runtime Detection ── */}
@@ -604,10 +432,10 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
               </div>
               <div style={{ fontSize: 18, fontWeight: 700, color: 'var(--t-text)', marginBottom: 8 }}>Ready to go</div>
               <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.6 }}>
-                {selectedRepos.size > 0 && <>{selectedRepos.size} repo{selectedRepos.size > 1 ? 's' : ''} connected. </>}
+                {configuredRepoCount > 0 && <>{configuredRepoCount} repo{configuredRepoCount > 1 ? 's' : ''} connected. </>}
                 {runtimes.filter(r => r.detected).length > 0 && <>{runtimes.filter(r => r.detected).length} runtime{runtimes.filter(r => r.detected).length > 1 ? 's' : ''} detected. </>}
                 {importProfile && <>{importProfile.topics.length} topics imported. </>}
-                {!selectedRepos.size && !runtimes.filter(r => r.detected).length && !importProfile && <>You can configure everything from the dashboard.</>}
+                {!configuredRepoCount && !runtimes.filter(r => r.detected).length && !importProfile && <>You can configure everything from the dashboard.</>}
               </div>
             </GlassCard>
 
