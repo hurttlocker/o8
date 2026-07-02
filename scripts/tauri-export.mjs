@@ -4,7 +4,7 @@
  *   out/frontend/  → Tauri frontendDist (just the loader HTML)
  *   out/server/    → Tauri bundle resource (Next.js server + Node binary)
  */
-import { cpSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'fs';
+import { cpSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'fs';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 
@@ -229,6 +229,47 @@ const loaderHtml = `<!DOCTYPE html>
 writeFileSync(join(frontend, 'index.html'), loaderHtml);
 console.log('📦 Created frontend loader (port-probing)');
 
+// ── Release config: bake the device-flow GitHub OAuth client id (#1338) ──
+// The client id is PUBLIC (not a secret), so embedding it in the signed build
+// is correct — it's what lets a fresh install render the "Connect GitHub"
+// device-flow CTA (deviceFlowEnabled in /api/panel/github-status keys off
+// process.env.GITHUB_OAUTH_CLIENT_ID, which was never present in packaged
+// builds). Source priority: build env var wins, else o8.release.json at the
+// repo root (gitignored, deployment-specific — see o8.release.example.json).
+// Absent → nothing is stamped and the packaged build behaves exactly as today.
+function resolveReleaseConfig() {
+  const cfg = { githubOAuthClientId: '' };
+  const cfgPath = join(root, 'o8.release.json');
+  if (existsSync(cfgPath)) {
+    try {
+      const parsed = JSON.parse(readFileSync(cfgPath, 'utf-8'));
+      if (typeof parsed.githubOAuthClientId === 'string') {
+        cfg.githubOAuthClientId = parsed.githubOAuthClientId.trim();
+      }
+    } catch (e) {
+      console.warn('⚠️  o8.release.json parse failed — ignoring:', e.message);
+    }
+  }
+  const fromEnv = process.env.GITHUB_OAUTH_CLIENT_ID?.trim();
+  if (fromEnv) cfg.githubOAuthClientId = fromEnv;
+  return cfg;
+}
+const releaseConfig = resolveReleaseConfig();
+
+// Stanza spliced into the server.js wrapper (same process as server-impl.js, so
+// setting process.env here is visible to the Next route handlers). The `if
+// (!process.env…)` guard means a real env var — dev, operator override — still
+// wins over the baked value.
+const RELEASE_ENV_STANZA = releaseConfig.githubOAuthClientId
+  ? `\n// Device-flow public client id, baked at release build (issue #1338).\n` +
+    `if (!process.env.GITHUB_OAUTH_CLIENT_ID) process.env.GITHUB_OAUTH_CLIENT_ID = ${JSON.stringify(releaseConfig.githubOAuthClientId)};\n`
+  : '';
+if (releaseConfig.githubOAuthClientId) {
+  console.log(`📦 Baking GITHUB_OAUTH_CLIENT_ID into server.js wrapper (device flow enabled)`);
+} else {
+  console.log('📦 No GITHUB_OAUTH_CLIENT_ID configured — device flow stays disabled in this build');
+}
+
 // ── Server bundle ──
 // Next's stock standalone entry ships as server-impl.js; server.js becomes a
 // thin wrapper that stamps the REAL TCP peer address into x-o8-client-addr on
@@ -269,7 +310,7 @@ const origHttpsCreate = https.createServer;
 https.createServer = function (...args) {
   return stampClientAddr(origHttpsCreate.apply(this, args));
 };
-
+${RELEASE_ENV_STANZA}
 require('./server-impl.js');
 `);
 console.log('📦 Wrote server.js wrapper (socket-addr stamping) + server-impl.js');
