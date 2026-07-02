@@ -11,7 +11,7 @@
 
 import Database from 'better-sqlite3';
 import { drizzle, type BetterSQLite3Database } from 'drizzle-orm/better-sqlite3';
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { migrateDataDirOnce } from '@/lib/data-dir-migration';
@@ -69,6 +69,17 @@ export function getDb(): BetterSQLite3Database<typeof schema> | null {
 
   const dbFilePreviouslyExisted = existsSync(DB_PATH);
   _sqlite = new Database(DB_PATH);
+
+  // Tighten permissions: the DB holds encrypted api_keys plus PLAINTEXT
+  // chat_history / lanes / approvals. Keep it owner-only so another local user
+  // or a backup/sync process can't read operator data (§PL-1). Best-effort.
+  try {
+    chmodSync(DATA_DIR, 0o700);
+    for (const suffix of ['', '-wal', '-shm']) {
+      const p = `${DB_PATH}${suffix}`;
+      if (existsSync(p)) chmodSync(p, 0o600);
+    }
+  } catch { /* chmod is best-effort — never block DB init on it */ }
 
   // SQLite performance pragmas
   _sqlite.pragma('journal_mode = WAL');      // Write-ahead logging (concurrent reads)
