@@ -178,5 +178,14 @@ export function buildPreviewSrcdoc(content: string, opts: HtmlStylePresetOptions
       var t = setInterval(function () { report(); if (++n > 8) clearInterval(t); }, 250);
     })();
   `;
-  return `<!doctype html><html><head><meta charset="utf-8"><style>${css}</style></head><body>${content}<script>${heightScript}<\/script></body></html>`;
+  // The preview runs agent-authored HTML in a sandbox="allow-scripts" iframe, so
+  // a script in `content` could otherwise fire a BLIND cross-origin POST to a
+  // loopback API route (e.g. /api/panel/dev-server → RCE) even without reading
+  // the response. A CSP with `connect-src 'none'` + `form-action 'none'` blocks
+  // all network egress (fetch/XHR/beacon/WebSocket/forms) while still allowing
+  // the preview to render styled HTML with images and run its inline height
+  // script. (SECURITY_AUDIT_2026-07-02 §CRIT-2.)
+  const csp = "default-src 'none'; style-src 'unsafe-inline'; img-src data: blob: https: http:; "
+    + "font-src data: https:; script-src 'unsafe-inline'; connect-src 'none'; form-action 'none'; base-uri 'none'";
+  return `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="${csp}"><style>${css}</style></head><body>${content}<script>${heightScript}<\/script></body></html>`;
 }

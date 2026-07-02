@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { useTheme } from '@/lib/theme/context';
 import { buildPreviewSrcdoc, type HtmlStylePalette } from '@/lib/spec/html-style-presets';
+import { sanitizeAgentHtml } from '@/lib/render/sanitize-html';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -214,27 +215,31 @@ function FencedHtmlBlock({ code, theme }: { code: string; theme: HtmlStylePalett
 }
 
 function InlineSvg({ html }: { html: string }) {
-  // Inline SVG is safe to drop in directly — no scripts inside <svg> from
-  // markdown content reach the parent anything they couldn't already.
+  // Agent-authored SVG is UNTRUSTED — sanitize before insertion (DOMPurify
+  // strips <script>, on* handlers, SMIL onbegin/onend, <foreignObject>). The
+  // old "SVG is safe to drop in directly" assumption was a same-origin XSS
+  // (SECURITY_AUDIT_2026-07-02 §CRIT-2). Gate behind `mounted` so the server
+  // render (empty) matches the first client render — no hydration mismatch.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const safe = useMemo(() => (mounted ? sanitizeAgentHtml(html) : ''), [mounted, html]);
   return (
-    <div style={{ marginTop: 10, marginBottom: 10 }} dangerouslySetInnerHTML={{ __html: html }} />
+    <div style={{ marginTop: 10, marginBottom: 10 }} dangerouslySetInnerHTML={{ __html: safe }} />
   );
 }
 
 function PassthroughIframe({ html }: { html: string }) {
-  // Inline <iframe src="…"> in o8.md — looser sandbox is acceptable since
-  // spec content is user-/agent-authored and goes through the existing
-  // approval flow. We ENFORCE a sandbox attribute here even if the source
-  // markdown didn't include one.
-  const enforced = useMemo(() => {
-    let out = html;
-    if (!/\ssandbox=/i.test(out)) {
-      out = out.replace(/<iframe\b/i, '<iframe sandbox="allow-scripts allow-same-origin"');
-    }
-    return out;
-  }, [html]);
+  // Inline <iframe> in agent/spec markdown is NOT rendered as a live frame — an
+  // agent-controlled iframe (whose sandbox it sets itself) is a same-origin XSS
+  // (§CRIT-2). The sanitizer strips the <iframe> entirely; use a fenced ```html
+  // block (FencedHtmlBlock — fixed sandbox + network-blocking CSP) for
+  // intentional HTML preview.
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const safe = useMemo(() => (mounted ? sanitizeAgentHtml(html) : ''), [mounted, html]);
+  if (!safe) return null;
   return (
-    <div style={{ marginTop: 10, marginBottom: 10 }} dangerouslySetInnerHTML={{ __html: enforced }} />
+    <div style={{ marginTop: 10, marginBottom: 10 }} dangerouslySetInnerHTML={{ __html: safe }} />
   );
 }
 
