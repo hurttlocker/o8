@@ -73,6 +73,7 @@ import {
 } from './lib/mobile/orchestrator-thread-history';
 import { getLiveReviewChangeSet } from './lib/review/live-changes';
 import { isManualThinkingEffort, type ManualThinkingEffort } from './lib/orchestrator/thinking-effort';
+import { withSessionRules } from './lib/orchestrator/session-rules-prompt';
 import { orchestratorReplay } from './lib/orchestrator/replay-buffer';
 import {
   rehydrateOrchestratorSessions,
@@ -2902,10 +2903,19 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
         data: { requestedAt: updatedThread.lastMessageAt, thread: updatedThread },
       });
     }
+    // #1329 — pin active session rules into EVERY orchestrator turn (not sent
+    // once), so they survive context churn + compaction. The RAW `message` is
+    // what got persisted to the transcript above; only the payload handed to
+    // the backend carries the "Operator session rules (binding)" block. Applies
+    // across ALL backends because they all forward this argument untouched.
+    const turnMessage = withSessionRules(message, threadId);
+    if (turnMessage !== message) {
+      console.log(`[session-rules] Injected session rules into orchestrator turn (thread=${threadId ?? 'none'})`);
+    }
     const sendTurn = (
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
-    ): Promise<void> => backend.sendTurn(repoPath, message, onEvent, { permissionMode, thinkingEffort, model, agent: agentTag, threadId, signal, ...(attachments?.length ? { attachments } : {}) });
+    ): Promise<void> => backend.sendTurn(repoPath, turnMessage, onEvent, { permissionMode, thinkingEffort, model, agent: agentTag, threadId, signal, ...(attachments?.length ? { attachments } : {}) });
 
     // Ensure a subscription exists for the selected backend + agent.
     orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
