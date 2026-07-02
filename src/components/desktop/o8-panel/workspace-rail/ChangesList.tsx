@@ -95,7 +95,9 @@ export function useWorkspaceChanges(repoPath?: string | null): WorkspaceChangesS
     setLoading(true);
     setError(null);
     try {
-      const workspaceQuery = `?workspace=${encodeURIComponent(repoPath)}`;
+      // changesOnly=1 keeps this off the slow network `gh` path — the changes
+      // view reads only changedFiles/branch/repoSlug, all local git data (#1340).
+      const workspaceQuery = `?workspace=${encodeURIComponent(repoPath)}&changesOnly=1`;
       const response = await fetch(`/api/review/workspace${workspaceQuery}`);
       if (!response.ok) throw new Error('Failed to load workspace changes');
       const data = await response.json() as WorkspaceReviewResponse;
