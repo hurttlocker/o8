@@ -172,6 +172,11 @@ export async function createMission(input: CreateMissionInput) {
       ...(issueMeta ? { issue: issueMeta } : {}),
       ...(typeof input.useBrain === 'boolean' ? { useBrain: input.useBrain } : {}),
       ...(typeof input.huddle === 'boolean' ? { huddle: input.huddle } : {}),
+      // #1329 — carry the dispatching orchestrator thread id so the worker
+      // inherits that thread's session rules via `buildPacketPrompt`.
+      ...(typeof input.orchestratorThreadId === 'string' && input.orchestratorThreadId.trim()
+        ? { orchestratorThreadId: input.orchestratorThreadId.trim() }
+        : {}),
       // Best-of-N: stamp the seed packet so fanOutComparisonPackets (scheduling.ts)
       // splits it into N sibling candidates, one per model, each its own worktree.
       ...(input.comparisonModels && input.comparisonModels.length > 0
