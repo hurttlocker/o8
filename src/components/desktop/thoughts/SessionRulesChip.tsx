@@ -94,6 +94,9 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
   const [directives, setDirectives] = useState<DirectiveRow[]>([]);
   const [draft, setDraft] = useState('');
   const [pending, setPending] = useState(false);
+  // STYLEGUIDE §1 busy state, §2 sibling cohesion with Add's `pending`: the
+  // pressed × disables until its DELETE round-trip lands.
+  const [removingId, setRemovingId] = useState<string | null>(null);
   const [hovered, setHovered] = useState(false);
 
   const loadSessionRules = useCallback(async () => {
@@ -162,14 +165,18 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
   }, [draft, threadId, pending, loadSessionRules]);
 
   const handleRemove = useCallback(async (id: string) => {
+    if (removingId) return;
+    setRemovingId(id);
     try {
       const res = await fetch(`/api/orchestrator/session-rules?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
       const data = await res.json().catch(() => null) as { ok?: boolean } | null;
       if (data?.ok) await loadSessionRules();
     } catch (error) {
       console.warn('[session-rules] remove failed', error);
+    } finally {
+      setRemovingId(null);
     }
-  }, [loadSessionRules]);
+  }, [removingId, loadSessionRules]);
 
   const repoDirectives = directives.filter((d) => !isGlobalScope(d.scope));
   const globalDirectives = directives.filter((d) => isGlobalScope(d.scope));
@@ -268,7 +275,9 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
               <button
                 type="button"
                 onClick={() => { void handleRemove(rule.id); }}
-                aria-label="Remove rule"
+                disabled={removingId !== null}
+                aria-label={removingId === rule.id ? 'Removing rule…' : 'Remove rule'}
+                aria-busy={removingId === rule.id}
                 title="Remove this session rule"
                 style={{
                   display: 'inline-flex',
@@ -280,12 +289,17 @@ export function SessionRulesChip({ threadId, repoPath }: SessionRulesChipProps) 
                   borderWidth: 0,
                   background: 'transparent',
                   color: 'var(--t-text-faint)',
-                  cursor: 'pointer',
+                  cursor: removingId ? 'default' : 'pointer',
+                  opacity: removingId === rule.id ? 0.45 : 1,
                   fontSize: 13,
                   lineHeight: 1,
                   flexShrink: 0,
                 }}
-                onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--t-text)'; event.currentTarget.style.background = 'var(--t-hover)'; }}
+                onMouseEnter={(event) => {
+                  if (removingId) return;
+                  event.currentTarget.style.color = 'var(--t-text)';
+                  event.currentTarget.style.background = 'var(--t-hover)';
+                }}
                 onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--t-text-faint)'; event.currentTarget.style.background = 'transparent'; }}
               >
                 &times;
