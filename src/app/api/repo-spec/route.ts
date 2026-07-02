@@ -191,6 +191,14 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ ok: true, path: specPath });
     }
 
+    if (action === 'prewarm-review') {
+      // Warm a review REPL so the FIRST review click is instant, not a cold
+      // spawn. Fire-and-forget + idempotent (pool keeps ≤1 idle proc per key).
+      const { prewarmReview } = await import('@/lib/o8md/spec-review');
+      prewarmReview();
+      return NextResponse.json({ ok: true });
+    }
+
     if (action === 'review') {
       // Headless one-shot review: an LLM turn reads the notes and returns
       // annotations we splice in here. Never touches the orchestrator session,

@@ -18,7 +18,7 @@
 import 'server-only';
 
 import { execSync } from 'node:child_process';
-import { askClaudeWarm } from '@/lib/claude-code/warm-repl-pool';
+import { askClaudeWarm, prewarmClaudeRepl } from '@/lib/claude-code/warm-repl-pool';
 import { defaultClaudeBin } from '@/lib/claude-code/one-shot-repl';
 import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { appendComment, insertSuggestion, type SuggestionKind } from './mutate';
@@ -130,6 +130,18 @@ async function runLLM(prompt: string): Promise<{ text: string; backend: 'claude'
   }
   const text = await callCodex(prompt, { timeoutMs: 120_000 });
   return { text, backend: 'codex' };
+}
+
+/**
+ * Warm a sonnet-5|xhigh REPL so the FIRST "Ask o8 to review" click doesn't
+ * cold-spawn. Fire-and-forget + idempotent (the pool keeps at most one idle proc
+ * per key), so calling it per pane-open just maintains one warm proc; it reaps
+ * after the pool's idle window if it's never used. (2026-07-02)
+ */
+export function prewarmReview(): void {
+  const binary = defaultClaudeBin();
+  if (!binary) return;
+  try { prewarmClaudeRepl(binary, REVIEW_MODEL, REVIEW_EFFORT); } catch { /* best effort */ }
 }
 
 /**
