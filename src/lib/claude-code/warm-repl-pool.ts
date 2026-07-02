@@ -77,14 +77,17 @@ interface WarmProc {
 const idlePools = new Map<string, WarmProc[]>();
 let liveProcCount = 0;
 
-function poolKey(binary: string, model: string): string {
-  return `${binary}\x00${model}`;
+function poolKey(binary: string, model: string, effort?: string): string {
+  // No-effort callers key EXACTLY as before (byte-identical) so their warm
+  // hits are unaffected; an effort'd proc gets a distinct key so it can never
+  // be handed to a no-effort caller.
+  return effort ? `${binary}\x00${model}\x00${effort}` : `${binary}\x00${model}`;
 }
 
-function spawnWarmProc(binary: string, model: string): WarmProc | null {
+function spawnWarmProc(binary: string, model: string, effort?: string): WarmProc | null {
   if (liveProcCount >= MAX_LIVE_PROCS) return null;
 
-  const args = [...buildOneShotArgs(model)];
+  const args = [...buildOneShotArgs(model, effort)];
   const mcpStrip = getEmptyMcpConfigPath();
   if (mcpStrip) args.push('--strict-mcp-config', '--mcp-config', mcpStrip);
 
@@ -149,13 +152,13 @@ function killProc(proc: WarmProc): void {
 }
 
 /** Add one idle proc for `key` if below the idle/live caps. */
-function refill(binary: string, model: string): void {
-  const key = poolKey(binary, model);
+function refill(binary: string, model: string, effort?: string): void {
+  const key = poolKey(binary, model, effort);
   const pool = idlePools.get(key) ?? [];
   idlePools.set(key, pool);
   if (pool.length >= MAX_IDLE_PER_KEY) return;
 
-  const proc = spawnWarmProc(binary, model);
+  const proc = spawnWarmProc(binary, model, effort);
   if (!proc) return;
   pool.push(proc);
   proc.reapTimer = setTimeout(() => {
@@ -171,8 +174,8 @@ function refill(binary: string, model: string): void {
 }
 
 /** Pop a healthy idle proc for `key`, or null. */
-function takeIdle(binary: string, model: string): WarmProc | null {
-  const pool = idlePools.get(poolKey(binary, model));
+function takeIdle(binary: string, model: string, effort?: string): WarmProc | null {
+  const pool = idlePools.get(poolKey(binary, model, effort));
   while (pool && pool.length > 0) {
     const proc = pool.shift()!;
     if (proc.reapTimer) clearTimeout(proc.reapTimer);
@@ -218,6 +221,12 @@ export interface AskClaudeWarmOptions {
   binary: string;
   /** Model arg passed via `--model`. */
   model: string;
+  /**
+   * Optional reasoning effort passed via `--effort` (skipped when unset or
+   * 'adaptive'). Also keys the pool, so an effort'd proc is never handed to a
+   * no-effort caller (and no-effort callers key exactly as before).
+   */
+  effort?: string;
   /** Whole-turn timeout (slot wait + generation). Default 300s. */
   timeoutMs?: number;
   /** Streaming hook — called with each text delta as the model generates. */
@@ -228,8 +237,8 @@ export interface AskClaudeWarmOptions {
  * Fire-and-forget: make sure a warm proc exists for this binary+model so the
  * next `askClaudeWarm` skips the bootstrap. Safe to call on every question.
  */
-export function prewarmClaudeRepl(binary: string, model: string): void {
-  try { refill(binary, model); } catch { /* never block the pipeline on warm-up */ }
+export function prewarmClaudeRepl(binary: string, model: string, effort?: string): void {
+  try { refill(binary, model, effort); } catch { /* never block the pipeline on warm-up */ }
 }
 
 /**
@@ -241,12 +250,12 @@ export async function askClaudeWarm(prompt: string, opts: AskClaudeWarmOptions):
   const timeoutMs = opts.timeoutMs ?? 300_000;
   const releaseSlot = await acquireTurnSlot(timeoutMs);
 
-  let proc = takeIdle(opts.binary, opts.model);
+  let proc = takeIdle(opts.binary, opts.model, opts.effort);
   const warm = proc !== null;
   if (proc) {
     console.info(`[qa][warm-repl] warm hit for ${opts.model} (age ${((Date.now() - proc.spawnedAt) / 1000).toFixed(1)}s)`);
   } else {
-    proc = spawnWarmProc(opts.binary, opts.model);
+    proc = spawnWarmProc(opts.binary, opts.model, opts.effort);
     if (!proc) {
       releaseSlot();
       throw new Error(`[qa][warm-repl] live-proc cap reached (${MAX_LIVE_PROCS}) — refusing to spawn`);
@@ -256,7 +265,7 @@ export async function askClaudeWarm(prompt: string, opts: AskClaudeWarmOptions):
 
   // Replace the proc we just consumed so the NEXT question finds a warm one.
   // Done before the turn runs: the replacement bootstraps while we generate.
-  refill(opts.binary, opts.model);
+  refill(opts.binary, opts.model, opts.effort);
 
   try {
     return await runTurn(proc, prompt, timeoutMs, warm, opts.onDelta);

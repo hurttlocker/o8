@@ -138,22 +138,24 @@ function ComposerStatusBar({
           long orchestrator turn surfaces the orbit. */}
       <AgentStatusDot state="running" startedAt={turnStart} color="var(--t-text-muted)" />
       <span style={{
-        fontSize: 12,
-        fontWeight: 500,
-        letterSpacing: '-0.01em',
-        color: 'var(--t-text-muted)',
-      }}>
-        Working
-      </span>
-      <span style={{
-        fontSize: 11,
+        fontSize: 11.5,
         fontWeight: 500,
         fontFamily: '"SF Mono", ui-monospace, monospace',
         letterSpacing: '0',
-        color: 'var(--t-text-faint)',
+        color: 'var(--t-text-muted)',
       }}>
         {formatElapsed(elapsed)}
       </span>
+      {hasRunningTools ? (
+        <span style={{
+          fontSize: 11.5,
+          fontWeight: 400,
+          letterSpacing: '-0.05px',
+          color: 'var(--t-text-faint)',
+        }}>
+          {`· ${runningTools.length} running`}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -201,6 +203,7 @@ interface ComposerAreaProps {
   dragOver?: boolean;
   dragHandlers?: ThoughtsComposerDragHandlers;
   onAttachedImageRemove?: (index: number) => void;
+  onAttachedImageAnnotate?: (index: number) => void;
   onAttachedFileRemove?: (fileName: string) => void;
   onUploadDiskFiles?: (files: FileList | File[]) => void;
   repoPath?: string | null;
@@ -261,6 +264,7 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   dragOver = false,
   dragHandlers,
   onAttachedImageRemove,
+  onAttachedImageAnnotate,
   onAttachedFileRemove,
   onUploadDiskFiles,
   repoPath,
@@ -440,13 +444,14 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
 
   return (
     <div style={{
-      paddingTop: 10,
+      paddingTop: 24,
       paddingRight: 12,
       paddingBottom: 12,
       paddingLeft: 12,
-      borderTop: '1px solid var(--t-divider-subtle)',
       flexShrink: 0,
-      background: thoughtsBodyBackground,
+      // No background band (the "bar") — the composer floats; the transcript
+      // fades behind it. (2026-07-02)
+      background: 'transparent',
     }}>
       {isOrchestratorMode ? (
         <ComposerStatusBar
@@ -474,10 +479,13 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
           style={{
             position: 'relative',
             borderRadius: 14,
-            border: '1px solid var(--t-input-border)',
+            border: 'none',
             background: 'var(--t-input-bg)',
-            // Flat on the workspace — no drop shadow (operator request,
-            // 2026-06-18). The border + input bg already define the composer.
+            // Floating composer (Claude-style, 2026-07-02) — NO border; the input
+            // bg + a soft warm lift define it, so the edge just FADES into the
+            // transcript instead of drawing a boxed outline. (Supersedes the
+            // earlier flat/no-shadow request.)
+            boxShadow: '0 1px 3px rgba(40,30,20,0.05), 0 6px 20px rgba(40,30,20,0.07)',
             overflow: 'hidden',
             opacity: isDisabled ? 0.6 : 1,
             outline: dragOver ? '2px solid var(--t-accent)' : 'none',
@@ -499,6 +507,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                   <img
                     src={image.dataUri}
                     alt={image.name}
+                    title={onAttachedImageAnnotate ? 'Click to annotate' : undefined}
+                    onClick={onAttachedImageAnnotate ? () => onAttachedImageAnnotate(index) : undefined}
                     style={{
                       display: 'block',
                       width: 56,
@@ -507,8 +517,42 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
                       borderRadius: 10,
                       border: '1px solid var(--t-input-border)',
                       background: 'var(--t-bg-card)',
+                      cursor: onAttachedImageAnnotate ? 'pointer' : 'default',
                     }}
                   />
+                  {onAttachedImageAnnotate ? (
+                    <button
+                      type="button"
+                      aria-label={`Annotate ${image.name}`}
+                      title="Annotate"
+                      onClick={() => onAttachedImageAnnotate(index)}
+                      style={{
+                        position: 'absolute',
+                        top: 39,
+                        right: 4,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 18,
+                        height: 18,
+                        borderRadius: 999,
+                        border: '1px solid var(--t-input-border)',
+                        background: 'var(--t-input-bg)',
+                        color: 'var(--t-text-muted)',
+                        cursor: 'pointer',
+                        paddingTop: 0,
+                        paddingRight: 0,
+                        paddingBottom: 0,
+                        paddingLeft: 0,
+                        boxShadow: 'var(--t-panel-shadow)',
+                      }}
+                    >
+                      <svg width={10} height={10} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M12 20h9" />
+                        <path d="M16.5 3.5a2.12 2.12 0 0 1 3 3L7 19l-4 1 1-4Z" />
+                      </svg>
+                    </button>
+                  ) : null}
                   <div style={{
                     width: 60,
                     marginTop: 4,

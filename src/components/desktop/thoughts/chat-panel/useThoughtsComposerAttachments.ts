@@ -64,6 +64,13 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
     setAttachedImages((current) => current.filter((_, imageIndex) => imageIndex !== index));
   }, []);
 
+  // Swap one attachment in place (e.g. after screenshot annotation) — keeps the
+  // array position so the thumbnail updates without a remount, and the send path
+  // (which reads live state) picks up the annotated dataUri on the next send.
+  const replaceAttachedImage = useCallback((index: number, image: ThoughtsAttachedImage) => {
+    setAttachedImages((current) => current.map((im, i) => (i === index ? image : im)));
+  }, []);
+
   // Programmatic add (e.g. "Add to chat" from an o8.md inline image). Respects
   // the same image cap as the drop/paste bridge above.
   const addAttachedImage = useCallback((image: ThoughtsAttachedImage) => {
@@ -88,6 +95,7 @@ export function useThoughtsComposerAttachments(options?: UseThoughtsComposerAtta
     processFiles,
     addAttachedImage,
     removeAttachedImage,
+    replaceAttachedImage,
     removeAttachedFile,
     clearAttachments,
   };

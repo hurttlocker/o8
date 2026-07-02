@@ -124,7 +124,7 @@ const LIGHT_BASE: Record<string, string> = {
   // Borders / dividers / overlays — rgba over either surface mode reads fine
   '--t-border': 'rgba(15, 23, 42, 0.1)',
   '--t-panel-border': 'rgba(15, 23, 42, 0.1)',
-  '--t-panel-shadow': '0 24px 60px rgba(15, 23, 42, 0.1)',
+  '--t-panel-shadow': '0 24px 60px rgba(40, 30, 20, 0.12), 0 6px 16px rgba(40, 30, 20, 0.06)',
   '--t-panel-hover': 'rgba(15, 23, 42, 0.04)',
   '--t-panel-active': 'rgba(37, 99, 235, 0.1)',
   '--t-input-border': 'rgba(15, 23, 42, 0.12)',

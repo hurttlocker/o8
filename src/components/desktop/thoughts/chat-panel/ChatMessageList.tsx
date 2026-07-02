@@ -5,7 +5,40 @@ import { DesktopAgentMessage } from '../../DesktopAgentMessage';
 import { SuggestedReplies } from '../SuggestedReplies';
 import { TurnSummaryCard, type TurnSummary } from './TurnSummaryCard';
 import { CollideProposalCard } from './CollideProposalCard';
+import { MissionCompleteGroupCard } from './MissionCompleteGroupCard';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+
+// A run of ≥2 consecutive mission-complete cards collapses into ONE aggregate
+// (MissionCompleteGroupCard); everything else renders as its own message. Keys
+// on the structured statusEvent, so grouping survives a thread reload.
+type MissionRenderItem =
+  | { kind: 'msg'; msg: MobileTranscriptEntry; index: number }
+  | { kind: 'mission-group'; entries: MobileTranscriptEntry[]; lastIndex: number };
+
+function isMissionCompleteEntry(m: MobileTranscriptEntry): boolean {
+  return m.statusEvent?.kind === 'mission-complete';
+}
+
+function buildMissionRenderItems(messages: MobileTranscriptEntry[]): MissionRenderItem[] {
+  const items: MissionRenderItem[] = [];
+  let i = 0;
+  while (i < messages.length) {
+    if (isMissionCompleteEntry(messages[i])) {
+      let j = i;
+      while (j < messages.length && isMissionCompleteEntry(messages[j])) j += 1;
+      if (j - i >= 2) {
+        items.push({ kind: 'mission-group', entries: messages.slice(i, j), lastIndex: j - 1 });
+      } else {
+        items.push({ kind: 'msg', msg: messages[i], index: i });
+      }
+      i = j;
+    } else {
+      items.push({ kind: 'msg', msg: messages[i], index: i });
+      i += 1;
+    }
+  }
+  return items;
+}
 
 interface ChatMessageListProps {
   displayMessages: MobileTranscriptEntry[];
@@ -106,10 +139,11 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
       overflowY: 'auto',
       paddingTop: 14,
       paddingRight: 'var(--cortex-chat-gutter)',
-      // Breathing room before the composer — wider than the 18px inter-message
-      // gap so the last item (e.g. the Mission complete card) floats above the
-      // composer instead of sitting flush against it.
-      paddingBottom: 24,
+      // Breathing room before the composer, sized to CLEAR the 30px bottom-fade
+      // mask below — so scrolled all the way down, the last item (e.g. the
+      // Mission complete card) sits fully in the sharp region above the fade and
+      // never dissolves; only the empty padding fades into the composer.
+      paddingBottom: 36,
       paddingLeft: 'var(--cortex-chat-gutter)',
       display: 'flex',
       flexDirection: 'column',
@@ -139,7 +173,18 @@ export const ChatMessageList = forwardRef<HTMLDivElement, ChatMessageListProps>(
 
         {topContent}
 
-        {displayMessages.map((msg, index) => {
+        {buildMissionRenderItems(displayMessages).map((item) => {
+          if (item.kind === 'mission-group') {
+            const isLastGroup = item.lastIndex === displayMessages.length - 1 && !displayWaiting;
+            return (
+              <MissionCompleteGroupCard
+                key={`mission-group-${item.entries[0].id}`}
+                entries={item.entries.map((e) => ({ key: e.id, event: e.statusEvent!, timestampLabel: e.timestampLabel }))}
+                isLast={isLastGroup}
+              />
+            );
+          }
+          const { msg, index } = item;
           const isLatestAssistant = index === lastAssistantIndex;
           const showChipsHere = isLatestAssistant
             && hasSuggestedReplies

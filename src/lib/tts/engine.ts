@@ -1,11 +1,24 @@
 /**
  * TTSEngine — unified TTS playback for o8.
  *
- * Layer 1: Server-side edge-tts via /api/tts (en-US-SteffanNeural = Mister voice)
- * Layer 2: Browser SpeechSynthesis (offline fallback, device voice)
+ * Desktop (Tauri): routes to the native Rust streaming engine via the
+ *   `tts_speak` command — the Symon `reading.rs` port (src-tauri/src/tts/
+ *   playback.rs): a ~200-char lead chunk cut at a clause boundary (first audio
+ *   ~1–2s), a one-chunk-lookahead prefetch (no gap between chunks), single-
+ *   flight, process reaping, and a macOS `say` safety net. Playback state
+ *   mirrors back through the `o8:tts-state` event. Uses the app's read-aloud
+ *   voice (Google Neural2-J / ElevenLabs), matching the dock / Ask panel.
+ * Browser / mobile: server-side edge-tts via /api/tts (en-US-SteffanNeural),
+ *   then browser SpeechSynthesis (offline fallback).
+ *
+ * The desktop reroute exists because the old edge-tts path synthesized the
+ * ENTIRE response before a word played (1–2 min on long replies) and cold-
+ * spawned an un-reaped python per click. The native engine already solves both.
  *
  * Used by both desktop and mobile message action bars.
  */
+
+import { isTauri } from '@/lib/tauri/bridge';
 
 export type PlaybackState = 'idle' | 'loading' | 'playing' | 'paused' | 'error';
 
@@ -34,6 +47,8 @@ class TTSEngineImpl {
     usingFallback: false,
   };
   private animFrameId: number | null = null;
+  // Set up the native `o8:tts-state` subscription exactly once (desktop only).
+  private tauriListenerSetup = false;
 
   subscribe(listener: StateListener): () => void {
     this.listeners.add(listener);
@@ -72,10 +87,72 @@ class TTSEngineImpl {
     }
   }
 
-  /** Play a message. Tries server-side edge-tts first, falls back to SpeechSynthesis. */
+  /** Play a message. Desktop → native streaming engine; browser → edge-tts. */
   async play(text: string, messageId: string): Promise<void> {
-    this.stop();
+    if (isTauri()) return this.playViaTauri(text, messageId);
+    return this.playViaWeb(text, messageId);
+  }
 
+  // ── Desktop: native Rust streaming engine (Symon reading.rs port) ──
+
+  private async playViaTauri(text: string, messageId: string): Promise<void> {
+    this.setupTauriStateListener();
+    this.updateState({
+      state: 'loading',
+      activeMessageId: messageId,
+      currentTime: 0,
+      duration: 0,
+      usingFallback: false,
+    });
+    try {
+      const { invoke } = await import('@tauri-apps/api/core');
+      // Raw text on purpose — the Rust engine runs its own speech_text
+      // normalization (numbers / units / URLs / markdown) + chunking. Its
+      // single-flight supersedes any current playback, so we deliberately do
+      // NOT stop() first: a stop would emit a spurious `idle` that races the
+      // new `playing` and clears activeMessageId.
+      await invoke('tts_speak', { text });
+      // state transitions ('playing' → 'idle') arrive via o8:tts-state.
+    } catch (err) {
+      console.warn('[TTS] Native tts_speak failed, using web path:', err);
+      await this.playViaWeb(text, messageId);
+    }
+  }
+
+  /** Mirror native playback state into the engine so the ▷/stop toggle stays
+   *  honest. Idempotent — subscribes once for the life of the singleton. */
+  private setupTauriStateListener() {
+    if (this.tauriListenerSetup) return;
+    this.tauriListenerSetup = true;
+    import('@tauri-apps/api/event')
+      .then(({ listen }) =>
+        listen<{ state?: 'idle' | 'playing' | 'paused' }>('o8:tts-state', (e) => {
+          const next = e.payload?.state;
+          if (next === 'playing') {
+            this.updateState({ state: 'playing' });
+          } else if (next === 'paused') {
+            this.updateState({ state: 'paused' });
+          } else if (next === 'idle') {
+            this.updateState({ state: 'idle', activeMessageId: null, currentTime: 0, duration: 0 });
+          }
+        }),
+      )
+      .catch((err) => {
+        console.warn('[TTS] o8:tts-state subscribe failed:', err);
+        this.tauriListenerSetup = false; // allow a retry on the next play
+      });
+  }
+
+  private invokeTauri(cmd: string, args?: Record<string, unknown>) {
+    void import('@tauri-apps/api/core')
+      .then(({ invoke }) => invoke(cmd, args))
+      .catch((err) => console.warn(`[TTS] invoke ${cmd} failed:`, err));
+  }
+
+  // ── Browser / mobile: server-side edge-tts → SpeechSynthesis ──
+
+  private async playViaWeb(text: string, messageId: string): Promise<void> {
+    this.cleanup();
     this.updateState({
       state: 'loading',
       activeMessageId: messageId,
@@ -190,6 +267,10 @@ class TTSEngineImpl {
   }
 
   pause() {
+    if (isTauri()) {
+      if (this._state.state === 'playing') this.invokeTauri('tts_toggle_pause');
+      return;
+    }
     if (this.audio && this._state.state === 'playing') {
       this.audio.pause();
     } else if (this.utterance && this._state.state === 'playing') {
@@ -199,6 +280,10 @@ class TTSEngineImpl {
   }
 
   resume() {
+    if (isTauri()) {
+      if (this._state.state === 'paused') this.invokeTauri('tts_toggle_pause');
+      return;
+    }
     if (this.audio && this._state.state === 'paused') {
       void this.audio.play();
     } else if (this.utterance && this._state.state === 'paused') {
@@ -208,7 +293,11 @@ class TTSEngineImpl {
   }
 
   stop() {
-    this.cleanup();
+    if (isTauri()) {
+      this.invokeTauri('tts_stop');
+    } else {
+      this.cleanup();
+    }
     this.updateState({
       state: 'idle',
       activeMessageId: null,
@@ -231,6 +320,10 @@ class TTSEngineImpl {
 
   setRate(rate: number) {
     this.updateState({ playbackRate: rate });
+    if (isTauri()) {
+      this.invokeTauri('tts_set_speed', { rate });
+      return;
+    }
     if (this.audio) this.audio.playbackRate = rate;
   }
 
