@@ -22,6 +22,7 @@ import { IconFilesDrawer, IconScopeFilter, IconSplit, IconUnified, IconMore, Dif
 import { PanelMessage } from './panel/DiffView';
 import { ReviewFileRow, ToolbarButton, MenuItem } from './panel/ReviewFileRow';
 import { FilesDrawer } from './panel/FilesDrawer';
+import { ReviewSkeleton } from './panel/ReviewSkeleton';
 
 /**
  * ReviewPanel — the dedicated Review surface for the right panel's `review`
@@ -366,7 +367,7 @@ export const ReviewPanel = memo(function ReviewPanel({ repoPath, registeredRepos
         {!repoPath ? (
           <PanelMessage text="Select a repo to review changes." />
         ) : changes.loading && !hasFiles ? (
-          <PanelMessage text="Loading changes…" />
+          <ReviewSkeleton />
         ) : changes.error ? (
           <PanelMessage text={changes.error} tone="error" />
         ) : !hasFiles ? (

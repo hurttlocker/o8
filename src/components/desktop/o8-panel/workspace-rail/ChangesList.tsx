@@ -75,7 +75,9 @@ function statusGlyph(status: ReviewChangedFile['status']) {
 export function useWorkspaceChanges(repoPath?: string | null): WorkspaceChangesState {
   const [files, setFiles] = useState<ReviewChangedFile[]>([]);
   const [sourceRepoPath, setSourceRepoPath] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
+  // Start loading when a repo is present so the first paint is the skeleton,
+  // not a one-frame "Working tree clean" flash before the fetch effect runs (#1340).
+  const [loading, setLoading] = useState<boolean>(() => Boolean(repoPath));
   const [error, setError] = useState<string | null>(null);
   const [branch, setBranch] = useState<string | null>(null);
   const [repoSlug, setRepoSlug] = useState<string | null>(null);
