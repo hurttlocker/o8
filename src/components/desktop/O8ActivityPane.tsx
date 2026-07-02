@@ -264,6 +264,31 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     return null;
   }, [selectedSlug, repoSlug, repoOptions]);
 
+  // Slug → on-disk path, so the local-git commit fallback (#1341) can resolve
+  // a workspace path in all-repos mode too (not just the focused repo).
+  const pathForSlug = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const entry of registeredRepoEntries) {
+      const slug = repoSlugFromRemote(entry.remoteUrl) ?? normalizeRepoSlug(entry.name);
+      if (slug && entry.localPath) map.set(slug, entry.localPath);
+    }
+    return map;
+  }, [registeredRepoEntries]);
+
+  // Whether the *focused* repo has a real GitHub remote. Drives honest empty
+  // copy: PRs/Issues/CI can't exist without GitHub, so a local-only repo says
+  // "Connect GitHub …" instead of the misleading "No activity yet" (#1341).
+  const focusedGithubConnected = useMemo(() => {
+    if (allRepos) return true; // mixed scope — don't imply a single repo lacks GitHub
+    if (repoPath) {
+      const entry = registeredRepoEntries.find((e) => e.localPath === repoPath);
+      if (entry) return Boolean(repoSlugFromRemote(entry.remoteUrl));
+    }
+    // Legacy prop path with no matching registry entry: a resolved remote slug
+    // means GitHub is in play.
+    return Boolean(normalizeRepoSlug(repoSlug));
+  }, [allRepos, repoPath, registeredRepoEntries, repoSlug]);
+
   const isAllRepos = allRepos;
 
   // Fetch activity data
@@ -277,7 +302,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       try {
         if (isAllRepos) {
           const results = await Promise.all(
-            repoOptions.map((slug) => fetchRepoActivity(slug).catch(() => EMPTY_DATA))
+            repoOptions.map((slug) => fetchRepoActivity(slug, pathForSlug.get(slug) ?? null).catch(() => EMPTY_DATA))
           );
           if (cancelled) return;
           const merged: RepoActivityData = { commits: [], prs: [], issues: [], ciRuns: [] };
@@ -289,7 +314,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
           }
           setData(merged);
         } else if (effectiveRepo) {
-          const result = await fetchRepoActivity(effectiveRepo);
+          const result = await fetchRepoActivity(effectiveRepo, repoPath ?? pathForSlug.get(effectiveRepo) ?? null);
           if (cancelled) return;
           setData(result);
         } else {
@@ -321,7 +346,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       window.removeEventListener('o8:lane-lifecycle', handler);
       clearInterval(fallbackId);
     };
-  }, [active, effectiveRepo, isAllRepos, repoOptions]);
+  }, [active, effectiveRepo, isAllRepos, repoOptions, repoPath, pathForSlug]);
 
   // Packet items are derived from orchestrator missionState (not the
   // /api/panel feed). Always-on as of commit 2 — Mission rail is gone, so
@@ -669,9 +694,23 @@ export const O8ActivityPane = memo(function O8ActivityPane({
             lineHeight: 1.45,
             letterSpacing: '-0.1px',
           }}>
-            {effectiveRepo
-              ? `No ${filter === 'all' ? '' : filter + ' '}activity yet for ${shortRepoLabel(effectiveRepo)}.`
-              : 'Attach a repo to see activity here.'}
+            {(() => {
+              if (!effectiveRepo) return 'Attach a repo to see activity here.';
+              const label = shortRepoLabel(effectiveRepo);
+              // PRs / Issues / CI cannot exist without GitHub — say so plainly
+              // for a repo with no remote instead of the misleading "No activity
+              // yet" (#1341). Do not build the connect flow here (#1338).
+              const githubOnlyFilter = filter === 'pr' || filter === 'issue' || filter === 'ci';
+              if (githubOnlyFilter && !focusedGithubConnected) {
+                return 'Connect GitHub to see pull requests, issues, and CI runs.';
+              }
+              // All / Commits empty means local git genuinely has no history —
+              // the commit fallback already ran, so this is honest.
+              if ((filter === 'all' || filter === 'commit') && !focusedGithubConnected) {
+                return `No commits yet in ${label}.`;
+              }
+              return `No ${filter === 'all' ? '' : filter + ' '}activity yet for ${label}.`;
+            })()}
           </div>
         ) : (
           grouped.map((group) => (

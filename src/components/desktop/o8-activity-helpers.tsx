@@ -154,7 +154,30 @@ export interface RepoActivityData {
 
 export const EMPTY_DATA: RepoActivityData = { commits: [], prs: [], issues: [], ciRuns: [] };
 
-export async function fetchRepoActivity(repoSlug: string): Promise<RepoActivityData> {
+/** Commit row shape from /api/panel/commits — GitHub mirror rows carry
+ *  `hash`/`message`, the local-git (`?workspace=`) branch carries
+ *  `shortSha`/`subject`. Normalize both into one ActivityItem. */
+interface CommitRow {
+  hash?: string;
+  shortSha?: string;
+  message?: string;
+  subject?: string;
+  date?: string;
+}
+
+function mapCommitRow(c: CommitRow, repoSlug: string): ActivityItem {
+  const ts = c.date ? new Date(c.date).getTime() : 0;
+  return {
+    kind: 'commit',
+    hash: c.hash ?? c.shortSha ?? '',
+    message: c.message ?? c.subject ?? '',
+    age: c.date ? relativeAge(c.date) : '',
+    ts,
+    repo: repoSlug,
+  };
+}
+
+export async function fetchRepoActivity(repoSlug: string, repoPath?: string | null): Promise<RepoActivityData> {
   const enc = encodeURIComponent(repoSlug);
   const [commitsRes, prsRes, issuesRes, ciRes] = await Promise.all([
     fetch(`/api/panel/commits?repo=${enc}`).catch(() => null),
@@ -163,12 +186,20 @@ export async function fetchRepoActivity(repoSlug: string): Promise<RepoActivityD
     fetch(`/api/panel/ci?repo=${enc}`).catch(() => null),
   ]);
 
-  const commits: ActivityItem[] = [];
+  let commits: ActivityItem[] = [];
   if (commitsRes?.ok) {
     const data = await commitsRes.json();
-    for (const c of (data.commits ?? []).slice(0, 12)) {
-      const ts = c.date ? new Date(c.date).getTime() : 0;
-      commits.push({ kind: 'commit', hash: c.hash ?? '', message: c.message ?? '', age: c.date ? relativeAge(c.date) : '', ts, repo: repoSlug });
+    commits = ((data.commits ?? []) as CommitRow[]).slice(0, 12).map((c) => mapCommitRow(c, repoSlug));
+  }
+  // #1341 — graceful degradation. A locally-added repo has no GitHub mirror
+  // rows, so the GitHub-keyed fetch above returns nothing. The repo is on
+  // disk, so read recent history straight from local git instead (bounded to
+  // the last 50 commits) via the commits route's `?workspace=` branch.
+  if (commits.length === 0 && repoPath) {
+    const localRes = await fetch(`/api/panel/commits?workspace=${encodeURIComponent(repoPath)}&limit=50`).catch(() => null);
+    if (localRes?.ok) {
+      const data = await localRes.json();
+      commits = ((data.commits ?? []) as CommitRow[]).slice(0, 50).map((c) => mapCommitRow(c, repoSlug));
     }
   }
 
