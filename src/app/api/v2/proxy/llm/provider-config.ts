@@ -49,6 +49,7 @@ const PRICING: Record<string, { input: number; output: number }> = {
   'claude-opus-4-8': { input: 5, output: 25 },
   'claude-opus-4-7': { input: 5, output: 25 },
   'claude-opus-4-6': { input: 15, output: 75 },
+  'claude-sonnet-5': { input: 3, output: 15 },
   'claude-sonnet-4-6': { input: 3, output: 15 },
   'claude-sonnet-4-5': { input: 3, output: 15 },
   'claude-haiku-4-5': { input: 0.80, output: 4 },
@@ -61,7 +62,7 @@ const PRICING: Record<string, { input: number; output: number }> = {
 /** Models that support thinking/reasoning output */
 const THINKING_MODELS = new Set([
   // Anthropic — opus and sonnet 4+ support extended thinking
-  'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-4-6', 'claude-sonnet-4-5',
+  'claude-opus-4-8', 'claude-opus-4-7', 'claude-opus-4-6', 'claude-sonnet-5', 'claude-sonnet-4-6', 'claude-sonnet-4-5',
   // OpenAI — o-series are reasoning models
   'o3', 'o4-mini', 'o3-mini',
   // Google — 2.5+ support thinking

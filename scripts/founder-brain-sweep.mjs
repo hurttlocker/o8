@@ -12,7 +12,7 @@ const MODELS = [
   'google/gemini-2.5-flash-lite',
   'x-ai/grok-4.3',
   'deepseek/deepseek-chat',
-  'anthropic/claude-sonnet-4-6',
+  'anthropic/claude-sonnet-5',
 ];
 
 // Representative o8 repo Q&A (context mimics retrieved chunks; answers are checkable).

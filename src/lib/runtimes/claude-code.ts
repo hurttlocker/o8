@@ -554,6 +554,7 @@ function inferContextWindowFromModel(model?: string): number | undefined {
   const normalized = model?.trim().toLowerCase();
   if (!normalized) return undefined;
   if (normalized.includes('claude-opus-4-6')) return CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS;
+  if (normalized.includes('claude-sonnet-5')) return CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS;
   if (normalized.includes('claude-sonnet-4-6')) return CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS;
   if (normalized.startsWith('claude-')) return CLAUDE_DEFAULT_CONTEXT_WINDOW_TOKENS;
   return undefined;

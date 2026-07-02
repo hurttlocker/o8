@@ -63,7 +63,7 @@ function connectionLabel(state: MobileOrchestratorConnectionState): string {
 }
 
 function compactModelLabel(model: string): string {
-  // claude-opus-4-7 → Opus 4.7, claude-sonnet-4-6 → Sonnet 4.6,
+  // claude-opus-4-7 → Opus 4.7, claude-sonnet-5 → Sonnet 5,
   // claude-fable-5 → Fable 5 (single-part versions have no minor)
   const stripped = model.replace(/^claude-/, '');
   const match = stripped.match(/^(opus|sonnet|haiku|fable)-(\d+)(?:-(\d+))?/i);

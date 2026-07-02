@@ -97,6 +97,14 @@ function detectPricingModel(rawModel: string | null | undefined, usage: ClaudeUs
     };
   }
 
+  if (normalizedModel.includes('sonnet-5')) {
+    return {
+      canonicalModel: 'claude-sonnet-5',
+      inputUsdPerMillion: 3,
+      outputUsdPerMillion: 15,
+    };
+  }
+
   if (normalizedModel.includes('sonnet-4-6')) {
     return {
       canonicalModel: 'claude-sonnet-4-6',
