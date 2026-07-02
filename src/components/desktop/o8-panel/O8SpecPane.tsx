@@ -128,6 +128,16 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded }: O8SpecPaneProps)
     }
   }, [repoPath, reviewing, content]);
 
+  // Warm a review proc when the pane opens so the FIRST "Ask o8 to review" click
+  // is instant, not a cold spawn. Fire-and-forget, once per repo; the pool reaps
+  // the idle proc if it's never used (issue #1332 follow-up). (2026-07-02)
+  useEffect(() => {
+    if (!repoPath) return;
+    void fetch(`/api/repo-spec?action=prewarm-review&repoPath=${encodeURIComponent(repoPath)}`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    }).catch(() => {});
+  }, [repoPath]);
+
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 5_000);
     return () => window.clearInterval(timer);
