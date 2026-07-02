@@ -22,7 +22,7 @@ import { askClaudeWarm, prewarmClaudeRepl, resetWarmReplPool } from '@/lib/claud
 
 const CLAUDE_BIN = process.env.O8_CLAUDE_BIN || '/Users/marquisehurtt/.local/bin/claude';
 const HAIKU = 'claude-haiku-4-5-20251001';
-const SONNET = 'claude-sonnet-4-6';
+const SONNET = 'claude-sonnet-5';
 const FLASH = 'google/gemini-2.5-flash-lite';
 const OR_KEY = process.env.OPENROUTER_API_KEY;
 

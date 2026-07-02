@@ -39,7 +39,7 @@ import { assertNoPrintFlag } from './assert-no-print-flag';
 export interface AskClaudeOneShotOptions {
   /** Explicit `claude` binary path. Caller resolves; we don't probe. */
   binary: string;
-  /** Model arg passed via `--model` (e.g. `claude-sonnet-4-6`). */
+  /** Model arg passed via `--model` (e.g. `claude-sonnet-5`). */
   model: string;
   /** Optional reasoning effort passed via `--effort` (skipped when unset or 'adaptive'). */
   effort?: string;

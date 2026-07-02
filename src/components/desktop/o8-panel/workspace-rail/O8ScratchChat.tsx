@@ -1062,7 +1062,7 @@ export function O8ScratchChat({
                 title={
                   !input.trim()
                     ? 'Type a question to ask the Engineering Brain'
-                    : 'Ask the Engineering Brain (cortex_ask) — paid path: grok-4.1-fast classifier + retrieval (o8 sub) + Claude Sonnet 4.6 via your Claude Code subscription'
+                    : 'Ask the Engineering Brain (cortex_ask) — paid path: grok-4.1-fast classifier + retrieval (o8 sub) + Claude Sonnet 5 via your Claude Code subscription'
                 }
                 style={{
                   minHeight: 26,

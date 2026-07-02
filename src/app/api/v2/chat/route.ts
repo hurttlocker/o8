@@ -79,6 +79,7 @@ function parseBody(value: unknown): ChatRequestBody | { paidModel: string } | nu
   if (
     model === 'claude-max' ||
     model === 'sonnet-4.6' ||
+    model === 'sonnet-5' ||
     model === PAID_CHAT_MODEL_ID ||
     model.startsWith('paid:')
   ) {

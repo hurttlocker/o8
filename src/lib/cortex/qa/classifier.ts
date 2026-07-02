@@ -237,7 +237,7 @@ async function tryHaiku(prompt: string, question: string): Promise<ClassifierRes
 
 /**
  * Eval-mode tier 0: Sonnet 4.6 via the REPL one-shot adapter. Used in place
- * of `tryOpenRouter(prompt, question, 'anthropic/claude-sonnet-4-6')` post-#1124
+ * of `tryOpenRouter(prompt, question, 'anthropic/claude-sonnet-5')` post-#1124
  * so eval runs go through the subscription pool instead of paid OpenRouter.
  */
 async function trySonnetRepl(prompt: string, question: string): Promise<ClassifierResult | null> {
