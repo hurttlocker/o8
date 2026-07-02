@@ -351,6 +351,11 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
       : null,
     workerIntent,
     workerRouting,
+    // #1329 — originating orchestrator thread id lives only on the packet; drop
+    // it here and a rerun/re-read would silently sever session-rule inheritance.
+    orchestratorThreadId: typeof packet.orchestratorThreadId === 'string' && packet.orchestratorThreadId.trim()
+      ? packet.orchestratorThreadId.trim()
+      : undefined,
     prompt: typeof packet.prompt === 'string' && packet.prompt.trim() ? packet.prompt : undefined,
     allowedFiles: Array.isArray(packet.allowedFiles)
       ? packet.allowedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)
