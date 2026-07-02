@@ -2,11 +2,13 @@
  * Headless o8.md review — the background "one-shot lane" for the spec surface.
  *
  * Instead of pre-filling the visible orchestrator composer, the sparkle button
- * calls this: a single LLM turn (dual-path — Claude when the in-app orchestrator
- * toggle is on, else Codex) that READS the operator's o8.md and RETURNS a JSON
- * list of annotations. We apply them via the same splice functions the API/CLI/
- * MCP use (appendComment / insertSuggestion). The orchestrator session is never
- * touched, so the review never appears in the chat — it just lands on the rail.
+ * calls this: a single LLM turn (Sonnet-5 at xhigh effort through the warm
+ * subscription REPL pool, decoupled from the orchestrator/Brain toggles; Codex
+ * only as a fallback when no `claude` binary resolves or the warm call throws)
+ * that READS the operator's o8.md and RETURNS a JSON list of annotations. We
+ * apply them via the same splice functions the API/CLI/MCP use (appendComment /
+ * insertSuggestion). The orchestrator session is never touched, so the review
+ * never appears in the chat — it just lands on the rail.
  *
  * The LLM returns structured JSON (not tool calls): far more reliable for a
  * one-shot than a headless tool-calling loop, and it keeps the whole thing a
@@ -16,8 +18,9 @@
 import 'server-only';
 
 import { execSync } from 'node:child_process';
+import { askClaudeWarm } from '@/lib/claude-code/warm-repl-pool';
+import { defaultClaudeBin } from '@/lib/claude-code/one-shot-repl';
 import { callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
-import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import { appendComment, insertSuggestion, type SuggestionKind } from './mutate';
 
 /** One annotation the LLM proposes. Mirrors the comment/suggest write surface. */
@@ -40,6 +43,18 @@ export interface SpecReviewResult {
 /** Generous cap on the doc slice we hand the model — the o8.md byte cap is
  *  256KB but a notes file is normally tiny; this just bounds a runaway. */
 const MAX_CONTENT_CHARS = 24_000;
+
+/**
+ * The o8.md review always runs on Sonnet-5 at xhigh effort through the warm
+ * subscription REPL pool — decoupled from the orchestrator/Brain toggles (the
+ * routing lives in {@link runLLM}). Deliberately NOT the shared SONNET_CLI_MODEL
+ * in sonnet-adapter.ts, which has other callers pinned to a different model.
+ */
+const REVIEW_MODEL = 'claude-sonnet-5';
+const REVIEW_EFFORT = 'xhigh';
+/** System framing prepended to the user prompt for the warm one-shot frame
+ *  (mirrors callSonnetCli's `<system>…</system>` shape, sonnet-adapter.ts). */
+const REVIEW_SYSTEM = 'You review o8.md working notes and leave terse margin annotations. You never rewrite the prose. You output ONLY a JSON array of annotation objects and nothing else.';
 
 function recentCommits(repoPath: string): string {
   try {
@@ -88,17 +103,33 @@ function parseAnnotations(raw: string): ReviewAnnotation[] {
   }
 }
 
-async function runLLM(prompt: string, useClaude: boolean): Promise<string> {
-  if (useClaude) {
-    const messages = [{ role: 'user' as const, content: prompt }];
-    const { text } = await callSonnet({
-      system: 'You review o8.md working notes and leave terse margin annotations. You never rewrite the prose. You output ONLY a JSON array of annotation objects and nothing else.',
-      messages,
-      timeoutMs: 120_000,
-    });
-    return text;
+/**
+ * Run the review turn. Routes to Sonnet-5 at xhigh effort through the warm
+ * subscription pool — DECOUPLED from the orchestrator/Brain toggles so the
+ * review always gets that path — and only falls back to Codex when no `claude`
+ * binary resolves or the warm call throws. Reports the backend it actually used.
+ */
+async function runLLM(prompt: string): Promise<{ text: string; backend: 'claude' | 'codex' }> {
+  const binary = defaultClaudeBin();
+  // TODO(prewarm): fire prewarmClaudeRepl(binary, REVIEW_MODEL, REVIEW_EFFORT) on pane focus so the first click is warm.
+  if (binary) {
+    try {
+      // Prepend the system block the way callSonnetCli does — the one-shot
+      // frame only carries a `user` message (sonnet-adapter.ts:188-191).
+      const framed = `<system>\n${REVIEW_SYSTEM}\n</system>\n\n${prompt}`;
+      const text = await askClaudeWarm(framed, {
+        binary,
+        model: REVIEW_MODEL,
+        effort: REVIEW_EFFORT,
+        timeoutMs: 120_000,
+      });
+      return { text, backend: 'claude' };
+    } catch {
+      // Warm-Claude path unavailable (bad binary / spawn error) — fall to Codex.
+    }
   }
-  return callCodex(prompt, { timeoutMs: 120_000 });
+  const text = await callCodex(prompt, { timeoutMs: 120_000 });
+  return { text, backend: 'codex' };
 }
 
 /**
@@ -108,16 +139,8 @@ async function runLLM(prompt: string, useClaude: boolean): Promise<string> {
  * annotation can't sink the batch.
  */
 export async function runSpecReview(repoPath: string, content: string): Promise<{ updated: string; result: SpecReviewResult }> {
-  let useClaude = false;
-  try {
-    const { resolveInAppOrchestratorEnabledSync } = await import('@/lib/operator/defaults');
-    useClaude = resolveInAppOrchestratorEnabledSync();
-  } catch {
-    useClaude = false;
-  }
-
   const prompt = buildPrompt(content, recentCommits(repoPath));
-  const raw = await runLLM(prompt, useClaude);
+  const { text: raw, backend } = await runLLM(prompt);
   const annotations = parseAnnotations(raw);
 
   let md = content;
@@ -156,5 +179,5 @@ export async function runSpecReview(repoPath: string, content: string): Promise<
     }
   }
 
-  return { updated: md, result: { applied, skipped, total: annotations.length, backend: useClaude ? 'claude' : 'codex' } };
+  return { updated: md, result: { applied, skipped, total: annotations.length, backend } };
 }

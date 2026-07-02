@@ -32,7 +32,10 @@ import { useTauriFileDrop } from '@/lib/hooks/use-tauri-file-drop';
 
 const HAND = "'Caveat', ui-rounded, cursive";
 const PROSE = "-apple-system, BlinkMacSystemFont, 'SF Pro Text', 'SF Pro Display', 'Segoe UI', Roboto, 'Helvetica Neue', Arial, system-ui, sans-serif";
-const RAIL_W = 220;
+// Note rail width. Kept tight (was 220 — too wide, notes read "detached" floating
+// in an empty band) so each margin note sits close to the prose it annotates,
+// matching the o8-site reference (~116px note + ~10px gap). (2026-07-02)
+const RAIL_W = 150;
 
 // A block spacer that reserves vertical room in the prose so a margin note can
 // sit beside its anchor without colliding with the note above it. Injected
@@ -250,6 +253,12 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
   });
 
   const spacersRef = useRef<{ pos: number; height: number }[]>([]);
+  // Measured pixel heights of the rendered notes, keyed by id. The collision
+  // reserve uses these (exact) rather than a char-count estimate — the estimate
+  // assumed a fixed chars-per-line and broke when the rail narrowed (fewer
+  // chars/line → taller notes → under-reserved → overlap at the top on load). A
+  // note reports its real height via a ref callback below. (2026-07-02)
+  const noteHeightsRef = useRef<Map<string, number>>(new Map());
   const recompute = useCallback(() => {
     const view = viewRef.current; const wrap = wrapRef.current;
     if (!view || !wrap) return;
@@ -289,8 +298,14 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
     let pushDown = 0;
     let placedBottom = -1e9;
     for (const n of layouts) {
-      const lines = Math.max(1, Math.ceil((n.text?.length ?? 0) / 24));
-      const est = 22 + lines * 20 + n.replies.length * 20 + (n.kind === 'suggestion' ? 26 : 0);
+      // Prefer the MEASURED note height (exact, includes wrapping + padding).
+      // Fall back to a width-aware estimate only until a note has been measured
+      // once — chars-per-line is derived from the current rail width so it tracks
+      // RAIL_W instead of assuming a fixed 24.
+      const cpl = Math.max(8, Math.floor((RAIL_W - 34) / 7));
+      const lines = Math.max(1, Math.ceil((n.text?.length ?? 0) / cpl));
+      const estFallback = 24 + lines * 22 + n.replies.length * 22 + (n.kind === 'suggestion' ? 26 : 0);
+      const est = noteHeightsRef.current.get(n.id) ?? estFallback;
       let top = n.top + pushDown;
       const deficit = Math.round(placedBottom + GAP - top);
       if (deficit > 0) {
@@ -470,9 +485,28 @@ export function O8SpecEditor({ value, onChange, repoPath }: O8SpecEditorProps) {
           initial={{ opacity: 0, x: 10 }}
           animate={{ opacity: 1, x: 0 }}
           transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-          style={{ position: 'absolute', top: n.top, right: 0, width: RAIL_W - 16, paddingLeft: 14 }}
+          style={{ position: 'absolute', top: n.top - 3, right: 0, width: RAIL_W - 16 }}
         >
-          <MarginNote note={n} onResolve={resolveSuggestion} onResolveComment={resolveComment} onReply={replyToComment} />
+          {/* Inner hover-card — tinting on hover ties the note to the reader's
+              focus; wrapped separately so framer-motion keeps owning transform. */}
+          <div
+            ref={(el) => {
+              if (!el) return;
+              const h = el.offsetHeight;
+              const prev = noteHeightsRef.current.get(n.id);
+              // Feed the real height back so the collision reserve is exact. Only
+              // re-run when it actually changed (>1px) so this can't loop.
+              if (prev === undefined || Math.abs(prev - h) > 1) {
+                noteHeightsRef.current.set(n.id, h);
+                scheduleRecomputeRef.current();
+              }
+            }}
+            onMouseEnter={(e) => { e.currentTarget.style.backgroundColor = 'color-mix(in srgb, var(--o8ed-ink-soft) 8%, transparent)'; }}
+            onMouseLeave={(e) => { e.currentTarget.style.backgroundColor = 'transparent'; }}
+            style={{ paddingTop: 3, paddingBottom: 4, paddingLeft: 14, paddingRight: 6, borderRadius: 9, backgroundColor: 'transparent', transition: 'background-color 140ms ease' }}
+          >
+            <MarginNote note={n} onResolve={resolveSuggestion} onResolveComment={resolveComment} onReply={replyToComment} />
+          </div>
         </motion.div>
       ))}
     </div>

@@ -41,6 +41,8 @@ export interface AskClaudeOneShotOptions {
   binary: string;
   /** Model arg passed via `--model` (e.g. `claude-sonnet-4-6`). */
   model: string;
+  /** Optional reasoning effort passed via `--effort` (skipped when unset or 'adaptive'). */
+  effort?: string;
   /** Optional cwd. Defaults to os.tmpdir() so no project .claude/ config bleeds in. */
   cwd?: string;
   /** Process timeout. Default 300_000 (5min) — matches the prior CLI ceiling. */
@@ -55,7 +57,7 @@ export interface AskClaudeOneShotOptions {
  * Exported for `warm-repl-pool.ts` so the pre-warmed spawn path shares the
  * exact same flag set (and the same #1066 no-print billing guard).
  */
-export function buildOneShotArgs(model: string): string[] {
+export function buildOneShotArgs(model: string, effort?: string): string[] {
   const args = [
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
@@ -64,6 +66,9 @@ export function buildOneShotArgs(model: string): string[] {
     '--include-partial-messages',
     '--model', model,
   ];
+  // Mirror the orchestrator precedent (orchestrator-session.ts) — attach an
+  // explicit reasoning effort only when the caller asks for a non-adaptive one.
+  if (effort && effort !== 'adaptive') args.push('--effort', effort);
   // #1066 billing guard — enforce what line 52's comment only described.
   assertNoPrintFlag(args, 'One-shot Claude REPL');
   return args;
@@ -83,7 +88,7 @@ export async function askClaudeOneShot(
   const env = { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' };
 
   return new Promise<string>((resolve, reject) => {
-    const child = spawn(opts.binary, buildOneShotArgs(opts.model), {
+    const child = spawn(opts.binary, buildOneShotArgs(opts.model, opts.effort), {
       cwd,
       env,
       stdio: ['pipe', 'pipe', 'pipe'],

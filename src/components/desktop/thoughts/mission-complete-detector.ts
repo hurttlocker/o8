@@ -96,19 +96,37 @@ function checkTrackerComplete(missionId: string) {
 }
 
 /**
- * Return (WITHOUT removing) the Mission-complete cards recorded for `repoPath`.
- * Non-consuming so the feed can re-assert them after a thread reload clobbers
- * the live transcript — appendLocalEntries dedups by id, so re-asserting is a
- * no-op once the card is present.
+ * Drain (and CONSUME) the Mission-complete cards recorded for `repoPath`. The
+ * card goes to the FIRST transcript that drains it — the mission's owning thread,
+ * active at record time — and is then removed, so it can never re-assert into a
+ * new/empty thread of the same repo. That same-repo re-assert was what left a
+ * stale packet sitting atop every fresh orchestrator, blocking a clean new chat.
+ *
+ * Reload survival is now the persisted transcript's job: once a card is appended
+ * it auto-saves, so a reload restores it from history. The only gap is a reload
+ * inside the sub-second window before that save lands — a rare, cosmetic miss.
+ *
+ * STRICT repo scoping: a card only drains when BOTH the thread's repo and the
+ * card's repo are known AND equal — the old permissive match (surface whenever
+ * *either* side was unknown) bled stale cards into new threads across every
+ * project, and null repos showed everywhere. (2026-07-02)
  */
 export function getPendingMissionCards(repoPath: string | null): MobileTranscriptEntry[] {
   if (pendingCards.length === 0) return [];
   const target = normalizeRepoPath(repoPath);
-  return pendingCards.filter((card) => {
+  if (!target) return [];
+  const matched: MobileTranscriptEntry[] = [];
+  // Iterate back-to-front so splicing is index-safe; unshift restores order.
+  for (let i = pendingCards.length - 1; i >= 0; i -= 1) {
+    const card = pendingCards[i];
     const event = card.statusEvent;
     const cardRepo = normalizeRepoPath(event && event.kind === 'mission-complete' ? event.repoPath ?? null : null);
-    return !target || !cardRepo || cardRepo === target;
-  });
+    if (cardRepo && cardRepo === target) {
+      matched.unshift(card);
+      pendingCards.splice(i, 1); // consume — delivered to this thread, done
+    }
+  }
+  return matched;
 }
 
 /**

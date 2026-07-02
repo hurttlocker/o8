@@ -59,7 +59,7 @@ export function OrchestratorStatusCard({
           borderStyle: 'solid',
           borderColor: hover ? 'var(--t-border)' : 'var(--t-divider)',
           background: hover ? 'var(--t-bg-card)' : 'var(--t-input-bg)',
-          boxShadow: 'var(--t-panel-shadow)',
+          boxShadow: 'none',
           paddingTop: 10,
           paddingBottom: 10,
           paddingLeft: 12,
@@ -151,7 +151,7 @@ export function OrchestratorStatusCard({
             borderStyle: 'solid',
             borderColor: 'var(--t-divider)',
             background: 'var(--t-bg-card)',
-            boxShadow: 'var(--t-panel-shadow)',
+            boxShadow: 'none',
             overflow: 'hidden',
             animation: 'o8StatusDrawerIn 220ms cubic-bezier(0.22, 1, 0.36, 1)',
           }}

@@ -321,7 +321,7 @@ function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab) => vo
   const gapsTotal = 6 * 4; // 5 cards = 4 gaps × 6px
   const usable = Math.max(0, (panelHeight ?? 600) - padding - gapsTotal);
   const fairShare = usable / RIGHT_UTILITY_TABS.length;
-  const cardHeight = Math.max(48, Math.min(96, fairShare));
+  const cardHeight = Math.max(52, Math.min(64, fairShare));
   const compact = cardHeight < 64;
   const iconSize = compact ? 14 : 16;
   const iconBoxSize = compact ? 26 : 30;
@@ -349,6 +349,7 @@ function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab) => vo
         marginRight: 'auto',
         display: 'flex',
         flexDirection: 'column',
+        justifyContent: 'center',
         gap: 6,
       }}>
         {RIGHT_UTILITY_TABS.map((tab) => {
@@ -360,7 +361,6 @@ function RightUtilityLauncher({ onOpen }: { onOpen: (tab: RightUtilityTab) => vo
               onClick={() => onOpen(tab.id)}
               style={{
                 minHeight: cardHeight,
-                flex: 1,
                 display: 'flex',
                 flexDirection: 'row',
                 alignItems: 'center',

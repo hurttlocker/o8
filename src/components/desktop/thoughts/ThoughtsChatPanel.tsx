@@ -75,6 +75,7 @@ import { useOrchestratorReloadNotice } from './chat-panel/useOrchestratorReloadN
 import { usePersistChatThread } from './chat-panel/usePersistChatThread';
 import { useSuggestedReplies } from './chat-panel/useSuggestedReplies';
 import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposerAttachments';
+import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { interruptRuntimeSurface } from './chat-panel/runtimeInterrupt';
 import { useSteerAutoFire } from './chat-panel/useSteerAutoFire';
 import type {
@@ -382,9 +383,12 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     dragHandlers: attachmentDragHandlers,
     processFiles: processAttachmentFiles,
     removeAttachedImage,
+    replaceAttachedImage,
     removeAttachedFile,
     clearAttachments,
   } = useThoughtsComposerAttachments({ hostRef: composerDropHostRef });
+  // Index of the attachment currently open in the screenshot annotator (or null).
+  const [annotatingIndex, setAnnotatingIndex] = useState<number | null>(null);
 
   const isSingleMode = orchestrationMode === 'single';
   const isChatMode = orchestrationMode === 'chat';
@@ -2129,6 +2133,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         dragOver={attachmentDragOver}
         dragHandlers={attachmentDragHandlers}
         onAttachedImageRemove={removeAttachedImage}
+        onAttachedImageAnnotate={setAnnotatingIndex}
         onAttachedFileRemove={removeAttachedFile}
         onUploadDiskFiles={processAttachmentFiles}
         repoPath={resolvedRepoPath}
@@ -2137,6 +2142,22 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onSelectRepoPath={handleSelectComposerRepoPath}
       />
       {displayMessages.length === 0 && composerBelowSlot ? composerBelowSlot : null}
+      {annotatingIndex !== null && attachedImages[annotatingIndex] ? (() => {
+        const idx = annotatingIndex;
+        const target = attachedImages[idx];
+        if (!target) return null;
+        return (
+          <ScreenshotAnnotator
+            image={target}
+            onCancel={() => setAnnotatingIndex(null)}
+            onDone={(dataUri) => {
+              const mime = dataUri.slice(5, dataUri.indexOf(';')) || 'image/png';
+              replaceAttachedImage(idx, { ...target, dataUri, mimeType: mime });
+              setAnnotatingIndex(null);
+            }}
+          />
+        );
+      })() : null}
       </div>
     </div>
   );
