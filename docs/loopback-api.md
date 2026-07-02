@@ -14,20 +14,25 @@ the only thing standing between a LAN device and that surface.
 
 ## The decision ladder
 
-For any request to a gated prefix (see `GATED_PREFIXES` in `src/middleware.ts`),
-in order:
+The middleware `matcher` restricts it to `/api/*`, and the model is
+**default-deny**: every `/api/*` request is denied unless it matches an explicit
+escape. There is no fail-open "ungated family" — an unlisted new route is
+denied, not exposed (this closed the fail-open + trailing-slash gate class,
+audit 2026-07-02). In order:
 
-1. **Worker-route bypass.** `/api/worker/*` and `/api/cloud/*` skip the gate
-   entirely — workers run off-host by design and each handler verifies its own
-   bearer token against the `worker_tokens` table / cloud-worker key files.
+1. **Self-authenticating bypass** (`SELF_AUTH_PREFIXES`). `/api/worker/*`,
+   `/api/cloud/*`, and `/api/github/webhook` skip the gate — they are reachable
+   off-host by design and each handler verifies its own credential (worker
+   `worker_tokens` / cloud-worker keys / GitHub HMAC-SHA256). Matched with a
+   trailing-boundary check so a prefix can't cover a sibling path.
 2. **Allowlist.** `ALLOWLIST_READ_ONLY` passes GET/HEAD only (setup wizard
    reads, VAPID public key, panel status). `ALLOWLIST_ANY_METHOD` passes the
-   OAuth handshakes. Keep both lists minimal.
+   OAuth handshakes + mobile enroll. Keep both lists minimal.
 3. **Loopback trust** (`isTrustedLocalRequest`) — see tiers below.
 4. **Bearer token fallback.** Non-loopback callers must present the ws-token
-   (`~/.o8/ws-token`) as `Authorization: Bearer <token>` or `?token=`.
-   Comparison is constant-time (`timingSafeEqual`).
-5. Otherwise: `401`.
+   (`~/.o8/ws-token`) as `Authorization: Bearer <token>` or `?token=`, or an
+   active per-device token. Comparison is constant-time (`timingSafeEqual`).
+5. Otherwise (the default): `401`.
 
 ## Loopback trust tiers
 
@@ -69,10 +74,11 @@ trade-off for dev ergonomics — packaged builds always have Tier 1.
 
 ## Rules when adding routes
 
-- New route family that touches agent/repo/operator state → add the prefix to
-  `GATED_PREFIXES`, and update the API security section in `CLAUDE.md`.
+- New route family that touches agent/repo/operator state → **nothing to do**:
+  default-deny already gates it (loopback + token). Do not add it to any bypass.
 - Need public access → GET-only under an `ALLOWLIST_READ_ONLY` entry, never a
-  blanket bypass.
+  blanket bypass. A self-authenticating external caller (like a signed webhook)
+  goes in `SELF_AUTH_PREFIXES` and MUST verify its own credential in-handler.
 - Never read `Origin`/`Host` directly for trust decisions — go through
   `@/lib/auth/loopback-request` so socket truth keeps winning.
 - Add a case to `tests/middleware-gate.test.ts` for any new allowlist entry or

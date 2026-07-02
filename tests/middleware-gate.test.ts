@@ -139,13 +139,22 @@ describe('panelGateMiddleware — loopback trust', () => {
     expect(res.status).toBe(401);
   });
 
-  it('leaves /api/browser/proxy ungated (iframes cannot send a bearer)', () => {
+  it('passes /api/browser/proxy from loopback (the in-webview iframe is loopback)', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://localhost:3001/api/browser/proxy?url=http%3A%2F%2Flocalhost%3A3005', {
         headers: { host: 'localhost:3001' },
       }),
     );
     expect(res.status).toBe(200);
+  });
+
+  it('now GATES /api/browser/proxy against LAN (RF-4: was the SSRF entry point)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/browser/proxy?url=http%3A%2F%2Flocalhost%3A3001', {
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
   });
 
   it('passes the Tauri webview origin', () => {
@@ -281,11 +290,42 @@ describe('panelGateMiddleware — allowlists and bypasses', () => {
     expect(res.status).toBe(200);
   });
 
-  it('passes ungated API families untouched', () => {
+  it('bypasses the HMAC-verified GitHub webhook (external caller, self-auth)', () => {
     const res = panelGateMiddleware(
       gatedRequest('http://192.168.1.50:3001/api/github/webhook', {
         method: 'POST',
         headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(200);
+  });
+});
+
+describe('panelGateMiddleware — default-deny (RF-2: no fail-open)', () => {
+  it('denies a previously-ungated state route from LAN (/api/board)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/board?repo=x', {
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('denies an UNLISTED /api route from LAN (proves the default is deny, not pass)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://192.168.1.50:3001/api/some-future-route-nobody-gated', {
+        method: 'POST',
+        headers: { host: '192.168.1.50:3001' },
+      }),
+    );
+    expect(res.status).toBe(401);
+  });
+
+  it('still passes that unlisted route from loopback (operator surface unaffected)', () => {
+    const res = panelGateMiddleware(
+      gatedRequest('http://localhost:3001/api/some-future-route-nobody-gated', {
+        method: 'POST',
+        headers: { host: 'localhost:3001' },
       }),
     );
     expect(res.status).toBe(200);
