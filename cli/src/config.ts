@@ -23,7 +23,7 @@ export interface ResolvedConfig {
   token: string | null;
   source: {
     port: 'env' | 'o8-dir' | 'cortex-ide-dir' | 'default';
-    token: 'env' | 'o8-dir' | 'cortex-ide-dir' | 'none';
+    token: 'worker' | 'env' | 'o8-dir' | 'cortex-ide-dir' | 'none';
   };
   dataDir: string | null;
 }
@@ -56,6 +56,13 @@ function readTokenFile(dir: string): string | null {
 
 export function resolveConfig(): ResolvedConfig {
   const envPort = process.env.O8_API_PORT && Number.parseInt(process.env.O8_API_PORT, 10);
+  // A dispatched worker carries O8_WORKER_TOKEN (stamped at spawn). Sending it as
+  // the Bearer lets governance routes identify the caller as a worker and deny
+  // worker-forbidden actions (e.g. resolving its own approval). Prefer it over
+  // the shared ws-token so a worker never presents the operator credential.
+  // (SECURITY_AUDIT_2026-07-02 §CRIT-1.) A human running `o8` manually has no
+  // O8_WORKER_TOKEN, so they fall through to the ws-token and act as operator.
+  const workerToken = process.env.O8_WORKER_TOKEN?.trim() || null;
   const envToken = process.env.O8_API_TOKEN?.trim() || null;
 
   let apiPort: number | null = null;
@@ -84,7 +91,10 @@ export function resolveConfig(): ResolvedConfig {
 
   let token: string | null = null;
   let tokenSource: ResolvedConfig['source']['token'] = 'none';
-  if (envToken) {
+  if (workerToken) {
+    token = workerToken;
+    tokenSource = 'worker';
+  } else if (envToken) {
     token = envToken;
     tokenSource = 'env';
   } else {
