@@ -1,0 +1,5 @@
+{
+  "//": "Release-time build config, baked into signed builds by scripts/tauri-export.mjs.",
+  "//githubOAuthClientId": "Public OAuth client id for the device-flow GitHub app (issue #1338). Client IDs are PUBLIC, not secrets — this is baked into the packaged server so a fresh install can render the 'Connect GitHub' device-flow CTA. Copy this file to o8.release.json (gitignored) and paste the client id. A GITHUB_OAUTH_CLIENT_ID env var at build time overrides this. Absent → device flow stays disabled.",
+  "githubOAuthClientId": ""
+}
