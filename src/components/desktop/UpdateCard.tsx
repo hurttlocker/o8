@@ -224,8 +224,19 @@ export function UpdateCard() {
       const result = await check();
       if (result) {
         await result.downloadAndInstall();
-        const { relaunch } = await import('@tauri-apps/plugin-process');
-        await relaunch();
+        // Restart via our own command, NOT plugin-process relaunch: the plugin
+        // exits the old process without reaping the bundled Node children, so
+        // they kept holding the API/WS ports and the new instance came up
+        // "reconnecting" (zombie observed 2026-07-03). restart_app kills the
+        // tracked children first, then restarts. Fall back to plugin relaunch
+        // if the command is unavailable (older shell).
+        try {
+          const { invoke } = await import('@tauri-apps/api/core');
+          await invoke('restart_app');
+        } catch {
+          const { relaunch } = await import('@tauri-apps/plugin-process');
+          await relaunch();
+        }
       }
       setInstalling(false);
     } catch (err) {
