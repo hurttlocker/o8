@@ -5,7 +5,10 @@
  * File-per-backend, matching openclaw/acp.
  */
 
+import { prewarmHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
+import { prewarmSonnetCli } from '@/lib/cortex/qa/llm/sonnet-adapter';
 import {
+  buildCodexOrchestratorPrompt,
   ensureCodexOrchestratorSession,
   getCodexOrchestratorSession,
   sendToCodexOrchestrator,
@@ -24,9 +27,11 @@ export const codexBackend: OrchestratorBackend = {
     return { sessionName: session.sessionName, status: session.status };
   },
   sendTurn(repoPath, message, onEvent, options) {
+    void prewarmHaiku().catch(() => {});
+    void prewarmSonnetCli().catch(() => {});
     return sendToCodexOrchestrator(
       ensureCodexOrchestratorSession(repoPath, options?.threadId),
-      message,
+      buildCodexOrchestratorPrompt(repoPath, message),
       onEvent,
       options,
     );
