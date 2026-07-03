@@ -137,6 +137,15 @@ export async function probeSelfReviewStall(
     !state.signalSentAt
     && runningMs >= STALL_SIGNAL_MS
     && snapshot.head === state.initialHead
+    // Tuning (2026-07-03): only ALARM when there is genuinely no reviewable
+    // output. If committed work already exists ahead of base, the worker is
+    // done-and-over-reviewing, not stuck-with-nothing — that case falls through
+    // to the force-review salvage below (surface the work as `reviewing`)
+    // instead of raising a scary `self_review_stall_detected`. Observed live:
+    // a worker that committed once then spent 10+ min in a thorough self-review
+    // (whose transcript didn't match the `selfReviewLikely` regex) tripped this
+    // alarm while its work was perfectly reviewable.
+    && !snapshot.hasDiffAgainstBase
   ) {
     state.signalSentAt = now;
     return {
@@ -165,7 +174,12 @@ export async function probeSelfReviewStall(
 
   const selfReviewIdleMs = now - state.lastEditAt;
   if (
-    verification.selfReviewLikely
+    // Salvage on EITHER a self-review-shaped transcript OR the presence of
+    // committed work ahead of base (2026-07-03 tuning): the regex was too
+    // narrow, so a worker that finished, committed, and quietly over-reviewed
+    // fell through to the 10-min alarm above. Committed work + a clean,
+    // idle worktree past the deadline means "done" — surface it as `reviewing`.
+    (verification.selfReviewLikely || (snapshot.hasDiffAgainstBase && !snapshot.dirty))
     && selfReviewIdleMs >= SELF_REVIEW_HARD_DEADLINE_MS
   ) {
     state.forceStartedAt = now;
