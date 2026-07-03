@@ -78,6 +78,9 @@ import { useThoughtsComposerAttachments } from './chat-panel/useThoughtsComposer
 import { ScreenshotAnnotator } from './chat-panel/ScreenshotAnnotator';
 import { interruptRuntimeSurface } from './chat-panel/runtimeInterrupt';
 import { useSteerAutoFire } from './chat-panel/useSteerAutoFire';
+import { isAbortError } from '@/lib/active-long-lived-request';
+import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
+import { useActiveLongLivedRequest } from '@/lib/use-active-long-lived-request';
 import type {
   ThoughtsChatPanelChromeState,
   ThoughtsChatPanelHandle,
@@ -336,13 +339,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const thinkingPreferenceTouchedRef = useRef(false);
   const pollRef = useRef<number | null>(null);
   const pollDelayRef = useRef<number | null>(null);
-  // Aborts the in-flight transcript fetch. The 2s poll reads a JSONL transcript
-  // that grows large in long sessions; without aborting, a stalled read leaves
-  // the request open while the next tick fires another, stacking ESTABLISHED
-  // sockets until the webview's ~6-per-origin budget is exhausted (which then
-  // wedges every on-demand fetch). Abort per-tick + on teardown so at most one
-  // transcript request is ever in flight.
+  // Abort per transcript tick + on teardown so a stalled read cannot stack
+  // ESTABLISHED sockets across the webview's small per-origin budget.
   const pollAbortRef = useRef<AbortController | null>(null);
+  const openRef = useRef(open);
+  const chatStreamRequest = useActiveLongLivedRequest(open);
   const chatEndRef = useRef<HTMLDivElement>(null);
   const seenServerEntriesRef = useRef<Map<string, string>>(new Map());
   const responseSeenRef = useRef(false);
@@ -356,16 +357,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   const [singleRuntimeSpawning, setSingleRuntimeSpawning] = useState(false);
   const [threadId, setThreadId] = useState<string | null>(null);
   const threadIdRef = useRef<string | null>(null);
-  // Sidebar trampoline guard. Three concurrent callers race here:
-  //   1. page.tsx handleOpenHistoryChatFromPanel dispatches o8:load-history-thread (up to 3× via the late-mount retries)
-  //   2. OrchestratorTab.tsx restoreLastThread effect calls loadThread on activation
-  //   3. OrchestratorTab.tsx initialThreadId effect calls loadThread when the prop changes
-  // Each call re-fetches the transcript and resets orchStream — duplicate
-  // fetches cause visible flicker AND lose in-flight streaming state.
-  // `inFlightLoadKeyRef` blocks ALL re-entry while a load for the same
-  // tabId is fetching. `lastLoadKeyRef` + `lastLoadAtRef` add an 800 ms
-  // post-completion cooldown so the dispatch retries hitting the listener
-  // after the load settles are also dropped.
+  // Sidebar trampoline guard: history load, restoreLastThread, and initialThreadId
+  // can race. Block re-entry for the same tab while loading and briefly after.
   const inFlightLoadKeyRef = useRef<string | null>(null);
   const lastLoadKeyRef = useRef<string | null>(null);
   const lastLoadAtRef = useRef<number>(0);
@@ -645,6 +638,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [isChatMode, isOrchestratorMode, orchestrationSettingsLoaded, orchestratorSpawning, resolvedRepoPath]);
 
   useEffect(() => {
+    openRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
     if (!open || !draftInjection?.id) return;
     setInput((prev) => prev.trim()
       ? `${prev.trimEnd()}\n\n${draftInjection.text}\n\n`
@@ -665,17 +662,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     onImageInjectionConsumed?.();
   }, [open, imageInjection?.id, imageInjection?.name, imageInjection?.dataUri, imageInjection?.mimeType, addAttachedImage, onImageInjectionConsumed]);
 
-  // Phase 4 friction fix #1: clear stale composer drafts on tab refocus.
-  // The composer state is preserved across tab switches (the parent uses
-  // display:none, not unmount), so a directive review draft sitting in
-  // the textarea before the user navigated away ends up appended to
-  // whatever they type next time they return. Snapshot the input on
-  // tab-blur (open: true→false) and clear + toast on next refocus
-  // (open: false→true) IF that snapshot was non-empty AND no fresh
-  // draft injection arrived in the interim. The newDraftArrived check
-  // prevents the clear from wiping a legitimate inject; the
-  // inject effect declared above runs first in declaration order, so
-  // we observe the post-inject input here.
+  // Clear stale composer drafts on tab refocus unless a fresh draft injection
+  // arrived while hidden. Tabs are display:none, so composer state persists.
   const previousOpenRef = useRef(open);
   const inputAtBlurRef = useRef<string>('');
   const lastSeenDraftIdRef = useRef<string | null>(draftInjection?.id ?? null);
@@ -792,7 +780,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
 
   const captureServerSnapshot = useCallback(async (sessionKey: string) => {
     try {
-      const res = await fetch(transcriptUrl(sessionKey));
+      const res = await fetchWithLongLivedBudget(transcriptUrl(sessionKey));
       if (!res.ok) return;
       const data = await res.json();
       const entries = (data.transcript ?? data.entries ?? []) as MobileTranscriptEntry[];
@@ -812,13 +800,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     || sessionKey.startsWith('opencode-owned:')
   ), []);
 
-  // Owned codex/gemini/opencode sessions can't accept the next turn until
-  // their CLI emits a thread id and the lifecycle flips to ready-for-resume.
-  // The transcript poller can declare "response done" before that happens
-  // (the launch banner counts as a non-user entry), so the composer would
-  // unlock and the next steer call would 501 with "cannot accept the next
-  // input yet". Gate the composer on the inventory snapshot for these
-  // sessions to keep the user from sending into a not-yet-resumable lane.
+  // Owned CLI sessions unlock only after inventory says they can resume; a
+  // transcript tail alone can arrive before the next steer is accepted.
   const checkOwnedSessionReady = useCallback(async (sessionKey: string) => {
     try {
       const res = await fetch('/api/runtime/inventory');
@@ -849,6 +832,10 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     };
 
     const poll = async () => {
+      if (!openRef.current) {
+        clearPolling();
+        return;
+      }
       attempts++;
       if (attempts > maxAttempts) {
         finishPolling();
@@ -862,7 +849,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       pollAbortRef.current = controller;
 
       try {
-        const res = await fetch(transcriptUrl(sessionKey), { signal: controller.signal });
+        const res = await fetchWithLongLivedBudget(transcriptUrl(sessionKey), { signal: controller.signal });
         if (!res.ok) return;
 
         const data = await res.json();
@@ -924,6 +911,20 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     }
     startPollingForSession(sessionKey);
   }, [isOrchestratorMode, startPollingForSession, targetSessionKey]);
+
+  const previousConnectionOpenRef = useRef(open);
+  useEffect(() => {
+    const wasOpen = previousConnectionOpenRef.current;
+    previousConnectionOpenRef.current = open;
+    if (wasOpen && !open) {
+      clearPolling();
+      chatStreamRequest.abort('inactive');
+      return;
+    }
+    if (!wasOpen && open && waitingForReply && !isChatMode) {
+      startPolling();
+    }
+  }, [chatStreamRequest, clearPolling, isChatMode, open, startPolling, waitingForReply]);
 
   const resetRemoteSession = useCallback(async () => {
     try {
@@ -1098,11 +1099,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   );
 
   const handleLoadThread = useCallback(async (tabId: string) => {
-    // Sidebar trampoline guard — see refs declaration above. Three layers:
-    //   1. If a load for THIS tabId is in flight, drop the re-entry.
-    //   2. If a load for THIS tabId just settled within 800 ms, drop too
-    //      (covers the page.tsx 120/420 ms dispatch retries).
-    //   3. Otherwise proceed and claim both refs for the duration.
+    // Drop duplicate history loads for this tab while one is in flight or just
+    // settled, then claim both refs for the duration.
     const now = Date.now();
     if (inFlightLoadKeyRef.current === tabId) return;
     if (lastLoadKeyRef.current === tabId && now - lastLoadAtRef.current < 800) {
@@ -1112,12 +1110,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     lastLoadKeyRef.current = tabId;
     lastLoadAtRef.current = now;
     try {
-      // In long sessions the webview's per-origin socket budget (~6) can be
-      // saturated by the dashboard poll fan-out, leaving this fetch with no
-      // free socket — a bare `await fetch` then hangs forever and the thread
-      // silently never loads (the empty state sticks). Bound it with a timeout
-      // and retry once so a transient starvation can't permanently wedge the
-      // load. (The durable fix is relieving the poll concurrency.)
+      // Bound history load with a timeout + one retry so socket starvation
+      // cannot permanently wedge the thread on an empty state.
       const fetchHistoryOnce = async (): Promise<Response | null> => {
         const controller = new AbortController();
         const timer = window.setTimeout(() => controller.abort(), 6000);
@@ -1529,19 +1523,17 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       setChatMessages((prev) => [...prev, userEntry, assistantEntry]);
       clearAttachments();
       setWaitingForReply(true);
+      const streamController = chatStreamRequest.begin();
       try {
-        // Chat-mode always routes through the OpenRouter scratch-chat
-        // path with tools wired. The model is picked per-tab via the
-        // ChatOpenRouterPicker chip; modelOverride pins it server-side.
-        // BYOK is no longer a separate UI tier — operators with their
-        // own OpenRouter key supply it through env / Settings and the
-        // server-side resolver picks it automatically.
+        // Chat-mode streams through scratch-chat; modelOverride pins the
+        // per-tab picker choice server-side.
         await sendScratchChatMessage({
           history: chatMessages,
           message: msg,
           context: resolvedRepoPath ? { repoPath: resolvedRepoPath } : undefined,
           enableTools: true,
           modelOverride: chatOpenrouterModel ?? null,
+          signal: streamController.signal,
           onDelta: (text) => {
             assistantText += text;
             setChatMessages((prev) => prev.map((entry) => (
@@ -1560,13 +1552,16 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           },
         });
       } catch (error) {
-        const message = error instanceof Error ? error.message : 'Chat request failed.';
+        const message = streamController.signal.aborted || isAbortError(error)
+          ? 'Stream paused because this tab became inactive. Send again when you return.'
+          : error instanceof Error ? error.message : 'Chat request failed.';
         setChatMessages((prev) => prev.map((entry) => (
           entry.id === assistantEntry.id
             ? { ...entry, text: assistantText ? `${assistantText}\n\n${message}` : message }
             : entry
         )));
       } finally {
+        chatStreamRequest.finish(streamController);
         setWaitingForReply(false);
       }
       return;
@@ -1705,7 +1700,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
+  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();

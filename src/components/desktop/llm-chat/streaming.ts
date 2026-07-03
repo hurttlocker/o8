@@ -1,6 +1,7 @@
 import { buildLinkedIssueContext, type LinkedIssueRef } from '../IssueLinkPicker';
 
 import { buildRepoRequestHeaders, type ActiveThinkingState, type LLMMessage, MODELS, type ModelOption, type PendingApprovalState, type PreferredRepoContext, type SourceInfo, type ThinkingStep, type ToolCallInfo } from './shared';
+import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 
 function normalizeFetchFailure(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
@@ -12,7 +13,7 @@ function normalizeFetchFailure(error: unknown) {
 
 export async function generateFollowUps(lastResponse: string, model: { id: string; label: string; provider: string }, userQuestion: string): Promise<string[]> {
   try {
-    const response = await fetch('/api/v2/proxy/llm', {
+    const response = await fetchWithLongLivedBudget('/api/v2/proxy/llm', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -111,7 +112,7 @@ export async function streamAssistantResponse({
   const retryDelays = [800, 1800];
   for (let attempt = 0; attempt < retryDelays.length + 1; attempt += 1) {
     try {
-      response = await fetch(endpoint, {
+      response = await fetchWithLongLivedBudget(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-tab-id': tabId, ...buildRepoRequestHeaders(preferredRepo ?? null) },
         body: requestBody,
