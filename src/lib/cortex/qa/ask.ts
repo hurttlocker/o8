@@ -23,6 +23,7 @@ import { createHash } from 'node:crypto';
 
 import { classifyQuestion } from '@/lib/cortex/qa/classifier';
 import { composeClassA, composeClassB, rowDisplayTitle, type SseEmit } from '@/lib/cortex/qa/composer';
+import { rowFullText } from '@/lib/cortex/qa/citations';
 import { buildGrepArmTopRows } from '@/lib/cortex/qa/grep-arm';
 import { dot, embedQuestion } from '@/lib/cortex/qa/llm/gemini-embed';
 import { prewarmHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
@@ -197,6 +198,12 @@ export interface AskCortexResult {
    *  cosine-near duplicate question's answer was reused (#1226). Callers can
    *  re-ask with bypassCache when freshness matters more than speed. */
   cacheHit?: 'exact' | 'semantic';
+  /** Total chars of composer-visible source text across the considered rows
+   *  (each row capped at ~1500 chars by `rowFullText`). The honest "what a
+   *  raw read would have cost" denominator for the Brain→Fable offload line
+   *  (metered-orchestrator transparency card). Absent on cache hits — the
+   *  Brain read nothing this time, so no offload is derivable. */
+  consideredChars?: number;
 }
 
 /**
@@ -384,6 +391,7 @@ async function runAskCortexUncached(
     retrievalMs,
     classifyMs,
     sourcesConsidered: topRows.length,
+    consideredChars: topRows.reduce((sum, row) => sum + rowFullText(row).length, 0),
   };
 
   if (!bypassCache) {

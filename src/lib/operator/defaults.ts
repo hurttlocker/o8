@@ -113,11 +113,11 @@ function isWorkersUseBrain(value: unknown): value is WorkersUseBrain {
 
 /** Which backend drives the in-app Orchestrator. 'auto' = the legacy
  *  inAppOrchestratorEnabled derivation; a specific id forces that backend. */
-export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
+export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide' | 'fable';
 
-function isOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
+export function isOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
   return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw'
-    || value === 'hermes' || value === 'collide';
+    || value === 'hermes' || value === 'collide' || value === 'fable';
 }
 
 export interface OperatorDefaults {
@@ -314,7 +314,7 @@ export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }>
   { value: 'claude-opus-4-8', label: 'Opus 4.8' },
   { value: 'claude-opus-4-7', label: 'Opus 4.7' },
   { value: 'claude-opus-4-6', label: 'Opus 4.6' },
-  { value: 'claude-sonnet-4-6', label: 'Sonnet 4.6' },
+  { value: 'claude-sonnet-5', label: 'Sonnet 5' },
   { value: 'claude-sonnet-4-5', label: 'Sonnet 4.5' },
   { value: 'claude-haiku-4-5', label: 'Haiku 4.5' },
 ];
@@ -818,7 +818,7 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
   }
   if (update.orchestratorBackend !== undefined) {
     if (!isOrchestratorBackendSetting(update.orchestratorBackend)) {
-      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide".');
+      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide", "fable".');
     }
     stored.orchestratorBackend = update.orchestratorBackend;
   }

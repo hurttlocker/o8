@@ -38,6 +38,11 @@ import {
   handleProposeObservation,
 } from '@/lib/mcp/operator-handlers/cortex';
 import {
+  DIGEST_TOOLS,
+  handleDigest,
+  handleFetchRaw,
+} from '@/lib/mcp/operator-handlers/digest';
+import {
   SPEC_TOOLS,
   handleSpecRead,
   handleSpecReviewIndex,
@@ -509,6 +514,7 @@ const TOOLS: McpTool[] = [
   ...STATUS_TOOLS.filter((t) => t.name === 'steer_packet'),
   ...STATUS_TOOLS.filter((t) => t.name === 'o8_operator_defaults'),
   ...CORTEX_TOOLS,
+  ...DIGEST_TOOLS,
   ...SPEC_TOOLS,
   ...TARGETING_TOOLS,
   ...O8_WEBVIEW_TOOLS,
@@ -552,6 +558,8 @@ const TOOL_HANDLERS: Record<string, (args: Record<string, unknown>) => Promise<M
   o8_operator_defaults: handleOperatorDefaults,
   cortex_propose_observation: handleProposeObservation,
   cortex_ask: handleAsk,
+  digest: handleDigest,
+  fetch_raw: handleFetchRaw,
   o8_targets: handleTargets,
   o8_spec_read: handleSpecRead,
   o8_spec_review_index: handleSpecReviewIndex,

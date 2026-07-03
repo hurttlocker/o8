@@ -10,6 +10,16 @@ export const DEFAULT_ORCHESTRATOR_MODEL = 'claude-opus-4-8';
 export const ORCHESTRATOR_CONTEXT_LIMIT = 1_000_000;
 export const ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR = 250_000;
 export const ORCHESTRATOR_AUTO_COMPACT_THRESHOLD = 300_000;
+// Fable mode (Slice 4, 2026-07-02) — the metered-orchestrator window target.
+// A per-token-metered backend re-reads its window every turn, so it compacts
+// at ~15K instead of 300K. Cache-aware discipline: compaction REWRITES the
+// prompt-cache prefix (one full-price re-read), so it must only fire at the
+// between-turn boundary the auto-compact effect already gates on
+// (status === 'ready') — never mid-stride — and the floor/threshold gap keeps
+// it from thrashing (re-arm only after a compaction actually lands below the
+// floor). The GLOBAL constants above are deliberately untouched.
+export const ORCHESTRATOR_METERED_AUTO_COMPACT_RESET_FLOOR = 12_000;
+export const ORCHESTRATOR_METERED_AUTO_COMPACT_THRESHOLD = 15_000;
 export const ORCHESTRATOR_FORCE_COMPACT_THRESHOLD = Math.floor(ORCHESTRATOR_CONTEXT_LIMIT * 0.85);
 export const ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS = 4_000;
 export const ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS = 8_000;

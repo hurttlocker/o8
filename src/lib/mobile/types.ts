@@ -133,6 +133,36 @@ export interface MobileTranscriptToolLaunchLink {
   label: string;
 }
 
+/** One titled source the Brain cited in a cortex_ask answer (Fable
+ *  transparency card). Mirrors the Citation contract from qa/types.ts —
+ *  every citation carries a human-readable `title` (2026-06-11 parity pass). */
+export interface BrainFeedCitation {
+  kind: string;
+  rowId: string;
+  title?: string;
+  excerpt?: string;
+  url?: string | null;
+}
+
+/**
+ * Parsed cortex_ask tool RESULT — what the Brain fed the orchestrator this
+ * turn. Populated by the orchestrator stream's `tool-result` handler (only
+ * for cortex_ask calls); drives the Brain→Fable transparency card rendered
+ * when the turn's backend is metered.
+ */
+export interface BrainFeed {
+  question: string;
+  answer: string;
+  citations: BrainFeedCitation[];
+  sourcesConsidered: number | null;
+  retrievalMs: number | null;
+  cacheHit: 'exact' | 'semantic' | null;
+  /** Chars of source text the Brain read (composer-visible, ~1500/row cap) —
+   *  the "what a raw read would have cost" offload denominator. Null when the
+   *  server didn't derive it (cache hits, older servers). */
+  consideredChars: number | null;
+}
+
 export interface MobileTranscriptToolCall {
   id?: string | null;
   name: string;
@@ -142,6 +172,12 @@ export interface MobileTranscriptToolCall {
   result?: string;
   sideEffectClass?: ToolSideEffectClass;
   launchLink?: MobileTranscriptToolLaunchLink | null;
+  /** Orchestrator backend id of the turn that made this call — stamped from
+   *  the ws event's `data.backend` by the tool-result handler. Gates the
+   *  Brain→Fable transparency card to metered backends. */
+  backend?: string;
+  /** Structured cortex_ask answer payload — see BrainFeed. */
+  brainFeed?: BrainFeed;
 }
 
 export interface MobileTranscriptSource {

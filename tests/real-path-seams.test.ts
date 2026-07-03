@@ -1,8 +1,8 @@
 /**
- * Real-path spot-checks on three load-bearing seams (reachability rule).
+ * Real-path spot-checks on load-bearing seams (reachability rule).
  *
  * Each test drives the REAL entry point against PERSISTED state — not the guard
- * or helper in isolation. The three seams were chosen because each currently has
+ * or helper in isolation. The seams were chosen because each currently has
  * only direct-argument coverage, each is safety/correctness-critical, and each
  * maps to an incident class the "green tests encode the premise" gap produced:
  *
@@ -25,6 +25,12 @@
  *      never proves the budget survives serialization + the normalize pass every
  *      persisted read runs. This POSTs a packet through the orchestrator-state
  *      route and reads it back, exercising persist → reconcile → normalizePacket.
+ *
+ *   D. buildPacketPrompt → the metered-orchestrator Brain flip (Fable Slice 2,
+ *      2026-07-02). Asserts the assembled dispatch prompt carries the
+ *      Engineering Brain block when the ACTIVE orchestrator backend is metered
+ *      (fable) even for a frontier worker (codex) — through the real
+ *      operator-defaults resolution, not resolveBrainEnabledWith in isolation.
  */
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -194,5 +200,49 @@ describe('seam C — typecheckAutoRetries survives the orchestrator-state persis
     // type-broken packet loops full workers forever — this asserts it persists.
     expect(packet).toBeTruthy();
     expect(packet.typecheckAutoRetries).toBe(2);
+  });
+});
+
+// ── Seam D — metered orchestrator flips the Brain on through the REAL prompt ─
+
+describe('seam D — a metered orchestrator (fable) puts the Brain in a frontier worker prompt', () => {
+  // Fable mode, Slice 2 (2026-07-02): under a per-token-metered orchestrator,
+  // workers must self-serve repo knowledge via the fixed-cost Brain instead of
+  // routing questions back through the metered window. The isolation-test trap
+  // (#1329): asserting resolveBrainEnabledWith(…, 'fable') proves nothing about
+  // whether the dispatch chain actually reaches it — so this drives the real
+  // buildPacketPrompt against the persisted operator-defaults resolution
+  // (O8_ORCHESTRATOR_BACKEND env layer) and asserts the assembled prompt.
+  const withBackend = async (backend: string, fn: () => Promise<void>) => {
+    process.env.O8_ORCHESTRATOR_BACKEND = backend;
+    try {
+      await fn();
+    } finally {
+      delete process.env.O8_ORCHESTRATOR_BACKEND;
+    }
+  };
+
+  it('backend=fable: a codex (frontier) packet prompt carries the Brain section in auto mode', async () => {
+    await withBackend('fable', async () => {
+      const prompt = await buildPacketPrompt(packetFixture({ id: 'pkt-seam-D-1' }), []);
+      expect(prompt).toContain('Engineering Brain available');
+    });
+  });
+
+  it('backend=codex (subscription): the same packet stays lean (negative control)', async () => {
+    await withBackend('codex', async () => {
+      const prompt = await buildPacketPrompt(packetFixture({ id: 'pkt-seam-D-2' }), []);
+      expect(prompt).not.toContain('Engineering Brain available');
+    });
+  });
+
+  it('backend=fable + explicit useBrain:false: the per-packet override still wins', async () => {
+    await withBackend('fable', async () => {
+      const prompt = await buildPacketPrompt(
+        packetFixture({ id: 'pkt-seam-D-3', useBrain: false }),
+        [],
+      );
+      expect(prompt).not.toContain('Engineering Brain available');
+    });
   });
 });

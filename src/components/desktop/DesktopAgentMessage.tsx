@@ -16,6 +16,8 @@ import { MessageActions } from './MessageActions';
 import { usePretextHeight } from '@/lib/pretext';
 import { sanitizeTranscriptText } from '@/components/desktop/transcript-sanitize';
 import { ToolCallChipCluster } from '@/components/desktop/thoughts/chat-panel/ToolCallChipCluster';
+import { BrainFeedCard } from '@/components/desktop/thoughts/chat-panel/BrainFeedCard';
+import { isMeteredBrainFeedCall } from '@/components/desktop/thoughts/brain-feed';
 import { useSmoothText } from '@/components/desktop/thoughts/chat-panel/use-smooth-text';
 import { OrchestratorStatusCard } from '@/components/desktop/thoughts/chat-panel/OrchestratorStatusCard';
 import { detectOrchestratorStatusEvent } from '@/lib/orchestrator/status-events';
@@ -194,6 +196,20 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
   const hasText = Boolean(displayText.trim());
   const hasMedia = Boolean(entry.media?.length);
   const hasToolCalls = Boolean(entry.toolCalls?.length);
+  // Brain→Fable transparency: cortex_ask calls made on a METERED backend
+  // (fable) render as expandable BrainFeedCards instead of plain chips —
+  // the operator sees what the Brain fed the orchestrator, cited. Calls on
+  // subscription backends (or without a parsed result) stay in the cluster.
+  const brainFeedCalls = useMemo(
+    () => (entry.toolCalls ?? []).filter(isMeteredBrainFeedCall),
+    [entry.toolCalls],
+  );
+  const clusterToolCalls = useMemo(
+    () => brainFeedCalls.length > 0
+      ? (entry.toolCalls ?? []).filter((toolCall) => !isMeteredBrainFeedCall(toolCall))
+      : (entry.toolCalls ?? []),
+    [entry.toolCalls, brainFeedCalls.length],
+  );
   const isCompaction = entry.type === 'compaction'
     || (entry.role === 'system' && entry.text.toLowerCase().includes('compaction'));
   const isEvicted = useOrchestratorEntryEvicted(entry.id);
@@ -448,7 +464,10 @@ export const DesktopAgentMessage = memo(function DesktopAgentMessage({
       ) : null}
 
       {hasMedia ? <MediaGrid media={entry.media ?? []} tint="assistant" /> : null}
-      {hasToolCalls ? <ToolCallChipCluster toolCalls={entry.toolCalls ?? []} /> : null}
+      {clusterToolCalls.length > 0 ? <ToolCallChipCluster toolCalls={clusterToolCalls} /> : null}
+      {brainFeedCalls.map((toolCall, index) => (
+        <BrainFeedCard key={toolCall.id ?? `brain-feed-${index}`} toolCall={toolCall} />
+      ))}
 
       {entry.role === 'assistant' && hasText ? (
         <div style={{ width: '100%' }}>
