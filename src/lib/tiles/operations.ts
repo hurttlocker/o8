@@ -499,6 +499,20 @@ function migrateNode(node: any): any {
   }
   if (node.children) {
     node.children = node.children.map(migrateNode);
+    // Collapse terminal↔terminal splits (2026-07-02, operator report). The
+    // retired-kind migration above turns old thoughts/mission-control leaves
+    // into terminal leaves, which can leave a persisted split rendering TWO
+    // full WorkspaceTerminals side by side — two tab strips, two composers.
+    // The workspace is ONE surface with tabs; a stale split of two terminal
+    // leaves self-heals to the first leaf. Splits involving canvas/preview
+    // stay — those are live, intentional layouts.
+    if (
+      node.type === 'split'
+      && node.children.length === 2
+      && node.children.every((child: any) => child?.type === 'leaf' && child.content?.kind === 'terminal')
+    ) {
+      return node.children[0];
+    }
   }
   return node;
 }
