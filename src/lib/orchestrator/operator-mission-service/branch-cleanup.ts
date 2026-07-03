@@ -326,11 +326,6 @@ export async function prepareMissionBranches(input: {
       continue;
     }
 
-    const shouldReset = policy === 'reset'
-      || specChanged
-      || probe.staleLanes.length > 0
-      || (probe.activeLanes.length === 0 && (probe.hasBranch || probe.hasWorktree));
-
     if (policy === 'continue' && !specChanged) {
       if (probe.activeLanes.length === 0) {
         throw new Error(
@@ -350,7 +345,13 @@ export async function prepareMissionBranches(input: {
       continue;
     }
 
-    if (policy === 'error' || (!shouldReset && probe.activeLanes.length > 0)) {
+    // Pipeline root fix (2026-07-03): only an EXPLICIT operator reset may
+    // clear ACTIVE lanes. Previously a derived reset (stale sibling present,
+    // or spec drift) fell through to cleanupIssueBranch and archived the LIVE
+    // lane on the same branch target — running work destroyed by a collision
+    // it did not cause. Auto now surfaces the ambiguity instead of resolving
+    // it destructively.
+    if (policy === 'error' || (policy !== 'reset' && probe.activeLanes.length > 0)) {
       const laneSummary = probe.activeLanes
         .map((lane) => `${lane.id} (${lane.status})`)
         .join(', ');
