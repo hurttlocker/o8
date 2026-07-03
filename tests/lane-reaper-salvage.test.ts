@@ -18,11 +18,7 @@
  *     worktree is left untouched
  */
 import { execFileSync } from 'node:child_process';
-<<<<<<< HEAD
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-=======
-import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
->>>>>>> 82f1be27 (fix: keep steered lanes bound to live sessions)
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -39,9 +35,9 @@ import { resetOwnedSessionIndex } from '@/lib/runtimes/shared/owned-session-inde
 process.env.O8_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-reaper-salvage-'));
 process.env.CORTEX_IDE_OWNED_CODEX_ROOT = mkdtempSync(join(tmpdir(), 'o8-owned-codex-'));
 
-<<<<<<< HEAD
 const { createLane, getLane, setLaneStatus, updateLane, getLaneEvents } = await import('@/lib/lane/registry');
-const { LANE_HEARTBEAT_STALE_MS, listZombieLaneCandidates, reapZombieLane } = await import('@/lib/lane/reaper');
+const { LANE_HEARTBEAT_STALE_MS, listZombieLaneCandidates, reapZombieLane, recordLaneHeartbeat } = await import('@/lib/lane/reaper');
+const { rebindLaneSessionIfChanged } = await import('@/lib/lane/session-rebind');
 
 let ownedRoot: string | null = null;
 
@@ -52,12 +48,6 @@ afterEach(() => {
   resetCodexProcessCwdIndexForTesting();
   resetOwnedSessionIndex();
 });
-=======
-const { createLane, getLane, setLaneStatus, getLaneEvents } = await import('@/lib/lane/registry');
-const { LANE_HEARTBEAT_STALE_MS, listZombieLaneCandidates, reapZombieLane, recordLaneHeartbeat } = await import('@/lib/lane/reaper');
-const { rebindLaneSessionIfChanged } = await import('@/lib/lane/session-rebind');
-const { resetOwnedSessionIndex } = await import('@/lib/runtimes/shared/owned-session-index');
->>>>>>> 82f1be27 (fix: keep steered lanes bound to live sessions)
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
