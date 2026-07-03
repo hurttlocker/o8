@@ -216,7 +216,7 @@ function heartbeatStaleMs(lane: Lane, now: number): number {
 }
 
 function actorStatusTransitionGraceMs(lane: Lane, now: number): number | null {
-  const events = getLaneEvents(lane.id, 12);
+  const events = getLaneEvents(lane.id, 80);
   for (let index = events.length - 1; index >= 0; index -= 1) {
     const event = events[index];
     if (event.verb !== 'status_change') continue;
