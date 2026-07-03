@@ -49,9 +49,11 @@ interface DesktopStatusBarProps {
    *  (transparent bg, no shadow/border/rounding) so the panel above floats as
    *  a self-contained Lisse card — the icons sit directly on the vibrancy. */
   glassSurface?: boolean;
-  /** Lanes parked in the review/escalation gates — drives the merge beacon
-   *  (fleet-wide "something's ready to merge / needs you" pill). */
+  /** Lanes parked in the review gate — drives the merge beacon split between
+   *  needs-review and approved-awaiting-merge. */
   parkedLanes?: ParkedLane[];
+  onOpenReviewLane?: (lane: ParkedLane) => void;
+  onOpenAwaitingMerge?: () => void;
   onOpenSettings: () => void;
   onAddRepo: () => void;
   /** Open the full-screen mobile-pairing QR view (a canvas tab). */
@@ -80,6 +82,8 @@ function DesktopStatusBarBase({
   compact = false,
   glassSurface = false,
   parkedLanes = [],
+  onOpenReviewLane,
+  onOpenAwaitingMerge,
   onOpenSettings,
   onAddRepo,
   onOpenMobilePairing,
@@ -355,7 +359,12 @@ function DesktopStatusBarBase({
         }}
       >
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, pointerEvents: 'auto' }}>
-          <MergeBeacon parked={parkedLanes} compact={compact} />
+          <MergeBeacon
+            parked={parkedLanes}
+            compact={compact}
+            onOpenNeedsReviewLane={onOpenReviewLane}
+            onOpenAwaitingMerge={onOpenAwaitingMerge}
+          />
           <MergeActionCluster
             branchName={branchName}
             repoName={repoName}

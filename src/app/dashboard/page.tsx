@@ -77,7 +77,7 @@ import {
   type DomainLaneSummary,
 } from '@/lib/orchestrator/store';
 import { agentDisplayLabel } from '@/lib/orchestrator/display';
-import { deriveParkedLanes } from '@/components/desktop/merge-beacon/derive';
+import { deriveParkedLanes, type ParkedLane } from '@/components/desktop/merge-beacon/derive';
 import type { WorkspaceLifecycleRecordView, WorkspaceLifecycleSummaryView } from '@/lib/workspace/lifecycle-types';
 import type {
   CanvasTileState,
@@ -650,6 +650,7 @@ function DashboardInner() {
     agentsJson, setAgentsJson,
     activeWorkspace, setActiveWorkspace,
     wsStatus,
+    approvals,
     approvalCount,
     resolvedApprovalCount,
     parsedAgents,
@@ -3422,8 +3423,9 @@ function DashboardInner() {
       .filter((l): l is typeof l & { packetId: string } => Boolean(l.packetId))
       .map((l) => ({ laneId: l.id, packetId: l.packetId, status: l.status, sessionKey: l.sessionKey, lastEventLabel: l.lastEventLabel, branch: l.branch, repoPath: l.repoPath, label: l.label }));
   }, [domainLanesRaw]);
-  // Footer merge beacon — fleet-wide "parked, needs you" lanes (review +
-  // escalation gates), derived from the same already-live lanes poll. Exclude
+  // Footer merge beacon — fleet-wide review-gate lanes split into
+  // needs-review vs approved-awaiting-merge, derived from the same already-live
+  // lanes poll plus durable approval records. Exclude
   // lanes whose PACKET has merged/released/archived — the lane summary status can
   // lag (stale-stuck at 'reviewing' after the packet closed), which left a
   // just-merged packet counting as "1 ready" in the beacon.
@@ -3436,7 +3438,23 @@ function DashboardInner() {
     }
     return closed;
   }, [thoughtsMissionState.packets]);
-  const parkedLanes = useMemo(() => deriveParkedLanes(domainLanes, closedPacketIds), [domainLanes, closedPacketIds]);
+  const parkedLanes = useMemo(() => deriveParkedLanes(domainLanes, closedPacketIds, approvals), [approvals, domainLanes, closedPacketIds]);
+
+  const handleOpenReviewLane = useCallback((lane: ParkedLane) => {
+    if (lane.repoPath) {
+      setO8RepoPathOverride(lane.repoPath);
+      setO8SelectedFile(null);
+      setO8SelectedFileRepoPath(null);
+    }
+    setRightPanelKind('review');
+    openRightPanelFromUser();
+  }, [openRightPanelFromUser]);
+
+  const handleOpenAwaitingMerge = useCallback(() => {
+    setRightPanelKind('o8');
+    openRightPanelFromUser();
+    setO8ActiveTab('inbox');
+  }, [openRightPanelFromUser]);
 
   useEffect(() => {
     if (!tileLayoutHydrated) return;
@@ -4906,6 +4924,8 @@ function DashboardInner() {
         compact={compactShell}
         glassSurface={effectiveGlassSurface}
         parkedLanes={parkedLanes}
+        onOpenReviewLane={handleOpenReviewLane}
+        onOpenAwaitingMerge={handleOpenAwaitingMerge}
         bottomPanelVisible={bottomPanelVisible}
         onToggleBottomPanel={toggleContextualPanelTile}
         onOpenBottomPanelSurface={handleOpenBottomPanelSurface}
