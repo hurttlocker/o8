@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect } from 'react';
+import { installLongLivedFetchBudgetGuard } from '@/lib/connection-budget';
 
 // The pre-ship boot gate (scripts/preship-webview-gate.mjs) treats
 // `data-o8-dashboard-hydrated` as proof the dashboard booted cleanly. We only
@@ -11,6 +12,8 @@ import { useEffect } from 'react';
 // (data-o8-mount-error) suppresses it outright.
 export function DashboardHydrationMarker() {
   useEffect(() => {
+    installLongLivedFetchBudgetGuard();
+
     const root = document.documentElement;
     root.removeAttribute('data-o8-dashboard-hydrated');
 

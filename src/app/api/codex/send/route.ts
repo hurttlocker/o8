@@ -100,6 +100,7 @@ export async function POST(req: NextRequest) {
 
   const encoder = new TextEncoder();
 
+  let markClientGone: (() => void) | null = null;
   const stream = new ReadableStream({
     start(controller) {
       const child = spawn(CODEX_BIN, args, {
@@ -110,90 +111,89 @@ export async function POST(req: NextRequest) {
 
       let fullResponse = '';
       let capturedThreadId = '';
+      let streamClosed = false;
+      markClientGone = () => {
+        streamClosed = true;
+      };
+      const enqueue = (event: unknown) => {
+        if (streamClosed) return;
+        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+      };
+      const closeStream = () => {
+        if (streamClosed) return;
+        streamClosed = true;
+        controller.close();
+      };
 
-	      child.stdout.on('data', (chunk: Buffer) => {
-	        const text = chunk.toString();
+      child.stdout.on('data', (chunk: Buffer) => {
+        const text = chunk.toString();
 
-	        for (const line of text.split('\n').filter(Boolean)) {
-	          try {
-	            const event = JSON.parse(line) as Record<string, unknown>;
-	            const rawItem = (event.item ?? event.payload ?? {}) as Record<string, unknown>;
+        for (const line of text.split('\n').filter(Boolean)) {
+          try {
+            const event = JSON.parse(line) as Record<string, unknown>;
+            const rawItem = (event.item ?? event.payload ?? {}) as Record<string, unknown>;
 
-	            // Capture thread ID
-	            if (event.type === 'thread.started' && event.thread_id) {
-	              capturedThreadId = event.thread_id as string;
-              controller.enqueue(encoder.encode(
-                `data: ${JSON.stringify({ type: 'session', threadId: capturedThreadId })}\n\n`
-              ));
+            // Capture thread ID
+            if (event.type === 'thread.started' && event.thread_id) {
+              capturedThreadId = event.thread_id as string;
+              enqueue({ type: 'session', threadId: capturedThreadId });
             }
 
             // Agent message completed — the actual response text
-	            if (event.type === 'item.completed' || event.type === 'response_item') {
-	              const itemType = String(rawItem.type ?? '');
-	              const itemRole = String(rawItem.role ?? '');
-	              const messageText = extractCodexMessageText(rawItem);
-	              const reasoningText = extractCodexReasoningText(rawItem);
+            if (event.type === 'item.completed' || event.type === 'response_item') {
+              const itemType = String(rawItem.type ?? '');
+              const itemRole = String(rawItem.role ?? '');
+              const messageText = extractCodexMessageText(rawItem);
+              const reasoningText = extractCodexReasoningText(rawItem);
 
-	              if ((itemType === 'agent_message' || (itemType === 'message' && itemRole === 'assistant')) && messageText) {
-	                fullResponse += messageText;
-	                controller.enqueue(encoder.encode(
-	                  `data: ${JSON.stringify({ type: 'delta', text: messageText })}\n\n`
-	                ));
-	              }
+              if ((itemType === 'agent_message' || (itemType === 'message' && itemRole === 'assistant')) && messageText) {
+                fullResponse += messageText;
+                enqueue({ type: 'delta', text: messageText });
+              }
 
-	              if (itemType === 'reasoning' && reasoningText) {
-	                controller.enqueue(encoder.encode(
-	                  `data: ${JSON.stringify({ type: 'thinking', text: reasoningText })}\n\n`
-	                ));
-	              }
+              if (itemType === 'reasoning' && reasoningText) {
+                enqueue({ type: 'thinking', text: reasoningText });
+              }
 
-	              if (itemType === 'tool_call' || itemType === 'function_call' || itemType === 'custom_tool_call') {
-	                const toolName = typeof rawItem.name === 'string' ? rawItem.name : '';
-	                if (toolName) {
-	                  controller.enqueue(encoder.encode(
-	                    `data: ${JSON.stringify({
-	                      type: 'tool_call',
-	                      name: toolName,
-	                      status: 'running',
-	                      args: parseCodexArgs(rawItem.arguments)
-	                        ?? (typeof rawItem.input === 'string'
-	                          ? parseCodexArgs(rawItem.input)
-	                          : (rawItem.input && typeof rawItem.input === 'object' ? rawItem.input as Record<string, unknown> : undefined)),
-	                    })}\n\n`
-	                  ));
-	                }
-	              }
+              if (itemType === 'tool_call' || itemType === 'function_call' || itemType === 'custom_tool_call') {
+                const toolName = typeof rawItem.name === 'string' ? rawItem.name : '';
+                if (toolName) {
+                  enqueue({
+                    type: 'tool_call',
+                    name: toolName,
+                    status: 'running',
+                    args: parseCodexArgs(rawItem.arguments)
+                      ?? (typeof rawItem.input === 'string'
+                        ? parseCodexArgs(rawItem.input)
+                        : (rawItem.input && typeof rawItem.input === 'object' ? rawItem.input as Record<string, unknown> : undefined)),
+                  });
+                }
+              }
 
-	              if ((itemType === 'function_call_output' || itemType === 'custom_tool_call_output') && typeof rawItem.output === 'string') {
-	                controller.enqueue(encoder.encode(
-	                  `data: ${JSON.stringify({
-	                    type: 'tool_result',
-	                    name: typeof rawItem.name === 'string' ? rawItem.name : undefined,
-	                    preview: rawItem.output,
-	                  })}\n\n`
-	                ));
-	              }
-	            }
+              if ((itemType === 'function_call_output' || itemType === 'custom_tool_call_output') && typeof rawItem.output === 'string') {
+                enqueue({
+                  type: 'tool_result',
+                  name: typeof rawItem.name === 'string' ? rawItem.name : undefined,
+                  preview: rawItem.output,
+                });
+              }
+            }
 
-	            // Turn completed — usage info
-	            if (event.type === 'turn.completed') {
-	              const usage = event.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-	              controller.enqueue(encoder.encode(
-	                `data: ${JSON.stringify({
-	                  type: 'usage',
-	                  inputTokens: usage?.input_tokens,
-	                  outputTokens: usage?.output_tokens,
-	                })}\n\n`
-	              ));
-	              controller.enqueue(encoder.encode(
-	                `data: ${JSON.stringify({
-	                  type: 'done',
-                  text: fullResponse,
-                  threadId: capturedThreadId || undefined,
-                  inputTokens: usage?.input_tokens,
-                  outputTokens: usage?.output_tokens,
-                })}\n\n`
-              ));
+            // Turn completed — usage info
+            if (event.type === 'turn.completed') {
+              const usage = event.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+              enqueue({
+                type: 'usage',
+                inputTokens: usage?.input_tokens,
+                outputTokens: usage?.output_tokens,
+              });
+              enqueue({
+                type: 'done',
+                text: fullResponse,
+                threadId: capturedThreadId || undefined,
+                inputTokens: usage?.input_tokens,
+                outputTokens: usage?.output_tokens,
+              });
             }
           } catch {
             // Not JSON or partial — skip
@@ -205,32 +205,31 @@ export async function POST(req: NextRequest) {
         const errLines = chunk.toString().split('\n').map((line) => line.trim()).filter(Boolean);
         const visibleLines = errLines.filter((line) => !shouldSuppressCodexStderrLine(line));
         if (visibleLines.length > 0) {
-          controller.enqueue(encoder.encode(
-            `data: ${JSON.stringify({ type: 'error', text: visibleLines.join('\n') })}\n\n`
-          ));
+          enqueue({ type: 'error', text: visibleLines.join('\n') });
         }
       });
 
       child.on('close', (code) => {
-        controller.enqueue(encoder.encode(
-          `data: ${JSON.stringify({
-            type: 'close',
-            exitCode: code,
-            text: fullResponse,
-            threadId: capturedThreadId || undefined,
-          })}\n\n`
-        ));
-        controller.close();
+        enqueue({
+          type: 'close',
+          exitCode: code,
+          text: fullResponse,
+          threadId: capturedThreadId || undefined,
+        });
+        closeStream();
       });
 
       child.on('error', (err) => {
-        controller.enqueue(encoder.encode(
-          `data: ${JSON.stringify({ type: 'error', text: err.message })}\n\n`
-        ));
-        controller.close();
+        enqueue({ type: 'error', text: err.message });
+        closeStream();
       });
 
       child.stdin.end();
+    },
+    cancel() {
+      // The CLI process keeps its own transcript/session state. Client-side
+      // cancellation only releases the webview HTTP socket.
+      markClientGone?.();
     },
   });
 
