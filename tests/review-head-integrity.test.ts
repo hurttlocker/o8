@@ -95,8 +95,11 @@ describe('reviewed HEAD merge integrity', () => {
     });
 
     const result = await submitPacketReview({ packetId, approved: true, findings: [] });
-    expect(result.reviewedHeadSha).toBeNull();
-    expect(result.warning).toContain('unpinned');
+    // Omitted sha auto-captures the worktree HEAD at review time (keeps the
+    // durable-review merge authorization working) with an advisory warning to
+    // pass the packet-diff headSha for the exact-content pin.
+    expect(result.reviewedHeadSha).toBe(git(repoPath, ['rev-parse', 'HEAD']));
+    expect(result.warning).toContain('packet-diff headSha');
   });
 
   it('refuses when HEAD moves after review, then merges after re-review at the new HEAD', async () => {
