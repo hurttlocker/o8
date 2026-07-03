@@ -1,7 +1,7 @@
 import { createApproval, recordApprovalAudit, resolveApproval } from '@/lib/approvals/store';
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
 import { getLaneDiffFacts } from '@/lib/lane/lane-diff-facts';
-import { normalizeHeadSha, readHeadSha } from '@/lib/lane/head-sha-lock';
+import { normalizeHeadSha } from '@/lib/lane/head-sha-lock';
 import { findLaneByPacket, findLatestLaneByPacket } from '@/lib/lane/registry';
 import { classifyReviewRisk } from '@/lib/lane/review-risk';
 import type { Lane } from '@/lib/lane/types';
@@ -155,26 +155,6 @@ function recordPacketReviewAudit(packet: OrchestratorPacket, findings: Orchestra
   return resolved?.id ?? approval.id;
 }
 
-async function captureReviewedHeadSha(packetId: string, explicitHeadSha?: string) {
-  const explicit = normalizeHeadSha(explicitHeadSha);
-  if (explicit) {
-    return explicit;
-  }
-
-  const lane = findLaneByPacket(packetId);
-  const worktreePath = lane?.worktreePath?.trim();
-  if (!worktreePath) {
-    return undefined;
-  }
-
-  try {
-    return await readHeadSha(worktreePath);
-  } catch (error) {
-    console.warn(`[review] Failed to capture reviewed HEAD for packet ${packetId}:`, error);
-    return undefined;
-  }
-}
-
 export async function submitPacketReview(input: SubmitReviewInput) {
   const state = currentMissionState();
   const missionPacket = state.packets.find((candidate) => candidate.id === input.packetId);
@@ -196,7 +176,7 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     packet = synthesizePacketFromLane(input.packetId, orphanLane);
   }
 
-  const reviewedHeadSha = await captureReviewedHeadSha(packet.id, input.reviewedHeadSha);
+  const reviewedHeadSha = normalizeHeadSha(input.reviewedHeadSha);
   const summary = buildReviewSummary(input.findings, input.approved);
   const auditApprovalId = recordPacketReviewAudit(packet, input.findings, input.approved, summary, reviewedHeadSha);
 
@@ -236,6 +216,9 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     recorded: true,
     findingsCount: input.findings.length,
     reviewedHeadSha: reviewedHeadSha ?? null,
+    ...(reviewedHeadSha ? {} : {
+      warning: 'reviewedHeadSha was omitted; this review is unpinned to a specific worktree HEAD.',
+    }),
     auditEventType: 'orchestrator_review',
     auditApprovalId: resolvedAuditApprovalId,
   };
