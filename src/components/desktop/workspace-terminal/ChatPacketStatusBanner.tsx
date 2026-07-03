@@ -22,6 +22,7 @@ import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 interface ChatPacketStatusBannerProps {
   status: OrchestratorPacketStatus | null;
   laneId: string | null;
+  packetId: string | null;
   packetTitle: string | null;
   onOpenInActivity?: () => void;
 }
@@ -68,13 +69,16 @@ const TONE_BY_STATUS: Partial<Record<OrchestratorPacketStatus, Tone>> = {
 export function ChatPacketStatusBanner({
   status,
   laneId,
+  packetId,
   packetTitle,
   onOpenInActivity,
 }: ChatPacketStatusBannerProps) {
   const tone = status ? TONE_BY_STATUS[status] : undefined;
-  const [pending, setPending] = useState<'merge' | 'create_pr' | null>(null);
+  const [pending, setPending] = useState<'merge' | 'create_pr' | 'reject' | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedback, setFeedback] = useState('');
 
   const callLaneAction = useCallback(async (verb: 'merge' | 'create_pr') => {
     if (!laneId) return;
@@ -103,6 +107,40 @@ export function ChatPacketStatusBanner({
       setPending(null);
     }
   }, [laneId, packetTitle]);
+
+  // #1293 FIX 2 — request changes / reject. Sends the packet back to the agent
+  // with operator feedback via /api/orchestrator/rerun-with-feedback (mirrors
+  // ReviewPane's respec wiring). Keyed on packetId (not laneId) so it works
+  // whenever a packet is bound, even before a lane rebinds.
+  const submitFeedback = useCallback(async () => {
+    const trimmed = feedback.trim();
+    if (!packetId || !trimmed) return;
+    setPending('reject');
+    setActionError(null);
+    setActionNote(null);
+    try {
+      const response = await fetch('/api/orchestrator/rerun-with-feedback', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ packetId, feedback: trimmed }),
+      });
+      const payload = await response.json().catch(() => null) as {
+        ok?: boolean;
+        result?: { note?: string };
+        error?: { message?: string };
+      } | null;
+      if (!response.ok || !payload?.ok) {
+        throw new Error(payload?.error?.message ?? 'Unable to request changes.');
+      }
+      setActionNote(payload.result?.note ?? 'Sent back to the agent with your feedback.');
+      setFeedback('');
+      setFeedbackOpen(false);
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to request changes.');
+    } finally {
+      setPending(null);
+    }
+  }, [feedback, packetId]);
 
   if (!tone) return null;
 
@@ -157,76 +195,184 @@ export function ChatPacketStatusBanner({
         </div>
       </div>
 
-      {status === 'awaiting_review' && laneId ? (
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-          <button
-            type="button"
-            onClick={() => { void callLaneAction('merge'); }}
-            disabled={pending !== null}
-            style={{
-              paddingTop: 4,
-              paddingRight: 10,
-              paddingBottom: 4,
-              paddingLeft: 10,
-              borderRadius: 8,
-              borderWidth: 0,
-              background: pending === 'merge' ? 'rgba(22, 163, 74, 0.6)' : '#16a34a',
-              color: '#fff',
-              fontSize: 11,
-              fontWeight: 400,
-              cursor: pending !== null ? 'wait' : 'pointer',
-              fontFamily: 'var(--font-sans-system)',
-              letterSpacing: '-0.1px',
-            }}
-          >
-            {pending === 'merge' ? 'Merging…' : 'Approve & merge'}
-          </button>
-          <button
-            type="button"
-            onClick={() => { void callLaneAction('create_pr'); }}
-            disabled={pending !== null}
-            style={{
-              paddingTop: 4,
-              paddingRight: 10,
-              paddingBottom: 4,
-              paddingLeft: 10,
-              borderRadius: 8,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: tone.border,
-              background: 'transparent',
-              color: tone.color,
-              fontSize: 11,
-              fontWeight: 400,
-              cursor: pending !== null ? 'wait' : 'pointer',
-              fontFamily: 'var(--font-sans-system)',
-            }}
-          >
-            {pending === 'create_pr' ? 'Creating PR…' : 'Create PR'}
-          </button>
-          {onOpenInActivity ? (
-            <button
-              type="button"
-              onClick={onOpenInActivity}
+      {status === 'awaiting_review' && (laneId || packetId) ? (
+        feedbackOpen ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <textarea
+              value={feedback}
+              onChange={(event) => setFeedback(event.target.value)}
+              placeholder="What needs to change? Be specific — this prepends to the original prompt."
+              disabled={pending === 'reject'}
               style={{
-                paddingTop: 4,
-                paddingRight: 10,
-                paddingBottom: 4,
-                paddingLeft: 10,
+                width: '100%',
+                minHeight: 64,
+                maxHeight: 160,
+                resize: 'vertical',
                 borderRadius: 8,
-                borderWidth: 0,
-                background: 'transparent',
-                color: 'var(--t-text-muted)',
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'var(--t-panel-border)',
+                background: 'var(--t-input-bg, var(--t-panel))',
+                color: 'var(--t-text)',
+                paddingTop: 6,
+                paddingRight: 8,
+                paddingBottom: 6,
+                paddingLeft: 8,
                 fontSize: 11,
-                fontWeight: 400,
-                cursor: 'pointer',
                 fontFamily: 'var(--font-sans-system)',
+                outline: 'none',
               }}
-            >
-              Open in Activity
-            </button>
-          ) : null}
-        </div>
+            />
+            <div style={{ display: 'flex', gap: 6 }}>
+              <button
+                type="button"
+                onClick={() => { void submitFeedback(); }}
+                disabled={!feedback.trim() || pending === 'reject'}
+                style={{
+                  paddingTop: 4,
+                  paddingRight: 10,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: tone.border,
+                  background: tone.background,
+                  color: tone.color,
+                  fontSize: 11,
+                  fontWeight: 400,
+                  cursor: !feedback.trim() || pending === 'reject' ? 'not-allowed' : 'pointer',
+                  opacity: !feedback.trim() || pending === 'reject' ? 0.5 : 1,
+                  fontFamily: 'var(--font-sans-system)',
+                }}
+              >
+                {pending === 'reject' ? 'Sending…' : 'Send back'}
+              </button>
+              <button
+                type="button"
+                onClick={() => { setFeedbackOpen(false); setFeedback(''); }}
+                disabled={pending === 'reject'}
+                style={{
+                  paddingTop: 4,
+                  paddingRight: 10,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: 'var(--t-panel-border)',
+                  background: 'transparent',
+                  color: 'var(--t-text-muted)',
+                  fontSize: 11,
+                  fontWeight: 400,
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-sans-system)',
+                }}
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {laneId ? (
+              <button
+                type="button"
+                onClick={() => { void callLaneAction('merge'); }}
+                disabled={pending !== null}
+                style={{
+                  paddingTop: 4,
+                  paddingRight: 10,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  borderRadius: 8,
+                  borderWidth: 0,
+                  background: pending === 'merge' ? 'rgba(22, 163, 74, 0.6)' : '#16a34a',
+                  color: '#fff',
+                  fontSize: 11,
+                  fontWeight: 400,
+                  cursor: pending !== null ? 'wait' : 'pointer',
+                  fontFamily: 'var(--font-sans-system)',
+                  letterSpacing: '-0.1px',
+                }}
+              >
+                {pending === 'merge' ? 'Merging…' : 'Approve & merge'}
+              </button>
+            ) : null}
+            {laneId ? (
+              <button
+                type="button"
+                onClick={() => { void callLaneAction('create_pr'); }}
+                disabled={pending !== null}
+                style={{
+                  paddingTop: 4,
+                  paddingRight: 10,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: tone.border,
+                  background: 'transparent',
+                  color: tone.color,
+                  fontSize: 11,
+                  fontWeight: 400,
+                  cursor: pending !== null ? 'wait' : 'pointer',
+                  fontFamily: 'var(--font-sans-system)',
+                }}
+              >
+                {pending === 'create_pr' ? 'Creating PR…' : 'Create PR'}
+              </button>
+            ) : null}
+            {packetId ? (
+              <button
+                type="button"
+                onClick={() => setFeedbackOpen(true)}
+                disabled={pending !== null}
+                style={{
+                  paddingTop: 4,
+                  paddingRight: 10,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  borderRadius: 8,
+                  borderWidth: 1,
+                  borderStyle: 'solid',
+                  borderColor: tone.border,
+                  background: 'transparent',
+                  color: tone.color,
+                  fontSize: 11,
+                  fontWeight: 400,
+                  cursor: pending !== null ? 'wait' : 'pointer',
+                  fontFamily: 'var(--font-sans-system)',
+                }}
+              >
+                Request changes
+              </button>
+            ) : null}
+            {onOpenInActivity ? (
+              <button
+                type="button"
+                onClick={onOpenInActivity}
+                style={{
+                  paddingTop: 4,
+                  paddingRight: 10,
+                  paddingBottom: 4,
+                  paddingLeft: 10,
+                  borderRadius: 8,
+                  borderWidth: 0,
+                  background: 'transparent',
+                  color: 'var(--t-text-muted)',
+                  fontSize: 11,
+                  fontWeight: 400,
+                  cursor: 'pointer',
+                  fontFamily: 'var(--font-sans-system)',
+                }}
+              >
+                Open in Activity
+              </button>
+            ) : null}
+          </div>
+        )
       ) : null}
 
       {actionNote ? (

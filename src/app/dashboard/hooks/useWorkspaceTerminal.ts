@@ -907,6 +907,44 @@ export function useWorkspaceTerminal({
     });
   }, [thoughtsMissionPackets]);
 
+  // #1293 — a RESET packet orphans its chat tab. Sibling to the badge-rebind
+  // above: the rebind re-attaches LIVE packets; this closes a chat tab whose
+  // packet was reset. A reset drops the packet back to `draft` and clears its
+  // lane (status 'draft' && lane === null), OR removes it from mission state
+  // entirely — neither path fires a `lane-lifecycle` archived event, so the
+  // event-driven close listener above never catches it and the tab lingers as a
+  // ghost. Reading the persisted client mission state closes it regardless of
+  // broadcast-payload ordering (covers the main + fallback reset paths).
+  useEffect(() => {
+    const handles = Array.from(workspaceTerminalHandlesRef.current.values());
+    if (handles.length === 0) return;
+
+    // (a) Packets still present but reset to the draft / no-lane signature.
+    for (const packet of thoughtsMissionPackets) {
+      if (packet.status === 'draft' && !packet.lane) {
+        for (const handle of handles) {
+          if (handle?.closeChatTabForRetiredLane({ packetId: packet.id })) break;
+        }
+      }
+    }
+
+    // (b) Chat tabs whose bound packet vanished from mission state entirely.
+    // Guarded on a non-empty known set so a transient empty load never closes
+    // live tabs.
+    if (thoughtsMissionPackets.length === 0) return;
+    const knownPacketIds = new Set(thoughtsMissionPackets.map((packet) => packet.id));
+    const boundPacketIds = handles
+      .flatMap((handle) => handle.getChatTabSnapshots())
+      .map((snapshot) => snapshot.packetId)
+      .filter((packetId): packetId is string => Boolean(packetId));
+    for (const packetId of boundPacketIds) {
+      if (knownPacketIds.has(packetId)) continue;
+      for (const handle of handles) {
+        if (handle?.closeChatTabForRetiredLane({ packetId })) break;
+      }
+    }
+  }, [thoughtsMissionPackets]);
+
   // Option D — self-heal the tab LABEL when a packet's real title resolves. The
   // twin of the badge rebind above: the badge already healed on async data, the
   // label didn't, so it stayed frozen on whatever fallback it had at open-time

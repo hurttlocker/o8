@@ -27,6 +27,7 @@ import type { TerminalTab } from '@/components/desktop/workspace-terminal/types'
 import { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
 import { WorkspaceChatComposer } from '@/components/desktop/workspace-terminal/WorkspaceChatComposer';
 import { ChatPacketStatusBanner } from '@/components/desktop/workspace-terminal/ChatPacketStatusBanner';
+import { ChatPacketReviewDiff } from '@/components/desktop/workspace-terminal/ChatPacketReviewDiff';
 import { PacketHeaderCard } from '@/components/desktop/workspace-terminal/PacketHeaderCard';
 import {
   WorkspaceRichChatEvents,
@@ -378,6 +379,124 @@ function WorkspaceChatPaneBase({
                 const showBanner = liveStatus === 'awaiting_review'
                   || liveStatus === 'failed'
                   || liveStatus === 'recovering';
+                const stillWorking = liveStatus === 'running'
+                  || liveStatus === 'recovering'
+                  || liveStatus === 'launching'
+                  || liveStatus === 'queued';
+                // #1293 FIX 1 — a dispatched Codex `exec --json` streams its
+                // transcript to the LANE, not this session's sessionKey slice.
+                // The additive packetId-keyed poll (useWorkspaceChatPane) fills
+                // `packetLlmMessages`; when present, render the real work instead
+                // of a static placeholder. Stays empty for Claude-Code / steered
+                // Codex (sessionKey slice fills), so their path is untouched.
+                const hasPacketTranscript = chat.packetLlmMessages.length > 0;
+
+                // Review affordances shared by the hero + transcript layouts:
+                // the inline diff (FIX 2 — so "Ready for review" shows WHAT to
+                // review) and the status banner (merge / PR / request-changes).
+                const reviewAffordances = (
+                  <>
+                    {awaitingReview && livePacket ? (
+                      <ChatPacketReviewDiff packet={livePacket} />
+                    ) : null}
+                    {tab.orchestrationPacket && livePacket && showBanner ? (
+                      <div style={{ width: '100%', maxWidth: 440 }}>
+                        <ChatPacketStatusBanner
+                          status={liveStatus}
+                          laneId={livePacket.lane?.laneId ?? null}
+                          packetId={livePacket.id}
+                          packetTitle={livePacket.title ?? tab.orchestrationPacket.title ?? null}
+                          onOpenInActivity={
+                            orchestratorData?.onOpenO8Panel
+                              ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
+                              : undefined
+                          }
+                        />
+                      </div>
+                    ) : orchestratorData?.onOpenO8Panel ? (
+                      <button
+                        type="button"
+                        onClick={() => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })}
+                        style={{
+                          marginTop: 2,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 6,
+                          height: 28,
+                          paddingLeft: 12,
+                          paddingRight: 12,
+                          borderRadius: 999,
+                          borderWidth: 1,
+                          borderStyle: 'solid',
+                          borderColor: 'var(--t-border)',
+                          background: 'var(--t-panel)',
+                          color: 'var(--t-text-muted)',
+                          cursor: 'pointer',
+                          fontSize: 11,
+                          fontWeight: 500,
+                          fontFamily: 'var(--font-sans-system)',
+                        }}
+                      >
+                        View in Activity
+                      </button>
+                    ) : null}
+                  </>
+                );
+
+                if (hasPacketTranscript) {
+                  return (
+                    <Suspense fallback={null}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8, width: '100%', maxWidth: 'var(--cortex-chat-column-max)', marginLeft: 'auto', marginRight: 'auto' }}>
+                        {chat.packetLlmMessages.map((message, index) => {
+                          const bubbleMessage = stripWorkspaceRichRendererFallback(message);
+                          return (
+                            <div key={message.id} style={{ display: 'flex', flexDirection: 'column', alignItems: message.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                              <LazyMessageBubble
+                                message={bubbleMessage}
+                                isLast={index === chat.packetLlmMessages.length - 1}
+                                onRunInTerminal={onRunInTerminal}
+                              />
+                              {message.role === 'assistant' ? (
+                                <WorkspaceRichChatEvents
+                                  message={message}
+                                  repoPath={tab.repo?.localPath}
+                                  onPermissionDecision={chat.handleClaudePermissionDecision}
+                                />
+                              ) : null}
+                            </div>
+                          );
+                        })}
+                        {stillWorking && !awaitingReview ? (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingBottom: 4 }}>
+                            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
+                              {[0, 1, 2].map((dot) => (
+                                <span
+                                  key={dot}
+                                  style={{
+                                    width: 5,
+                                    height: 5,
+                                    borderRadius: '50%',
+                                    background: '#22c55e',
+                                    opacity: 0.4,
+                                    animation: `o8ThinkPulse 1.4s ease-in-out ${dot * 0.2}s infinite`,
+                                  }}
+                                />
+                              ))}
+                            </div>
+                            <span style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: 'var(--font-sans-system)', fontWeight: 500 }}>
+                              {chat.runtimeLabel} working…
+                            </span>
+                            <style>{'@keyframes o8ThinkPulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.1); } }'}</style>
+                          </div>
+                        ) : null}
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start', paddingTop: 4 }}>
+                          {reviewAffordances}
+                        </div>
+                      </div>
+                    </Suspense>
+                  );
+                }
+
                 return (
                   <div
                     style={{
@@ -425,46 +544,7 @@ function WorkspaceChatPaneBase({
                         ? `This ${chat.runtimeLabel} session finished and is awaiting review.`
                         : `${chat.runtimeLabel} is working in this lane — live activity streams to the Activity panel. Type below to steer it.`}
                     </div>
-                    {tab.orchestrationPacket && livePacket && showBanner ? (
-                      <div style={{ width: '100%', maxWidth: 440 }}>
-                        <ChatPacketStatusBanner
-                          status={liveStatus}
-                          laneId={livePacket.lane?.laneId ?? null}
-                          packetTitle={livePacket.title ?? tab.orchestrationPacket.title ?? null}
-                          onOpenInActivity={
-                            orchestratorData?.onOpenO8Panel
-                              ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
-                              : undefined
-                          }
-                        />
-                      </div>
-                    ) : orchestratorData?.onOpenO8Panel ? (
-                      <button
-                        type="button"
-                        onClick={() => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })}
-                        style={{
-                          marginTop: 2,
-                          display: 'inline-flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          height: 28,
-                          paddingLeft: 12,
-                          paddingRight: 12,
-                          borderRadius: 999,
-                          borderWidth: 1,
-                          borderStyle: 'solid',
-                          borderColor: 'var(--t-border)',
-                          background: 'var(--t-panel)',
-                          color: 'var(--t-text-muted)',
-                          cursor: 'pointer',
-                          fontSize: 11,
-                          fontWeight: 500,
-                          fontFamily: 'var(--font-sans-system)',
-                        }}
-                      >
-                        View in Activity
-                      </button>
-                    ) : null}
+                    {reviewAffordances}
                   </div>
                 );
               })()
@@ -679,6 +759,7 @@ function WorkspaceChatPaneBase({
                 <ChatPacketStatusBanner
                   status={liveStatus}
                   laneId={livePacket.lane?.laneId ?? null}
+                  packetId={livePacket.id}
                   packetTitle={livePacket.title ?? tab.orchestrationPacket.title ?? null}
                   onOpenInActivity={
                     orchestratorData?.onOpenO8Panel
