@@ -3,6 +3,7 @@ import { eq } from 'drizzle-orm';
 import { getDb, lanes } from '@/lib/db';
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { findLiveCodexProcessByCwd } from '@/lib/runtimes/shared/codex-process-cwd';
 import { lookupOwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
 import type { Lane } from './types';
 import {
@@ -61,18 +62,43 @@ function parseLivePidSessionKey(sessionKey: string): number | null {
   return Number.isFinite(pid) && pid > 0 ? pid : null;
 }
 
+async function probeCodexWorktreeContinuity(
+  sessionKey: string,
+  lane: Lane,
+): Promise<LaneOwnerProbe | null> {
+  if (!sessionKey.startsWith('codex-owned:')) return null;
+  const match = await findLiveCodexProcessByCwd(lane.worktreePath);
+  if (!match) return null;
+  return {
+    alive: true,
+    source: 'codex-process-cwd',
+    pid: match.pid,
+    note: 'live codex process cwd matches lane worktree',
+  };
+}
+
 async function probeOwnedSession(
   sessionKey: string,
+  lane: Lane,
 ): Promise<LaneOwnerProbe> {
   // Shared, TTL-memoized owned-session index (perf 2026-07-03) — one readdir
   // per root per tick, shared with the silent-exit detector, instead of a
   // per-lane scan. Semantics unchanged: null=gone, {}=cleared.
   const run = await lookupOwnedActiveRun(sessionKey);
   if (!run) {
-    return { alive: false, source: 'owned-session-registry', note: 'owned session metadata not found' };
+    return (await probeCodexWorktreeContinuity(sessionKey, lane))
+      ?? { alive: false, source: 'owned-session-registry', note: 'owned session metadata not found' };
+  }
+  if (run.tmuxSession === undefined && run.pid === undefined) {
+    return (await probeCodexWorktreeContinuity(sessionKey, lane))
+      ?? { alive: false, source: 'owned-session-registry', note: 'owned session activeRun cleared' };
   }
   if (run.tmuxSession) {
     const alive = await isBridgeSessionAlive(run.tmuxSession);
+    if (!alive) {
+      const continuity = await probeCodexWorktreeContinuity(sessionKey, lane);
+      if (continuity) return continuity;
+    }
     return {
       alive,
       source: 'owned-session-registry',
@@ -80,8 +106,13 @@ async function probeOwnedSession(
       pid: run.pid,
     };
   }
+  const pidAlive = isPidAlive(run.pid);
+  if (!pidAlive) {
+    const continuity = await probeCodexWorktreeContinuity(sessionKey, lane);
+    if (continuity) return continuity;
+  }
   return {
-    alive: isPidAlive(run.pid),
+    alive: pidAlive,
     source: 'owned-session-registry',
     pid: run.pid,
   };
@@ -149,13 +180,13 @@ async function probeLaneOwner(lane: Lane): Promise<LaneOwnerProbe> {
   }
 
   if (sessionKey.startsWith('codex-owned:')) {
-    return probeOwnedSession(sessionKey);
+    return probeOwnedSession(sessionKey, lane);
   }
   if (sessionKey.startsWith('gemini-owned:')) {
-    return probeOwnedSession(sessionKey);
+    return probeOwnedSession(sessionKey, lane);
   }
   if (sessionKey.startsWith('opencode-owned:')) {
-    return probeOwnedSession(sessionKey);
+    return probeOwnedSession(sessionKey, lane);
   }
 
   const terminalSession = getRuntimeTerminalSession(sessionKey);
