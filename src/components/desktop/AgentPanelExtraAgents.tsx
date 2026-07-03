@@ -239,12 +239,18 @@ function groupRows(
   for (const row of rows) {
     const matched = mapRepoPathToRegistered(row.repoPath, repos);
     const normalizedPath = normalizePath(row.repoPath);
-    const key = normalizedPath ?? '__unbound__';
+    // Registered repos consolidate under ONE group keyed by repo id — a
+    // dispatched packet's worktree path (.cortex-worktrees/packet-*) resolves
+    // to its parent repo, never its own group. Basename + unregistered
+    // treatment is only for paths that resolve to no registered repo.
+    const key = matched ? `id:${matched.id}` : normalizedPath ?? '__unbound__';
     const unregistered = !matched || matched.exists === false;
-    const tooltip = normalizedPath == null
-      ? 'No repo path reported'
-      : matched?.exists === false
-        ? `${normalizedPath} · missing on disk`
+    const tooltip = matched
+      ? matched.exists === false
+        ? `${normalizePath(matched.localPath) ?? matched.localPath} · missing on disk`
+        : normalizePath(matched.localPath) ?? matched.localPath
+      : normalizedPath == null
+        ? 'No repo path reported'
         : normalizedPath;
     const existing = byRepo.get(key);
     if (existing) {
@@ -254,7 +260,7 @@ function groupRows(
 
     byRepo.set(key, {
       key: `repo:${key}`,
-      label: pathBasename(normalizedPath),
+      label: matched ? matched.name : pathBasename(normalizedPath),
       tooltip,
       rows: [row],
       unregistered,
