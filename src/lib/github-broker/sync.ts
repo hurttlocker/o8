@@ -1,6 +1,7 @@
 import 'server-only';
 
 import {
+  getGitHubPullRequestByNumber,
   listGitHubIssues,
   listGitHubPullRequests,
   markGitHubSyncError,
@@ -8,6 +9,7 @@ import {
   readGitHubSyncState,
   replaceGitHubIssues,
   replaceGitHubPullRequests,
+  upsertGitHubPullRequest,
   upsertGitHubInstallation,
   type GitHubIssueSnapshot,
   type GitHubPullRequestSnapshot,
@@ -61,6 +63,53 @@ type GitHubIssuePayloadItem = {
   pull_request?: unknown;
   repository_url?: string;
 };
+
+type GitHubPullRequestPayload = {
+  id: number;
+  number: number;
+  title: string;
+  state: string;
+  body?: string | null;
+  html_url?: string;
+  created_at?: string;
+  updated_at?: string;
+  closed_at?: string | null;
+  merged_at?: string | null;
+  user?: { login?: string | null } | null;
+  head?: { ref?: string | null };
+  base?: { ref?: string | null };
+  additions?: number;
+  deletions?: number;
+  changed_files?: number;
+};
+
+function mapPullRequestSnapshot(
+  repoFullName: string,
+  item: GitHubPullRequestPayload,
+  detail: GitHubPullRequestPayload,
+): GitHubPullRequestSnapshot {
+  return {
+    pullRequestId: item.id,
+    repoFullName,
+    number: item.number,
+    title: item.title,
+    state: item.state,
+    author: item.user?.login ? { login: item.user.login } : null,
+    body: item.body ?? '',
+    headRefName: item.head?.ref ?? '',
+    baseRefName: item.base?.ref ?? '',
+    additions: detail.additions ?? 0,
+    deletions: detail.deletions ?? 0,
+    changedFiles: detail.changed_files ?? 0,
+    reviewDecision: null,
+    statusCheckRollup: [],
+    url: detail.html_url ?? item.html_url ?? '',
+    createdAt: detail.created_at ?? item.created_at ?? '',
+    updatedAt: detail.updated_at ?? item.updated_at ?? item.created_at ?? '',
+    closedAt: detail.closed_at ?? item.closed_at ?? null,
+    mergedAt: detail.merged_at ?? item.merged_at ?? null,
+  };
+}
 
 async function syncIssues(repoFullName: string) {
   const syncState = readGitHubSyncState(repoFullName, 'issues');
@@ -166,21 +215,7 @@ async function syncPullRequests(repoFullName: string) {
     throw buildGitHubError(response, bodyText);
   }
 
-  const listPayload = JSON.parse(bodyText) as Array<{
-    id: number;
-    number: number;
-    title: string;
-    state: string;
-    body?: string | null;
-    html_url: string;
-    created_at: string;
-    updated_at: string;
-    closed_at?: string | null;
-    merged_at?: string | null;
-    user?: { login?: string | null } | null;
-    head?: { ref?: string | null };
-    base?: { ref?: string | null };
-  }>;
+  const listPayload = JSON.parse(bodyText) as GitHubPullRequestPayload[];
 
   const pulls: GitHubPullRequestSnapshot[] = [];
 
@@ -190,43 +225,34 @@ async function syncPullRequests(repoFullName: string) {
     if (!detailResponse.ok) {
       throw buildGitHubError(detailResponse, detailText);
     }
-    const detail = JSON.parse(detailText) as {
-      additions?: number;
-      deletions?: number;
-      changed_files?: number;
-      requested_reviewers?: unknown[];
-      html_url: string;
-      created_at: string;
-      updated_at: string;
-      closed_at?: string | null;
-      merged_at?: string | null;
-    };
-
-    pulls.push({
-      pullRequestId: item.id,
-      repoFullName,
-      number: item.number,
-      title: item.title,
-      state: item.state,
-      author: item.user?.login ? { login: item.user.login } : null,
-      body: item.body ?? '',
-      headRefName: item.head?.ref ?? '',
-      baseRefName: item.base?.ref ?? '',
-      additions: detail.additions ?? 0,
-      deletions: detail.deletions ?? 0,
-      changedFiles: detail.changed_files ?? 0,
-      reviewDecision: null,
-      statusCheckRollup: [],
-      url: detail.html_url,
-      createdAt: detail.created_at,
-      updatedAt: detail.updated_at,
-      closedAt: detail.closed_at ?? null,
-      mergedAt: detail.merged_at ?? null,
-    });
+    const detail = JSON.parse(detailText) as GitHubPullRequestPayload;
+    pulls.push(mapPullRequestSnapshot(repoFullName, item, detail));
   }
 
   replaceGitHubPullRequests(repoFullName, pulls);
   markGitHubSyncSuccess(repoFullName, 'pull_requests', response.headers.get('etag'));
+}
+
+async function syncPullRequest(repoFullName: string, prNumber: number) {
+  const { response, installation } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`);
+
+  upsertGitHubInstallation({
+    installationId: installation.id,
+    accountLogin: installation.account?.login ?? repoFullName.split('/')[0],
+    accountType: installation.account?.type ?? null,
+    targetType: installation.target_type ?? null,
+    permissions: installation.permissions ?? null,
+  });
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    throw buildGitHubError(response, bodyText);
+  }
+
+  const detail = JSON.parse(bodyText) as GitHubPullRequestPayload;
+  const pull = mapPullRequestSnapshot(repoFullName, detail, detail);
+  upsertGitHubPullRequest(pull);
+  return pull;
 }
 
 export async function ensureGitHubIssues(repoFullName: string, options?: { fresh?: boolean }) {
@@ -291,4 +317,26 @@ export async function ensureGitHubPullRequests(repoFullName: string) {
     error: nextState?.lastError ?? null,
     stale: !isFresh(nextState?.lastSuccessfulAt),
   };
+}
+
+export async function ensureGitHubPullRequest(repoFullName: string, prNumber: number) {
+  const current = getGitHubPullRequestByNumber(repoFullName, prNumber);
+  const config = getGitHubAppConfig();
+
+  if (!config) {
+    return {
+      pr: current,
+      error: current ? null : 'GitHub App is not configured.',
+      stale: true,
+    };
+  }
+
+  try {
+    const pr = await syncPullRequest(repoFullName, prNumber);
+    return { pr, error: null, stale: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to sync GitHub pull request';
+    markGitHubSyncError(repoFullName, 'pull_requests', message);
+    return { pr: current, error: message, stale: true };
+  }
 }
