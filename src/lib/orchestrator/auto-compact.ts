@@ -174,6 +174,53 @@ async function summarizeWithCodex(repoPath: string, prompt: string) {
     });
   });
 }
+// ── digest() — Fable Slice 5 (2026-07-02) ────────────────────────────────────
+
+export interface DigestResult {
+  digest: string;
+  approxInputTokens: number;
+  approxDigestTokens: number;
+  truncatedInput: boolean;
+}
+
+/** Argv-safety cap — the prompt rides as a single codex argv element. */
+const DIGEST_INPUT_CHAR_CAP = 180_000;
+
+/**
+ * Pre-digest arbitrary bulk (logs, test output, a diff, docs, a transcript)
+ * into the smallest faithful summary a decision-maker can act on — the
+ * metered-orchestrator window's inbound-bulk lever (lever 4). Runs on the same
+ * Codex-medium engine as compaction, at $0 marginal (fixed sub).
+ *
+ * Adversarial digestion (Q synthesis #3): every call spawns a FRESH read-only
+ * codex exec — the digest never comes from the proposing worker's session, so
+ * no summarizer grades its own work.
+ */
+export async function digest(text: string, repoPath: string): Promise<DigestResult> {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error('digest: text is required');
+  const truncatedInput = trimmed.length > DIGEST_INPUT_CHAR_CAP;
+  const capped = truncatedInput
+    ? `${trimmed.slice(0, DIGEST_INPUT_CHAR_CAP)}\n[... input truncated at ${DIGEST_INPUT_CHAR_CAP} chars ...]`
+    : trimmed;
+  const summary = await summarizeWithCodex(repoPath, [
+    'Digest the following material into the smallest faithful summary a decision-maker can act on. Use exactly these sections with terse bullets:',
+    'What this is',
+    'Key facts / findings',
+    'Errors or failures (keep load-bearing lines verbatim)',
+    'Decisions needed',
+    'Use file paths, symbols, and numbers verbatim. If a section is empty, write "- None." Do not editorialize or add recommendations beyond the material.',
+    '',
+    capped,
+  ].join('\n'));
+  return {
+    digest: summary,
+    approxInputTokens: approxTokens(capped),
+    approxDigestTokens: approxTokens(summary),
+    truncatedInput,
+  };
+}
+
 export async function autoCompactOrchestratorThread(input: {
   repoPath: string;
   liveMessages?: MobileTranscriptEntry[];

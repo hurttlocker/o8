@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import {
   getOperatorDefaults,
+  isOrchestratorBackendSetting,
   updateOperatorDefaults,
   type OperatorDefaults,
   type OverlapGateMode,
@@ -179,8 +180,10 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
 
   if (body.orchestratorBackend !== undefined) {
     const raw = body.orchestratorBackend;
-    if (raw !== 'auto' && raw !== 'codex' && raw !== 'claude' && raw !== 'openclaw' && raw !== 'hermes' && raw !== 'collide') {
-      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide".');
+    // Single-source guard from defaults.ts — a hand-rolled list here silently
+    // rejected the fable backend when Slice 1 widened the union (dogfood 2026-07-02).
+    if (!isOrchestratorBackendSetting(raw)) {
+      throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide", "fable".');
     }
     update.orchestratorBackend = raw;
   }

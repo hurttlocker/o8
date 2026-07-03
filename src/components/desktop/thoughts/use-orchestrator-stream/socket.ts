@@ -1,5 +1,6 @@
 import type { Dispatch, SetStateAction } from 'react';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
+import { isCortexAskTool, parseBrainFeed } from '@/components/desktop/thoughts/brain-feed';
 import { skipDuplicateBySeq } from '@/lib/orchestrator/replay-cursor';
 import {
   formatTimestampLabel,
@@ -30,6 +31,12 @@ interface CreateOrchestratorMessageHandlerOptions {
   flushCurrentAssistant: () => void;
   /** Coalesced (rAF-batched) flush for the streaming-text path — one re-render per frame. */
   scheduleFlushCurrentAssistant: () => void;
+  /**
+   * Last backend id seen on any orchestrator event (`data.backend` rides every
+   * ws-server emission, including the subscribe-ack snapshot). Fable Slice 4:
+   * the auto-compact effect reads this to pick the metered vs global threshold.
+   */
+  lastBackendRef?: RefLike<string | null>;
   lastEventAtRef: RefLike<number>;
   messagesRef: RefLike<MobileTranscriptEntry[]>;
   resetEpochRef: RefLike<number>;
@@ -85,6 +92,12 @@ export function createOrchestratorMessageHandler(
     }
 
     if (msg.channel !== 'orchestrator') return;
+
+    // Track the active backend BEFORE seq-dedup/snapshot gating — a snapshot or
+    // replayed event is still truthful about which backend owns the session.
+    if (options.lastBackendRef && typeof msg.data?.backend === 'string') {
+      options.lastBackendRef.current = msg.data.backend;
+    }
 
     // Replay de-dup: live + replayed events carry a monotonic per-session seq.
     // Skip anything we've already applied so a replay overlap (or a re-
@@ -260,6 +273,52 @@ export function createOrchestratorMessageHandler(
         });
 
         if (options.statusRef.current !== 'busy') options.setStatus('busy');
+        break;
+      }
+
+      case 'tool-result': {
+        // Brain→Fable transparency card (2026-07-02). The ws-server forwards
+        // EVERY tool_result over this channel (`data.output` = the raw result
+        // string), but the transcript only consumes the cortex_ask payload:
+        // parse it onto the originating tool call so the metered-backend card
+        // can show what the Brain fed the orchestrator (question, titled
+        // citations, offload). Other tools' results stay ignored — their
+        // chips flip to done via the next tool-use / live 'ready' as before.
+        const resultName = typeof msg.data?.name === 'string' ? msg.data.name : '';
+        if (!isCortexAskTool(resultName)) break;
+        const output = typeof msg.data?.output === 'string' ? msg.data.output : '';
+        if (!output) break;
+        const toolUseId = typeof msg.data?.toolUseId === 'string' ? msg.data.toolUseId : null;
+        const backend = typeof msg.data?.backend === 'string' ? msg.data.backend : undefined;
+        const current = options.currentAssistantRef.current;
+        if (!current) break;
+        options.setMessages((prev) => {
+          const idx = prev.findIndex((message) => message.id === current.id);
+          if (idx < 0) return prev;
+          const tools = prev[idx].toolCalls ?? [];
+          // Match by toolUseId; fall back to the latest cortex_ask call so a
+          // missing id (older parser events) still lands on the right chip.
+          let toolIdx = toolUseId ? tools.findIndex((tool) => tool.id === toolUseId) : -1;
+          if (toolIdx < 0) {
+            for (let i = tools.length - 1; i >= 0; i -= 1) {
+              if (isCortexAskTool(tools[i].name)) { toolIdx = i; break; }
+            }
+          }
+          if (toolIdx < 0) return prev;
+          const tool = tools[toolIdx];
+          const brainFeed = parseBrainFeed(output, tool.args) ?? undefined;
+          const nextTools = [...tools];
+          nextTools[toolIdx] = {
+            ...tool,
+            status: 'done' as const,
+            result: output,
+            ...(backend ? { backend } : {}),
+            ...(brainFeed ? { brainFeed } : {}),
+          };
+          const next = [...prev];
+          next[idx] = { ...prev[idx], toolCalls: nextTools };
+          return next;
+        });
         break;
       }
 

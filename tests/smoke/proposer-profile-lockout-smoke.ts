@@ -72,6 +72,22 @@ function main(): void {
   assert(cortexEnv(claudeFull).CORTEX_READONLY === undefined, 'Claude FULL cortex has NO read-only flag');
   assert(cortexEnv(codexFull).CORTEX_READONLY === undefined, 'Codex FULL cortex has NO read-only flag');
 
+  // ── FABLE profile (Slice 1) — KEEPS operator (Fable still dispatches) + cortex
+  //    (ask), STRIPS externals; cortex stays at FULL read (CORTEX_READONLY is a
+  //    propose-only tightening). Fable's real lockout is Layer B (native tools
+  //    disallowed at the CLI — see fable-profile.ts), not the MCP surface.
+  const fable = buildToolRegistry(repo, { profile: 'fable' });
+  const fableIds = new Set(fable.entries.map((e) => e.id));
+  assert(fableIds.has('builtin:operator'), 'fable KEEPS operator (still dispatches)');
+  assert(fableIds.has('builtin:cortex'), 'fable KEEPS cortex (ask)');
+  assert(fable.entries.every((e) => e.source !== 'external'), 'fable registry has ZERO external entries');
+
+  const claudeFable = toClaudeServersMap(fable);
+  assert('operator' in claudeFable, 'Claude fable config HAS operator server');
+  assert('cortex' in claudeFable, 'Claude fable config HAS cortex server');
+  assert(!('smoke-ext' in claudeFable), 'Claude fable config has NO external server');
+  assert(cortexEnv(claudeFable).CORTEX_READONLY === undefined, 'fable cortex is FULL read (no CORTEX_READONLY)');
+
   // ── Zero behavior change — profile:'full' is byte-identical to the no-arg call.
   assert.deepStrictEqual(
     buildToolRegistry(repo, { profile: 'full' }),
@@ -81,6 +97,7 @@ function main(): void {
 
   console.log(
     '[proposer-profile-lockout-smoke] PASS — propose strips operator (Claude+Codex), keeps cortex; '
+      + 'fable keeps operator+cortex + strips externals (cortex full read); '
       + 'full byte-identical to no-arg',
   );
 }

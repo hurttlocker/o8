@@ -23,6 +23,7 @@ function makeHarness(initial: {
   const currentAssistantRef = { current: initial.current ?? null };
   const messagesRef = { current: initial.messages ?? [] };
   const lastSeqRef = { current: initial.lastSeq ?? 0 };
+  const lastBackendRef = { current: null as string | null };
   const setStatus = vi.fn();
   const setMessages = vi.fn();
   const scheduleFlushCurrentAssistant = vi.fn();
@@ -39,6 +40,7 @@ function makeHarness(initial: {
     firstTurnPlanStartedRef: { current: false },
     flushCurrentAssistant,
     scheduleFlushCurrentAssistant,
+    lastBackendRef,
     lastEventAtRef: { current: 0 },
     messagesRef,
     resetEpochRef: { current: 0 },
@@ -56,6 +58,7 @@ function makeHarness(initial: {
     statusRef,
     currentAssistantRef,
     lastSeqRef,
+    lastBackendRef,
     setStatus,
     setMessages,
     scheduleFlushCurrentAssistant,
@@ -163,5 +166,119 @@ describe('orchestrator socket — replay seq cursor', () => {
     h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'busy', snapshot: true } });
     expect(h.statusRef.current).toBe('busy');
     expect(h.lastSeqRef.current).toBe(9); // unchanged
+  });
+});
+
+describe('orchestrator socket — cortex_ask tool-result (Brain→Fable transparency card)', () => {
+  const askOutput = JSON.stringify({
+    ok: true,
+    answer: 'The middleware is default-deny.',
+    citations: [
+      { kind: 'directive', rowId: 'd-12', table: 'directives', title: 'API security gate' },
+    ],
+    class: 'A',
+    retrievalMs: 320,
+    classifyMs: 41,
+    sourcesConsidered: 18,
+    consideredChars: 21400,
+    cacheHit: null,
+  });
+
+  /** Apply every setMessages updater in call order — the real state the
+   *  transcript would hold after the fired events. */
+  function reduceMessages(h: ReturnType<typeof makeHarness>, initial: MobileTranscriptEntry[] = []) {
+    return h.setMessages.mock.calls.reduce<MobileTranscriptEntry[]>(
+      (state, [updater]) => (typeof updater === 'function' ? updater(state) : updater),
+      initial,
+    );
+  }
+
+  it('parses the result onto the originating tool call: status done, backend + brainFeed stamped', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({
+      channel: 'orchestrator',
+      event: 'tool-use',
+      data: { name: 'mcp__o8__cortex_ask', args: { question: 'How is the API gated?' }, toolUseId: 'tu-1', backend: 'fable' },
+    });
+    h.fire({
+      channel: 'orchestrator',
+      event: 'tool-result',
+      data: { name: 'mcp__o8__cortex_ask', toolUseId: 'tu-1', output: askOutput, backend: 'fable' },
+    });
+
+    const messages = reduceMessages(h);
+    const tool = messages[messages.length - 1]?.toolCalls?.[0];
+    expect(tool?.status).toBe('done');
+    expect(tool?.result).toBe(askOutput);
+    expect(tool?.backend).toBe('fable');
+    expect(tool?.brainFeed?.question).toBe('How is the API gated?');
+    expect(tool?.brainFeed?.citations).toEqual([
+      { kind: 'directive', rowId: 'd-12', title: 'API security gate', excerpt: undefined, url: null },
+    ]);
+    expect(tool?.brainFeed?.sourcesConsidered).toBe(18);
+    expect(tool?.brainFeed?.consideredChars).toBe(21400);
+  });
+
+  it('falls back to the latest cortex_ask call when the result carries no toolUseId', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash', args: { command: 'ls' } } });
+    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'cortex_ask', args: { question: 'q2' } } });
+    h.fire({ channel: 'orchestrator', event: 'tool-result', data: { name: 'cortex_ask', output: askOutput, backend: 'fable' } });
+
+    const messages = reduceMessages(h);
+    const tools = messages[messages.length - 1]?.toolCalls ?? [];
+    expect(tools[0]?.brainFeed).toBeUndefined(); // the Bash call stays untouched
+    expect(tools[1]?.brainFeed?.question).toBe('q2');
+    expect(tools[1]?.backend).toBe('fable');
+  });
+
+  it('ignores non-cortex_ask tool results entirely (no transcript write)', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'Bash', args: { command: 'ls' }, toolUseId: 'tu-9' } });
+    const callsAfterUse = h.setMessages.mock.calls.length;
+    h.fire({ channel: 'orchestrator', event: 'tool-result', data: { name: 'Bash', toolUseId: 'tu-9', output: 'file-a\nfile-b', backend: 'fable' } });
+    expect(h.setMessages.mock.calls.length).toBe(callsAfterUse);
+  });
+
+  it('an unparseable cortex_ask result still lands result/backend/done — just no brainFeed (card stays a plain chip)', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'tool-use', data: { name: 'cortex_ask', args: { question: 'q' }, toolUseId: 'tu-2' } });
+    h.fire({ channel: 'orchestrator', event: 'tool-result', data: { name: 'cortex_ask', toolUseId: 'tu-2', output: 'not json at all', backend: 'fable' } });
+
+    const messages = reduceMessages(h);
+    const tool = messages[messages.length - 1]?.toolCalls?.[0];
+    expect(tool?.status).toBe('done');
+    expect(tool?.result).toBe('not json at all');
+    expect(tool?.backend).toBe('fable');
+    expect(tool?.brainFeed).toBeUndefined();
+  });
+});
+
+describe('orchestrator socket — backend tracking (Fable Slice 4)', () => {
+  it('stamps lastBackendRef from any event carrying data.backend — snapshots and deduped replays included', () => {
+    const h = makeHarness({ status: 'connecting', lastSeq: 5 });
+
+    // Subscribe-ack snapshot (no seq) — the FIRST thing a fresh client sees.
+    h.fire({ channel: 'orchestrator', event: 'status', data: { status: 'ready', snapshot: true, backend: 'fable' } });
+    expect(h.lastBackendRef.current).toBe('fable');
+
+    // A deduped replay still updates the backend (tracked before seq gating).
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'dup', backend: 'codex' }, seq: 5 });
+    expect(h.lastBackendRef.current).toBe('codex');
+    expect(h.currentAssistantRef.current).toBeNull(); // the dedup itself still held
+  });
+
+  it('leaves lastBackendRef untouched for events without a backend field or off-channel', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'hello' } });
+    expect(h.lastBackendRef.current).toBeNull();
+
+    h.fire({ channel: 'supervisor', event: 'agent-update', data: { surfaceId: 's1', backend: 'fable' } });
+    expect(h.lastBackendRef.current).toBeNull();
   });
 });

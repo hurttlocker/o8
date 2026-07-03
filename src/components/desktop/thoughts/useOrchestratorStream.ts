@@ -6,6 +6,8 @@ import type {
   MobileTranscriptToolLaunchLink,
 } from '@/lib/mobile/types';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
+import { isMeteredOrchestratorBackend } from '@/lib/lane/orchestrator-backends/billing';
+import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import {
   clearQueuedOrchestratorSessionPrelude,
   consumeOrchestratorSessionPrelude,
@@ -28,6 +30,8 @@ import {
   ORCHESTRATOR_AUTO_COMPACT_THRESHOLD,
   ORCHESTRATOR_COMPACTION_STATUS_MIN_MS,
   ORCHESTRATOR_FORCE_COMPACT_THRESHOLD,
+  ORCHESTRATOR_METERED_AUTO_COMPACT_RESET_FLOOR,
+  ORCHESTRATOR_METERED_AUTO_COMPACT_THRESHOLD,
   ORCHESTRATOR_NEXT_TURN_BUFFER_TOKENS,
   ORCHESTRATOR_SYSTEM_PROMPT_ESTIMATE_TOKENS,
   approxTokens,
@@ -203,6 +207,10 @@ export function useOrchestratorStream(
   const activeTurnRef = useRef<ActiveTurnState | null>(null);
   const autoCompactInFlightRef = useRef(false);
   const autoCompactArmedRef = useRef(true);
+  // Fable Slice 4 — last backend id seen on the stream (socket.ts stamps it
+  // from every event). Read by the auto-compact effect to pick the metered
+  // window target vs the global one.
+  const lastBackendRef = useRef<string | null>(null);
   const missionRotationInFlightRef = useRef(false);
   const pendingMissionCompletionRef = useRef<OrchestratorMissionCompletedDetail | null>(null);
   const transitionStripTimerRef = useRef<number | null>(null);
@@ -577,6 +585,7 @@ export function useOrchestratorStream(
       firstTurnPlanStartedRef,
       flushCurrentAssistant,
       scheduleFlushCurrentAssistant,
+      lastBackendRef,
       lastSeqRef,
       lastEventAtRef,
       messagesRef,
@@ -696,8 +705,18 @@ export function useOrchestratorStream(
 
   useEffect(() => {
     if (!repoPath) return;
-    if (runningTotal < ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR) autoCompactArmedRef.current = true;
-    if (status !== 'ready' || runningTotal < ORCHESTRATOR_AUTO_COMPACT_THRESHOLD || autoCompactInFlightRef.current || !autoCompactArmedRef.current) return;
+    // Fable Slice 4 — a metered backend compacts at the ~15K window target;
+    // subscription backends keep the global 300K. Cache-aware: this effect only
+    // fires at status==='ready' (the between-turn boundary), so a compaction —
+    // which rewrites the prompt-cache prefix at one full-price re-read — never
+    // lands mid-stride. Keyed to the billing class, not the backend name.
+    const metered = lastBackendRef.current !== null
+      && isOrchestratorBackendId(lastBackendRef.current)
+      && isMeteredOrchestratorBackend(lastBackendRef.current);
+    const resetFloor = metered ? ORCHESTRATOR_METERED_AUTO_COMPACT_RESET_FLOOR : ORCHESTRATOR_AUTO_COMPACT_RESET_FLOOR;
+    const threshold = metered ? ORCHESTRATOR_METERED_AUTO_COMPACT_THRESHOLD : ORCHESTRATOR_AUTO_COMPACT_THRESHOLD;
+    if (runningTotal < resetFloor) autoCompactArmedRef.current = true;
+    if (status !== 'ready' || runningTotal < threshold || autoCompactInFlightRef.current || !autoCompactArmedRef.current) return;
     if (hasQueuedOrchestratorSessionPrelude(repoPath, threadIdRef.current)) return;
     autoCompactInFlightRef.current = true;
     autoCompactArmedRef.current = false;

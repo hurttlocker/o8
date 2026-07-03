@@ -261,13 +261,23 @@ export function buildToolRegistry(
   //      ONLY its allowlisted read tools (the dispatch/mutator verbs never reach
   //      the proposer's MCP config). Fail-closed: a cortex tool added later is
   //      hidden until it opts into the allowlist.
+  // `'fable'` (the Fable orchestrator) shares the external-strip with `'propose'`
+  // but diverges on operator + cortex:
+  //   · propose → drop operator (dispatch lockout) + relaunch cortex read-only.
+  //   · fable   → KEEP operator (Fable still dispatches) + cortex at full read.
+  //     Fable's token lever is Layer B (native read/write tools locked out at the
+  //     CLI — see `fable-profile.ts`), NOT the MCP surface, so operator/cortex ride.
   // `'full'` returns the catalog untouched — byte-identical to the legacy no-arg path.
   const profile = options?.profile ?? 'full';
-  const projected = profile === 'propose'
+  const stripExternal = profile === 'propose' || profile === 'fable';
+  const dropOperator = profile === 'propose';
+  const cortexReadonly = profile === 'propose';
+  const projected = (stripExternal || dropOperator)
     ? entries
-        .filter((entry) => entry.id !== 'builtin:operator' && entry.source !== 'external')
+        .filter((entry) => !(dropOperator && entry.id === 'builtin:operator'))
+        .filter((entry) => !(stripExternal && entry.source === 'external'))
         .map((entry) =>
-          entry.id === 'builtin:cortex' && entry.config.type === 'stdio'
+          cortexReadonly && entry.id === 'builtin:cortex' && entry.config.type === 'stdio'
             ? { ...entry, config: { ...entry.config, env: { ...entry.config.env, CORTEX_READONLY: '1' } } }
             : entry,
         )

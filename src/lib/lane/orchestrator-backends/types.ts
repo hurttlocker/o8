@@ -23,8 +23,11 @@ import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
  * backend; `acp` is the generic escape hatch for any other ACP agent. `collide`
  * is the Mixture-of-Agents fusion brain (moa.ts) — a backend whose proposers +
  * aggregator are themselves backends; it is a BRAIN only, never a worker runtime.
+ * `fable` is a Claude-only variant (fable.ts) that forces the `claude-fable-5`
+ * model, strips Claude's native read/write tools (the token lever) via the
+ * `'fable'` ToolProfile, and injects the operator's BYO `ANTHROPIC_API_KEY`.
  */
-export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide';
+export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' | 'acp' | 'collide' | 'fable';
 
 /**
  * The single runtime validation point for the backend-id union. Callers that
@@ -34,7 +37,7 @@ export type OrchestratorBackendId = 'codex' | 'claude' | 'openclaw' | 'hermes' |
  */
 export function isOrchestratorBackendId(value: unknown): value is OrchestratorBackendId {
   return value === 'codex' || value === 'claude' || value === 'openclaw' || value === 'hermes'
-    || value === 'acp' || value === 'collide';
+    || value === 'acp' || value === 'collide' || value === 'fable';
 }
 
 export type OrchestratorSessionStatus = 'ready' | 'busy' | 'dead';

@@ -97,6 +97,7 @@ export async function POST(request: NextRequest) {
       retrievalMs: result.retrievalMs,
       classifyMs: result.classifyMs,
       sourcesConsidered: result.sourcesConsidered,
+      consideredChars: result.consideredChars ?? null,
       cacheHit: result.cacheHit ?? null,
     }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch (err) {
