@@ -44,6 +44,7 @@ import {
   setLaneStatus,
 } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
+import { findLiveCodexProcessByCwd } from '@/lib/runtimes/shared/codex-process-cwd';
 import { lookupOwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
 import {
   autoCommitCompletionWorktree,
@@ -99,13 +100,22 @@ function isPidAlive(pid: number | undefined): boolean {
 }
 
 
+async function hasCodexWorktreeContinuity(
+  surfaceId: string,
+  worktreePath: string | null | undefined,
+): Promise<boolean> {
+  if (!surfaceId.startsWith('codex-owned:')) return false;
+  return Boolean(await findLiveCodexProcessByCwd(worktreePath));
+}
+
 async function isOwnedSessionAlive(
   surfaceId: string,
+  worktreePath?: string | null,
 ): Promise<boolean | undefined> {
   // Shared, TTL-memoized index (perf 2026-07-03): one readdir per root per tick
   // instead of one per-lane. Semantics unchanged — null=gone, {}=cleared.
   const run = await lookupOwnedActiveRun(surfaceId);
-  if (!run) return false;
+  if (!run) return await hasCodexWorktreeContinuity(surfaceId, worktreePath) ? true : false;
   // F44 — when session.json exists but `activeRun` is cleared (the runtime
   // store does this when the recorded pid dies, see owned-session/store.ts
   // line 253), readOwnedActiveRun returns `{}`. That's not "I can't tell" —
@@ -114,17 +124,20 @@ async function isOwnedSessionAlive(
   // `reviewing`. Without this, F44 lanes stayed `running` for 45+ min after
   // Codex finished.
   if (run.tmuxSession === undefined && run.pid === undefined) {
-    return false;
+    return await hasCodexWorktreeContinuity(surfaceId, worktreePath) ? true : false;
   }
   // Trust the tmux/bridge session first — it survives `zsh -l -c CMD` exec-ing
   // into the CLI, where the wrapper pid is replaced by the child pid and our
   // stored pid goes stale. If tmux exists AND is dead, we know the session is
   // gone. If tmux exists AND is alive, the session is alive regardless of pid.
   if (run.tmuxSession) {
-    return isBridgeSessionAlive(run.tmuxSession);
+    const bridgeAlive = await isBridgeSessionAlive(run.tmuxSession);
+    if (bridgeAlive) return true;
+    return await hasCodexWorktreeContinuity(surfaceId, worktreePath) ? true : false;
   }
   // No tmux session recorded (e.g. bridge failed to spawn) — fall back to pid.
   if (isPidAlive(run.pid)) return true;
+  if (await hasCodexWorktreeContinuity(surfaceId, worktreePath)) return true;
   // pid was set but is now dead, with no tmux to confirm — bail rather than
   // miscategorize. The store will clear activeRun on its next pass and the
   // case above will then trigger the silent-exit triage.
@@ -158,7 +171,7 @@ async function probeSessionAlive(lane: Lane): Promise<boolean | undefined> {
     || sessionKey.startsWith('opencode-owned:')
   ) {
     try {
-      return await isOwnedSessionAlive(sessionKey);
+      return await isOwnedSessionAlive(sessionKey, lane.worktreePath);
     } catch (error) {
       console.warn(`[silent-exit] Owned session probe failed for ${sessionKey}:`, error);
       return undefined;
