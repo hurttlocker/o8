@@ -25,14 +25,16 @@ function MergeBeaconBase({
   onOpenNeedsReviewLane?: (lane: ParkedLane) => void;
   onOpenAwaitingMerge?: () => void;
 }) {
+  const escalated = parked.filter((lane) => lane.reviewState === 'escalated');
   const needsReview = parked.filter((lane) => lane.reviewState === 'needs-review');
   const awaitingMerge = parked.filter((lane) => lane.reviewState === 'awaiting-merge');
   if (compact || parked.length === 0) return null;
 
+  const escalatedCount = escalated.length;
   const needsReviewCount = needsReview.length;
   const awaitingMergeCount = awaitingMerge.length;
-  const urgent = needsReviewCount > 0;
-  const title = `Needs review: ${needsReviewCount}. Approved awaiting merge: ${awaitingMergeCount}.`;
+  const urgent = escalatedCount > 0 || needsReviewCount > 0;
+  const title = `Escalated: ${escalatedCount}. Needs review: ${needsReviewCount}. Approved awaiting merge: ${awaitingMergeCount}.`;
 
   const focusLane = (lane: ParkedLane) => {
     if (typeof window === 'undefined') return;
@@ -49,7 +51,7 @@ function MergeBeaconBase({
   };
 
   const handleClick = () => {
-    const lane = needsReview[0];
+    const lane = escalated[0] ?? needsReview[0];
     if (lane) {
       focusLane(lane);
       onOpenNeedsReviewLane?.(lane);
@@ -87,6 +89,12 @@ function MergeBeaconBase({
         }}
       >
         <span style={{ width: 7, height: 7, borderRadius: 999, background: urgent ? 'var(--t-brand-orange)' : 'var(--t-text-faint)', flexShrink: 0 }} />
+        {escalatedCount > 0 ? (
+          <>
+            <span>{escalatedCount} escalated</span>
+            <span style={{ color: 'var(--t-text-faint)' }}>·</span>
+          </>
+        ) : null}
         <span>{needsReviewCount} review</span>
         {awaitingMergeCount > 0 ? (
           <>

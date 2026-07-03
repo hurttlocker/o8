@@ -1,6 +1,10 @@
 import type { DomainLaneSummary } from '@/lib/orchestrator/store';
 
 const REVIEWING_STATUS = 'reviewing';
+// Lanes parked in the merge-failure escalation chain (CLAUDE.md layers 2/5) —
+// the strongest operator-attention signal the beacon carries. Dropping them
+// made escalated packets invisible (wave-2 review regression, 2026-07-03).
+const ESCALATED_STATUSES = new Set(['awaiting_orchestrator', 'awaiting_human']);
 
 export interface ReviewApprovalSummary {
   status: string;
@@ -8,7 +12,7 @@ export interface ReviewApprovalSummary {
   metadata?: Record<string, string> | null;
 }
 
-export type ParkedLaneReviewState = 'needs-review' | 'awaiting-merge';
+export type ParkedLaneReviewState = 'needs-review' | 'awaiting-merge' | 'escalated';
 
 export interface ParkedLane {
   laneId: string;
@@ -21,6 +25,7 @@ export interface ParkedLane {
 }
 
 export interface ParkedLaneBuckets {
+  escalated: ParkedLane[];
   needsReview: ParkedLane[];
   awaitingMerge: ParkedLane[];
   all: ParkedLane[];
@@ -65,11 +70,19 @@ export function deriveParkedLaneBuckets(
   approvals: ReviewApprovalSummary[] = [],
   closedPacketIds?: ReadonlySet<string>,
 ): ParkedLaneBuckets {
+  const escalated: ParkedLane[] = [];
   const needsReview: ParkedLane[] = [];
   const awaitingMerge: ParkedLane[] = [];
 
   for (const lane of lanes) {
-    if (lane.status !== REVIEWING_STATUS || closedPacketIds?.has(lane.packetId)) {
+    if (closedPacketIds?.has(lane.packetId)) {
+      continue;
+    }
+    if (ESCALATED_STATUSES.has(lane.status)) {
+      escalated.push(toParkedLane(lane, 'escalated'));
+      continue;
+    }
+    if (lane.status !== REVIEWING_STATUS) {
       continue;
     }
     if (hasApprovedReview(lane, approvals)) {
@@ -80,9 +93,10 @@ export function deriveParkedLaneBuckets(
   }
 
   return {
+    escalated,
     needsReview,
     awaitingMerge,
-    all: [...needsReview, ...awaitingMerge],
+    all: [...escalated, ...needsReview, ...awaitingMerge],
   };
 }
 
