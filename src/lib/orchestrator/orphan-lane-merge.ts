@@ -47,7 +47,9 @@ export async function mergeOrphanLaneByPacket(
       ? `${result.note} (merged via lane fallback — packet ${packetId} was not in mission state)`
       : result.note,
     ...(result.approvalId ? { approvalId: result.approvalId } : {}),
+    ...(result.reason ? { reason: result.reason } : {}),
     ...(result.expectedHeadSha ? { expectedHeadSha: result.expectedHeadSha } : {}),
+    ...(result.reviewedHeadSha ? { reviewedHeadSha: result.reviewedHeadSha } : {}),
     ...(result.currentHeadSha ? { currentHeadSha: result.currentHeadSha } : {}),
   };
 }

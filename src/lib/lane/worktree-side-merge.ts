@@ -9,6 +9,7 @@ import type {
   MergeStrategy,
 } from '@/lib/approvals/types';
 import { checkExpectedHeadSha, formatHeadShaMismatchNote } from '@/lib/lane/head-sha-lock';
+import { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote } from '@/lib/lane/review-head-integrity';
 import { dogfoodPrOnlyActive, DOGFOOD_PR_ONLY_NOTE } from '@/lib/lane/dogfood-guard';
 import {
   appendEvent,
@@ -618,6 +619,19 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
     const worktreeId = (await mgr.list()).find((w) => w.path === worktreePath)?.id
       ?? worktreePath.split('/').filter(Boolean).pop()!;
 
+    const reviewedHead = await checkReviewedHeadIntegrity(lane, worktreePath);
+    if (!reviewedHead.ok) {
+      setLaneStatus(command.laneId, 'reviewing', 'system', 'review_invalidated');
+      appendEvent(command.laneId, 'review_invalidated', actor, {
+        reviewedHeadSha: reviewedHead.reviewedHeadSha,
+        currentHeadSha: reviewedHead.currentHeadSha,
+        branch: lane.branch,
+        baseBranch: lane.baseBranch,
+        packetId: lane.packetId,
+      });
+      return { ok: false, laneId: command.laneId, note: formatReviewedHeadMismatchNote(reviewedHead), reason: 'head_moved_since_review', reviewedHeadSha: reviewedHead.reviewedHeadSha, currentHeadSha: reviewedHead.currentHeadSha };
+    }
+
     const headLock = await checkExpectedHeadSha(worktreePath, command.expectedHeadSha);
     if (!headLock.ok) {
       setLaneStatus(command.laneId, 'reviewing', 'system', 'head_sha_drift');
@@ -705,7 +719,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
       return handlePostRebaseTypecheckFailure(input, typecheck.output);
     }
 
-    await amendViaO8Suffix(worktreePath);
+    if (!reviewedHead.reviewedHeadSha) await amendViaO8Suffix(worktreePath);
     await pushWorkerBranchBestEffort(worktreePath, actualBranch);
 
     const integrationRef = mergeRefForLane(command.laneId);
