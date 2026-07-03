@@ -18,22 +18,34 @@
  *     worktree is left untouched
  */
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import type { ZombieLaneCandidate } from '@/lib/lane/reaper';
 import type { Lane } from '@/lib/lane/types';
+import { resetCodexProcessCwdIndexForTesting, setCodexProcessReaderForTesting } from '@/lib/runtimes/shared/codex-process-cwd';
+import { resetOwnedSessionIndex } from '@/lib/runtimes/shared/owned-session-index';
 
 // The SQLite store resolves its data dir at module load — point it at a temp
 // dir BEFORE importing anything that touches the registry (dynamic below for
 // the same reason; static imports would hoist above this assignment).
 process.env.O8_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-reaper-salvage-'));
 
-const { createLane, getLane, setLaneStatus, getLaneEvents } = await import('@/lib/lane/registry');
-const { reapZombieLane } = await import('@/lib/lane/reaper');
+const { createLane, getLane, setLaneStatus, updateLane, getLaneEvents } = await import('@/lib/lane/registry');
+const { LANE_HEARTBEAT_STALE_MS, listZombieLaneCandidates, reapZombieLane } = await import('@/lib/lane/reaper');
+
+let ownedRoot: string | null = null;
+
+afterEach(() => {
+  if (ownedRoot) rmSync(ownedRoot, { recursive: true, force: true });
+  ownedRoot = null;
+  delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+  resetCodexProcessCwdIndexForTesting();
+  resetOwnedSessionIndex();
+});
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, stdio: ['ignore', 'pipe', 'pipe'] }).toString();
@@ -73,6 +85,48 @@ function deadCandidate(
 }
 
 describe('reapZombieLane salvage (#1282 Failure B)', () => {
+  it('does not classify an owned Codex lane dead when a live codex process cwd matches the worktree', async () => {
+    const wt = makeWorktree({ dirty: false });
+    ownedRoot = mkdtempSync(join(tmpdir(), 'o8-reaper-owned-codex-'));
+    process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedRoot;
+    resetOwnedSessionIndex();
+
+    const surfaceId = 'codex-owned:reaper-live-cwd';
+    const sessionDir = join(ownedRoot, 'reaper-live-cwd');
+    mkdirSync(sessionDir, { recursive: true });
+    writeFileSync(join(sessionDir, 'session.json'), JSON.stringify({
+      surfaceId,
+      activeRun: { pid: 2_147_483_647 },
+    }));
+    setCodexProcessReaderForTesting(async () => [{
+      pid: 23456,
+      command: '/opt/homebrew/bin/codex exec --resume reaper',
+      cwd: wt,
+    }]);
+
+    const lane = createLane({
+      repoPath: wt,
+      branch: 'pkt/reaper-live-cwd',
+      runtime: 'codex',
+      worktreePath: wt,
+      baseBranch: 'main',
+      sessionKey: surfaceId,
+      packetId: 'pkt-reaper-live-cwd',
+    });
+    setLaneStatus(lane.id, 'running', 'system');
+    const now = Date.now();
+    updateLane(lane.id, {
+      lastHeartbeatAt: now - LANE_HEARTBEAT_STALE_MS - 5_000,
+      lastEventAt: new Date(now - LANE_HEARTBEAT_STALE_MS - 5_000).toISOString(),
+      lastEventLabel: 'session_launched',
+    });
+
+    const candidates = await listZombieLaneCandidates(now);
+
+    expect(candidates.some((candidate) => candidate.lane.id === lane.id)).toBe(false);
+    expect(getLane(lane.id)?.status).toBe('running');
+  });
+
   it('commits a running lane\'s uncommitted work and routes it to reviewing', async () => {
     const wt = makeWorktree({ dirty: true });
     const lane = createLane({
