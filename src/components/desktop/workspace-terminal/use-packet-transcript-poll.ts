@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from 'react';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
+import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 
@@ -141,17 +142,17 @@ export function usePacketTranscriptPoll({
 
   const packetId = livePacket?.id ?? packetIdHint;
   const status = livePacket?.status ?? null;
+  const visiblePacketEvents = enabled && packetId ? packetEvents : [];
 
   useEffect(() => {
     if (!enabled || !packetId) {
-      setPacketEvents([]);
       return undefined;
     }
     const controller = new AbortController();
     let cancelled = false;
     const run = async () => {
       try {
-        const response = await fetch(
+        const response = await fetchWithLongLivedBudget(
           `/api/orchestrator/packet-transcript?packetId=${encodeURIComponent(packetId)}&tail=1&limit=${TRANSCRIPT_TAIL_LIMIT}`,
           { signal: controller.signal, cache: 'no-store' },
         );
@@ -175,5 +176,5 @@ export function usePacketTranscriptPoll({
     };
   }, [enabled, packetId, status, active]);
 
-  return packetEvents;
+  return visiblePacketEvents;
 }

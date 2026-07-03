@@ -66,8 +66,11 @@ export async function handleClaudeCodeSend(req: Request) {
   const stream = new ReadableStream({
     start(controller) {
       abortController = new AbortController();
-      if (req.signal.aborted) abortController.abort();
-      else req.signal.addEventListener('abort', () => abortController?.abort(), { once: true });
+      const markClientGone = () => {
+        streamClosed = true;
+      };
+      if (req.signal.aborted) markClientGone();
+      else req.signal.addEventListener('abort', markClientGone, { once: true });
       let closeText = '';
       let closeSessionId = session.sessionId ?? null;
       const enqueueEvent = (event: unknown) => {
@@ -77,6 +80,7 @@ export async function handleClaudeCodeSend(req: Request) {
       const closeStream = () => {
         if (streamClosed) return;
         streamClosed = true;
+        req.signal.removeEventListener('abort', markClientGone);
         controller.close();
       };
       void sendMessage(session, message, (event) => {
@@ -102,7 +106,6 @@ export async function handleClaudeCodeSend(req: Request) {
     },
     cancel() {
       streamClosed = true;
-      abortController?.abort();
     },
   });
 
