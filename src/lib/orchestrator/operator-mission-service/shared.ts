@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { randomInt, randomUUID } from 'node:crypto';
 import { existsSync, statSync } from 'node:fs';
 import { basename } from 'node:path';
 import { listLanes } from '@/lib/lane/registry';
@@ -45,22 +45,27 @@ export function isInlineIssue(issue: LoadedIssue) {
   return !issue.url && issue.number >= 90001;
 }
 
-let inlineIssueSequence = 0;
+const INLINE_ISSUE_BASE = 90_000_000_000;
+const INLINE_ISSUE_RANDOM_SPACE = 2 ** 47;
+const issuedInlineIssueNumbers = new Set<number>();
 
 /**
  * Pipeline root fix (2026-07-03): UNIQUE synthetic numbers for inline issues.
- * Every creator used to hand out `90001 + index`, so every inline mission
- * collided with every prior inline mission on issue number — and the branch
- * preparation collision handler (`archiveLanesForBranch`) then archived the
- * OLDER mission's in-flight lanes, worktrees and branches. Observed live: a
- * leaked test-fixture mission with number 90002 archived a real running
- * worker. Time-based numbers keep `isInlineIssue` true (>= 90001) while
- * making cross-mission number collisions impossible; same-task re-dispatch
- * dedupe still works because it keys on the title-derived branch slug.
+ * Early creators reused fixed low numbers, then a time-based variant still
+ * allowed same-ms collisions across processes. Crypto-backed values keep
+ * `isInlineIssue` true while making cross-process collisions practically
+ * impossible; the issued set also prevents same-process repeats.
  */
 export function nextInlineIssueNumbers(count: number): number[] {
-  const base = 90_000_000_000 + Date.now() * 10 + (inlineIssueSequence++ % 10);
-  return Array.from({ length: Math.max(1, count) }, (_unused, index) => base + index * 10);
+  const normalizedCount = Number.isFinite(count) ? Math.max(1, Math.trunc(count)) : 1;
+  return Array.from({ length: normalizedCount }, () => {
+    let candidate = INLINE_ISSUE_BASE + randomInt(INLINE_ISSUE_RANDOM_SPACE);
+    while (issuedInlineIssueNumbers.has(candidate)) {
+      candidate = INLINE_ISSUE_BASE + randomInt(INLINE_ISSUE_RANDOM_SPACE);
+    }
+    issuedInlineIssueNumbers.add(candidate);
+    return candidate;
+  });
 }
 
 export function ensureRepoPath(repoPath: string) {
