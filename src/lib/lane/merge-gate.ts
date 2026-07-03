@@ -20,6 +20,7 @@
 import { execFileSync } from 'node:child_process';
 import { isSafeGitRef } from '@/lib/git/refs';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
+import { getAllCached } from '@/lib/skeleton';
 import { checkUntrackedImports } from './check-untracked-imports';
 import { hasScopePartitionToken } from './review-risk';
 import type { Lane } from './types';
@@ -383,8 +384,6 @@ function checkDiffBudgets(
   const numstat = getDiffNumstat(cwd, baseBranch);
   if (numstat.length === 0) return [];
 
-  // Lazy-load skeleton to avoid circular deps at module level.
-  const { getAllCached } = require('@/lib/skeleton') as { getAllCached: (path: string) => Array<{ relativePath: string; lineCount: number }> };
   const skeleton = getAllCached(repoPath);
   const violations: MergeViolation[] = [];
 

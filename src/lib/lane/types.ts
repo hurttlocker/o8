@@ -193,6 +193,7 @@ export type LaneEventVerb =
   | 'agent_report'
   | 'zombie_reap'
   | 'merge_head_drift'
+  | 'review_invalidated'
   | 'runtime_drift'
   | 'pr_merged_reconciled'
   // Post-rebase typecheck escalation (#1108):
@@ -247,8 +248,12 @@ export interface LaneCommandResult {
   pushError?: string;
   /** Merge-specific — expected worktree HEAD when optimistic locking rejects drift */
   expectedHeadSha?: string;
+  /** Merge-specific — reviewed worktree HEAD when review integrity rejects drift */
+  reviewedHeadSha?: string;
   /** Merge-specific — actual worktree HEAD when optimistic locking rejects drift */
   currentHeadSha?: string;
+  /** Merge-specific structured refusal reason */
+  reason?: string;
 }
 
 // ── Persisted State ──
