@@ -43,6 +43,7 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
     case 'reviewing':
     case 'waiting':
     case 'awaiting_input':
+    case 'awaiting_human':
     case 'awaiting_orchestrator':
     case 'awaiting_review':
     case 'review':
@@ -79,12 +80,15 @@ export function AgentStatusDot({
   state,
   startedAt,
   color,
+  label,
 }: {
   state: AgentDotState;
   startedAt?: string | number | null;
   color?: string;
+  label?: string;
 }) {
   const running = state === 'running';
+  const dotLabel = label ?? defaultDotLabel(state);
   // Elapsed → orbit switch. Prefer an explicit `startedAt` (surfaces that know
   // their real run-start, e.g. a streaming turn); otherwise fall back to when
   // this dot was first observed running. All time math lives in the effect
@@ -111,13 +115,13 @@ export function AgentStatusDot({
     return () => window.clearInterval(id);
   }, [running, startedAt]);
 
-  if (state === 'merged') return <MergedGlyph />;
+  if (state === 'merged') return <MergedGlyph label={dotLabel} />;
 
   if (state === 'failed') {
     return (
       <span
-        aria-label="Blocked"
-        title="Blocked"
+        aria-label={dotLabel}
+        title={dotLabel}
         style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color ?? ACCENT.failed, flexShrink: 0 }}
       />
     );
@@ -128,8 +132,8 @@ export function AgentStatusDot({
       <span
         className="o8-pulse-circle"
         style={{ background: color ?? ACCENT.review }}
-        aria-label="Awaiting review"
-        title="Awaiting review"
+        aria-label={dotLabel}
+        title={dotLabel}
       />
     );
   }
@@ -139,30 +143,45 @@ export function AgentStatusDot({
       <span
         className="o8-orbit"
         style={{ color: color ?? ACCENT.running }}
-        aria-label="Working — long-running"
-        title="Working — long-running"
+        aria-label={`${dotLabel} — long-running`}
+        title={`${dotLabel} — long-running`}
       />
     ) : (
       <span
         className="o8-pulse-circle"
         style={{ background: color ?? ACCENT.running }}
-        aria-label="Working"
-        title="Working"
+        aria-label={dotLabel}
+        title={dotLabel}
       />
     );
   }
 
   // idle / default → A3 static ring
-  return <span className="o8-static-ring" aria-hidden style={{ width: 5, height: 5 }} />;
+  return <span className="o8-static-ring" aria-label={dotLabel} title={dotLabel} style={{ width: 5, height: 5 }} />;
 }
 
 /** Purple branch-merge mark — static, breaks the gray rhythm without claiming
  *  attention. Kept identical to the legacy HistoryRows glyph. */
-function MergedGlyph() {
+function defaultDotLabel(state: AgentDotState): string {
+  switch (state) {
+    case 'running':
+      return 'running';
+    case 'review':
+      return 'review ready';
+    case 'merged':
+      return 'merged';
+    case 'failed':
+      return 'failed';
+    default:
+      return 'idle';
+  }
+}
+
+function MergedGlyph({ label }: { label: string }) {
   return (
     <span
-      aria-label="Merged"
-      title="Merged"
+      aria-label={label}
+      title={label}
       style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 9, height: 9, flexShrink: 0, color: '#8b5cf6' }}
     >
       <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
