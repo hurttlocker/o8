@@ -116,7 +116,7 @@ commands:
   status               snapshot: running packets, lanes, merges, approvals
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
-  ask "<question>"     ask the Engineering Brain about this repo (answer + cited sources)
+  ask [--terse] "<question>"  ask the Engineering Brain about this repo (answer + cited sources)
   browser open [url]   open a page — localhost rides o8's embedded browser, external URLs auto-route to headless Chrome (engine)
   browser read         page text + interactive elements (selectors)
   browser click <sel>  click an element (ghost cursor paints in the o8 UI)

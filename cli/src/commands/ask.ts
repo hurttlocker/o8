@@ -24,6 +24,7 @@ import { resolveLaneFromCwd } from './packet/worktree-resolve.js';
 interface AskArgs {
   question: string | null;
   repo: string | null;
+  terse: boolean;
 }
 
 interface AskCitation {
@@ -45,6 +46,7 @@ interface AskAnswerResponse {
 
 function parseAskArgs(rest: string[]): AskArgs {
   let repo: string | null = null;
+  let terse = false;
   const questionParts: string[] = [];
 
   for (let i = 0; i < rest.length; i++) {
@@ -53,6 +55,8 @@ function parseAskArgs(rest: string[]): AskArgs {
       repo = rest[++i] ?? null;
     } else if (tok.startsWith('--repo=')) {
       repo = tok.slice('--repo='.length);
+    } else if (tok === '--terse') {
+      terse = true;
     } else if (!tok.startsWith('--')) {
       questionParts.push(tok);
     }
@@ -61,6 +65,7 @@ function parseAskArgs(rest: string[]): AskArgs {
   return {
     question: questionParts.join(' ').trim() || null,
     repo: repo?.trim() || null,
+    terse,
   };
 }
 
@@ -92,6 +97,7 @@ export async function runAsk(mode: OutputMode, rest: string[]): Promise<number> 
     method: 'POST',
     body: {
       question: args.question,
+      ...(args.terse ? { terse: true } : {}),
       ...(repoPath ? { repoPath } : {}),
       ...(packetId ? { packetId } : {}),
     },
@@ -116,6 +122,7 @@ export async function runAsk(mode: OutputMode, rest: string[]): Promise<number> 
     class: data.class ?? null,
     cacheHit: data.cacheHit ?? null,
     sourcesConsidered: data.sourcesConsidered ?? null,
+    terse: args.terse,
     packetId,
   };
 

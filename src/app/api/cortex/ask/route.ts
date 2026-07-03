@@ -35,6 +35,7 @@ interface AskBody {
   repoPath?: unknown;
   projectId?: unknown;
   mode?: unknown;
+  terse?: unknown;
   bypassCache?: unknown;
 }
 
@@ -58,6 +59,7 @@ export async function POST(request: NextRequest) {
     typeof body?.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : undefined;
 
   const force = request.nextUrl.searchParams.get('force') === '1' || body?.bypassCache === true;
+  const terse = body?.terse === true;
 
   const encoder = new TextEncoder();
 
@@ -77,7 +79,7 @@ export async function POST(request: NextRequest) {
 
       try {
         emit('open', { ok: true });
-        await runAskPipeline(question, repoPath, emit, force, projectId);
+        await runAskPipeline(question, repoPath, emit, force, projectId, { terse });
       } catch (err) {
         const message = err instanceof Error ? err.message : 'pipeline error';
         console.error('[qa][ask-route] pipeline error:', message);
