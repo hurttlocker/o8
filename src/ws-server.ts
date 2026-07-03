@@ -103,6 +103,7 @@ import {
   resetSelfReviewStallGuard,
   type SelfReviewStallDecision,
 } from './lib/supervisor/self-review-stall-guard';
+import { invalidateReviewingLaneForWorkerActivity } from './lib/supervisor/review-invalidation';
 import {
   enqueueSupervisorInboxItem,
   startHealBot,
@@ -481,6 +482,15 @@ async function enqueueVerificationFailureInboxItem(input: {
 }
 
 async function handleCodexSelfReviewProgress(surfaceId: string, lastMessage: string): Promise<void> {
+  if (await invalidateReviewingLaneForWorkerActivity({
+    surfaceId,
+    source: 'transcript_progress',
+    lastMessage,
+  })) {
+    resetSelfReviewStallGuard(surfaceId);
+    return;
+  }
+
   const watched = getWatchedAgents().find((agent) => agent.surfaceId === surfaceId);
   const { findLaneBySession, updateLane } = await import('@/lib/lane/registry');
   const lane = findLaneBySession(surfaceId);
