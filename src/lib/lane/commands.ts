@@ -26,6 +26,7 @@ import {
   archiveLane,
 } from '@/lib/lane/registry';
 import { parsePullRequestNumber } from '@/lib/lane/pr-number';
+import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
 // A lane whose worker can never spawn (e.g. its worktree/cwd was cleaned up)
 // otherwise loops launching→idle forever — the scheduler re-dispatches on every
 // launch_error/launch_failed with no ceiling. Cap the attempts so it fails
@@ -476,6 +477,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         });
 
         if (result.ok) {
+          rebindLaneSessionIfChanged(command.laneId, lane.sessionKey, result.sessionKey, actor);
           setLaneStatus(command.laneId, 'running', actor, 'turn_sent');
         }
 
@@ -571,6 +573,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
             message: command.message,
           });
           if (result.ok) {
+            rebindLaneSessionIfChanged(command.laneId, lane.sessionKey, result.sessionKey, actor);
             setLaneStatus(command.laneId, 'running', actor, 'resumed');
           }
           return { ok: result.ok, laneId: command.laneId, note: result.note, lane: getLane(command.laneId) ?? undefined };
