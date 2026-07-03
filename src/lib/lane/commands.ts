@@ -25,7 +25,7 @@ import {
   attachSession,
   archiveLane,
 } from '@/lib/lane/registry';
-
+import { parsePullRequestNumber } from '@/lib/lane/pr-number';
 // A lane whose worker can never spawn (e.g. its worktree/cwd was cleaned up)
 // otherwise loops launching→idle forever — the scheduler re-dispatches on every
 // launch_error/launch_failed with no ceiling. Cap the attempts so it fails
@@ -75,7 +75,6 @@ async function worktreeExistsOnDisk(worktreePath: string): Promise<boolean> {
     return false;
   }
 }
-
 async function getDiffForLane(lane: Pick<Lane, 'baseBranch' | 'worktreePath' | 'repoPath'>) {
   const cwd = lane.worktreePath || lane.repoPath;
   const { execFile } = await import('node:child_process');
@@ -772,6 +771,8 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         ], { cwd: lane.repoPath });
 
         const prUrl = prResult.stdout.trim();
+        const prNumber = parsePullRequestNumber(prUrl);
+        if (prNumber !== null) updateLane(command.laneId, { prNumber }, actor);
         setLaneStatus(command.laneId, 'reviewing', actor, 'pr_created');
         const updated = getLane(command.laneId);
         return { ok: true, laneId: command.laneId, note: `PR created: ${prUrl}`, lane: updated ?? undefined };
