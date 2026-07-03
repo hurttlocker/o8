@@ -1,6 +1,6 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { getDataDir } from '@/lib/data-dir-migration';
 import { listLanes } from '@/lib/lane/registry';
 import type { DomainLaneSummary } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
@@ -11,7 +11,7 @@ import {
   updateOrchestratorMissionState,
 } from '@/lib/orchestrator/store';
 
-const ORCHESTRATOR_DIR = join(homedir(), '.o8');
+const ORCHESTRATOR_DIR = getDataDir();
 const ORCHESTRATOR_PATH = join(ORCHESTRATOR_DIR, 'orchestrator-state.json');
 const ORCHESTRATOR_TMP_PATH = `${ORCHESTRATOR_PATH}.tmp`;
 

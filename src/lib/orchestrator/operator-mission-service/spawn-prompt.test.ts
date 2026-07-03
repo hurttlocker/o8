@@ -65,8 +65,8 @@ describe('buildInlineIssuesFromPrompt', () => {
     expect(again.some((n) => numbers.includes(n))).toBe(false);
     issues.forEach((issue) => expect(isInlineIssue(issue)).toBe(true));
 
-    // Every agent shares the body but carries a distinct (i/N) title — the
-    // mission layer derives inline/{slug(title)} branches, which must differ.
+    // Every agent shares the body but carries a distinct (i/N) title. The
+    // mission branch target also carries the unique inline issue number.
     const slugs = new Set(issues.map((i) => slugify(i.title)));
     expect(slugs.size).toBe(3);
     issues.forEach((issue) => expect(issue.body).toBe('the auth refactor'));
