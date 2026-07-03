@@ -18,7 +18,6 @@ import { closeSync, openSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-
 import { CliNotFoundError, resolveCli } from '@/lib/runtimes/shared/cli-resolver';
 import { getRuntimeRepoReview } from '@/lib/git/runtime-review';
 import { chainOnKey } from '@/lib/util/keyed-promise-chain';
@@ -41,7 +40,6 @@ import type {
   RuntimeSurfaceSummary,
   SquadSummary,
 } from '@/lib/fleet/types';
-
 import {
   ACTIVE_WINDOW_MS,
   AUTO_RETRY_FRESHNESS_MS,
@@ -86,6 +84,7 @@ import type {
 import { stageMissingCliRun } from './missing-cli';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
+import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
 
 export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSessionStore {
   const runtimeId = adapter.runtimeId;
@@ -104,7 +103,6 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   let fleetCache: { value: OwnedFleetAdditions; cachedAt: number } | null = null;
   let fleetInflight: Promise<OwnedFleetAdditions> | null = null;
   let fleetGeneration = 0;
-
   function invalidateFleetCache() {
     fleetGeneration += 1;
     fleetCache = null;
@@ -582,6 +580,8 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       // + orchestrator MCP never carry it. (SECURITY_AUDIT_2026-07-02 §CRIT-1.)
       O8_WORKER_TOKEN: getOrCreateLocalWorkerToken(),
     };
+
+    await ensureDispatchBackendReady(runtimeId, mode);
 
     // #4 — crash-survivable workers (default ON since the 0.1.512 kill-test). When
     // enabled we skip the ws-server PTY bridge and spawn the worker detached
