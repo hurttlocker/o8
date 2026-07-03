@@ -68,6 +68,8 @@ type TtsControlState = 'idle' | 'playing' | 'paused';
 
 /** Ask answer panel (voice P4 C3). */
 type AskMode = 'idle' | 'listening' | 'answer';
+type WorkerSnapshot = { count: number; working: number; waiting: number; repos: string[] };
+type ParkedLaneSnapshot = { waiting: number; repos: string[]; tooltip: string | null };
 const ASK_IDLE_COLLAPSE_MS = 45_000; // auto-collapse the panel after idle
 const ASK_RESUME_WINDOW_MS = 60_000; // preserve the thread if reopened within
 const ASK_MAX_TURNS = 16; // 8 exchanges before trimming the oldest
@@ -580,14 +582,14 @@ export default function DictationPillPage() {
 
   // Fleet visibility (dossier #8): worker-pulse pushes `o8:worker-status`;
   // the idle sliver carries the orbit + count, tap expands the detail capsule.
-  const [workers, setWorkers] = useState<{ count: number; working: number; waiting: number; repos: string[] }>(
-    { count: 0, working: 0, waiting: 0, repos: [] },
-  );
+  const [workers, setWorkers] = useState<WorkerSnapshot>({ count: 0, working: 0, waiting: 0, repos: [] });
+  const [parkedWorkers, setParkedWorkers] = useState<ParkedLaneSnapshot | null>(null);
   const [showWorkers, setShowWorkers] = useState(false);
   const showWorkersTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   useEffect(() => {
     if (!isTauri()) return;
-    let unlisten: (() => void) | undefined;
+    let workerUnlisten: (() => void) | undefined;
+    let parkedUnlisten: (() => void) | undefined;
     import('@tauri-apps/api/event')
       .then(({ listen }) => listen<{ count?: number; working?: number; waiting?: number; repos?: string[] }>('o8:worker-status', (e) => {
         const count = Math.max(0, e.payload?.count ?? 0);
@@ -596,10 +598,19 @@ export default function DictationPillPage() {
         setWorkers({ count, working, waiting, repos: e.payload?.repos ?? [] });
         if (count === 0) setShowWorkers(false);
       }))
-      .then((u) => { unlisten = u; })
+      .then((u) => { workerUnlisten = u; })
       .catch((err) => dockLog(`worker-status subscribe failed: ${err instanceof Error ? err.message : String(err)}`));
+    import('@tauri-apps/api/event')
+      .then(({ listen }) => listen<{ count?: number; waiting?: number; repos?: string[]; tooltip?: string }>('o8:parked-lanes-status', (e) => {
+        const waiting = Math.max(0, e.payload?.waiting ?? e.payload?.count ?? 0);
+        setParkedWorkers({ waiting, repos: e.payload?.repos ?? [], tooltip: e.payload?.tooltip ?? null });
+        if (waiting === 0) setShowWorkers(false);
+      }))
+      .then((u) => { parkedUnlisten = u; })
+      .catch((err) => dockLog(`parked-lanes-status subscribe failed: ${err instanceof Error ? err.message : String(err)}`));
     return () => {
-      unlisten?.();
+      workerUnlisten?.();
+      parkedUnlisten?.();
       if (showWorkersTimerRef.current) clearTimeout(showWorkersTimerRef.current);
     };
   }, []);
@@ -798,6 +809,18 @@ export default function DictationPillPage() {
     };
   }, []);
 
+  const displayedWaiting = parkedWorkers?.waiting ?? workers.waiting;
+  const displayedWorkers = {
+    count: parkedWorkers ? workers.working + displayedWaiting : workers.count,
+    working: workers.working,
+    waiting: displayedWaiting,
+    repos: parkedWorkers
+      ? Array.from(new Set([...workers.repos, ...parkedWorkers.repos])).filter(Boolean).slice(0, 4)
+      : workers.repos,
+    waitingLabel: parkedWorkers ? 'ready' : 'waiting',
+    tooltip: parkedWorkers?.tooltip ?? null,
+  };
+
   return (
     <div
       style={{
@@ -823,7 +846,7 @@ export default function DictationPillPage() {
         onClick={() => {
           // Tap the resting sliver while the worker orbit is up → transient
           // capsule naming the in-flight packets (dossier #8).
-          if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen && !agentWorking && workers.count > 0) {
+          if (snapshot.state === 'idle' && ttsState === 'idle' && !askOpen && !agentWorking && displayedWorkers.count > 0) {
             setShowWorkers(true);
             if (showWorkersTimerRef.current) clearTimeout(showWorkersTimerRef.current);
             showWorkersTimerRef.current = setTimeout(() => setShowWorkers(false), 5000);
@@ -863,10 +886,12 @@ export default function DictationPillPage() {
             onAgentConfirm={handleAgentConfirm}
             dropActive={dropActive}
             stagedFiles={stagedChips}
-            workerCount={workers.count}
-            workerWorking={workers.working}
-            workerWaiting={workers.waiting}
-            workerRepos={workers.repos}
+            workerCount={displayedWorkers.count}
+            workerWorking={displayedWorkers.working}
+            workerWaiting={displayedWorkers.waiting}
+            workerWaitingLabel={displayedWorkers.waitingLabel}
+            workerTooltip={displayedWorkers.tooltip}
+            workerRepos={displayedWorkers.repos}
             showWorkers={showWorkers}
             panelPending={panelPending}
             realtimeVoice={realtimeVoice}
