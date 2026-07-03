@@ -55,6 +55,28 @@ export interface GitHubPullRequestSnapshot {
   mergedAt: string | null;
 }
 
+type GitHubPullRequestRow = {
+  pullRequestId: number;
+  repoFullName: string;
+  number: number;
+  title: string;
+  state: string;
+  authorLogin: string | null;
+  body: string | null;
+  headRefName: string | null;
+  baseRefName: string | null;
+  additions: number;
+  deletions: number;
+  changedFiles: number;
+  reviewDecision: string | null;
+  statusChecksJson: string;
+  url: string;
+  createdAt: string | null;
+  updatedAt: string | null;
+  closedAt: string | null;
+  mergedAt: string | null;
+};
+
 function parseJson<T>(value: string | null | undefined, fallback: T): T {
   if (!value) return fallback;
   try {
@@ -62,6 +84,30 @@ function parseJson<T>(value: string | null | undefined, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+function mapPullRequestRow(row: GitHubPullRequestRow): GitHubPullRequestSnapshot {
+  return {
+    pullRequestId: row.pullRequestId,
+    repoFullName: row.repoFullName,
+    number: row.number,
+    title: row.title,
+    state: row.state,
+    author: row.authorLogin ? { login: row.authorLogin } : null,
+    body: row.body ?? '',
+    headRefName: row.headRefName ?? '',
+    baseRefName: row.baseRefName ?? '',
+    additions: row.additions,
+    deletions: row.deletions,
+    changedFiles: row.changedFiles,
+    reviewDecision: row.reviewDecision,
+    statusCheckRollup: parseJson<Array<{ name: string; status?: string | null; conclusion?: string | null }>>(row.statusChecksJson, []),
+    url: row.url,
+    createdAt: row.createdAt ?? '',
+    updatedAt: row.updatedAt ?? row.createdAt ?? '',
+    closedAt: row.closedAt,
+    mergedAt: row.mergedAt,
+  };
 }
 
 export function readGitHubSyncState(repoFullName: string, resource: GitHubSyncResource): GitHubSyncState | null {
@@ -454,47 +500,38 @@ export function listGitHubPullRequests(repoFullName: string): GitHubPullRequestS
     WHERE repo_full_name = ? AND state = 'open'
     ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
     LIMIT 20
-  `).all(repoFullName) as Array<{
-    pullRequestId: number;
-    repoFullName: string;
-    number: number;
-    title: string;
-    state: string;
-    authorLogin: string | null;
-    body: string | null;
-    headRefName: string | null;
-    baseRefName: string | null;
-    additions: number;
-    deletions: number;
-    changedFiles: number;
-    reviewDecision: string | null;
-    statusChecksJson: string;
-    url: string;
-    createdAt: string | null;
-    updatedAt: string | null;
-    closedAt: string | null;
-    mergedAt: string | null;
-  }>;
+  `).all(repoFullName) as GitHubPullRequestRow[];
 
-  return rows.map((row) => ({
-    pullRequestId: row.pullRequestId,
-    repoFullName: row.repoFullName,
-    number: row.number,
-    title: row.title,
-    state: row.state,
-    author: row.authorLogin ? { login: row.authorLogin } : null,
-    body: row.body ?? '',
-    headRefName: row.headRefName ?? '',
-    baseRefName: row.baseRefName ?? '',
-    additions: row.additions,
-    deletions: row.deletions,
-    changedFiles: row.changedFiles,
-    reviewDecision: row.reviewDecision,
-    statusCheckRollup: parseJson<Array<{ name: string; status?: string | null; conclusion?: string | null }>>(row.statusChecksJson, []),
-    url: row.url,
-    createdAt: row.createdAt ?? '',
-    updatedAt: row.updatedAt ?? row.createdAt ?? '',
-    closedAt: row.closedAt,
-    mergedAt: row.mergedAt,
-  }));
+  return rows.map(mapPullRequestRow);
+}
+
+export function getGitHubPullRequestByNumber(repoFullName: string, prNumber: number): GitHubPullRequestSnapshot | null {
+  const sqlite = getSqlite();
+  const row = sqlite.prepare(`
+    SELECT pull_request_id as pullRequestId, repo_full_name as repoFullName, number, title, state,
+           author_login as authorLogin, body, head_ref_name as headRefName, base_ref_name as baseRefName,
+           additions, deletions, changed_files as changedFiles, review_decision as reviewDecision,
+           status_checks_json as statusChecksJson, url, created_at as createdAt, updated_at as updatedAt,
+           closed_at as closedAt, merged_at as mergedAt
+    FROM github_pull_requests
+    WHERE repo_full_name = ? AND number = ?
+    LIMIT 1
+  `).get(repoFullName, prNumber) as GitHubPullRequestRow | undefined;
+  return row ? mapPullRequestRow(row) : null;
+}
+
+export function getGitHubPullRequestByHead(repoFullName: string, headRefName: string): GitHubPullRequestSnapshot | null {
+  const sqlite = getSqlite();
+  const row = sqlite.prepare(`
+    SELECT pull_request_id as pullRequestId, repo_full_name as repoFullName, number, title, state,
+           author_login as authorLogin, body, head_ref_name as headRefName, base_ref_name as baseRefName,
+           additions, deletions, changed_files as changedFiles, review_decision as reviewDecision,
+           status_checks_json as statusChecksJson, url, created_at as createdAt, updated_at as updatedAt,
+           closed_at as closedAt, merged_at as mergedAt
+    FROM github_pull_requests
+    WHERE repo_full_name = ? AND head_ref_name = ?
+    ORDER BY datetime(COALESCE(updated_at, created_at)) DESC
+    LIMIT 1
+  `).get(repoFullName, headRefName) as GitHubPullRequestRow | undefined;
+  return row ? mapPullRequestRow(row) : null;
 }
