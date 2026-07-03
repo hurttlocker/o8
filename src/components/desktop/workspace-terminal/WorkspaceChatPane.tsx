@@ -131,6 +131,20 @@ function WorkspaceChatPaneBase({
     const candidateKeys = [tab.chatSessionKey, chat.normalizedSessionKey, livePacket?.lane?.sessionKey];
     return candidateKeys.some((key) => Boolean(key) && archivedLaneView.sessionKeys.has(key as string));
   }, [tab.kind, tab.chatSessionKey, tab.orchestrationPacket?.packetId, chat.normalizedSessionKey, liveStatus, livePacket, archivedLaneView]);
+  const archiveSummary = useMemo(() => {
+    const packetId = livePacket?.id ?? tab.orchestrationPacket?.packetId ?? null;
+    if (packetId) {
+      const byPacket = archivedLaneView.archiveSummariesByPacketId.get(packetId);
+      if (byPacket) return byPacket;
+    }
+    const candidateKeys = [tab.chatSessionKey, chat.normalizedSessionKey, livePacket?.lane?.sessionKey];
+    for (const key of candidateKeys) {
+      if (!key) continue;
+      const bySession = archivedLaneView.archiveSummariesBySessionKey.get(key);
+      if (bySession) return bySession;
+    }
+    return null;
+  }, [archivedLaneView, chat.normalizedSessionKey, livePacket, tab.chatSessionKey, tab.orchestrationPacket?.packetId]);
 
   // A retired lane is NOT necessarily a merged one. The old banner said "Merged"
   // for every archived lane — including ones the operator stopped or reset, and
@@ -168,11 +182,13 @@ function WorkspaceChatPaneBase({
       tone: 'var(--t-text-muted)',
       iconBg: 'var(--t-panel)',
       heroTitle: 'Archived',
-      heroSub: `This ${chat.runtimeLabel} session’s lane was archived without merging.`,
+      heroSub: archiveSummary?.message ?? `This ${chat.runtimeLabel} session’s lane was archived without merging.`,
       bannerLabel: 'Archived · read-only',
-      bannerSub: 'This session’s lane was archived without merging. The transcript stays for review.',
+      bannerSub: archiveSummary
+        ? `${archiveSummary.message} The transcript stays for review.`
+        : 'This session’s lane was archived without merging. The transcript stays for review.',
     };
-  }, [liveStatus, livePacket?.releaseState, chat.runtimeLabel]);
+  }, [archiveSummary, liveStatus, livePacket?.releaseState, chat.runtimeLabel]);
 
   // Runtime fallback notifications: when a Gemini model quotas out, the
   // adapter picks the next model in GEMINI_FALLBACK_CASCADE before retrying.

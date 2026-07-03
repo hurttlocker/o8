@@ -40,6 +40,7 @@ export interface RuntimeActionResult {
   ok: boolean;
   action: RuntimeActionKind;
   surfaceId: string;
+  sessionKey?: string;
   runtime: string;
   clientMutationId?: string;
   status: 'queued' | 'completed' | 'unavailable';
@@ -547,6 +548,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
             ok: result.ok,
             action: payload.action,
             surfaceId: runtimeSurface.id,
+            sessionKey: result.sessionKey ?? agent.sessionKey,
             runtime: agent.runtime,
             clientMutationId: payload.clientMutationId,
             status: result.ok ? 'queued' : 'unavailable',
@@ -599,6 +601,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           ok: true,
           action: payload.action,
           surfaceId: runtimeSurface.id,
+          sessionKey: runtimeSurface.id,
           runtime: agent.runtime,
           clientMutationId: payload.clientMutationId,
           status: 'queued',
@@ -667,6 +670,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
           ok: result.ok,
           action: payload.action,
           surfaceId: runtimeSurface.id,
+          sessionKey: result.sessionKey ?? agent.sessionKey,
           runtime: agent.runtime,
           clientMutationId: payload.clientMutationId,
           status: 'queued',
