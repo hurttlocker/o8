@@ -3,6 +3,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import type { FileNode } from '@/app/dashboard/types';
+import { QuickDocs } from './QuickDocs';
 
 const UI_FONT = 'var(--font-sans-system)';
 const MONO_FONT = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -235,6 +236,7 @@ export function AllFilesTree({
         {repoName}
       </div>
       <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, minHeight: 0, overflowY: 'auto', overflowX: 'hidden', paddingTop: 3, paddingBottom: 3 }}>
+        <QuickDocs repoPath={repoPath} selectedFile={selectedFile} onSelectFile={onSelectFile} />
         {!repoPath ? (
           <div style={{ paddingTop: 13, paddingRight: 12, paddingBottom: 13, paddingLeft: 12, color: 'var(--t-text-muted)', fontFamily: UI_FONT, fontSize: 12 }}>
             Select a repo to browse files.
