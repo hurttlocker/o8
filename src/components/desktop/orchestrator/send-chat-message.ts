@@ -4,6 +4,7 @@ import type {
   ChatHistoryMessage,
 } from '@/lib/chat/types';
 import type { ChatModelOption } from './chat-models';
+import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 
 export class ChatSendError extends Error {
   status: number;
@@ -150,7 +151,7 @@ export async function sendScratchChatMessage({
   onToolResult,
   onModel,
 }: SendScratchChatInput): Promise<void> {
-  const response = await fetch('/api/panel/o8-scratch-chat', {
+  const response = await fetchWithLongLivedBudget('/api/panel/o8-scratch-chat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
