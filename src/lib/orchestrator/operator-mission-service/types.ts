@@ -129,6 +129,8 @@ export interface MergePacketResult {
   reason?: string;
   /** Expected worktree HEAD when optimistic locking rejects drift. */
   expectedHeadSha?: string;
+  /** Reviewed worktree HEAD when review integrity rejects drift. */
+  reviewedHeadSha?: string;
   /** Actual worktree HEAD when optimistic locking rejects drift. */
   currentHeadSha?: string;
 }
