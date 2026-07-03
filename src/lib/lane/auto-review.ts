@@ -19,6 +19,7 @@ import { extractAddedLines, getLaneDiffFacts, parseDiffStat } from './lane-diff-
 import { buildAdversarialReviewProtocol, classifyReviewRisk } from './review-risk';
 import { resolveLaneReviewScreenshotReference, type LaneReviewScreenshotReference } from './review-screenshot';
 import { buildBlindSecondPassPrompt, findPendingSecondPassApproval, parseSecondPassVerdict } from './blind-second-pass-review';
+import { appendCodexAutoReviewVerdictInstructions, recordCodexAutoReviewVerdict } from './codex-auto-review-verdict';
 import type { Lane } from './types';
 
 const MAX_REVIEW_ATTEMPTS = 5;
@@ -522,6 +523,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   const mechanicalChecks = runMechanicalChecks(lane);
   const mergeGateResult = runMergeGate(lane, completionContext?.selfReview);
   const diffSummary = getDiffSummary(lane, depth);
+  const reviewRisk = classifyReviewRisk(diffSummary.changedFiles, diffSummary.addedLines);
   let reviewScreenshot: LaneReviewScreenshotReference | null = null;
   if (lane.runtime === 'codex') {
     try {
@@ -533,7 +535,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
       console.warn(`[auto-review] Failed to prepare review screenshot for lane ${lane.id}:`, error);
     }
   }
-  const reviewPrompt = buildReviewPrompt(
+  let reviewPrompt = buildReviewPrompt(
     lane,
     diffSummary.summary,
     diffSummary.changedFiles,
@@ -559,6 +561,9 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
   // is byte-identical to the prior dual-path branch — see registry.ts.
   const { getActiveOrchestratorBackend } = await import('./orchestrator-backends/registry');
   const backend = getActiveOrchestratorBackend();
+  if (backend.id === 'codex') {
+    reviewPrompt = appendCodexAutoReviewVerdictInstructions(reviewPrompt);
+  }
 
   console.log(`[auto-review] Routing lane ${lane.id} via ${backend.label} orchestrator`);
 
@@ -572,8 +577,10 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
 
   console.log(`[auto-review] Sending review prompt to ${backend.label} orchestrator for lane ${lane.id}`);
 
+  let codexReviewText = '';
   await backend.sendTurn(lane.repoPath, reviewPrompt, (event) => {
     if (event.type === 'text') {
+      if (backend.id === 'codex') codexReviewText += event.text;
       console.log(`[auto-review] ${backend.label}: ${event.text.slice(0, 100)}`);
     } else if (event.type === 'tool_use') {
       console.log(`[auto-review] ${backend.label} called tool: ${event.name}`);
@@ -582,7 +589,17 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
     }
   });
 
-  const reviewRisk = classifyReviewRisk(diffSummary.changedFiles, diffSummary.addedLines);
+  if (backend.id === 'codex') {
+    const recorded = await recordCodexAutoReviewVerdict({
+      lane,
+      rawText: codexReviewText,
+      requiresSecondPass: reviewRisk.tier === 'high',
+    });
+    if (recorded?.verdict.parseWarning) {
+      console.warn(`[auto-review] Codex verdict for lane ${lane.id} needed parser fallback: ${recorded.verdict.parseWarning}`);
+    }
+  }
+
   if (reviewRisk.tier !== 'high') {
     console.log(`[auto-review] Review complete for lane ${lane.id}`);
     return;
