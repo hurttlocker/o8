@@ -210,6 +210,9 @@ export type LaneEventVerb =
   // Operator picked a best-of-N comparison winner (item 3). Recorded on the
   // winner's lane. Payload: { groupId, winnerPacketId, archivedPacketIds }
   | 'comparison_resolved'
+  // Review card invalidated because the worker resumed activity after review.
+  // Payload: { reason, source, surfaceId, packetId, worktreePath }
+  | 'review_invalidated'
   // Session rules governed this packet at dispatch (#1329). Snapshot of the
   // exact operator session rules injected into the worker prompt, so review is
   // "what changed, under which constraints." Payload: { threadId, ruleCount, rules }
