@@ -33,9 +33,11 @@ import { resetOwnedSessionIndex } from '@/lib/runtimes/shared/owned-session-inde
 // dir BEFORE importing anything that touches the registry (dynamic below for
 // the same reason; static imports would hoist above this assignment).
 process.env.O8_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-reaper-salvage-'));
+process.env.CORTEX_IDE_OWNED_CODEX_ROOT = mkdtempSync(join(tmpdir(), 'o8-owned-codex-'));
 
 const { createLane, getLane, setLaneStatus, updateLane, getLaneEvents } = await import('@/lib/lane/registry');
-const { LANE_HEARTBEAT_STALE_MS, listZombieLaneCandidates, reapZombieLane } = await import('@/lib/lane/reaper');
+const { LANE_HEARTBEAT_STALE_MS, listZombieLaneCandidates, reapZombieLane, recordLaneHeartbeat } = await import('@/lib/lane/reaper');
+const { rebindLaneSessionIfChanged } = await import('@/lib/lane/session-rebind');
 
 let ownedRoot: string | null = null;
 
@@ -69,6 +71,23 @@ function makeWorktree(opts: { dirty: boolean }): string {
 
 function isDirty(cwd: string): boolean {
   return git(cwd, ['status', '--porcelain']).trim().length > 0;
+}
+
+function writeOwnedSession(surfaceId: string, activeRun?: { pid: number }) {
+  // Self-provision the owned root: the liveness suite's afterEach deletes the
+  // env var, so each test that writes a session gets a fresh isolated root.
+  if (!process.env.CORTEX_IDE_OWNED_CODEX_ROOT) {
+    ownedRoot = mkdtempSync(join(tmpdir(), 'o8-owned-codex-'));
+    process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedRoot;
+  }
+  const id = surfaceId.replace(/^codex-owned:/, '');
+  const dir = join(process.env.CORTEX_IDE_OWNED_CODEX_ROOT, id);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'session.json'), JSON.stringify({
+    surfaceId,
+    activeRun,
+  }));
+  resetOwnedSessionIndex();
 }
 
 function deadCandidate(
@@ -151,6 +170,60 @@ describe('reapZombieLane salvage (#1282 Failure B)', () => {
     const salvageEvent = getLaneEvents(lane.id).find((e) => e.verb === 'zombie_reap');
     expect(salvageEvent?.payload.salvaged).toBe(true);
     expect(salvageEvent?.payload.autoCommitted).toBe(true);
+    const preservedBranch = salvageEvent?.payload.preservedBranch;
+    expect(typeof preservedBranch).toBe('string');
+    expect(preservedBranch).toMatch(/^preserved\//);
+    expect(git(wt, ['show', `${preservedBranch as string}:feature.ts`])).toContain('shipped = true');
+  });
+
+  it('does not reap after a steer-style rebind while the old owned key is dead', async () => {
+    const wt = makeWorktree({ dirty: false });
+    const oldSessionKey = 'codex-owned:codex-owned-test-old';
+    const liveSessionKey = 'codex-owned:codex-owned-test-live';
+    writeOwnedSession(oldSessionKey);
+    writeOwnedSession(liveSessionKey, { pid: process.pid });
+
+    const lane = createLane({
+      repoPath: wt,
+      branch: 'pkt/rebound-owned-session',
+      runtime: 'codex',
+      worktreePath: wt,
+      baseBranch: 'main',
+      packetId: 'pkt-rebind-owned-session',
+      sessionKey: oldSessionKey,
+    });
+    setLaneStatus(lane.id, 'running', 'system');
+
+    const rebound = rebindLaneSessionIfChanged(lane.id, oldSessionKey, liveSessionKey, 'orchestrator');
+    expect(rebound?.sessionKey).toBe(liveSessionKey);
+
+    const baseNow = Date.now();
+    recordLaneHeartbeat(lane.id, baseNow - (LANE_HEARTBEAT_STALE_MS * 2));
+    const candidates = await listZombieLaneCandidates(baseNow + LANE_HEARTBEAT_STALE_MS + 5_000);
+
+    expect(candidates.some((candidate) => candidate.lane.id === lane.id)).toBe(false);
+  });
+
+  it('gives actor-driven running transitions a reaper grace window', async () => {
+    const wt = makeWorktree({ dirty: false });
+    const sessionKey = 'codex-owned:codex-owned-test-dead-after-steer';
+    writeOwnedSession(sessionKey);
+    const lane = createLane({
+      repoPath: wt,
+      branch: 'pkt/recent-steer-grace',
+      runtime: 'codex',
+      worktreePath: wt,
+      baseBranch: 'main',
+      packetId: 'pkt-recent-steer-grace',
+      sessionKey,
+    });
+    setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
+
+    const baseNow = Date.now();
+    recordLaneHeartbeat(lane.id, baseNow - (LANE_HEARTBEAT_STALE_MS * 2));
+    const candidates = await listZombieLaneCandidates(baseNow + LANE_HEARTBEAT_STALE_MS - 1_000);
+
+    expect(candidates.some((candidate) => candidate.lane.id === lane.id)).toBe(false);
   });
 
   it('falls through to recovering when the worktree has nothing reviewable', async () => {

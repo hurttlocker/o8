@@ -15,6 +15,7 @@
  */
 
 import { findLaneByPacket, setLaneStatus } from '@/lib/lane/registry';
+import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
 import { performRuntimeAction } from '@/lib/runtime/actions';
 
 export interface SteerPacketInput {
@@ -41,6 +42,7 @@ export async function steerPacket({ packetId, message }: SteerPacketInput): Prom
     throw new Error(result.note || 'Runtime steer failed.');
   }
 
+  rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
   const updated = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
   if (!updated || updated.status !== 'running') {
     throw new Error(NO_STEERABLE_SESSION);
