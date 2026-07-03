@@ -114,6 +114,7 @@ const LIGHT_BASE: Record<string, string> = {
   // Brand orange — bright vermillion in both palettes. Used by the
   // Agents and Browser titlebar buttons so their active state glows.
   '--t-brand-orange': '#FF5A1F',
+  '--t-brand-orange-contrast': '#0f1216',
   // Celebration
   '--t-celebration': '#c8923b',
   '--t-celebration-soft': 'rgba(200, 146, 59, 0.14)',
@@ -290,6 +291,7 @@ const DARK_BASE: Record<string, string> = {
   '--t-tone-fail-bg': 'rgba(194, 139, 139, 0.16)',
   '--t-tone-fail-border': 'rgba(194, 139, 139, 0.3)',
   '--t-brand-orange': '#FF5A1F',
+  '--t-brand-orange-contrast': '#0f1216',
   '--t-celebration': '#f1c36a',
   '--t-celebration-soft': 'rgba(241, 195, 106, 0.14)',
   '--t-celebration-border': 'rgba(241, 195, 106, 0.3)',

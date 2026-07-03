@@ -17,6 +17,7 @@ import { SidebarTogglePill } from './SidebarTogglePill';
 import { HeaderIconPill } from './HeaderIconPill';
 import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
+import { HeaderPlayButton } from './HeaderPlayButton';
 import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
@@ -765,129 +766,6 @@ function significantWords(label: string, count: number): string {
   const tail = slash >= 0 ? label.slice(slash + 3) : label;
   const words = tail.trim().split(/\s+/);
   return words.slice(0, count).join(' ');
-}
-
-/** Header ▶ play button — mirrors the WorkspaceLaunchPicker dropdown
- *  but lives in the global column header instead of the lower per-pane
- *  TabBar. Used only in single-workspace mode; when the operator splits,
- *  each pane's own lower TabBar carries the spawn button instead. */
-function HeaderPlayButton({
-  onSpawnOrchestrator,
-  onSpawnChat,
-  onSpawnTerminal,
-  ariaSuffix,
-}: {
-  onSpawnOrchestrator?: () => void;
-  onSpawnChat?: () => void;
-  onSpawnTerminal?: () => void;
-  /** Disambiguates the aria-label when two play buttons coexist in a
-   *  split (e.g. "New tab (left pane)") — without this Playwright and
-   *  other a11y tooling hit strict-mode duplicate-label violations. */
-  ariaSuffix?: string;
-}) {
-  const [open, setOpen] = useState(false);
-  const [hovered, setHovered] = useState(false);
-  const wrapperRef = useRef<HTMLDivElement | null>(null);
-  const menuId = useId();
-
-  useEffect(() => {
-    if (!open) return;
-    const onDocDown = (event: MouseEvent) => {
-      if (!wrapperRef.current) return;
-      if (!wrapperRef.current.contains(event.target as Node)) setOpen(false);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setOpen(false);
-    };
-    window.addEventListener('mousedown', onDocDown);
-    window.addEventListener('keydown', onKey);
-    return () => {
-      window.removeEventListener('mousedown', onDocDown);
-      window.removeEventListener('keydown', onKey);
-    };
-  }, [open]);
-
-  const pick = useCallback((handler?: () => void) => () => {
-    setOpen(false);
-    handler?.();
-  }, []);
-
-  return (
-    <div ref={wrapperRef} data-no-drag style={{ position: 'relative', flexShrink: 0 }}>
-      <button
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
-        aria-label={ariaSuffix ? `New tab (${ariaSuffix})` : 'New tab'}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        aria-controls={menuId}
-        title="New tab (⌘T)"
-        style={{
-          // Matched to HeaderIconPill: 26 tall, 7px radius, transparent →
-          // var(--t-hover) on hover. Keeps the accent color since play is
-          // the brand-orange spawn action.
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          height: 26,
-          minWidth: 26,
-          paddingLeft: 7,
-          paddingRight: 7,
-          borderRadius: 7,
-          borderWidth: 0,
-          background: open || hovered ? 'var(--t-hover)' : 'transparent',
-          color: 'var(--t-accent)',
-          cursor: 'pointer',
-          // Same vertical nudge as the other workspace-strip pills so play
-          // baselines with the toggle, terminal, split, etc.
-          marginTop: -3,
-          transition: 'background 120ms ease',
-        }}
-      >
-        <svg width={13} height={13} viewBox="0 0 24 24" fill="currentColor" aria-hidden>
-          <path d="M8 5v14l11-7z" />
-        </svg>
-      </button>
-      {/* Always-mounted menu (display toggles) — agents can enumerate
-          the spawn options from the DOM without opening first. */}
-      <div
-        id={menuId}
-        role="menu"
-        aria-label={ariaSuffix ? `New tab options (${ariaSuffix})` : 'New tab options'}
-        style={{
-          display: open ? 'block' : 'none',
-          position: 'absolute',
-          top: '100%',
-          right: 0,
-          marginTop: 4,
-          minWidth: 220,
-          borderRadius: 10,
-          borderWidth: 1,
-          borderStyle: 'solid',
-          borderColor: 'var(--t-divider)',
-          background: 'var(--t-panel)',
-          boxShadow: '0 8px 24px rgba(0, 0, 0, 0.18)',
-          paddingTop: 4,
-          paddingBottom: 4,
-          zIndex: 100,
-          overflow: 'hidden',
-          fontFamily: 'var(--font-sans-system)',
-        }}
-      >
-        {onSpawnOrchestrator ? (
-          <TitleMenuItem label="Orchestrator" onClick={pick(onSpawnOrchestrator)} />
-        ) : null}
-        {onSpawnChat ? (
-          <TitleMenuItem label="Chat" onClick={pick(onSpawnChat)} />
-        ) : null}
-        {onSpawnTerminal ? (
-          <TitleMenuItem label="Terminal" onClick={pick(onSpawnTerminal)} />
-        ) : null}
-      </div>
-    </div>
-  );
 }
 
 /** `…` overflow menu next to the workspace title. Codex puts a small
