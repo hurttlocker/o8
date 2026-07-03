@@ -1,4 +1,4 @@
-import { cleanupIssueBranch } from './branch-cleanup';
+import { cleanupResetPacketTargets, type ResetCleanupTarget } from './reset-cleanup';
 import { currentMissionState, log } from './shared';
 import type { ResetPacketInput } from './types';
 import { interruptLaneSessions, archiveLaneSessions } from '@/lib/lane/reap-sessions';
@@ -54,13 +54,14 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
     if (lane.sessionKey?.trim()) unregisterWatchedAgent(lane.sessionKey.trim());
   }
 
-  const cleanupTargets = new Map<string, { repoPath: string; branch: string; worktreePath: string | null }>();
+  const cleanupTargets: ResetCleanupTarget[] = [];
   let firstWorktreePath: string | null = null;
   for (const lane of bound) {
     if (!firstWorktreePath && lane.worktreePath) {
       firstWorktreePath = lane.worktreePath;
     }
-    cleanupTargets.set(`${lane.repoPath}\0${lane.branch}`, {
+    cleanupTargets.push({
+      id: lane.id,
       repoPath: lane.repoPath,
       branch: lane.branch,
       worktreePath: lane.worktreePath,
@@ -80,19 +81,16 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   let worktreePruned = false;
   let branchDeleted = false;
   if (input.clearWorktree) {
-    for (const target of cleanupTargets.values()) {
-      try {
-        const cleanup = await cleanupIssueBranch(target.repoPath, target.branch);
-        worktreePruned = worktreePruned || cleanup.worktreePruned;
-        branchDeleted = branchDeleted || cleanup.branchDeleted;
-        log(`[lane-reset] Cleared branch ${target.branch} for evicted packet ${input.packetId}`, cleanup);
-      } catch (error) {
-        const targetWorktreePath = target.worktreePath ?? firstWorktreePath;
-        log(
-          `[lane-reset] Could not clear branch ${target.branch}${targetWorktreePath ? ` at ${targetWorktreePath}` : ''} — may already be gone`,
-          error instanceof Error ? error.message : String(error),
-        );
-      }
+    try {
+      const cleanup = await cleanupResetPacketTargets(cleanupTargets, input.packetId);
+      worktreePruned = worktreePruned || cleanup.worktreePruned;
+      branchDeleted = branchDeleted || cleanup.branchDeleted;
+      log(`[lane-reset] Cleared packet-owned cleanup targets for evicted packet ${input.packetId}`, cleanup);
+    } catch (error) {
+      log(
+        `[lane-reset] Could not clear packet-owned cleanup targets${firstWorktreePath ? ` at ${firstWorktreePath}` : ''} — may already be gone`,
+        error instanceof Error ? error.message : String(error),
+      );
     }
 
     // F33 fallback (#1025): mirror the in-mission reset sweep for packets
@@ -152,7 +150,7 @@ export async function resetPacket(input: ResetPacketInput) {
   // packet.lane because store.reconcileOrchestratorMissionState() can
   // null packet.lane while leaving the SQLite row in a non-terminal status.
   let worktreePath: string | null = null;
-  const branchCleanupExpected = input.clearWorktree && Boolean(packet.branchTarget && state.repoPath);
+  const cleanupTargets: ResetCleanupTarget[] = [];
   try {
     const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
     const bound = listLanes().filter((lane) => lane.packetId === packet.id);
@@ -181,23 +179,24 @@ export async function resetPacket(input: ResetPacketInput) {
       if (!terminal && !worktreePath && lane.worktreePath) {
         worktreePath = lane.worktreePath;
       }
+      if (!terminal) {
+        cleanupTargets.push({
+          id: lane.id,
+          repoPath: lane.repoPath,
+          branch: lane.branch,
+          worktreePath: lane.worktreePath,
+        });
+      }
       try {
         // Clear packetId first so reconciler can't re-bind this lane.
         // #1055 — also wipe worktreePath + sessionKey so the next dispatch
-        // doesn't reuse a stale path. findLaneByRepoAndBranch returns any
-        // non-(archived/completed/failed) lane, so if branchCleanupExpected
-        // forces us to skip archive below, the lane survives reset with its
-        // old worktreePath intact — commands.ts:311 then evaluates
-        // `isolate: !lane.worktreePath` to false and Codex spawns in the
-        // main repo instead of a fresh worktree.
+        // doesn't reuse a stale path. The clearWorktree branch cleanup below
+        // uses the captured lane snapshot, so the archived row can be scrubbed
+        // here without losing the target worktree path.
         updateLane(lane.id, { packetId: '', worktreePath: null, sessionKey: null });
         console.log(`[reset-packet] cleared stale lane fields for ${lane.id}`);
         if (terminal) {
           console.log(`[reset-packet] Unbound ${lane.status} lane ${lane.id} from packet ${packet.referenceLabel}`);
-          continue;
-        }
-        if (branchCleanupExpected) {
-          console.log(`[reset-packet] Deferred lane ${lane.id} cleanup to branch cleanup for packet ${packet.referenceLabel}`);
           continue;
         }
         archiveLane(lane.id, 'user');
@@ -220,10 +219,10 @@ export async function resetPacket(input: ResetPacketInput) {
   let branchDeleted = false;
   if (input.clearWorktree && packet.branchTarget && state.repoPath) {
     try {
-      const cleanup = await cleanupIssueBranch(state.repoPath, packet.branchTarget);
+      const cleanup = await cleanupResetPacketTargets(cleanupTargets, packet.id);
       worktreePruned = cleanup.worktreePruned;
       branchDeleted = cleanup.branchDeleted;
-      log(`[lane-reset] Cleared branch ${packet.branchTarget} for packet ${packet.referenceLabel}`, cleanup);
+      log(`[lane-reset] Cleared packet-owned cleanup targets for packet ${packet.referenceLabel}`, cleanup);
     } catch (error) {
       log(
         `[lane-reset] Could not clear branch ${packet.branchTarget}${worktreePath ? ` at ${worktreePath}` : ''} — may already be gone`,
