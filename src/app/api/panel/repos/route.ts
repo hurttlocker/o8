@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
+import { access } from 'node:fs/promises';
 import { performance } from 'node:perf_hooks';
 import {
   addRepo,
@@ -31,6 +32,19 @@ import type {
 } from '@/lib/repos/types';
 
 const RUNTIME_CLEANUP_TIMEOUT_MS = 3_500;
+
+async function pathExists(localPath: string) {
+  try {
+    await access(localPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function appendExistence<T extends { localPath: string }>(repo: T): Promise<T & { exists: boolean }> {
+  return { ...repo, exists: await pathExists(repo.localPath) };
+}
 
 function normalizeScopePath(filePath?: string | null) {
   const trimmed = filePath?.trim();
@@ -123,7 +137,7 @@ export async function GET() {
   const startedAt = performance.now();
   try {
     const repos = await enrichRepoReadinessList(await listRepos());
-    return NextResponse.json({ repos }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    return NextResponse.json({ repos: await Promise.all(repos.map(appendExistence)) }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch (error) {
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Unable to load repository registry.' },

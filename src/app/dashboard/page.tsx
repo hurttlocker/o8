@@ -2026,7 +2026,6 @@ function DashboardInner() {
     setGlobalRepoEntries,
     setGlobalRepoId,
     setSelectedRepoWorktrees,
-    setWorkspaceActiveTabKindByTileId,
     setWorkspaceChatSessionByTileId,
     setWorkspaceChatSessionsByTileId,
     setWorkspaceLaneByTileId,
@@ -3455,6 +3454,36 @@ function DashboardInner() {
     openRightPanelFromUser();
     setO8ActiveTab('inbox');
   }, [openRightPanelFromUser]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    const breakdown = parkedLanes.reduce<Record<string, number>>((acc, lane) => {
+      acc[lane.status] = (acc[lane.status] ?? 0) + 1;
+      return acc;
+    }, {});
+    const repos = Array.from(new Set(parkedLanes
+      .map((lane) => lane.repoPath?.trim().replace(/\/+$/, '').split('/').filter(Boolean).at(-1) ?? null)
+      .filter((name): name is string => Boolean(name))));
+    const parts = [
+      breakdown.reviewing ? `${breakdown.reviewing} review ready` : null,
+      breakdown.awaiting_orchestrator ? `${breakdown.awaiting_orchestrator} escalated` : null,
+      breakdown.awaiting_human ? `${breakdown.awaiting_human} awaiting human` : null,
+    ].filter((part): part is string => Boolean(part));
+    const tooltip = parts.length > 0
+      ? `${parts.join(' · ')}${repos.length > 0 ? ` · ${repos.slice(0, 3).join(', ')}` : ''}`
+      : 'No lanes ready for review';
+    import('@tauri-apps/api/event')
+      .then(({ emit }) => {
+        void emit('o8:parked-lanes-status', {
+          count: parkedLanes.length,
+          waiting: parkedLanes.length,
+          repos,
+          breakdown,
+          tooltip,
+        });
+      })
+      .catch(() => {});
+  }, [parkedLanes]);
 
   useEffect(() => {
     if (!tileLayoutHydrated) return;
