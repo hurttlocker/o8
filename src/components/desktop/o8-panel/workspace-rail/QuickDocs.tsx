@@ -28,6 +28,12 @@ function ChevronIcon({ size = 13 }: { size?: number }) {
   );
 }
 
+function displayPathForEntry(entryPath: string, repoPath?: string | null) {
+  if (entryPath.startsWith('/')) return entryPath;
+  if (!repoPath?.startsWith('/')) return entryPath;
+  return `${repoPath.replace(/\/$/, '')}/${entryPath.replace(/^\//, '')}`;
+}
+
 export function QuickDocs({
   repoPath,
   selectedFile,
@@ -81,11 +87,13 @@ export function QuickDocs({
           </div>
           {group.entries.map((entry) => {
             const selected = selectedFile === entry.path;
+            const displayPath = displayPathForEntry(entry.path, repoPath);
             return (
               <button
                 key={entry.path}
                 type="button"
                 onClick={() => onSelectFile(entry.path)}
+                title={displayPath}
                 style={{
                   minHeight: 44,
                   width: '100%',
@@ -113,6 +121,9 @@ export function QuickDocs({
                   </span>
                   <span style={{ color: 'var(--t-text-faint)', fontFamily: MONO_FONT, fontSize: 10, fontWeight: 500, letterSpacing: 0, lineHeight: 1.15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {entry.value}
+                  </span>
+                  <span style={{ color: 'var(--t-text-secondary)', fontFamily: MONO_FONT, fontSize: 9, fontWeight: 450, letterSpacing: 0, lineHeight: 1.1, opacity: 0.74, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {displayPath}
                   </span>
                 </span>
                 <ChevronIcon />
