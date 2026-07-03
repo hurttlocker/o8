@@ -86,7 +86,7 @@ function ApprovalActionButton({
     ? {
         borderColor: 'var(--t-brand-orange, #FF5A1F)',
         background: disabled ? 'var(--t-input-bg)' : 'var(--t-brand-orange, #FF5A1F)',
-        color: disabled ? 'var(--t-text-faint)' : 'var(--t-approval-accent-contrast, #0f1216)',
+        color: disabled ? 'var(--t-text-faint)' : 'var(--t-brand-orange-contrast)',
       }
     : {
         borderColor: disabled ? 'var(--t-divider-subtle)' : 'var(--t-danger-border)',

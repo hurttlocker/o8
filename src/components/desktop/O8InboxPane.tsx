@@ -145,18 +145,28 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
   useEffect(() => {
     if (!active && !inboxHydratedRef.current) return;
     inboxHydratedRef.current = true;
-    refresh();
-    const handleEvent = () => refresh();
+    void refresh();
+    const handleEvent = (event: Event) => {
+      const queryKey = (event as CustomEvent<{ queryKey?: string[] }>).detail?.queryKey;
+      if (queryKey && queryKey[0] !== 'approvals') return;
+      void refresh();
+    };
     window.addEventListener(REFRESH_EVENT, handleEvent);
     window.addEventListener('o8:supervisor-inbox', handleEvent);
-    // Push-not-poll: the `o8:supervisor-inbox` WS event (and the local
-    // REFRESH_EVENT) drive live updates, so this timer is only a safety net for
-    // a dropped event — stretch it from 15s to 5min to keep it off the webview's
-    // socket budget instead of hammering an unmapped route every 15s.
-    const interval = window.setInterval(refresh, 300000);
+    window.addEventListener('o8:inbox', handleEvent);
+    window.addEventListener('o8:realtime', handleEvent);
+    window.addEventListener('o8:lane-lifecycle', handleEvent);
+    window.addEventListener('o8:invalidate', handleEvent);
+    // Push-not-poll: supervisor + approval WS events (and REFRESH_EVENT) drive
+    // live updates, so this timer is only a safety net for a dropped event.
+    const interval = window.setInterval(() => { void refresh(); }, 300000);
     return () => {
       window.removeEventListener(REFRESH_EVENT, handleEvent);
       window.removeEventListener('o8:supervisor-inbox', handleEvent);
+      window.removeEventListener('o8:inbox', handleEvent);
+      window.removeEventListener('o8:realtime', handleEvent);
+      window.removeEventListener('o8:lane-lifecycle', handleEvent);
+      window.removeEventListener('o8:invalidate', handleEvent);
       window.clearInterval(interval);
     };
   }, [active, refresh]);
