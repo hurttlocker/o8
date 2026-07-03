@@ -1,0 +1,62 @@
+/**
+ * Shared owned-session index — semantics + memoization (perf, 2026-07-03).
+ * Pins the three-way return contract the liveness probes depend on, and that
+ * the 2s TTL shares one readdir instead of re-scanning per lookup.
+ */
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import { lookupOwnedActiveRun, resetOwnedSessionIndex } from './owned-session-index';
+
+let root = '';
+function writeSession(dir: string, surfaceId: string, activeRun: unknown) {
+  const d = join(root, dir);
+  mkdirSync(d, { recursive: true });
+  writeFileSync(join(d, 'session.json'), JSON.stringify({ surfaceId, ...(activeRun !== undefined ? { activeRun } : {}) }));
+}
+
+beforeEach(() => {
+  root = mkdtempSync(join(tmpdir(), 'o8-owned-idx-'));
+  process.env.CORTEX_IDE_OWNED_CODEX_ROOT = root;
+  resetOwnedSessionIndex();
+});
+afterEach(() => {
+  rmSync(root, { recursive: true, force: true });
+  delete process.env.CORTEX_IDE_OWNED_CODEX_ROOT;
+  resetOwnedSessionIndex();
+});
+
+describe('lookupOwnedActiveRun', () => {
+  it('null when the surface is not present under its root', async () => {
+    expect(await lookupOwnedActiveRun('codex-owned:absent', 1000)).toBeNull();
+  });
+
+  it('{} when present but activeRun is cleared (definitively dead)', async () => {
+    writeSession('s1', 'codex-owned:cleared', undefined);
+    resetOwnedSessionIndex();
+    expect(await lookupOwnedActiveRun('codex-owned:cleared', 1000)).toEqual({});
+  });
+
+  it('returns the run (pid/tmux) when present with an active run', async () => {
+    writeSession('s2', 'codex-owned:live', { pid: 4242, tmuxSession: 'sess-x' });
+    resetOwnedSessionIndex();
+    expect(await lookupOwnedActiveRun('codex-owned:live', 1000)).toEqual({ pid: 4242, tmuxSession: 'sess-x' });
+  });
+
+  it('null for a surfaceId that matches no known root marker', async () => {
+    expect(await lookupOwnedActiveRun('claude-code:live-1', 1000)).toBeNull();
+  });
+
+  it('memoizes within the TTL — a write after the first scan is not seen until TTL expiry', async () => {
+    const t0 = 1_700_000_000_000;
+    expect(await lookupOwnedActiveRun('codex-owned:new', t0)).toBeNull(); // scan #1, empty
+    writeSession('s3', 'codex-owned:new', { pid: 7 });
+    // Within TTL: still the cached (empty) index.
+    expect(await lookupOwnedActiveRun('codex-owned:new', t0 + 1_000)).toBeNull();
+    // Past the 2s TTL: fresh scan sees it.
+    expect(await lookupOwnedActiveRun('codex-owned:new', t0 + 2_100)).toEqual({ pid: 7 });
+  });
+});

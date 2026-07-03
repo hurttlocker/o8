@@ -1,11 +1,9 @@
-import { readdir, readFile } from 'node:fs/promises';
-import { homedir } from 'node:os';
-import path from 'node:path';
 import { eq } from 'drizzle-orm';
 
 import { getDb, lanes } from '@/lib/db';
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
 import { getRuntimeTerminalSession } from '@/lib/runtime/terminal-session-registry';
+import { lookupOwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
 import type { Lane } from './types';
 import {
   appendEvent,
@@ -18,12 +16,6 @@ import {
 export const LANE_ZOMBIE_REAPER_INTERVAL_MS = 5 * 60_000;
 export const LANE_HEARTBEAT_STALE_MS = 90_000;
 
-const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT
-  || path.join(homedir(), '.o8', 'owned-codex');
-const OWNED_GEMINI_ROOT = process.env.O8_OWNED_GEMINI_ROOT
-  || path.join(homedir(), '.o8', 'owned-gemini');
-const OWNED_OPENCODE_ROOT = process.env.O8_OWNED_OPENCODE_ROOT
-  || path.join(homedir(), '.o8', 'owned-opencode');
 
 let zombieReaperTimer: ReturnType<typeof setInterval> | null = null;
 let zombieReaperInFlight = false;
@@ -69,38 +61,13 @@ function parseLivePidSessionKey(sessionKey: string): number | null {
   return Number.isFinite(pid) && pid > 0 ? pid : null;
 }
 
-async function readOwnedActiveRun(
-  surfaceId: string,
-  marker: string,
-  root: string,
-): Promise<{ pid?: number; tmuxSession?: string } | null> {
-  if (!surfaceId.startsWith(marker)) return null;
-  try {
-    const entries = await readdir(root, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const metadataPath = path.join(root, entry.name, 'session.json');
-      let parsed: { surfaceId?: string; activeRun?: { pid?: number; tmuxSession?: string } };
-      try {
-        parsed = JSON.parse(await readFile(metadataPath, 'utf-8')) as typeof parsed;
-      } catch {
-        continue;
-      }
-      if (parsed.surfaceId !== surfaceId) continue;
-      return parsed.activeRun ?? {};
-    }
-  } catch {
-    // Missing registry root means no owned process is currently registered.
-  }
-  return null;
-}
-
 async function probeOwnedSession(
   sessionKey: string,
-  marker: string,
-  root: string,
 ): Promise<LaneOwnerProbe> {
-  const run = await readOwnedActiveRun(sessionKey, marker, root);
+  // Shared, TTL-memoized owned-session index (perf 2026-07-03) — one readdir
+  // per root per tick, shared with the silent-exit detector, instead of a
+  // per-lane scan. Semantics unchanged: null=gone, {}=cleared.
+  const run = await lookupOwnedActiveRun(sessionKey);
   if (!run) {
     return { alive: false, source: 'owned-session-registry', note: 'owned session metadata not found' };
   }
@@ -182,13 +149,13 @@ async function probeLaneOwner(lane: Lane): Promise<LaneOwnerProbe> {
   }
 
   if (sessionKey.startsWith('codex-owned:')) {
-    return probeOwnedSession(sessionKey, 'codex-owned:', OWNED_CODEX_ROOT);
+    return probeOwnedSession(sessionKey);
   }
   if (sessionKey.startsWith('gemini-owned:')) {
-    return probeOwnedSession(sessionKey, 'gemini-owned:', OWNED_GEMINI_ROOT);
+    return probeOwnedSession(sessionKey);
   }
   if (sessionKey.startsWith('opencode-owned:')) {
-    return probeOwnedSession(sessionKey, 'opencode-owned:', OWNED_OPENCODE_ROOT);
+    return probeOwnedSession(sessionKey);
   }
 
   const terminalSession = getRuntimeTerminalSession(sessionKey);
