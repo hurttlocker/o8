@@ -50,6 +50,7 @@ async function preserveUncommittedWork(worktreePath: string, laneId: string): Pr
 
 export async function cleanupLaneWorktree(
   lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>,
+  opts: { deleteBranch?: boolean } = {},
 ): Promise<boolean> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
@@ -73,7 +74,7 @@ export async function cleanupLaneWorktree(
     const worktree = (await manager.list()).find((candidate) => candidate.path === worktreePath);
     if (worktree) {
       // manager.cleanup already calls preserveUncommittedWork internally
-      await manager.cleanup(worktree.id, { force: true, deleteBranch: true });
+      await manager.cleanup(worktree.id, { force: true, deleteBranch: opts.deleteBranch ?? true });
       return true;
     }
   } catch (error) {
