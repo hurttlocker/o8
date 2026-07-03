@@ -398,6 +398,7 @@ export const lanes = sqliteTable('lanes', {
   runtime: text('runtime', { enum: ['codex', 'claude-code', 'gemini', 'opencode'] }).notNull(),
   sessionKey: text('session_key'),
   packetId: text('packet_id'),
+  prNumber: integer('pr_number'),
   status: text('status', {
     enum: ['idle', 'launching', 'running', 'paused', 'awaiting_input', 'awaiting_orchestrator', 'recovering', 'reviewing', 'merging', 'failed', 'completed', 'archived'],
   }).notNull(),

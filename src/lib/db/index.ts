@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 29;
+const DB_SCHEMA_VERSION = 30;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -125,6 +125,7 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureApprovalEventsTable(sqlite);
   ensureExternalMcpServerColumns(sqlite);
   ensureLaneHeartbeatColumns(sqlite);
+  ensureLanePrNumberColumn(sqlite);
   ensurePushSubscriptionsTable(sqlite);
   ensureMobileLiveActivityTokensTable(sqlite);
   ensureProjectsTables(sqlite);
@@ -712,6 +713,7 @@ function ensureTables(sqlite: Database.Database): void {
       runtime TEXT NOT NULL,
       session_key TEXT,
       packet_id TEXT,
+      pr_number INTEGER,
       status TEXT NOT NULL,
       ownership TEXT NOT NULL,
       writer_token TEXT,
@@ -1085,6 +1087,12 @@ function ensureChatHistoryColumns(sqlite: Database.Database): void {
 function ensureLaneHeartbeatColumns(sqlite: Database.Database): void {
   if (!tableColumnExists(sqlite, 'lanes', 'last_heartbeat_at')) {
     addColumnTolerant(sqlite, 'ALTER TABLE lanes ADD COLUMN last_heartbeat_at INTEGER');
+  }
+}
+
+function ensureLanePrNumberColumn(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'lanes', 'pr_number')) {
+    addColumnTolerant(sqlite, 'ALTER TABLE lanes ADD COLUMN pr_number INTEGER');
   }
 }
 
