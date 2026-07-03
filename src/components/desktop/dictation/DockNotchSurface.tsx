@@ -492,6 +492,8 @@ interface DockNotchSurfaceProps {
   /** Lanes parked on the operator (review / awaiting input) — static amber dot,
    * "waiting on you" copy. A paused packet must not read as active work. */
   workerWaiting?: number;
+  workerWaitingLabel?: string;
+  workerTooltip?: string | null;
   workerRepos?: string[];
   /** Tap-the-sliver expansion: a transient capsule naming the in-flight work. */
   showWorkers?: boolean;
@@ -538,6 +540,8 @@ export function DockNotchSurface({
   workerCount = 0,
   workerWorking = 0,
   workerWaiting = 0,
+  workerWaitingLabel = 'waiting',
+  workerTooltip = null,
   workerRepos = [],
   showWorkers = false,
   panelPending = null,
@@ -591,6 +595,18 @@ export function DockNotchSurface({
     realtimeVoice !== 'off' && dictationMode === 'idle' && !isConfirming
     && !isAsking && !isSpeaking && !isAgentWorking && !isDropTarget
     && !isStagedChips && !isWorkersInfo;
+  const workerWaitingCopy = workerWaitingLabel === 'ready'
+    ? `${workerWaiting} review ready`
+    : `${workerWaiting} waiting on you`;
+  const workerSliverLabel = workerWorking > 0 && workerWaiting > 0
+    ? 'fleet'
+    : workerWorking > 0
+      ? 'work'
+      : workerWaitingLabel;
+  const workerDisplayCount = workerCount > 99 ? '99+' : String(workerCount);
+  const workerTooltipText = workerTooltip
+    ? `${workerWorking > 0 ? `${workerWorking} in flight · ` : ''}${workerTooltip}`
+    : `${workerWorking} in flight · ${workerWaitingCopy}${workerRepos.length ? ` · ${workerRepos.join(', ')}` : ''}`;
 
   // Live ref for the canvas RAF loop (avoid re-running the effect per frame).
   const levelRef = useRef<number>(audioLevel);
@@ -1079,6 +1095,7 @@ export function DockNotchSurface({
   } else if (isWorkersInfo) {
     body = (
       <div
+        title={workerTooltipText}
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -1112,10 +1129,10 @@ export function DockNotchSurface({
           }}
         >
           {workerWorking > 0 && workerWaiting > 0
-            ? `${workerWorking} in flight · ${workerWaiting} waiting on you`
+            ? `${workerWorking} in flight · ${workerWaitingCopy}`
             : workerWorking > 0
               ? `${workerWorking} packet${workerWorking === 1 ? '' : 's'} in flight`
-              : `${workerWaiting} waiting on you`}
+              : workerWaitingCopy}
           {workerRepos.length ? (
             <span style={{ color: 'rgba(255, 255, 255, 0.6)' }}>
               {' '}· {workerRepos.join(', ')}
@@ -1389,7 +1406,11 @@ export function DockNotchSurface({
     // glass).
     const sliverInk = 'rgba(28, 28, 46, 0.8)';
     body = (
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 5, width: '100%', height: '100%' }}>
+      <div
+        title={workerTooltipText}
+        aria-label={workerTooltipText}
+        style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 4, width: '100%', height: '100%' }}
+      >
         {workerWorking > 0 ? (
           <NotchOrbit size={9} color="rgba(28, 28, 46, 0.78)" />
         ) : (
@@ -1413,7 +1434,18 @@ export function DockNotchSurface({
             fontVariantNumeric: 'tabular-nums',
           }}
         >
-          {workerCount}
+          {workerDisplayCount}
+        </span>
+        <span
+          style={{
+            fontSize: 9,
+            fontWeight: 300,
+            letterSpacing: 0,
+            color: sliverInk,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {workerSliverLabel}
         </span>
       </div>
     );
