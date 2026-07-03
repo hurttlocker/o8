@@ -18,6 +18,7 @@
  */
 
 import { useCallback, useRef, useState } from 'react';
+import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import { AnswerStream, type ContradictionNote } from './AnswerStream';
 import type { Citation, CitationKind } from './CitationPill';
 import {
@@ -141,7 +142,7 @@ export function AskAnythingRow({ open, onToggle, repoPath }: AskAnythingRowProps
     abortRef.current = controller;
 
     try {
-      const res = await fetch('/api/cortex/ask', {
+      const res = await fetchWithLongLivedBudget('/api/cortex/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question: q, repoPath, mode }),

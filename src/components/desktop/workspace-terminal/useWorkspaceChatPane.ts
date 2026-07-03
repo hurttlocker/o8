@@ -42,6 +42,9 @@ import type {
 import { bootstrapTranscripts } from '@/lib/transcripts/bootstrap';
 import { transcriptStore } from '@/lib/transcripts/store';
 import { useTranscript } from '@/lib/transcripts/useTranscript';
+import { isAbortError } from '@/lib/active-long-lived-request';
+import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
+import { useActiveLongLivedRequest } from '@/lib/use-active-long-lived-request';
 import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-json-parser';
 
 interface UseWorkspaceChatPaneOptions {
@@ -90,6 +93,7 @@ export function useWorkspaceChatPane({
   const stickToBottomRef = useRef(true);
   const handledDraftInjectionRef = useRef<string | null>(null);
   const openCodeProvidersLoadedRef = useRef(openCodeProviders.length > 0);
+  const streamRequest = useActiveLongLivedRequest(active);
 
   const tabId = tab.id;
   const chatRuntime = tab.chatRuntime as 'codex' | 'claude-code' | 'gemini' | 'opencode' | undefined;
@@ -138,12 +142,7 @@ export function useWorkspaceChatPane({
   }, []);
   const disableClaudeBypassPermissions = useCallback(() => setClaudeBypassPermissions(false), []);
 
-  // Packet B: reads go through the transcript store. When the slice is still
-  // `idle` (no bootstrap yet) or we don't have a sessionKey yet, we fall back
-  // to the persisted `tab.chatMessages`. Writes mirror into the store via
-  // `commitMessages` so `useTranscript` subscribers (including this hook)
-  // round-trip the same entries. WS snapshots from `chat.done` refill the
-  // store out-of-band via the Packet A bridge wired in `page.tsx`.
+  // Reads go through the transcript store; writes mirror back via `commitMessages`.
   const transcriptSlice = useTranscript(normalizedSessionKey);
   const fallbackMessages = useMemo(() => tab.chatMessages ?? [], [tab.chatMessages]);
   const messages = useMemo(() => {
@@ -153,14 +152,7 @@ export function useWorkspaceChatPane({
     return fallbackMessages;
   }, [fallbackMessages, normalizedSessionKey, transcriptSlice]);
 
-  // #1293 FIX 1 — ADDITIVE packetId-keyed transcript poll, running ALONGSIDE the
-  // sessionKey bootstrap below. A dispatched Codex `exec --json` streams to the
-  // LANE, not the sessionKey slice, so an un-steered packet keeps an empty slice
-  // and the tab would otherwise render a static placeholder forever. Gate
-  // strictly on an EMPTY sessionKey slice so Claude-Code packets (slice filled
-  // via /api/claude-code/send) and steered Codex (slice filled via the bootstrap
-  // poll) are untouched — `packetEvents` stays empty and their render path is
-  // byte-identical.
+  // PacketId-keyed transcript poll for dispatched Codex lanes with an empty sessionKey slice.
   const packetEvents = usePacketTranscriptPoll({
     enabled: isAgentTab && messages.length === 0,
     packetIdHint: tab.orchestrationPacket?.packetId ?? null,
@@ -226,14 +218,8 @@ export function useWorkspaceChatPane({
     return status === 'running' || status === 'launched' || status === 'waiting';
   })();
 
-  // Load the transcript on mount, RE-load whenever the tab becomes active, and
-  // poll while an agent is actively working. The one-shot-on-mount bootstrap
-  // wasn't enough for DISPATCHED packets: the pane often mounts at dispatch time
-  // (transcript still empty) and the WS history push doesn't reliably cover
-  // MCP-dispatched owned-Codex sessions — so the transcript never filled in and
-  // the operator couldn't watch the agent work. A bounded pull (re-fetch on
-  // activate + 3s poll only while active AND the supervisor is running) makes
-  // the transcript load on view and stream live, then goes quiet once idle.
+  // Load on mount, re-load on activation, and poll only while this tab is active
+  // and the supervisor is running. Hidden tabs must not hold transcript polls.
   useEffect(() => {
     if (!normalizedSessionKey) return undefined;
     const controller = new AbortController();
@@ -285,6 +271,9 @@ export function useWorkspaceChatPane({
     const updated = [...baseMessages, userMsg];
     commitMessages(updated);
     scrollToBottom(true);
+
+    let streamController: AbortController | null = null;
+    let pendingAssistantId: string | null = null;
 
     try {
       const composedMessage = [buildLinkedIssueContext(linkedIssue), text].filter(Boolean).join('\n\n');
@@ -340,10 +329,7 @@ export function useWorkspaceChatPane({
           }
           return;
         }
-        // Non-owned discovered sessions fall back to the runtime-specific
-        // streaming endpoint (codex-only today; gemini/opencode discovered
-        // is a follow-up since neither CLI has a stable scratch-session UX
-        // yet).
+        // Non-owned discovered sessions fall back to the codex stream endpoint.
         if (chatRuntime !== 'codex') {
           throw new Error(`Discovered ${chatRuntime} sessions don't support send yet — dispatch a packet via the orchestrator instead.`);
         }
@@ -359,6 +345,7 @@ export function useWorkspaceChatPane({
       }
 
       const assistantId = `msg-${Date.now()}-assistant`;
+      pendingAssistantId = assistantId;
       let nextTranscript: MobileTranscriptEntry[] = [
         ...updated,
         {
@@ -373,10 +360,12 @@ export function useWorkspaceChatPane({
       setLiveAssistantId(assistantId);
       commitMessages(nextTranscript);
 
-      const res = await fetch(endpoint, {
+      streamController = streamRequest.begin();
+      const res = await fetchWithLongLivedBudget(endpoint, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
+        signal: streamController.signal,
       });
 
       if (!res.ok || !res.body) {
@@ -649,6 +638,16 @@ export function useWorkspaceChatPane({
         );
       }
     } catch (err) {
+      if (streamController?.signal.aborted || isAbortError(err)) {
+        if (pendingAssistantId) {
+          commitMessages(messagesRef.current.map((entry) => (
+            entry.id === pendingAssistantId && !entry.text.trim()
+              ? { ...entry, text: 'Stream paused because this tab became inactive. Reopen it to refresh the transcript.' }
+              : entry
+          )));
+        }
+        return;
+      }
       commitMessages([
         ...updated,
         {
@@ -660,6 +659,7 @@ export function useWorkspaceChatPane({
         },
       ]);
     } finally {
+      if (streamController) streamRequest.finish(streamController);
       setSending(false);
       setAgentRunning(false);
       setLiveAssistantId(null);
@@ -671,7 +671,7 @@ export function useWorkspaceChatPane({
         transcriptStore.setStatus(normalizedSessionKey, 'loading');
       }
     }
-  }, [chatRuntime, claudeBypassPermissions, claudePlanMode, commitMessages, linkedIssue, normalizedSessionKey, onUpdateSessionKey, scrollToBottom, selectedModel, sending, tab.claudeSessionId, tab.repo?.localPath, tabId, transportSessionId]);
+  }, [chatRuntime, claudeBypassPermissions, claudePlanMode, commitMessages, linkedIssue, normalizedSessionKey, onUpdateSessionKey, scrollToBottom, selectedModel, sending, streamRequest, tab.claudeSessionId, tab.repo?.localPath, tabId, transportSessionId]);
 
   const handleSend = useCallback(async () => {
     const baseDraft = draft.trim();

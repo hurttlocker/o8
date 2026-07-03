@@ -19,6 +19,7 @@ import { Citations, InlineMarkdown, SourcesLine } from './response-blocks';
 import { CardComposer } from './card-composer';
 import { GlassCardShell } from './card-shell';
 import { useScrollBlurFade } from './use-scroll-blur-fade';
+import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 
 export interface BrainCard {
   id: number;
@@ -125,7 +126,7 @@ export function BrainConversation({
     abortRef.current = controller;
     const timeoutId = setTimeout(() => controller.abort(), 90_000);
     try {
-      const response = await fetch('/api/cortex/ask', {
+      const response = await fetchWithLongLivedBudget('/api/cortex/ask', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ question, repoPath: repoPath ?? undefined }),
