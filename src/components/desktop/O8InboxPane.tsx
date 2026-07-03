@@ -1,7 +1,10 @@
 'use client';
 
 import { useCallback, useEffect, useRef, useState } from 'react';
+import type { ApprovalRecord } from '@/lib/approvals/types';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
+import { fireInvalidation } from '@/lib/query/use-reactive-query';
+import { O8ApprovalCards } from './o8-panel/O8ApprovalCards';
 
 const KIND_LABELS: Record<SupervisorInboxItem['kind'], string> = {
   verification_failed: 'Verification Failed',
@@ -103,38 +106,67 @@ function ArchiveGlyph() {
 
 export function O8InboxPane({ active = true }: { active?: boolean }) {
   const [items, setItems] = useState<SupervisorInboxItem[]>([]);
+  const [approvals, setApprovals] = useState<ApprovalRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [approvalLoading, setApprovalLoading] = useState(true);
   const [filter, setFilter] = useState<'active' | 'self_healed' | 'all'>('active');
   const [expandedTranscriptById, setExpandedTranscriptById] = useState<Record<string, RuntimeTranscriptEntry[]>>({});
   const [actionNoteById, setActionNoteById] = useState<Record<string, string>>({});
+  const [approvalNoteById, setApprovalNoteById] = useState<Record<string, string>>({});
+  const [busyApproval, setBusyApproval] = useState<{ id: string; action: 'approve' | 'reject' } | null>(null);
   const inboxHydratedRef = useRef(false);
 
   const refresh = useCallback(async () => {
-    try {
-      const response = await fetch('/api/panel/supervisor-inbox?includeDismissed=1&scope=all', { cache: 'no-store' });
-      if (!response.ok) return;
-      const body = await response.json();
-      if (Array.isArray(body?.items)) setItems(body.items);
-    } finally {
-      setLoading(false);
+    const [inboxResult, approvalsResult] = await Promise.allSettled([
+      fetch('/api/panel/supervisor-inbox?includeDismissed=1&scope=all', { cache: 'no-store' })
+        .then(async (response) => {
+          if (!response.ok) return null;
+          const body = await response.json();
+          return Array.isArray(body?.items) ? body.items as SupervisorInboxItem[] : null;
+        }),
+      fetch('/api/panel/approvals?status=pending', { cache: 'no-store' })
+        .then(async (response) => {
+          if (!response.ok) return null;
+          const body = await response.json();
+          return Array.isArray(body?.approvals) ? body.approvals as ApprovalRecord[] : null;
+        }),
+    ]);
+
+    if (inboxResult.status === 'fulfilled' && inboxResult.value) {
+      setItems(inboxResult.value);
     }
+    if (approvalsResult.status === 'fulfilled' && approvalsResult.value) {
+      setApprovals(approvalsResult.value);
+    }
+    setLoading(false);
+    setApprovalLoading(false);
   }, []);
 
   useEffect(() => {
     if (!active && !inboxHydratedRef.current) return;
     inboxHydratedRef.current = true;
-    refresh();
-    const handleEvent = () => refresh();
+    void refresh();
+    const handleEvent = (event: Event) => {
+      const queryKey = (event as CustomEvent<{ queryKey?: string[] }>).detail?.queryKey;
+      if (queryKey && queryKey[0] !== 'approvals') return;
+      void refresh();
+    };
     window.addEventListener(REFRESH_EVENT, handleEvent);
     window.addEventListener('o8:supervisor-inbox', handleEvent);
-    // Push-not-poll: the `o8:supervisor-inbox` WS event (and the local
-    // REFRESH_EVENT) drive live updates, so this timer is only a safety net for
-    // a dropped event — stretch it from 15s to 5min to keep it off the webview's
-    // socket budget instead of hammering an unmapped route every 15s.
-    const interval = window.setInterval(refresh, 300000);
+    window.addEventListener('o8:inbox', handleEvent);
+    window.addEventListener('o8:realtime', handleEvent);
+    window.addEventListener('o8:lane-lifecycle', handleEvent);
+    window.addEventListener('o8:invalidate', handleEvent);
+    // Push-not-poll: supervisor + approval WS events (and REFRESH_EVENT) drive
+    // live updates, so this timer is only a safety net for a dropped event.
+    const interval = window.setInterval(() => { void refresh(); }, 300000);
     return () => {
       window.removeEventListener(REFRESH_EVENT, handleEvent);
       window.removeEventListener('o8:supervisor-inbox', handleEvent);
+      window.removeEventListener('o8:inbox', handleEvent);
+      window.removeEventListener('o8:realtime', handleEvent);
+      window.removeEventListener('o8:lane-lifecycle', handleEvent);
+      window.removeEventListener('o8:invalidate', handleEvent);
       window.clearInterval(interval);
     };
   }, [active, refresh]);
@@ -149,6 +181,41 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
       });
     }, 2500);
   }, []);
+
+  const setApprovalNote = useCallback((id: string, note: string) => {
+    setApprovalNoteById((current) => ({ ...current, [id]: note }));
+    window.setTimeout(() => {
+      setApprovalNoteById((current) => {
+        const next = { ...current };
+        delete next[id];
+        return next;
+      });
+    }, 3000);
+  }, []);
+
+  const resolveApproval = useCallback(async (approval: ApprovalRecord, action: 'approve' | 'reject') => {
+    setBusyApproval({ id: approval.id, action });
+    setApprovalNote(approval.id, action === 'approve' ? 'Approving...' : 'Rejecting...');
+    try {
+      const response = await fetch('/api/panel/approvals', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action, id: approval.id }),
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; error?: string; note?: string } | null;
+      if (!response.ok || payload?.ok === false) {
+        throw new Error(payload?.error ?? `Unable to ${action} approval.`);
+      }
+      setApprovalNote(approval.id, payload?.note ?? (action === 'approve' ? 'Approved.' : 'Rejected.'));
+      fireInvalidation('invalidate', ['approvals', 'all']);
+      window.dispatchEvent(new CustomEvent('o8:supervisor-inbox'));
+      await refresh();
+    } catch (error) {
+      setApprovalNote(approval.id, error instanceof Error ? error.message : `Unable to ${action} approval.`);
+    } finally {
+      setBusyApproval(null);
+    }
+  }, [refresh, setApprovalNote]);
 
   const dismiss = useCallback(async (id: string) => {
     await fetch('/api/panel/supervisor-inbox', {
@@ -284,11 +351,11 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
           Incident Queue
         </div>
         <div style={{ fontSize: 11, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.45, color: 'var(--t-text-faint)', marginBottom: 6 }}>
-          Deduped agent failures that still need operator attention.
+          Approval requests and deduped agent failures that still need operator attention.
         </div>
-        {(humanRequired.length + escalated.length + pending.length + healing.length) > 0 ? (
+        {(approvals.length + humanRequired.length + escalated.length + pending.length + healing.length) > 0 ? (
           <div style={{ fontSize: 10, fontWeight: 300, letterSpacing: '0.02em', color: 'var(--t-text-faint)', marginBottom: 10 }}>
-            {escalated.length} escalated · {humanRequired.length} awaiting you · {pending.length + healing.length} open
+            {approvals.length} approval{approvals.length === 1 ? '' : 's'} · {escalated.length} escalated · {humanRequired.length} awaiting you · {pending.length + healing.length} open
           </div>
         ) : null}
         <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -314,12 +381,21 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
       </div>
 
       <div className="cortex-scroll-fade-y cortex-themed-scroll" style={{ flex: 1, overflowY: 'auto', paddingTop: 8, paddingBottom: 12, paddingLeft: 12, paddingRight: 12 }}>
-        {loading && items.length === 0 ? (
+        {approvalLoading && approvals.length === 0 ? (
+          <div style={{ paddingTop: 8, paddingRight: 4, paddingBottom: 8, paddingLeft: 4, color: 'var(--t-text-secondary)', fontSize: 12 }}>Loading approvals...</div>
+        ) : null}
+        <O8ApprovalCards
+          approvals={approvals}
+          busyApproval={busyApproval}
+          noteById={approvalNoteById}
+          onResolve={resolveApproval}
+        />
+        {loading && items.length === 0 && approvals.length === 0 ? (
           <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12 }}>Loading…</div>
-        ) : visibleItems.length === 0 ? (
+        ) : visibleItems.length === 0 && approvals.length === 0 ? (
           <div style={{ padding: 16, color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.5, overflowWrap: 'break-word' }}>
             {filter === 'active'
-              ? 'No active supervisor inbox items. Heal-bot caught everything else.'
+              ? 'No active approvals or supervisor inbox items. Heal-bot caught everything else.'
               : filter === 'self_healed'
                 ? 'No self-healed items yet. Heal-bot will log fixes here.'
                 : 'Supervisor inbox is empty.'}
@@ -361,16 +437,16 @@ export function O8InboxPane({ active = true }: { active?: boolean }) {
                       paddingRight: 6,
                       borderRadius: 6,
                       background: isHumanRequired
-                        ? 'var(--t-warning-soft, rgba(249, 115, 22, 0.12))'
+                        ? 'var(--t-warning-soft)'
                         : isEscalated
-                          ? 'var(--t-info-soft, rgba(59, 130, 246, 0.12))'
+                          ? 'var(--t-accent-soft)'
                           : (isSelfHealed || isResolved)
                             ? 'var(--t-accent-soft)'
                             : 'var(--t-border)',
                       color: isHumanRequired
-                        ? 'var(--t-warning, #c2410c)'
+                        ? 'var(--t-warning)'
                         : isEscalated
-                          ? 'var(--t-info, #2563eb)'
+                          ? 'var(--t-accent)'
                           : (isSelfHealed || isResolved)
                             ? 'var(--t-accent)'
                             : 'var(--t-text-secondary)',
@@ -545,9 +621,9 @@ function FilterChip({
 }) {
   const activeBackground = active
     ? tone === 'warning'
-      ? 'rgba(249, 115, 22, 0.08)'
+      ? 'var(--t-warning-soft)'
       : tone === 'accent'
-        ? 'var(--t-accent-soft, rgba(96, 165, 250, 0.1))'
+        ? 'var(--t-accent-soft)'
         : 'var(--t-panel-active, var(--t-input-bg))'
     : 'var(--t-bg-card)';
   const color = active
@@ -557,13 +633,6 @@ function FilterChip({
         ? 'var(--t-accent)'
         : 'var(--t-text)'
     : 'var(--t-text-secondary)';
-  const borderColor = active
-    ? tone === 'warning'
-      ? 'rgba(249, 115, 22, 0.2)'
-      : tone === 'accent'
-        ? 'var(--t-accent-border, rgba(96, 165, 250, 0.22))'
-        : 'var(--t-divider-subtle)'
-    : 'var(--t-divider-subtle)';
 
   return (
     <button

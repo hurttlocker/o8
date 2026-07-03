@@ -31,7 +31,6 @@ import { DesktopStatusBar } from '@/components/desktop/DesktopStatusBar';
 import { useProjects, type ProjectRecord } from '@/components/desktop/repo-registry/useProjects';
 import type { CommandPaletteActionItem } from '@/components/desktop/CommandPalette';
 import { SessionTimeline } from '@/components/desktop/SessionTimeline';
-import { ApprovalBanner } from '@/components/desktop/ApprovalBanner';
 import { DictationHost } from '@/components/desktop/dictation/DictationHost';
 import { RealtimeVoiceHost } from '@/components/desktop/dictation/RealtimeVoiceHost';
 import { FileOpenBridge } from '@/components/desktop/FileOpenBridge';
@@ -1850,15 +1849,16 @@ function DashboardInner() {
     return unsubscribe;
   }, [chatVisible, currentO8RepoPath, rightPanelKind]);
 
+  const handleOpenInbox = useCallback(() => {
+    setRightPanelKind('o8');
+    openRightPanelFromUser();
+    setO8ActiveTab('inbox');
+  }, [openRightPanelFromUser]);
+
   useEffect(() => {
-    const handleOpenInbox = () => {
-      setRightPanelKind('o8');
-      openRightPanelFromUser();
-      setO8ActiveTab('inbox');
-    };
     window.addEventListener('o8:open-inbox-tab', handleOpenInbox);
     return () => window.removeEventListener('o8:open-inbox-tab', handleOpenInbox);
-  }, [openRightPanelFromUser]);
+  }, [handleOpenInbox]);
 
   // Automations nav entry (lives in AgentPanel's MiniAgentPanelHeader) dispatches
   // o8:open-automations when clicked. Flip the activeNavSection so the
@@ -2604,11 +2604,8 @@ function DashboardInner() {
   }, [openCanvasTab, waitForWorkspaceTerminalTarget]);
 
   const openApprovalsDiscoverySurface = useCallback(() => {
-    // Approvals surface lives under the O8 panel's Activity tab now — no more
-    // dedicated Review tab or NavRail shield button. The only remaining
-    // caller is an onboarding coachmark CTA.
-    handleReviewPR(0);
-  }, [handleReviewPR]);
+    handleOpenInbox();
+  }, [handleOpenInbox]);
 
   const handleToggleChatPanel = useCallback(() => {
     // v1: chat panel removed — toggle workspace instead
@@ -4071,8 +4068,6 @@ function DashboardInner() {
           now surfaces as ConnectionPill inside AgentPanel above the
           UpdateCard slot (operator pass 2026-05-27). ── */}
 
-      <ApprovalBanner />
-
       {/* DesignModeOverlay only renders the actual overlay when design mode
           is active. Wrapping it in a guarded Suspense + lazy() keeps its
           ~500-line module out of the initial dashboard chunk; the chunk is
@@ -4228,7 +4223,7 @@ function DashboardInner() {
                 letterSpacing: '-0.01em',
                 color: 'var(--t-text-muted)',
               }}>
-                Approval requests stay inline, so you can review the command or diff without leaving the flow.
+                Approval requests land in the Inbox, so risky actions stay visible until you decide.
               </span>
             </div>
             <button
@@ -4249,7 +4244,7 @@ function DashboardInner() {
                 flexShrink: 0,
               }}
             >
-              Review approval
+              Open Inbox
             </button>
           </motion.div>
         ) : null}
@@ -4492,6 +4487,8 @@ function DashboardInner() {
           onTitleRenameSubmit={titleMenuActive ? handleTitleRenameSubmit : undefined}
           onTitleArchive={titleMenuActive ? handleTitleArchive : undefined}
           onTitleShare={titleMenuActive ? handleTitleShare : undefined}
+          approvalCount={showRightPanelColumn ? 0 : approvalCount}
+          onOpenInbox={handleOpenInbox}
         />
         {/* The white workspace card. Lisse squircle ("list corners" from the
             canvas) on all four corners so the TOP rounds too — not just the
@@ -4654,6 +4651,8 @@ function DashboardInner() {
                 browserActive={rightPanelKind === 'o8' && o8ActiveTab === 'browser'}
                 browserPreviewUrl={o8BrowserHoverUrl}
                 onOpenBrowser={handleOpenBrowser}
+                approvalCount={approvalCount}
+                onOpenInbox={handleOpenInbox}
               />
               <AnimatePresence initial={false} mode="wait">
                 {rightPanelKind === 'o8' ? (
