@@ -22,13 +22,16 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
-import { archiveLane, listActiveLanes } from '@/lib/lane/registry';
+import { appendEvent, archiveLane, listActiveLanes } from '@/lib/lane/registry';
+import type { GitHubPullRequestSnapshot } from '@/lib/github-broker/store';
+import type { Lane } from '@/lib/lane/types';
 
 const execFileAsync = promisify(execFile);
 
 const REAPER_INTERVAL_MS = 5 * 60_000;              // 5 minutes
 const STALE_REVIEW_THRESHOLD_MS = 2 * 60 * 60_000;  // 2 hours
 const ABANDONED_IDLE_THRESHOLD_MS = 8 * 60 * 60_000; // 8 hours
+const MAX_TARGETED_PR_REFRESHES_PER_TICK = 5;
 
 let reaperTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -72,6 +75,92 @@ async function worktreeHasNoDiffAgainstBase(
   }
 }
 
+function repoSlugFromRemoteUrl(remoteUrl: string): string | null {
+  const normalized = remoteUrl
+    .trim()
+    .replace(/\.git$/, '')
+    .replace(/^git@github\.com:/, 'https://github.com/');
+  const match = normalized.match(/github\.com\/([^/]+\/[^/]+)$/);
+  return match?.[1] ?? null;
+}
+
+async function resolveRepoFullName(repoPath: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['remote', 'get-url', 'origin'],
+      { cwd: repoPath, timeout: 5_000 },
+    );
+    return repoSlugFromRemoteUrl(stdout);
+  } catch {
+    return null;
+  }
+}
+
+function archiveMergedPullRequestLane(
+  lane: Lane,
+  repoFullName: string,
+  pull: GitHubPullRequestSnapshot,
+  match: 'prNumber' | 'headRefName',
+): void {
+  console.log(`[worktree-reaper] ${lane.id} PR #${pull.number} merged at ${pull.mergedAt} — archiving`);
+  archiveLane(lane.id, 'system');
+  appendEvent(lane.id, 'pr_merged_reconciled', 'system', {
+    repoFullName,
+    prNumber: pull.number,
+    mergedAt: pull.mergedAt,
+    match,
+  });
+}
+
+async function reconcileMergedPullRequest(
+  lane: Lane,
+  allowTargetedRefresh: boolean,
+): Promise<{ archived: boolean; refreshed: boolean }> {
+  if (lane.status !== 'reviewing') {
+    return { archived: false, refreshed: false };
+  }
+
+  const repoFullName = await resolveRepoFullName(lane.repoPath);
+  if (!repoFullName) {
+    return { archived: false, refreshed: false };
+  }
+
+  const { getGitHubPullRequestByHead, getGitHubPullRequestByNumber } = await import('@/lib/github-broker/store');
+  const prNumber = Number.isInteger(lane.prNumber) && (lane.prNumber ?? 0) > 0
+    ? lane.prNumber
+    : null;
+
+  if (prNumber !== null) {
+    let pull = getGitHubPullRequestByNumber(repoFullName, prNumber);
+    if (pull?.mergedAt) {
+      archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber');
+      return { archived: true, refreshed: false };
+    }
+
+    if (allowTargetedRefresh) {
+      const { ensureGitHubPullRequest } = await import('@/lib/github-broker/sync');
+      const refreshed = await ensureGitHubPullRequest(repoFullName, prNumber);
+      pull = refreshed.pr;
+      if (pull?.mergedAt) {
+        archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber');
+        return { archived: true, refreshed: true };
+      }
+      return { archived: false, refreshed: true };
+    }
+
+    return { archived: false, refreshed: false };
+  }
+
+  const legacyPull = getGitHubPullRequestByHead(repoFullName, lane.branch);
+  if (legacyPull?.mergedAt) {
+    archiveMergedPullRequestLane(lane, repoFullName, legacyPull, 'headRefName');
+    return { archived: true, refreshed: false };
+  }
+
+  return { archived: false, refreshed: false };
+}
+
 async function laneHasPendingApproval(laneId: string): Promise<boolean> {
   try {
     const { listApprovalsForContext } = await import('@/lib/approvals/store');
@@ -88,10 +177,15 @@ async function laneHasPendingApproval(laneId: string): Promise<boolean> {
 export async function runWorktreeReaperTick(): Promise<void> {
   const lanes = listActiveLanes();
   const now = Date.now();
+  let remainingTargetedPrRefreshes = MAX_TARGETED_PR_REFRESHES_PER_TICK;
 
   for (const lane of lanes) {
     const updatedAtMs = Date.parse(lane.updatedAt);
     const ageMs = Number.isFinite(updatedAtMs) ? now - updatedAtMs : 0;
+
+    const prReconciliation = await reconcileMergedPullRequest(lane, remainingTargetedPrRefreshes > 0);
+    if (prReconciliation.refreshed) remainingTargetedPrRefreshes -= 1;
+    if (prReconciliation.archived) continue;
 
     // Case 1: reviewing lane whose worktree vanished on disk.
     // Only trigger after 2h to give legitimate reviews room to breathe.
