@@ -10,9 +10,11 @@ import {
   appendEvent,
   archiveLane,
   getLane,
+  getLaneEvents,
   listActiveLanes,
   updateLane,
 } from './registry';
+import { preserveLaneWorktreeHead, type LaneWorktreePreservation } from './worktree-preservation';
 
 export const LANE_ZOMBIE_REAPER_INTERVAL_MS = 5 * 60_000;
 export const LANE_HEARTBEAT_STALE_MS = 90_000;
@@ -213,6 +215,20 @@ function heartbeatStaleMs(lane: Lane, now: number): number {
   return Number.isFinite(updatedAtMs) ? now - updatedAtMs : Number.POSITIVE_INFINITY;
 }
 
+function actorStatusTransitionGraceMs(lane: Lane, now: number): number | null {
+  const events = getLaneEvents(lane.id, 12);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event.verb !== 'status_change') continue;
+    if (event.actor !== 'orchestrator' && event.actor !== 'user') continue;
+    const eventMs = Date.parse(event.timestamp);
+    if (!Number.isFinite(eventMs)) continue;
+    const ageMs = now - eventMs;
+    return ageMs >= 0 ? ageMs : 0;
+  }
+  return null;
+}
+
 export function recordLaneHeartbeat(laneId: string, heartbeatAt: number = Date.now()): Lane | null {
   const lane = getLane(laneId);
   if (!lane) return null;
@@ -233,6 +249,8 @@ export async function listZombieLaneCandidates(now: number = Date.now()): Promis
   for (const lane of runningLanes) {
     const staleMs = heartbeatStaleMs(lane, now);
     if (staleMs <= LANE_HEARTBEAT_STALE_MS) continue;
+    const actorGraceMs = actorStatusTransitionGraceMs(lane, now);
+    if (actorGraceMs !== null && actorGraceMs <= LANE_HEARTBEAT_STALE_MS) continue;
 
     const probe = await probeLaneOwner(lane);
     if (probe.alive !== false) continue;
@@ -276,6 +294,15 @@ export async function reapZombieLane(
 ): Promise<Lane | null> {
   const before = getLane(candidate.lane.id);
   if (!before || (before.status !== 'running' && before.status !== 'merging')) return before;
+  let preservedWork: LaneWorktreePreservation | null = null;
+
+  if (before.status === 'running' && before.worktreePath) {
+    try {
+      preservedWork = await preserveLaneWorktreeHead(before);
+    } catch (error) {
+      console.warn('[lane-reaper] worktree preservation failed before zombie reap:', error);
+    }
+  }
 
   const payload = {
     source: options.source,
@@ -285,6 +312,8 @@ export async function reapZombieLane(
     previousSessionKey: before.sessionKey,
     processProbe: candidate.probe,
     recommendedAction: before.packetId ? 'retry_packet' : 'inspect_lane',
+    preservedBranch: preservedWork?.preserved ? preservedWork.branchName : undefined,
+    preservedHead: preservedWork?.preserved ? preservedWork.headSha : undefined,
   };
 
   // Salvage path (#1282 Failure B): a `running` lane whose owner died may have
@@ -299,7 +328,7 @@ export async function reapZombieLane(
       const { autoCommitCompletionWorktree, hasReviewableCompletionDiff } =
         await import('@/lib/supervisor/completion-verification');
       const baseRef = before.baseBranch?.trim() || 'main';
-      const autoCommitted = await autoCommitCompletionWorktree(before.worktreePath);
+      const autoCommitted = preservedWork?.autoCommitted ?? await autoCommitCompletionWorktree(before.worktreePath);
       const reviewable =
         autoCommitted || (await hasReviewableCompletionDiff(before.worktreePath, baseRef));
       if (reviewable) {
