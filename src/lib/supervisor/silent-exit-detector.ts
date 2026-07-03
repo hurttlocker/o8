@@ -35,9 +35,6 @@
  */
 
 import { execFile } from 'node:child_process';
-import { readdir, readFile } from 'node:fs/promises';
-import os from 'node:os';
-import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { isBridgeSessionAlive } from '@/lib/runtime/pty-bridge';
@@ -47,6 +44,7 @@ import {
   setLaneStatus,
 } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
+import { lookupOwnedActiveRun } from '@/lib/runtimes/shared/owned-session-index';
 import {
   autoCommitCompletionWorktree,
   runCompletionVerification,
@@ -86,18 +84,9 @@ export const INTERESTING_LANE_STATUSES = new Set<Lane['status']>([
 ]);
 
 const SILENT_EXIT_EVENT_PREFIX = 'silent_exit_';
-
-// Mirror of constants from src/lib/codex/owned.ts. Duplicated here rather than
-// exported from that module to avoid pushing owned.ts past the 800-line rule
-// ceiling when we only need two scalar probes. If the owned-codex root path
-// ever changes we should DRY these up (owned.ts already lives above the
-// ceiling, so a small extraction is overdue).
-const OWNED_CODEX_ROOT = process.env.CORTEX_IDE_OWNED_CODEX_ROOT
-  || path.join(os.homedir(), '.o8', 'owned-codex');
-const OWNED_GEMINI_ROOT = process.env.O8_OWNED_GEMINI_ROOT
-  || path.join(os.homedir(), '.o8', 'owned-gemini');
-const OWNED_OPENCODE_ROOT = process.env.O8_OWNED_OPENCODE_ROOT
-  || path.join(os.homedir(), '.o8', 'owned-opencode');
+// Owned-session roots + the readdir/parse loop now live in the shared,
+// TTL-memoized `owned-session-index` (perf 2026-07-03) — the DRY extraction the
+// old duplicated-constants comment said was overdue.
 
 function isPidAlive(pid: number | undefined): boolean {
   if (!pid || !Number.isFinite(pid)) return false;
@@ -109,51 +98,13 @@ function isPidAlive(pid: number | undefined): boolean {
   }
 }
 
-async function readOwnedActiveRun(
-  surfaceId: string,
-  marker: string,
-  root: string,
-): Promise<{ pid?: number; tmuxSession?: string } | null> {
-  if (!surfaceId.startsWith(marker)) return null;
-  try {
-    const entries = await readdir(root, { withFileTypes: true });
-    for (const entry of entries) {
-      if (!entry.isDirectory()) continue;
-      const sessionDir = path.join(root, entry.name);
-      const metadataPath = path.join(sessionDir, 'session.json');
-      let raw: string;
-      try {
-        raw = await readFile(metadataPath, 'utf-8');
-      } catch {
-        continue;
-      }
-      let parsed: { surfaceId?: string; activeRun?: { pid?: number; tmuxSession?: string } };
-      try {
-        parsed = JSON.parse(raw) as typeof parsed;
-      } catch {
-        continue;
-      }
-      if (parsed.surfaceId !== surfaceId) continue;
-      if (!parsed.activeRun) return {};
-      return {
-        pid: typeof parsed.activeRun.pid === 'number' ? parsed.activeRun.pid : undefined,
-        tmuxSession: typeof parsed.activeRun.tmuxSession === 'string'
-          ? parsed.activeRun.tmuxSession
-          : undefined,
-      };
-    }
-  } catch {
-    // Root missing — treat as session gone.
-  }
-  return null;
-}
 
 async function isOwnedSessionAlive(
   surfaceId: string,
-  marker: string,
-  root: string,
 ): Promise<boolean | undefined> {
-  const run = await readOwnedActiveRun(surfaceId, marker, root);
+  // Shared, TTL-memoized index (perf 2026-07-03): one readdir per root per tick
+  // instead of one per-lane. Semantics unchanged — null=gone, {}=cleared.
+  const run = await lookupOwnedActiveRun(surfaceId);
   if (!run) return false;
   // F44 — when session.json exists but `activeRun` is cleared (the runtime
   // store does this when the recorded pid dies, see owned-session/store.ts
@@ -201,29 +152,15 @@ async function probeSessionAlive(lane: Lane): Promise<boolean | undefined> {
   const sessionKey = lane.sessionKey?.trim();
   if (!sessionKey) return undefined;
 
-  if (sessionKey.startsWith('codex-owned:')) {
+  if (
+    sessionKey.startsWith('codex-owned:')
+    || sessionKey.startsWith('gemini-owned:')
+    || sessionKey.startsWith('opencode-owned:')
+  ) {
     try {
-      return await isOwnedSessionAlive(sessionKey, 'codex-owned:', OWNED_CODEX_ROOT);
+      return await isOwnedSessionAlive(sessionKey);
     } catch (error) {
-      console.warn(`[silent-exit] Owned codex probe failed for ${sessionKey}:`, error);
-      return undefined;
-    }
-  }
-
-  if (sessionKey.startsWith('gemini-owned:')) {
-    try {
-      return await isOwnedSessionAlive(sessionKey, 'gemini-owned:', OWNED_GEMINI_ROOT);
-    } catch (error) {
-      console.warn(`[silent-exit] Owned gemini probe failed for ${sessionKey}:`, error);
-      return undefined;
-    }
-  }
-
-  if (sessionKey.startsWith('opencode-owned:')) {
-    try {
-      return await isOwnedSessionAlive(sessionKey, 'opencode-owned:', OWNED_OPENCODE_ROOT);
-    } catch (error) {
-      console.warn(`[silent-exit] Owned opencode probe failed for ${sessionKey}:`, error);
+      console.warn(`[silent-exit] Owned session probe failed for ${sessionKey}:`, error);
       return undefined;
     }
   }
