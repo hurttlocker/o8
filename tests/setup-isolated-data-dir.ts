@@ -15,12 +15,24 @@
  * may still override with their own mkdtemp dirs — that stays safe because
  * both paths are temp dirs, never ~/.o8.
  */
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+type FsModule = typeof import('node:fs');
+type OsModule = typeof import('node:os');
+type PathModule = typeof import('node:path');
+
+const getBuiltinModule = (process as NodeJS.Process & {
+  getBuiltinModule?: (id: string) => unknown;
+}).getBuiltinModule;
+
+const fs = getBuiltinModule?.('node:fs') as FsModule | undefined;
+const os = getBuiltinModule?.('node:os') as OsModule | undefined;
+const path = getBuiltinModule?.('node:path') as PathModule | undefined;
+
+if (!fs || !os || !path) {
+  throw new Error('Vitest setup requires Node built-in modules.');
+}
 
 if (!process.env.O8_TEST_DATA_DIR_PINNED) {
-  const dir = mkdtempSync(join(tmpdir(), 'o8-test-data-'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'o8-test-data-'));
   process.env.CORTEX_IDE_DATA_DIR = dir;
   process.env.O8_DATA_DIR = dir;
   process.env.O8_TEST_DATA_DIR_PINNED = dir;
