@@ -104,6 +104,7 @@ export function useSessionState() {
     () => (approvalData?.approvals ?? []).filter((a) => a.status !== 'pending').length,
     [approvalData],
   );
+  const approvals = useMemo(() => approvalData?.approvals ?? [], [approvalData]);
 
   useEffect(() => {
     approvalRefreshRef.current = () => {
@@ -150,6 +151,7 @@ export function useSessionState() {
     wsStatus,
 
     // Approvals
+    approvals,
     approvalCount,
     resolvedApprovalCount,
 

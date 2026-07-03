@@ -42,7 +42,7 @@ describe('deriveParkedLanes', () => {
     expect(deriveParkedLanes(lanes).map((p) => p.laneId)).toEqual(['a']);
   });
 
-  it('carries branch/repoPath/label through for the popover + click', () => {
+  it('carries branch/repoPath/label through for click routing', () => {
     const parked = deriveParkedLanes([
       lane({ laneId: 'a', status: 'reviewing', branch: 'feat/x', repoPath: '/r', label: 'Fix x' }),
     ]);
