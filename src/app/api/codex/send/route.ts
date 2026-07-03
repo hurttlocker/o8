@@ -115,9 +115,9 @@ export async function POST(req: NextRequest) {
       markClientGone = () => {
         streamClosed = true;
       };
-      const enqueue = (event: unknown) => {
+      const enqueueChunk = (chunk: Uint8Array) => {
         if (streamClosed) return;
-        controller.enqueue(encoder.encode(`data: ${JSON.stringify(event)}\n\n`));
+        controller.enqueue(chunk);
       };
       const closeStream = () => {
         if (streamClosed) return;
@@ -125,75 +125,89 @@ export async function POST(req: NextRequest) {
         controller.close();
       };
 
-      child.stdout.on('data', (chunk: Buffer) => {
-        const text = chunk.toString();
+	      child.stdout.on('data', (chunk: Buffer) => {
+	        const text = chunk.toString();
 
-        for (const line of text.split('\n').filter(Boolean)) {
-          try {
-            const event = JSON.parse(line) as Record<string, unknown>;
-            const rawItem = (event.item ?? event.payload ?? {}) as Record<string, unknown>;
+	        for (const line of text.split('\n').filter(Boolean)) {
+	          try {
+	            const event = JSON.parse(line) as Record<string, unknown>;
+	            const rawItem = (event.item ?? event.payload ?? {}) as Record<string, unknown>;
 
-            // Capture thread ID
-            if (event.type === 'thread.started' && event.thread_id) {
-              capturedThreadId = event.thread_id as string;
-              enqueue({ type: 'session', threadId: capturedThreadId });
+	            // Capture thread ID
+	            if (event.type === 'thread.started' && event.thread_id) {
+	              capturedThreadId = event.thread_id as string;
+              enqueueChunk(encoder.encode(
+                `data: ${JSON.stringify({ type: 'session', threadId: capturedThreadId })}\n\n`
+              ));
             }
 
             // Agent message completed — the actual response text
-            if (event.type === 'item.completed' || event.type === 'response_item') {
-              const itemType = String(rawItem.type ?? '');
-              const itemRole = String(rawItem.role ?? '');
-              const messageText = extractCodexMessageText(rawItem);
-              const reasoningText = extractCodexReasoningText(rawItem);
+	            if (event.type === 'item.completed' || event.type === 'response_item') {
+	              const itemType = String(rawItem.type ?? '');
+	              const itemRole = String(rawItem.role ?? '');
+	              const messageText = extractCodexMessageText(rawItem);
+	              const reasoningText = extractCodexReasoningText(rawItem);
 
-              if ((itemType === 'agent_message' || (itemType === 'message' && itemRole === 'assistant')) && messageText) {
-                fullResponse += messageText;
-                enqueue({ type: 'delta', text: messageText });
-              }
+	              if ((itemType === 'agent_message' || (itemType === 'message' && itemRole === 'assistant')) && messageText) {
+	                fullResponse += messageText;
+	                enqueueChunk(encoder.encode(
+	                  `data: ${JSON.stringify({ type: 'delta', text: messageText })}\n\n`
+	                ));
+	              }
 
-              if (itemType === 'reasoning' && reasoningText) {
-                enqueue({ type: 'thinking', text: reasoningText });
-              }
+	              if (itemType === 'reasoning' && reasoningText) {
+	                enqueueChunk(encoder.encode(
+	                  `data: ${JSON.stringify({ type: 'thinking', text: reasoningText })}\n\n`
+	                ));
+	              }
 
-              if (itemType === 'tool_call' || itemType === 'function_call' || itemType === 'custom_tool_call') {
-                const toolName = typeof rawItem.name === 'string' ? rawItem.name : '';
-                if (toolName) {
-                  enqueue({
-                    type: 'tool_call',
-                    name: toolName,
-                    status: 'running',
-                    args: parseCodexArgs(rawItem.arguments)
-                      ?? (typeof rawItem.input === 'string'
-                        ? parseCodexArgs(rawItem.input)
-                        : (rawItem.input && typeof rawItem.input === 'object' ? rawItem.input as Record<string, unknown> : undefined)),
-                  });
-                }
-              }
+	              if (itemType === 'tool_call' || itemType === 'function_call' || itemType === 'custom_tool_call') {
+	                const toolName = typeof rawItem.name === 'string' ? rawItem.name : '';
+	                if (toolName) {
+	                  enqueueChunk(encoder.encode(
+	                    `data: ${JSON.stringify({
+	                      type: 'tool_call',
+	                      name: toolName,
+	                      status: 'running',
+	                      args: parseCodexArgs(rawItem.arguments)
+	                        ?? (typeof rawItem.input === 'string'
+	                          ? parseCodexArgs(rawItem.input)
+	                          : (rawItem.input && typeof rawItem.input === 'object' ? rawItem.input as Record<string, unknown> : undefined)),
+	                    })}\n\n`
+	                  ));
+	                }
+	              }
 
-              if ((itemType === 'function_call_output' || itemType === 'custom_tool_call_output') && typeof rawItem.output === 'string') {
-                enqueue({
-                  type: 'tool_result',
-                  name: typeof rawItem.name === 'string' ? rawItem.name : undefined,
-                  preview: rawItem.output,
-                });
-              }
-            }
+	              if ((itemType === 'function_call_output' || itemType === 'custom_tool_call_output') && typeof rawItem.output === 'string') {
+	                enqueueChunk(encoder.encode(
+	                  `data: ${JSON.stringify({
+	                    type: 'tool_result',
+	                    name: typeof rawItem.name === 'string' ? rawItem.name : undefined,
+	                    preview: rawItem.output,
+	                  })}\n\n`
+	                ));
+	              }
+	            }
 
-            // Turn completed — usage info
-            if (event.type === 'turn.completed') {
-              const usage = event.usage as { input_tokens?: number; output_tokens?: number } | undefined;
-              enqueue({
-                type: 'usage',
-                inputTokens: usage?.input_tokens,
-                outputTokens: usage?.output_tokens,
-              });
-              enqueue({
-                type: 'done',
+	            // Turn completed — usage info
+	            if (event.type === 'turn.completed') {
+	              const usage = event.usage as { input_tokens?: number; output_tokens?: number } | undefined;
+	              enqueueChunk(encoder.encode(
+	                `data: ${JSON.stringify({
+	                  type: 'usage',
+	                  inputTokens: usage?.input_tokens,
+	                  outputTokens: usage?.output_tokens,
+	                })}\n\n`
+	              ));
+	              enqueueChunk(encoder.encode(
+	                `data: ${JSON.stringify({
+	                  type: 'done',
                 text: fullResponse,
                 threadId: capturedThreadId || undefined,
                 inputTokens: usage?.input_tokens,
                 outputTokens: usage?.output_tokens,
-              });
+                })}\n\n`
+              ));
             }
           } catch {
             // Not JSON or partial — skip
@@ -205,22 +219,28 @@ export async function POST(req: NextRequest) {
         const errLines = chunk.toString().split('\n').map((line) => line.trim()).filter(Boolean);
         const visibleLines = errLines.filter((line) => !shouldSuppressCodexStderrLine(line));
         if (visibleLines.length > 0) {
-          enqueue({ type: 'error', text: visibleLines.join('\n') });
+          enqueueChunk(encoder.encode(
+            `data: ${JSON.stringify({ type: 'error', text: visibleLines.join('\n') })}\n\n`
+          ));
         }
       });
 
       child.on('close', (code) => {
-        enqueue({
-          type: 'close',
-          exitCode: code,
-          text: fullResponse,
-          threadId: capturedThreadId || undefined,
-        });
+        enqueueChunk(encoder.encode(
+          `data: ${JSON.stringify({
+            type: 'close',
+            exitCode: code,
+            text: fullResponse,
+            threadId: capturedThreadId || undefined,
+          })}\n\n`
+        ));
         closeStream();
       });
 
       child.on('error', (err) => {
-        enqueue({ type: 'error', text: err.message });
+        enqueueChunk(encoder.encode(
+          `data: ${JSON.stringify({ type: 'error', text: err.message })}\n\n`
+        ));
         closeStream();
       });
 
