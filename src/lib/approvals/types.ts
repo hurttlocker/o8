@@ -76,6 +76,9 @@ export interface ApprovalAuditEvent {
   reviewer?: string;
   approved?: boolean;
   diffSha?: string;
+  reviewedHeadSha?: string;
+  parseWarning?: string;
+  rawText?: string;
   patterns?: string[];
   conflictZones?: string[];
 }
