@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { deriveParkedLanes } from './derive';
+import { deriveParkedLaneBuckets, deriveParkedLanes, type ReviewApprovalSummary } from './derive';
 import type { DomainLaneSummary } from '@/lib/orchestrator/store';
 
 function lane(
@@ -13,12 +13,23 @@ function lane(
   };
 }
 
+function approvedReview(packetId: string, laneId?: string): ReviewApprovalSummary {
+  return {
+    status: 'approved',
+    toolName: 'orchestrator_review',
+    metadata: {
+      Packet: packetId,
+      ...(laneId ? { Lane: laneId } : {}),
+    },
+  };
+}
+
 describe('deriveParkedLanes', () => {
   it('returns empty for no lanes', () => {
     expect(deriveParkedLanes([])).toEqual([]);
   });
 
-  it('keeps only parked statuses (reviewing + awaiting_*), drops in-motion + terminal', () => {
+  it('keeps reviewing + escalation states, drops in-motion + terminal states', () => {
     const lanes = [
       lane({ laneId: 'a', status: 'reviewing' }),
       lane({ laneId: 'b', status: 'running' }),
@@ -28,10 +39,33 @@ describe('deriveParkedLanes', () => {
       lane({ laneId: 'f', status: 'completed' }),
       lane({ laneId: 'g', status: 'launching' }),
     ];
-    expect(deriveParkedLanes(lanes).map((p) => p.laneId)).toEqual(['a', 'c', 'd']);
+    // escalated first — the strongest operator-attention signal leads the pill
+    expect(deriveParkedLanes(lanes).map((p) => p.laneId)).toEqual(['c', 'd', 'a']);
   });
 
-  it('carries branch/repoPath/label through for the popover + click', () => {
+  it('buckets escalation-chain lanes as escalated, regardless of review approvals', () => {
+    const lanes = [
+      lane({ laneId: 'esc-orch', status: 'awaiting_orchestrator', packetId: 'pkt-esc-1' }),
+      lane({ laneId: 'esc-human', status: 'awaiting_human', packetId: 'pkt-esc-2' }),
+      lane({ laneId: 'needs', status: 'reviewing', packetId: 'pkt-needs' }),
+      lane({ laneId: 'approved', status: 'reviewing', packetId: 'pkt-approved' }),
+    ];
+    const reviews = [approvedReview('pkt-approved'), approvedReview('pkt-esc-1')];
+
+    const buckets = deriveParkedLaneBuckets(lanes, reviews);
+
+    expect(buckets.escalated.map((p) => p.laneId)).toEqual(['esc-orch', 'esc-human']);
+    expect(buckets.needsReview.map((p) => p.laneId)).toEqual(['needs']);
+    expect(buckets.awaitingMerge.map((p) => p.laneId)).toEqual(['approved']);
+    expect(buckets.all.map((p) => p.reviewState)).toEqual(['escalated', 'escalated', 'needs-review', 'awaiting-merge']);
+  });
+
+  it('drops an escalated lane whose packet is closed', () => {
+    const lanes = [lane({ laneId: 'esc', status: 'awaiting_human', packetId: 'pkt-closed' })];
+    expect(deriveParkedLanes(lanes, new Set(['pkt-closed']))).toEqual([]);
+  });
+
+  it('carries branch/repoPath/label through for click routing', () => {
     const parked = deriveParkedLanes([
       lane({ laneId: 'a', status: 'reviewing', branch: 'feat/x', repoPath: '/r', label: 'Fix x' }),
     ]);
@@ -46,6 +80,27 @@ describe('deriveParkedLanes', () => {
     const closed = new Set(['pkt-merged']);
     const parked = deriveParkedLanes(lanes, closed);
     expect(parked.map((p) => p.laneId)).toEqual(['live']); // the merged one dropped
+  });
+
+  it('splits reviewing lanes into needs-review vs approved-awaiting-merge', () => {
+    const lanes = [
+      lane({ laneId: 'needs', status: 'reviewing', packetId: 'pkt-needs' }),
+      lane({ laneId: 'approved-by-packet', status: 'reviewing', packetId: 'pkt-approved' }),
+      lane({ laneId: 'approved-by-lane', status: 'reviewing', packetId: 'pkt-other' }),
+      lane({ laneId: 'running-approved', status: 'running', packetId: 'pkt-running' }),
+    ];
+    const reviews = [
+      approvedReview('pkt-approved'),
+      approvedReview('pkt-unrelated', 'approved-by-lane'),
+      approvedReview('pkt-running'),
+      { ...approvedReview('pkt-rejected'), status: 'rejected' },
+    ];
+
+    const buckets = deriveParkedLaneBuckets(lanes, reviews);
+
+    expect(buckets.needsReview.map((p) => p.laneId)).toEqual(['needs']);
+    expect(buckets.awaitingMerge.map((p) => p.laneId)).toEqual(['approved-by-packet', 'approved-by-lane']);
+    expect(buckets.all.map((p) => p.reviewState)).toEqual(['needs-review', 'awaiting-merge', 'awaiting-merge']);
   });
 
   it('with no closed set, behaves exactly as before (parity)', () => {
