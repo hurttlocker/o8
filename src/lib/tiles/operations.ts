@@ -509,7 +509,7 @@ function migrateNode(node: any): any {
     if (
       node.type === 'split'
       && node.children.length === 2
-      && node.children.every((child: any) => child?.type === 'leaf' && child.content?.kind === 'terminal')
+      && node.children.every((child: { type?: string; content?: { kind?: string } }) => child?.type === 'leaf' && child.content?.kind === 'terminal')
     ) {
       return node.children[0];
     }
