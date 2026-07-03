@@ -7,6 +7,7 @@ import { getScores } from '@/lib/targeting/store';
 import { resolveTargetingRouting } from '@/lib/targeting/routing';
 import { logDispatchChoice } from '@/lib/targeting/observability';
 import { createMission, dispatchMission } from '@/lib/orchestrator/operator-mission-service';
+import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
 
 /**
  * Point an agent at a targeted file. Resolves the file's dispatch routing (cheap
@@ -41,6 +42,7 @@ export async function POST(request: Request) {
   const routing = resolveTargetingRouting(score.signals);
 
   try {
+    const [issueNumber] = nextInlineIssueNumbers(1);
     const brief = [
       `Operator-directed target from the Targeting Machine (impact ${score.impact}/5, opportunity ${score.opportunity}/5).`,
       `Why here: ${score.rationale}`,
@@ -49,9 +51,7 @@ export async function POST(request: Request) {
     ].join('\n');
 
     const mission = await createMission({
-      // Inline issues require a positive synthetic number (normalizeLoadedIssue
-      // rejects 0); mirror the create_mission MCP convention (90001+).
-      issues: [{ number: 90001, title: `Targeting: ${filePath}`, body: brief, url: '' }],
+      issues: [{ number: issueNumber!, title: `Targeting: ${filePath}`, body: brief, url: '' }],
       repoPath,
       runtime: routing.runtime,
       requestedRuntime: routing.runtime,
