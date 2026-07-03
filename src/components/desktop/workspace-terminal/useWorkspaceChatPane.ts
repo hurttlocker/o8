@@ -13,6 +13,7 @@ import type {
   WorkspaceCliModelOption,
 } from '@/components/desktop/workspace-terminal/types';
 import { mapWorkspaceTranscriptMessages } from '@/components/desktop/workspace-terminal/workspace-chat-message-mapper';
+import { usePacketTranscriptPoll } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
 import {
   buildClaudePermissionDecisionMessage,
   coerceClaudeCodeChatEvent,
@@ -151,6 +152,25 @@ export function useWorkspaceChatPane({
     }
     return fallbackMessages;
   }, [fallbackMessages, normalizedSessionKey, transcriptSlice]);
+
+  // #1293 FIX 1 — ADDITIVE packetId-keyed transcript poll, running ALONGSIDE the
+  // sessionKey bootstrap below. A dispatched Codex `exec --json` streams to the
+  // LANE, not the sessionKey slice, so an un-steered packet keeps an empty slice
+  // and the tab would otherwise render a static placeholder forever. Gate
+  // strictly on an EMPTY sessionKey slice so Claude-Code packets (slice filled
+  // via /api/claude-code/send) and steered Codex (slice filled via the bootstrap
+  // poll) are untouched — `packetEvents` stays empty and their render path is
+  // byte-identical.
+  const packetEvents = usePacketTranscriptPoll({
+    enabled: isAgentTab && messages.length === 0,
+    packetIdHint: tab.orchestrationPacket?.packetId ?? null,
+    sessionKey: normalizedSessionKey,
+    active,
+  });
+  const packetLlmMessages = useMemo(
+    () => mapWorkspaceTranscriptMessages(packetEvents, selectedModelLabel),
+    [packetEvents, selectedModelLabel],
+  );
 
   const commitMessages = useCallback(
     (next: MobileTranscriptEntry[]) => {
@@ -788,6 +808,7 @@ export function useWorkspaceChatPane({
     linkedIssue,
     llmMessages,
     messages,
+    packetLlmMessages,
     normalizedSessionKey,
     queuedContextCards,
     runtimeLabel,
