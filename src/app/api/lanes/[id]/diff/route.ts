@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { findLatestLaneByPacket, getLane } from '@/lib/lane/registry';
+import { readHeadSha } from '@/lib/lane/head-sha-lock';
 
 const execFileAsync = promisify(execFile);
 const COMMAND_MAX_BUFFER = 32 * 1024 * 1024;
@@ -44,42 +45,56 @@ export async function GET(
   const base = (lane.baseBranch || 'main').trim();
 
   try {
-    // Diff against the merge-base so base advancing doesn't pollute the output
-    // with commits the lane didn't make.
-    let against = base;
-    try {
-      const { stdout } = await execFileAsync('git', ['merge-base', base, 'HEAD'], { cwd, maxBuffer: COMMAND_MAX_BUFFER });
-      against = stdout.trim() || base;
-    } catch {
-      // base unresolvable in this worktree — fall back to the base ref name.
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const headSha = await readHeadSha(cwd);
+      // Diff against the merge-base so base advancing doesn't pollute the output
+      // with commits the lane didn't make.
+      let against = base;
+      try {
+        const { stdout } = await execFileAsync('git', ['merge-base', base, headSha], { cwd, maxBuffer: COMMAND_MAX_BUFFER });
+        against = stdout.trim() || base;
+      } catch {
+        // base unresolvable in this worktree — fall back to the base ref name.
+      }
+
+      const [stat, full] = await Promise.all([
+        execFileAsync('git', ['diff', '--stat', against], { cwd, maxBuffer: COMMAND_MAX_BUFFER })
+          .then((r) => r.stdout).catch(() => ''),
+        execFileAsync('git', ['diff', against], { cwd, maxBuffer: COMMAND_MAX_BUFFER })
+          .then((r) => r.stdout).catch(() => ''),
+      ]);
+
+      const currentHeadSha = await readHeadSha(cwd);
+      if (currentHeadSha !== headSha) {
+        continue;
+      }
+
+      const sizeBytes = Buffer.byteLength(full, 'utf8');
+      const truncated = sizeBytes > maxBytes;
+      const diff = truncated
+        ? `${Buffer.from(full, 'utf8').subarray(0, maxBytes).toString('utf8')}\n\n…[diff truncated at ${maxBytes} bytes of ${sizeBytes} — raise maxBytes or read the file directly]`
+        : full;
+
+      return NextResponse.json({
+        ok: true,
+        laneId: lane.id,
+        packetId: lane.packetId ?? null,
+        headSha,
+        base,
+        branch: lane.branch,
+        worktreePath: lane.worktreePath ?? null,
+        stat: stat.trim(),
+        diff,
+        sizeBytes,
+        truncated,
+        maxBytes,
+      }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
     }
 
-    const [stat, full] = await Promise.all([
-      execFileAsync('git', ['diff', '--stat', against], { cwd, maxBuffer: COMMAND_MAX_BUFFER })
-        .then((r) => r.stdout).catch(() => ''),
-      execFileAsync('git', ['diff', against], { cwd, maxBuffer: COMMAND_MAX_BUFFER })
-        .then((r) => r.stdout).catch(() => ''),
-    ]);
-
-    const sizeBytes = Buffer.byteLength(full, 'utf8');
-    const truncated = sizeBytes > maxBytes;
-    const diff = truncated
-      ? `${Buffer.from(full, 'utf8').subarray(0, maxBytes).toString('utf8')}\n\n…[diff truncated at ${maxBytes} bytes of ${sizeBytes} — raise maxBytes or read the file directly]`
-      : full;
-
     return NextResponse.json({
-      ok: true,
-      laneId: lane.id,
-      packetId: lane.packetId ?? null,
-      base,
-      branch: lane.branch,
-      worktreePath: lane.worktreePath ?? null,
-      stat: stat.trim(),
-      diff,
-      sizeBytes,
-      truncated,
-      maxBytes,
-    }, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
+      ok: false,
+      note: 'Worktree HEAD moved while computing diff. Retry o8_packet_diff before reviewing.',
+    }, { status: 409 });
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to compute diff.';
     return NextResponse.json({ ok: false, note: message }, { status: 500 });

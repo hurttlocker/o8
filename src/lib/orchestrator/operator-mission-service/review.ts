@@ -155,26 +155,6 @@ function recordPacketReviewAudit(packet: OrchestratorPacket, findings: Orchestra
   return resolved?.id ?? approval.id;
 }
 
-async function captureReviewedHeadSha(packetId: string, explicitHeadSha?: string) {
-  const explicit = normalizeHeadSha(explicitHeadSha);
-  if (explicit) {
-    return explicit;
-  }
-
-  const lane = findLaneByPacket(packetId);
-  const worktreePath = lane?.worktreePath?.trim();
-  if (!worktreePath) {
-    return undefined;
-  }
-
-  try {
-    return await readHeadSha(worktreePath);
-  } catch (error) {
-    console.warn(`[review] Failed to capture reviewed HEAD for packet ${packetId}:`, error);
-    return undefined;
-  }
-}
-
 export async function submitPacketReview(input: SubmitReviewInput) {
   const state = currentMissionState();
   const missionPacket = state.packets.find((candidate) => candidate.id === input.packetId);
@@ -196,7 +176,26 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     packet = synthesizePacketFromLane(input.packetId, orphanLane);
   }
 
-  const reviewedHeadSha = await captureReviewedHeadSha(packet.id, input.reviewedHeadSha);
+  // Explicit pin from the caller wins (#1363 — pass the headSha the diff was
+  // read at). Fallback: capture the lane worktree HEAD at review time, which
+  // authorizes the durable-review merge exactly as before but can pin a HEAD
+  // whose latest commits the reviewer's diff never showed — callers that care
+  // must pass reviewedHeadSha explicitly. Merge-time drift refusal
+  // (head_moved_since_review) still guards commits landing after this point.
+  let reviewedHeadSha = normalizeHeadSha(input.reviewedHeadSha);
+  let reviewedHeadAutoCaptured = false;
+  if (!reviewedHeadSha) {
+    const lane = orphanLane ?? findLaneByPacket(input.packetId);
+    const cwd = lane?.worktreePath?.trim() || undefined;
+    if (cwd) {
+      try {
+        reviewedHeadSha = normalizeHeadSha(await readHeadSha(cwd));
+        reviewedHeadAutoCaptured = reviewedHeadSha !== undefined;
+      } catch (error) {
+        console.warn(`[review] Failed to capture reviewed HEAD for packet ${input.packetId}:`, error);
+      }
+    }
+  }
   const summary = buildReviewSummary(input.findings, input.approved);
   const auditApprovalId = recordPacketReviewAudit(packet, input.findings, input.approved, summary, reviewedHeadSha);
 
@@ -236,6 +235,12 @@ export async function submitPacketReview(input: SubmitReviewInput) {
     recorded: true,
     findingsCount: input.findings.length,
     reviewedHeadSha: reviewedHeadSha ?? null,
+    ...(reviewedHeadAutoCaptured ? {
+      warning: 'reviewedHeadSha was omitted; pinned to the worktree HEAD at review time — pass the packet-diff headSha to pin exactly what you read.',
+    } : {}),
+    ...(reviewedHeadSha ? {} : {
+      warning: 'reviewedHeadSha was omitted and no worktree HEAD was capturable; this review is unpinned.',
+    }),
     auditEventType: 'orchestrator_review',
     auditApprovalId: resolvedAuditApprovalId,
   };
