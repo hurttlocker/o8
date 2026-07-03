@@ -29,7 +29,10 @@ describe('buildInlineIssuesFromPrompt', () => {
   it('synthesizes a single inline issue that passes isInlineIssue', () => {
     const [issue, ...rest] = buildInlineIssuesFromPrompt('Refactor the auth module');
     expect(rest).toHaveLength(0);
-    expect(issue.number).toBe(90001);
+    // Unique time-based synthetics (pipeline root fix 2026-07-03) — fixed
+    // 90001+index numbers made every inline mission collide with every prior
+    // one, and branch cleanup archived the older mission's live lanes.
+    expect(issue.number).toBeGreaterThanOrEqual(90001);
     expect(issue.url).toBe('');
     expect(issue.title).toBe('Refactor the auth module');
     expect(issue.body).toBe('Refactor the auth module');
@@ -54,7 +57,12 @@ describe('buildInlineIssuesFromPrompt', () => {
   it('uniquifies titles for a multi-agent race so branch slugs do not collide', () => {
     const issues = buildInlineIssuesFromPrompt('the auth refactor', 3);
     expect(issues).toHaveLength(3);
-    expect(issues.map((i) => i.number)).toEqual([90001, 90002, 90003]);
+    const numbers = issues.map((i) => i.number);
+    expect(new Set(numbers).size).toBe(3); // unique within the batch
+    for (const n of numbers) expect(n).toBeGreaterThanOrEqual(90001); // still isInlineIssue
+    // and unique ACROSS creations — the collision that archived live lanes:
+    const again = buildInlineIssuesFromPrompt('same task', 3).map((i) => i.number);
+    expect(again.some((n) => numbers.includes(n))).toBe(false);
     issues.forEach((issue) => expect(isInlineIssue(issue)).toBe(true));
 
     // Every agent shares the body but carries a distinct (i/N) title — the

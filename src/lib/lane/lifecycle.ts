@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { recordLaneEvent } from '@/lib/orchestrator/runtime-status';
+import { notifyReviewReady } from '@/lib/push/notify';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
 import type { LaneLifecycleEventPayload } from '@/lib/realtime/types';
 import type { Lane, LaneStatus } from './types';
@@ -39,6 +40,19 @@ export function publishLaneLifecycleEvent(
     recordLaneEvent(payload);
   } catch (err) {
     console.error(`[lane-lifecycle] recordLaneEvent failed: ${err}`);
+  }
+  // Pipeline root fix (2026-07-03) — the review-ready edge notifies the
+  // operator's devices. This chokepoint already feeds the MCP ring buffer and
+  // the lane-lifecycle WS channel; the push was the missing third leg, so an
+  // away operator never heard that review-ready work existed and stale lanes
+  // aged unseen into reaper territory.
+  if (payload.status === 'reviewing' && previousStatus !== 'reviewing') {
+    notifyReviewReady({
+      laneId: payload.laneId,
+      label: lane.label,
+      packetId: payload.packetId,
+      repoPath: payload.repoPath,
+    });
   }
   void publishRealtimeMutation({
     mutation: {

@@ -1,3 +1,4 @@
+import { nextInlineIssueNumbers } from './shared';
 import type { LoadedIssue } from './types';
 
 /**
@@ -39,8 +40,9 @@ export function buildInlineIssuesFromPrompt(task: string, count = 1): LoadedIssu
   const baseTitle = deriveTitle(body) || 'Inline task';
   const n = clampSpawnCount(count);
 
+  const numbers = nextInlineIssueNumbers(n);
   return Array.from({ length: n }, (_unused, index) => ({
-    number: 90001 + index,
+    number: numbers[index]!,
     title: n === 1 ? baseTitle : `${baseTitle} (${index + 1}/${n})`,
     body,
     url: '',
