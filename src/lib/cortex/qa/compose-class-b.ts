@@ -6,10 +6,11 @@ import {
   translateCitations,
   type CitationLookup,
 } from '@/lib/cortex/qa/citations';
-import { composeClassA, type SseEmit } from '@/lib/cortex/qa/compose-class-a';
+import { composeClassA, limitCitationMarkers, type SseEmit } from '@/lib/cortex/qa/compose-class-a';
 import {
   buildSonnetComposeSystem,
   buildSonnetComposeUser,
+  type ComposeOptions,
 } from '@/lib/cortex/qa/compose-prompts';
 import { detectContradictions } from '@/lib/cortex/qa/contradictions';
 import { callSonnet } from '@/lib/cortex/qa/llm/sonnet-adapter';
@@ -20,6 +21,7 @@ export async function composeClassB(
   repoPath: string | undefined,
   topRows: TypedRow[],
   emit: SseEmit,
+  options: ComposeOptions = {},
 ): Promise<void> {
   const lookup = buildCitationLookup(topRows);
   // O8_EVAL_MODE=1 routes Class B through OpenRouter (non-streaming) instead
@@ -29,12 +31,12 @@ export async function composeClassB(
   const evalMode = process.env.O8_EVAL_MODE === '1' || process.env.O8_EVAL_MODE === 'true';
 
   if (evalMode) {
-    return composeClassBViaSonnetAdapter(question, repoPath, topRows, emit, lookup);
+    return composeClassBViaSonnetAdapter(question, repoPath, topRows, emit, lookup, options);
   }
 
   try {
     const result = await callSonnet({
-      system: buildSonnetComposeSystem(),
+      system: buildSonnetComposeSystem(options),
       messages: [
         {
           role: 'user',
@@ -56,15 +58,17 @@ export async function composeClassB(
     for await (const token of result.tokens) {
       if (!token) continue;
       fullText += token;
-      emit('token', { text: token });
+      if (!options.terse) emit('token', { text: token });
     }
 
     // Post-process: translate bracket citations → verified CITATION markers.
     let finalAnswer = '';
     if (fullText.trim()) {
       const { translatedAnswer: translated, verifiedRows } = translateCitations(fullText, lookup);
-      finalAnswer = translated;
-      for (const row of verifiedRows) {
+      const citationRows = options.terse ? verifiedRows.slice(0, 2) : verifiedRows;
+      finalAnswer = options.terse ? limitCitationMarkers(translated, citationRows) : translated;
+      if (options.terse) emit('token', { text: finalAnswer });
+      for (const row of citationRows) {
         emit('citation', {
           kind: row.citation.kind,
           rowId: `${row.citation.kind}-${row.citation.rowId}`,
@@ -90,7 +94,7 @@ export async function composeClassB(
     const message = err instanceof Error ? err.message : 'composer-B error';
     console.warn('[qa][composer-B] error:', message);
     // Degrade to Flash on any failure.
-    return composeClassA(question, repoPath, topRows, emit);
+    return composeClassA(question, repoPath, topRows, emit, options);
   }
 }
 
@@ -111,10 +115,11 @@ async function composeClassBViaSonnetAdapter(
   topRows: TypedRow[],
   emit: SseEmit,
   lookup: CitationLookup,
+  options: ComposeOptions = {},
 ): Promise<void> {
   try {
     const result = await callSonnet({
-      system: buildSonnetComposeSystem(),
+      system: buildSonnetComposeSystem(options),
       messages: [
         {
           role: 'user',
@@ -129,16 +134,17 @@ async function composeClassBViaSonnetAdapter(
     if (result.tier === 'flash') {
       // Adapter degraded back to Flash — no Claude path was available, so
       // fall back to Class A (which has its own chain).
-      return composeClassA(question, repoPath, topRows, emit);
+      return composeClassA(question, repoPath, topRows, emit, options);
     }
     const fullText = result.text;
 
     let finalAnswer = '';
     if (fullText.trim()) {
-      emit('token', { text: fullText });
       const { translatedAnswer: translated, verifiedRows } = translateCitations(fullText, lookup);
-      finalAnswer = translated;
-      for (const row of verifiedRows) {
+      const citationRows = options.terse ? verifiedRows.slice(0, 2) : verifiedRows;
+      finalAnswer = options.terse ? limitCitationMarkers(translated, citationRows) : translated;
+      emit('token', { text: options.terse ? finalAnswer : fullText });
+      for (const row of citationRows) {
         emit('citation', {
           kind: row.citation.kind,
           rowId: `${row.citation.kind}-${row.citation.rowId}`,
@@ -167,7 +173,6 @@ async function composeClassBViaSonnetAdapter(
   } catch (err) {
     const message = err instanceof Error ? err.message : 'composer-B-eval error';
     console.warn('[qa][composer-B-eval] error:', message);
-    return composeClassA(question, repoPath, topRows, emit);
+    return composeClassA(question, repoPath, topRows, emit, options);
   }
 }
-

@@ -22,7 +22,7 @@ import 'server-only';
 import { createHash } from 'node:crypto';
 
 import { classifyQuestion } from '@/lib/cortex/qa/classifier';
-import { composeClassA, composeClassB, rowDisplayTitle, type SseEmit } from '@/lib/cortex/qa/composer';
+import { composeClassA, composeClassB, rowDisplayTitle, type ComposeOptions, type SseEmit } from '@/lib/cortex/qa/composer';
 import { rowFullText } from '@/lib/cortex/qa/citations';
 import { buildGrepArmTopRows } from '@/lib/cortex/qa/grep-arm';
 import { dot, embedQuestion } from '@/lib/cortex/qa/llm/gemini-embed';
@@ -58,8 +58,8 @@ interface CacheEntry {
 
 const answerCache = new Map<string, CacheEntry>();
 
-function scopeKey(repoPath: string | undefined, projectId: string | undefined): string {
-  return `${repoPath ?? ''}\x00${projectId ?? ''}`;
+function scopeKey(repoPath: string | undefined, projectId: string | undefined, terse = false): string {
+  return `${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`;
 }
 
 /**
@@ -140,9 +140,14 @@ export function invalidateAnswerCache(): void {
   answerCache.clear();
 }
 
-function cacheKey(question: string, repoPath: string | undefined, projectId: string | undefined): string {
+function cacheKey(
+  question: string,
+  repoPath: string | undefined,
+  projectId: string | undefined,
+  terse = false,
+): string {
   return createHash('sha256')
-    .update(`${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}`)
+    .update(`${normalizeQuestionForCache(question)}\x00${repoPath ?? ''}\x00${projectId ?? ''}${terse ? '\x00terse' : ''}`)
     .digest('hex');
 }
 
@@ -238,12 +243,12 @@ function buildSourcesPayload(topRows: TypedRow[], retrievalMs: number): {
 export async function askCortex(
   question: string,
   repoPath: string | undefined,
-  options: { bypassCache?: boolean; projectId?: string | null } = {},
+  options: { bypassCache?: boolean; projectId?: string | null; terse?: boolean } = {},
 ): Promise<AskCortexResult> {
-  const { bypassCache = false } = options;
+  const { bypassCache = false, terse = false } = options;
   const projectId = options.projectId?.trim()
     || (await getActiveProjectScopeForRepo(repoPath)).projectId;
-  const key = cacheKey(question, repoPath, projectId);
+  const key = cacheKey(question, repoPath, projectId, terse);
   if (!bypassCache) {
     const cached = getCached(key);
     if (cached) {
@@ -263,13 +268,13 @@ export async function askCortex(
     // the CLI spawns while the first run is still composing.
     const pending = inFlight.get(key);
     if (pending) return pending;
-    const run = runAskCortexUncached(question, repoPath, projectId, key, bypassCache)
+    const run = runAskCortexUncached(question, repoPath, projectId, key, bypassCache, { terse })
       .finally(() => { inFlight.delete(key); });
     inFlight.set(key, run);
     return run;
   }
 
-  return runAskCortexUncached(question, repoPath, projectId, key, bypassCache);
+  return runAskCortexUncached(question, repoPath, projectId, key, bypassCache, { terse });
 }
 
 const inFlight = new Map<string, Promise<AskCortexResult>>();
@@ -280,11 +285,12 @@ async function runAskCortexUncached(
   projectId: string | undefined,
   key: string,
   bypassCache: boolean,
+  composeOptions: ComposeOptions,
 ): Promise<AskCortexResult> {
   // Semantic cache (#1226) — a cosine-near duplicate of an already-answered
   // question replays its answer instead of re-running the pipeline.
   if (!bypassCache) {
-    const semantic = await getSemanticCached(question, scopeKey(repoPath, projectId));
+    const semantic = await getSemanticCached(question, scopeKey(repoPath, projectId, composeOptions.terse === true));
     if (semantic) {
       return {
         answer: semantic.answer,
@@ -379,9 +385,9 @@ async function runAskCortexUncached(
   };
 
   if (classification.class === 'A') {
-    await composeClassA(question, repoPath, topRows, emit);
+    await composeClassA(question, repoPath, topRows, emit, composeOptions);
   } else {
-    await composeClassB(question, repoPath, topRows, emit);
+    await composeClassB(question, repoPath, topRows, emit, composeOptions);
   }
 
   const result: AskCortexResult = {
@@ -395,7 +401,11 @@ async function runAskCortexUncached(
   };
 
   if (!bypassCache) {
-    setCache(key, { answer: result.answer, citations, scope: scopeKey(repoPath, projectId) });
+    setCache(key, {
+      answer: result.answer,
+      citations,
+      scope: scopeKey(repoPath, projectId, composeOptions.terse === true),
+    });
     attachVector(key, question);
   }
   return result;
@@ -415,10 +425,11 @@ export async function runAskPipeline(
   emit: SseEmit,
   force = false,
   requestedProjectId?: string | null,
+  options: ComposeOptions = {},
 ): Promise<void> {
   const projectId = requestedProjectId?.trim()
     || (await getActiveProjectScopeForRepo(repoPath)).projectId;
-  const key = cacheKey(question, repoPath, projectId);
+  const key = cacheKey(question, repoPath, projectId, options.terse === true);
 
   if (!force) {
     const cached = getCached(key);
@@ -432,7 +443,7 @@ export async function runAskPipeline(
       return;
     }
     // Semantic cache (#1226) — replay a cosine-near duplicate's answer.
-    const semantic = await getSemanticCached(question, scopeKey(repoPath, projectId));
+    const semantic = await getSemanticCached(question, scopeKey(repoPath, projectId, options.terse === true));
     if (semantic) {
       emit('token', { text: semantic.answer });
       for (const c of semantic.citations) {
@@ -523,9 +534,9 @@ export async function runAskPipeline(
   };
 
   if (classification.class === 'A') {
-    await composeClassA(question, repoPath, topRows, trackingEmit);
+    await composeClassA(question, repoPath, topRows, trackingEmit, options);
   } else {
-    await composeClassB(question, repoPath, topRows, trackingEmit);
+    await composeClassB(question, repoPath, topRows, trackingEmit, options);
   }
 
   // Store in cache for follow-up identical questions.
@@ -533,7 +544,7 @@ export async function runAskPipeline(
     setCache(key, {
       answer: cachedAnswer.trim(),
       citations: cachedCitations,
-      scope: scopeKey(repoPath, projectId),
+      scope: scopeKey(repoPath, projectId, options.terse === true),
     });
     attachVector(key, question);
   }
