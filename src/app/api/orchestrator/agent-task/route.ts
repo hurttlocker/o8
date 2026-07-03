@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
+import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
 import { performRuntimeAction } from '@/lib/runtime/actions';
 import { codename } from '@/lib/agents/codename';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
@@ -78,6 +79,7 @@ export async function POST(request: NextRequest) {
   if (!result.ok) {
     return operatorError('steer_failed', result.note || `Could not reach ${resolvedName}.`, 200);
   }
+  rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
 
   return operatorSuccess({
     steered: resolvedName,

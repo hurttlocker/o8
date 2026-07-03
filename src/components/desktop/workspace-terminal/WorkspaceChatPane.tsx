@@ -5,14 +5,9 @@ import {
   AlertCircle,
   ArrowDown,
   CheckCircle2,
-  FileText,
-  Lightbulb,
   MessageSquare,
-  Search,
 } from '../lucide-shims';
-import { useLaneArchivedView } from '@/app/dashboard/hooks/useLaneArchivedSet';
 import { useSharedDesktopWs } from '@/components/desktop/hooks/DesktopWebSocketContext';
-import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { IssueLinkPickerModal, type LinkedIssueRef } from '@/components/desktop/IssueLinkPicker';
 import type { RealtimeEventEnvelope, RealtimeMutationRecord } from '@/lib/realtime/types';
 import {
@@ -25,6 +20,7 @@ import {
 } from '@/components/desktop/workspace-terminal/constants';
 import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { useWorkspaceChatPane } from '@/components/desktop/workspace-terminal/useWorkspaceChatPane';
+import { useWorkspaceChatLifecycle } from '@/components/desktop/workspace-terminal/useWorkspaceChatLifecycle';
 import { WorkspaceChatComposer } from '@/components/desktop/workspace-terminal/WorkspaceChatComposer';
 import { ChatPacketStatusBanner } from '@/components/desktop/workspace-terminal/ChatPacketStatusBanner';
 import { ChatPacketReviewDiff } from '@/components/desktop/workspace-terminal/ChatPacketReviewDiff';
@@ -33,6 +29,7 @@ import {
   WorkspaceRichChatEvents,
   stripWorkspaceRichRendererFallback,
 } from '@/components/desktop/workspace-terminal/chat-renderers/WorkspaceRichChatEvents';
+import { PromptGlyph, looksLikePacketPrompt } from '@/components/desktop/workspace-terminal/workspace-chat-prompt';
 
 const LazyMessageBubble = lazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.MessageBubble })));
 const LazyChainOfThought = lazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.ChainOfThought })));
@@ -48,26 +45,6 @@ interface WorkspaceChatPaneProps {
   onLinkedIssueChange: (tabId: string, issue: LinkedIssueRef | null) => void;
   onSaveCheckpoint: (tabId: string) => void;
   onRestoreLatestCheckpoint: (tabId: string) => void;
-}
-
-function PromptGlyph({ icon }: { icon: string }) {
-  if (icon === 'Idea') return <Lightbulb size={16} />;
-  if (icon === 'Search') return <Search size={16} />;
-  if (icon === 'Test') return <AlertCircle size={16} />;
-  return <FileText size={16} />;
-}
-
-// A dispatched-packet prompt is a large, structured brief. We collapse it into a
-// PacketHeaderCard so the transcript doesn't open with a wall of text — but the
-// gate used to require `tab.orchestrationPacket`, which is dropped when a tab is
-// reconstructed from session discovery (the packet metadata doesn't survive).
-// Detect the prompt by the markers the dispatcher always emits so the card shows
-// regardless of whether the badge metadata is present.
-function looksLikePacketPrompt(text: string): boolean {
-  if (!text || text.length < 400) return false;
-  return /##\s*Project\s+(Brief|Scope|Directives)\b/i.test(text)
-    || /(^|\n)\s*Packet:\s/i.test(text)
-    || /(^|\n)\s*STRICT SCOPE:/i.test(text);
 }
 
 function WorkspaceChatPaneBase({
@@ -94,85 +71,11 @@ function WorkspaceChatPaneBase({
     onConsumeDraftInjection,
   });
 
-  // Live packet status — the orchestrationPacket badge stored on the tab is
-  // a snapshot at openCliChatSession time. The mission state knows the
-  // current status (running → awaiting_review → released → archived);
-  // resolve it by sessionKey so the PacketHeaderCard reflects reality.
-  const orchestratorData = useOrchestratorData();
-  const livePacket = useMemo(() => {
-    if (!tab.orchestrationPacket) return null;
-    const targetSessionKey = chat.normalizedSessionKey ?? tab.id;
-    const targetPacketId = tab.orchestrationPacket.packetId ?? null;
-    return orchestratorData?.missionState?.packets.find((p) => (
-      (targetPacketId && p.id === targetPacketId)
-      || (targetSessionKey && p.lane?.sessionKey === targetSessionKey)
-    )) ?? null;
-  }, [chat.normalizedSessionKey, orchestratorData?.missionState?.packets, tab.id, tab.orchestrationPacket]);
-  const liveStatus = livePacket?.status ?? tab.orchestrationPacket?.status ?? null;
-
-  // When the lane bound to this tab's session has been archived (reviewed +
-  // merged, reaped for a missing worktree, or explicitly archived by the
-  // operator), we flip the composer into read-only mode with a dismissible
-  // banner. The transcript stays visible so the user can still scroll the
-  // history, but they can't send new turns to a retired session.
-  const archivedLaneView = useLaneArchivedView();
-  // A lane is "retired" (merged + archived → read-only) when ANY reliable
-  // signal says so. We OR several because the session-key form drifts between
-  // raw (`codex-owned:abc`), normalized (`codex:abc`), and whatever the
-  // lane-lifecycle event payload carried. The old check keyed only on the raw
-  // `tab.chatSessionKey`, so two sibling tabs from the same mission disagreed —
-  // one flipped to read-only while the other stayed stuck on "Agent working…".
-  // Packet status + the archived packetId set don't drift, so they anchor it.
-  const laneRetired = useMemo(() => {
-    if (tab.kind !== 'chat') return false;
-    if (liveStatus === 'released' || liveStatus === 'archived') return true;
-    const packetId = livePacket?.id ?? tab.orchestrationPacket?.packetId ?? null;
-    if (packetId && archivedLaneView.packetIds.has(packetId)) return true;
-    const candidateKeys = [tab.chatSessionKey, chat.normalizedSessionKey, livePacket?.lane?.sessionKey];
-    return candidateKeys.some((key) => Boolean(key) && archivedLaneView.sessionKeys.has(key as string));
-  }, [tab.kind, tab.chatSessionKey, tab.orchestrationPacket?.packetId, chat.normalizedSessionKey, liveStatus, livePacket, archivedLaneView]);
-
-  // A retired lane is NOT necessarily a merged one. The old banner said "Merged"
-  // for every archived lane — including ones the operator stopped or reset, and
-  // ones that failed — which is a lie (operator flagged it 2026-06-22). Derive
-  // the real outcome: `releaseState === 'released'` is the sticky merge signal
-  // (set at merge, survives archival even when status flips to 'archived'); a
-  // `failed` status is a failure; anything else retired was archived without
-  // ever merging. Only the genuine-merge branch gets the green "Merged" check.
-  const retirement = useMemo(() => {
-    const merged = liveStatus === 'released' || livePacket?.releaseState === 'released';
-    if (merged) {
-      return {
-        merged: true,
-        tone: '#22c55e',
-        iconBg: 'rgba(34, 197, 94, 0.10)',
-        heroTitle: 'Merged & archived',
-        heroSub: `This ${chat.runtimeLabel} session shipped and its lane was archived. The live transcript isn’t available here.`,
-        bannerLabel: 'Merged · read-only',
-        bannerSub: 'This session’s lane merged and was archived. The transcript stays for review.',
-      };
-    }
-    if (liveStatus === 'failed') {
-      return {
-        merged: false,
-        tone: '#f59e0b',
-        iconBg: 'rgba(245, 158, 11, 0.10)',
-        heroTitle: 'Ended without merging',
-        heroSub: `This ${chat.runtimeLabel} session ended without merging and its lane was archived.`,
-        bannerLabel: 'Ended · read-only',
-        bannerSub: 'This session ended without merging. The transcript stays for review.',
-      };
-    }
-    return {
-      merged: false,
-      tone: 'var(--t-text-muted)',
-      iconBg: 'var(--t-panel)',
-      heroTitle: 'Archived',
-      heroSub: `This ${chat.runtimeLabel} session’s lane was archived without merging.`,
-      bannerLabel: 'Archived · read-only',
-      bannerSub: 'This session’s lane was archived without merging. The transcript stays for review.',
-    };
-  }, [liveStatus, livePacket?.releaseState, chat.runtimeLabel]);
+  const { orchestratorData, livePacket, liveStatus, laneRetired, retirement } = useWorkspaceChatLifecycle({
+    tab,
+    normalizedSessionKey: chat.normalizedSessionKey,
+    runtimeLabel: chat.runtimeLabel,
+  });
 
   // Runtime fallback notifications: when a Gemini model quotas out, the
   // adapter picks the next model in GEMINI_FALLBACK_CASCADE before retrying.

@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
-import { listLanes, listActiveLanes } from '@/lib/lane/registry';
+import { getLaneEvents, listLanes, listActiveLanes } from '@/lib/lane/registry';
+import { summarizeLaneArchive } from '@/lib/lane/archive-summary';
 import { collapseArchivedLanesByTask } from '@/lib/lanes/collapse-archived-by-task';
 import { codename } from '@/lib/agents/codename';
 import { dispatch } from '@/lib/lane/commands';
@@ -44,6 +45,9 @@ export async function GET(req: NextRequest) {
   const lanes = resolvedLanes.map((lane) => ({
     ...lane,
     codename: codename(lane.id),
+    archiveSummary: lane.status === 'archived' || lane.status === 'completed'
+      ? summarizeLaneArchive(lane, getLaneEvents(lane.id, 80))
+      : null,
   }));
 
   return NextResponse.json({ lanes }, {

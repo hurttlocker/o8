@@ -7,6 +7,13 @@ interface LaneRecord {
   sessionKey: string | null;
   packetId: string | null;
   status: string;
+  archiveSummary?: LaneArchiveSummary | null;
+}
+
+interface LaneArchiveSummary {
+  source: string;
+  message: string;
+  preservedBranch?: string | null;
 }
 
 interface LaneLifecycleEventData {
@@ -23,6 +30,22 @@ interface LaneLifecycleEventData {
 export interface ArchivedLaneView {
   sessionKeys: Set<string>;
   packetIds: Set<string>;
+  archiveSummariesBySessionKey: Map<string, LaneArchiveSummary>;
+  archiveSummariesByPacketId: Map<string, LaneArchiveSummary>;
+}
+
+function archiveSummarySame(left: LaneArchiveSummary | undefined, right: LaneArchiveSummary | undefined): boolean {
+  return left?.source === right?.source
+    && left?.message === right?.message
+    && left?.preservedBranch === right?.preservedBranch;
+}
+
+function archiveSummaryMapsSame(
+  left: Map<string, LaneArchiveSummary>,
+  right: Map<string, LaneArchiveSummary>,
+): boolean {
+  return left.size === right.size
+    && [...right].every(([key, value]) => archiveSummarySame(left.get(key), value));
 }
 
 // Terminal lane statuses that mean "retired" — the session is done and the
@@ -66,6 +89,8 @@ export function useLaneArchivedView(): ArchivedLaneView {
   const [state, setState] = useState<ArchivedLaneView>(() => ({
     sessionKeys: new Set<string>(),
     packetIds: new Set<string>(),
+    archiveSummariesBySessionKey: new Map<string, LaneArchiveSummary>(),
+    archiveSummariesByPacketId: new Map<string, LaneArchiveSummary>(),
   }));
   const inflightRef = useRef(false);
   const laneSessionKeysRef = useRef<Map<string, Set<string>>>(new Map());
@@ -79,13 +104,22 @@ export function useLaneArchivedView(): ArchivedLaneView {
       const data = await response.json() as { lanes?: LaneRecord[] };
       const nextSessions = new Set<string>();
       const nextPackets = new Set<string>();
+      const nextSessionSummaries = new Map<string, LaneArchiveSummary>();
+      const nextPacketSummaries = new Map<string, LaneArchiveSummary>();
       for (const lane of data.lanes ?? []) {
         if (!RETIRED_LANE_STATUSES.has(lane.status)) continue;
         if (lane.sessionKey) nextSessions.add(lane.sessionKey);
         if (lane.packetId) nextPackets.add(lane.packetId);
+        if (lane.archiveSummary) {
+          if (lane.sessionKey) nextSessionSummaries.set(lane.sessionKey, lane.archiveSummary);
+          if (lane.packetId) nextPacketSummaries.set(lane.packetId, lane.archiveSummary);
+        }
         const accumulated = laneSessionKeysRef.current.get(lane.id);
         if (accumulated) {
-          for (const key of accumulated) nextSessions.add(key);
+          for (const key of accumulated) {
+            nextSessions.add(key);
+            if (lane.archiveSummary) nextSessionSummaries.set(key, lane.archiveSummary);
+          }
         }
       }
       setState((current) => {
@@ -93,9 +127,16 @@ export function useLaneArchivedView(): ArchivedLaneView {
           && [...nextSessions].every((key) => current.sessionKeys.has(key));
         const packetsSame = current.packetIds.size === nextPackets.size
           && [...nextPackets].every((id) => current.packetIds.has(id));
-        return sessionsSame && packetsSame
+        const sessionSummariesSame = archiveSummaryMapsSame(current.archiveSummariesBySessionKey, nextSessionSummaries);
+        const packetSummariesSame = archiveSummaryMapsSame(current.archiveSummariesByPacketId, nextPacketSummaries);
+        return sessionsSame && packetsSame && sessionSummariesSame && packetSummariesSame
           ? current
-          : { sessionKeys: nextSessions, packetIds: nextPackets };
+          : {
+              sessionKeys: nextSessions,
+              packetIds: nextPackets,
+              archiveSummariesBySessionKey: nextSessionSummaries,
+              archiveSummariesByPacketId: nextPacketSummaries,
+            };
       });
     } catch {
       // Lane derivation is best-effort — on fetch failure we keep the last
@@ -145,7 +186,7 @@ export function useLaneArchivedView(): ArchivedLaneView {
             packets.add(packetId);
             changed = true;
           }
-          return changed ? { sessionKeys: sessions, packetIds: packets } : current;
+          return changed ? { ...current, sessionKeys: sessions, packetIds: packets } : current;
         });
       }
       void fetchOnce();
