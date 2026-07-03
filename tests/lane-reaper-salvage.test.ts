@@ -74,8 +74,14 @@ function isDirty(cwd: string): boolean {
 }
 
 function writeOwnedSession(surfaceId: string, activeRun?: { pid: number }) {
+  // Self-provision the owned root: the liveness suite's afterEach deletes the
+  // env var, so each test that writes a session gets a fresh isolated root.
+  if (!process.env.CORTEX_IDE_OWNED_CODEX_ROOT) {
+    ownedRoot = mkdtempSync(join(tmpdir(), 'o8-owned-codex-'));
+    process.env.CORTEX_IDE_OWNED_CODEX_ROOT = ownedRoot;
+  }
   const id = surfaceId.replace(/^codex-owned:/, '');
-  const dir = join(process.env.CORTEX_IDE_OWNED_CODEX_ROOT!, id);
+  const dir = join(process.env.CORTEX_IDE_OWNED_CODEX_ROOT, id);
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, 'session.json'), JSON.stringify({
     surfaceId,
