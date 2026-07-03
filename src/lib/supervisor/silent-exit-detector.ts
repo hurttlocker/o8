@@ -72,9 +72,16 @@ const SILENT_EXIT_DEAD_GRACE_MS = 45_000;
 const GIT_COMMAND_TIMEOUT_MS = 15_000;
 const GIT_COMMAND_MAX_BUFFER = 10 * 1024 * 1024;
 
-const INTERESTING_LANE_STATUSES = new Set<Lane['status']>([
+// Pipeline root fix (2026-07-03): `reviewing` is NOT interesting to this
+// detector. A lane in `reviewing` has finished its work — its worker process
+// being dead is the NORMAL state, not a silent exit. Probing reviewing lanes
+// made this detector re-triage clean `agent_completed` completions ~60s later
+// and overwrite them with `silent_exit_work_present`, which fed the terminal
+// archiver and buried review-ready work (observed live, wave-1B). Silent-exit
+// detection is for lanes whose process death is UNEXPECTED: running work and
+// input waits only.
+export const INTERESTING_LANE_STATUSES = new Set<Lane['status']>([
   'running',
-  'reviewing',
   'awaiting_input',
 ]);
 
@@ -467,8 +474,13 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
 // Archives BOTH the lane row and the owned-codex session dir so the UI/inventory
 // clears on its own.
 const ARCHIVE_DEAD_LANE_GRACE_MS = 30 * 60 * 1000;
-const DEAD_LANE_EVENT_LABELS = new Set<string>([
-  'silent_exit_work_present',
+// Pipeline root fix (2026-07-03): `silent_exit_work_present` REMOVED from the
+// terminally-dead set. Work-present means committed, reviewable output exists —
+// that lane is REVIEW-READY, not dead, and the operator (or orchestrator) owns
+// its disposition. This archiver buried three review-ready wave-1B lanes
+// (worktrees pruned, branches deleted) 30 minutes after a mislabel. Only
+// genuinely workless terminal states are auto-archivable.
+export const DEAD_LANE_EVENT_LABELS = new Set<string>([
   'silent_exit_no_work',
   'silent_exit_verification_failed',
   'zombie_reap',
@@ -476,8 +488,10 @@ const DEAD_LANE_EVENT_LABELS = new Set<string>([
 const ARCHIVABLE_STALE_STATUSES = new Set<Lane['status']>(['reviewing', 'recovering', 'awaiting_input']);
 
 async function archiveTerminallyDeadLanes(now: number): Promise<void> {
-  const { listLanes, archiveLane } = await import('@/lib/lane/registry');
-  const stale = listLanes().filter((lane) => {
+  // listActiveLanes, not listLanes — the unfiltered read walked every archived
+  // row every 30s tick for nothing (perf: O(all-ever-lanes) → O(active)).
+  const { listActiveLanes: listActive, archiveLane } = await import('@/lib/lane/registry');
+  const stale = listActive().filter((lane) => {
     if (!ARCHIVABLE_STALE_STATUSES.has(lane.status)) return false;
     if (!lane.lastEventLabel || !DEAD_LANE_EVENT_LABELS.has(lane.lastEventLabel)) return false;
     const ms = lane.lastEventAt ? new Date(lane.lastEventAt).getTime() : 0;

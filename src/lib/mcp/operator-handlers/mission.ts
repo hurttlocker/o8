@@ -822,13 +822,17 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const comparisonModels = comparisonModelsRaw.length > 0 ? comparisonModelsRaw : undefined;
 
     if (inlineIssues) {
-      // #453 — Auto-assign synthetic numbers starting at 90001 when not provided
+      // #453 — Auto-assign synthetic numbers when not provided. UNIQUE per
+      // creation (pipeline root fix 2026-07-03): fixed 90001+index numbers made
+      // every inline mission collide with every prior one, and branch cleanup
+      // archived the older mission's live lanes on the collision.
+      const syntheticBase = 90_000_000_000 + Date.now() * 10;
       const parsed = inlineIssues.map((entry, index) => {
         if (typeof entry !== 'object' || entry === null) throw new Error('Each inline issue must be an object.');
         const e = entry as Record<string, unknown>;
         const title = typeof e.title === 'string' ? e.title.trim() : '';
         if (!title) throw new Error('Each inline issue must have a title.');
-        const syntheticNumber = 90001 + index;
+        const syntheticNumber = syntheticBase + index * 10;
         return { number: syntheticNumber, title, body: typeof e.body === 'string' ? e.body : '' };
       });
       const createResult = await createMissionInline({

@@ -106,3 +106,25 @@ export function notifyOrchestratorReady(opts: {
     data: { threadId: opts.threadId, kind: 'orchestrator' },
   });
 }
+
+/**
+ * Pipeline root fix (2026-07-03) — the missing "work is ready for review"
+ * trigger. A lane entering `reviewing` with committed work used to emit only
+ * the lane-lifecycle WS event + MCP ring-buffer entry; no push ever fired, so
+ * an away operator (or a phone) never heard that review-ready work existed —
+ * and stale review-ready lanes aged into reaper territory unseen.
+ */
+export function notifyReviewReady(opts: {
+  laneId: string;
+  label: string;
+  packetId?: string | null;
+  repoPath?: string;
+}): void {
+  notifyAllInBackground({
+    title: 'Ready for review',
+    body: opts.label,
+    tag: `review-ready-${opts.laneId}`,
+    url: '/mobile?view=agents',
+    data: { laneId: opts.laneId, packetId: opts.packetId ?? undefined, repoPath: opts.repoPath, kind: 'review-ready' },
+  });
+}
