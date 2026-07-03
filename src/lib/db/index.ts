@@ -125,7 +125,6 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureApprovalEventsTable(sqlite);
   ensureExternalMcpServerColumns(sqlite);
   ensureLaneHeartbeatColumns(sqlite);
-  ensureLanePrNumberColumn(sqlite);
   ensurePushSubscriptionsTable(sqlite);
   ensureMobileLiveActivityTokensTable(sqlite);
   ensureProjectsTables(sqlite);
@@ -712,8 +711,7 @@ function ensureTables(sqlite: Database.Database): void {
       base_branch TEXT NOT NULL,
       runtime TEXT NOT NULL,
       session_key TEXT,
-      packet_id TEXT,
-      pr_number INTEGER,
+      packet_id TEXT, pr_number INTEGER,
       status TEXT NOT NULL,
       ownership TEXT NOT NULL,
       writer_token TEXT,
@@ -1085,14 +1083,8 @@ function ensureChatHistoryColumns(sqlite: Database.Database): void {
 }
 
 function ensureLaneHeartbeatColumns(sqlite: Database.Database): void {
-  if (!tableColumnExists(sqlite, 'lanes', 'last_heartbeat_at')) {
-    addColumnTolerant(sqlite, 'ALTER TABLE lanes ADD COLUMN last_heartbeat_at INTEGER');
-  }
-}
-
-function ensureLanePrNumberColumn(sqlite: Database.Database): void {
-  if (!tableColumnExists(sqlite, 'lanes', 'pr_number')) {
-    addColumnTolerant(sqlite, 'ALTER TABLE lanes ADD COLUMN pr_number INTEGER');
+  for (const [column, type] of Object.entries({ last_heartbeat_at: 'INTEGER', pr_number: 'INTEGER' })) {
+    if (!tableColumnExists(sqlite, 'lanes', column)) addColumnTolerant(sqlite, `ALTER TABLE lanes ADD COLUMN ${column} ${type}`);
   }
 }
 

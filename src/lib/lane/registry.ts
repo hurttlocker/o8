@@ -84,8 +84,7 @@ function mapLaneRow(row: LaneRow | undefined): Lane | null {
     baseBranch: row.baseBranch,
     runtime: row.runtime as LaneRuntime,
     sessionKey: row.sessionKey,
-    packetId: row.packetId,
-    prNumber: row.prNumber,
+    packetId: row.packetId, prNumber: row.prNumber,
     status: row.status as LaneStatus,
     ownership: row.ownership as LaneOwnership,
     writerToken: row.writerToken,
@@ -293,8 +292,7 @@ export function createLane(opts: {
     baseBranch: opts.baseBranch ?? 'main',
     runtime: opts.runtime,
     sessionKey: opts.sessionKey ?? null,
-    packetId: opts.packetId ?? null,
-    prNumber: null,
+    packetId: opts.packetId ?? null, prNumber: null,
     status: 'idle',
     ownership: opts.ownership ?? 'managed',
     writerToken: null,
@@ -436,8 +434,7 @@ export function updateLane(
       'lastHeartbeatAt',
       'lastEventAt',
       'lastEventLabel',
-      'packetId',
-      'prNumber',
+      'packetId', 'prNumber',
     ];
 
     for (const key of updatableKeys) {
