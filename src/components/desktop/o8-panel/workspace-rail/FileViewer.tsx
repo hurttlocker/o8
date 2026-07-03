@@ -184,6 +184,7 @@ export function FileViewer({
     ? assetUrlFor(repoPath, selectedFile)
     : null;
   const fileName = selectedFile?.split('/').pop() ?? selectedFile ?? 'file';
+  const isAbsolutePath = selectedFile?.startsWith('/') ?? false;
 
   useEffect(() => {
     if (!selectedFile) {
@@ -194,7 +195,7 @@ export function FileViewer({
       setLoading(false);
       return;
     }
-    if (!repoPath) {
+    if (!repoPath && !isAbsolutePath) {
       setFileContent(null);
       setEditContent('');
       setError('Select a repo before loading file content.');
@@ -218,7 +219,8 @@ export function FileViewer({
     setFileContent(null);
     setEditContent('');
     setDirty(false);
-    const params = new URLSearchParams({ path: selectedFile, workspace: repoPath });
+    const params = new URLSearchParams({ path: selectedFile });
+    if (repoPath) params.set('workspace', repoPath);
     fetch(`/api/v2/files?${params.toString()}`)
       .then((response) => response.json() as Promise<FileResponse>)
       .then((data) => {
@@ -244,17 +246,20 @@ export function FileViewer({
       });
 
     return () => { cancelled = true; };
-  }, [fileKind, repoPath, selectedFile]);
+  }, [fileKind, isAbsolutePath, repoPath, selectedFile]);
 
   const handleSave = useCallback(async () => {
-    if (!selectedFile || !repoPath || !dirty) return;
+    if (!selectedFile || (!repoPath && !isAbsolutePath) || !dirty) return;
     setSaving(true);
     setError(null);
     try {
+      const body = repoPath
+        ? { path: selectedFile, content: editContent, workspace: repoPath }
+        : { path: selectedFile, content: editContent };
       const response = await fetch('/api/v2/files', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ path: selectedFile, content: editContent, workspace: repoPath }),
+        body: JSON.stringify(body),
       });
       const data = await response.json().catch(() => ({})) as FileResponse;
       if (!response.ok) throw new Error(data.error || 'Unable to save file');
@@ -265,7 +270,7 @@ export function FileViewer({
     } finally {
       setSaving(false);
     }
-  }, [dirty, editContent, repoPath, selectedFile]);
+  }, [dirty, editContent, isAbsolutePath, repoPath, selectedFile]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
