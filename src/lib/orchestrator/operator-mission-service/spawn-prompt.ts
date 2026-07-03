@@ -30,7 +30,7 @@ export function clampSpawnCount(count: number | undefined): number {
  *
  * For count > 1 the agents race the SAME task in independent worktrees; titles
  * carry an `(i/N)` suffix so the per-agent branch slugs (and card labels) stay
- * unique — same-title inline issues would collide on `inline/{slug}`.
+ * unique — they feed the mission branch target's `inline/{number}-{slug}` prefix.
  */
 export function buildInlineIssuesFromPrompt(task: string, count = 1): LoadedIssue[] {
   const body = task.trim();
