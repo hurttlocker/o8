@@ -29,7 +29,7 @@ describe('deriveParkedLanes', () => {
     expect(deriveParkedLanes([])).toEqual([]);
   });
 
-  it('keeps only reviewing lanes, drops in-motion + terminal + escalation states', () => {
+  it('keeps reviewing + escalation states, drops in-motion + terminal states', () => {
     const lanes = [
       lane({ laneId: 'a', status: 'reviewing' }),
       lane({ laneId: 'b', status: 'running' }),
@@ -39,7 +39,30 @@ describe('deriveParkedLanes', () => {
       lane({ laneId: 'f', status: 'completed' }),
       lane({ laneId: 'g', status: 'launching' }),
     ];
-    expect(deriveParkedLanes(lanes).map((p) => p.laneId)).toEqual(['a']);
+    // escalated first — the strongest operator-attention signal leads the pill
+    expect(deriveParkedLanes(lanes).map((p) => p.laneId)).toEqual(['c', 'd', 'a']);
+  });
+
+  it('buckets escalation-chain lanes as escalated, regardless of review approvals', () => {
+    const lanes = [
+      lane({ laneId: 'esc-orch', status: 'awaiting_orchestrator', packetId: 'pkt-esc-1' }),
+      lane({ laneId: 'esc-human', status: 'awaiting_human', packetId: 'pkt-esc-2' }),
+      lane({ laneId: 'needs', status: 'reviewing', packetId: 'pkt-needs' }),
+      lane({ laneId: 'approved', status: 'reviewing', packetId: 'pkt-approved' }),
+    ];
+    const reviews = [approvedReview('pkt-approved'), approvedReview('pkt-esc-1')];
+
+    const buckets = deriveParkedLaneBuckets(lanes, reviews);
+
+    expect(buckets.escalated.map((p) => p.laneId)).toEqual(['esc-orch', 'esc-human']);
+    expect(buckets.needsReview.map((p) => p.laneId)).toEqual(['needs']);
+    expect(buckets.awaitingMerge.map((p) => p.laneId)).toEqual(['approved']);
+    expect(buckets.all.map((p) => p.reviewState)).toEqual(['escalated', 'escalated', 'needs-review', 'awaiting-merge']);
+  });
+
+  it('drops an escalated lane whose packet is closed', () => {
+    const lanes = [lane({ laneId: 'esc', status: 'awaiting_human', packetId: 'pkt-closed' })];
+    expect(deriveParkedLanes(lanes, new Set(['pkt-closed']))).toEqual([]);
   });
 
   it('carries branch/repoPath/label through for click routing', () => {
