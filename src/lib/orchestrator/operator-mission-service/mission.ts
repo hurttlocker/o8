@@ -38,10 +38,15 @@ import type {
   MissionStatusInput,
 } from './types';
 
+const INLINE_BRANCH_MAX_LENGTH = 60;
+
 function branchTargetForIssue(issue: LoadedIssue) {
-  return isInlineIssue(issue)
-    ? `inline/${slugify(issue.title)}`
-    : `issue/${issue.number}-${slugify(issue.title)}`;
+  if (!isInlineIssue(issue)) {
+    return `issue/${issue.number}-${slugify(issue.title)}`;
+  }
+
+  const prefix = `inline/${issue.number}-`;
+  return `${prefix}${slugify(issue.title, Math.max(1, INLINE_BRANCH_MAX_LENGTH - prefix.length))}`;
 }
 
 export async function createMission(input: CreateMissionInput) {
@@ -114,7 +119,8 @@ export async function createMission(input: CreateMissionInput) {
         })
       : workerRouting;
 
-    // #453 — Inline tasks get "inline/{slug}" branches, not "issue/{number}-{slug}"
+    // #453/#inline-branch-hardening — Inline tasks carry their unique issue
+    // number in the branch to avoid same-title mission collisions.
     const branchTarget = branchTargets[index]!;
     const inlineLabel = hasInlineIssues ? referenceLabels[index] : undefined;
     const packetSummary = buildPacketSummary(issue, input.constraints, repoPath, inlineLabel);
