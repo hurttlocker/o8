@@ -9,9 +9,14 @@ export const dynamic = 'force-dynamic';
 
 import { NextRequest, NextResponse } from 'next/server';
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
-import { relative, dirname, resolve } from 'node:path';
+import { dirname, isAbsolute } from 'node:path';
 import { homedir } from 'node:os';
 import { getDefaultLlmRepoRoot, resolveRegisteredRepoScope } from '@/lib/llm/repo-scope';
+import {
+  ABSOLUTE_PATH_NOT_ALLOWLISTED,
+  resolveAllowedOperatorConfigPath,
+  resolveRepoRelativeFilePath,
+} from '@/lib/files/operator-config-docs';
 
 async function resolveRoot(workspace?: string | null) {
   if (!workspace) return getDefaultLlmRepoRoot();
@@ -24,11 +29,38 @@ async function resolveRoot(workspace?: string | null) {
   return repoRoot;
 }
 
-function safePath(root: string, path: string): string | null {
-  const resolved = resolve(root, path);
-  const rel = relative(root, resolved);
-  if (rel.startsWith('..') || rel.startsWith('/')) return null;
-  return resolved;
+async function resolveFileTarget(filePath: string, workspace?: string | null) {
+  if (isAbsolute(filePath)) {
+    const resolved = resolveAllowedOperatorConfigPath(filePath);
+    if (!resolved) {
+      return {
+        error: 'Absolute path is not allowlisted',
+        code: ABSOLUTE_PATH_NOT_ALLOWLISTED,
+        status: 400,
+      } as const;
+    }
+    return { resolved } as const;
+  }
+
+  const root = await resolveRoot(workspace);
+  if (!root) {
+    return {
+      error: 'Workspace is not registered',
+      code: 'workspace_not_registered',
+      status: 400,
+    } as const;
+  }
+
+  const resolved = resolveRepoRelativeFilePath(root, filePath);
+  if (!resolved) {
+    return {
+      error: 'Path outside repository',
+      code: 'path_outside_repository',
+      status: 400,
+    } as const;
+  }
+
+  return { resolved } as const;
 }
 
 export async function GET(request: NextRequest) {
@@ -37,22 +69,17 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: 'path required' }, { status: 400 });
   }
 
-  const root = await resolveRoot(request.nextUrl.searchParams.get('workspace'));
-  if (!root) {
-    return NextResponse.json({ error: 'Workspace is not registered' }, { status: 400 });
+  const target = await resolveFileTarget(path, request.nextUrl.searchParams.get('workspace'));
+  if ('error' in target) {
+    return NextResponse.json({ error: target.error, code: target.code }, { status: target.status });
   }
 
-  const resolved = safePath(root, path);
-  if (!resolved) {
-    return NextResponse.json({ error: 'Path outside repository' }, { status: 400 });
-  }
-
-  if (!existsSync(resolved)) {
+  if (!existsSync(target.resolved)) {
     return NextResponse.json({ error: 'File not found', exists: false }, { status: 404 });
   }
 
   try {
-    const content = readFileSync(resolved, 'utf-8');
+    const content = readFileSync(target.resolved, 'utf-8');
     return NextResponse.json({ content, path, exists: true });
   } catch (err) {
     return NextResponse.json({ error: String(err) }, { status: 500 });
@@ -68,28 +95,24 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'path and content required' }, { status: 400 });
     }
 
-    const root = await resolveRoot(workspace);
-    if (!root) {
-      return NextResponse.json({ error: 'Workspace is not registered' }, { status: 400 });
-    }
-    const resolved = safePath(root, path);
-    if (!resolved) {
-      return NextResponse.json({ error: 'Path outside repository' }, { status: 400 });
+    const target = await resolveFileTarget(path, workspace);
+    if ('error' in target) {
+      return NextResponse.json({ error: target.error, code: target.code }, { status: target.status });
     }
 
     // Read existing content for diff
     let oldContent: string | null = null;
-    if (existsSync(resolved)) {
-      oldContent = readFileSync(resolved, 'utf-8');
+    if (existsSync(target.resolved)) {
+      oldContent = readFileSync(target.resolved, 'utf-8');
     }
 
     // Ensure directory exists
-    const dir = dirname(resolved);
+    const dir = dirname(target.resolved);
     if (!existsSync(dir)) {
       mkdirSync(dir, { recursive: true });
     }
 
-    writeFileSync(resolved, content, 'utf-8');
+    writeFileSync(target.resolved, content, 'utf-8');
 
     return NextResponse.json({
       success: true,
