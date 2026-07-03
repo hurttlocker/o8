@@ -15,7 +15,7 @@
  *     Agent row + origin chip
  *   [repoB/spear]
  *     Agent row + origin chip
- *   [OTHER]              ← cross-repo agents (no bound repoPath)
+ *   [unregistered]       ← cross-repo agents (no registered repoPath)
  *     Agent row + origin chip
  *
  * Data sources (merged and deduped by sessionKey):
@@ -32,14 +32,14 @@
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from 'react';
 import { Folder as IconoirFolder } from 'iconoir-react';
-import { ClaudeIcon, CodexIcon } from '@/components/desktop/repo-registry/shared';
 import { ChevronDown, ChevronRight } from '@/components/desktop/lucide-shims';
 import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { callRetryPacket } from '@/lib/orchestrator/packet-actions';
 
 // ── Types ──
 
-type LaneStatus = 'idle' | 'launching' | 'running' | 'paused' | 'awaiting_input' | 'awaiting_orchestrator' | 'reviewing' | 'merging' | 'failed' | 'completed' | 'archived';
-type LaneRuntime = 'codex' | 'claude-code';
+type LaneStatus = 'idle' | 'launching' | 'running' | 'paused' | 'awaiting_input' | 'awaiting_human' | 'awaiting_orchestrator' | 'recovering' | 'reviewing' | 'merging' | 'failed' | 'completed' | 'archived';
+type LaneRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 type LaneOwnership = 'managed' | 'attached';
 
 interface LaneSummary {
@@ -74,6 +74,7 @@ interface RegisteredRepo {
   id: string;
   name: string;
   localPath: string;
+  exists?: boolean;
 }
 
 type AgentOrigin = 'CLI' | 'MCP' | 'Mobile' | 'Webhook' | 'Cloud';
@@ -89,12 +90,17 @@ interface ExtraAgentRow {
   lastActivityAt: number;
   sessionKey: string | null;
   repoPath: string | null;
+  packetId: string | null;
+  laneStatus: LaneStatus | null;
+  lastEventLabel: string | null;
 }
 
 interface ExtraAgentGroup {
   key: string;
   label: string;
   rows: ExtraAgentRow[];
+  tooltip: string;
+  unregistered: boolean;
 }
 
 export interface AgentPanelExtraAgentsProps {
@@ -102,14 +108,6 @@ export interface AgentPanelExtraAgentsProps {
 }
 
 // ── Constants ──
-
-const STATUS_COLORS: Record<VisualStatus, string> = {
-  running: '#22c55e',
-  waiting: '#f59e0b',
-  idle: '#9ca3af',
-  error: '#ef4444',
-  archived: '#6b7280',
-};
 
 const ORIGIN_LABELS: Record<AgentOrigin, string> = {
   CLI: 'CLI',
@@ -127,8 +125,8 @@ function classifyStatus(status: string | undefined): VisualStatus {
   const s = (status ?? '').toLowerCase();
   if (s === 'archived') return 'archived';
   if (s.includes('running') || s.includes('active') || s.includes('working') || s === 'merging') return 'running';
-  if (s.includes('wait') || s.includes('approval') || s.includes('pending') || s === 'reviewing' || s === 'awaiting_input' || s === 'awaiting_orchestrator') return 'waiting';
-  if (s.includes('error') || s.includes('fail')) return 'error';
+  if (s.includes('wait') || s.includes('approval') || s.includes('pending') || s === 'reviewing' || s === 'awaiting_input' || s === 'awaiting_human' || s === 'awaiting_orchestrator') return 'waiting';
+  if (s.includes('error') || s.includes('fail') || s === 'recovering') return 'error';
   return 'idle';
 }
 
@@ -152,6 +150,11 @@ function normalizePath(value: string | null | undefined): string | null {
   if (!value) return null;
   const trimmed = value.trim().replace(/\/+$/, '');
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function pathBasename(value: string | null | undefined): string {
+  const parts = normalizePath(value)?.split('/').filter(Boolean) ?? [];
+  return parts.at(-1) ?? 'Unbound';
 }
 
 function mapRepoPathToRegistered(
@@ -197,6 +200,9 @@ function buildRows(
       lastActivityAt: parseTimestamp(lane.lastEventAt),
       sessionKey: lane.sessionKey,
       repoPath: normalizePath(lane.repoPath),
+      packetId: lane.packetId,
+      laneStatus: lane.status,
+      lastEventLabel: lane.lastEventLabel,
     });
   }
 
@@ -215,6 +221,9 @@ function buildRows(
       lastActivityAt: parseTimestamp(agent.lastEventAt),
       sessionKey: agent.sessionKey,
       repoPath: normalizePath(agent.workspace),
+      packetId: null,
+      laneStatus: null,
+      lastEventLabel: null,
     });
   }
 
@@ -225,45 +234,41 @@ function groupRows(
   rows: ExtraAgentRow[],
   repos: RegisteredRepo[],
 ): ExtraAgentGroup[] {
-  const byRepo = new Map<string, ExtraAgentRow[]>();
-  const other: ExtraAgentRow[] = [];
-  const repoNameById = new Map<string, string>();
+  const byRepo = new Map<string, ExtraAgentGroup>();
 
   for (const row of rows) {
     const matched = mapRepoPathToRegistered(row.repoPath, repos);
-    if (matched) {
-      repoNameById.set(matched.id, matched.name);
-      const bucket = byRepo.get(matched.id) ?? [];
-      bucket.push(row);
-      byRepo.set(matched.id, bucket);
-    } else {
-      other.push(row);
+    const normalizedPath = normalizePath(row.repoPath);
+    // Registered repos consolidate under ONE group keyed by repo id — a
+    // dispatched packet's worktree path (.cortex-worktrees/packet-*) resolves
+    // to its parent repo, never its own group. Basename + unregistered
+    // treatment is only for paths that resolve to no registered repo.
+    const key = matched ? `id:${matched.id}` : normalizedPath ?? '__unbound__';
+    const unregistered = !matched || matched.exists === false;
+    const tooltip = matched
+      ? matched.exists === false
+        ? `${normalizePath(matched.localPath) ?? matched.localPath} · missing on disk`
+        : normalizePath(matched.localPath) ?? matched.localPath
+      : normalizedPath == null
+        ? 'No repo path reported'
+        : normalizedPath;
+    const existing = byRepo.get(key);
+    if (existing) {
+      existing.rows.push(row);
+      continue;
     }
+
+    byRepo.set(key, {
+      key: `repo:${key}`,
+      label: matched ? matched.name : pathBasename(normalizedPath),
+      tooltip,
+      rows: [row],
+      unregistered,
+    });
   }
 
-  const groups: ExtraAgentGroup[] = [];
-  const sortedRepoIds = [...byRepo.keys()].sort((a, b) => {
-    const nameA = repoNameById.get(a) ?? a;
-    const nameB = repoNameById.get(b) ?? b;
-    return nameA.localeCompare(nameB);
-  });
-  for (const repoId of sortedRepoIds) {
-    const bucket = byRepo.get(repoId) ?? [];
-    bucket.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-    groups.push({
-      key: `repo:${repoId}`,
-      label: repoNameById.get(repoId) ?? repoId,
-      rows: bucket,
-    });
-  }
-  if (other.length > 0) {
-    other.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
-    groups.push({
-      key: 'other',
-      label: 'Other',
-      rows: other,
-    });
-  }
+  const groups = [...byRepo.values()].sort((a, b) => a.label.localeCompare(b.label));
+  for (const group of groups) group.rows.sort((a, b) => b.lastActivityAt - a.lastActivityAt);
   return groups;
 }
 
@@ -298,43 +303,55 @@ function OriginChip({ origin }: { origin: AgentOrigin }) {
   );
 }
 
-function RuntimeGlyph({ runtime }: { runtime: string }) {
-  const r = runtime.toLowerCase();
-  if (r.includes('claude')) return <ClaudeIcon size={13} />;
-  if (r.includes('codex') || r.startsWith('gpt')) return <CodexIcon size={13} />;
-  return (
-    <span
-      aria-hidden="true"
-      style={{
-        width: 6,
-        height: 6,
-        borderRadius: '50%',
-        background: 'var(--t-text-muted)',
-        opacity: 0.6,
-        display: 'inline-block',
-      }}
-    />
-  );
+function rowDotState(row: ExtraAgentRow): AgentDotState {
+  const lane = row.laneStatus;
+  if (lane === 'completed') return 'merged';
+  if (lane === 'failed' || lane === 'recovering') return 'failed';
+  if (lane === 'archived') return 'idle';
+  if (row.status === 'running') return 'running';
+  if (row.status === 'waiting') return 'review';
+  return row.status === 'error' ? 'failed' : 'idle';
+}
+
+function rowStatusLabel(row: ExtraAgentRow): string {
+  const lane = row.laneStatus;
+  if (lane === 'reviewing') return row.lastEventLabel === 'pr_created' ? 'PR open' : 'review ready';
+  if (lane === 'awaiting_input') return 'needs input';
+  if (lane === 'awaiting_human') return 'needs you';
+  if (lane === 'awaiting_orchestrator') return 'escalated';
+  if (lane === 'failed' || lane === 'recovering') return 'failed';
+  if (lane === 'archived') return 'archived';
+  if (lane === 'completed') return 'merged';
+  if (lane === 'launching' || lane === 'running' || lane === 'merging') return 'running';
+  if (lane === 'paused' || lane === 'idle') return 'idle';
+  if (row.status === 'running') return 'running';
+  if (row.status === 'waiting') return 'review ready';
+  if (row.status === 'error') return 'failed';
+  return row.status === 'archived' ? 'archived' : 'idle';
 }
 
 function ExtraAgentRowView({
   row,
   onSelectSession,
   onOpenMenu,
+  busy,
+  onRetryPacket,
 }: {
   row: ExtraAgentRow;
   onSelectSession?: (sessionKey: string) => void;
   onOpenMenu?: (event: ReactMouseEvent, row: ExtraAgentRow) => void;
+  busy: boolean;
+  onRetryPacket?: (row: ExtraAgentRow) => void;
 }) {
   // Same status vocabulary as the chat rows (AgentStatusDot): accent pulse
   // while running — flips to the binary orbit once long-running — review
   // orange, failed red, idle ring. Keeps the panel unified with the history list.
-  const dotState: AgentDotState =
-    row.status === 'running' ? 'running'
-      : row.status === 'waiting' ? 'review'
-        : row.status === 'error' ? 'failed'
-          : 'idle';
+  const dotState = rowDotState(row);
+  const dotLabel = rowStatusLabel(row);
   const canFocus = Boolean(row.sessionKey && onSelectSession);
+  const canRetry = Boolean(row.packetId && onRetryPacket && (row.laneStatus === 'failed' || row.laneStatus === 'recovering'));
+  const canInteract = canFocus || canRetry;
+  const [hovered, setHovered] = useState(false);
   const handleClick = useCallback(() => {
     if (row.sessionKey) onSelectSession?.(row.sessionKey);
   }, [row.sessionKey, onSelectSession]);
@@ -342,7 +359,7 @@ function ExtraAgentRowView({
   return (
     <button
       type="button"
-      disabled={!canFocus}
+      disabled={!canInteract}
       onClick={handleClick}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -366,15 +383,16 @@ function ExtraAgentRowView({
         alignItems: 'center',
         gap: 9,
         textAlign: 'left',
-        cursor: canFocus ? 'pointer' : 'default',
+        cursor: canInteract ? 'pointer' : 'default',
         opacity: row.status === 'archived' ? 0.58 : 1,
         fontFamily: FONT,
       }}
       onMouseEnter={(e) => {
-        if (!canFocus) return;
-        e.currentTarget.style.background = 'var(--t-panel-hover, rgba(148,163,184,0.08))';
+        setHovered(true);
+        if (canInteract) e.currentTarget.style.background = 'var(--t-panel-hover)';
       }}
       onMouseLeave={(e) => {
+        setHovered(false);
         e.currentTarget.style.background = 'transparent';
       }}
     >
@@ -408,7 +426,50 @@ function ExtraAgentRowView({
         ) : null}
       </span>
       <OriginChip origin={row.origin} />
-      <AgentStatusDot state={dotState} />
+      {canRetry ? (
+        <span
+          title="Retry failed packet"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (busy) return;
+            onRetryPacket?.(row);
+          }}
+          style={{
+            minHeight: 22,
+            borderRadius: 7,
+            paddingTop: 0,
+            paddingRight: 7,
+            paddingBottom: 0,
+            paddingLeft: 7,
+            display: 'inline-flex',
+            alignItems: 'center',
+            background: 'transparent',
+            color: busy ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
+            cursor: busy ? 'default' : 'pointer',
+            fontFamily: FONT,
+            fontSize: 10.5,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            opacity: hovered ? 1 : 0,
+            pointerEvents: hovered ? 'auto' : 'none',
+            transition: 'opacity 120ms ease, background 120ms ease, color 120ms ease',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(event) => {
+            if (busy) return;
+            event.currentTarget.style.background = 'var(--t-hover)';
+            event.currentTarget.style.color = 'var(--t-text)';
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.background = 'transparent';
+            event.currentTarget.style.color = busy ? 'var(--t-text-faint)' : 'var(--t-text-muted)';
+          }}
+        >
+          {busy ? 'Retrying' : 'Retry'}
+        </span>
+      ) : null}
+      <AgentStatusDot state={dotState} label={dotLabel} />
     </button>
   );
 }
@@ -419,13 +480,18 @@ function GroupHeader({
   collapsible = false,
   collapsed = false,
   onToggle,
+  tooltip,
+  unregistered = false,
 }: {
   label: string;
   count?: number;
   collapsible?: boolean;
   collapsed?: boolean;
   onToggle?: () => void;
+  tooltip?: string;
+  unregistered?: boolean;
 }) {
+  const headerInk = unregistered ? 'var(--t-text-muted)' : 'var(--t-text-faint)';
   const body = (
     <>
       {collapsible ? (
@@ -446,7 +512,7 @@ function GroupHeader({
             display: 'inline-flex',
             alignItems: 'center',
             justifyContent: 'center',
-            color: 'var(--t-text-faint)',
+            color: headerInk,
             flexShrink: 0,
           }}
         >
@@ -459,7 +525,7 @@ function GroupHeader({
           minWidth: 0,
           fontSize: 10,
           fontWeight: 300,
-          color: 'var(--t-text-faint)',
+          color: headerInk,
           letterSpacing: '-0.1px',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
@@ -468,6 +534,11 @@ function GroupHeader({
       >
         {label}
       </span>
+      {unregistered ? (
+        <span style={{ fontSize: 9.5, fontWeight: 260, color: 'var(--t-text-faint)', letterSpacing: '-0.2px', flexShrink: 0 }}>
+          unregistered
+        </span>
+      ) : null}
       {typeof count === 'number' ? (
         <span
           style={{
@@ -501,7 +572,7 @@ function GroupHeader({
         type="button"
         onClick={onToggle}
         aria-expanded={!collapsed}
-        title={collapsed ? `Show ${label.toLowerCase()}` : `Hide ${label.toLowerCase()}`}
+        title={tooltip ?? (collapsed ? `Show ${label.toLowerCase()}` : `Hide ${label.toLowerCase()}`)}
         style={{
           ...commonStyle,
           width: '100%',
@@ -517,7 +588,7 @@ function GroupHeader({
     );
   }
 
-  return <div style={commonStyle}>{body}</div>;
+  return <div title={tooltip} style={commonStyle}>{body}</div>;
 }
 
 // ── Main component ──
@@ -609,12 +680,27 @@ function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsPro
       }
       if (reposRes.status === 'fulfilled' && reposRes.value.ok) {
         const json = await reposRes.value.json() as { repos?: RegisteredRepo[] };
-        setRepos((json.repos ?? []).map((r) => ({ id: r.id, name: r.name, localPath: r.localPath })));
+        setRepos((json.repos ?? []).map((r) => ({ id: r.id, name: r.name, localPath: r.localPath, exists: r.exists })));
       }
     } catch {
       // AbortError on teardown — silently ignore.
     }
   }, []);
+
+  const handleRetry = useCallback(async (row: ExtraAgentRow) => {
+    if (!row.packetId) return;
+    setBusy(true);
+    try {
+      const result = await callRetryPacket(row.packetId, 'spawned agent row retry');
+      if (result.ok) {
+        void fetchData();
+      } else {
+        console.warn('[spawned-agents] retry failed:', result.note ?? 'Retry failed');
+      }
+    } finally {
+      setBusy(false);
+    }
+  }, [fetchData]);
 
   useEffect(() => {
     void fetchData();
@@ -659,12 +745,14 @@ function AgentPanelExtraAgentsBase({ onSelectSession }: AgentPanelExtraAgentsPro
       />
       {!collapsed ? groups.map((group) => (
         <div key={group.key}>
-          <GroupHeader label={group.label} />
+          <GroupHeader label={group.label} tooltip={group.tooltip} unregistered={group.unregistered} />
           {group.rows.map((row) => (
             <ExtraAgentRowView
               key={row.key}
               row={row}
+              busy={busy}
               onSelectSession={onSelectSession}
+              onRetryPacket={handleRetry}
               onOpenMenu={(event, targetRow) => {
                 setActionMenu({ x: event.clientX, y: event.clientY, row: targetRow });
               }}

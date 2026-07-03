@@ -27,6 +27,50 @@ function RuntimeIcon({ runtime }: { runtime?: string | null }) {
   }
 }
 
+function packetDotLabel(packet: OrchestratorPacket): string {
+  switch (packetVisualState(packet)) {
+    case 'awaiting_review':
+      return 'review ready';
+    case 'failed':
+      return 'failed';
+    case 'merged':
+      return 'merged';
+    case 'running':
+      return 'running';
+    default:
+      return 'idle';
+  }
+}
+
+function sessionDotLabel(status: string): string {
+  switch (status.toLowerCase()) {
+    case 'reviewing':
+    case 'awaiting_review':
+      return 'review ready';
+    case 'awaiting_input':
+      return 'needs input';
+    case 'awaiting_human':
+      return 'needs you';
+    case 'awaiting_orchestrator':
+      return 'escalated';
+    case 'failed':
+    case 'blocked':
+      return 'failed';
+    case 'archived':
+      return 'archived';
+    case 'completed':
+    case 'merged':
+    case 'released':
+      return 'merged';
+    case 'running':
+    case 'launching':
+    case 'recovering':
+      return 'running';
+    default:
+      return 'idle';
+  }
+}
+
 export function StatusPill({ label, color }: { label: string; color: string }) {
   return (
     <span
@@ -89,7 +133,7 @@ export function PacketRow({
         paddingLeft: 14,
       }}
     >
-      <AgentStatusDot state={agentStatusToDotState(packetVisualState(packet))} />
+      <AgentStatusDot state={agentStatusToDotState(packetVisualState(packet))} label={packetDotLabel(packet)} />
       <RuntimeIcon runtime={packet.runtime} />
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
@@ -133,7 +177,7 @@ export function SessionRow({
         paddingLeft: 24,
       }}
     >
-      <AgentStatusDot state={agentStatusToDotState(session.status)} />
+      <AgentStatusDot state={agentStatusToDotState(session.status)} label={sessionDotLabel(session.status)} />
       <span style={{ flex: 1, minWidth: 0 }}>
         <span style={{ display: 'block', fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {session.name || session.runtime || 'Agent'}
