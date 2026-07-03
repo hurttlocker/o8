@@ -25,6 +25,7 @@ import {
 } from '@/lib/tasks/actions';
 import { getTaskPool, getTaskPoolTask } from '@/lib/tasks/pool';
 import type { ExistingBranchPolicy } from '@/lib/orchestrator/operator-mission-service';
+import { nextInlineIssueNumbers } from '@/lib/orchestrator/operator-mission-service/shared';
 import {
   apiFetch,
   type McpTool,
@@ -822,17 +823,15 @@ export async function handleCreateMission(args: Record<string, unknown>): Promis
     const comparisonModels = comparisonModelsRaw.length > 0 ? comparisonModelsRaw : undefined;
 
     if (inlineIssues) {
-      // #453 — Auto-assign synthetic numbers when not provided. UNIQUE per
-      // creation (pipeline root fix 2026-07-03): fixed 90001+index numbers made
-      // every inline mission collide with every prior one, and branch cleanup
-      // archived the older mission's live lanes on the collision.
-      const syntheticBase = 90_000_000_000 + Date.now() * 10;
+      // #453 — Auto-assign synthetic numbers when not provided. Centralized so
+      // every inline creator uses the same collision-resistant allocator.
+      const syntheticNumbers = nextInlineIssueNumbers(inlineIssues.length);
       const parsed = inlineIssues.map((entry, index) => {
         if (typeof entry !== 'object' || entry === null) throw new Error('Each inline issue must be an object.');
         const e = entry as Record<string, unknown>;
         const title = typeof e.title === 'string' ? e.title.trim() : '';
         if (!title) throw new Error('Each inline issue must have a title.');
-        const syntheticNumber = syntheticBase + index * 10;
+        const syntheticNumber = syntheticNumbers[index]!;
         return { number: syntheticNumber, title, body: typeof e.body === 'string' ? e.body : '' };
       });
       const createResult = await createMissionInline({
