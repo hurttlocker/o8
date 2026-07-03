@@ -46,7 +46,7 @@ export async function GET(req: NextRequest) {
     ...lane,
     codename: codename(lane.id),
     archiveSummary: lane.status === 'archived' || lane.status === 'completed'
-      ? summarizeLaneArchive(lane, getLaneEvents(lane.id, 24))
+      ? summarizeLaneArchive(lane, getLaneEvents(lane.id, 80))
       : null,
   }));
 
