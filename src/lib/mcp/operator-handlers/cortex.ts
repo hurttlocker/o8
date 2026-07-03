@@ -63,6 +63,10 @@ export const CORTEX_TOOLS: McpTool[] = [
           type: 'boolean',
           description: 'Skip the 30s in-process answer cache. Default false.',
         },
+        terse: {
+          type: 'boolean',
+          description: 'Return a compact answer: <=150 tokens and at most 2 citations. Default false.',
+        },
       },
       required: ['question'],
     },
@@ -89,6 +93,7 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
     const projectId = optionalString(args, 'projectId');
     if (projectId) body.projectId = projectId;
     if (args.bypassCache === true) body.bypassCache = true;
+    if (args.terse === true) body.terse = true;
 
     const result = await apiFetch('/api/cortex/ask/answer', {
       method: 'POST',

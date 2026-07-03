@@ -13,6 +13,7 @@ import {
   buildFlashComposePrompt,
   buildSonnetComposeSystem,
   buildSonnetComposeUser,
+  type ComposeOptions,
 } from '@/lib/cortex/qa/compose-prompts';
 import { CODEX_DEFAULT_MODEL, callCodex } from '@/lib/cortex/qa/llm/codex-adapter';
 import { callHaiku } from '@/lib/cortex/qa/llm/haiku-adapter';
@@ -47,6 +48,7 @@ export async function composeClassA(
   repoPath: string | undefined,
   topRows: TypedRow[],
   emit: SseEmit,
+  options: ComposeOptions = {},
 ): Promise<void> {
   const lookup = buildCitationLookup(topRows);
   const rowsJson = JSON.stringify(
@@ -71,7 +73,10 @@ export async function composeClassA(
   // when picking lead citations.
   const leadKind = topRows[0]?.citation.kind;
   const specIngestPresent = leadKind === 'directive';
-  const composePrompt = buildFlashComposePrompt(question, rowsJson, { specIngestPresent });
+  const composePrompt = buildFlashComposePrompt(question, rowsJson, {
+    specIngestPresent,
+    terse: options.terse,
+  });
   // O8_EVAL_MODE=1 is the ship-gate / smoke path. We use Sonnet 4.6 via
   // OpenRouter (~$0.026/run) because false negatives cost more in re-
   // investigation than the bill. Production user chat (non-eval-mode)
@@ -102,17 +107,17 @@ export async function composeClassA(
   // `tryComposeOpenRouter('anthropic/...')` so eval doesn't burn paid
   // OpenRouter credits on the Anthropic models.
   if (evalMode) {
-    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
+    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-repl (eval tier 0)');
-      emitClassAAnswer(sonnetAnswer, lookup, emit);
+      emitClassAAnswer(sonnetAnswer, lookup, emit, options);
       return;
     }
     // Eval-mode tier 0b: Haiku 4.5 via the REPL adapter as cheap fallback.
     const haikuAnswer = await tryComposeHaiku(composePrompt);
     if (haikuAnswer) {
       console.info('[qa][composer-A] resolved via haiku-repl (eval tier 0b)');
-      emitClassAAnswer(haikuAnswer, lookup, emit);
+      emitClassAAnswer(haikuAnswer, lookup, emit, options);
       return;
     }
   }
@@ -126,13 +131,13 @@ export async function composeClassA(
     const fastAnswer = await tryComposeOpenRouter(composePrompt);
     if (fastAnswer) {
       console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL} (mode=fastest)`);
-      emitClassAAnswer(fastAnswer, lookup, emit);
+      emitClassAAnswer(fastAnswer, lookup, emit, options);
       return;
     }
     const fastFlash = await tryComposeFlash(composePrompt);
     if (fastFlash) {
       console.info('[qa][composer-A] resolved via flash (mode=fastest)');
-      emitClassAAnswer(fastFlash, lookup, emit);
+      emitClassAAnswer(fastFlash, lookup, emit, options);
       return;
     }
     // Fall through to the standard chain (Haiku/Codex/Sonnet/heuristic).
@@ -142,11 +147,11 @@ export async function composeClassA(
   // Falls through to OpenRouter/Flash/heuristic on failure (Haiku + Codex
   // stay skipped because the user explicitly opted in to Sonnet quality).
   if (sonnetCliFirst) {
-    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
+    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
     triedSonnetCli = true;
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-cli (mode=sonnet-cli)');
-      emitClassAAnswer(sonnetAnswer, lookup, emit);
+      emitClassAAnswer(sonnetAnswer, lookup, emit, options);
       return;
     }
   }
@@ -172,7 +177,7 @@ export async function composeClassA(
     const haikuAnswer = await tryComposeHaiku(composePrompt);
     if (haikuAnswer) {
       console.info('[qa][composer-A] resolved via haiku-cli (tier 1)');
-      emitClassAAnswer(haikuAnswer, lookup, emit);
+      emitClassAAnswer(haikuAnswer, lookup, emit, options);
       return;
     }
   }
@@ -184,7 +189,7 @@ export async function composeClassA(
       console.info(
         `[qa][composer-A] resolved via codex-cli:${CODEX_DEFAULT_MODEL} (${brainCliOn ? 'tier 2' : 'tier 1 default'})`,
       );
-      emitClassAAnswer(codexAnswer, lookup, emit);
+      emitClassAAnswer(codexAnswer, lookup, emit, options);
       return;
     }
   }
@@ -193,7 +198,7 @@ export async function composeClassA(
   const openrouterAnswer = await tryComposeOpenRouter(composePrompt);
   if (openrouterAnswer) {
     console.info(`[qa][composer-A] resolved via openrouter:${OPENROUTER_PRIMARY_MODEL}`);
-    emitClassAAnswer(openrouterAnswer, lookup, emit);
+    emitClassAAnswer(openrouterAnswer, lookup, emit, options);
     return;
   }
 
@@ -201,17 +206,17 @@ export async function composeClassA(
   const flashAnswer = await tryComposeFlash(composePrompt);
   if (flashAnswer) {
     console.info('[qa][composer-A] resolved via flash');
-    emitClassAAnswer(flashAnswer, lookup, emit);
+    emitClassAAnswer(flashAnswer, lookup, emit, options);
     return;
   }
 
   // Tier 5: Sonnet CLI (callSonnet's CLI tier — slow but reliable). Skipped
   // in eval mode or when sonnet-cli mode already tried it above (#971).
   if (!evalMode && !triedSonnetCli) {
-    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows);
+    const sonnetAnswer = await tryComposeSonnet(question, repoPath, topRows, options);
     if (sonnetAnswer) {
       console.info('[qa][composer-A] resolved via sonnet-cli');
-      emitClassAAnswer(sonnetAnswer, lookup, emit);
+      emitClassAAnswer(sonnetAnswer, lookup, emit, options);
       return;
     }
   }
@@ -361,10 +366,11 @@ async function tryComposeSonnet(
   question: string,
   repoPath: string | undefined,
   topRows: TypedRow[],
+  options: ComposeOptions = {},
 ): Promise<string | null> {
   try {
     const result = await callSonnet({
-      system: buildSonnetComposeSystem(),
+      system: buildSonnetComposeSystem(options),
       messages: [
         {
           role: 'user',
@@ -396,10 +402,17 @@ async function tryComposeSonnet(
  * three LLM tiers so the SSE shape stays identical regardless of which
  * provider answered.
  */
-function emitClassAAnswer(rawAnswer: string, lookup: CitationLookup, emit: SseEmit): void {
+function emitClassAAnswer(
+  rawAnswer: string,
+  lookup: CitationLookup,
+  emit: SseEmit,
+  options: ComposeOptions = {},
+): void {
   const { translatedAnswer, verifiedRows } = translateCitations(rawAnswer, lookup);
-  emit('token', { text: translatedAnswer });
-  for (const row of verifiedRows) {
+  const citationRows = options.terse ? verifiedRows.slice(0, 2) : verifiedRows;
+  const answer = options.terse ? limitCitationMarkers(translatedAnswer, citationRows) : translatedAnswer;
+  emit('token', { text: answer });
+  for (const row of citationRows) {
     emit('citation', {
       kind: row.citation.kind,
       rowId: `${row.citation.kind}-${row.citation.rowId}`,
@@ -412,3 +425,15 @@ function emitClassAAnswer(rawAnswer: string, lookup: CitationLookup, emit: SseEm
   emit('done', {});
 }
 
+export function limitCitationMarkers(answer: string, allowedRows: TypedRow[]): string {
+  const allowed = new Set(
+    allowedRows.map((row) => `${row.citation.kind}-${row.citation.rowId}`),
+  );
+  return answer
+    .replace(/\[CITATION:([^\]\n]+)\]/g, (marker, id: string) => (
+      allowed.has(id) ? marker : ''
+    ))
+    .replace(/\s+([.,;:!?])/g, '$1')
+    .replace(/[ \t]{2,}/g, ' ')
+    .trim();
+}

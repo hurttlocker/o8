@@ -9,7 +9,7 @@
  * a `brain_consulted` lane event is recorded so the packet UI can surface
  * "this worker used the Brain" with the same titled sources.
  *
- * Accepts: { question: string, repoPath?: string, projectId?: string,
+ * Accepts: { question: string, repoPath?: string, projectId?: string, terse?: boolean,
  *            bypassCache?: boolean, packetId?: string }
  * Returns: { ok: true, answer, citations, class, retrievalMs, classifyMs,
  *            sourcesConsidered } | { ok: false, error }
@@ -30,6 +30,7 @@ interface AskAnswerBody {
   question?: unknown;
   repoPath?: unknown;
   projectId?: unknown;
+  terse?: unknown;
   bypassCache?: unknown;
   packetId?: unknown;
 }
@@ -67,6 +68,7 @@ export async function POST(request: NextRequest) {
   const projectId =
     typeof body?.projectId === 'string' && body.projectId.trim() ? body.projectId.trim() : null;
   const bypassCache = body?.bypassCache === true;
+  const terse = body?.terse === true;
   const packetId =
     typeof body?.packetId === 'string' && body.packetId.trim() ? body.packetId.trim() : null;
 
@@ -87,7 +89,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await askCortex(question, repoPath, { bypassCache, projectId });
+    const result = await askCortex(question, repoPath, { bypassCache, projectId, terse });
     if (packetId && laneId) recordBrainConsulted(packetId, laneId, question, result);
     return NextResponse.json({
       ok: true,
