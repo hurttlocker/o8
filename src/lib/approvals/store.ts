@@ -12,6 +12,7 @@ import {
   buildOrchestratorReviewEvent,
   deriveOrchestratorReviewRisk,
   normalizeOrchestratorReview,
+  type OrchestratorReviewRecordInput,
 } from '@/lib/approvals/orchestrator-review';
 import { approvals as approvalsTable, approvalEvents as approvalEventsTable, getDb, getSqlite } from '@/lib/db';
 import type { EventSeverity } from '@/lib/fleet/types';
@@ -24,7 +25,6 @@ import type {
   ApprovalRisk,
   CreateApprovalInput,
   MobileApprovalCard,
-  OrchestratorReviewFinding,
 } from '@/lib/approvals/types';
 
 type ApprovalRow = typeof approvalsTable.$inferSelect;
@@ -597,12 +597,7 @@ export function resolveApproval(id: string, action: 'approve' | 'reject', actor:
 
 export function recordOrchestratorReview(
   packetId: string,
-  review: {
-    findings: OrchestratorReviewFinding[];
-    reviewer?: string;
-    approved: boolean;
-    diffSha?: string;
-  },
+  review: OrchestratorReviewRecordInput,
 ): ApprovalAuditEvent {
   const normalizedPacketId = packetId.trim();
   const normalizedReview = normalizeOrchestratorReview(review);
@@ -642,6 +637,19 @@ export function recordOrchestratorReview(
       } : {}),
       ...(normalizedReview.reviewer ? { Reviewer: normalizedReview.reviewer } : {}),
       ...(normalizedReview.diffSha ? { 'Diff SHA': normalizedReview.diffSha } : {}),
+      ...(normalizedReview.reviewedHeadSha ? { 'Reviewed HEAD': normalizedReview.reviewedHeadSha } : {}),
+      ...(normalizedReview.parseWarning ? { 'Parse Warning': normalizedReview.parseWarning } : {}),
+    },
+    args: {
+      ...approval.args,
+      packetId: normalizedPacketId,
+      approved: normalizedReview.approved,
+      findings: normalizedReview.findings,
+      ...(normalizedReview.reviewedHeadSha ? { reviewedHeadSha: normalizedReview.reviewedHeadSha } : {}),
+      requiresSecondPass: normalizedReview.requiresSecondPass === true,
+      secondPassAgreed: approval.args?.secondPassAgreed === true ? true : false,
+      ...(normalizedReview.parseWarning ? { parseWarning: normalizedReview.parseWarning } : {}),
+      ...(normalizedReview.rawText ? { rawText: normalizedReview.rawText } : {}),
     },
     audit: [...approval.audit, reviewEvent],
   };
@@ -672,6 +680,7 @@ export function recordOrchestratorReview(
   } else {
     updateApprovalRecord(nextApproval);
   }
+  insertApprovalEvent(nextApproval.id, reviewEvent);
 
   return reviewEvent;
 }
