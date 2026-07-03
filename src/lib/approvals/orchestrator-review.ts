@@ -11,6 +11,10 @@ export interface OrchestratorReviewRecordInput {
   reviewer?: string;
   approved: boolean;
   diffSha?: string;
+  reviewedHeadSha?: string;
+  requiresSecondPass?: boolean;
+  rawText?: string;
+  parseWarning?: string;
 }
 
 function trimOptional(value?: string) {
@@ -40,20 +44,20 @@ function buildOrchestratorReviewNote(review: OrchestratorReviewRecordInput) {
     ? 'no findings'
     : `${findingCount} finding${findingCount === 1 ? '' : 's'}`;
   const diffSummary = review.diffSha ? ` Diff ${review.diffSha}.` : '';
-  return `${reviewer} ${verdict} with ${findingsSummary}.${diffSummary}`;
+  const parseSummary = review.parseWarning ? ` Parser warning: ${review.parseWarning}.` : '';
+  return `${reviewer} ${verdict} with ${findingsSummary}.${diffSummary}${parseSummary}`;
 }
 
-export function normalizeOrchestratorReview(review: {
-  findings: OrchestratorReviewFinding[];
-  reviewer?: string;
-  approved: boolean;
-  diffSha?: string;
-}): OrchestratorReviewRecordInput {
+export function normalizeOrchestratorReview(review: OrchestratorReviewRecordInput): OrchestratorReviewRecordInput {
   return {
     findings: review.findings.map(normalizeReviewFinding),
     reviewer: trimOptional(review.reviewer),
     approved: review.approved,
     diffSha: trimOptional(review.diffSha),
+    reviewedHeadSha: trimOptional(review.reviewedHeadSha),
+    requiresSecondPass: review.requiresSecondPass === true,
+    rawText: trimOptional(review.rawText),
+    parseWarning: trimOptional(review.parseWarning),
   };
 }
 
@@ -90,6 +94,9 @@ export function buildOrchestratorReviewEvent(review: OrchestratorReviewRecordInp
     reviewer: review.reviewer,
     approved: review.approved,
     diffSha: review.diffSha,
+    reviewedHeadSha: review.reviewedHeadSha,
+    parseWarning: review.parseWarning,
+    rawText: review.rawText,
   };
 }
 
@@ -111,6 +118,16 @@ export function buildOrchestratorReviewApprovalInput(
       ? `Orchestrator review: ${lane.branch} → ${lane.baseBranch}`
       : `Orchestrator review: ${packetId}`,
     toolName: 'orchestrator_review',
+    args: {
+      packetId,
+      approved: review.approved,
+      findings: review.findings,
+      ...(review.reviewedHeadSha ? { reviewedHeadSha: review.reviewedHeadSha } : {}),
+      requiresSecondPass: review.requiresSecondPass === true,
+      secondPassAgreed: false,
+      ...(review.parseWarning ? { parseWarning: review.parseWarning } : {}),
+      ...(review.rawText ? { rawText: review.rawText } : {}),
+    },
     risk: deriveOrchestratorReviewRisk(review),
     metadata: {
       Packet: packetId,
@@ -122,6 +139,8 @@ export function buildOrchestratorReviewApprovalInput(
       } : {}),
       ...(review.reviewer ? { Reviewer: review.reviewer } : {}),
       ...(review.diffSha ? { 'Diff SHA': review.diffSha } : {}),
+      ...(review.reviewedHeadSha ? { 'Reviewed HEAD': review.reviewedHeadSha } : {}),
+      ...(review.parseWarning ? { 'Parse Warning': review.parseWarning } : {}),
     },
   };
 }
