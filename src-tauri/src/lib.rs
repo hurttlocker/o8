@@ -1274,6 +1274,26 @@ fn check_port(port: u16) -> bool {
     std::net::TcpStream::connect(format!("127.0.0.1:{}", port)).is_ok()
 }
 
+/// Restart the app, killing the bundled Node children FIRST.
+///
+/// The Tauri plugin-process `relaunch()` (and `AppHandle::restart()` underneath
+/// it) spawns the new instance and then `std::process::exit()`s the old one —
+/// WITHOUT going through the `RunEvent::ExitRequested`/`Exit` path where
+/// `kill_tracked_children()` runs. So on an auto-update relaunch the old
+/// next-server / ws-server children survived, kept holding the API/WS ports,
+/// and the freshly-installed instance came up unable to bind — the "stuck in
+/// restart / reconnecting" zombie observed live 2026-07-03. The UpdateCard
+/// calls THIS command instead of the raw plugin relaunch so the children are
+/// reaped and the ports freed before the new instance boots.
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle) {
+    log::info!("[restart] killing tracked children before relaunch");
+    sidecar_lifecycle::kill_tracked_children();
+    // Give the OS a beat to release the listening sockets the children held.
+    std::thread::sleep(std::time::Duration::from_millis(300));
+    app.restart();
+}
+
 /// Start the WebSocket server as a background process
 #[tauri::command]
 fn start_ws_server(project_dir: String) -> SidecarResult {
@@ -3802,6 +3822,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             get_desktop_info,
             check_port,
+            restart_app,
             start_ws_server,
             cortex_available,
             get_app_data_dir,
