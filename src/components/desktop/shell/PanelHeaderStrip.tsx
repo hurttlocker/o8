@@ -9,6 +9,7 @@
 import { ColumnHeaderStrip } from './ColumnHeaderStrip';
 import { O8HeaderTabs } from '../o8-panel/O8HeaderTabs';
 import type { O8Tab } from '../o8-panel/types';
+import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { BrowserHoverButton } from '../title-bar/BrowserHoverButton';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 
@@ -21,6 +22,8 @@ interface PanelHeaderStripProps {
   browserActive?: boolean;
   browserPreviewUrl?: string | null;
   onOpenBrowser?: () => void;
+  approvalCount?: number;
+  onOpenInbox?: () => void;
 }
 
 export function PanelHeaderStrip({
@@ -32,6 +35,8 @@ export function PanelHeaderStrip({
   browserActive = false,
   browserPreviewUrl,
   onOpenBrowser,
+  approvalCount = 0,
+  onOpenInbox,
 }: PanelHeaderStripProps) {
   return (
     <ColumnHeaderStrip
@@ -43,6 +48,9 @@ export function PanelHeaderStrip({
       }
       right={
         <>
+          {onOpenInbox ? (
+            <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
+          ) : null}
           {onOpenBrowser ? (
             <BrowserHoverButton
               active={browserActive}
