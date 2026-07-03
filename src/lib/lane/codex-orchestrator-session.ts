@@ -35,6 +35,8 @@ import {
 } from '@/lib/mobile/orchestrator-thread-history';
 import { parseLocalModel } from '@/lib/codex/local-model';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
+import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
+import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -341,6 +343,21 @@ export function codexOrchestratorModelFlags(model: string, reasoningEffort: stri
     return ['--oss', '--local-provider', local.provider, '--model', local.model];
   }
   return ['-c', `model=${model}`, '-c', `model_reasoning_effort=${reasoningEffort}`];
+}
+
+const CODEX_BRAIN_FIRST_SECTION = [
+  '## ENGINEERING BRAIN — USE THIS FIRST',
+  BRAIN_PROMPT_SECTION,
+  'Codex orchestrator rule: on every turn, if you need repo conventions, history, ownership, prior fixes, directives, or cross-repo context, ask the Engineering Brain first via the `cortex_ask` MCP tool (or `o8 ask` from shell) before grepping or re-reading broad files. One focused Brain question is the default context-gathering step; use direct file reads after the Brain points you at current source or when exact code is needed.',
+].join('\n\n');
+
+export function buildCodexOrchestratorPrompt(repoPath: string, message: string): string {
+  return [
+    buildOrchestratorSystemPrompt(repoPath),
+    CODEX_BRAIN_FIRST_SECTION,
+    '## USER MESSAGE',
+    message,
+  ].join('\n\n');
 }
 
 // ── Event mapping (codex JSON → OrchestratorEvent) ───────────────────────────
