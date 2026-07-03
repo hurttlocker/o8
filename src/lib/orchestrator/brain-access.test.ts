@@ -33,4 +33,21 @@ describe('resolveBrainEnabledWith', () => {
     expect(resolveBrainEnabledWith({ runtime: 'gemini' }, 'auto')).toBe(true);
     expect(resolveBrainEnabledWith({ runtime: 'opencode' }, 'auto')).toBe(true);
   });
+
+  it('mode auto + metered orchestrator (fable) → every runtime gets the Brain', () => {
+    expect(resolveBrainEnabledWith({ runtime: 'codex' }, 'auto', 'fable')).toBe(true);
+    expect(resolveBrainEnabledWith({ runtime: 'claude-code' }, 'auto', 'fable')).toBe(true);
+    expect(resolveBrainEnabledWith({ runtime: 'gemini' }, 'auto', 'fable')).toBe(true);
+  });
+
+  it('subscription orchestrators do NOT flip auto — frontier stays lean', () => {
+    expect(resolveBrainEnabledWith({ runtime: 'codex' }, 'auto', 'codex')).toBe(false);
+    expect(resolveBrainEnabledWith({ runtime: 'codex' }, 'auto', 'claude')).toBe(false);
+    expect(resolveBrainEnabledWith({ runtime: 'codex' }, 'auto', 'collide')).toBe(false);
+  });
+
+  it('explicit override + explicit mode still beat the metered flip', () => {
+    expect(resolveBrainEnabledWith({ runtime: 'codex', useBrain: false }, 'auto', 'fable')).toBe(false);
+    expect(resolveBrainEnabledWith({ runtime: 'codex' }, 'off', 'fable')).toBe(false);
+  });
 });

@@ -83,6 +83,7 @@ import {
   getOrchestratorBackend,
   resolveOrchestratorBackendId,
 } from './lib/lane/orchestrator-backends/registry';
+import { isMeteredOrchestratorBackend } from './lib/lane/orchestrator-backends/billing';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from './lib/lane/orchestrator-backends/types';
 import type { OrchestratorEvent } from './lib/lane/orchestrator-stream-events';
 import {
@@ -843,6 +844,28 @@ const orchestratorSubscriptions = new Map<string, OrchestratorSubscription>();
 // turns on the same repo don't clobber each other. Entries are removed when the
 // turn resolves.
 const orchestratorInflightAborts = new Map<string, AbortController>();
+
+// ── Fable Slice 6 #2 — server-side metered-window valve state ────────────────
+// The metered auto-compact target mirrors ORCHESTRATOR_METERED_AUTO_COMPACT_
+// THRESHOLD in use-orchestrator-stream/shared.ts (a client module this server
+// process must not import). Keep the two in sync.
+const ORCHESTRATOR_METERED_AUTO_COMPACT_THRESHOLD = 15_000;
+/** Warn each time the persisted thread crosses another step of this size. */
+const METERED_WINDOW_VALVE_STEP_TOKENS = 60_000;
+/** threadId → highest step already warned about (anti-spam). */
+const meteredWindowValveWarnedStep = new Map<string, number>();
+
+/** Approximate persisted-thread tokens from the chat-history file (chars/4). */
+function estimateThreadTokens(threadId: string): number {
+  try {
+    const raw = readFileSync(join(homedir(), '.o8', 'chat-history', `${threadId}.json`), 'utf-8');
+    const payload = JSON.parse(raw) as { messages?: Array<{ text?: string; content?: string }> };
+    const chars = (payload.messages ?? []).reduce((sum, m) => sum + (m.text ?? m.content ?? '').length, 0);
+    return Math.ceil(chars / 4);
+  } catch {
+    return 0;
+  }
+}
 
 /** Composite key for `orchestratorSubscriptions` (`agent` is '' for codex/claude). */
 function orchestratorSubKey(clientId: string, backend: OrchestratorBackendId, agent: string): string {
@@ -2911,6 +2934,27 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     const turnMessage = withSessionRules(message, threadId);
     if (turnMessage !== message) {
       console.log(`[session-rules] Injected session rules into orchestrator turn (thread=${threadId ?? 'none'})`);
+    }
+    // Fable Slice 6 #2 — server-side metered-window valve. The 15K auto-compact
+    // target lives in the desktop client's React effect; a headless or mobile
+    // operator never mounts it, so a metered window could grow unbounded at
+    // full API price. This valve does NOT force-compact (recycling a live proc
+    // mid-mission is the client's call) — it warns loudly and raises the UI
+    // notice banner each time the persisted thread crosses another 60K-token
+    // step past the metered target.
+    if (threadId && isMeteredOrchestratorBackend(backend.id)) {
+      const approxThreadTokens = estimateThreadTokens(threadId);
+      const step = Math.floor(approxThreadTokens / METERED_WINDOW_VALVE_STEP_TOKENS);
+      if (step >= 1 && (meteredWindowValveWarnedStep.get(threadId) ?? 0) < step) {
+        meteredWindowValveWarnedStep.set(threadId, step);
+        const valveMessage = `Metered window over budget: this thread is ~${Math.round(approxThreadTokens / 1000)}K tokens against a ${Math.round(ORCHESTRATOR_METERED_AUTO_COMPACT_THRESHOLD / 1000)}K target — open the workspace to compact, or start a fresh thread.`;
+        console.warn(`[metered-valve] ${valveMessage} (thread=${threadId}, backend=${backend.id})`);
+        broadcastToOrchestratorSession(sessionName, JSON.stringify({
+          channel: 'orchestrator',
+          event: 'notice',
+          data: { repoPath, kind: 'metered-window-over-budget', noticeId: `metered-valve-${threadId}-${step}`, message: valveMessage },
+        }));
+      }
     }
     const sendTurn = (
       onEvent: (event: OrchestratorEvent) => void,

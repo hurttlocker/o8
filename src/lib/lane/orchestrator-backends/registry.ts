@@ -13,12 +13,13 @@
  * single chokepoint that knows which backend is active.
  */
 
-import { resolveInAppOrchestratorEnabledSync, resolveOrchestratorBackendSync } from '@/lib/operator/defaults';
+import { resolveOrchestratorBackendId } from './active-backend';
 import { claudeBackend } from './claude';
 import { codexBackend } from './codex';
 import { openclawBackend } from './openclaw';
 import { acpBackend, hermesBackend } from './acp';
 import { collideBackend } from './moa';
+import { fableBackend } from './fable';
 import type { OrchestratorBackend, OrchestratorBackendId } from './types';
 
 // ── Registry ─────────────────────────────────────────────────────────────────
@@ -34,6 +35,7 @@ const BACKENDS: Partial<Record<OrchestratorBackendId, OrchestratorBackend>> = {
   hermes: hermesBackend,
   acp: acpBackend,
   collide: collideBackend,
+  fable: fableBackend,
 };
 
 /** The default backend — also the fallback for any unregistered id. */
@@ -43,24 +45,16 @@ export function getOrchestratorBackend(id: OrchestratorBackendId): OrchestratorB
   return BACKENDS[id] ?? DEFAULT_BACKEND;
 }
 
-/**
- * Resolve the active orchestrator backend id.
- *
- * The `orchestratorBackend` operator setting picks the backend:
- *   - **'auto' (default)** → defer to the legacy `inAppOrchestratorEnabled`
- *     boolean, BYTE-IDENTICAL to the pre-setting behavior:
- *       · toggle OFF (default) → Codex GPT-5.5 xhigh
- *       · toggle ON            → Claude
- *   - a specific id ('codex' | 'claude' | 'openclaw') → forces that backend,
- *     which is how OpenClaw becomes selectable from the desktop.
- * A per-request `msg.backend` still overrides this (see ws-server's
- * `resolveMsgBackendId`).
- */
-export function resolveOrchestratorBackendId(): OrchestratorBackendId {
-  const setting = resolveOrchestratorBackendSync();
-  if (setting !== 'auto') return setting;
-  return resolveInAppOrchestratorEnabledSync() ? 'claude' : 'codex';
-}
+// Active-id resolution lives in the server leaf `active-backend.ts`; billing
+// classes in the PURE leaf `billing.ts` (client-bundle-safe) — so brain-access/
+// packet-prompt and the client compaction trigger resolve what they need
+// without pulling every backend implementation through this module.
+// Re-exported for existing call-sites (ws-server). IMPORT-PATH TRAP: client
+// code must import these from './billing' / './active-backend' DIRECTLY —
+// importing via this registry pulls every backend implementation (and their
+// session modules) into the bundle.
+export { resolveOrchestratorBackendId } from './active-backend';
+export { isMeteredOrchestratorBackend } from './billing';
 
 /** The active backend, resolved from operator settings. */
 export function getActiveOrchestratorBackend(): OrchestratorBackend {

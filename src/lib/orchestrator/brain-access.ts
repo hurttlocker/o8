@@ -4,19 +4,28 @@ import 'server-only';
  * "Workers use the Brain" resolution (2026-06-11).
  *
  * Decides whether a dispatched worker gets Engineering Brain access — i.e.
- * whether `buildPacketPrompt` injects the `o8 ask` instruction block. Three
- * inputs, strict precedence:
+ * whether `buildPacketPrompt` injects the `o8 ask` instruction block. Strict
+ * precedence:
  *
  *   1. packet.useBrain (explicit per-packet override — the dogfood knob)
  *   2. operator default `workersUseBrain` ('off' | 'auto' | 'all')
- *   3. in 'auto': the runtime's capability tier — non-frontier workers get
- *      the Brain so a weaker (or future local) model spends its context on
- *      the task, not on re-deriving repo knowledge a search would cost it.
+ *   3. in 'auto': a METERED active orchestrator (Fable mode, 2026-07-02)
+ *      flips the Brain ON for every runtime — under metered economics repo
+ *      knowledge must come from the fixed-cost Brain, never flow back through
+ *      the per-token orchestrator window. Keyed to the billing class (not the
+ *      backend name) so the next metered model inherits the flip.
+ *   4. otherwise in 'auto': the runtime's capability tier — non-frontier
+ *      workers get the Brain so a weaker (or future local) model spends its
+ *      context on the task, not on re-deriving repo knowledge a search would
+ *      cost it.
  *
  * Read-only and cheap (one sync settings-file read, memoized upstream by the
  * OS page cache) — safe to call once per dispatch.
  */
 
+import { resolveOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/active-backend';
+import { isMeteredOrchestratorBackend } from '@/lib/lane/orchestrator-backends/billing';
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { resolveWorkersUseBrainSync, type WorkersUseBrain } from '@/lib/operator/defaults';
 import { ORCHESTRATOR_RUNTIMES } from '@/lib/orchestrator/runtime-capabilities';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -26,17 +35,32 @@ export interface BrainAccessInput {
   useBrain?: boolean;
 }
 
-/** Pure core — exported for tests; pass the mode explicitly. */
-export function resolveBrainEnabledWith(packet: BrainAccessInput, mode: WorkersUseBrain): boolean {
+/** Pure core — exported for tests; pass the mode (and backend) explicitly. */
+export function resolveBrainEnabledWith(
+  packet: BrainAccessInput,
+  mode: WorkersUseBrain,
+  orchestratorBackend?: OrchestratorBackendId,
+): boolean {
   if (typeof packet.useBrain === 'boolean') return packet.useBrain;
   if (mode === 'all') return true;
   if (mode === 'off') return false;
+  if (orchestratorBackend && isMeteredOrchestratorBackend(orchestratorBackend)) return true;
   return ORCHESTRATOR_RUNTIMES[packet.runtime]?.tier !== 'frontier';
 }
 
-/** Production entry: reads the operator default, then resolves. */
+/**
+ * Production entry: reads the operator default + active backend, then resolves.
+ *
+ * Known approximation (hard-task review, 2026-07-03): the backend here is the
+ * OPERATOR-DEFAULT resolution, not the per-request `msg.backend` override a ws
+ * turn can carry (e.g. a one-off collide turn while the default is fable, or
+ * vice versa). The mismatch only matters when the two differ in billing class,
+ * and it errs toward Brain-ON — which is free (subscription pool) and never
+ * harms the metered window. Thread the actual turn backend through the
+ * dispatch chain if per-turn precision ever matters.
+ */
 export function resolvePacketBrainEnabled(packet: BrainAccessInput): boolean {
-  return resolveBrainEnabledWith(packet, resolveWorkersUseBrainSync());
+  return resolveBrainEnabledWith(packet, resolveWorkersUseBrainSync(), resolveOrchestratorBackendId());
 }
 
 /**

@@ -379,6 +379,13 @@ export async function sendToCodexOrchestrator(
   onEvent: (event: OrchestratorEvent) => void,
   options: SendToCodexOrchestratorOptions = {},
 ): Promise<void> {
+  // Fable is Claude-only — its native-tool lockout + BYO-key path live in the
+  // Claude REPL (orchestrator-session.ts). The registry routes 'fable' to
+  // fableBackend, so a 'fable' profile reaching a Codex orchestrator is a
+  // mis-wire; fail closed rather than silently running Fable's surface on Codex.
+  if (options.toolProfile === 'fable') {
+    throw new Error("Codex orchestrator does not support the 'fable' tool profile (Fable is Claude-only).");
+  }
   const permissionMode: CodexOrchestratorPermissionMode = options.permissionMode ?? 'full';
   const model = resolveOrchestratorModelSync(options.model);
   const isLocalModel = !!parseLocalModel(model);

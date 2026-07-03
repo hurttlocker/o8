@@ -46,6 +46,7 @@ import { getRuntime, type RuntimeSession } from '@/lib/runtimes';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
+import { fableEnvOverride, fableLockoutArgs } from '@/lib/lane/fable-profile';
 
 // ── Types ──
 
@@ -304,11 +305,13 @@ export async function rehydrateOrchestratorSessions(): Promise<void> {
  * path, byte-identical content. `'propose'` (Collide proposer) strips the
  * operator server and writes to a SEPARATE `-propose` file so a concurrent
  * full-profile turn for the same repo can never clobber it back to a config
- * that carries dispatch (the #1075 lockout would otherwise race). */
+ * that carries dispatch (the #1075 lockout would otherwise race). `'fable'`
+ * likewise gets its own `-fable` file (keeps operator + cortex, strips externals)
+ * so a concurrent full turn for the same repo can't clobber its surface either. */
 function ensureMcpConfig(repoPath: string, profile: ToolProfile = 'full'): string {
   if (!existsSync(MCP_CONFIG_DIR)) mkdirSync(MCP_CONFIG_DIR, { recursive: true });
 
-  const suffix = profile === 'propose' ? '-propose' : '';
+  const suffix = profile === 'propose' ? '-propose' : profile === 'fable' ? '-fable' : '';
   const configPath = join(MCP_CONFIG_DIR, `orchestrator-${repoHash(repoPath)}${suffix}.json`);
   // Tool-Spine: the Claude orchestrator surface projection. toClaudeJson emits
   // the full `{ mcpServers }` envelope; the stringify (2-space, no trailing
@@ -802,11 +805,21 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
 /** Spawn a fresh resident proc with the baked config. First-turn cold. */
 function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, config: OrchestratorProcConfig): void {
   const mcpConfigPath = ensureMcpConfig(session.repoPath, config.toolProfile);
+  // Layer B — a Fable turn keeps `--dangerously-skip-permissions` (kept MCP tools
+  // run autonomously) AND adds `--disallowedTools <native>` to strip Claude's
+  // native read/write tools (the token lever). isFable takes precedence over the
+  // plan branch so the lockout holds regardless of permission mode. See
+  // `fable-profile.ts` for the empirical basis.
+  const isFable = config.toolProfile === 'fable';
   const args: string[] = [
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
     '--include-partial-messages',
-    ...(config.permissionMode === 'plan' ? ['--permission-mode', 'plan'] : ['--dangerously-skip-permissions']),
+    ...(isFable
+      ? fableLockoutArgs()
+      : config.permissionMode === 'plan'
+        ? ['--permission-mode', 'plan']
+        : ['--dangerously-skip-permissions']),
     '--verbose',
     '--mcp-config', mcpConfigPath,
     '--model', config.model,
@@ -820,7 +833,15 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
 
   const proc = spawn(CLAUDE_BIN, args, {
     cwd: session.repoPath,
-    env: { ...process.env, FORCE_COLOR: '0', NO_COLOR: '1', O8_MANAGED_SESSION: '1' },
+    // BYO-key injection is Fable-scoped ONLY — never ambient process.env — so the
+    // subscription-billed backends aren't re-billed against an API key.
+    env: {
+      ...process.env,
+      FORCE_COLOR: '0',
+      NO_COLOR: '1',
+      O8_MANAGED_SESSION: '1',
+      ...(isFable ? fableEnvOverride() : {}),
+    },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   session.proc = proc;

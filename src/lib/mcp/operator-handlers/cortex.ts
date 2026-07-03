@@ -108,6 +108,7 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
       retrievalMs?: number;
       classifyMs?: number;
       sourcesConsidered?: number;
+      consideredChars?: number | null;
       cacheHit?: string | null;
       error?: string;
     };
@@ -124,6 +125,7 @@ export async function handleAsk(args: Record<string, unknown>): Promise<McpToolR
       retrievalMs: result.retrievalMs ?? null,
       classifyMs: result.classifyMs ?? null,
       sourcesConsidered: result.sourcesConsidered ?? null,
+      consideredChars: result.consideredChars ?? null,
       cacheHit: result.cacheHit ?? null,
     });
   } catch (error) {
