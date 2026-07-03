@@ -26,10 +26,9 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { existsSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, resolve } from 'node:path';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
 import { assertNoPrintFlag } from '@/lib/claude-code/assert-no-print-flag';
 import {
@@ -47,6 +46,7 @@ import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { fableEnvOverride, fableLockoutArgs } from '@/lib/lane/fable-profile';
+import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
 
 // ── Types ──
 
@@ -322,70 +322,6 @@ function ensureMcpConfig(repoPath: string, profile: ToolProfile = 'full'): strin
   writeFileSync(configPath, JSON.stringify(config, null, 2));
   console.log(`[orchestrator-session] MCP config written to ${configPath}`);
   return configPath;
-}
-
-/**
- * Appended to Claude Code's default system prompt on the first message only.
- *
- * Prompt body lives in `orchestrator.md` next to this file — edit the md and
- * the next orchestrator turn picks it up immediately. The file is read on
- * every call so there's no cache to bust. Placeholders:
- *
- *   {{REPO_NAME}} — primary repo name
- *   {{REPO_PATH}} — primary repo absolute path
- *   {{REPO_LIST}} — bullet list of registered repos for fleet awareness
- *
- * In dev the file resolves via `import.meta.url` to `src/lib/lane/orchestrator.md`.
- * In the Tauri-bundled prod build the md file is copied to `out/server/orchestrator.md`
- * by `scripts/tauri-export.mjs` so the same resolution strategy works.
- */
-const PROMPT_FILE_NAME = 'orchestrator.md';
-const FALLBACK_PROMPT = [
-  'You are the orchestrator for o8. The markdown prompt file could not be loaded.',
-  'Primary repo: "{{REPO_NAME}}" at {{REPO_PATH}}.',
-  'Work carefully, use cortex_* MCP tools for fleet awareness, and always end your',
-  'review turns with a VERDICT block so the user has an actionable summary.',
-].join('\n');
-
-function resolvePromptFilePath(): string {
-  const here = dirname(fileURLToPath(import.meta.url));
-  return join(here, PROMPT_FILE_NAME);
-}
-
-function buildOrchestratorSystemPrompt(repoPath: string): string {
-  const repoName = repoPath.split('/').filter(Boolean).pop() ?? repoPath;
-
-  // Load all registered repos for fleet awareness
-  let allRepos: Array<{ name: string; localPath: string }> = [];
-  try {
-    const reposFile = join(homedir(), '.o8', 'repos.json');
-    if (existsSync(reposFile)) {
-      const parsed = JSON.parse(readFileSync(reposFile, 'utf-8'));
-      allRepos = (parsed.repos ?? []).map((r: { name?: string; localPath: string }) => ({
-        name: r.name ?? r.localPath.split('/').filter(Boolean).pop() ?? r.localPath,
-        localPath: r.localPath,
-      }));
-    }
-  } catch { /* best effort */ }
-
-  const repoList = allRepos.length > 0
-    ? allRepos.map((r) => `  - ${r.name} → ${r.localPath}`).join('\n')
-    : `  - ${repoName} → ${repoPath}`;
-
-  let template: string;
-  try {
-    template = readFileSync(resolvePromptFilePath(), 'utf-8');
-  } catch (err) {
-    console.warn(
-      `[orchestrator-session] Failed to load ${PROMPT_FILE_NAME}: ${(err as Error).message}. Using minimal fallback prompt.`,
-    );
-    template = FALLBACK_PROMPT;
-  }
-
-  return template
-    .replaceAll('{{REPO_NAME}}', repoName)
-    .replaceAll('{{REPO_PATH}}', repoPath)
-    .replaceAll('{{REPO_LIST}}', repoList);
 }
 
 // ── Registry ──
