@@ -17,6 +17,7 @@ const loadLaneCommands = () => import('@/lib/lane/commands');
 const loadPreviewMerge = () => import('@/lib/lane/preview-merge');
 const loadLaneRegistry = () => import('@/lib/lane/registry');
 const loadLaneEvents = () => import('@/lib/lane/events');
+const loadReviewHeadIntegrity = () => import('@/lib/lane/review-head-integrity');
 const loadControlPlane = () => import('@/lib/orchestrator/control-plane');
 const loadDag = () => import('@/lib/orchestrator/dag');
 const loadDispatch = () => import('@/lib/orchestrator/dispatch');
@@ -35,6 +36,7 @@ export async function warmMergePath() {
     loadPreviewMerge(),
     loadLaneRegistry(),
     loadControlPlane(),
+    loadReviewHeadIntegrity(),
     loadDag(),
     loadDispatch(),
     loadWorktreeCleanup(),
@@ -247,7 +249,7 @@ async function withGateVerdict(
   }
 
   const blockers = preview.blockers;
-  const reason = blockers.length > 0 ? blockers.join(', ') : result.note;
+  const reason = result.reason ?? (blockers.length > 0 ? blockers.join(', ') : result.note);
   return {
     ...result,
     checks: preview.checks,
@@ -271,17 +273,19 @@ async function dispatchPacketMerge(
   actor: 'orchestrator' | 'user',
 ): Promise<MergePacketResult> {
   const [
-    { findLatestLaneByPacket },
+    { findLatestLaneByPacket, appendEvent, setLaneStatus },
     { capturePostMergeCleanupTarget, postMergeCleanup },
     { dispatch: dispatchLaneCommand },
     { mapReviewSummary },
     { currentMissionState, log },
+    { checkReviewedHeadIntegrity, formatReviewedHeadMismatchNote },
   ] = await Promise.all([
     loadLaneRegistry(),
     loadPostMergeCleanup(),
     loadLaneCommands(),
     loadReview(),
     loadShared(),
+    loadReviewHeadIntegrity(),
   ]);
   const alreadyReleased = await alreadyReleasedResultForPacketId(packet.id, currentMissionState().packets);
   if (alreadyReleased) {
@@ -291,6 +295,24 @@ async function dispatchPacketMerge(
   const lane = findLatestLaneByPacket(packet.id);
   if (!lane) {
     throw new Error(`Packet ${packet.id} is not bound to an active lane.`);
+  }
+  const reviewedHead = await checkReviewedHeadIntegrity(lane, lane.worktreePath || lane.repoPath);
+  if (!reviewedHead.ok) {
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_invalidated');
+    appendEvent(lane.id, 'review_invalidated', actor, {
+      reviewedHeadSha: reviewedHead.reviewedHeadSha,
+      currentHeadSha: reviewedHead.currentHeadSha,
+      branch: lane.branch,
+      baseBranch: lane.baseBranch,
+      packetId: lane.packetId,
+    });
+    return {
+      merged: false,
+      note: formatReviewedHeadMismatchNote(reviewedHead),
+      reason: 'head_moved_since_review',
+      reviewedHeadSha: reviewedHead.reviewedHeadSha,
+      currentHeadSha: reviewedHead.currentHeadSha,
+    };
   }
   const cleanupTarget = await capturePostMergeCleanupTarget(lane);
 
@@ -304,6 +326,21 @@ async function dispatchPacketMerge(
     expectedHeadSha: resolveExpectedHeadSha(input, packet),
     actor,
   });
+
+  if (!result.ok && result.reason === 'head_moved_since_review' && result.reviewedHeadSha && result.currentHeadSha) {
+    log(`Merge refused for packet ${packet.id}: reviewed HEAD moved.`, {
+      reviewedHeadSha: result.reviewedHeadSha,
+      currentHeadSha: result.currentHeadSha,
+      actor,
+    });
+    return {
+      merged: false,
+      note: result.note,
+      reason: 'head_moved_since_review',
+      reviewedHeadSha: result.reviewedHeadSha,
+      currentHeadSha: result.currentHeadSha,
+    };
+  }
 
   if (!result.ok && result.expectedHeadSha && result.currentHeadSha) {
     throw new HeadShaMismatchError(packet.id, result.expectedHeadSha, result.currentHeadSha);
@@ -428,6 +465,9 @@ async function dispatchPacketMerge(
     merged: result.ok,
     note: result.note,
     ...(result.approvalId ? { approvalId: result.approvalId } : {}),
+    ...(result.reason ? { reason: result.reason } : {}),
+    ...(result.reviewedHeadSha ? { reviewedHeadSha: result.reviewedHeadSha } : {}),
+    ...(result.currentHeadSha ? { currentHeadSha: result.currentHeadSha } : {}),
   }, packet.review?.approved === true);
 }
 
@@ -460,6 +500,9 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
     }
     if (!orphanResult.merged && orphanResult.expectedHeadSha && orphanResult.currentHeadSha) {
       throw new HeadShaMismatchError(input.packetId, orphanResult.expectedHeadSha, orphanResult.currentHeadSha);
+    }
+    if (!orphanResult.merged && orphanResult.reason === 'head_moved_since_review') {
+      return orphanResult;
     }
     return withGateVerdict(input.packetId, orphanResult);
   }
@@ -535,7 +578,10 @@ export async function approveAndMergePacket(input: ApproveAndMergeInput) {
           : `Merge order requires ${candidate.packet.referenceLabel} to merge before ${packet.referenceLabel}: ${result.note}`,
         ...(result.approvalId ? { approvalId: result.approvalId } : {}),
         ...(result.checks ? { checks: result.checks } : {}),
-        ...(result.blockers ? { blockers: result.blockers, reason: result.blockers.join(', ') || result.note } : {}),
+        ...(result.blockers ? { blockers: result.blockers } : {}),
+        ...(result.reason ? { reason: result.reason } : result.blockers ? { reason: result.blockers.join(', ') || result.note } : {}),
+        ...(result.reviewedHeadSha ? { reviewedHeadSha: result.reviewedHeadSha } : {}),
+        ...(result.currentHeadSha ? { currentHeadSha: result.currentHeadSha } : {}),
       };
     }
 
