@@ -17,6 +17,7 @@ import { SidebarTogglePill } from './SidebarTogglePill';
 import { HeaderIconPill } from './HeaderIconPill';
 import { TabCleanupButton } from './TabCleanupButton';
 import { HeaderScrollArrow } from './HeaderScrollArrow';
+import { ApprovalInboxBadge } from '../title-bar/ApprovalInboxBadge';
 import { IconColumns, IconTerminal } from '../title-bar/icons';
 import { RightPanelMorphButton } from '../title-bar/RightPanelMorphButton';
 
@@ -46,6 +47,9 @@ interface WorkspaceHeaderStripProps {
    */
   rightPanelOpen?: boolean;
   onToggleRightPanel?: () => void;
+  /** Pending approvals badge shown only when the right panel header is absent. */
+  approvalCount?: number;
+  onOpenInbox?: () => void;
   /** Active workspace tab title rendered in the center slot. Codex / Claude
    *  put the conversation name in the title bar itself instead of a
    *  separate strip below. Supports "repo / chat" split styling. Used
@@ -107,6 +111,8 @@ export function WorkspaceHeaderStrip({
   onSplitWorkspacePanel,
   rightPanelOpen = false,
   onToggleRightPanel,
+  approvalCount = 0,
+  onOpenInbox,
   headerLabel,
   onTitleRenameSubmit,
   onTitleArchive,
@@ -121,6 +127,7 @@ export function WorkspaceHeaderStrip({
   splitHeaderWorkspaces,
 }: WorkspaceHeaderStripProps) {
   const showRightPanelFallbackToggle = !rightPanelOpen && Boolean(onToggleRightPanel);
+  const showApprovalBadge = approvalCount > 0 && Boolean(onOpenInbox);
   const showProjectContextToggle = projectContextRailAvailable && Boolean(onToggleProjectContextRail);
   const tabs = headerTabs ?? [];
   const isSplit = Boolean(splitHeaderWorkspaces && splitHeaderWorkspaces.length >= 2);
@@ -189,8 +196,11 @@ export function WorkspaceHeaderStrip({
         </div>
       ) : null}
       right={
-        showProjectContextToggle || onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
+        showApprovalBadge || showProjectContextToggle || onToggleBottomPanel || onSplitWorkspacePanel || showRightPanelFallbackToggle ? (
           <>
+            {showApprovalBadge && onOpenInbox ? (
+              <ApprovalInboxBadge count={approvalCount} onClick={onOpenInbox} />
+            ) : null}
             {showProjectContextToggle ? (
               <HeaderIconPill
                 icon={<IconInfoCircle />}
