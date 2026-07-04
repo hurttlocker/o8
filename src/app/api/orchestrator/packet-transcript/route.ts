@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { readPacketTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
+import { readPacketTranscriptEvents, readSessionTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
 import { requirePanelAuth } from '@/lib/panel/auth';
 
 export const runtime = 'nodejs';
@@ -34,19 +34,27 @@ export async function GET(request: NextRequest) {
 
   const params = request.nextUrl.searchParams;
   const packetId = (params.get('packetId') ?? '').trim();
+  // sessionKey fallback — a dispatched tab always knows its lane sessionKey,
+  // but packetId resolution depends on the client's mission-state projection,
+  // which goes stale when missions are created outside the desktop flow (MCP
+  // dispatch, #1389). Live-hit 2026-07-04: every packet tab stuck on "Agent
+  // working…" because the poll never resolved a packetId.
+  const sessionKey = (params.get('sessionKey') ?? '').trim();
   const limit = parseLimit(params.get('limit'));
   const cursor = parseCursor(params.get('cursor'));
   const tail = parseTail(params.get('tail'));
 
-  if (!packetId) {
+  if (!packetId && !sessionKey) {
     return NextResponse.json(
-      { ok: false, error: { code: 'packet_id_required', message: 'packetId is required' } },
+      { ok: false, error: { code: 'packet_id_required', message: 'packetId or sessionKey is required' } },
       { status: 400, headers: { 'Cache-Control': 'no-store, max-age=0' } },
     );
   }
 
   try {
-    const readback = await readPacketTranscriptEvents(packetId);
+    const readback = packetId
+      ? await readPacketTranscriptEvents(packetId)
+      : { packetId: '', ...(await readSessionTranscriptEvents(sessionKey)) };
 
     if (readback.unsupportedReason) {
       return NextResponse.json(

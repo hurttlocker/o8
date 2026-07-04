@@ -142,10 +142,21 @@ export function usePacketTranscriptPoll({
 
   const packetId = livePacket?.id ?? packetIdHint;
   const status = livePacket?.status ?? null;
-  const visiblePacketEvents = enabled && packetId ? packetEvents : [];
+  const visiblePacketEvents = enabled && (packetId || sessionKey) ? packetEvents : [];
 
   useEffect(() => {
-    if (!enabled || !packetId) {
+    // sessionKey fallback — the tab always carries its lane sessionKey, but
+    // packetId depends on the packet badge AND the client mission-state
+    // projection, both of which go stale/missing when missions are created
+    // outside the desktop flow (MCP dispatch, #1389). Live-hit 2026-07-04:
+    // packetId resolved to null on every dispatched tab, the poll never fired,
+    // and every transcript showed "Agent working…" over a healthy backend.
+    const query = packetId
+      ? `packetId=${encodeURIComponent(packetId)}`
+      : sessionKey
+        ? `sessionKey=${encodeURIComponent(sessionKey)}`
+        : null;
+    if (!enabled || !query) {
       return undefined;
     }
     const controller = new AbortController();
@@ -153,7 +164,7 @@ export function usePacketTranscriptPoll({
     const run = async () => {
       try {
         const response = await fetchWithLongLivedBudget(
-          `/api/orchestrator/packet-transcript?packetId=${encodeURIComponent(packetId)}&tail=1&limit=${TRANSCRIPT_TAIL_LIMIT}`,
+          `/api/orchestrator/packet-transcript?${query}&tail=1&limit=${TRANSCRIPT_TAIL_LIMIT}`,
           { signal: controller.signal, cache: 'no-store' },
         );
         if (!response.ok) return;
@@ -180,7 +191,7 @@ export function usePacketTranscriptPoll({
       controller.abort();
       if (interval !== undefined) window.clearInterval(interval);
     };
-  }, [enabled, packetId, status, active]);
+  }, [enabled, packetId, sessionKey, status, active]);
 
   return visiblePacketEvents;
 }
