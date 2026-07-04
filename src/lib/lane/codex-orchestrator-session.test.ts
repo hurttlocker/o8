@@ -51,3 +51,16 @@ describe('buildCodexOrchestratorPrompt', () => {
     expect(prompt).toContain('## USER MESSAGE\n\nReview the latest packet.');
   });
 });
+
+describe('resolveOrchestratorModelSync — cross-backend bleed guard', () => {
+  it('falls through to the codex default when the explicit model is a Claude id', async () => {
+    const { resolveOrchestratorModelSync } = await import('./codex-orchestrator-session');
+    expect(resolveOrchestratorModelSync('claude-opus-4-8')).not.toMatch(/^claude/i);
+    expect(resolveOrchestratorModelSync('Claude-Sonnet-5')).not.toMatch(/^claude/i);
+  });
+
+  it('keeps a genuine explicit codex model', async () => {
+    const { resolveOrchestratorModelSync } = await import('./codex-orchestrator-session');
+    expect(resolveOrchestratorModelSync('gpt-5.5-codex')).toBe('gpt-5.5-codex');
+  });
+});
