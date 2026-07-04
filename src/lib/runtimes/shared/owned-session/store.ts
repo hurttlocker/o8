@@ -608,14 +608,26 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
       const stdoutFd = openSync(stdoutPath, 'a');
       const stderrFd = openSync(stderrPath, 'a');
       try {
-        const child = spawn(binary, args, {
-          cwd: session.repoPath,
-          detached: true,
-          stdio: ['ignore', stdoutFd, stderrFd],
-          // Detached fallback inherits process.env then layers adapter env +
-          // FORCE_COLOR/NO_COLOR, matching the bridge path's semantics.
-          env: { ...process.env, ...spawnEnv },
-        });
+        // Workers run at reduced CPU priority (nice +10). A 10-worker dispatch
+        // burst at full priority starved the o8 node server — API latency
+        // ballooned, the webview's connection pool saturated, and the dashboard
+        // crashed mid-scoring-run (2026-07-04). Workers are batch compute; the
+        // operator's UI is interactive and always wins the scheduler.
+        const child = process.platform === 'win32'
+          ? spawn(binary, args, {
+              cwd: session.repoPath,
+              detached: true,
+              stdio: ['ignore', stdoutFd, stderrFd],
+              env: { ...process.env, ...spawnEnv },
+            })
+          : spawn('nice', ['-n', '10', binary, ...args], {
+              cwd: session.repoPath,
+              detached: true,
+              stdio: ['ignore', stdoutFd, stderrFd],
+              // Detached fallback inherits process.env then layers adapter env +
+              // FORCE_COLOR/NO_COLOR, matching the bridge path's semantics.
+              env: { ...process.env, ...spawnEnv },
+            });
         child.unref();
         pid = child.pid ?? 0;
         detachMode = 'detached';

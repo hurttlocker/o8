@@ -1,12 +1,39 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useOrchestratorData } from '@/components/desktop/orchestrator-data-context';
 import { fetchWithLongLivedBudget } from '@/lib/connection-budget';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
 
 const POLL_INTERVAL_MS = 3_000;
+
+// Module-level semaphore: at most 2 transcript fetches in flight across ALL
+// packet tabs. The webview shares ~6 HTTP/1.1 connections per origin; a
+// 10-packet dispatch burst held 20+ transcript requests, starved lazy-chunk
+// loads, and crashed the dashboard (2026-07-04 scoring run).
+const MAX_CONCURRENT_TRANSCRIPT_FETCHES = 2;
+let activeTranscriptFetches = 0;
+const transcriptFetchWaiters: Array<() => void> = [];
+
+function acquireTranscriptFetchSlot(): Promise<void> {
+  if (activeTranscriptFetches < MAX_CONCURRENT_TRANSCRIPT_FETCHES) {
+    activeTranscriptFetches += 1;
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => {
+    transcriptFetchWaiters.push(() => {
+      activeTranscriptFetches += 1;
+      resolve();
+    });
+  });
+}
+
+function releaseTranscriptFetchSlot(): void {
+  activeTranscriptFetches = Math.max(0, activeTranscriptFetches - 1);
+  const next = transcriptFetchWaiters.shift();
+  if (next) next();
+}
 const TRANSCRIPT_TAIL_LIMIT = 200;
 
 /**
@@ -127,6 +154,7 @@ export function usePacketTranscriptPoll({
   active,
 }: UsePacketTranscriptPollArgs): MobileTranscriptEntry[] {
   const [packetEvents, setPacketEvents] = useState<MobileTranscriptEntry[]>([]);
+  const hasEventsRef = useRef(false);
   const orchestratorData = useOrchestratorData();
 
   // Resolve the live packet the same way WorkspaceChatPane does — explicit
@@ -162,7 +190,19 @@ export function usePacketTranscriptPoll({
     const controller = new AbortController();
     let cancelled = false;
     const run = async () => {
+      // 2026-07-04 scoring-run crash: 10 dispatched tabs each re-firing this
+      // fetch on every mission-state churn held 20+ concurrent requests
+      // against the webview's ~6-connection pool — starving lazy-chunk loads
+      // and crashing the dashboard mount. Two dampers:
+      //   1. Background tabs that already HAVE events don't refetch — the
+      //      active tab's interval is the live view; background tabs refresh
+      //      when focused.
+      //   2. A module-level semaphore caps concurrent transcript fetches.
+      if (!active && hasEventsRef.current) return;
+      if (cancelled) return;
+      await acquireTranscriptFetchSlot();
       try {
+        if (cancelled) return;
         const response = await fetchWithLongLivedBudget(
           `/api/orchestrator/packet-transcript?${query}&tail=1&limit=${TRANSCRIPT_TAIL_LIMIT}`,
           { signal: controller.signal, cache: 'no-store' },
@@ -170,9 +210,13 @@ export function usePacketTranscriptPoll({
         if (!response.ok) return;
         const payload = await response.json().catch(() => null) as { events?: TranscriptEvent[] } | null;
         if (cancelled || !payload || !Array.isArray(payload.events)) return;
-        setPacketEvents(mapPacketTranscriptEntries(payload.events));
+        const mapped = mapPacketTranscriptEntries(payload.events);
+        hasEventsRef.current = mapped.length > 0;
+        setPacketEvents(mapped);
       } catch {
         /* best-effort — transient network error or abort */
+      } finally {
+        releaseTranscriptFetchSlot();
       }
     };
     void run();
