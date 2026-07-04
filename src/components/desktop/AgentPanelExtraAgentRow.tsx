@@ -1,0 +1,379 @@
+'use client';
+
+import { useCallback, useEffect, useState, type MouseEvent as ReactMouseEvent } from 'react';
+import { AgentStatusDot, type AgentDotState } from '@/components/desktop/AgentStatusDot';
+import { shimmerTextStyle } from './repo-focus/tabs/chats/helpers';
+
+export type AgentOrigin = 'CLI' | 'MCP' | 'Mobile' | 'Webhook' | 'Cloud';
+export type VisualStatus = 'running' | 'waiting' | 'idle' | 'error' | 'archived';
+export type LaneStatus = 'idle' | 'launching' | 'running' | 'paused' | 'awaiting_input' | 'awaiting_human' | 'awaiting_orchestrator' | 'recovering' | 'reviewing' | 'merging' | 'failed' | 'completed' | 'archived';
+
+export interface ExtraAgentRow {
+  key: string;
+  origin: AgentOrigin;
+  status: VisualStatus;
+  runtime: string;
+  name: string;
+  subtitle: string;
+  lastActivityAt: number;
+  sessionKey: string | null;
+  repoPath: string | null;
+  packetId: string | null;
+  laneStatus: LaneStatus | null;
+  lastEventLabel: string | null;
+}
+
+export interface ExtraAgentActionMenuState {
+  x: number;
+  y: number;
+  row: ExtraAgentRow;
+}
+
+const FONT = 'var(--font-sans-system)';
+
+function OriginChip({ origin }: { origin: AgentOrigin }) {
+  if (origin === 'CLI') return null;
+  return (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        paddingTop: 1,
+        paddingBottom: 1,
+        paddingLeft: 5,
+        paddingRight: 5,
+        borderRadius: 4,
+        borderWidth: 1,
+        borderStyle: 'solid',
+        borderColor: 'var(--t-border-subtle)',
+        fontSize: 9,
+        fontWeight: 300,
+        textTransform: 'uppercase',
+        letterSpacing: '0.06em',
+        color: 'var(--t-text-muted)',
+        fontFamily: FONT,
+      }}
+    >
+      {origin}
+    </span>
+  );
+}
+
+function rowDotState(row: ExtraAgentRow): AgentDotState {
+  const lane = row.laneStatus;
+  if (lane === 'completed') return 'merged';
+  if (lane === 'failed' || lane === 'recovering') return 'failed';
+  if (lane === 'archived') return 'idle';
+  if (row.status === 'running') return 'running';
+  if (row.status === 'waiting') return 'review';
+  if (row.status === 'error') return 'failed';
+  return 'idle';
+}
+
+function rowStatusLabel(row: ExtraAgentRow): string {
+  const lane = row.laneStatus;
+  if (lane === 'reviewing') return row.lastEventLabel === 'pr_created' ? 'PR open' : 'review ready';
+  if (lane === 'awaiting_input') return 'needs input';
+  if (lane === 'awaiting_human') return 'needs you';
+  if (lane === 'awaiting_orchestrator') return 'escalated';
+  if (lane === 'failed' || lane === 'recovering') return 'failed';
+  if (lane === 'archived') return 'archived';
+  if (lane === 'completed') return 'merged';
+  if (lane === 'launching' || lane === 'running' || lane === 'merging') return 'running';
+  if (lane === 'paused' || lane === 'idle') return 'idle';
+  if (row.status === 'running') return 'running';
+  if (row.status === 'waiting') return 'review ready';
+  if (row.status === 'error') return 'failed';
+  return row.status === 'archived' ? 'archived' : 'idle';
+}
+
+export function ExtraAgentRowView({
+  row,
+  active,
+  onSelectSession,
+  onOpenMenu,
+  busy,
+  onRetryPacket,
+}: {
+  row: ExtraAgentRow;
+  active: boolean;
+  onSelectSession?: (sessionKey: string) => void;
+  onOpenMenu?: (event: ReactMouseEvent, row: ExtraAgentRow) => void;
+  busy: boolean;
+  onRetryPacket?: (row: ExtraAgentRow) => void;
+}) {
+  const dotState = rowDotState(row);
+  const dotLabel = rowStatusLabel(row);
+  const canFocus = Boolean(row.sessionKey && onSelectSession);
+  const canRetry = Boolean(row.packetId && onRetryPacket && (row.laneStatus === 'failed' || row.laneStatus === 'recovering'));
+  const canInteract = canFocus || canRetry;
+  const [hovered, setHovered] = useState(false);
+  const handleClick = useCallback(() => {
+    if (row.sessionKey) onSelectSession?.(row.sessionKey);
+  }, [row.sessionKey, onSelectSession]);
+
+  return (
+    <button
+      type="button"
+      disabled={!canInteract}
+      onClick={handleClick}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onOpenMenu?.(event, row);
+      }}
+      aria-current={active ? 'true' : undefined}
+      title={canFocus ? `Focus ${row.name}` : row.name}
+      style={{
+        width: '100%',
+        minHeight: 28,
+        paddingTop: 5,
+        paddingBottom: 5,
+        paddingLeft: 37,
+        paddingRight: 12,
+        borderWidth: 0,
+        background: active ? 'var(--t-input-bg)' : 'transparent',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 9,
+        textAlign: 'left',
+        cursor: canInteract ? 'pointer' : 'default',
+        opacity: row.status === 'archived' ? 0.58 : 1,
+        fontFamily: FONT,
+      }}
+      onMouseEnter={(event) => {
+        setHovered(true);
+        if (canInteract && !active) event.currentTarget.style.background = 'var(--t-panel-hover)';
+      }}
+      onMouseLeave={(event) => {
+        setHovered(false);
+        event.currentTarget.style.background = active ? 'var(--t-input-bg)' : 'transparent';
+      }}
+    >
+      <span
+        style={{
+          flex: 1,
+          minWidth: 0,
+          fontSize: 13.5,
+          fontWeight: 300,
+          color: 'var(--t-text)',
+          letterSpacing: '-0.1px',
+          lineHeight: 1.25,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
+          ...(active ? shimmerTextStyle('var(--t-text)', 'color-mix(in srgb, var(--t-text) 55%, var(--t-accent) 45%)') : {}),
+        }}
+      >
+        {row.name}
+        {row.subtitle ? (
+          <span
+            style={{
+              marginLeft: 6,
+              fontSize: 9.5,
+              color: active ? 'inherit' : 'var(--t-text-muted)',
+              fontWeight: 260,
+              letterSpacing: '-0.4px',
+            }}
+          >
+            {row.subtitle}
+          </span>
+        ) : null}
+      </span>
+      <OriginChip origin={row.origin} />
+      {canRetry ? (
+        <span
+          title="Retry failed packet"
+          onMouseDown={(event) => event.stopPropagation()}
+          onClick={(event) => {
+            event.stopPropagation();
+            if (busy) return;
+            onRetryPacket?.(row);
+          }}
+          style={{
+            minHeight: 22,
+            borderRadius: 7,
+            paddingTop: 0,
+            paddingRight: 7,
+            paddingBottom: 0,
+            paddingLeft: 7,
+            display: 'inline-flex',
+            alignItems: 'center',
+            background: 'transparent',
+            color: busy ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
+            cursor: busy ? 'default' : 'pointer',
+            fontFamily: FONT,
+            fontSize: 10.5,
+            fontWeight: 300,
+            letterSpacing: '-0.1px',
+            opacity: hovered ? 1 : 0,
+            pointerEvents: hovered ? 'auto' : 'none',
+            transition: 'opacity 120ms ease, background 120ms ease, color 120ms ease',
+            flexShrink: 0,
+          }}
+          onMouseEnter={(event) => {
+            if (busy) return;
+            event.currentTarget.style.background = 'var(--t-hover)';
+            event.currentTarget.style.color = 'var(--t-text)';
+          }}
+          onMouseLeave={(event) => {
+            event.currentTarget.style.background = 'transparent';
+            event.currentTarget.style.color = busy ? 'var(--t-text-faint)' : 'var(--t-text-muted)';
+          }}
+        >
+          {busy ? 'Retrying' : 'Retry'}
+        </span>
+      ) : null}
+      <AgentStatusDot state={dotState} label={dotLabel} />
+    </button>
+  );
+}
+
+export function ExtraAgentActionMenu({
+  state,
+  busy,
+  canFocus,
+  onClose,
+  onFocus,
+  onArchive,
+}: {
+  state: ExtraAgentActionMenuState;
+  busy: boolean;
+  canFocus: boolean;
+  onClose: () => void;
+  onFocus: () => void;
+  onArchive: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') onClose();
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+
+  const menuWidth = 190;
+  const menuHeight = 130;
+  const panelRect = typeof document === 'undefined'
+    ? null
+    : document.querySelector('[data-o8-agent-panel="true"]')?.getBoundingClientRect() ?? null;
+  const viewportWidth = typeof window === 'undefined' ? 1200 : window.innerWidth;
+  const viewportHeight = typeof window === 'undefined' ? 800 : window.innerHeight;
+  const boundaryLeft = panelRect?.left ?? 0;
+  const boundaryRight = panelRect?.right ?? viewportWidth;
+  const boundaryTop = panelRect?.top ?? 0;
+  const boundaryBottom = panelRect?.bottom ?? viewportHeight;
+  const minLeft = boundaryLeft + 8;
+  const maxLeft = Math.max(minLeft, boundaryRight - menuWidth - 8);
+  const left = Math.min(Math.max(state.x, minLeft), maxLeft);
+  const minTop = boundaryTop + 8;
+  const maxTop = Math.max(minTop, boundaryBottom - menuHeight - 8);
+  const top = Math.min(Math.max(state.y, minTop), maxTop);
+
+  return (
+    <>
+      <button
+        type="button"
+        aria-label="Close spawned agent action menu"
+        onClick={onClose}
+        style={{
+          position: 'fixed',
+          top: 0,
+          right: 0,
+          bottom: 0,
+          left: 0,
+          zIndex: 58,
+          borderWidth: 0,
+          background: 'transparent',
+          cursor: 'default',
+        }}
+      />
+      <div
+        style={{
+          position: 'fixed',
+          left,
+          top,
+          zIndex: 59,
+          width: menuWidth,
+          borderRadius: 13,
+          borderWidth: 1,
+          borderStyle: 'solid',
+          borderColor: 'var(--t-divider-subtle)',
+          background: 'var(--t-bg-card)',
+          boxShadow: 'var(--t-panel-shadow)',
+          backdropFilter: 'blur(18px) saturate(145%)',
+          WebkitBackdropFilter: 'blur(18px) saturate(145%)',
+          paddingTop: 7,
+          paddingRight: 7,
+          paddingBottom: 7,
+          paddingLeft: 7,
+          color: 'var(--t-text)',
+        }}
+      >
+        <div style={{ paddingTop: 4, paddingRight: 7, paddingBottom: 7, paddingLeft: 7 }}>
+          <div style={{ fontSize: 11.25, lineHeight: '15px', fontWeight: 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {state.row.name}
+          </div>
+          <div style={{ marginTop: 1, color: 'var(--t-text-faint)', fontSize: 10, lineHeight: '13px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+            {state.row.subtitle || state.row.runtime}
+          </div>
+        </div>
+        <div style={{ display: 'grid', gap: 2 }}>
+          <ExtraAgentMenuRow label="Open" disabled={!canFocus || busy} onClick={onFocus} />
+          <ExtraAgentMenuRow label="Archive" disabled={busy || !state.row.sessionKey} onClick={onArchive} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+function ExtraAgentMenuRow({
+  label,
+  disabled = false,
+  onClick,
+}: {
+  label: string;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      style={{
+        width: '100%',
+        minHeight: 29,
+        borderRadius: 9,
+        borderWidth: 0,
+        background: 'transparent',
+        color: disabled ? 'var(--t-text-faint)' : 'var(--t-text-muted)',
+        cursor: disabled ? 'default' : 'pointer',
+        textAlign: 'left',
+        paddingTop: 0,
+        paddingRight: 9,
+        paddingBottom: 0,
+        paddingLeft: 9,
+        fontSize: 11.25,
+        lineHeight: '15px',
+        fontWeight: 300,
+        transition: 'background 120ms ease, color 120ms ease',
+      }}
+      onMouseEnter={(event) => {
+        if (disabled) return;
+        event.currentTarget.style.background = 'var(--t-hover)';
+        event.currentTarget.style.color = 'var(--t-text)';
+      }}
+      onMouseLeave={(event) => {
+        event.currentTarget.style.background = 'transparent';
+        event.currentTarget.style.color = disabled ? 'var(--t-text-faint)' : 'var(--t-text-muted)';
+      }}
+    >
+      {label}
+    </button>
+  );
+}

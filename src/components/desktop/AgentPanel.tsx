@@ -444,7 +444,7 @@ export const AgentPanel = memo(function AgentPanel(props: AgentPanelProps = {}) 
             // Spawned agents lands between the active chats and the
             // Archived section per operator's hierarchy: chats →
             // spawned → archived. Same data source as before.
-            slotBeforeArchived={<AgentPanelExtraAgents onSelectSession={onSelectSession} />}
+            slotBeforeArchived={<AgentPanelExtraAgents activeSessionKey={activeSessionKey} onSelectSession={onSelectSession} />}
           />
         </section>
 
