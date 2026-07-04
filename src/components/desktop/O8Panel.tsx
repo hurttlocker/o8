@@ -477,6 +477,12 @@ export function O8Panel({
   const renderedUtilityTabs = activeUtilityTab && !utilityTabs.includes(activeUtilityTab)
     ? [...utilityTabs, activeUtilityTab]
     : utilityTabs;
+  useEffect(() => {
+    if (!activeUtilityTab) return;
+    queueMicrotask(() => {
+      setUtilityTabs((prev) => (prev.includes(activeUtilityTab) ? prev : [...prev, activeUtilityTab]));
+    });
+  }, [activeUtilityTab]);
 
   const openRightUtilityTab = useCallback((tab: RightUtilityTab) => {
     setUtilityTabs((prev) => (prev.includes(tab) ? prev : [...prev, tab]));
@@ -690,8 +696,8 @@ export function O8Panel({
       ) : null}
 
       {/* Tab content — all tabs stay mounted to preserve state */}
-      {utilityShellActive ? (
-        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      {utilityShellActive || renderedUtilityTabs.length > 0 ? (
+        <div style={{ flex: 1, minHeight: 0, display: utilityShellActive ? 'flex' : 'none', flexDirection: 'column' }}>
           <RightUtilityTabStrip
             tabs={renderedUtilityTabs}
             activeTab={activeTab}
