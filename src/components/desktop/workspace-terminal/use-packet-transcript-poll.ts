@@ -166,7 +166,13 @@ export function usePacketTranscriptPoll({
     };
     void run();
     let interval: number | undefined;
-    if (active && (status === 'running' || status === 'recovering')) {
+    // status === null means the packet is not in the CURRENT mission's state —
+    // which happens whenever the current-mission pointer has moved on (#1389)
+    // even though the lane and its transcript are alive. Going quiet here left
+    // every non-current-mission tab stuck on the one-shot fetch ("Agent
+    // working…" forever, live-hit 2026-07-03). Unknown status keeps polling
+    // while the tab is active; terminal statuses still stop the interval.
+    if (active && (status === 'running' || status === 'recovering' || status === null)) {
       interval = window.setInterval(() => { void run(); }, POLL_INTERVAL_MS);
     }
     return () => {
