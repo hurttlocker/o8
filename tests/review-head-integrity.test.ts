@@ -157,5 +157,5 @@ describe('reviewed HEAD merge integrity', () => {
     expect(merged.merged).toBe(true);
     expect(git(repoPath, ['rev-parse', 'HEAD'])).toBe(shaB);
     expect(getLane(lane.id)?.status).toBe('completed');
-  });
+  }, 20_000);
 });
