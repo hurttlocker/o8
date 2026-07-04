@@ -388,6 +388,12 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
 
   // Clean worktree branch.
   if (state.commitsAhead === 0) {
+    const { parkHuddleReadyZeroDiffLane } = await import('@/lib/orchestrator/huddle-zero-diff');
+    const huddlePark = await parkHuddleReadyZeroDiffLane(lane);
+    if (huddlePark.parked) {
+      console.log(`[silent-exit] Lane ${lane.id} completed its huddle turn with no changes; parked for orchestrator.`);
+      return true;
+    }
     setLaneStatus(lane.id, 'awaiting_input', 'system', 'silent_exit_no_work');
     enqueueSilentExitInbox(
       lane,
