@@ -127,6 +127,35 @@ async function resolvePrMergedClean(
     return { mergedClean: null, reason: 'missing-reviewed-tree', reviewedHeadSha };
   }
 
+  // The exact semantic of "merged clean" is: the PR HEAD tree at merge equals
+  // the reviewed tree. Compare the head tree FIRST — it is usually still
+  // readable right after merge, before branch pruning. Comparing against the
+  // base branch first produced systematic FALSE NEGATIVES: any other PR landing
+  // on main between the merge and the reaper tick moves the base tree even
+  // though the operator merged the agent's diff untouched.
+  const headTree = await firstReadableTree(lane.repoPath, [
+    pull.headRefName,
+    lane.branch,
+    pull.headRefName ? `origin/${pull.headRefName}` : null,
+    lane.branch ? `origin/${lane.branch}` : null,
+  ]);
+  if (headTree) {
+    return {
+      mergedClean: headTree.tree === reviewedTree,
+      reason: headTree.tree === reviewedTree
+        ? 'pr-head-tree-matches-reviewed-head'
+        : 'pr-head-tree-differs-from-reviewed-head',
+      reviewedHeadSha,
+      reviewedTree,
+      comparisonRef: headTree.ref,
+      comparisonTree: headTree.tree,
+    };
+  }
+
+  // Head refs pruned — fall back to the base tree. A MATCH is still conclusive
+  // (the squash landed exactly the reviewed tree and nothing else moved), but a
+  // MISMATCH is indeterminate, not "touched": base drift after merge is the
+  // expected state of a busy repo.
   const baseTree = await firstReadableTree(lane.repoPath, [
     pull.baseRefName,
     lane.baseBranch,
@@ -146,31 +175,12 @@ async function resolvePrMergedClean(
 
   if (baseTree) {
     return {
-      mergedClean: false,
-      reason: 'merged-tree-differs-from-reviewed-head',
+      mergedClean: null,
+      reason: 'base-tree-moved-head-unreadable',
       reviewedHeadSha,
       reviewedTree,
       comparisonRef: baseTree.ref,
       comparisonTree: baseTree.tree,
-    };
-  }
-
-  const headTree = await firstReadableTree(lane.repoPath, [
-    pull.headRefName,
-    lane.branch,
-    pull.headRefName ? `origin/${pull.headRefName}` : null,
-    lane.branch ? `origin/${lane.branch}` : null,
-  ]);
-  if (headTree) {
-    return {
-      mergedClean: headTree.tree === reviewedTree,
-      reason: headTree.tree === reviewedTree
-        ? 'pr-head-tree-matches-reviewed-head'
-        : 'pr-head-tree-differs-from-reviewed-head',
-      reviewedHeadSha,
-      reviewedTree,
-      comparisonRef: headTree.ref,
-      comparisonTree: headTree.tree,
     };
   }
 

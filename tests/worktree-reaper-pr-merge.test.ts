@@ -314,7 +314,47 @@ describe('worktree reaper PR merge reconciliation', () => {
     expect(readMergedClean(packetId)).toBe(0);
     const event = getLaneEvents(lane.id).find((item) => item.verb === 'pr_merged_reconciled');
     expect(event?.payload.mergedClean).toBe(false);
-    expect(event?.payload.mergedCleanReason).toBe('merged-tree-differs-from-reviewed-head');
+    expect(event?.payload.mergedCleanReason).toBe('pr-head-tree-differs-from-reviewed-head');
+  });
+
+  it('stamps merged_clean true when other commits land on main after a clean squash merge', async () => {
+    const repoPath = makeRepo();
+    const packetId = 'pkt-pr-merged-clean-busy-main';
+    const branch = 'inline/pr-merged-clean-busy-main';
+    const worktreePath = makePacketWorktree(repoPath, branch, 'packet-pkt-pr-merged-clean-busy-main');
+    const lane = createLane({
+      repoPath,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      worktreePath,
+    });
+    const reviewedHeadSha = commitFile(worktreePath, 'busy.txt', 'reviewed\n', 'feat: reviewed change [via-o8]');
+    recordApprovedReview(packetId, reviewedHeadSha);
+    insertSucceededOutcome({ laneId: lane.id, packetId, repoPath, branch });
+    squashBranchToMain(repoPath, branch, 'squash reviewed change');
+    // Another PR lands on main between the merge and the reaper tick — the
+    // base tree moves, but the packet's diff was merged untouched. This is the
+    // false-negative case the head-tree-first ordering exists for.
+    commitFile(repoPath, 'unrelated.txt', 'someone else\n', 'feat: unrelated change');
+    markReviewing(lane.id, 309);
+    mirrorPullRequest({
+      number: 309,
+      headRefName: lane.branch,
+      state: 'closed',
+      closedAt: '2026-07-03T12:50:00.000Z',
+      mergedAt: '2026-07-03T12:50:00.000Z',
+    });
+
+    await runWorktreeReaperTick();
+
+    expect(getLane(lane.id)?.status).toBe('archived');
+    await waitForPathGone(worktreePath);
+    expect(readMergedClean(packetId)).toBe(1);
+    const event = getLaneEvents(lane.id).find((item) => item.verb === 'pr_merged_reconciled');
+    expect(event?.payload.mergedClean).toBe(true);
+    expect(event?.payload.mergedCleanReason).toBe('pr-head-tree-matches-reviewed-head');
   });
 
   it('preserves dirty terminal work before deleting a PR-merged packet clone', async () => {
