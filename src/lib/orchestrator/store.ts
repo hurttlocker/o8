@@ -1,3 +1,4 @@
+import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import { normalizeDecompositionMetadata, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
 import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
@@ -772,6 +773,12 @@ export interface DomainLaneSummary {
   branch?: string;
   repoPath?: string;
   label?: string;
+  // Merge policy (#1367) — stamped server-side in buildDomainLaneSummaries so
+  // review cards reading missionState (not /api/lanes) can hide the doomed
+  // Merge button in PR-only mode. Live-hit 2026-07-04: the chat banner rendered
+  // Approve & merge because only the lanes route carried the policy.
+  mergeMode?: LaneMergeMode;
+  mergeModeNote?: string | null;
 }
 
 export function reconcileOrchestratorMissionState(
@@ -790,9 +797,9 @@ export function reconcileOrchestratorMissionState(
   const runtimeTruthBySession = new Map(inputs.runtimeTruth.map((truth) => [truth.sessionKey, truth] as const));
 
   // ── Lane domain model (passed from server-side caller) ──
-  const domainLaneByPacketId: Map<string, { status: string; sessionKey: string | null; laneId: string; lastEventLabel: string | null }> | null =
+  const domainLaneByPacketId: Map<string, { status: string; sessionKey: string | null; laneId: string; lastEventLabel: string | null; mergeMode?: LaneMergeMode; mergeModeNote?: string | null }> | null =
     inputs.domainLanes && inputs.domainLanes.length > 0
-      ? new Map(inputs.domainLanes.map((dl) => [dl.packetId, { status: dl.status, sessionKey: dl.sessionKey, laneId: dl.laneId, lastEventLabel: dl.lastEventLabel }]))
+      ? new Map(inputs.domainLanes.map((dl) => [dl.packetId, { status: dl.status, sessionKey: dl.sessionKey, laneId: dl.laneId, lastEventLabel: dl.lastEventLabel, mergeMode: dl.mergeMode, mergeModeNote: dl.mergeModeNote }]))
       : null;
 
   const reconciledPackets = packets.map((packet) => {
@@ -819,9 +826,17 @@ export function reconcileOrchestratorMissionState(
             lastHeartbeatAt: laneMatch.lastActivityAt,
             lastEventAt: runtime?.lastEventAt ?? packet.lane?.lastEventAt ?? laneMatch.lastActivityAt ?? null,
             lastEventLabel: runtime?.currentTask ?? runtime?.workflowStageLabel ?? packet.lane?.lastEventLabel ?? null,
+            mergeMode: domainLane?.mergeMode ?? packet.lane?.mergeMode,
+            mergeModeNote: domainLane?.mergeModeNote ?? packet.lane?.mergeModeNote ?? null,
           }
         : packet.lane?.laneId
-          ? { ...packet.lane, laneId, sessionKey: domainLane?.sessionKey ?? packet.lane?.sessionKey ?? null }
+          ? {
+              ...packet.lane,
+              laneId,
+              sessionKey: domainLane?.sessionKey ?? packet.lane?.sessionKey ?? null,
+              mergeMode: domainLane?.mergeMode ?? packet.lane?.mergeMode,
+              mergeModeNote: domainLane?.mergeModeNote ?? packet.lane?.mergeModeNote ?? null,
+            }
           : null,
       lastEventAt: runtime?.lastEventAt ?? packet.lastEventAt ?? packet.lane?.lastHeartbeatAt ?? null,
       lastEventLabel: runtime?.currentTask ?? runtime?.workflowStageLabel ?? packet.lastEventLabel ?? packet.lane?.lastEventLabel ?? null,

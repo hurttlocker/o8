@@ -49,3 +49,57 @@ describe('review card PR-only mode reaches the lane-list route', () => {
     }
   });
 });
+
+describe('mission-state lane bindings carry PR-only merge policy (the chat banner path)', () => {
+  it('real /api/orchestrator/state GET stamps mergeMode on packet lane bindings', async () => {
+    const sentinelPath = join(dataDir, '.dogfood-pr-only');
+    writeFileSync(sentinelPath, '', 'utf-8');
+    try {
+      const stateRoute = await import('@/app/api/orchestrator/state/route');
+      const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+      const packetId = 'pkt-state-pr-only-band';
+      const lane = createLane({
+        repoPath: '/tmp/o8-state-pr-only-repo',
+        branch: 'issue/state-pr-only',
+        runtime: 'codex',
+        label: 'State PR-only lane',
+        packetId,
+      });
+
+      const get = (): Request => new NextRequest('http://localhost:3001/api/orchestrator/state', {
+        method: 'GET',
+        headers: { host: 'localhost:3001' },
+      });
+      const seed = await (await stateRoute.GET(get() as never)).json();
+      const mission = seed.mission ?? createEmptyOrchestratorMissionState();
+      mission.packets = [
+        ...mission.packets,
+        {
+          id: packetId,
+          referenceLabel: 'P-pr-only',
+          title: 'State PR-only packet',
+          status: 'awaiting_review',
+          queueState: 'released',
+          releaseState: 'released',
+          runtime: 'codex',
+          wave: 1,
+          blockedBy: [],
+          lane: { laneId: lane.id, sessionKey: null },
+        },
+      ];
+      const postRes = await stateRoute.POST(new NextRequest('http://localhost:3001/api/orchestrator/state', {
+        method: 'POST',
+        headers: { host: 'localhost:3001', 'content-type': 'application/json' },
+        body: JSON.stringify({ mission }),
+      }) as never);
+      expect(postRes.status).toBe(200);
+
+      const json = await (await stateRoute.GET(get() as never)).json();
+      const packet = json.mission.packets.find((p: { id: string }) => p.id === packetId);
+      expect(packet?.lane?.mergeMode).toBe('pr_only');
+      expect(packet?.lane?.mergeModeNote).toBe(DOGFOOD_PR_ONLY_NOTE);
+    } finally {
+      rmSync(sentinelPath, { force: true });
+    }
+  });
+});
