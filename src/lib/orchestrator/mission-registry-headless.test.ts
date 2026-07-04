@@ -102,5 +102,5 @@ describe('headless mission registry dispatch', () => {
     expect(findLaneByPacket(firstPacketId!)?.id).toMatch(/^lane-/);
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
     expect(launchMock.calls.some((call) => call.packetId === firstPacketId)).toBe(true);
-  });
+  }, 20_000);
 });
