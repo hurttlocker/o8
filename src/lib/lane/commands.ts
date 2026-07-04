@@ -677,6 +677,17 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         const baseBranch = lane.baseBranch || 'main';
         const probe = await probeNoChangesProduced(reviewCwd, baseBranch);
         if (probe.noChangesProduced) {
+          const { parkHuddleReadyZeroDiffLane } = await import('@/lib/orchestrator/huddle-zero-diff');
+          const huddlePark = await parkHuddleReadyZeroDiffLane(lane);
+          if (huddlePark.parked) {
+            console.warn(`[lane] request_review: ${command.laneId} produced no diff after huddle report — parking for orchestrator.`);
+            return {
+              ok: false,
+              laneId: command.laneId,
+              note: 'huddle_ready',
+              lane: huddlePark.lane ?? undefined,
+            };
+          }
           console.warn(`[lane] request_review: ${command.laneId} has 0 commits ahead of ${baseBranch} — runtime reported success but produced no diff. Marking failed.`);
           const failed = setLaneStatus(command.laneId, 'failed', 'system', 'zero_diff_failed');
           return {
