@@ -42,13 +42,15 @@ function rectKey(r: BrowserViewRect): string {
   return `${Math.round(r.x)},${Math.round(r.y)},${Math.round(r.w)},${Math.round(r.h)}`;
 }
 
+let lastShownNativeBrowserUrl = '';
+
 export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfaceProps) {
   const ref = useRef<HTMLDivElement>(null);
   const lastRect = useRef<string>('');
   /** Whether the placeholder is currently on screen (driven by the observer). */
   const visibleRef = useRef<boolean>(false);
   /** The URL currently shown by the native window (so we navigate on change). */
-  const shownUrl = useRef<string>('');
+  const shownUrl = useRef<string>(lastShownNativeBrowserUrl);
   /** Page-zoom factor: visual-viewport px ÷ layout (CSS) px. 1 at 100%. */
   const zoomRef = useRef<number>(1);
   /** Occlusion state (Stage 5): the native window composites ABOVE o8's web
@@ -223,6 +225,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
 
   const showOrOpen = useCallback((rect: BrowserViewRect) => {
     lastRect.current = rectKey(rect);
+    lastShownNativeBrowserUrl = url;
     if (shownUrl.current === url) {
       void browserViewSetRect(rect);
       void browserViewShow();
