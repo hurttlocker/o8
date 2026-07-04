@@ -1,6 +1,6 @@
 'use client';
 
-import { MutableRefObject, Suspense, lazy, memo, useEffect, useRef, useState } from 'react';
+import { MutableRefObject, Suspense, memo, useEffect, useRef, useState } from 'react';
 import { Terminal as TerminalIcon } from '../lucide-shims';
 import type { CanvasTab } from '@/components/desktop/Canvas';
 import { WorkspaceChatPane } from '@/components/desktop/workspace-terminal/WorkspaceChatPane';
@@ -8,14 +8,15 @@ import type { RegisteredRepo, TerminalTab } from '@/components/desktop/workspace
 import { repoSlugFromRemote, shortenPath } from '@/components/desktop/workspace-terminal/utils';
 import { XtermPanel, type XtermPanelHandle } from '@/components/desktop/workspace-terminal/XtermPanel';
 import { WorkspaceBootLoader } from '@/components/desktop/workspace-terminal/WorkspaceBootLoader';
+import { retryingLazy } from '@/lib/react/retrying-lazy';
 
 // LazyLLMChat used to render the Assistant tab (kind='llm-chat'). The
 // chooser-spawn rewrite routes both orchestrator and llm-chat tabs
 // through OrchestratorTab now (chat tabs run with lockedMode='chat'),
 // so the standalone LLMChat surface is no longer mounted from here.
-const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then((module) => ({ default: module.Canvas })));
-const LazyOrchestratorTab = lazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })));
-const LazyFleetCanvasTab = lazy(() => import('@/components/desktop/workspace-terminal/FleetCanvasTab').then((module) => ({ default: module.FleetCanvasTab })));
+const LazyCanvas = retryingLazy(() => import('@/components/desktop/Canvas').then((module) => ({ default: module.Canvas })), { label: 'Canvas' });
+const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
+const LazyFleetCanvasTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/FleetCanvasTab').then((module) => ({ default: module.FleetCanvasTab })), { label: 'Fleet canvas' });
 
 interface WorkspaceTerminalPanelsProps {
   visibleTabs: TerminalTab[];
