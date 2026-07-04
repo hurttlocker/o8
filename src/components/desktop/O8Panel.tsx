@@ -7,7 +7,7 @@
  * Modeled after Cursor 3's right panel, adapted for governance.
  */
 
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+import { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
 import type React from 'react';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { Terminal as TablerTerminal } from '@/components/desktop/tabler-shims';
@@ -29,9 +29,10 @@ import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps 
 import type { O8Tab } from './o8-panel/types';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+import { retryingLazy } from '@/lib/react/retrying-lazy';
 // O8 panel uses the native dark theme — no LIGHT_CANVAS_VARS override needed
 
-const LazyOrchestratorTab = lazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })));
+const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
 type RightUtilityTab = Extract<O8Tab, 'files' | 'side-chat' | 'browser' | 'review' | 'terminal'>;
 

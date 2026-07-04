@@ -1,7 +1,7 @@
 'use client';
 /* eslint-disable @typescript-eslint/no-unused-vars -- dashboard shell is mid-refactor and keeps dormant wiring for upcoming panels */
 
-import { lazy, Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
+import { Suspense, useState, useCallback, useEffect, useRef, useMemo } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
 import { track } from '@/lib/analytics/track';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -126,6 +126,7 @@ import { createTileRegistry } from './tileRegistry';
 import { SettingsOverlay } from './SettingsOverlay';
 import type { TerminalTabHandle } from '@/components/desktop/workspace-terminal/types';
 import type { SavedChatRepoContext } from '@/lib/llm/chat-history';
+import { retryingLazy } from '@/lib/react/retrying-lazy';
 
 // Mark the dashboard module load as early as possible. Runs once when the
 // bundle is first parsed, before the React component is even invoked, so
@@ -138,16 +139,16 @@ markDashboardScriptStart();
    open a panel, hit Cmd+K, or trigger design mode before its chunk needs to
    load. Keeping these out of the main dashboard chunk shaves real ms off
    first-render on cold launch. */
-const LazySettingsPage = lazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })));
+const LazySettingsPage = retryingLazy(() => import('@/components/desktop/SettingsPage').then(m => ({ default: m.SettingsPage })), { label: 'Settings' });
 // LazyAnalyticsPage full-page mount retired — Settings → Analytics tab is
 // the live entry point. AnalyticsPage is still consumed via that tab.
-const LazyAutomationsPage = lazy(() => import('@/components/desktop/AutomationsPage').then(m => ({ default: m.AutomationsPage })));
-const LazyOnboarding = lazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })));
-const LazyCommandPalette = lazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })));
-const LazyKeyboardShortcutsOverlay = lazy(() => import('@/components/desktop/KeyboardShortcutsOverlay').then(m => ({ default: m.KeyboardShortcutsOverlay })));
-const LazyDesignModeOverlay = lazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })));
-const LazyO8ElementPanel = lazy(() => import('@/components/desktop/O8ElementPanel').then(m => ({ default: m.O8ElementPanel })));
-const LazyO8Panel = lazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })));
+const LazyAutomationsPage = retryingLazy(() => import('@/components/desktop/AutomationsPage').then(m => ({ default: m.AutomationsPage })), { label: 'Automations' });
+const LazyOnboarding = retryingLazy(() => import('@/components/desktop/Onboarding').then(m => ({ default: m.Onboarding })), { label: 'Onboarding' });
+const LazyCommandPalette = retryingLazy(() => import('@/components/desktop/CommandPalette').then(m => ({ default: m.CommandPalette })), { label: 'Command palette' });
+const LazyKeyboardShortcutsOverlay = retryingLazy(() => import('@/components/desktop/KeyboardShortcutsOverlay').then(m => ({ default: m.KeyboardShortcutsOverlay })), { label: 'Keyboard shortcuts' });
+const LazyDesignModeOverlay = retryingLazy(() => import('@/components/desktop/DesignModeOverlay').then(m => ({ default: m.DesignModeOverlay })), { label: 'Design mode' });
+const LazyO8ElementPanel = retryingLazy(() => import('@/components/desktop/O8ElementPanel').then(m => ({ default: m.O8ElementPanel })), { label: 'Element panel' });
+const LazyO8Panel = retryingLazy(() => import('@/components/desktop/O8Panel').then(m => ({ default: m.O8Panel })), { label: 'o8 panel' });
 // #888/#895 — packet-mode right panel (Spec / Agent Overview / Changes).
 import { OrchestratorDataProvider } from '@/components/desktop/orchestrator-data-context';
 import { useMissionCompleteDetector } from '@/components/desktop/thoughts/mission-complete-detector';

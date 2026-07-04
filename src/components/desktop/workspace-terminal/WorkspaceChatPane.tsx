@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, lazy, memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
+import { Suspense, memo, useEffect, useMemo, useState, type CSSProperties } from 'react';
 import {
   AlertCircle,
   ArrowDown,
@@ -30,9 +30,10 @@ import {
   stripWorkspaceRichRendererFallback,
 } from '@/components/desktop/workspace-terminal/chat-renderers/WorkspaceRichChatEvents';
 import { PromptGlyph, looksLikePacketPrompt } from '@/components/desktop/workspace-terminal/workspace-chat-prompt';
+import { retryingLazy } from '@/lib/react/retrying-lazy';
 
-const LazyMessageBubble = lazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.MessageBubble })));
-const LazyChainOfThought = lazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.ChainOfThought })));
+const LazyMessageBubble = retryingLazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.MessageBubble })), { label: 'Message bubble' });
+const LazyChainOfThought = retryingLazy(() => import('@/components/desktop/LLMChat').then((module) => ({ default: module.ChainOfThought })), { label: 'Chain of thought' });
 
 interface WorkspaceChatPaneProps {
   tab: TerminalTab;
