@@ -8,8 +8,8 @@
 - **P0 — Always-on dock (the operator's #1 visible want):** dock window created *visible* + shown at boot (top-center, level 25, nonactivating, **persistent**); **fix the paint** — `DictationPillView` IDLE branch renders nothing today → the transparent window is invisible; add a persistent idle capsule/dot (Symon's notch idle). Fn morphs idle→recording→polishing→idle (never hides). Wire `frontmost_app` + dictionary/instructions/replacements into `run_finalize`'s polish ctx (currently dead). Port `commands.rs` voice-commands on the native Fn path. Stand up `preferences.rs`.
 - **P1 — capture polish:** `audio_ducker.rs` (duck audio while dictating); dictionary UI + pref; phrase replacements + app file-tag filters + UI; custom-instructions textarea + pref.
 - **P2 — Voice settings UIs:** dictionary/replacements/instructions/Whisper-toggle/local-vs-cloud.
-- **P3 — hotkeys:** add `tauri-plugin-global-shortcut`; **double-tap-Fn** (long-form), **Cmd+Shift+Space** (toggle dock), **Cmd+Shift+,** (settings), **Cmd+Alt+V** (paste last) — all inside the ONE HID tap + poll. (Fn+R, Right-Option, Cmd+Shift+R/S need their pipelines below.)
-- **P4 — TTS:** Edge (free, native Rust) + Google + ElevenLabs(founder) + speech-text normalization; **Cmd+Shift+S speak-selection** + `grab_selection`; read-aloud "say".
+- **P3 — hotkeys:** add `tauri-plugin-global-shortcut`; **double-tap-Fn** (long-form), **Cmd+Shift+Space** (toggle dock), **Cmd+Shift+,** (settings), **Cmd+Alt+V** (paste last) — all inside the ONE HID tap + poll. (Fn+R, Right-Option, Cmd+Shift+R / Ctrl+Shift+S need their pipelines below.)
+- **P4 — TTS:** Edge (free, native Rust) + Google + ElevenLabs(founder) + speech-text normalization; **Ctrl+Shift+S speak-selection** + `grab_selection`; read-aloud "say".
 - **P5 — screen reading:** capture→Gemini-Vision→TTS; **Fn+R** + reading sub-controls (Space/arrows/Esc); **Cmd+Shift+R**; needs Screen-Recording TCC.
 - **P6 — history:** transcript store + history/replay/rerun + stats.
 - **P7 — Ask Q&A:** the assistant surface (`qa.rs`) + spoken voice + RMS envelope + dock answer panel + **Right-Option hold**.

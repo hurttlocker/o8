@@ -310,7 +310,7 @@ fn get_current_frontmost_bundle_id() -> Option<String> {
     native_frontmost_app_info().map(|app| app.bundle_id)
 }
 
-/// Whether o8 ITSELF is the current frontmost app. ⌘⇧S speak-selection uses this
+/// Whether o8 ITSELF is the current frontmost app. Ctrl+Shift+S speak-selection uses this
 /// to read o8's own webview selection (`window.getSelection()` via the frontend)
 /// instead of the AX/Cmd+C path — a WKWebView does NOT expose web-content
 /// selections through `AXSelectedText`, and the synthetic Cmd+C doesn't reliably
@@ -1203,16 +1203,16 @@ extern "C" {
     fn CGEventSourceFlagsState(state_id: i32) -> u64;
 }
 
-/// Wait (≤700ms) for the ⌘ and ⇧ modifiers to be physically released before we
-/// synthesize Cmd+C. Posting Cmd+C while the ⌘⇧S chord is still held merges the
-/// held Shift into the event (→ Cmd+Shift+C) so the copy never happens. Matters
-/// for AX-opaque surfaces (o8's own WKWebView) where Strategy 1 returns None and
-/// we depend on the Cmd+C fallback. A tap releases in tens of ms; a long hold
-/// times out and we proceed best-effort.
+/// Wait (≤700ms) for the Ctrl and Shift modifiers to be physically released
+/// before we synthesize Cmd+C. Posting Cmd+C while the Ctrl+Shift+S chord is
+/// still held can merge held modifiers into the event so the copy never happens.
+/// Matters for AX-opaque surfaces (o8's own WKWebView) where Strategy 1 returns
+/// None and we depend on the Cmd+C fallback. A tap releases in tens of ms; a
+/// long hold times out and we proceed best-effort.
 #[cfg(target_os = "macos")]
 fn wait_for_chord_release() {
-    // kCGEventFlagMaskCommand (1<<20) | kCGEventFlagMaskShift (1<<17).
-    const CHORD_MASK: u64 = 0x100000 | 0x20000;
+    // kCGEventFlagMaskControl (1<<18) | kCGEventFlagMaskShift (1<<17).
+    const CHORD_MASK: u64 = 0x40000 | 0x20000;
     // kCGEventSourceStateCombinedSessionState = 1.
     const CG_STATE_COMBINED_SESSION: i32 = 1;
     let deadline = std::time::Instant::now() + std::time::Duration::from_millis(700);
@@ -1235,7 +1235,7 @@ pub(crate) fn grab_selection() -> Option<String> {
     // ── Strategy 1: Accessibility (no clipboard clobber) ──
     // AX APIs SIGILL/return-nothing off the main thread on macOS 15.7+ (same
     // rule as gather_window_context). grab_selection is called from a worker
-    // thread (the ⌘⇧S handler spawns it for the Cmd+C sleeps), so the AX read
+    // thread (the Ctrl+Shift+S handler spawns it for the Cmd+C sleeps), so the AX read
     // MUST hop to the main thread or it silently fails and we fall through to
     // the held-modifier-broken Cmd+C path.
     if let Some(text) = run_on_main_thread(read_selected_text_via_accessibility) {
@@ -1244,9 +1244,9 @@ pub(crate) fn grab_selection() -> Option<String> {
     }
 
     // ── Strategy 2: simulate Cmd+C → poll clipboard → restore ──
-    // Wait for the ⌘⇧S chord to release first so the synthetic Cmd+C isn't
-    // polluted by the still-held Shift (the held-modifier bug that left o8's own
-    // webview selection uncopyable).
+    // Wait for the Ctrl+Shift+S chord to release first so the synthetic Cmd+C
+    // isn't polluted by still-held modifiers (the held-modifier bug that left
+    // o8's own webview selection uncopyable).
     wait_for_chord_release();
     let saved = capture_clipboard_snapshot();
     simulate_cmd_c();

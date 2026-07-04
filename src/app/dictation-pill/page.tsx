@@ -264,7 +264,7 @@ export default function DictationPillPage() {
         // Recognizer lifecycle signal only. It must NOT re-enter recording:
         // the engine emits `ready` after every session teardown, including a
         // cancelled one — treating it as a start signal left the dock stuck
-        // on "listening" after an ⌥S say-cancel (operator-reported). The
+        // on "listening" after a say-shortcut cancel (operator-reported). The
         // lost-broadcast race the old defensive start covered was fixed by
         // emit_to(DOCK_LABEL) — system-start is the only start signal now.
         break;

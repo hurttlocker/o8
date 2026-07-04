@@ -14,7 +14,7 @@ P3 adds the gesture/combo bindings Symon ships, on top of o8's single existing F
 **Pipeline gating (CRITICAL).** The *binding* is P3 for every gesture, but several land on pipelines o8 does not have yet:
 - **Fn+R / ⌘⇧R → screen reading** → BLOCKED on P5 (no `reading.rs`, no Vision→TTS path).
 - **Right-Option hold → Ask** → BLOCKED on P7 (no `qa.rs`, no answer pipeline).
-- **⌘⇧S → speak-selection / TTS** → BLOCKED on P4 (no TTS subsystem).
+- **Ctrl+Shift+S → speak-selection / TTS** → BLOCKED on P4 (no TTS subsystem).
 
 **First shippable slice** = substrate (plugin + tap extension scaffolding) + **double-tap-Fn long-form** (rides o8's EXISTING `stt_engine` + `paste` + dock — fully wireable today) + the Cmd-combos that map to an **existing o8 capability**: **⌘⇧Space → summon/dismiss o8 window** and **⌘⌥V → paste-last-dictation** (needs a thin transcript-store read, see gap) and **⌘⇧, → open settings overlay**. The reading/Ask/speak keys get registered as **no-op-with-log stubs** (or are left unregistered) and marked BLOCKED until their pipelines land.
 
@@ -79,13 +79,13 @@ Today o8's system path is a single `SYSTEM_DICTATION_ORIGIN: AtomicBool` (`fn_ho
 | `aqua lib.rs:2677-2739` Right-Option (kc 61, `OPTION_FLAG 0x80000`) PRESS → Ask | P7 (no `qa.rs`) |
 | `aqua lib.rs:2740-2829` Right-Option RELEASE → finalize+send | P7 |
 | `aqua lib.rs:3664-3709` `⌘⇧R` reading | P5 |
-| `aqua lib.rs:3711-3747` `⌘⇧S` speak selection | P4 (TTS) — also shadows macOS "Save As…" |
+| `aqua lib.rs:3711-3747` `⌘⇧S` speak selection | P4 (TTS) — o8 uses Ctrl+Shift+S to avoid Save As and Option chords |
 
 ## o8 gap
 
 - **No `tauri-plugin-global-shortcut`** anywhere (Cargo.toml/lock/src clean). NEW dep + install + capability + registration — all four needed.
 - **No transcript store on the Rust side.** `⌘⌥V` needs the last polished system transcript. Stash it in a `static LAST_VOICE_TRANSCRIPT: Mutex<Option<String>>` written at the end of `run_finalize` (~2482). Small, contained.
-- **No `reading.rs`/Vision→TTS (P5), no `qa.rs` (P7), no TTS (P4).** These block Fn+R, ⌘⇧R, ⌘⇧S, Right-Option Ask.
+- **No `reading.rs`/Vision→TTS (P5), no `qa.rs` (P7), no TTS (P4).** These block Fn+R, ⌘⇧R, Ctrl+Shift+S, Right-Option Ask.
 - **Origin model is a bool** — sufficient for long-form (Paste-mode); becomes a `Mode` enum only when P5/P7 land.
 - **Settings UI already at/ahead of parity:** `KeyboardShortcutsOverlay.tsx` has a `ShortcutSection[]` schema with a "Voice" section; `VoiceTab.tsx` already has `01 PERMISSIONS` (Accessibility/Input Monitoring/Fn-binding). Just add discoverability rows.
 
@@ -100,7 +100,7 @@ Today o8's system path is a single `SYSTEM_DICTATION_ORIGIN: AtomicBool` (`fn_ho
 - **preship_gate (lib.rs ~2909).** Register the global shortcuts inside the same `!preship_gate` macOS `setup()` block, NOT in the Builder, so the disposable pre-ship app doesn't grab system chords. (The `.plugin()` install can stay in the Builder.)
 - **⌘⇧Space** — o8's window is the whole IDE; summon-to-front only, never hide.
 - **⌘⇧, vs ⌘,** — o8 already binds plain `⌘,` in-app (`dashboard/page.tsx:3690`). See Forks.
-- **⌘⇧S shadows macOS "Save As…"** system-wide — do NOT register globally (P4-blocked anyway).
+- **⌘⇧S shadows macOS "Save As…"** system-wide — do NOT register globally; use Ctrl+Shift+S for speak-selection instead.
 - **catch_unwind is non-negotiable** — keep all new tap-closure code INSIDE the existing `catch_unwind(AssertUnwindSafe(...))` (315-358). A panic across the extern "C" boundary aborts o8 + kills the Node sidecars.
 - **Double-tap window = 480ms** (real Symon constant `aqua lib.rs:151`) — do not guess.
 - **No rebind UI** — Symon's `settings.ts` `hotkey` field is dead/vestigial; keep o8 hotkeys display-only.
@@ -109,7 +109,7 @@ Today o8's system path is a single `SYSTEM_DICTATION_ORIGIN: AtomicBool` (`fn_ho
 
 1. **first-slice-combos** — Which Cmd-combos ship now? **Rec: ship the 3 existing-capability combos (⌘⇧Space, ⌘⌥V, ⌘⇧,) + double-tap-Fn; register nothing for the 2 pipeline-blocked ones** (no inert globals grabbing system chords). ⌘⌥V's transcript-store stash is small — keep it in.
 2. **settings-chord-conflict** — o8 has in-app `⌘,`; Symon's global is `⌘⇧,`. **Rec: add `⌘⇧,` as the global (fires when o8 unfocused — the actual value of a global), keep `⌘,` in-app.** If avoiding redundancy, drop `⌘⇧,` from the slice entirely.
-3. **cmd-s-save-as** — `⌘⇧S` global shadows "Save As…". **Rec: never register a global `⌘⇧S` in the first slice (P4-blocked); pick a non-conflicting chord when TTS ships.**
+3. **cmd-s-save-as** — `⌘⇧S` global shadows "Save As…". **Resolved: never register a global `⌘⇧S`; use Ctrl+Shift+S for speak-selection.**
 4. **preship-gate-placement** — **Rec: register the on_shortcut handlers inside the `!preship_gate` setup() block** (the `.plugin()` install can stay in the Builder).
 5. **escape-cancel-scope** — **Rec: include Escape-cancel in the first slice** — KeyDown plumbing is cheap and pre-wires the keycode read Fn+R/reading-transport reuse in P5.
 
