@@ -19,6 +19,7 @@ import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
 import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
 import { performRuntimeAction } from '@/lib/runtime/actions';
 import { currentMissionState } from './shared';
+import { continueOwnedCodexSession, getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
 
 export interface SteerPacketInput {
   packetId: string;
@@ -32,6 +33,19 @@ export interface SteerPacketResult {
 }
 
 const NO_STEERABLE_SESSION = 'Packet has no steerable session — use rerun_with_feedback instead.';
+
+async function resumeExitedOwnedCodexSession(surfaceId: string, message: string) {
+  if (!surfaceId.startsWith('codex-owned:')) {
+    return null;
+  }
+
+  const sources = await getOwnedCodexTelemetrySources(surfaceId);
+  if (!sources?.threadId) {
+    return null;
+  }
+
+  return continueOwnedCodexSession(surfaceId, message);
+}
 
 export async function steerPacket({ packetId, message }: SteerPacketInput): Promise<SteerPacketResult> {
   const lane = findLaneByPacket(packetId);
@@ -50,10 +64,17 @@ export async function steerPacket({ packetId, message }: SteerPacketInput): Prom
 
   const result = await performRuntimeAction({ action: 'steer', surfaceId: lane.sessionKey, message });
   if (!result.ok || result.status === 'unavailable') {
-    throw new Error(result.note || 'Runtime steer failed.');
+    const resumed = await resumeExitedOwnedCodexSession(lane.sessionKey, message);
+    if (!resumed?.ok) {
+      if (lane.sessionKey.startsWith('codex-owned:')) {
+        throw new Error(resumed?.note || NO_STEERABLE_SESSION);
+      }
+      throw new Error(resumed?.note || result.note || NO_STEERABLE_SESSION);
+    }
+  } else {
+    rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
   }
 
-  rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
   const updated = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
   if (!updated || updated.status !== 'running') {
     throw new Error(NO_STEERABLE_SESSION);
