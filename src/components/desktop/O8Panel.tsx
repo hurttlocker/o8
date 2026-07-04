@@ -57,6 +57,7 @@ interface O8PanelProps {
   onActiveTabChange?: (tab: O8Tab) => void;
   selectedFile?: string | null;
   browserUrl?: string | null;
+  browserStateKey?: string;
   // Bubbles the browser pane's active URL up so the TitleBar Browser
   // button can render a hover preview iframe pointed at it.
   onBrowserActiveUrlChange?: (url: string | null) => void;
@@ -432,6 +433,7 @@ export function O8Panel({
   onActiveTabChange,
   selectedFile,
   browserUrl,
+  browserStateKey = 'right-panel',
   onBrowserActiveUrlChange,
   onSelectedFileChange,
   onSelectCommit,
@@ -598,8 +600,10 @@ export function O8Panel({
     if (tab === 'browser') {
       return (
         <O8BrowserPane
+          key={browserStateKey}
           previews={previews}
           navigateToUrl={pendingBrowserUrl ?? browserUrl}
+          stateScopeKey={browserStateKey}
           onActiveUrlChange={onBrowserActiveUrlChange}
         />
       );
@@ -744,7 +748,7 @@ export function O8Panel({
         )}
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'browser' && !utilityShellActive ? 'flex' : 'none', flexDirection: 'column' }}>
-        <O8BrowserPane previews={previews} navigateToUrl={pendingBrowserUrl ?? browserUrl} onActiveUrlChange={onBrowserActiveUrlChange} />
+        <O8BrowserPane key={browserStateKey} previews={previews} navigateToUrl={pendingBrowserUrl ?? browserUrl} stateScopeKey={browserStateKey} onActiveUrlChange={onBrowserActiveUrlChange} />
       </div>
       <div style={{ flex: 1, minHeight: 0, display: activeTab === 'activity' || activeTab === 'prs' ? 'flex' : 'none', flexDirection: 'column' }}>
         <O8ActivityPane
