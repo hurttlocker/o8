@@ -4,7 +4,7 @@
  * useSymonEditBridge — the o8-side half of Symon's in-place edit lane for
  * text living inside o8's OWN webview. The native AX path is blind here (a
  * WKWebView exposes neither AXSelectedText nor a reliable synthetic Cmd+C —
- * the same wall the ⌥S speak-selection path hit), so the Rust edit lane
+ * the same wall the Ctrl+Shift+S speak-selection path hit), so the Rust edit lane
  * round-trips through this listener instead:
  *
  *   `o8:edit-capture` → report the live selection / focused editable via
