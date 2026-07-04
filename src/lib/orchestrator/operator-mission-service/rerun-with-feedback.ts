@@ -3,7 +3,8 @@ import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { archiveLane, listLanes, updateLane } from '@/lib/lane/registry';
 import { getWorktreeManager } from '@/lib/worktree/launch';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
-import { log } from './shared';
+import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import { currentMissionState, log } from './shared';
 
 /**
  * #662 — One-click rerun-with-feedback.
@@ -123,6 +124,54 @@ export function resetPacketFields(packet: OrchestratorPacket) {
   // operator reset_packet refreshes it.
 }
 
+async function rerunRegistryPacketWithFeedback(
+  missionId: string,
+  packetId: string,
+  feedback: string,
+) {
+  let worktreePruned = false;
+  let referenceLabel = packetId;
+
+  const { state: finalState } = await withMissionRegistryState(missionId, async (current) => {
+    const packet = current.packets.find((candidate) => candidate.id === packetId);
+    if (!packet) {
+      throw new Error(`Packet ${packetId} not found.`);
+    }
+    referenceLabel = packet.referenceLabel;
+
+    const originalSummary = packet.summary;
+    const originalPrompt = packet.prompt?.trim()
+      || [packet.title, originalSummary].map((part) => part.trim()).filter(Boolean).join('\n\n');
+
+    const worktreePath = archiveLanesForPacket(packetId, packet.referenceLabel);
+    if (worktreePath) {
+      worktreePruned = await pruneWorktree(current.repoPath, worktreePath);
+    }
+
+    resetPacketFields(packet);
+    packet.summary = appendFeedback(originalSummary, feedback);
+    packet.prompt = appendFeedback(originalPrompt, feedback);
+
+    const afterDispatch = await runDispatchTick(current);
+    return { state: afterDispatch, result: null };
+  });
+
+  const dispatchedPacket = finalState.packets.find((candidate) => candidate.id === packetId) ?? null;
+  const dispatched = Boolean(dispatchedPacket?.lane?.laneId || dispatchedPacket?.lane?.sessionKey);
+
+  log(`Rerun-with-feedback for registry packet ${referenceLabel} (${packetId}). dispatched=${dispatched}`);
+
+  return {
+    packetId,
+    referenceLabel,
+    dispatched,
+    worktreePruned,
+    note: dispatched
+      ? `Packet ${referenceLabel} relaunched with operator feedback.`
+      : `Packet ${referenceLabel} reset and queued. Awaiting next dispatch tick.`,
+  };
+}
+
 export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
   const packetId = input.packetId.trim();
   if (!packetId) {
@@ -131,6 +180,18 @@ export async function rerunWithFeedback(input: RerunWithFeedbackInput) {
   const feedback = input.feedback.trim();
   if (!feedback) {
     throw new Error('feedback is required.');
+  }
+
+  const current = currentMissionState();
+  if (!current.packets.some((candidate) => candidate.id === packetId)) {
+    const registryEntry = findMissionRegistryEntryByPacketId(packetId, {
+      includeArchived: true,
+      excludeMissionId: current.missionId,
+    });
+    if (!registryEntry) {
+      throw new Error(`Packet ${packetId} not found.`);
+    }
+    return rerunRegistryPacketWithFeedback(registryEntry.id, packetId, feedback);
   }
 
   let worktreePruned = false;

@@ -46,6 +46,78 @@ function parseMissionResult(result: { content: Array<{ type: 'text'; text: strin
   };
 }
 
+function parseJsonResult<T>(result: { content: Array<{ type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string }> }) {
+  return JSON.parse(textContent(result)) as T;
+}
+
+function apiResponse(factory: () => Promise<unknown>) {
+  return factory()
+    .then((result) => new Response(JSON.stringify({ ok: true, result }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    .catch((error) => new Response(JSON.stringify({
+      ok: false,
+      error: { message: error instanceof Error ? error.message : String(error) },
+    }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    }));
+}
+
+function stubMissionApiFetch() {
+  vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
+    const urlText = String(url);
+    if (urlText.includes('/supervisor/watch') || urlText.includes('/internal/realtime')) {
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      });
+    }
+
+    const body = JSON.parse(String(init?.body ?? '{}'));
+    if (urlText.includes('/api/orchestrator/create-mission')) {
+      return apiResponse(async () => {
+        const { createMission } = await import('@/lib/orchestrator/operator-mission-service/mission');
+        return createMission(body as Parameters<typeof createMission>[0]);
+      });
+    }
+    if (urlText.includes('/api/orchestrator/dispatch')) {
+      return apiResponse(async () => {
+        const { dispatchMission } = await import('@/lib/orchestrator/operator-mission-service/mission');
+        return dispatchMission(body as Parameters<typeof dispatchMission>[0]);
+      });
+    }
+    if (urlText.includes('/api/orchestrator/reset-packet')) {
+      return apiResponse(async () => {
+        const { resetPacket } = await import('@/lib/orchestrator/operator-mission-service/reset');
+        return resetPacket(body as Parameters<typeof resetPacket>[0]);
+      });
+    }
+    if (urlText.includes('/api/orchestrator/rerun-with-feedback')) {
+      return apiResponse(async () => {
+        const { rerunWithFeedback } = await import('@/lib/orchestrator/operator-mission-service/rerun-with-feedback');
+        return rerunWithFeedback(body as Parameters<typeof rerunWithFeedback>[0]);
+      });
+    }
+
+    return new Response(JSON.stringify({ ok: false, error: { message: `Unhandled test URL: ${urlText}` } }), {
+      status: 404,
+      headers: { 'Content-Type': 'application/json' },
+    });
+  }));
+}
+
+async function createInlineMission(title: string, repoPath: string) {
+  const { handleCreateMission } = await import('@/lib/mcp/operator-handlers/mission');
+  return parseMissionResult(await handleCreateMission({
+    issues_inline: [{ title, body: `${title} body` }],
+    repoPath,
+    runtime: 'codex',
+    dispatch: false,
+  }));
+}
+
 afterEach(() => {
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
@@ -58,37 +130,10 @@ afterEach(() => {
 describe('headless mission registry dispatch', () => {
   it('dispatches a non-current mission packet after a newer mission becomes current', async () => {
     const repoPath = createTempRepo();
-    vi.stubGlobal('fetch', vi.fn(async (url: string | URL | Request, init?: RequestInit) => {
-      const urlText = String(url);
-      if (urlText.includes('/supervisor/watch') || urlText.includes('/internal/realtime')) {
-        return new Response(JSON.stringify({ ok: true }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        });
-      }
+    stubMissionApiFetch();
 
-      const body = JSON.parse(String(init?.body ?? '{}'));
-      const { createMission } = await import('@/lib/orchestrator/operator-mission-service/mission');
-      const result = await createMission(body as Parameters<typeof createMission>[0]);
-      return new Response(JSON.stringify({ ok: true, result }), {
-        status: 200,
-        headers: { 'Content-Type': 'application/json' },
-      });
-    }));
-
-    const { handleCreateMission } = await import('@/lib/mcp/operator-handlers/mission');
-    const first = parseMissionResult(await handleCreateMission({
-      issues_inline: [{ title: 'registry mission A', body: 'first mission must still dispatch' }],
-      repoPath,
-      runtime: 'codex',
-      dispatch: false,
-    }));
-    const second = parseMissionResult(await handleCreateMission({
-      issues_inline: [{ title: 'registry mission B', body: 'second mission becomes current focus' }],
-      repoPath,
-      runtime: 'codex',
-      dispatch: false,
-    }));
+    const first = await createInlineMission('registry mission A', repoPath);
+    const second = await createInlineMission('registry mission B', repoPath);
 
     const { runHeadlessSprintTick } = await import('@/lib/orchestrator/headless-loop');
     const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
@@ -103,4 +148,106 @@ describe('headless mission registry dispatch', () => {
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
     expect(launchMock.calls.some((call) => call.packetId === firstPacketId)).toBe(true);
   }, 20_000);
+
+  it('dispatch_mission addresses a non-current missionId through the real MCP handler', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry mcp dispatch A', repoPath);
+    const second = await createInlineMission('registry mcp dispatch B', repoPath);
+
+    const { handleDispatchMission } = await import('@/lib/mcp/operator-handlers/mission');
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const { findLaneByPacket } = await import('@/lib/lane/registry');
+
+    expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+    const result = parseJsonResult<{ dispatched?: number }>(await handleDispatchMission({ missionId: first.missionId }));
+
+    const firstPacketId = first.packets[0]?.id;
+    expect(firstPacketId).toBeTruthy();
+    expect(result.dispatched).toBe(1);
+    expect(findLaneByPacket(firstPacketId!)?.id).toMatch(/^lane-/);
+    expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+  }, 20_000);
+
+  it('retry_packet mutates a non-current registry packet through the real MCP handler', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry mcp retry A', repoPath);
+    const second = await createInlineMission('registry mcp retry B', repoPath);
+
+    const packetId = first.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+    const { handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
+    const retryResult = parseJsonResult<{ reset?: boolean; referenceLabel?: string }>(await handleRetryPacket({
+      packetId: packetId!,
+      reason: 'retry non-current packet',
+    }));
+
+    const { readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    const packet = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+
+    expect(retryResult.reset).toBe(true);
+    expect(retryResult.referenceLabel).toBe('inline-1');
+    expect(packet?.status).toBe('draft');
+    expect(packet?.queueState).toBe('held');
+    expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+  });
+
+  it('rerun_with_feedback relaunches a non-current registry packet through the real MCP handler', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry mcp rerun A', repoPath);
+    const second = await createInlineMission('registry mcp rerun B', repoPath);
+
+    const packetId = first.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+    const { handleRerunWithFeedback } = await import('@/lib/mcp/operator-handlers/mission');
+    const result = parseJsonResult<{ dispatched?: boolean; referenceLabel?: string }>(await handleRerunWithFeedback({
+      packetId: packetId!,
+      feedback: 'tighten the implementation',
+    }));
+
+    const { findLaneByPacket } = await import('@/lib/lane/registry');
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+    expect(result.dispatched).toBe(true);
+    expect(result.referenceLabel).toBe('inline-1');
+    expect(findLaneByPacket(packetId!)?.id).toMatch(/^lane-/);
+    expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+  }, 20_000);
+
+  it('returns a clean unknown-packet error through the retry MCP handler', async () => {
+    stubMissionApiFetch();
+    const { handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
+    const result = parseJsonResult<{ error?: string }>(await handleRetryPacket({
+      packetId: 'pkt-missing-from-registry',
+      reason: 'negative case',
+    }));
+    expect(result.error).toContain('Packet pkt-missing-from-registry not found');
+  });
+
+  it('serializes registry-row mutations per mission', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const mission = await createInlineMission('registry mutation serialization', repoPath);
+    const { readMissionRegistryEntry, withMissionRegistryState } = await import('@/lib/orchestrator/mission-registry');
+    const observed: string[] = [];
+
+    await Promise.all([
+      withMissionRegistryState(mission.missionId, async (state) => {
+        observed.push(`first:${state.constraints}`);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        return { state: { ...state, constraints: 'first-write' }, result: null };
+      }),
+      withMissionRegistryState(mission.missionId, (state) => {
+        observed.push(`second:${state.constraints}`);
+        return { state: { ...state, summary: `second saw ${state.constraints}` }, result: null };
+      }),
+    ]);
+
+    const persisted = readMissionRegistryEntry(mission.missionId, { includeArchived: true })?.mission;
+    expect(observed).toEqual(['first:', 'second:first-write']);
+    expect(persisted?.summary).toBe('second saw first-write');
+  });
 });
