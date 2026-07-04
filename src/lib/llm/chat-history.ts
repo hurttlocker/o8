@@ -54,6 +54,8 @@ export async function loadChatHistory(tabId: string): Promise<{
   repoName?: string;
   repoPath?: string;
   repoBranch?: string;
+  githubOwner?: string | null;
+  githubRepo?: string | null;
   remoteUrl?: string | null;
 } | null> {
   try {
