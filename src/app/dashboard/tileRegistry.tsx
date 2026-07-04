@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, lazy, type Dispatch, type SetStateAction } from 'react';
+import { Suspense, type Dispatch, type SetStateAction } from 'react';
 import { toast } from '@/components/shared/ConfirmToastHost';
 import type { CanvasRepoTaskLaunchRequest } from '@/components/desktop/Canvas';
 import { ContextualPanel, type ContextualPanelHandle, type ContextualPanelProps } from '@/components/desktop/ContextualPanel';
@@ -25,6 +25,7 @@ import {
   getFirstLeaf,
 } from '@/lib/tiles/operations';
 import type { TileLayout } from '@/lib/tiles/types';
+import { retryingLazy } from '@/lib/react/retrying-lazy';
 import type {
   CanvasTileState,
   PaletteAgentSummary,
@@ -36,8 +37,8 @@ import {
   sameWorkspaceLaneState,
 } from './utils';
 
-const LazyWorkspaceTerminal = lazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })));
-const LazyCanvas = lazy(() => import('@/components/desktop/Canvas').then(m => ({ default: m.Canvas })));
+const LazyWorkspaceTerminal = retryingLazy(() => import('@/components/desktop/WorkspaceTerminal').then(m => ({ default: m.WorkspaceTerminal })), { label: 'Workspace terminal' });
+const LazyCanvas = retryingLazy(() => import('@/components/desktop/Canvas').then(m => ({ default: m.Canvas })), { label: 'Canvas' });
 
 const TILE_LAYOUT_STORAGE_KEY = 'o8:dashboard-tiles:v1';
 

@@ -11,7 +11,7 @@
  * Repo-owned inspectors and task surfaces belong in repo-scoped workspace panes.
  */
 
-import { Suspense, forwardRef, lazy, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
+import { Suspense, forwardRef, useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import type React from 'react';
 import { BottomXtermPanel, type XtermPanelHandle } from '@/components/desktop/BottomXtermPanel';
 import { ClaudeIcon, CodexIcon, GeminiIcon, OpenCodeIcon } from '@/components/desktop/repo-registry/shared';
@@ -23,8 +23,9 @@ import { FileViewer } from '@/components/desktop/o8-panel/workspace-rail/FileVie
 import { ReviewPanel } from '@/components/desktop/review/ReviewPanel';
 import type { DetectedLocalhostPreview } from '@/lib/panel/preview';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+import { retryingLazy } from '@/lib/react/retrying-lazy';
 
-const LazyOrchestratorTab = lazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })));
+const LazyOrchestratorTab = retryingLazy(() => import('@/components/desktop/workspace-terminal/OrchestratorTab').then((module) => ({ default: module.OrchestratorTab })), { label: 'Orchestrator tab' });
 
 // ── CLI Agents (terminal only, no chat modes) ──
 
