@@ -8,7 +8,7 @@ import {
 } from '@/lib/orchestrator/control-plane';
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
-import { RUNTIME_PARALLEL_CAP, runDispatchTick, type DispatchLaunchBudget } from '@/lib/orchestrator/dispatch';
+import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { hasRegistryPendingHeadlessWork, listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState, OrchestratorRuntime } from '@/lib/orchestrator/types';
@@ -228,21 +228,6 @@ async function pruneWorktreesIfDue(state: OrchestratorMissionState) {
   await prunePromise;
 }
 
-function buildRemainingLaunchBudget(): DispatchLaunchBudget {
-  const parallelCap = resolveParallelCapSync();
-  const activeLanes = listLanes().filter((lane) => lane.status === 'launching' || lane.status === 'running');
-  const perRuntime: Partial<Record<OrchestratorRuntime, number>> = {};
-  for (const runtime of Object.keys(RUNTIME_PARALLEL_CAP) as OrchestratorRuntime[]) {
-    const cap = RUNTIME_PARALLEL_CAP[runtime];
-    if (cap === undefined) continue;
-    const active = activeLanes.filter((lane) => lane.runtime === runtime).length;
-    perRuntime[runtime] = Math.max(0, cap - active);
-  }
-  return {
-    maxLaunches: Math.max(0, parallelCap - activeLanes.length),
-    perRuntime,
-  };
-}
 
 async function runRegistryMissionTicks(
   currentMissionId: string | null | undefined,

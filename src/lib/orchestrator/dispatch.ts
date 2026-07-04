@@ -11,6 +11,7 @@ export {
   MAX_PARALLEL_DISPATCHES,
   MAX_RECOVERY_DISPATCHES,
   RUNTIME_PARALLEL_CAP,
+  buildRemainingLaunchBudget,
   type DispatchLaunchBudget,
   getDispatchBlocker,
   runDispatchTick,
