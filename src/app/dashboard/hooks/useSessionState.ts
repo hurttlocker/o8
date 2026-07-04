@@ -44,6 +44,14 @@ function reviewPayloadTouchesApprovals(data: Record<string, unknown>): boolean {
     || typeof data.policyRuleId === 'string';
 }
 
+function normalizeRuntimeAvailability(
+  value: string | null | undefined,
+): OrchestratorRuntimeTruth['runtimeAvailability'] {
+  return value === 'awaiting-thread' || value === 'running' || value === 'ready-for-resume'
+    ? value
+    : null;
+}
+
 export function useSessionState() {
   // ── Core session state ──
   const [activeSessionKey, setActiveSessionKey] = useState<string | undefined>();
@@ -132,6 +140,10 @@ export function useSessionState() {
         currentTask: agent.currentTask ?? null,
         lastEventAt: agent.lastEventAt ?? null,
         workflowStageLabel: null,
+        canSendInput: agent.runtimeSurface?.capabilities?.sendInput ?? null,
+        canInterrupt: agent.runtimeSurface?.capabilities?.interrupt ?? null,
+        runtimeAvailability: normalizeRuntimeAvailability(agent.runtimeSurface?.lifecycle?.availability),
+        ownership: agent.runtimeSurface?.ownership ?? null,
       })),
     [parsedAgents],
   );

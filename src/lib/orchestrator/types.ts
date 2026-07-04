@@ -399,6 +399,10 @@ export interface OrchestratorRuntimeTruth {
   currentTask?: string | null;
   lastEventAt?: string | null;
   workflowStageLabel?: string | null;
+  canSendInput?: boolean | null;
+  canInterrupt?: boolean | null;
+  runtimeAvailability?: 'awaiting-thread' | 'running' | 'ready-for-resume' | null;
+  ownership?: 'provider' | 'discovered' | 'owned' | null;
 }
 
 export type WorkspaceLaneTranscriptState =

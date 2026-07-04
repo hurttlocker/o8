@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
 import { listLanes } from '@/lib/lane/registry';
 import type { DomainLaneSummary } from '@/lib/orchestrator/store';
-import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
+import type { OrchestratorMissionState, OrchestratorRuntimeTruth } from '@/lib/orchestrator/types';
 import {
   createEmptyOrchestratorMissionState,
   normalizeOrchestratorMissionState,
@@ -84,19 +84,51 @@ export function buildDomainLaneSummaries(): DomainLaneSummary[] {
     }));
 }
 
-export function reconcileOrchestratorControlPlaneState(state?: OrchestratorMissionState) {
+function needsRuntimeTruth(domainLanes: DomainLaneSummary[]): boolean {
+  return domainLanes.some((lane) =>
+    lane.status === 'reviewing' && lane.sessionKey?.startsWith('codex-owned:')
+  );
+}
+
+async function buildRuntimeTruthSummaries(domainLanes: DomainLaneSummary[]): Promise<OrchestratorRuntimeTruth[]> {
+  if (!needsRuntimeTruth(domainLanes)) return [];
+  const { getRuntimeInventorySnapshot } = await import('@/lib/runtime/inventory');
+  const snapshot = await getRuntimeInventorySnapshot({ fresh: true });
+  return snapshot.agents
+    .filter((agent) => agent.sessionKey && (agent.runtime === 'codex' || agent.runtime === 'claude-code'))
+    .map((agent) => ({
+      sessionKey: agent.sessionKey,
+      runtime: agent.runtime === 'claude-code' ? 'claude-code' as const : 'codex' as const,
+      status: agent.status ?? 'idle',
+      currentTask: agent.currentTask ?? null,
+      lastEventAt: agent.lastEventAt ?? null,
+      workflowStageLabel: null,
+      canSendInput: agent.runtimeSurface?.capabilities.sendInput ?? null,
+      canInterrupt: agent.runtimeSurface?.capabilities.interrupt ?? null,
+      runtimeAvailability: agent.runtimeSurface?.lifecycle?.availability ?? null,
+      ownership: agent.runtimeSurface?.ownership ?? null,
+    }));
+}
+
+export function reconcileOrchestratorControlPlaneState(
+  state?: OrchestratorMissionState,
+  runtimeTruth: OrchestratorRuntimeTruth[] = [],
+  domainLanes: DomainLaneSummary[] = buildDomainLaneSummaries(),
+) {
   const current = normalizeOrchestratorMissionState(state ?? readOrchestratorControlPlaneState());
   return reconcileOrchestratorMissionState(current, {
     laneSnapshots: [],
-    runtimeTruth: [],
-    domainLanes: buildDomainLaneSummaries(),
+    runtimeTruth,
+    domainLanes,
   });
 }
 
 export async function syncOrchestratorControlPlaneState(state?: OrchestratorMissionState) {
   await acquireLock();
   try {
-    const reconciled = reconcileOrchestratorControlPlaneState(state);
+    const domainLanes = buildDomainLaneSummaries();
+    const runtimeTruth = await buildRuntimeTruthSummaries(domainLanes).catch(() => []);
+    const reconciled = reconcileOrchestratorControlPlaneState(state, runtimeTruth, domainLanes);
     return writeOrchestratorControlPlaneState(reconciled);
   } finally {
     releaseLock();
@@ -128,7 +160,9 @@ export async function withLockedState<T>(
       && 'lanes' in (result as object)
         ? (result as unknown as OrchestratorMissionState)
         : current;
-    const reconciled = reconcileOrchestratorControlPlaneState(basisForReconcile);
+    const domainLanes = buildDomainLaneSummaries();
+    const runtimeTruth = await buildRuntimeTruthSummaries(domainLanes).catch(() => []);
+    const reconciled = reconcileOrchestratorControlPlaneState(basisForReconcile, runtimeTruth, domainLanes);
     const state = writeOrchestratorControlPlaneState(reconciled);
     return { result, state };
   } finally {
