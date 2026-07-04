@@ -2,6 +2,7 @@ import 'server-only';
 import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import { DOGFOOD_PR_ONLY_NOTE, type LaneMergePolicy } from '@/lib/lane/merge-mode';
 
 /**
  * PR-only safety wall for the autonomous dogfood loop (#1173). While the loop is
@@ -16,5 +17,10 @@ export function dogfoodPrOnlyActive(): boolean {
   return existsSync(join(dir, '.dogfood-pr-only'));
 }
 
-export const DOGFOOD_PR_ONLY_NOTE =
-  'PR-only dogfood mode is active — merge to main is blocked. Open a PR; a human merges.';
+export { DOGFOOD_PR_ONLY_NOTE };
+
+export function currentLaneMergePolicy(): LaneMergePolicy {
+  return dogfoodPrOnlyActive()
+    ? { mode: 'pr_only', note: DOGFOOD_PR_ONLY_NOTE }
+    : { mode: 'direct', note: null };
+}

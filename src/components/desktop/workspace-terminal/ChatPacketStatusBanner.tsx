@@ -17,6 +17,7 @@
  */
 
 import { useCallback, useState } from 'react';
+import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import type { OrchestratorPacketStatus } from '@/lib/orchestrator/types';
 
 interface ChatPacketStatusBannerProps {
@@ -24,6 +25,8 @@ interface ChatPacketStatusBannerProps {
   laneId: string | null;
   packetId: string | null;
   packetTitle: string | null;
+  mergeMode?: LaneMergeMode | null;
+  mergeModeNote?: string | null;
   onOpenInActivity?: () => void;
 }
 
@@ -71,9 +74,13 @@ export function ChatPacketStatusBanner({
   laneId,
   packetId,
   packetTitle,
+  mergeMode,
+  mergeModeNote,
   onOpenInActivity,
 }: ChatPacketStatusBannerProps) {
   const tone = status ? TONE_BY_STATUS[status] : undefined;
+  const prOnlyMode = mergeMode === 'pr_only';
+  const prOnlyCaption = mergeModeNote ?? 'PR-only mode is active. Create a PR for human merge.';
   const [pending, setPending] = useState<'merge' | 'create_pr' | 'reject' | null>(null);
   const [actionNote, setActionNote] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
@@ -190,7 +197,9 @@ export function ChatPacketStatusBanner({
             {packetTitle ?? 'Dispatched packet'}
           </div>
           <div style={{ fontSize: 11, fontWeight: 300, color: 'var(--t-text-secondary)', marginTop: 2, lineHeight: 1.45 }}>
-            {tone.detail}
+            {status === 'awaiting_review' && prOnlyMode
+              ? 'PR-only mode is active. Create a PR so a human can merge.'
+              : tone.detail}
           </div>
         </div>
       </div>
@@ -274,8 +283,9 @@ export function ChatPacketStatusBanner({
             </div>
           </div>
         ) : (
+          <>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {laneId ? (
+            {laneId && !prOnlyMode ? (
               <button
                 type="button"
                 onClick={() => { void callLaneAction('merge'); }}
@@ -310,15 +320,16 @@ export function ChatPacketStatusBanner({
                   paddingBottom: 4,
                   paddingLeft: 10,
                   borderRadius: 8,
-                  borderWidth: 1,
+                  borderWidth: prOnlyMode ? 0 : 1,
                   borderStyle: 'solid',
-                  borderColor: tone.border,
-                  background: 'transparent',
-                  color: tone.color,
+                  borderColor: prOnlyMode ? 'transparent' : tone.border,
+                  background: prOnlyMode ? 'var(--t-accent)' : 'transparent',
+                  color: prOnlyMode ? '#fff' : tone.color,
                   fontSize: 11,
                   fontWeight: 400,
                   cursor: pending !== null ? 'wait' : 'pointer',
                   fontFamily: 'var(--font-sans-system)',
+                  letterSpacing: prOnlyMode ? '-0.1px' : undefined,
                 }}
               >
                 {pending === 'create_pr' ? 'Creating PR…' : 'Create PR'}
@@ -372,6 +383,12 @@ export function ChatPacketStatusBanner({
               </button>
             ) : null}
           </div>
+          {prOnlyMode ? (
+            <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.4 }}>
+              {prOnlyCaption}
+            </div>
+          ) : null}
+          </>
         )
       ) : null}
 
