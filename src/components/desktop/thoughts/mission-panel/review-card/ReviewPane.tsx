@@ -60,8 +60,11 @@ export function ReviewPane({ packet, onActionComplete }: {
   const verdict = deriveVerdict(packet);
   const tone = verdictTone(verdict);
   const concerns = useMemo(() => buildConcerns(packet), [packet]);
+  const laneId = packet.lane?.laneId ?? null;
+  const prOnlyMode = packet.lane?.mergeMode === 'pr_only';
+  const prOnlyCaption = packet.lane?.mergeModeNote ?? 'PR-only mode is active. Create a PR for human merge.';
 
-  const [busy, setBusy] = useState<'merge' | 'respec' | 'kill' | null>(null);
+  const [busy, setBusy] = useState<'merge' | 'create_pr' | 'respec' | 'kill' | null>(null);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [actionError, setActionError] = useState<string | null>(null);
@@ -88,11 +91,14 @@ export function ReviewPane({ packet, onActionComplete }: {
       });
       const payload = await response.json().catch(() => null) as {
         ok?: boolean;
-        result?: { note?: string };
+        result?: { note?: string; merged?: boolean };
         error?: { message?: string };
       } | null;
       if (!response.ok || !payload?.ok) {
         throw new Error(payload?.error?.message ?? `Unable to ${kind} packet.`);
+      }
+      if (kind === 'merge' && payload.result?.merged === false) {
+        throw new Error(payload.result.note ?? 'Merge was refused.');
       }
       setActionNote(payload.result?.note ?? null);
       onActionComplete?.();
@@ -106,6 +112,38 @@ export function ReviewPane({ packet, onActionComplete }: {
   const onMerge = useCallback(() => {
     void callAction('merge', { packetId: packet.id }, '/api/orchestrator/merge');
   }, [callAction, packet.id]);
+
+  const onCreatePr = useCallback(async () => {
+    if (!laneId) {
+      setActionError('No lane is bound to this packet yet.');
+      return;
+    }
+    setBusy('create_pr');
+    setActionError(null);
+    setActionNote(null);
+    try {
+      const response = await fetch('/api/lanes', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          verb: 'create_pr',
+          laneId,
+          commitMessage: 'Auto-commit from lane',
+        }),
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; note?: string } | null;
+      const note = payload?.note ?? 'Unable to create PR.';
+      if (!response.ok || !payload?.ok) {
+        throw new Error(note);
+      }
+      setActionNote(note);
+      onActionComplete?.();
+    } catch (error) {
+      setActionError(error instanceof Error ? error.message : 'Unable to create PR.');
+    } finally {
+      setBusy(null);
+    }
+  }, [laneId, onActionComplete]);
 
   const onKill = useCallback(() => {
     void callAction('kill', { packetId: packet.id, clearWorktree: true, reason: 'Killed via review card.' }, '/api/orchestrator/reset-packet');
@@ -376,31 +414,67 @@ export function ReviewPane({ packet, onActionComplete }: {
           </div>
         </div>
       ) : (
+        <>
+        {prOnlyMode ? (
+          <div style={{
+            fontSize: 10.5,
+            color: 'var(--t-text-secondary)',
+            fontFamily: FONT_FAMILY,
+            lineHeight: 1.4,
+          }}>
+            {prOnlyCaption}
+          </div>
+        ) : null}
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, paddingTop: 4 }}>
-          <button
-            type="button"
-            onClick={onMerge}
-            disabled={busy !== null}
-            style={{
-              paddingTop: 6,
-              paddingRight: 12,
-              paddingBottom: 6,
-              paddingLeft: 12,
-              borderRadius: 10,
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: 'rgba(34, 197, 94, 0.36)',
-              background: 'rgba(34, 197, 94, 0.14)',
-              color: '#15803d',
-              fontSize: 11,
-              fontWeight: 700,
-              cursor: busy !== null ? 'not-allowed' : 'pointer',
-              opacity: busy !== null ? 0.5 : 1,
-              fontFamily: FONT_FAMILY,
-            }}
-          >
-            {busy === 'merge' ? 'Merging…' : 'Merge'}
-          </button>
+          {prOnlyMode ? (
+            <button
+              type="button"
+              onClick={onCreatePr}
+              disabled={busy !== null || !laneId}
+              style={{
+                paddingTop: 6,
+                paddingRight: 12,
+                paddingBottom: 6,
+                paddingLeft: 12,
+                borderRadius: 10,
+                borderWidth: 0,
+                background: 'var(--t-accent)',
+                color: '#fff',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: busy !== null || !laneId ? 'not-allowed' : 'pointer',
+                opacity: busy !== null || !laneId ? 0.5 : 1,
+                fontFamily: FONT_FAMILY,
+              }}
+            >
+              {busy === 'create_pr' ? 'Creating PR…' : 'Create PR'}
+            </button>
+          ) : (
+            <button
+              type="button"
+              onClick={onMerge}
+              disabled={busy !== null}
+              style={{
+                paddingTop: 6,
+                paddingRight: 12,
+                paddingBottom: 6,
+                paddingLeft: 12,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: 'rgba(34, 197, 94, 0.36)',
+                background: 'rgba(34, 197, 94, 0.14)',
+                color: '#15803d',
+                fontSize: 11,
+                fontWeight: 700,
+                cursor: busy !== null ? 'not-allowed' : 'pointer',
+                opacity: busy !== null ? 0.5 : 1,
+                fontFamily: FONT_FAMILY,
+              }}
+            >
+              {busy === 'merge' ? 'Merging…' : 'Merge'}
+            </button>
+          )}
           <button
             type="button"
             onClick={() => setFeedbackOpen(true)}
@@ -450,6 +524,7 @@ export function ReviewPane({ packet, onActionComplete }: {
             {busy === 'kill' ? 'Killing…' : 'Kill packet'}
           </button>
         </div>
+        </>
       )}
     </div>
   );

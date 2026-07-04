@@ -4,6 +4,7 @@ import { withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orche
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket } from '@/lib/lane/registry';
+import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { listArtifacts, toArtifactRef } from '@/lib/artifacts/store';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { archiveMissionsExcept, getMissionRecord, recordMission } from '@/lib/db/missions-store';
@@ -411,6 +412,7 @@ async function readTranscriptActivityBySession(
  */
 function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').MissionRecord) {
   const lanesByPacket = new Map<string, ReturnType<typeof findLaneByPacket>>();
+  const mergePolicy = currentLaneMergePolicy();
   for (const meta of record.packetMeta) {
     lanesByPacket.set(meta.id, findLaneByPacket(meta.id));
   }
@@ -468,6 +470,8 @@ function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').
         lastActivityLabel: lane.lastEventLabel,
         transcriptUnsupportedReason: null,
         lastEventLabel: lane.lastEventLabel,
+        mergeMode: mergePolicy.mode,
+        mergeModeNote: mergePolicy.note,
       } : null,
       review: null,
     };
@@ -542,6 +546,7 @@ export async function getMissionStatus(input: MissionStatusInput) {
     return sessionKey ? [sessionKey] : [];
   });
   const transcriptActivityBySession = await readTranscriptActivityBySession(sessionKeys);
+  const mergePolicy = currentLaneMergePolicy();
 
   const agents = state.packets
     .map((packet) => {
@@ -570,6 +575,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
         lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, lane.lastEventLabel),
         transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
         lastEventLabel: lane.lastEventLabel,
+        mergeMode: mergePolicy.mode,
+        mergeModeNote: mergePolicy.note,
       };
     })
     .filter((agent): agent is NonNullable<typeof agent> => agent !== null);
@@ -628,6 +635,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
           lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, lane.lastEventLabel),
           transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
           lastEventLabel: lane.lastEventLabel,
+          mergeMode: mergePolicy.mode,
+          mergeModeNote: mergePolicy.note,
         } : packet.lane ? {
           ...packet.lane,
           lastEventAt: lastActivityAt ?? packet.lane.lastEventAt ?? null,
@@ -636,6 +645,8 @@ export async function getMissionStatus(input: MissionStatusInput) {
           lastActivityAt,
           lastActivityLabel: activityLabel(lastActivityAt, lastTranscriptAt, packet.lane.lastEventLabel),
           transcriptUnsupportedReason: activity?.transcriptUnsupportedReason ?? null,
+          mergeMode: mergePolicy.mode,
+          mergeModeNote: mergePolicy.note,
         } : null,
         review: packet.review ? {
           approved: packet.review.approved,

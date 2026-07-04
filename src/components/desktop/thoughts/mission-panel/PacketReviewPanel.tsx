@@ -52,6 +52,8 @@ export function PacketReviewPanel({
   const visibleReviewFiles = reviewState?.showAllFiles ? reviewFiles : reviewFiles.slice(0, 5);
   const reviewWarningText = reviewWarnings.length > 0 ? reviewWarnings.slice(0, 2).join(' ') : null;
   const laneId = packet.lane?.laneId ?? null;
+  const prOnlyMode = packet.lane?.mergeMode === 'pr_only';
+  const prOnlyCaption = packet.lane?.mergeModeNote ?? 'PR-only mode is active. Create a PR for human merge.';
   const approvalQuery = useMemo(() => {
     if (!laneId) return null;
     const params = new URLSearchParams({ status: 'all', packetId: packet.id, laneId });
@@ -412,6 +414,12 @@ export function PacketReviewPanel({
         </div>
       ) : null}
 
+      {prOnlyMode ? (
+        <div style={{ fontSize: 11, color: 'var(--t-text-secondary)', lineHeight: 1.4 }}>
+          {prOnlyCaption}
+        </div>
+      ) : null}
+
       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
         <button
           type="button"
@@ -436,29 +444,31 @@ export function PacketReviewPanel({
         >
           {reviewState?.action === 'create_pr' ? 'Create PR...' : 'Create PR'}
         </button>
-        <button
-          type="button"
-          onClick={() => onReviewAction('merge')}
-          disabled={reviewState?.action === 'merge' || reviewState?.loading}
-          style={{
-            minHeight: 44,
-            minWidth: 44,
-            border: '1px solid rgba(37, 99, 235, 0.2)',
-            background: 'rgba(37, 99, 235, 0.06)',
-            color: '#2563eb',
-            paddingTop: 6,
-            paddingRight: 10,
-            paddingBottom: 6,
-            paddingLeft: 10,
-            borderRadius: 8,
-            fontSize: 11,
-            fontWeight: 700,
-            cursor: reviewState?.action === 'merge' || reviewState?.loading ? 'default' : 'pointer',
-            opacity: reviewState?.action === 'merge' || reviewState?.loading ? 0.5 : 1,
-          }}
-        >
-          {reviewState?.action === 'merge' ? 'Merge...' : 'Merge'}
-        </button>
+        {!prOnlyMode ? (
+          <button
+            type="button"
+            onClick={() => onReviewAction('merge')}
+            disabled={reviewState?.action === 'merge' || reviewState?.loading}
+            style={{
+              minHeight: 44,
+              minWidth: 44,
+              border: '1px solid rgba(37, 99, 235, 0.2)',
+              background: 'rgba(37, 99, 235, 0.06)',
+              color: '#2563eb',
+              paddingTop: 6,
+              paddingRight: 10,
+              paddingBottom: 6,
+              paddingLeft: 10,
+              borderRadius: 8,
+              fontSize: 11,
+              fontWeight: 700,
+              cursor: reviewState?.action === 'merge' || reviewState?.loading ? 'default' : 'pointer',
+              opacity: reviewState?.action === 'merge' || reviewState?.loading ? 0.5 : 1,
+            }}
+          >
+            {reviewState?.action === 'merge' ? 'Merge...' : 'Merge'}
+          </button>
+        ) : null}
         {reviewState?.prUrl ? (
           <a
             href={reviewState.prUrl}

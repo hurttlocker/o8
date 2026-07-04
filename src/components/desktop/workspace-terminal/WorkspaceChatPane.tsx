@@ -309,6 +309,8 @@ function WorkspaceChatPaneBase({
                           laneId={livePacket.lane?.laneId ?? null}
                           packetId={livePacket.id}
                           packetTitle={livePacket.title ?? tab.orchestrationPacket.title ?? null}
+                          mergeMode={livePacket.lane?.mergeMode ?? null}
+                          mergeModeNote={livePacket.lane?.mergeModeNote ?? null}
                           onOpenInActivity={
                             orchestratorData?.onOpenO8Panel
                               ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
@@ -664,6 +666,8 @@ function WorkspaceChatPaneBase({
                   laneId={livePacket.lane?.laneId ?? null}
                   packetId={livePacket.id}
                   packetTitle={livePacket.title ?? tab.orchestrationPacket.title ?? null}
+                  mergeMode={livePacket.lane?.mergeMode ?? null}
+                  mergeModeNote={livePacket.lane?.mergeModeNote ?? null}
                   onOpenInActivity={
                     orchestratorData?.onOpenO8Panel
                       ? () => orchestratorData.onOpenO8Panel?.({ tab: 'activity' })
