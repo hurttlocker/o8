@@ -1197,7 +1197,23 @@ export class WorktreeManager {
       return;
     }
 
+    // #1404 — a blank/dot/traversal worktreeId resolves to the container dir
+    // (or above it); the container isn't a git dir, so the preserve path's
+    // `git status` WALKS UP to the repo root and `add -A + commit` lands on
+    // the operator's main. No lane-lifecycle git write may ever target a
+    // registered repo root — refuse the whole cleanup instead.
     const worktreePath = path.join(this.worktreeBase, worktreeId);
+    const resolvedTarget = path.resolve(worktreePath);
+    const resolvedBase = path.resolve(this.worktreeBase);
+    if (
+      !worktreeId.trim()
+      || resolvedTarget === resolvedBase
+      || resolvedTarget === path.resolve(this.repoRoot)
+      || !resolvedTarget.startsWith(`${resolvedBase}${path.sep}`)
+    ) {
+      console.error(`[worktree-prune] REFUSED cleanup for unsafe worktreeId ${JSON.stringify(worktreeId)} → ${resolvedTarget} (repo-root write guard, #1404)`);
+      return;
+    }
 
     // Safety: preserve uncommitted agent work before removing
     if (await this.pathExists(worktreePath)) {
@@ -1357,6 +1373,19 @@ export class WorktreeManager {
     worktreeId: string,
   ): Promise<'committed' | 'clean' | 'skip'> {
     try {
+      // #1404 belt-and-suspenders: even if a caller slips an unsafe path past
+      // the cleanup guard, never add/commit unless the git toplevel IS the
+      // worktree dir itself — a non-git dir makes git walk up to the repo root
+      // and this preserve would commit the OPERATOR'S uncommitted work.
+      const { stdout: toplevelRaw } = await execFileAsync(
+        'git', ['rev-parse', '--show-toplevel'],
+        { cwd: worktreePath, timeout: 5000 },
+      );
+      if (path.resolve(toplevelRaw.trim()) !== path.resolve(worktreePath)) {
+        console.error(`[worktree-prune] REFUSED preserve for ${worktreeId}: git toplevel ${toplevelRaw.trim()} != ${worktreePath} (repo-root write guard, #1404)`);
+        return 'skip';
+      }
+
       const { stdout: status } = await execFileAsync(
         'git', ['status', '--porcelain'],
         { cwd: worktreePath, timeout: 5000 },
