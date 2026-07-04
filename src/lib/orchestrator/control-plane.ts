@@ -1,6 +1,7 @@
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { getDataDir } from '@/lib/data-dir-migration';
+import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { listLanes } from '@/lib/lane/registry';
 import type { DomainLaneSummary } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState, OrchestratorRuntimeTruth } from '@/lib/orchestrator/types';
@@ -73,6 +74,7 @@ export function writeOrchestratorControlPlaneState(state: OrchestratorMissionSta
 }
 
 export function buildDomainLaneSummaries(): DomainLaneSummary[] {
+  const mergePolicy = currentLaneMergePolicy();
   return listLanes()
     .filter((lane) => lane.packetId)
     .map((lane) => ({
@@ -81,6 +83,8 @@ export function buildDomainLaneSummaries(): DomainLaneSummary[] {
       status: lane.status,
       sessionKey: lane.sessionKey,
       lastEventLabel: lane.lastEventLabel,
+      mergeMode: mergePolicy.mode,
+      mergeModeNote: mergePolicy.note,
     }));
 }
 
