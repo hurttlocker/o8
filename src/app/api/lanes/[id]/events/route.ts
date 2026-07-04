@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { getOrCreateWsToken } from '@/lib/ws-auth';
+import { isLocalWorkerToken } from '@/lib/auth/worker-token';
 import {
   isAgentReportReason,
   normalizeAgentReportEvent,
@@ -32,7 +33,10 @@ function requireLoopbackBearer(req: NextRequest): NextResponse | null {
   const expected = getOrCreateWsToken().trim();
   const auth = req.headers.get('authorization');
   const token = auth?.startsWith('Bearer ') ? auth.slice(7).trim() : '';
-  if (!expected || token !== expected) {
+  // Dispatched workers present O8_WORKER_TOKEN, never the operator ws-token
+  // (SECURITY_AUDIT_2026-07-02 §CRIT-1) — reporting on a lane is exactly the
+  // worker credential's intended scope, so accept it alongside the ws-token.
+  if (!expected || (token !== expected && !isLocalWorkerToken(token))) {
     return NextResponse.json({ ok: false, note: 'Unauthorized.' }, { status: 401 });
   }
 
