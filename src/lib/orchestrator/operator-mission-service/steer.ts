@@ -16,7 +16,9 @@
 
 import { findLaneByPacket, setLaneStatus } from '@/lib/lane/registry';
 import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
+import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
 import { performRuntimeAction } from '@/lib/runtime/actions';
+import { currentMissionState } from './shared';
 
 export interface SteerPacketInput {
   packetId: string;
@@ -34,6 +36,15 @@ const NO_STEERABLE_SESSION = 'Packet has no steerable session — use rerun_with
 export async function steerPacket({ packetId, message }: SteerPacketInput): Promise<SteerPacketResult> {
   const lane = findLaneByPacket(packetId);
   if (!lane?.sessionKey) {
+    const current = currentMissionState();
+    const packetExists = current.packets.some((packet) => packet.id === packetId)
+      || Boolean(findMissionRegistryEntryByPacketId(packetId, {
+        includeArchived: true,
+        excludeMissionId: current.missionId,
+      }));
+    if (!packetExists) {
+      throw new Error(`Packet ${packetId} not found.`);
+    }
     throw new Error(NO_STEERABLE_SESSION);
   }
 
