@@ -1,5 +1,6 @@
 import { normalizeDecompositionMetadata, normalizePacketType } from '@/lib/orchestrator/normalize/decomposition';
 import { normalizeRuntimeStatusToOrchestratorStatus } from '@/lib/orchestrator/runtime-status';
+import { runtimeTruthHasActiveWriter } from '@/lib/orchestrator/runtime-truth';
 import { hydrateOrchestratorTurnPinEntry, installOrchestratorTurnPinFetchPatch, persistOrchestratorTurnPin, readCachedOrchestratorTurnPin, stageOrchestratorTurnPin } from '@/lib/orchestrator/turn-pins';
 import {
   normalizeRequestedRuntime,
@@ -799,8 +800,9 @@ export function reconcileOrchestratorMissionState(
         ?? (packet.lane.sessionKey ? laneBySession.get(packet.lane.sessionKey) : undefined)
         ?? laneByPacketId.get(packet.id)
       : laneByPacketId.get(packet.id);
-    const runtime = laneMatch?.sessionKey ? runtimeTruthBySession.get(laneMatch.sessionKey) : undefined;
     const domainLane = domainLaneByPacketId?.get(packet.id) ?? null;
+    const runtimeSessionKey = laneMatch?.sessionKey ?? domainLane?.sessionKey ?? packet.lane?.sessionKey ?? null;
+    const runtime = runtimeSessionKey ? runtimeTruthBySession.get(runtimeSessionKey) : undefined;
     const laneId = domainLane?.laneId ?? packet.lane?.laneId ?? null;
     const next: OrchestratorPacket = {
       ...packet,
@@ -860,6 +862,7 @@ export function reconcileOrchestratorMissionState(
     // ── Lane domain model status takes priority when available ──
     if (domainLane) {
       const ds = domainLane.status;
+      if (ds === 'reviewing' && runtimeTruthHasActiveWriter(runtime)) { next.status = 'running'; return next; }
       if (ds === 'reviewing') { next.status = 'awaiting_review'; return next; }
       if (ds === 'merging') { next.status = 'awaiting_review'; next.blockedReason = 'Merge in progress'; return next; }
       if (ds === 'completed') { next.status = 'released'; next.releaseState = 'released'; return next; }
