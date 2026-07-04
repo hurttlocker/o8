@@ -221,6 +221,18 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
     setOccluded(occluded);
   }, [setOccluded]);
 
+  const showOrOpen = useCallback((rect: BrowserViewRect) => {
+    lastRect.current = rectKey(rect);
+    if (shownUrl.current === url) {
+      void browserViewSetRect(rect);
+      void browserViewShow();
+    } else {
+      shownUrl.current = url;
+      void browserViewOpen(url, rect, NATIVE_BROWSER_AGENT_SOURCE);
+    }
+    scheduleSnapshot();
+  }, [scheduleSnapshot, url]);
+
   /** Open/navigate the native window over the placeholder (only when visible). */
   const openHere = useCallback(() => {
     if (!visibleRef.current || !url) return;
@@ -234,17 +246,11 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
         if (!visibleRef.current || !url) return;
         const retry = computeRect();
         if (!retry) return;
-        lastRect.current = rectKey(retry);
-        shownUrl.current = url;
-        void browserViewOpen(url, retry, NATIVE_BROWSER_AGENT_SOURCE);
-        scheduleSnapshot();
+        showOrOpen(retry);
       });
       return;
     }
-    lastRect.current = rectKey(rect);
-    shownUrl.current = url;
-    void browserViewOpen(url, rect, NATIVE_BROWSER_AGENT_SOURCE);
-    scheduleSnapshot();
+    showOrOpen(rect);
     // Self-correct a stale open rect. The panel/window layout may not be settled
     // when the tab first opens — especially right after the operator moves the
     // o8 window between displays (mixed scale factors) — so re-measure the zoom +
@@ -258,7 +264,7 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
         }
       }, delay);
     });
-  }, [url, computeRect, measureZoom, scheduleSnapshot, syncRect]);
+  }, [url, computeRect, measureZoom, showOrOpen, syncRect]);
 
   // Visibility: open when the placeholder appears on screen, hide when it leaves
   // (tab switched away → display:none → not intersecting). The native window is a
