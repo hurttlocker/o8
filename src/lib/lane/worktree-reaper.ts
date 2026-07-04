@@ -22,7 +22,7 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
-import { appendEvent, archiveLane, listActiveLanes } from '@/lib/lane/registry';
+import { appendEvent, archiveLane, listActiveLanes, updateLane } from '@/lib/lane/registry';
 import type { GitHubPullRequestSnapshot } from '@/lib/github-broker/store';
 import type { Lane } from '@/lib/lane/types';
 
@@ -113,6 +113,12 @@ function archiveMergedPullRequestLane(
   });
 }
 
+function stampLanePullRequestNumber(lane: Lane, pull: GitHubPullRequestSnapshot): void {
+  if (pull.number > 0 && lane.prNumber !== pull.number) {
+    updateLane(lane.id, { prNumber: pull.number }, 'system');
+  }
+}
+
 async function reconcileMergedPullRequest(
   lane: Lane,
   allowTargetedRefresh: boolean,
@@ -153,9 +159,27 @@ async function reconcileMergedPullRequest(
   }
 
   const legacyPull = getGitHubPullRequestByHead(repoFullName, lane.branch);
-  if (legacyPull?.mergedAt) {
-    archiveMergedPullRequestLane(lane, repoFullName, legacyPull, 'headRefName');
-    return { archived: true, refreshed: false };
+  if (legacyPull) {
+    stampLanePullRequestNumber(lane, legacyPull);
+    if (legacyPull.mergedAt) {
+      archiveMergedPullRequestLane(lane, repoFullName, legacyPull, 'headRefName');
+      return { archived: true, refreshed: false };
+    }
+    return { archived: false, refreshed: false };
+  }
+
+  if (allowTargetedRefresh) {
+    const { ensureGitHubPullRequestByHead } = await import('@/lib/github-broker/sync');
+    const refreshed = await ensureGitHubPullRequestByHead(repoFullName, lane.branch);
+    const pull = refreshed.pr;
+    if (pull) {
+      stampLanePullRequestNumber(lane, pull);
+      if (pull.mergedAt) {
+        archiveMergedPullRequestLane(lane, repoFullName, pull, 'headRefName');
+        return { archived: true, refreshed: true };
+      }
+    }
+    return { archived: false, refreshed: true };
   }
 
   return { archived: false, refreshed: false };
