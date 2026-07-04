@@ -6,6 +6,9 @@ import {
   listSessionRules,
   removeSessionRule,
 } from '@/lib/db/session-rules-store';
+import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -23,8 +26,23 @@ function requireThreadId(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function findPacketForWorker(packetId: string): OrchestratorPacket | null {
+  const current = readOrchestratorControlPlaneState().packets.find((packet) => packet.id === packetId);
+  if (current) return current;
+  const registry = findMissionRegistryEntryByPacketId(packetId, { includeArchived: true });
+  return registry?.mission.packets.find((packet) => packet.id === packetId) ?? null;
+}
+
+function workerMayReadThread(request: NextRequest, threadId: string): boolean {
+  const packetId = request.headers.get('x-o8-worker-packet-id')?.trim() ?? '';
+  if (!packetId) return false;
+  const packet = findPacketForWorker(packetId);
+  return packet?.orchestratorThreadId === threadId;
+}
+
 // GET /api/orchestrator/session-rules?threadId=<id> — list active rules.
-// Read is allowed for any authenticated principal (workers included).
+// Operators may read any thread; workers may read only the thread that
+// dispatched their packet.
 export async function GET(request: NextRequest) {
   const denied = requirePanelAuth(request);
   if (denied) return denied;
@@ -32,6 +50,9 @@ export async function GET(request: NextRequest) {
   const threadId = requireThreadId(request.nextUrl.searchParams.get('threadId'));
   if (!threadId) {
     return operatorError('invalid_request', 'threadId query param is required.', 400);
+  }
+  if (resolveRequestPrincipal(request) === 'worker' && !workerMayReadThread(request, threadId)) {
+    return operatorError('forbidden', 'A dispatched worker can only read session rules for the thread that dispatched its packet.', 403);
   }
   try {
     return operatorSuccess({ rules: listSessionRules(threadId) });
