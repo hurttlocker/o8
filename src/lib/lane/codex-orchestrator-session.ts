@@ -322,9 +322,15 @@ function reasoningEffortFromThinkingEffort(effort: ThinkingEffort | undefined): 
  * orchestrator are separate concerns on the cloud path), so the gpt-5.5 default
  * is preserved exactly.
  */
-function resolveOrchestratorModelSync(explicit?: string): string {
+export function resolveOrchestratorModelSync(explicit?: string): string {
   const trimmed = explicit?.trim();
-  if (trimmed) return trimmed;
+  // Cross-backend bleed guard (live-hit 2026-07-05): the chat surface passes
+  // the UI-selected CLAUDE model (e.g. claude-opus-4-8) as the explicit model
+  // when the operator flips orchestratorBackend to codex — codex exec can't
+  // run an Anthropic model id and the turn hangs forever with nothing
+  // streamed. A claude-* explicit model is a backend mismatch, not a choice:
+  // fall through to the codex default instead of trusting it.
+  if (trimmed && !/^claude/i.test(trimmed)) return trimmed;
   const dispatch = resolveDefaultDispatchModelSync().trim();
   if (dispatch && parseLocalModel(dispatch)) return dispatch;
   return DEFAULT_CODEX_MODEL;
