@@ -208,7 +208,7 @@ mod tests {
         assert_eq!(decision.rect.width, 1152.0);
         assert!((decision.rect.height - 700.8).abs() < 0.001);
         assert_eq!(decision.rect.x, 144.0);
-        assert_eq!(decision.rect.y, 111.6);
+        assert!((decision.rect.y - 111.6).abs() < 0.001);
     }
 
     #[test]
