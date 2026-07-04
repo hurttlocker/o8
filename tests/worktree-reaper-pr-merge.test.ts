@@ -66,6 +66,7 @@ const { createLane, getLane, getLaneEvents } = await import('@/lib/lane/registry
 const { runWorktreeReaperTick } = await import('@/lib/lane/worktree-reaper');
 const { sweepTerminalCortexWorktrees } = await import('@/lib/lane/terminal-worktree-sweep');
 const { upsertGitHubPullRequest } = await import('@/lib/github-broker/store');
+const { recordOrchestratorReview } = await import('@/lib/approvals/store');
 
 const REPO_FULL_NAME = 'hurttlocker/o8-reaper-pr-test';
 
@@ -103,6 +104,60 @@ function makePacketWorktree(repoPath: string, branch: string, dirName: string): 
   git(repoPath, ['branch', branch]);
   git(repoPath, ['worktree', 'add', '-q', worktreePath, branch]);
   return worktreePath;
+}
+
+function commitFile(cwd: string, fileName: string, body: string, message: string): string {
+  writeFileSync(join(cwd, fileName), body);
+  git(cwd, ['add', fileName]);
+  git(cwd, ['commit', '-q', '--no-verify', '-m', message]);
+  return git(cwd, ['rev-parse', 'HEAD']).trim();
+}
+
+function squashBranchToMain(repoPath: string, branch: string, message: string): string {
+  git(repoPath, ['merge', '--squash', branch]);
+  git(repoPath, ['commit', '-q', '--no-verify', '-m', message]);
+  return git(repoPath, ['rev-parse', 'HEAD']).trim();
+}
+
+function insertSucceededOutcome(input: {
+  laneId: string;
+  packetId: string;
+  repoPath: string;
+  branch: string;
+}): void {
+  const now = new Date().toISOString();
+  getSqlite().prepare(`
+    INSERT INTO session_outcomes (
+      id, repo_path, branch, runtime, lane_id, packet_id, outcome, summary,
+      review_approved, started_at, completed_at
+    ) VALUES (?, ?, ?, 'codex', ?, ?, 'succeeded', ?, 1, ?, ?)
+  `).run(
+    `outcome-${input.packetId}`,
+    input.repoPath,
+    input.branch,
+    input.laneId,
+    input.packetId,
+    `completed ${input.packetId}`,
+    now,
+    now,
+  );
+}
+
+function readMergedClean(packetId: string): number | null {
+  const row = getSqlite().prepare(`
+    SELECT merged_clean as mergedClean
+    FROM session_outcomes
+    WHERE packet_id = ?
+  `).get(packetId) as { mergedClean: number | null } | undefined;
+  return row?.mergedClean ?? null;
+}
+
+function recordApprovedReview(packetId: string, reviewedHeadSha: string): void {
+  recordOrchestratorReview(packetId, {
+    approved: true,
+    findings: [],
+    reviewedHeadSha,
+  });
 }
 
 async function waitForPathGone(targetPath: string): Promise<void> {
@@ -187,6 +242,79 @@ describe('worktree reaper PR merge reconciliation', () => {
     const event = getLaneEvents(lane.id).find((item) => item.verb === 'pr_merged_reconciled');
     expect(event?.payload.prNumber).toBe(301);
     expect(event?.payload.match).toBe('prNumber');
+  });
+
+  it('stamps merged_clean when the PR squash tree matches the reviewed packet head', async () => {
+    const repoPath = makeRepo();
+    const packetId = 'pkt-pr-merged-clean';
+    const branch = 'inline/pr-merged-clean';
+    const worktreePath = makePacketWorktree(repoPath, branch, 'packet-pkt-pr-merged-clean');
+    const lane = createLane({
+      repoPath,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      worktreePath,
+    });
+    const reviewedHeadSha = commitFile(worktreePath, 'clean.txt', 'reviewed\n', 'feat: reviewed change [via-o8]');
+    recordApprovedReview(packetId, reviewedHeadSha);
+    insertSucceededOutcome({ laneId: lane.id, packetId, repoPath, branch });
+    squashBranchToMain(repoPath, branch, 'squash reviewed change');
+    markReviewing(lane.id, 307);
+    mirrorPullRequest({
+      number: 307,
+      headRefName: lane.branch,
+      state: 'closed',
+      closedAt: '2026-07-03T12:40:00.000Z',
+      mergedAt: '2026-07-03T12:40:00.000Z',
+    });
+
+    await runWorktreeReaperTick();
+
+    expect(getLane(lane.id)?.status).toBe('archived');
+    await waitForPathGone(worktreePath);
+    expect(readMergedClean(packetId)).toBe(1);
+    const event = getLaneEvents(lane.id).find((item) => item.verb === 'pr_merged_reconciled');
+    expect(event?.payload.mergedClean).toBe(true);
+    expect(event?.payload.reviewedHeadSha).toBe(reviewedHeadSha);
+  });
+
+  it('stamps merged_clean false when the merged PR tree moved after review', async () => {
+    const repoPath = makeRepo();
+    const packetId = 'pkt-pr-merged-touched';
+    const branch = 'inline/pr-merged-touched';
+    const worktreePath = makePacketWorktree(repoPath, branch, 'packet-pkt-pr-merged-touched');
+    const lane = createLane({
+      repoPath,
+      branch,
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      worktreePath,
+    });
+    const reviewedHeadSha = commitFile(worktreePath, 'touched.txt', 'reviewed\n', 'feat: reviewed change [via-o8]');
+    recordApprovedReview(packetId, reviewedHeadSha);
+    commitFile(worktreePath, 'touched.txt', 'reviewed\noperator touch\n', 'fix: operator touch-up');
+    insertSucceededOutcome({ laneId: lane.id, packetId, repoPath, branch });
+    squashBranchToMain(repoPath, branch, 'squash touched change');
+    markReviewing(lane.id, 308);
+    mirrorPullRequest({
+      number: 308,
+      headRefName: lane.branch,
+      state: 'closed',
+      closedAt: '2026-07-03T12:45:00.000Z',
+      mergedAt: '2026-07-03T12:45:00.000Z',
+    });
+
+    await runWorktreeReaperTick();
+
+    expect(getLane(lane.id)?.status).toBe('archived');
+    await waitForPathGone(worktreePath);
+    expect(readMergedClean(packetId)).toBe(0);
+    const event = getLaneEvents(lane.id).find((item) => item.verb === 'pr_merged_reconciled');
+    expect(event?.payload.mergedClean).toBe(false);
+    expect(event?.payload.mergedCleanReason).toBe('merged-tree-differs-from-reviewed-head');
   });
 
   it('preserves dirty terminal work before deleting a PR-merged packet clone', async () => {

@@ -35,6 +35,15 @@ const MAX_TARGETED_PR_REFRESHES_PER_TICK = 5;
 
 let reaperTimer: ReturnType<typeof setInterval> | null = null;
 
+interface MergedCleanResolution {
+  mergedClean: boolean | null;
+  reason: string;
+  reviewedHeadSha?: string;
+  reviewedTree?: string;
+  comparisonRef?: string;
+  comparisonTree?: string;
+}
+
 async function branchIsMergedIntoBase(
   repoPath: string,
   branch: string,
@@ -75,6 +84,116 @@ async function worktreeHasNoDiffAgainstBase(
   }
 }
 
+async function readTreeHash(repoPath: string, ref: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['rev-parse', `${ref}^{tree}`],
+      { cwd: repoPath, timeout: 5_000 },
+    );
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function firstReadableTree(
+  repoPath: string,
+  refs: Array<string | null | undefined>,
+): Promise<{ ref: string; tree: string } | null> {
+  const seen = new Set<string>();
+  for (const ref of refs) {
+    const trimmed = ref?.trim();
+    if (!trimmed || seen.has(trimmed)) continue;
+    seen.add(trimmed);
+    const tree = await readTreeHash(repoPath, trimmed);
+    if (tree) return { ref: trimmed, tree };
+  }
+  return null;
+}
+
+async function resolvePrMergedClean(
+  lane: Lane,
+  pull: GitHubPullRequestSnapshot,
+): Promise<MergedCleanResolution> {
+  const { latestRecordedReviewedHeadSha } = await import('@/lib/lane/review-head-integrity');
+  const reviewedHeadSha = latestRecordedReviewedHeadSha(lane);
+  if (!reviewedHeadSha) {
+    return { mergedClean: null, reason: 'missing-reviewed-head' };
+  }
+
+  const reviewedTree = await readTreeHash(lane.repoPath, reviewedHeadSha);
+  if (!reviewedTree) {
+    return { mergedClean: null, reason: 'missing-reviewed-tree', reviewedHeadSha };
+  }
+
+  const baseTree = await firstReadableTree(lane.repoPath, [
+    pull.baseRefName,
+    lane.baseBranch,
+    pull.baseRefName ? `origin/${pull.baseRefName}` : null,
+    lane.baseBranch ? `origin/${lane.baseBranch}` : null,
+  ]);
+  if (baseTree?.tree === reviewedTree) {
+    return {
+      mergedClean: true,
+      reason: 'merged-tree-matches-reviewed-head',
+      reviewedHeadSha,
+      reviewedTree,
+      comparisonRef: baseTree.ref,
+      comparisonTree: baseTree.tree,
+    };
+  }
+
+  if (baseTree) {
+    return {
+      mergedClean: false,
+      reason: 'merged-tree-differs-from-reviewed-head',
+      reviewedHeadSha,
+      reviewedTree,
+      comparisonRef: baseTree.ref,
+      comparisonTree: baseTree.tree,
+    };
+  }
+
+  const headTree = await firstReadableTree(lane.repoPath, [
+    pull.headRefName,
+    lane.branch,
+    pull.headRefName ? `origin/${pull.headRefName}` : null,
+    lane.branch ? `origin/${lane.branch}` : null,
+  ]);
+  if (headTree) {
+    return {
+      mergedClean: headTree.tree === reviewedTree,
+      reason: headTree.tree === reviewedTree
+        ? 'pr-head-tree-matches-reviewed-head'
+        : 'pr-head-tree-differs-from-reviewed-head',
+      reviewedHeadSha,
+      reviewedTree,
+      comparisonRef: headTree.ref,
+      comparisonTree: headTree.tree,
+    };
+  }
+
+  return { mergedClean: null, reason: 'missing-merged-tree', reviewedHeadSha, reviewedTree };
+}
+
+async function stampPrMergedClean(
+  lane: Lane,
+  pull: GitHubPullRequestSnapshot,
+): Promise<MergedCleanResolution> {
+  const resolution = await resolvePrMergedClean(lane, pull);
+  if (resolution.mergedClean === null) {
+    return resolution;
+  }
+  const { markOutcomeMerged } = await import('@/lib/orchestrator/context-relay');
+  await markOutcomeMerged({
+    laneId: lane.id,
+    packetId: lane.packetId,
+    mergedClean: resolution.mergedClean,
+  });
+  return resolution;
+}
+
 function repoSlugFromRemoteUrl(remoteUrl: string): string | null {
   const normalized = remoteUrl
     .trim()
@@ -97,19 +216,24 @@ async function resolveRepoFullName(repoPath: string): Promise<string | null> {
   }
 }
 
-function archiveMergedPullRequestLane(
+async function archiveMergedPullRequestLane(
   lane: Lane,
   repoFullName: string,
   pull: GitHubPullRequestSnapshot,
   match: 'prNumber' | 'headRefName',
-): void {
+): Promise<void> {
   console.log(`[worktree-reaper] ${lane.id} PR #${pull.number} merged at ${pull.mergedAt} — archiving`);
+  const mergedClean = await stampPrMergedClean(lane, pull);
   archiveLane(lane.id, 'system');
   appendEvent(lane.id, 'pr_merged_reconciled', 'system', {
     repoFullName,
     prNumber: pull.number,
     mergedAt: pull.mergedAt,
     match,
+    mergedClean: mergedClean.mergedClean,
+    mergedCleanReason: mergedClean.reason,
+    reviewedHeadSha: mergedClean.reviewedHeadSha ?? null,
+    comparisonRef: mergedClean.comparisonRef ?? null,
   });
 }
 
@@ -140,7 +264,7 @@ async function reconcileMergedPullRequest(
   if (prNumber !== null) {
     let pull = getGitHubPullRequestByNumber(repoFullName, prNumber);
     if (pull?.mergedAt) {
-      archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber');
+      await archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber');
       return { archived: true, refreshed: false };
     }
 
@@ -149,7 +273,7 @@ async function reconcileMergedPullRequest(
       const refreshed = await ensureGitHubPullRequest(repoFullName, prNumber);
       pull = refreshed.pr;
       if (pull?.mergedAt) {
-        archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber');
+        await archiveMergedPullRequestLane(lane, repoFullName, pull, 'prNumber');
         return { archived: true, refreshed: true };
       }
       return { archived: false, refreshed: true };
@@ -162,7 +286,7 @@ async function reconcileMergedPullRequest(
   if (legacyPull) {
     stampLanePullRequestNumber(lane, legacyPull);
     if (legacyPull.mergedAt) {
-      archiveMergedPullRequestLane(lane, repoFullName, legacyPull, 'headRefName');
+      await archiveMergedPullRequestLane(lane, repoFullName, legacyPull, 'headRefName');
       return { archived: true, refreshed: false };
     }
     return { archived: false, refreshed: false };
@@ -175,7 +299,7 @@ async function reconcileMergedPullRequest(
     if (pull) {
       stampLanePullRequestNumber(lane, pull);
       if (pull.mergedAt) {
-        archiveMergedPullRequestLane(lane, repoFullName, pull, 'headRefName');
+        await archiveMergedPullRequestLane(lane, repoFullName, pull, 'headRefName');
         return { archived: true, refreshed: true };
       }
     }
