@@ -59,7 +59,7 @@ const CHUNK_RETRIES: usize = 1;
 /// `play_thread` (start), `stop`, and `toggle_pause` all reach the same sink.
 struct Controls {
     /// True while a playback is actively producing audio — including the `say`
-    /// fallback, so ⌘⇧S / Escape route to `stop()` rather than starting a
+    /// fallback, so Ctrl+Shift+S / Escape route to `stop()` rather than starting a
     /// second voice. Mutated only under the `sink` lock.
     is_active: Arc<AtomicBool>,
     is_paused: Arc<AtomicBool>,
@@ -96,8 +96,8 @@ fn lock_recover<T>(m: &Mutex<T>) -> MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-/// Returns true while a TTS playback is active (used to make ⌘⇧S a toggle and
-/// to route Escape to a stop). True during the `say` fallback too.
+/// Returns true while a TTS playback is active (used to make Ctrl+Shift+S a
+/// toggle and to route Escape to a stop). True during the `say` fallback too.
 pub fn is_active() -> bool {
     controls().is_active.load(Ordering::SeqCst)
 }
@@ -448,8 +448,8 @@ pub fn play_thread_with_message(text: String, config: TtsConfig, message_id: Opt
 }
 
 /// Speak `text` via the macOS `say` fallback, holding `is_active` for its
-/// duration (so ⌘⇧S/Escape route to `stop`) and polling the generation so a
-/// stop / new speak kills it mid-utterance. No-op if already superseded.
+/// duration (so Ctrl+Shift+S/Escape route to `stop`) and polling the generation
+/// so a stop / new speak kills it mid-utterance. No-op if already superseded.
 fn run_say_fallback(
     text: &str,
     speed: f32,

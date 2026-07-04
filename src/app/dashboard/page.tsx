@@ -3991,9 +3991,9 @@ function DashboardInner() {
     };
   }, [toggleSettingsOverlay]);
 
-  // ── Voice P4: ⌥S while o8 is frontmost → speak o8's OWN webview selection ──
+  // ── Voice P4: Ctrl+Shift+S while o8 is frontmost → speak o8's OWN webview selection ──
   // o8's WKWebView doesn't expose its text selection to the native AX/Cmd+C
-  // grab, so the Rust ⌥S handler emits `o8:speak-selection` when o8 is the
+  // grab, so the Rust Ctrl+Shift+S handler emits `o8:speak-selection` when o8 is the
   // frontmost app; we read `window.getSelection()` here and speak it through the
   // native TTS engine. For other apps the Rust side grabs the selection itself.
   useEffect(() => {

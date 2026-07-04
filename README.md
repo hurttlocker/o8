@@ -31,7 +31,7 @@ This README is honest about state. Everything under **Real** ships in the curren
   - **o8 itself:** open any surface (settings, mobile QR, automations, browser, panels), read panels (automations/projects/repos), add a repo, **"what needs me?"** approval triage (approve/reject by name through a card), recap ("what happened while I was gone"), CLI quota, steer/rerun a packet, file a GitHub issue, draft a message to the orchestrator, ask the Engineering Brain.
   - **Terminals:** survey and drive **Terminal.app and iTerm2** by voice — list/read/send/interrupt/answer-a-prompt/open-new, plus a one-shot watcher ("tell me when that terminal finishes or needs me").
   - **Presence + trust:** the morphing notch dock (listening/thinking/speaking), on-screen pointer ("where do I click?"), screen-reading ("what's on my screen?"), rolling conversation memory (follow-ups resolve), pitch-preserving speaking-speed control (dock slider + setting), and a three-tier safety model — ReadOnly runs free, Reversible always cards, Destructive is withheld from the model entirely.
-  - Push-to-talk via Left-Option / ⌥S "say". Code lives in `src-tauri/src/agent/`.
+  - Push-to-talk via Right-Option; Ctrl+Shift+S reads selected text aloud. Code lives in `src-tauri/src/agent/`.
 - **Mobile remote-control surface** — `src/components/mobile/`, paired to the local backend, for kicking off and reviewing work away from the keyboard.
 - **Two-axis theming** (palette × surface), the dock, the review surface, the right-side O8Panel.
 

@@ -2581,7 +2581,7 @@ mod stt_engine {
             // true and mis-route the NEXT dictation to Ask. Routed at the bottom
             // (after polish) via this local. Always false off the macOS Ask path.
             let is_ask = crate::fn_hotkey::take_ask_mode();
-            // Same for the Left-Option agent flag — routed at the bottom to the
+            // Same for the Right-Option agent flag — routed at the bottom to the
             // Symon voice agent. Always false off the macOS agent path.
             let is_agent = crate::fn_hotkey::take_agent_mode();
 
@@ -2731,7 +2731,7 @@ mod stt_engine {
                 return;
             }
 
-            // ── Agent mode (Left-Option) — the polished text is a COMMAND ──
+            // ── Agent mode (Right-Option) — the polished text is a COMMAND ──
             // Route it to the Symon voice agent (tool-calling loop), which
             // streams progress + a spoken result to the dock and surfaces a
             // confirm card for any risky action. Same teardown as Ask.
@@ -4135,34 +4135,31 @@ pub fn run() {
                         }
                     }
 
-                    // ⌥S → speak the current text selection aloud (voice P4
-                    // "say" / speak-selection). Was ⌘⇧S — three keys, and ⌘S
-                    // adjacency made it feel like a save-chord; a single modifier
-                    // is the operator-requested shape. ⌥S is registered globally
-                    // (the plugin consumes it), and the Option agent hold-gesture
-                    // is combo-guarded: the S KeyDown cancels any just-started
-                    // recording, so the chord stays clean. grab_selection does
-                    // clipboard polling with sleeps, so run the whole thing off
-                    // the event-loop thread; play_thread then spawns its own
+                    // Ctrl+Shift+S → speak the current text selection aloud
+                    // (voice P4 "say" / speak-selection). Avoid Option entirely:
+                    // the old Option-based chord latched the modifier when
+                    // combined with the agent hold-gesture guard. grab_selection
+                    // does clipboard polling with sleeps, so run the whole thing
+                    // off the event-loop thread; play_thread then spawns its own
                     // audio thread. Falls back to `say` inside play_thread.
-                    if let Ok(sc) = "Alt+S".parse::<Shortcut>() {
+                    if let Ok(sc) = "Control+Shift+S".parse::<Shortcut>() {
                         let h_speak = app.handle().clone();
                         if let Err(e) = app.global_shortcut().on_shortcut(sc, move |_app, _sc, event| {
                             if event.state != ShortcutState::Pressed {
                                 return;
                             }
-                            // ⌥S says the current selection — ALWAYS. If a read is
+                            // Ctrl+Shift+S says the current selection — ALWAYS. If a read is
                             // already playing (commonly Symon's OWN voice, or a
                             // transient/stale is_active right after it finishes),
                             // stop it first but DON'T return — fall through and say
-                            // the new selection. The old early-return gated ⌥S on
+                            // the new selection. The old early-return gated the chord on
                             // is_active, so every press became a no-op stop whenever
-                            // TTS looked active ("⌥S won't initiate the say", the
+                            // TTS looked active ("say shortcut won't initiate the say", the
                             // operator hit this constantly while dictating). The
                             // re-trigger-stacking this once guarded against is now
                             // prevented by play_thread's single-flight (a new speak
                             // supersedes the old), so the gate is obsolete. A bare
-                            // ⌥S with nothing selected still just stops, because
+                            // Ctrl+Shift+S with nothing selected still just stops, because
                             // grab_selection returns None below; Escape also stops.
                             if crate::tts::playback::is_active() {
                                 std::thread::spawn(crate::tts::playback::stop);
@@ -4177,22 +4174,20 @@ pub fn run() {
                                 return;
                             }
                             std::thread::spawn(|| {
-                                // The user's finger is usually still on Option when S
-                                // lands (agent-key muscle memory). grab_selection's
-                                // Cmd+C fallback posted under a held Option merges to
-                                // ⌥C — no copy, "no selection to speak". Wait for the
-                                // physical release first (AX path is immune, but the
-                                // fallback is what fires in browsers/Electron).
+                                // Legacy safety guard: if an interrupted Option agent
+                                // gesture is still physically down, wait before the
+                                // Cmd+C fallback so the held modifier cannot merge
+                                // into the synthetic copy event.
                                 crate::fn_hotkey::wait_for_option_release(1_200);
                                 match crate::paste::grab_selection() {
                                     Some(text) => {
                                         crate::tts::playback::play_thread(text, crate::tts::load_config());
                                     }
-                                    None => log::info!("[tts] AltS: no selection to speak"),
+                                    None => log::info!("[tts] CtrlShiftS: no selection to speak"),
                                 }
                             });
                         }) {
-                            log::warn!("[hotkey] failed to register AltS (speak-selection): {e}");
+                            log::warn!("[hotkey] failed to register CtrlShiftS (speak-selection): {e}");
                         }
                     }
                 }

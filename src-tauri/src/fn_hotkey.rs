@@ -4,10 +4,10 @@
 //!
 //! - Hold Fn → push-to-talk dictation (paste at the caret on release).
 //! - Double-tap Fn → long-form dictation (single Fn tap finishes, Esc cancels).
-//! - Hold EITHER Option key → Symon voice AGENT (tool-calling loop; release
+//! - Hold Right Option → Symon voice AGENT (tool-calling loop; release
 //!   ≥120ms runs the command, a KeyDown mid-hold cancels so ⌥-chords stay safe).
-//! - Double-tap Option → long-form AGENT question (single Option tap finishes,
-//!   Esc cancels).
+//! - Double-tap Right Option → long-form AGENT question (single Option tap
+//!   finishes, Esc cancels).
 //!
 //! Implementation notes:
 //!
@@ -124,7 +124,7 @@ const LONG_FORM_FN_DOUBLE_TAP_MS: u64 = 480;
 const ESCAPE_KEYCODE: i64 = 53;
 
 /// NSEventModifierFlagOption = 1 << 19. Set when EITHER Option key is down (the
-/// side-agnostic bit). Used only for the ⌥S say path's physical-finger truth.
+/// side-agnostic bit). Used only for physical-finger truth before selection copy.
 #[cfg(target_os = "macos")]
 const OPTION_FLAG: u64 = 0x80000;
 
@@ -140,15 +140,13 @@ const RIGHT_OPTION_DEVICE_FLAG: u64 = 0x40;
 /// held alone, drives the Symon voice AGENT: hold, speak a command or question,
 /// release to run it through the tool-calling loop. Double-tap Right-Option =
 /// long-form agent (open mic for a long question; single tap finishes, Escape
-/// cancels). LEFT Option is reserved for the ⌥S "say" combo and does NOT trigger
-/// the agent.
+/// cancels). LEFT Option does NOT trigger the agent.
 #[cfg(target_os = "macos")]
 const RIGHT_OPTION_KEYCODE: i64 = 61;
 
 /// Virtual keycode for the LEFT Option key. LEFT Option does NOT trigger the
-/// agent — it only participates in the ⌥S "say" chord (speak-selection). We
-/// still track its physical down/up so the say path can wait for the finger to
-/// leave Option before the synthetic Cmd+C selection grab.
+/// agent. We still track its physical down/up so speak-selection can wait for a
+/// stray held Option before the synthetic Cmd+C selection grab.
 #[cfg(target_os = "macos")]
 const LEFT_OPTION_KEYCODE: i64 = 58;
 
@@ -159,22 +157,22 @@ const ASK_BRUSH_MS: u64 = 120;
 
 /// True while an ASK dictation is recording a question. `run_finalize` takes
 /// this to route the polished transcript to Gemini (speak the answer) instead
-/// of pasting it. The Ask lane currently has NO keyboard binding — both Option
-/// keys drive the agent (which answers questions too, with tools). The plumbing
+/// of pasting it. The Ask lane currently has NO keyboard binding — Right Option
+/// drives the agent (which answers questions too, with tools). The plumbing
 /// stays for a future dock-panel initiator.
 #[cfg(target_os = "macos")]
 static ASK_MODE: AtomicBool = AtomicBool::new(false);
 
 /// Edge latch for the RIGHT-Option agent gesture. Keyed on the right-Option
 /// device bit (not the side-agnostic OPTION_FLAG), so a held LEFT Option never
-/// begins/ends the gesture — left Option is the ⌥S "say" key, not the agent.
+/// begins/ends the gesture.
 #[cfg(target_os = "macos")]
 static OPTION_HELD: AtomicBool = AtomicBool::new(false);
 
 /// Raw physical state of the Option key, updated on every Option FlagsChanged.
-/// Unlike `OPTION_HELD` (the gesture edge-latch, cleared early by the ⌥-chord
-/// guard), this tracks the actual finger. The ⌥S say path polls it so the
-/// synthetic Cmd+C selection grab never fires under a still-held Option.
+/// Unlike `OPTION_HELD` (the gesture edge-latch, cleared early by the chord
+/// guard), this tracks the actual finger. The speak-selection path polls it so
+/// the synthetic Cmd+C selection grab never fires under a still-held Option.
 #[cfg(target_os = "macos")]
 static OPTION_PHYSICALLY_DOWN: AtomicBool = AtomicBool::new(false);
 
@@ -264,7 +262,7 @@ pub fn take_ask_mode() -> bool {
     false
 }
 
-/// Whether a Left-Option agent dictation is currently recording. Read by
+/// Whether a Right-Option agent dictation is currently recording. Read by
 /// `run_finalize` (via take_agent_mode) to route the result to the voice agent.
 #[cfg(target_os = "macos")]
 pub fn take_agent_mode() -> bool {
@@ -716,7 +714,7 @@ fn discard_ask_dictation() {
     morph_dock_idle();
 }
 
-/// Begin a Left-Option AGENT dictation: mark AGENT_MODE, morph the dock to
+/// Begin a Right-Option AGENT dictation: mark AGENT_MODE, morph the dock to
 /// 'recording' (so the user sees the agent is listening for a command), and
 /// start the SHARED recognizer. `run_finalize` routes the polished transcript to
 /// the Symon voice agent (`agent::spawn_agent`) instead of pasting or asking.
@@ -782,7 +780,7 @@ fn begin_agent_dictation() {
     }
 }
 
-/// Finish a Left-Option agent dictation (released ≥120ms): stop the recognizer
+/// Finish a Right-Option agent dictation (released ≥120ms): stop the recognizer
 /// (fenced) → the finalize chain polishes the command, and run_finalize routes it
 /// to the agent via take_agent_mode. Mirror of `end_ask_dictation`.
 #[cfg(target_os = "macos")]
@@ -795,7 +793,7 @@ fn end_agent_dictation() {
     }
 }
 
-/// Discard a too-short Left-Option brush: clear AGENT_MODE, drop the finalize,
+/// Discard a too-short Right-Option brush: clear AGENT_MODE, drop the finalize,
 /// and stop the recognizer (fenced). Mirror of `discard_ask_dictation`.
 #[cfg(target_os = "macos")]
 fn discard_agent_dictation() {
@@ -861,7 +859,7 @@ pub fn start(app: tauri::AppHandle) {
     let fn_held = Arc::new(AtomicBool::new(false));
     // Fn-down instant, used to reject sub-threshold brushes on release.
     let fn_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
-    // Option-down instant (either key), used to reject the sub-120ms agent brush.
+    // Right-Option-down instant, used to reject the sub-120ms agent brush.
     let agent_press_time = Arc::new(Mutex::new(std::time::Instant::now()));
 
     // ── Poll fallback for the dropped Fn-UP edge (Sequoia regression) ──
@@ -950,8 +948,8 @@ pub fn start(app: tauri::AppHandle) {
                         if RIGHT_CMD_HELD.load(Ordering::SeqCst) {
                             RIGHT_CMD_CHORDED.store(true, Ordering::SeqCst);
                         }
-                        // Option+<key> chords (⌥-arrow word jumps, ⌥S say, special
-                        // characters) are NOT push-to-talk: any KeyDown while the
+                        // Option+<key> chords (⌥-arrow word jumps, special characters)
+                        // are NOT push-to-talk: any KeyDown while the
                         // Option hold-gesture is recording cancels it. Clearing the
                         // latch here also makes the eventual Option-up CAS fail, so
                         // the release can't end/discard a second time. Long-form
@@ -1073,12 +1071,12 @@ pub fn start(app: tauri::AppHandle) {
 
                     // ── Option → Symon voice AGENT (RIGHT Option ONLY) ──
                     // RIGHT Option (keycode 61), held alone, drives the agent
-                    // gesture. LEFT Option (58) is reserved for the ⌥S "say"
-                    // combo and must NOT trigger the agent — so the edge-latch is
-                    // keyed on the RIGHT-Option device bit, not the side-agnostic
-                    // OPTION_FLAG. We still update OPTION_PHYSICALLY_DOWN for
-                    // EITHER key, because the say path's wait_for_option_release
-                    // needs the physical-finger truth regardless of side.
+                    // gesture. LEFT Option (58) must NOT trigger the agent — so
+                    // the edge-latch is keyed on the RIGHT-Option device bit, not
+                    // the side-agnostic OPTION_FLAG. We still update
+                    // OPTION_PHYSICALLY_DOWN for EITHER key, because
+                    // wait_for_option_release needs the physical-finger truth
+                    // regardless of side.
                     //
                     // Gestures (ORDER of branches is load-bearing, mirror of Fn):
                     //   (a) single tap while long-form is active FINISHES it,
@@ -1091,11 +1089,11 @@ pub fn start(app: tauri::AppHandle) {
                         let keycode =
                             event.get_integer_value_field(EventField::KEYBOARD_EVENT_KEYCODE);
                         if keycode == LEFT_OPTION_KEYCODE || keycode == RIGHT_OPTION_KEYCODE {
-                            // Physical-key truth for the ⌥S say path (EITHER
-                            // Option key): the synthetic Cmd+C selection grab
-                            // must wait until the user's finger leaves Option,
-                            // or the held modifier merges into the synthetic
-                            // event (⌥C — no copy). Side-agnostic OPTION_FLAG.
+                            // Physical-key truth for EITHER Option key: the
+                            // synthetic Cmd+C selection grab must wait until the
+                            // user's finger leaves Option, or the held modifier
+                            // merges into the synthetic event (⌥C — no copy).
+                            // Side-agnostic OPTION_FLAG.
                             OPTION_PHYSICALLY_DOWN
                                 .store((flags & OPTION_FLAG) != 0, Ordering::SeqCst);
                         }

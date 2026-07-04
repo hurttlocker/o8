@@ -46,7 +46,7 @@ Human-reachable: **CommandPalette** (⌘K) · **KeyboardShortcutsOverlay** (⌘/
 
 ### G. Secondary windows (separate Tauri windows)
 
-- **Symon dock** (`src/app/dictation-pill/`) — top-center always-on-top nonactivating sliver; white-glass closed state; modes: answer panel, confirm card (agent governance surface), capsule, Synthesizing card with o8-orbit motion, voice-settings glass modal, speaking-speed slider, Revert chip (text-edit governance). Trigger: Option keys (Left-Option agent, double-tap long form, ⌥S say), Fn dictation. **Symon is a full o8 user** — it calls `o8_ask` and names its sources in speech.
+- **Symon dock** (`src/app/dictation-pill/`) — top-center always-on-top nonactivating sliver; white-glass closed state; modes: answer panel, confirm card (agent governance surface), capsule, Synthesizing card with o8-orbit motion, voice-settings glass modal, speaking-speed slider, Revert chip (text-edit governance). Trigger: Right-Option agent, double-tap Right-Option long form, Ctrl+Shift+S say, Fn dictation. **Symon is a full o8 user** — it calls `o8_ask` and names its sources in speech.
 - This is the closest existing thing to the "Siri feel" — the Canvas session should study its glass + motion language first.
 
 ### H. Mobile (separate codebase — brief)
