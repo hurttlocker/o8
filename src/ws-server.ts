@@ -5113,6 +5113,20 @@ async function bootstrapWsServer() {
   }
 
   try {
+    const { sweepTerminalCortexWorktrees } = await import('@/lib/lane/terminal-worktree-sweep');
+    const result = await sweepTerminalCortexWorktrees(REPO_ROOT);
+    if (result.removed > 0 || result.failed > 0) {
+      console.log(
+        `[cleanup] Startup worktree sweep scanned=${result.scanned} removed=${result.removed} skippedActive=${result.skippedActive} failed=${result.failed}`,
+      );
+    }
+  } catch (error) {
+    console.warn(
+      `[cleanup] Startup worktree sweep failed: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+
+  try {
     await rehydrateOrchestratorSessions();
   } catch (error) {
     console.warn(
