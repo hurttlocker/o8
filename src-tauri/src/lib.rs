@@ -12,6 +12,7 @@ mod paste;
 mod sidecar_lifecycle;
 mod sound;
 mod speech_text;
+mod window_restore;
 #[cfg(target_os = "macos")]
 mod stt;
 #[cfg(target_os = "macos")]
@@ -2257,11 +2258,8 @@ fn notify_review_ready(
     Ok(())
 }
 
-// Sanity-bounds the saved window-state.json before tauri-plugin-window-state restores
-// from it. Multi-monitor reconfigs or virtual-desktop bugs can save dimensions like
-// 17000x2820 — wider than any real screen — and the plugin restores them blindly.
-// Drop the file if its main window size is outside reasonable bounds; the plugin then
-// falls back to the configured defaults from tauri.conf.json.
+// Drop only malformed saved window-state before tauri-plugin-window-state reads it.
+// Geometry that is merely stale is clamped after restore, once Tauri can see monitors.
 fn sanitize_window_state() {
     let Some(home) = std::env::var_os("HOME") else { return };
     let path = std::path::PathBuf::from(home)
@@ -2271,11 +2269,8 @@ fn sanitize_window_state() {
         let _ = std::fs::remove_file(&path);
         return;
     };
-    let main = json.get("main");
-    let width = main.and_then(|m| m.get("width")).and_then(|v| v.as_f64()).unwrap_or(0.0);
-    let height = main.and_then(|m| m.get("height")).and_then(|v| v.as_f64()).unwrap_or(0.0);
-    if width > 6000.0 || height > 4000.0 || width < 400.0 || height < 300.0 {
-        eprintln!("[o8] discarding off-bounds window state ({}x{})", width, height);
+    if json.get("main").is_none() {
+        eprintln!("[o8] discarding malformed window state with no main window");
         let _ = std::fs::remove_file(&path);
     }
 }
@@ -4196,6 +4191,8 @@ pub fn run() {
             // ── Window Close → Hide to Tray ──
             let app_handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
+                window_restore::clamp_main_window(&app_handle, &window);
+
                 #[cfg(target_os = "macos")]
                 if let Err(err) = apply_vibrancy(
                     &window,
