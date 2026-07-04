@@ -9,7 +9,7 @@
 Three phases in dependency order:
 
 - **Phase A — TTS Engine** (foundation: providers, two-path `load_config`, ElevenLabs exact request, Google direct, `say` fallback, the `!Send` rodio playback thread, key resolution). Nothing else can speak until A lands.
-- **Phase B — `say` / Speak-Selection** (uses A): `grab_selection` compose, a `Cmd+Shift+S` global shortcut, plus the net-new spoken `"say <text>"` grammar in `stt/mod.rs`.
+- **Phase B — `say` / Speak-Selection** (uses A): `grab_selection` compose, a `Ctrl+Shift+S` global shortcut, plus the net-new spoken `"say <text>"` grammar in `stt/mod.rs`.
 - **Phase C — Ask / Right-Option** (uses A only for the *spoken* answer; the **text** answer is independent of A): extend `fn_hotkey.rs` CGEventTap for Right-Option, the Ask engine (Gemini direct), the dock answer panel, and the spoken answer gated behind A.
 
 De-Symonize throughout: drop `personal_mode`/founder ceremony, drop `symon_license_token()`/`symon_api_url()`, drop the proxy branches, rename every `symon-*`/`ask-*` event to `o8:ask-*`, rename "Symon" → "o8" in prompts, omit the dead Edge/Native TTS providers. Any React UI is **inline styles only**, `var(--t-*)` tokens, no CSS classes.
@@ -228,7 +228,7 @@ The mandatory pattern (see top of doc) → **new `src-tauri/src/tts/playback.rs:
 
 # PHASE B — `say` / Speak-Selection (uses Phase A)
 
-Goal: highlight text anywhere → `Cmd+Shift+S` speaks it; plus the operator's net-new spoken `"say <text>"` grammar. **BLOCKED ON:** Phase A (`tts::speak`/`playback::play_thread`). If Phase A slips, B can ship a degraded path that routes straight to `native_say::speak_with_say` (no rodio, no cloud) — see FORK G.
+Goal: highlight text anywhere → `Ctrl+Shift+S` speaks it; plus the operator's net-new spoken `"say <text>"` grammar. **BLOCKED ON:** Phase A (`tts::speak`/`playback::play_thread`). If Phase A slips, B can ship a degraded path that routes straight to `native_say::speak_with_say` (no rodio, no cloud) — see FORK G.
 
 ## B.1 — `grab_selection()` — thin verbatim compose (all backing helpers exist)
 
@@ -238,13 +238,13 @@ Port the exact algorithm: Strategy 1 = `read_selected_text_via_accessibility()` 
 
 FORK on the fallback (FORK H): AX-only (clean, no clipboard clobber) vs AX-then-Cmd+C (covers canvas/Electron apps with opaque AX). Recommend **AX-then-Cmd+C** — the helpers are right there and the save/restore dance is already correct.
 
-## B.2 — `Cmd+Shift+S` global shortcut handler
+## B.2 — `Ctrl+Shift+S` global shortcut handler
 
-`aqua lib.rs:3711-3747` (Cmd+Shift+S Speak-Selection) → **o8 `lib.rs` global-shortcut block (~3037-3089)**, alongside the existing `⌘⇧Space` / `⌘⌥V` / `⌘⇧,` handlers. o8 **already has `tauri-plugin-global-shortcut` 2** (Cargo line 46), so this is the natural slot (Cmd+Shift+S is a plain chord, unlike Right-Option which is a modifier).
+`aqua lib.rs:3711-3747` (Cmd+Shift+S Speak-Selection) → **o8 `lib.rs` global-shortcut block (~3037-3089)**, alongside the existing `⌘⇧Space` / `⌘⌥V` / `⌘⇧,` handlers. o8 **already has `tauri-plugin-global-shortcut` 2** (Cargo line 46), so this is the natural slot (Ctrl+Shift+S is a plain chord, unlike Right-Option which is a modifier).
 
 Pattern (mirror the existing `⌘⌥V` handler at `lib.rs:3060` which already does `std::thread::spawn(paste_text)`):
 ```
-register "CommandOrControl+Shift+S"
+register "Control+Shift+S"
 .on_shortcut → if state != Pressed { return }   // guard double-fire
   std::thread::spawn(move || {
      match grab_selection() {
@@ -286,7 +286,7 @@ De-Symonize: drop `play_sound("ReadStart"/"Pop")` or map to o8 sounds; **do not*
 | `reading.rs:543-584` (`say` fallback) | already landed in Phase A (`tts/native_say.rs`) |
 | net-new (not in Symon) | `src-tauri/src/stt/mod.rs:84` (`CommandResult::Speak`) + `:99` (`starts_with("say ")`) + `lib.rs run_finalize` third match arm |
 
-**Phase B blocked on:** Phase A (`tts::load_config`/`playback::play_thread`). Build steps: land `grab_selection` (flip dead_code) → register `Cmd+Shift+S` → add `CommandResult::Speak` + `process()` branch + `run_finalize` arm → `cargo build` → manual test: highlight text in any app, press `Cmd+Shift+S`, hear it; Fn-dictate `"say hello world"`, hear "hello world" (not pasted).
+**Phase B blocked on:** Phase A (`tts::load_config`/`playback::play_thread`). Build steps: land `grab_selection` (flip dead_code) → register `Ctrl+Shift+S` → add `CommandResult::Speak` + `process()` branch + `run_finalize` arm → `cargo build` → manual test: highlight text in any app, press `Ctrl+Shift+S`, hear it; Fn-dictate `"say hello world"`, hear "hello world" (not pasted).
 
 ---
 
@@ -417,12 +417,12 @@ The `Speaking` state, the 3-bar transport meter (`voiceBars`), pause/stop, and `
 ### F-SAY-GRAMMAR: Ship the spoken 'say <text>' voice grammar, and which match shape?
 - Yes — starts_with('say ') strips the verb and speaks the remainder
 - Yes — ends_with (like the existing remove/cancel commands)
-- No — speak-selection (Cmd+Shift+S) is enough; skip the spoken grammar
+- No — speak-selection (Ctrl+Shift+S) is enough; skip the spoken grammar
 
 **Rec:** Yes, starts_with('say '). A read-aloud directive LEADS the utterance ('say hello world'), unlike the trailing cancel/remove commands. It's a net-new CommandResult::Speak(String) variant (Symon has no such grammar) wired into run_finalize's third match arm. Cheap, additive, and the operator explicitly asked for it. Place the branch BEFORE cancel/remove so 'say cancel' speaks rather than cancels.
 
 ### F-RODIO-VS-SAY: If Phase A slips, can Phase B ship without rodio?
-- Yes — route Cmd+Shift+S and 'say <text>' straight to native_say::speak_with_say (no rodio, no cloud, no new crate)
+- Yes — route Ctrl+Shift+S and 'say <text>' straight to native_say::speak_with_say (no rodio, no cloud, no new crate)
 - No — block B until A's rodio playback lands
 
 **Rec:** Yes — native_say::speak_with_say is fully self-contained (`say -r <175*speed> <text>`, no deps) and satisfies the operator's literal 'say' request. Ship B on the `say` path as a degraded-but-working slice if rodio/cloud TTS isn't ready; swap to play_thread (ElevenLabs/Google) once Phase A lands. This is the lowest-risk first user-visible win.

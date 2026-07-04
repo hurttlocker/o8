@@ -31,7 +31,7 @@ pub struct EditContext {
     pub app: String,
     /// True when the noun lives inside o8's OWN webview: a WKWebView exposes
     /// neither `AXSelectedText` nor a reliable synthetic Cmd+C (same wall the
-    /// ⌥S speak-selection path hit), so capture/apply/revert round-trip
+    /// Ctrl+Shift+S speak-selection path hit), so capture/apply/revert round-trip
     /// through the main webview's DOM instead of the AX/paste path.
     pub via_webview: bool,
 }

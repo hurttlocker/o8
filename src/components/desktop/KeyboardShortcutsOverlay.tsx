@@ -11,6 +11,7 @@
  *   - dashboard/page.tsx        → ⌘K, ⌘W, ⌘1-9, ⌘⌥←/→
  *   - ComposerArea.tsx          → Enter (send), ⌘⏎ (steer)
  *   - DictationHost.tsx         → hold Ctrl (push-to-talk)
+ *   - src-tauri/src/lib.rs      → global voice shortcuts
  */
 
 import { useEffect } from 'react';
@@ -79,6 +80,7 @@ const SECTIONS: ShortcutSection[] = [
       { label: 'Dictate anywhere → paste at caret', chords: [['Hold', 'Fn']] },
       { label: 'Long-form dictation (double-tap, tap to end)', chords: [['Fn', 'Fn']] },
       { label: 'Summon o8', chords: [['⌘', '⇧', 'Space']] },
+      { label: 'Speak selected text', chords: [['⌃', '⇧', 'S']] },
       { label: 'Paste last dictation', chords: [['⌘', '⌥', 'V']] },
       { label: 'Open settings (anywhere)', chords: [['⌘', '⇧', ',']] },
     ],
