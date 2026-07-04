@@ -15,8 +15,9 @@
  * Q's spec: bottom half of center, tabbed, replaces modals for primary content.
  */
 
-import { lazy, memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
+import { memo, Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { AnimatePresence, motion } from 'framer-motion';
+import { retryingLazy } from '@/lib/react/retrying-lazy';
 import {
   AlertCircle,
   BookOpen,
@@ -31,15 +32,15 @@ import {
   Terminal,
   X,
 } from './lucide-shims';
-const AuditLogPanel = lazy(() => import('@/components/desktop/AuditLogPanel').then(m => ({ default: m.AuditLogPanel })));
-const CommitViewer = lazy(() => import('@/components/desktop/CommitViewer').then(m => ({ default: m.CommitViewer })));
-const FileViewer = lazy(() => import('@/components/desktop/FileViewer').then(m => ({ default: m.FileViewer })));
-const HtmlPreview = lazy(() => import('@/components/desktop/canvas/HtmlPreview').then(m => ({ default: m.HtmlPreview })));
-const InlineDiffViewer = lazy(() => import('@/components/desktop/InlineDiffViewer').then(m => ({ default: m.InlineDiffViewer })));
-const IssueCreator = lazy(() => import('@/components/desktop/IssueCreator').then(m => ({ default: m.IssueCreator })));
-const IssueViewer = lazy(() => import('@/components/desktop/IssueViewer').then(m => ({ default: m.IssueViewer })));
-const MobilePairingView = lazy(() => import('@/components/desktop/canvas/MobilePairingView').then(m => ({ default: m.MobilePairingView })));
-const PRViewer = lazy(() => import('@/components/desktop/PRViewer').then(m => ({ default: m.PRViewer })));
+const AuditLogPanel = retryingLazy(() => import('@/components/desktop/AuditLogPanel').then(m => ({ default: m.AuditLogPanel })), { label: 'Audit log' });
+const CommitViewer = retryingLazy(() => import('@/components/desktop/CommitViewer').then(m => ({ default: m.CommitViewer })), { label: 'Commit viewer' });
+const FileViewer = retryingLazy(() => import('@/components/desktop/FileViewer').then(m => ({ default: m.FileViewer })), { label: 'File viewer' });
+const HtmlPreview = retryingLazy(() => import('@/components/desktop/canvas/HtmlPreview').then(m => ({ default: m.HtmlPreview })), { label: 'HTML preview' });
+const InlineDiffViewer = retryingLazy(() => import('@/components/desktop/InlineDiffViewer').then(m => ({ default: m.InlineDiffViewer })), { label: 'Diff viewer' });
+const IssueCreator = retryingLazy(() => import('@/components/desktop/IssueCreator').then(m => ({ default: m.IssueCreator })), { label: 'Issue creator' });
+const IssueViewer = retryingLazy(() => import('@/components/desktop/IssueViewer').then(m => ({ default: m.IssueViewer })), { label: 'Issue viewer' });
+const MobilePairingView = retryingLazy(() => import('@/components/desktop/canvas/MobilePairingView').then(m => ({ default: m.MobilePairingView })), { label: 'Mobile pairing' });
+const PRViewer = retryingLazy(() => import('@/components/desktop/PRViewer').then(m => ({ default: m.PRViewer })), { label: 'PR viewer' });
 import {
   CanvasEmpty,
   CIViewer,
