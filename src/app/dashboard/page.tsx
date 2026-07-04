@@ -742,6 +742,14 @@ function DashboardInner() {
     }
     return { workspaceId: null, label: null, tabId: null, kind: null, tabs: [], finishedTabCount: 0, contextRailAvailable: false, contextRailVisible: false };
   }, [workspaceActiveMap]);
+  const activeWorkspaceTabIdsRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const ids = new Set<string>();
+    for (const payload of workspaceActiveMap.values()) {
+      if (payload.tabId) ids.add(payload.tabId);
+    }
+    activeWorkspaceTabIdsRef.current = ids;
+  }, [workspaceActiveMap]);
 
   // Side-by-side header pills for splits — both workspaces' tabs land
   // in the global header with a divider between them, mirroring the
@@ -802,7 +810,8 @@ function DashboardInner() {
       // SIDEBAR click and diverges from the actually-displayed thread.
       // (The auto-fallback effect upstream guards `llm-chat:` keys so
       // this update isn't overwritten on the next render.)
-      if (detail.threadId) {
+      const activeWorkspaceTabIds = activeWorkspaceTabIdsRef.current;
+      if (detail.threadId && (activeWorkspaceTabIds.size === 0 || (detail.tabId ? activeWorkspaceTabIds.has(detail.tabId) : false))) {
         setActiveSessionKey(`llm-chat:${detail.threadId}`);
       }
     };
@@ -1487,6 +1496,13 @@ function DashboardInner() {
     const values = Object.values(workspaceActiveTabKindByTileId).filter((kind) => kind !== null);
     return values[0] ?? null;
   }, [activeTileId, workspaceActiveTabKindByTileId]);
+
+  useEffect(() => {
+    if (activeWorkspaceTabKind !== 'chat' || !activeWorkspaceChatSessionKey) return;
+    setActiveSessionKey((current) => (
+      current === activeWorkspaceChatSessionKey ? current : activeWorkspaceChatSessionKey
+    ));
+  }, [activeWorkspaceChatSessionKey, activeWorkspaceTabKind, setActiveSessionKey]);
 
   const handleOpenHistoryChatFromPanel = useCallback((
     historyTabId: string,
