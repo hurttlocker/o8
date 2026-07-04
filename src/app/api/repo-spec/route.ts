@@ -7,6 +7,7 @@ import {
   appendRoughdraftReply,
   markRoughdraftResolved,
 } from '@/lib/o8md/rfm';
+import { cleanupOrphanedRoughdraftAnnotations } from '@/lib/o8md/cleanup';
 import { appendComment, insertSuggestion, type SuggestionKind } from '@/lib/o8md/mutate';
 
 export const runtime = 'nodejs';
@@ -84,12 +85,19 @@ export async function PUT(request: NextRequest) {
   if (content === null) {
     return NextResponse.json({ ok: false, error: 'content must be a string' }, { status: 400 });
   }
-  if (Buffer.byteLength(content, 'utf-8') > MAX_BYTES) {
+  const cleanup = cleanupOrphanedRoughdraftAnnotations(content);
+  if (Buffer.byteLength(cleanup.content, 'utf-8') > MAX_BYTES) {
     return NextResponse.json({ ok: false, error: `content exceeds ${MAX_BYTES} bytes` }, { status: 400 });
   }
   mkdirSync(dirname(specPath), { recursive: true });
-  writeFileSync(specPath, content, 'utf-8');
-  return NextResponse.json({ ok: true, path: specPath, bytes: Buffer.byteLength(content, 'utf-8') });
+  writeFileSync(specPath, cleanup.content, 'utf-8');
+  return NextResponse.json({
+    ok: true,
+    path: specPath,
+    bytes: Buffer.byteLength(cleanup.content, 'utf-8'),
+    content: cleanup.content,
+    orphanedAnnotationsRemoved: cleanup.removedAnnotations,
+  });
 }
 
 // POST ?action=reply|resolve — review mutations via the vendored RFM parser.
