@@ -4763,6 +4763,7 @@ function DashboardInner() {
                           prRepo={o8PrRepo}
                           repoSlug={o8CommitRepoSlug ?? repoSlugFromRemote(globalRepoEntry?.remoteUrl)}
                           browserUrl={o8BrowserUrl}
+                          browserStateKey={o8AllRepos ? 'right-panel:all-repos' : `right-panel:${currentO8RepoPath ?? 'default'}`}
                           onBrowserActiveUrlChange={setO8BrowserHoverUrl}
                           commitSha={o8CommitSha}
                           onClearCommit={handleClearCommit}
