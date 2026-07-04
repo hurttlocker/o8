@@ -30,7 +30,9 @@ const fallbackCardStyle: CSSProperties = {
   gap: 10,
   padding: 16,
   borderRadius: 18,
-  border: '1px solid var(--t-divider-subtle)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'var(--t-divider-subtle)',
   background: 'var(--t-bg-card)',
   boxShadow: 'var(--t-shadow-soft)',
   textAlign: 'center',
@@ -51,14 +53,19 @@ const fallbackDetailStyle: CSSProperties = {
 };
 
 const fallbackButtonStyle: CSSProperties = {
-  border: '1px solid var(--t-divider-subtle)',
+  borderWidth: 1,
+  borderStyle: 'solid',
+  borderColor: 'var(--t-divider-subtle)',
   borderRadius: 999,
   background: 'var(--t-input-bg)',
   color: 'var(--t-text)',
   cursor: 'pointer',
   fontSize: 12,
   fontWeight: 650,
-  padding: '7px 12px',
+  paddingTop: 7,
+  paddingBottom: 7,
+  paddingLeft: 12,
+  paddingRight: 12,
 };
 
 function wait(ms: number): Promise<void> {
