@@ -5,6 +5,7 @@ import { summarizeLaneArchive } from '@/lib/lane/archive-summary';
 import { collapseArchivedLanesByTask } from '@/lib/lanes/collapse-archived-by-task';
 import { codename } from '@/lib/agents/codename';
 import { dispatch } from '@/lib/lane/commands';
+import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { reconcileOrphanedWorktrees } from '@/lib/lane/reconcile';
 import type { LaneCommand } from '@/lib/lane/types';
 
@@ -42,9 +43,12 @@ export async function GET(req: NextRequest) {
   // Stamp the memorable codename (same pure fn that labels the canvas card and
   // resolves voice "[Name], [task]") so every lane consumer — the canvas, voice
   // status, mobile — sees the agent by the SAME name. Additive, deterministic.
+  const mergePolicy = currentLaneMergePolicy();
   const lanes = resolvedLanes.map((lane) => ({
     ...lane,
     codename: codename(lane.id),
+    mergeMode: mergePolicy.mode,
+    mergeModeNote: mergePolicy.note,
     archiveSummary: lane.status === 'archived' || lane.status === 'completed'
       ? summarizeLaneArchive(lane, getLaneEvents(lane.id, 80))
       : null,
