@@ -19,6 +19,7 @@ import {
   type OrchestratorLaneBinding,
   type OrchestratorMissionState,
   type OrchestratorPacket,
+  type OrchestratorRuntime,
   type WorkerRouting,
 } from '@/lib/orchestrator/types';
 import { publishRealtimeMutation } from '@/lib/realtime/publisher';
@@ -30,6 +31,14 @@ import { computePredictedFiles, filterOverlappingPackets } from './preservation-
 // then the locked fallback (5). Existing imports keep working.
 export const MAX_PARALLEL_DISPATCHES = resolveParallelCapSync();
 export const MAX_RECOVERY_DISPATCHES = 2;
+export const RUNTIME_PARALLEL_CAP: Partial<Record<OrchestratorRuntime, number>> = {
+  gemini: 3,
+};
+
+export interface DispatchLaunchBudget {
+  maxLaunches: number;
+  perRuntime?: Partial<Record<OrchestratorRuntime, number>>;
+}
 
 const RECOVERY_COOLDOWN_MS = 60_000;
 const SESSION_RECOVERY_COMMIT_MESSAGE = 'auto-commit: session recovery';
@@ -324,6 +333,7 @@ export function getDispatchBlocker(
  */
 export async function runDispatchTick(
   state: OrchestratorMissionState,
+  options: { launchBudget?: DispatchLaunchBudget } = {},
 ): Promise<OrchestratorMissionState> {
   let nextState = normalizeOrchestratorMissionState(state);
   nextState = fanOutComparisonPackets(nextState);
@@ -452,23 +462,29 @@ export async function runDispatchTick(
   }
 
   const parallelCap = resolveParallelCapSync();
-  // Per-runtime parallel cap — Gemini 3.1 Pro drops concurrent calls past ~3
-  // (observed: 4-packet parallel burst lost 1 silently with no stderr). Other
-  // runtimes have no additional cap beyond the global.
-  const RUNTIME_PARALLEL_CAP: Partial<Record<typeof dispatchablePackets[number]['packet']['runtime'], number>> = {
-    gemini: 3,
-  };
+  const maxLaunches = options.launchBudget
+    ? Math.max(0, Math.floor(options.launchBudget.maxLaunches))
+    : Number.POSITIVE_INFINITY;
+  if (maxLaunches <= 0) {
+    return nextState;
+  }
   const queue = [...dispatchablePackets];
-  while (queue.length > 0) {
+  let launchedThisTick = 0;
+  const runtimeCountsInTick: Partial<Record<OrchestratorRuntime, number>> = {};
+  while (queue.length > 0 && launchedThisTick < maxLaunches) {
     const batch: typeof dispatchablePackets = [];
     const deferred: typeof dispatchablePackets = [];
-    const runtimeCountsInBatch: Record<string, number> = {};
+    const runtimeCountsInBatch: Partial<Record<OrchestratorRuntime, number>> = {};
+    const batchLimit = Math.min(parallelCap, maxLaunches - launchedThisTick);
     for (const candidate of queue) {
       const runtime = candidate.packet.runtime;
       const perRuntimeCap = RUNTIME_PARALLEL_CAP[runtime];
+      const perRuntimeBudget = options.launchBudget?.perRuntime?.[runtime];
       const hitRuntimeCap =
         perRuntimeCap !== undefined && (runtimeCountsInBatch[runtime] ?? 0) >= perRuntimeCap;
-      if (batch.length < parallelCap && !hitRuntimeCap) {
+      const hitRuntimeBudget =
+        perRuntimeBudget !== undefined && (runtimeCountsInTick[runtime] ?? 0) >= perRuntimeBudget;
+      if (batch.length < batchLimit && !hitRuntimeCap && !hitRuntimeBudget) {
         batch.push(candidate);
         runtimeCountsInBatch[runtime] = (runtimeCountsInBatch[runtime] ?? 0) + 1;
       } else {
@@ -478,6 +494,10 @@ export async function runDispatchTick(
     if (batch.length === 0) break;
     queue.length = 0;
     queue.push(...deferred);
+    launchedThisTick += batch.length;
+    for (const { packet } of batch) {
+      runtimeCountsInTick[packet.runtime] = (runtimeCountsInTick[packet.runtime] ?? 0) + 1;
+    }
     console.log(`[dag-scheduler] Dispatching ${batch.length} packets in parallel (cap ${parallelCap}): ${batch.map(({ packet }) => packet.id).join(', ')}`);
 
     const results = await Promise.allSettled(

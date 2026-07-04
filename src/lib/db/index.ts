@@ -42,7 +42,7 @@ const DATA_DIR = process.env.O8_DATA_DIR
 // second migration step with no user-facing benefit.
 const DB_PATH = process.env.CORTEX_IDE_DB_PATH || path.join(DATA_DIR, 'cortex-ide.db');
 // Bump when ensureTables() adds new schema or backfill work.
-const DB_SCHEMA_VERSION = 30;
+const DB_SCHEMA_VERSION = 31;
 
 function migrationMarkerPath(version: number): string {
   return path.join(DATA_DIR, `.db-migrated-v${version}`);
@@ -129,6 +129,7 @@ function ensureIdempotentColumnAdds(sqlite: Database.Database): void {
   ensureMobileLiveActivityTokensTable(sqlite);
   ensureProjectsTables(sqlite);
   ensureProjectScopeColumns(sqlite);
+  ensureMissionStateColumn(sqlite);
   // #915 sub-1 — Schema v14 — Q&A retrieval foundation. FTS5 virtual tables
   // for outcomes/prs/issues/directives plus qa_eval_runs table. Skips with a
   // warning when FTS5 isn't compiled in. Always-on via the same idempotent
@@ -736,6 +737,7 @@ function ensureTables(sqlite: Database.Database): void {
       summary TEXT NOT NULL DEFAULT '',
       constraints TEXT NOT NULL DEFAULT '',
       packet_meta_json TEXT NOT NULL DEFAULT '[]',
+      mission_state_json TEXT,
       total_waves INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL,
@@ -1085,6 +1087,12 @@ function ensureChatHistoryColumns(sqlite: Database.Database): void {
 function ensureLaneHeartbeatColumns(sqlite: Database.Database): void {
   for (const [column, type] of Object.entries({ last_heartbeat_at: 'INTEGER', pr_number: 'INTEGER' })) {
     if (!tableColumnExists(sqlite, 'lanes', column)) addColumnTolerant(sqlite, `ALTER TABLE lanes ADD COLUMN ${column} ${type}`);
+  }
+}
+
+function ensureMissionStateColumn(sqlite: Database.Database): void {
+  if (!tableColumnExists(sqlite, 'missions', 'mission_state_json')) {
+    addColumnTolerant(sqlite, 'ALTER TABLE missions ADD COLUMN mission_state_json TEXT');
   }
 }
 
