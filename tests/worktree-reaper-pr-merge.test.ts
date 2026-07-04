@@ -3,17 +3,58 @@ import { existsSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { afterAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, describe, expect, it, vi } from 'vitest';
 
 process.env.CORTEX_IDE_DATA_DIR = mkdtempSync(join(tmpdir(), 'o8-pr-reaper-data-'));
 process.env.O8_DATA_DIR = process.env.CORTEX_IDE_DATA_DIR;
 vi.resetModules();
+
+const targetedHeadRefreshes = new Map<string, {
+  number: number;
+  state: 'open' | 'closed';
+  closedAt?: string | null;
+  mergedAt?: string | null;
+}>();
 
 vi.doMock('@/lib/github-broker/sync', () => ({
   ensureGitHubPullRequest: vi.fn(async (repoFullName: string, prNumber: number) => {
     const { getGitHubPullRequestByNumber } = await import('@/lib/github-broker/store');
     return {
       pr: getGitHubPullRequestByNumber(repoFullName, prNumber),
+      error: null,
+      stale: false,
+    };
+  }),
+  ensureGitHubPullRequestByHead: vi.fn(async (repoFullName: string, headRefName: string) => {
+    const pull = targetedHeadRefreshes.get(`${repoFullName}:${headRefName}`);
+    if (!pull) {
+      return { pr: null, error: null, stale: false };
+    }
+
+    const { getGitHubPullRequestByNumber, upsertGitHubPullRequest } = await import('@/lib/github-broker/store');
+    upsertGitHubPullRequest({
+      pullRequestId: 910_000 + pull.number,
+      repoFullName,
+      number: pull.number,
+      title: `PR ${pull.number}`,
+      state: pull.state,
+      author: null,
+      body: '',
+      headRefName,
+      baseRefName: 'main',
+      additions: 0,
+      deletions: 0,
+      changedFiles: 0,
+      reviewDecision: null,
+      statusCheckRollup: [],
+      url: `https://github.com/${repoFullName}/pull/${pull.number}`,
+      createdAt: '2026-07-03T12:00:00.000Z',
+      updatedAt: '2026-07-03T12:05:00.000Z',
+      closedAt: pull.closedAt ?? null,
+      mergedAt: pull.mergedAt ?? null,
+    });
+    return {
+      pr: getGitHubPullRequestByNumber(repoFullName, pull.number),
       error: null,
       stale: false,
     };
@@ -32,6 +73,10 @@ afterAll(() => {
   closeDb();
   vi.doUnmock('@/lib/github-broker/sync');
   vi.resetModules();
+});
+
+afterEach(() => {
+  targetedHeadRefreshes.clear();
 });
 
 function git(cwd: string, args: string[]): string {
@@ -222,6 +267,56 @@ describe('worktree reaper PR merge reconciliation', () => {
     const event = getLaneEvents(lane.id).find((item) => item.verb === 'pr_merged_reconciled');
     expect(event?.payload.prNumber).toBe(303);
     expect(event?.payload.match).toBe('headRefName');
+    expect(getLane(lane.id)?.prNumber).toBe(303);
+  });
+
+  it('archives and stamps no-prNumber lanes by targeted GitHub head refresh when the mirror has no row', async () => {
+    const repoPath = makeRepo();
+    const lane = createLane({
+      repoPath,
+      branch: 'inline/head-refresh-pr-merged',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-head-refresh-pr-merged',
+    });
+    markReviewing(lane.id, null);
+    targetedHeadRefreshes.set(`${REPO_FULL_NAME}:${lane.branch}`, {
+      number: 305,
+      state: 'closed',
+      closedAt: '2026-07-03T12:35:00.000Z',
+      mergedAt: '2026-07-03T12:35:00.000Z',
+    });
+
+    await runWorktreeReaperTick();
+
+    expect(getLane(lane.id)?.status).toBe('archived');
+    expect(getLane(lane.id)?.prNumber).toBe(305);
+    const event = getLaneEvents(lane.id).find((item) => item.verb === 'pr_merged_reconciled');
+    expect(event?.payload.prNumber).toBe(305);
+    expect(event?.payload.match).toBe('headRefName');
+  });
+
+  it('stamps no-prNumber lanes by targeted GitHub head refresh before the PR is merged', async () => {
+    const repoPath = makeRepo();
+    const lane = createLane({
+      repoPath,
+      branch: 'inline/head-refresh-pr-open',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-head-refresh-pr-open',
+    });
+    markReviewing(lane.id, null);
+    targetedHeadRefreshes.set(`${REPO_FULL_NAME}:${lane.branch}`, {
+      number: 306,
+      state: 'open',
+    });
+
+    await runWorktreeReaperTick();
+
+    expect(getLane(lane.id)?.status).toBe('reviewing');
+    expect(getLane(lane.id)?.prNumber).toBe(306);
+    const event = getLaneEvents(lane.id).find((item) => item.verb === 'pr_merged_reconciled');
+    expect(event).toBeUndefined();
   });
 
   it('startup sweep removes terminal and unknown clone dirs while keeping active and context dirs', async () => {
