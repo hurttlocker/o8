@@ -681,6 +681,7 @@ function DashboardInner() {
     kind: string;
     runtime: string | null;
     packetStatus: string | null;
+    orchestratorThreadId: string | null;
   };
   type WorkspaceActivePayload = {
     workspaceId: string | null;
@@ -2183,6 +2184,12 @@ function DashboardInner() {
     }
 
     const repoPath = targetScope?.localPath ?? workspaceTerminalPreferredRepo?.localPath ?? null;
+    const activeOrchestratorThreadId = workspaceHeaderActive.kind === 'orchestrator'
+      ? workspaceHeaderActive.tabs.find((tab) => tab.id === workspaceHeaderActive.tabId)?.orchestratorThreadId?.trim() ?? ''
+      : '';
+    const launchPacket = activeOrchestratorThreadId
+      ? { ...packet, orchestratorThreadId: activeOrchestratorThreadId }
+      : packet;
 
     // Update lane with worktree path if one was created
     if (laneId && targetScope?.isWorktree && targetScope.localPath) {
@@ -2214,14 +2221,14 @@ function DashboardInner() {
       } : undefined,
       initialText: buildOrchestrationPacketDraft(
         thoughtsMissionState,
-        packet,
+        launchPacket,
         targetScope?.name ?? targetScope?.localPath ?? null,
       ),
       autoSend: true,
       createNew: true,
       label: packet.title,
       orchestrationPacket: buildOrchestrationPacketBadge({
-        ...packet,
+        ...launchPacket,
         status: 'running',
       }),
       autoArchiveOnIdle: false,
@@ -2252,6 +2259,9 @@ function DashboardInner() {
     setAllRepoWorktrees,
     thoughtsMissionState,
     waitForWorkspaceTerminalTarget,
+    workspaceHeaderActive.kind,
+    workspaceHeaderActive.tabId,
+    workspaceHeaderActive.tabs,
     workspaceScopeEntries,
     workspaceTerminalPreferredRepo,
   ]);
