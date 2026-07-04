@@ -341,6 +341,8 @@ export interface MobileOrchestratorThread {
   repoPath: string | null;
   repoName: string | null;
   repoBranch: string | null;
+  githubOwner: string | null;
+  githubRepo: string | null;
   /** Orchestrator backend, when the thread was tagged; null for legacy threads. */
   backend: MobileOrchestratorBackend | null;
   /** openclaw agent id that ran the thread; null for non-openclaw/untagged. */

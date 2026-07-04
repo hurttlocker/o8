@@ -1757,6 +1757,8 @@ function orchestratorThreadFingerprint(thread: MobileOrchestratorThread): string
     repoPath: thread.repoPath,
     repoName: thread.repoName,
     repoBranch: thread.repoBranch,
+    githubOwner: thread.githubOwner,
+    githubRepo: thread.githubRepo,
     backend: thread.backend,
     agent: thread.agent,
     pinned: thread.pinned === true,
