@@ -61,6 +61,10 @@ const REVIEW_SCREENSHOT_DIR = join(
 );
 let reviewScreenshotClient: O8WebviewClient | null = null;
 
+function isWorktreeCleanupTerminalStatus(status: LaneStatus) {
+  return status === 'completed' || status === 'archived';
+}
+
 function getLaneDb() {
   const db = getDb();
   if (!db) {
@@ -413,6 +417,7 @@ export function updateLane(
   let statusChanged = false;
   let statusChangeEventId: string | null = null;
   let lifecycleTimestamp: string | null = null;
+  let laneBeforeTerminalCleanup: Lane | null = null;
 
   db.transaction(() => {
     const lane = getLane(laneId);
@@ -455,6 +460,13 @@ export function updateLane(
 
     nextValues.updatedAt = now;
     statusChanged = nextValues.status !== undefined;
+    if (
+      statusChanged
+      && typeof nextValues.status === 'string'
+      && isWorktreeCleanupTerminalStatus(nextValues.status as LaneStatus)
+    ) {
+      laneBeforeTerminalCleanup = lane;
+    }
     updateLaneRecord(laneId, nextValues);
 
     if (statusChanged) {
@@ -483,6 +495,17 @@ export function updateLane(
     && statusChangeEventId
   ) {
     void captureReviewBoundaryScreenshot(resolvedLane.id, statusChangeEventId);
+  }
+
+  const terminalCleanupLane = laneBeforeTerminalCleanup as Lane | null;
+  if (
+    statusChanged
+    && terminalCleanupLane?.worktreePath
+    && isWorktreeCleanupTerminalStatus(resolvedLane.status)
+  ) {
+    void cleanupLaneWorktree(terminalCleanupLane, { terminal: true }).catch((error) => {
+      console.error(`[lane-worktree] Terminal cleanup failed for ${resolvedLane.id}: ${error instanceof Error ? error.message : String(error)}`);
+    });
   }
 
   return resolvedLane;
@@ -890,12 +913,6 @@ export function archiveLane(laneId: string, actor: LaneEventActor = 'user'): Lan
     lastEventLabel: 'archived',
   }, actor);
 
-  if (lane.worktreePath) {
-    void cleanupLaneWorktree(lane).catch((error) => {
-      console.error(`[lane-worktree] Cleanup failed for ${lane.id}: ${error instanceof Error ? error.message : String(error)}`);
-    });
-  }
-
   return updated;
 }
 
@@ -915,7 +932,7 @@ export function deleteLane(laneId: string): Lane | null {
   })();
 
   if (lane.worktreePath) {
-    void cleanupLaneWorktree(lane).catch((error) => {
+    void cleanupLaneWorktree(lane, { terminal: true }).catch((error) => {
       console.error(`[lane-worktree] Cleanup failed while pruning ${lane.id}: ${error instanceof Error ? error.message : String(error)}`);
     });
   }

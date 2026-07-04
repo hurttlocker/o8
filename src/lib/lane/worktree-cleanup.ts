@@ -2,23 +2,35 @@ import { execFile } from 'node:child_process';
 import { access } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import { getWorktreeManager } from '@/lib/worktree/launch';
+import { preserveLaneWorktreeHead } from './worktree-preservation';
+import { removeCortexWorktreePath } from './worktree-clone-removal';
 import type { Lane } from './types';
 
 const execFileAsync = promisify(execFile);
+
+type CleanupLane = Pick<Lane, 'id' | 'repoPath' | 'worktreePath'> & Partial<Pick<Lane, 'baseBranch'>>;
 
 function formatError(error: unknown) {
   return error instanceof Error ? error.message : String(error);
 }
 
-/**
- * Check for uncommitted changes and auto-commit before cleanup.
- * Returns true if safe to proceed, false if prune should be skipped.
- */
-async function preserveUncommittedWork(worktreePath: string, laneId: string): Promise<boolean> {
+async function isGitWorktree(worktreePath: string): Promise<boolean> {
+  try {
+    await execFileAsync('git', ['rev-parse', '--is-inside-work-tree'], {
+      cwd: worktreePath,
+      timeout: 5_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function hasUncommittedWork(worktreePath: string): Promise<boolean> {
   try {
     await access(worktreePath);
   } catch {
-    return true; // Directory gone, safe to proceed
+    return false;
   }
 
   try {
@@ -26,31 +38,52 @@ async function preserveUncommittedWork(worktreePath: string, laneId: string): Pr
       'git', ['status', '--porcelain'],
       { cwd: worktreePath, timeout: 5000 },
     );
-    if (!status.trim()) return true; // Clean, safe to proceed
-
-    console.log(`[worktree-prune] Lane ${laneId} has uncommitted changes — preserving work`);
-
-    try {
-      await execFileAsync('git', ['add', '-A'], { cwd: worktreePath, timeout: 10_000 });
-      await execFileAsync(
-        'git', ['commit', '-m', 'chore: preserve agent work before worktree cleanup'],
-        { cwd: worktreePath, timeout: 10_000 },
-      );
-      console.log(`[worktree-prune] Auto-committed changes for lane ${laneId}`);
-      return true;
-    } catch {
-      console.log(`[worktree-prune] Auto-commit failed for lane ${laneId}, skipping prune to preserve work`);
-      return false;
-    }
+    return status.trim().length > 0;
   } catch {
-    // git status failed — worktree might be corrupt, safe to proceed
-    return true;
+    return false;
   }
 }
 
+async function prepareLaneWorktreeRemoval(
+  lane: CleanupLane,
+  worktreePath: string,
+  terminal: boolean,
+): Promise<boolean> {
+  const gitWorktree = await isGitWorktree(worktreePath);
+  if (!gitWorktree) {
+    return true;
+  }
+
+  const dirty = await hasUncommittedWork(worktreePath);
+  if (dirty && !terminal) {
+    console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: non-terminal worktree has uncommitted changes.`);
+    return false;
+  }
+
+  if (terminal) {
+    try {
+      const preservation = await preserveLaneWorktreeHead({
+        id: lane.id,
+        repoPath: lane.repoPath,
+        worktreePath,
+        baseBranch: lane.baseBranch ?? 'main',
+      });
+      if (dirty && !preservation.preserved) {
+        console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: dirty terminal worktree has no preserved branch ref.`);
+        return false;
+      }
+    } catch (error) {
+      console.warn(`[lane-worktree] Skipping cleanup for ${lane.id}: failed to preserve terminal worktree head (${formatError(error)}).`);
+      return false;
+    }
+  }
+
+  return true;
+}
+
 export async function cleanupLaneWorktree(
-  lane: Pick<Lane, 'id' | 'repoPath' | 'worktreePath'>,
-  opts: { deleteBranch?: boolean } = {},
+  lane: CleanupLane,
+  opts: { deleteBranch?: boolean; terminal?: boolean } = {},
 ): Promise<boolean> {
   const worktreePath = lane.worktreePath?.trim();
   if (!worktreePath) {
@@ -69,6 +102,9 @@ export async function cleanupLaneWorktree(
     return false;
   }
 
+  const safeToRemove = await prepareLaneWorktreeRemoval(lane, worktreePath, opts.terminal === true);
+  if (!safeToRemove) return false;
+
   try {
     const manager = getWorktreeManager(lane.repoPath);
     const worktree = (await manager.list()).find((candidate) => candidate.path === worktreePath);
@@ -81,32 +117,12 @@ export async function cleanupLaneWorktree(
     console.warn(`[lane-worktree] Manager cleanup failed for ${lane.id}: ${formatError(error)}`);
   }
 
-  // Fallback: direct git worktree remove — also needs safety check
-  const safeToRemove = await preserveUncommittedWork(worktreePath, lane.id);
-  if (!safeToRemove) return false;
-
-  try {
-    await execFileAsync('git', ['worktree', 'remove', worktreePath, '--force'], {
-      cwd: lane.repoPath,
-      timeout: 15_000,
-    });
-    await execFileAsync('git', ['worktree', 'prune'], {
-      cwd: lane.repoPath,
-      timeout: 10_000,
-    }).catch(() => {});
-    return true;
-  } catch (error) {
-    const message = formatError(error);
-    if (
-      message.includes('is not a working tree')
-      || message.includes('not a working tree')
-      || message.includes('No such file or directory')
-    ) {
-      return false;
-    }
-    console.error(`[lane-worktree] Cleanup failed for ${lane.id}: ${message}`);
-    return false;
-  }
+  return removeCortexWorktreePath({
+    repoRoot: lane.repoPath,
+    worktreePath,
+    laneId: lane.id,
+    logPrefix: 'lane-worktree',
+  });
 }
 
 export async function pruneRepoWorktrees(repoPath: string): Promise<string[]> {

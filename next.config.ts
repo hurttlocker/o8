@@ -3,6 +3,9 @@ import type { NextConfig } from 'next';
 const nextConfig: NextConfig = {
   output: 'standalone',
   outputFileTracingRoot: __dirname,
+  outputFileTracingExcludes: {
+    '*': ['./.cortex-worktrees/**/*'],
+  },
   serverExternalPackages: ['better-sqlite3'], // Native module — must be bundled explicitly
   reactStrictMode: true,
   devIndicators: false,
