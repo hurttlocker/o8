@@ -1,6 +1,7 @@
 import 'server-only';
 
 import {
+  getGitHubPullRequestByHead,
   getGitHubPullRequestByNumber,
   listGitHubIssues,
   listGitHubPullRequests,
@@ -255,6 +256,36 @@ async function syncPullRequest(repoFullName: string, prNumber: number) {
   return pull;
 }
 
+async function syncPullRequestByHead(repoFullName: string, headRefName: string) {
+  const owner = repoFullName.split('/')[0] ?? '';
+  const head = encodeURIComponent(`${owner}:${headRefName}`);
+  const { response, installation } = await githubInstallationFetch(
+    repoFullName,
+    `/repos/${repoFullName}/pulls?state=all&head=${head}&per_page=1&sort=updated&direction=desc`,
+  );
+
+  upsertGitHubInstallation({
+    installationId: installation.id,
+    accountLogin: installation.account?.login ?? owner,
+    accountType: installation.account?.type ?? null,
+    targetType: installation.target_type ?? null,
+    permissions: installation.permissions ?? null,
+  });
+
+  const bodyText = await response.text();
+  if (!response.ok) {
+    throw buildGitHubError(response, bodyText);
+  }
+
+  const pulls = JSON.parse(bodyText) as GitHubPullRequestPayload[];
+  const match = pulls[0];
+  if (!match) return null;
+
+  const pull = mapPullRequestSnapshot(repoFullName, match, match);
+  upsertGitHubPullRequest(pull);
+  return pull;
+}
+
 export async function ensureGitHubIssues(repoFullName: string, options?: { fresh?: boolean }) {
   const config = getGitHubAppConfig();
   const current = listGitHubIssues(repoFullName);
@@ -336,6 +367,28 @@ export async function ensureGitHubPullRequest(repoFullName: string, prNumber: nu
     return { pr, error: null, stale: false };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Unable to sync GitHub pull request';
+    markGitHubSyncError(repoFullName, 'pull_requests', message);
+    return { pr: current, error: message, stale: true };
+  }
+}
+
+export async function ensureGitHubPullRequestByHead(repoFullName: string, headRefName: string) {
+  const current = getGitHubPullRequestByHead(repoFullName, headRefName);
+  const config = getGitHubAppConfig();
+
+  if (!config) {
+    return {
+      pr: current,
+      error: current ? null : 'GitHub App is not configured.',
+      stale: true,
+    };
+  }
+
+  try {
+    const pr = await syncPullRequestByHead(repoFullName, headRefName);
+    return { pr: pr ?? current, error: null, stale: false };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Unable to sync GitHub pull request by head branch';
     markGitHubSyncError(repoFullName, 'pull_requests', message);
     return { pr: current, error: message, stale: true };
   }
