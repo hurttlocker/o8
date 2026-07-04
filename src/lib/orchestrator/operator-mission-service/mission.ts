@@ -232,6 +232,7 @@ export async function createMission(input: CreateMissionInput) {
         title: packet.title,
         referenceLabel: packet.referenceLabel,
       })),
+      missionState: persisted,
       totalWaves,
     });
     archiveMissionsExcept(missionId);
