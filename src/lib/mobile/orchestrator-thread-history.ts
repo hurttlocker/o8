@@ -279,7 +279,7 @@ export function listMobileOrchestratorThreads(options: {
   backend?: MobileOrchestratorBackend | null;
   limit?: number;
 } = {}): MobileOrchestratorThread[] {
-  const wantOpenclaw = options.backend === 'openclaw';
+  const backendFilter = options.backend ?? null;
   const limit = options.limit ?? MAX_THREADS;
   const threads: MobileOrchestratorThread[] = [];
   if (!existsSync(ORCHESTRATOR_HISTORY_DIR)) return threads;
@@ -298,7 +298,7 @@ export function listMobileOrchestratorThreads(options: {
       // surfaces (which is where they were leaking back in).
       if (record.archivedAt) continue;
       const threadBackend = effectiveBackend(record);
-      if (wantOpenclaw ? threadBackend !== 'openclaw' : threadBackend === 'openclaw') {
+      if (backendFilter ? threadBackend !== backendFilter : threadBackend === 'openclaw') {
         continue;
       }
       threads.push(projectThread(tabId, record, stat.mtime.toISOString()));

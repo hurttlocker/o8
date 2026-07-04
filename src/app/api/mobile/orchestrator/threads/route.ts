@@ -15,6 +15,8 @@ export const dynamic = 'force-dynamic';
  */
 
 import { NextResponse, type NextRequest } from 'next/server';
+import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import type { MobileOrchestratorBackend } from '@/lib/mobile/types';
 import {
   createMobileOrchestratorThread,
   listArchivedOrchestratorThreadIds,
@@ -38,13 +40,17 @@ export async function GET(request: NextRequest) {
     }
   }
 
-  // ?backend=openclaw → only openclaw threads; otherwise → non-openclaw
+  // ?backend=<id> → only that backend's threads; otherwise → non-openclaw
   // threads (the default Orchestrator surface; untagged/legacy threads count
-  // as non-openclaw). The two surfaces coexist — see docs/openclaw-integration.md.
-  const wantOpenclaw = request.nextUrl.searchParams.get('backend') === 'openclaw';
+  // as non-openclaw). The runtime backend union includes Hermes/Collide.
+  const rawBackend = request.nextUrl.searchParams.get('backend')?.trim() || null;
+  if (rawBackend && !isOrchestratorBackendId(rawBackend)) {
+    return NextResponse.json({ threads: [] }, { headers: NO_STORE });
+  }
+  const backend = rawBackend as MobileOrchestratorBackend | null;
 
   try {
-    const threads = listMobileOrchestratorThreads({ backend: wantOpenclaw ? 'openclaw' : null });
+    const threads = listMobileOrchestratorThreads({ backend });
     return NextResponse.json({ threads }, { headers: NO_STORE });
   } catch (error) {
     console.log('[mobile-orchestrator] thread list failed', error);

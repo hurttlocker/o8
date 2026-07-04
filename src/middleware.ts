@@ -92,6 +92,8 @@ const ALLOWLIST_READ_ONLY: RegExp[] = [
   // VAPID public key — public by definition; the mobile client needs it
   // to call pushManager.subscribe before any token handshake.
   /^\/api\/mobile\/push\/public-key(\/|$)/,
+  // Backend availability is non-sensitive setup state for mobile runtime tabs.
+  /^\/api\/mobile\/orchestrator\/backend-availability(\/|$)/,
 ];
 
 const ALLOWLIST_ANY_METHOD: RegExp[] = [
