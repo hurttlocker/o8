@@ -12,6 +12,8 @@
  * "gate could not run".
  */
 
+import { execFileSync } from 'node:child_process';
+
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
@@ -21,6 +23,7 @@ import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge
 
 /** One row per enforcement check that ran, in the order listed below. */
 export type MergeCheckName =
+  | 'clean-worktree'
   | 'security-patterns'
   | 'diff-budget'
   | 'untracked-imports'
@@ -61,6 +64,7 @@ const CATEGORY_TO_CHECK: Record<MergeViolation['category'], MergeCheckName> = {
 };
 
 const ALL_CHECKS: MergeCheckName[] = [
+  'clean-worktree',
   'security-patterns',
   'diff-budget',
   'untracked-imports',
@@ -125,6 +129,23 @@ function hasApprovedOrchestratorReview(packetId: string): boolean {
   return mission.packets.find((packet) => packet.id === packetId)?.review?.approved === true;
 }
 
+function readDirtyWorktreeDetail(cwd: string): string | null {
+  try {
+    const output = execFileSync('git', ['status', '--porcelain'], {
+      cwd,
+      timeout: 5000,
+      encoding: 'utf-8',
+      maxBuffer: 1024 * 1024,
+    }).trim();
+    if (!output) return null;
+    const lines = output.split('\n').slice(0, 5);
+    const suffix = output.split('\n').length > lines.length ? '\n...' : '';
+    return `Uncommitted worktree changes are still present:\n${lines.join('\n')}${suffix}`;
+  } catch {
+    return 'Unable to verify that the worktree is clean.';
+  }
+}
+
 /**
  * Run the merge gate against a lane and return the structured preview shape.
  * Callers already holding a `Lane` reference should use this path — it
@@ -139,9 +160,18 @@ export function buildPreviewForLane(
   const gateResult = runMergeGate(lane, undefined, orchestratorApproved);
   const checks = buildCheckList(gateResult);
   const blockers = buildBlockerList(gateResult);
+  const dirtyDetail = readDirtyWorktreeDetail(lane.worktreePath ?? lane.repoPath);
+  if (dirtyDetail) {
+    const cleanCheck = checks.find((check) => check.name === 'clean-worktree');
+    if (cleanCheck) {
+      cleanCheck.verdict = 'fail';
+      cleanCheck.detail = dirtyDetail;
+    }
+    blockers.unshift('clean-worktree');
+  }
   return {
     packetId,
-    wouldMerge: gateResult.passed,
+    wouldMerge: gateResult.passed && !dirtyDetail,
     checks,
     blockers,
     branch: lane.branch ?? null,
