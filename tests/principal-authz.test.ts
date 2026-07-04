@@ -47,6 +47,7 @@ const rerun = await import('@/app/api/orchestrator/rerun-with-feedback/route');
 const sessionRules = await import('@/app/api/orchestrator/session-rules/route');
 const devServer = await import('@/app/api/panel/dev-server/route');
 const fileIo = await import('@/app/api/panel/file-io/route');
+const laneEvents = await import('@/app/api/lanes/[id]/events/route');
 const { createTestApproval, getApproval } = await import('@/lib/approvals/store');
 const { panelGateMiddleware } = await import('@/middleware');
 
@@ -201,5 +202,56 @@ describe('principal-authz — fail-closed: unknown/absent principal is denied on
 
   it.each(mutating)('LAN POST with no credential is 401 at the gate: %s', (url) => {
     expect(panelGateMiddleware(lanReq(url)).status).toBe(401);
+  });
+});
+
+describe('principal-authz — worker lane-event reports are accepted (post-CRIT-1 regression)', () => {
+  // CRIT-1 made dispatched workers present O8_WORKER_TOKEN instead of the
+  // operator ws-token; the lane-events route's in-handler bearer check only
+  // compared against the ws-token, silently 401ing every worker
+  // `o8 packet report` / huddle post (live-hit 2026-07-03, pkt-1f225562).
+  const params = { params: Promise.resolve({ id: 'lane-does-not-exist' }) };
+
+  it('WORKER token → passes the bearer gate (reaches lane lookup, not 401)', async () => {
+    const res = await laneEvents.POST(
+      req('http://localhost:3001/api/lanes/lane-does-not-exist/events', {
+        principal: 'worker',
+        body: { verb: 'agent_report', event: 'progress', message: 'x' },
+      }),
+      params,
+    );
+    expect(res.status).not.toBe(401);
+  });
+
+  it('OPERATOR ws-token → passes the bearer gate too', async () => {
+    const headers: Record<string, string> = {
+      host: 'localhost:3001',
+      authorization: `Bearer ${WS_TOKEN}`,
+    };
+    const res = await laneEvents.POST(
+      new NextRequest('http://localhost:3001/api/lanes/lane-does-not-exist/events', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ verb: 'agent_report', event: 'progress', message: 'x' }),
+      }),
+      params,
+    );
+    expect(res.status).not.toBe(401);
+  });
+
+  it('garbage bearer → still 401', async () => {
+    const headers: Record<string, string> = {
+      host: 'localhost:3001',
+      authorization: 'Bearer not-a-real-token-aaaaaaaaaaaaaaaa',
+    };
+    const res = await laneEvents.POST(
+      new NextRequest('http://localhost:3001/api/lanes/lane-does-not-exist/events', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ verb: 'agent_report', event: 'progress', message: 'x' }),
+      }),
+      params,
+    );
+    expect(res.status).toBe(401);
   });
 });
