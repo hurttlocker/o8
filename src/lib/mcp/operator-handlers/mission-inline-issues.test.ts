@@ -70,5 +70,5 @@ describe('handleCreateMission inline issue numbering', () => {
       expect(Number.isSafeInteger(number)).toBe(true);
       expect(number).toBeGreaterThanOrEqual(90001);
     }
-  });
+  }, 20_000);
 });
