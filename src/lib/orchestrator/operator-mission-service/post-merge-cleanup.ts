@@ -1,11 +1,12 @@
 import { execFile } from 'node:child_process';
-import { existsSync, rmSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
 import { recordMergeCleanupEvent } from '@/lib/lane/events';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
+import { removeCortexWorktreePath } from '@/lib/lane/worktree-clone-removal';
 
 const execFileAsync = promisify(execFile);
 
@@ -136,25 +137,12 @@ async function removeWorktree(target: PostMergeCleanupTarget) {
     return true;
   }
 
-  try {
-    await execFileAsync('git', ['worktree', 'remove', '--force', worktreePath], {
-      cwd: repoRoot,
-      timeout: 15_000,
-    });
-    await pruneWorktrees(repoRoot);
-    return true;
-  } catch (error) {
-    console.warn(`[merge-cleanup] git worktree remove failed for ${worktreePath}: ${formatError(error)}`);
-  }
-
-  try {
-    rmSync(worktreePath, { recursive: true, force: true });
-    await pruneWorktrees(repoRoot);
-    return !existsSync(worktreePath);
-  } catch (error) {
-    console.warn(`[merge-cleanup] fs.rmSync fallback failed for ${worktreePath}: ${formatError(error)}`);
-    return false;
-  }
+  return removeCortexWorktreePath({
+    repoRoot,
+    worktreePath,
+    laneId: target.id,
+    logPrefix: 'merge-cleanup',
+  });
 }
 
 function sessionIsStillActive(sessionKey: string) {
