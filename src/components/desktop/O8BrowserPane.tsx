@@ -64,9 +64,16 @@ interface BrowserTab {
   title: string;
 }
 
+interface BrowserPaneStateSnapshot {
+  tabs: BrowserTab[];
+  activeTabId: string | null;
+  activeUrl: string | null;
+}
+
 interface O8BrowserPaneProps {
   previews?: DetectedLocalhostPreview[];
   navigateToUrl?: string | null;
+  stateScopeKey?: string;
   // Bubbles the currently-loaded URL up to the dashboard so the TitleBar
   // Browser button can render a hover-preview iframe pointed at it.
   onActiveUrlChange?: (url: string | null) => void;
@@ -100,16 +107,60 @@ function newTabId(): string {
   return `btab-${tabCounter}-${Date.now()}`;
 }
 
+const DEFAULT_STATE_SCOPE_KEY = 'right-panel';
+const browserPaneStateStore = new Map<string, BrowserPaneStateSnapshot>();
+
+function normalizeStateScopeKey(key?: string): string {
+  const trimmed = key?.trim();
+  return trimmed || DEFAULT_STATE_SCOPE_KEY;
+}
+
+function cloneTabs(tabs: BrowserTab[]): BrowserTab[] {
+  return tabs.map((tab) => ({ ...tab }));
+}
+
+function readBrowserPaneState(scopeKey: string): BrowserPaneStateSnapshot | null {
+  const stored = browserPaneStateStore.get(scopeKey);
+  if (!stored) return null;
+  const tabs = cloneTabs(stored.tabs);
+  const activeFromId = tabs.find((tab) => tab.id === stored.activeTabId) ?? null;
+  const activeFromUrl = stored.activeUrl ? tabs.find((tab) => tab.url === stored.activeUrl) ?? null : null;
+  const activeTab = activeFromId ?? activeFromUrl ?? tabs[0] ?? null;
+  return {
+    tabs,
+    activeTabId: activeTab?.id ?? null,
+    activeUrl: activeTab?.url ?? null,
+  };
+}
+
+function writeBrowserPaneState(scopeKey: string, tabs: BrowserTab[], activeTabId: string | null): void {
+  const cloned = cloneTabs(tabs);
+  const activeTab = cloned.find((tab) => tab.id === activeTabId) ?? cloned[0] ?? null;
+  browserPaneStateStore.set(scopeKey, {
+    tabs: cloned,
+    activeTabId: activeTab?.id ?? null,
+    activeUrl: activeTab?.url ?? null,
+  });
+}
+
+function activeUrlFromSnapshot(snapshot: BrowserPaneStateSnapshot | null): string {
+  if (!snapshot) return '';
+  return snapshot.tabs.find((tab) => tab.id === snapshot.activeTabId)?.url ?? snapshot.activeUrl ?? '';
+}
+
 // ── Component ──
 
-export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange }: O8BrowserPaneProps) {
-  const [tabs, setTabs] = useState<BrowserTab[]>([]);
-  const [activeTabId, setActiveTabId] = useState<string | null>(null);
-  const [urlInput, setUrlInput] = useState('');
+export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onActiveUrlChange }: O8BrowserPaneProps) {
+  const normalizedStateScopeKey = normalizeStateScopeKey(stateScopeKey);
+  const [initialBrowserState] = useState<BrowserPaneStateSnapshot | null>(() => readBrowserPaneState(normalizedStateScopeKey));
+  const [tabs, setTabs] = useState<BrowserTab[]>(() => initialBrowserState?.tabs ?? []);
+  const [activeTabId, setActiveTabId] = useState<string | null>(() => initialBrowserState?.activeTabId ?? null);
+  const [urlInput, setUrlInput] = useState(() => activeUrlFromSnapshot(initialBrowserState));
   const [hoveredTabId, setHoveredTabId] = useState<string | null>(null);
   const urlRef = useRef<HTMLInputElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const seeded = useRef(false);
+  const seeded = useRef(initialBrowserState !== null);
+  const hasStoredState = useRef(initialBrowserState !== null);
   /** Agent-driving glow — pulses when an agent verb lands on this surface. */
   const [agentGlow, setAgentGlow] = useState(false);
   /** URLs that blank out when proxied (auth-gated SPAs) — drive them in the
@@ -150,6 +201,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
   useEffect(() => {
     if (seeded.current || previews.length === 0) return;
     seeded.current = true;
+    hasStoredState.current = true;
     const initial: BrowserTab[] = previews.map(p => ({
       id: newTabId(),
       url: p.url || `http://localhost:${p.port}`,
@@ -164,6 +216,12 @@ export function O8BrowserPane({ previews = [], navigateToUrl, onActiveUrlChange 
     });
     return () => { cancelled = true; };
   }, [previews]);
+
+  useEffect(() => {
+    if (!hasStoredState.current && tabs.length === 0 && activeTabId === null) return;
+    hasStoredState.current = true;
+    writeBrowserPaneState(normalizedStateScopeKey, tabs, activeTabId);
+  }, [activeTabId, normalizedStateScopeKey, tabs]);
 
   // Navigate to externally-provided URL (e.g. from port popover)
   const lastNavigatedUrl = useRef<string | null>(null);
