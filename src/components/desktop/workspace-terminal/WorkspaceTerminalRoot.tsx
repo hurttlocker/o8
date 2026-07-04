@@ -111,6 +111,7 @@ export const WorkspaceTerminalRoot = forwardRef<TerminalTabHandle, WorkspaceTerm
           ? (tab.singleRuntime ?? 'claude-code')
           : (tab.chatRuntime ?? null),
         packetStatus: tab.orchestrationPacket?.status ?? null,
+        orchestratorThreadId: tab.orchestratorThreadId ?? null,
       }))
     ), [controller.visibleTabs]);
 
