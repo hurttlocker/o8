@@ -161,6 +161,8 @@ function normalizeLaneBinding(value: unknown): OrchestratorLaneBinding | null {
     lastHeartbeatAt: typeof lane.lastHeartbeatAt === 'string' ? lane.lastHeartbeatAt : null,
     lastEventAt: typeof lane.lastEventAt === 'string' ? lane.lastEventAt : null,
     lastEventLabel: typeof lane.lastEventLabel === 'string' ? lane.lastEventLabel : null,
+    mergeMode: lane.mergeMode === 'pr_only' || lane.mergeMode === 'direct' ? lane.mergeMode : undefined,
+    mergeModeNote: typeof lane.mergeModeNote === 'string' ? lane.mergeModeNote : null,
   };
 }
 

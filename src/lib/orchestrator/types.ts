@@ -1,5 +1,6 @@
 // Orchestrator domain types — runtimes, packets, lanes
 import type { OrchestratorReviewFinding } from '@/lib/approvals/types';
+import type { LaneMergeMode } from '@/lib/lane/merge-mode';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 
 export type OrchestratorRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
@@ -83,6 +84,8 @@ export interface OrchestratorLaneBinding {
   lastHeartbeatAt?: string | null;
   lastEventAt?: string | null;
   lastEventLabel?: string | null;
+  mergeMode?: LaneMergeMode;
+  mergeModeNote?: string | null;
 }
 
 export interface OrchestratorPacketReviewFinding {
