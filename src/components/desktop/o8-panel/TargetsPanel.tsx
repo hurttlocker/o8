@@ -36,6 +36,11 @@ interface TargetsResponse {
   error?: string;
 }
 
+const FLOATING_ASK_O8_RIGHT = 12;
+const FLOATING_ASK_O8_BUTTON_SIZE = 26;
+const FLOATING_ASK_O8_HEADER_GAP = 6;
+const TARGETS_HEADER_PADDING_RIGHT = FLOATING_ASK_O8_RIGHT + FLOATING_ASK_O8_BUTTON_SIZE + FLOATING_ASK_O8_HEADER_GAP;
+
 function scoreColor(score: number): string {
   if (score >= 16) return 'var(--t-accent)';
   if (score >= 9) return 'var(--t-text)';
@@ -112,11 +117,11 @@ export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; a
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--t-bg)' }}>
       {/* Header. Right padding reserves room for the floating Ask-o8 icon that
           O8Panel renders over the top-right of non-excluded tabs (position
-          absolute, right:12, 26px button → occupies the rightmost 38px; +6 gap
-          = 44). Without this the Re-scan button sits under the sparkle (#1309). */}
+          absolute, right:12, 26px button). Without this the Re-scan button sits
+          under the sparkle (#1309). */}
       <div style={{
         display: 'flex', alignItems: 'center', gap: 10,
-        paddingTop: 10, paddingRight: 44, paddingBottom: 10, paddingLeft: 14,
+        paddingTop: 10, paddingRight: TARGETS_HEADER_PADDING_RIGHT, paddingBottom: 10, paddingLeft: 14,
         borderBottomWidth: 1, borderBottomStyle: 'solid', borderBottomColor: 'var(--t-divider)',
       }}>
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
