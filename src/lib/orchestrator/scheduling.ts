@@ -6,6 +6,7 @@ import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget'
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
 import { getLane, findLaneByPacket } from '@/lib/lane/registry';
+import { salvagedWorkBlockReason } from '@/lib/supervisor/heal-guard';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
 import { resolveOverlapGateSync, resolveParallelCapSync } from '@/lib/operator/defaults';
@@ -283,6 +284,15 @@ export function getDispatchBlocker(
   allPackets: OrchestratorPacket[],
 ): string | null {
   const candidate = packet.status === 'recovering' ? clearStaleLaneBinding(packet) : packet;
+
+  // #1391 — salvaged work is not a fault to heal. A packet whose latest lane
+  // sits in reviewing/merging (silent-exit salvage, open PR, approved review)
+  // must never auto-redispatch, whatever churn its status/queueState went
+  // through. Legit relaunch paths archive lanes first, so they pass.
+  const salvageBlock = salvagedWorkBlockReason(candidate);
+  if (salvageBlock) {
+    return salvageBlock;
+  }
 
   // Operator Stop is terminal — this is THE line that makes a Stop the loop
   // can't ignore. Every dispatch path funnels through here, so a stopped packet

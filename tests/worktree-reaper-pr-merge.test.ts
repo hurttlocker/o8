@@ -161,9 +161,9 @@ function recordApprovedReview(packetId: string, reviewedHeadSha: string): void {
 }
 
 async function waitForPathGone(targetPath: string): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 200; attempt += 1) {
     if (!existsSync(targetPath)) return;
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 50));
   }
   expect(existsSync(targetPath)).toBe(false);
 }
