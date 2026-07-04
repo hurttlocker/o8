@@ -15,6 +15,8 @@
 
 import 'server-only';
 import { getSqlite } from '@/lib/db';
+import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
+import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
 
 export interface MissionPacketMeta {
   id: string;
@@ -30,6 +32,7 @@ export interface MissionRecord {
   summary: string;
   constraints: string;
   packetMeta: MissionPacketMeta[];
+  missionState: OrchestratorMissionState | null;
   totalWaves: number;
   createdAt: number;
   updatedAt: number;
@@ -44,6 +47,7 @@ export interface RecordMissionInput {
   summary: string;
   constraints: string;
   packetMeta: MissionPacketMeta[];
+  missionState?: OrchestratorMissionState | null;
   totalWaves: number;
 }
 
@@ -63,6 +67,15 @@ function parsePacketMeta(json: string): MissionPacketMeta[] {
   }
 }
 
+function parseMissionState(json: string | null): OrchestratorMissionState | null {
+  if (!json) return null;
+  try {
+    return normalizeOrchestratorMissionState(JSON.parse(json));
+  } catch {
+    return null;
+  }
+}
+
 interface MissionRow {
   id: string;
   repo_path: string;
@@ -71,6 +84,7 @@ interface MissionRow {
   summary: string;
   constraints: string;
   packet_meta_json: string;
+  mission_state_json: string | null;
   total_waves: number;
   created_at: number;
   updated_at: number;
@@ -86,6 +100,7 @@ function rowToRecord(row: MissionRow): MissionRecord {
     summary: row.summary,
     constraints: row.constraints,
     packetMeta: parsePacketMeta(row.packet_meta_json),
+    missionState: parseMissionState(row.mission_state_json),
     totalWaves: row.total_waves,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -103,8 +118,8 @@ export function recordMission(input: RecordMissionInput): void {
   db.prepare(`
     INSERT INTO missions (
       id, repo_path, runtime, prompt, summary, constraints,
-      packet_meta_json, total_waves, created_at, updated_at, archived_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+      packet_meta_json, mission_state_json, total_waves, created_at, updated_at, archived_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
     ON CONFLICT(id) DO UPDATE SET
       repo_path = excluded.repo_path,
       runtime = excluded.runtime,
@@ -112,6 +127,7 @@ export function recordMission(input: RecordMissionInput): void {
       summary = excluded.summary,
       constraints = excluded.constraints,
       packet_meta_json = excluded.packet_meta_json,
+      mission_state_json = excluded.mission_state_json,
       total_waves = excluded.total_waves,
       updated_at = excluded.updated_at,
       archived_at = NULL
@@ -123,6 +139,7 @@ export function recordMission(input: RecordMissionInput): void {
     input.summary,
     input.constraints,
     JSON.stringify(input.packetMeta),
+    JSON.stringify(input.missionState ?? null),
     input.totalWaves,
     now,
     now,
@@ -130,9 +147,8 @@ export function recordMission(input: RecordMissionInput): void {
 }
 
 /**
- * Mark every mission OTHER than `currentId` as archived. Called after a fresh
- * createMission so the file-based "current" mission lines up with the only
- * row whose archived_at IS NULL.
+ * Historical rows without a packet-bearing snapshot are not dispatchable. Keep
+ * active snapshots live even when a newer mission becomes the UI focus.
  */
 export function archiveMissionsExcept(currentId: string): void {
   const db = getSqlite();
@@ -142,6 +158,7 @@ export function archiveMissionsExcept(currentId: string): void {
        SET archived_at = ?, updated_at = ?
      WHERE id != ?
        AND archived_at IS NULL
+       AND (mission_state_json IS NULL OR mission_state_json = '')
   `).run(now, now, currentId);
 }
 

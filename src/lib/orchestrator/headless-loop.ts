@@ -8,9 +8,11 @@ import {
 } from '@/lib/orchestrator/control-plane';
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
-import { runDispatchTick } from '@/lib/orchestrator/dispatch';
+import { RUNTIME_PARALLEL_CAP, runDispatchTick, type DispatchLaunchBudget } from '@/lib/orchestrator/dispatch';
+import { hasRegistryPendingHeadlessWork, listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
-import type { OrchestratorMissionState } from '@/lib/orchestrator/types';
+import type { OrchestratorMissionState, OrchestratorRuntime } from '@/lib/orchestrator/types';
+import { resolveParallelCapSync } from '@/lib/operator/defaults';
 
 const DEFAULT_INTERVAL_MS = 10_000;
 const MIN_INTERVAL_MS = 1_000;
@@ -157,6 +159,10 @@ function maybeShortCircuitIdleTick(): HeadlessSprintTickResult | null {
     silentIdleTickCount = 0;
     return null;
   }
+  if (hasRegistryPendingHeadlessWork(mission.missionId)) {
+    silentIdleTickCount = 0;
+    return null;
+  }
 
   silentIdleTickCount += 1;
   if (silentIdleTickCount >= IDLE_HEARTBEAT_TICKS) {
@@ -209,11 +215,52 @@ async function pruneWorktreesIfDue(state: OrchestratorMissionState) {
   await prunePromise;
 }
 
+function buildRemainingLaunchBudget(): DispatchLaunchBudget {
+  const parallelCap = resolveParallelCapSync();
+  const activeLanes = listLanes().filter((lane) => lane.status === 'launching' || lane.status === 'running');
+  const perRuntime: Partial<Record<OrchestratorRuntime, number>> = {};
+  for (const runtime of Object.keys(RUNTIME_PARALLEL_CAP) as OrchestratorRuntime[]) {
+    const cap = RUNTIME_PARALLEL_CAP[runtime];
+    if (cap === undefined) continue;
+    const active = activeLanes.filter((lane) => lane.runtime === runtime).length;
+    perRuntime[runtime] = Math.max(0, cap - active);
+  }
+  return {
+    maxLaunches: Math.max(0, parallelCap - activeLanes.length),
+    perRuntime,
+  };
+}
+
+async function runRegistryMissionTicks(
+  currentMissionId: string | null | undefined,
+  releasedPacketIds: string[],
+) {
+  let launched = 0;
+  for (const entry of listActiveMissionRegistryEntries(currentMissionId)) {
+    const withReleases = markReleasedPackets(entry.mission, releasedPacketIds);
+    const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
+    const fanned = fanOutComparisonPackets(reconciled);
+    if (fanned !== reconciled) {
+      persistMissionRegistryState(fanned);
+    }
+    const budget = buildRemainingLaunchBudget();
+    if (!missionHasPendingHeadlessWork(fanned) || budget.maxLaunches <= 0) {
+      persistMissionRegistryState(fanned);
+      continue;
+    }
+    const dispatched = await runDispatchTick(fanned, { launchBudget: budget });
+    launched += countLaunchedPackets(fanned, dispatched);
+    persistMissionRegistryState(dispatched);
+  }
+  return launched;
+}
+
 async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
+  const releasedPacketIds = drainReleasedPackets();
   // #460 — Acquire the control-plane lock so concurrent API operations
   // (reset_packet, etc.) don't race our read-modify-write cycle.
   const { result } = await withLockedState(async (current) => {
-    const withReleases = markReleasedPackets(current, drainReleasedPackets());
+    const withReleases = markReleasedPackets(current, releasedPacketIds);
     const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
     // #1293 — best-of-N fan-out: a seed packet (comparisonModels set, no
     // comparisonGroupId) is consumed by fanOutComparisonPackets — replaced by
@@ -223,7 +270,7 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
     if (fanned !== reconciled) {
       writeOrchestratorControlPlaneState(fanned);
     }
-    const dispatched = await runDispatchTick(fanned);
+    const dispatched = await runDispatchTick(fanned, { launchBudget: buildRemainingLaunchBudget() });
     // #1293 ROOT FIX — make withLockedState persist the post-dispatch state.
     // withLockedState does a FINAL reconcile+write at end-of-lock, and its basis
     // falls back to the (unmutated) pre-callback `current` when the callback
@@ -237,6 +284,7 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
     // consumed for good.
     Object.assign(current, dispatched);
     const mission = writeOrchestratorControlPlaneState(dispatched);
+    persistMissionRegistryState(mission);
     const dag = buildDagMetadata(mission.packets);
     const launched = countLaunchedPackets(reconciled, mission);
     const active = countActivePackets(mission);
@@ -251,13 +299,18 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
       mission,
     } satisfies HeadlessSprintTickResult;
   });
+  const registryLaunched = await runRegistryMissionTicks(result.mission.missionId, releasedPacketIds);
+  const tickResult = {
+    ...result,
+    launched: result.launched + registryLaunched,
+  };
 
   const archivedCompleted = archiveCompletedLanes();
   if (archivedCompleted > 0) {
     console.log(`[headless] Archived ${archivedCompleted} completed lane${archivedCompleted === 1 ? '' : 's'}`);
   }
-  const missionId = result.mission.missionId || 'current';
-  if (isMissionComplete(result.mission)) {
+  const missionId = tickResult.mission.missionId || 'current';
+  if (isMissionComplete(tickResult.mission)) {
     if (lastCompletedMissionId !== missionId) {
       lastCompletedMissionId = missionId;
       lastPruneAt = 0;
@@ -266,9 +319,9 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
   } else if (lastCompletedMissionId === missionId) {
     lastCompletedMissionId = '';
   }
-  await pruneWorktreesIfDue(result.mission);
+  await pruneWorktreesIfDue(tickResult.mission);
 
-  return result;
+  return tickResult;
 }
 
 export async function runHeadlessSprintTick(options: { releasePacketIds?: string[] } = {}) {
