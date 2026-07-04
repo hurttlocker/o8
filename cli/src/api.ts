@@ -179,6 +179,7 @@ export async function apiFetch<T = unknown>(
     Accept: 'application/json',
   };
   if (cfg.token) headers.Authorization = `Bearer ${cfg.token}`;
+  if (cfg.source.token === 'worker' && cfg.workerPacketId) headers['x-o8-worker-packet-id'] = cfg.workerPacketId;
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json';
 
   let res: Response;

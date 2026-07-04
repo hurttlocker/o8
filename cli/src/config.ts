@@ -15,12 +15,13 @@
 
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 
 export interface ResolvedConfig {
   apiPort: number;
   apiBase: string;
   token: string | null;
+  workerPacketId: string | null;
   source: {
     port: 'env' | 'o8-dir' | 'cortex-ide-dir' | 'default';
     token: 'worker' | 'env' | 'o8-dir' | 'cortex-ide-dir' | 'none';
@@ -54,6 +55,20 @@ function readTokenFile(dir: string): string | null {
   }
 }
 
+function detectPacketIdFromCwd(cwd: string): string | null {
+  const parts = cwd.split(sep);
+  for (let i = parts.length - 1; i >= 1; i--) {
+    const prev = parts[i - 1];
+    const cur = parts[i];
+    if (!cur?.startsWith('packet-')) continue;
+    if (prev === '.cortex-worktrees' || (prev === 'worktrees' && parts[i - 2] === '.claude')) {
+      const packetId = cur.slice('packet-'.length).trim();
+      return packetId || null;
+    }
+  }
+  return null;
+}
+
 export function resolveConfig(): ResolvedConfig {
   const envPort = process.env.O8_API_PORT && Number.parseInt(process.env.O8_API_PORT, 10);
   // A dispatched worker carries O8_WORKER_TOKEN (stamped at spawn). Sending it as
@@ -63,6 +78,9 @@ export function resolveConfig(): ResolvedConfig {
   // (SECURITY_AUDIT_2026-07-02 §CRIT-1.) A human running `o8` manually has no
   // O8_WORKER_TOKEN, so they fall through to the ws-token and act as operator.
   const workerToken = process.env.O8_WORKER_TOKEN?.trim() || null;
+  const workerPacketId = workerToken
+    ? process.env.O8_WORKER_PACKET_ID?.trim() || detectPacketIdFromCwd(process.cwd())
+    : null;
   const envToken = process.env.O8_API_TOKEN?.trim() || null;
 
   let apiPort: number | null = null;
@@ -117,6 +135,7 @@ export function resolveConfig(): ResolvedConfig {
     apiPort,
     apiBase: `http://127.0.0.1:${apiPort}`,
     token,
+    workerPacketId,
     source: { port: portSource, token: tokenSource },
     dataDir,
   };
