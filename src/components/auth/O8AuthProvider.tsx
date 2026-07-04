@@ -4,6 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode }
 import { ClerkProvider, useUser, useClerk } from '@clerk/nextjs';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
+import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
 
 // The Clerk publishable key is app-wide and public, baked into the build at ship
 // time. When it's absent (fresh build with no Clerk app yet), Clerk is disabled
@@ -73,6 +74,7 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
     if (provisionedRef.current === user.id) return;
     provisionedRef.current = user.id;
     const githubId = user.externalAccounts?.find((a) => String(a.provider).includes('github'))?.providerUserId;
+    const avatarUrl = highResolutionAvatarUrl(user.imageUrl);
     void fetch('/api/panel/auth/clerk-provision', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -81,7 +83,7 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
         githubId,
         email: user.primaryEmailAddress?.emailAddress ?? null,
         name: user.fullName ?? user.username ?? null,
-        avatarUrl: user.imageUrl ?? null,
+        avatarUrl,
       }),
     }).catch(() => {
       /* provisioning is best-effort; getCurrentUser retries on next sign-in */
@@ -112,7 +114,7 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
             id: user.id,
             name: user.fullName ?? user.username ?? null,
             email: user.primaryEmailAddress?.emailAddress ?? null,
-            avatarUrl: user.imageUrl ?? null,
+            avatarUrl: highResolutionAvatarUrl(user.imageUrl),
           }
         : null,
       signIn: startDesktopSignIn,
