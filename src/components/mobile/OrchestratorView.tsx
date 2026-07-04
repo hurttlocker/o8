@@ -285,7 +285,7 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
 
   const handleSelectThread = useCallback((id: string) => {
     setActiveThreadId(id);
-  }, []);
+  }, [setActiveThreadId]);
 
   const handleNewConversation = useCallback(async () => {
     const repoPath = activeThread?.repoPath ?? null;
@@ -322,6 +322,8 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
         repoPath: repoPath,
         repoName: repoName,
         repoBranch: activeThread?.repoBranch ?? null,
+        githubOwner: activeThread?.githubOwner ?? null,
+        githubRepo: activeThread?.githubRepo ?? null,
         runtime,
         status: 'ready',
         lastMessageAt: new Date().toISOString(),
@@ -338,7 +340,16 @@ export function OrchestratorView({ onBack, hideHeader = false, refreshSignal = 0
       console.log('[mobile-orchestrator] reset failed', error);
       setThreadsError(message);
     }
-  }, [activeThread?.repoPath, activeThread?.repoName, activeThread?.runtime]);
+  }, [
+    activeThread?.githubOwner,
+    activeThread?.githubRepo,
+    activeThread?.repoBranch,
+    activeThread?.repoName,
+    activeThread?.repoPath,
+    activeThread?.runtime,
+    setActiveThreadId,
+    setLocalThread,
+  ]);
 
   const handleToggleStrip = useCallback(() => {
     setStripOpen((current) => {
