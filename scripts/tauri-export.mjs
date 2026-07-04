@@ -147,14 +147,14 @@ const loaderHtml = `<!DOCTYPE html>
     (function () {
       var cv = document.getElementById('ascii');
       var ctx = cv.getContext('2d');
-      var CFG = { text: 'o8', cell: 8, scale: 0.4, color: '#ffffff', bg: '#0a0a0a', speed: 1.0, baseLevel: 0.5, waveBoost: 0.85, contrast: 1.2, ripple: 33 / 50, radiusFrac: 0.04 };
+      var CFG = { text: 'o8', cell: 6, scale: 0.4, color: '#ffffff', bg: '#0a0a0a', speed: 1.0, baseLevel: 0.5, waveBoost: 0.85, contrast: 1.2, ripple: 33 / 50, radiusFrac: 0.04 };
       var RAMP = ' .:-=+*#%@';
       var dpr = 1, W = 0, H = 0, cols = 0, rows = 0, lum = null;
       var cx = -1, cy = -1;
       var off = document.createElement('canvas');
       function build() {
         W = window.innerWidth; H = window.innerHeight;
-        dpr = Math.min(window.devicePixelRatio || 1, 2);
+        dpr = Math.min(window.devicePixelRatio || 1, 3);
         cv.width = Math.floor(W * dpr); cv.height = Math.floor(H * dpr);
         cv.style.width = W + 'px'; cv.style.height = H + 'px';
         cols = Math.max(8, Math.floor(W / CFG.cell));

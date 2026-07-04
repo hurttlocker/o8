@@ -19,7 +19,7 @@ import { memo, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 
 const RAMP = ' .:-=+*#%@';
-const CELL = 8;
+const CELL = 6;
 const SCALE = 0.4;
 const TEXT = 'o8';
 
@@ -54,7 +54,7 @@ function WorkspaceBootLoaderBase() {
       const rect = canvas!.getBoundingClientRect();
       cssW = Math.max(1, Math.floor(rect.width));
       cssH = Math.max(1, Math.floor(rect.height));
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      dpr = Math.min(window.devicePixelRatio || 1, 3);
       canvas!.width = Math.floor(cssW * dpr);
       canvas!.height = Math.floor(cssH * dpr);
       cols = Math.max(8, Math.floor(cssW / CELL));

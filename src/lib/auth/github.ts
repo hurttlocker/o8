@@ -5,6 +5,8 @@
  * Used after device flow completion to create/update the local user.
  */
 
+import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
+
 export interface GitHubUser {
   id: number;
   login: string;
@@ -37,7 +39,7 @@ export async function fetchGitHubUser(accessToken: string): Promise<GitHubUser |
       login: data.login,
       name: data.name,
       email: data.email,
-      avatar_url: data.avatar_url,
+      avatar_url: highResolutionAvatarUrl(data.avatar_url) ?? data.avatar_url,
     };
   } catch (err) {
     console.error('[github] Error fetching user:', err);
