@@ -92,6 +92,7 @@ const PUBLIC_READ = [
   /^\/api\/panel\/github-auth(\/|$)/,
   /^\/api\/panel\/status(\/|$)/,
   /^\/api\/v2\/auth(\/|$)/,
+  /^\/api\/mobile\/orchestrator\/backend-availability(\/|$)/,
   /^\/api\/mobile\/push\/public-key(\/|$)/,
 ];
 
