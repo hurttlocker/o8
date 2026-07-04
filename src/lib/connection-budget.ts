@@ -125,6 +125,27 @@ export function beginLongLivedFetchBudget(
   return acquireHolder(label ?? requestLabel(input, init));
 }
 
+// Headers watchdog (#1359 recurrence, 2026-07-04): a request whose response
+// HEADERS never arrive holds one of the webview's ~6 per-origin connections
+// forever — six stuck server handlers bricked every subsequent fetch/XHR/lazy
+// chunk on the page. Streams are unaffected (their headers arrive instantly);
+// this only aborts requests stuck BEFORE headers.
+const HEADERS_WATCHDOG_MS = 45_000;
+
+function withHeadersWatchdog(init: RequestInit | undefined): { init: RequestInit; cancel: () => void } {
+  const controller = new AbortController();
+  const upstream = init?.signal;
+  if (upstream) {
+    if (upstream.aborted) controller.abort(upstream.reason);
+    else upstream.addEventListener('abort', () => controller.abort(upstream.reason), { once: true });
+  }
+  const timer = setTimeout(() => controller.abort(new Error('o8 headers watchdog: no response headers in 45s')), HEADERS_WATCHDOG_MS);
+  return {
+    init: { ...(init ?? {}), signal: controller.signal },
+    cancel: () => clearTimeout(timer),
+  };
+}
+
 export async function fetchWithLongLivedBudget(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -134,14 +155,17 @@ export async function fetchWithLongLivedBudget(
   }
 
   const release = beginLongLivedFetchBudget(input, init);
+  const watchdog = withHeadersWatchdog(init);
   try {
     const budgetedInit = {
-      ...(init ?? {}),
+      ...watchdog.init,
       [TRACKED_INIT]: true,
     } as BudgetedRequestInit;
     const response = await fetch(input, budgetedInit);
+    watchdog.cancel();
     return wrapResponseBody(response, release);
   } catch (error) {
+    watchdog.cancel();
     release();
     throw error;
   }
@@ -156,8 +180,19 @@ export function installLongLivedFetchBudgetGuard(): void {
   budgetWindow[ORIGINAL_FETCH] = budgetWindow.fetch;
   budgetWindow.fetch = async (input: RequestInfo | URL, init?: RequestInit) => {
     const budgetedInit = init as BudgetedRequestInit | undefined;
-    const response = await nativeFetch(input, init);
-    if (budgetedInit?.[TRACKED_INIT] || !sameAppOrigin(input) || !wrapsLongLivedBody(response)) {
+    if (budgetedInit?.[TRACKED_INIT] || !sameAppOrigin(input)) {
+      return nativeFetch(input, init);
+    }
+    // Same headers watchdog for ALL app-origin traffic — one stuck handler
+    // must cost at most 45s of a pool slot, never a permanent connection.
+    const watchdog = withHeadersWatchdog(init);
+    let response: Response;
+    try {
+      response = await nativeFetch(input, watchdog.init);
+    } finally {
+      watchdog.cancel();
+    }
+    if (!wrapsLongLivedBody(response)) {
       return response;
     }
     const release = acquireHolder(requestLabel(input, init));
