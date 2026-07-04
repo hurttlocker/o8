@@ -634,20 +634,22 @@ async function persistSessionOutcome(
 }
 
 /**
- * Stamp `merged_clean = 1` on the session_outcomes row(s) for a successfully-
- * merged packet/lane. Best-effort + fire-and-forget by the caller — never
+ * Stamp `merged_clean` on the session_outcomes row(s) for a successfully-
+ * reconciled packet/lane. Best-effort + fire-and-forget by the caller — never
  * block a merge over a ledger write.
  *
- * Looks up by laneId first (most specific), falls back to packetId. Updates
- * every matching row in case a retry produced two captures for the same
+ * Looks up by laneId and packetId when available. Updates every matching row
+ * in case a retry produced two captures for the same
  * packet (deterministic id collapses most cases, but be defensive).
  */
 export async function markOutcomeMerged({
   laneId,
   packetId,
+  mergedClean = true,
 }: {
   laneId?: string | null;
   packetId?: string | null;
+  mergedClean?: boolean;
 }): Promise<void> {
   const db = getDb();
   if (!db) return;
@@ -658,11 +660,12 @@ export async function markOutcomeMerged({
   try {
     if (trimmedLane) {
       await db.update(sessionOutcomes)
-        .set({ mergedClean: true })
+        .set({ mergedClean })
         .where(eq(sessionOutcomes.laneId, trimmedLane));
-    } else if (trimmedPacket) {
+    }
+    if (trimmedPacket) {
       await db.update(sessionOutcomes)
-        .set({ mergedClean: true })
+        .set({ mergedClean })
         .where(eq(sessionOutcomes.packetId, trimmedPacket));
     }
   } catch (err) {
