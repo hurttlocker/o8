@@ -39,7 +39,9 @@ const DOCS_URL = 'https://o8.run';
 const PANEL_BG = 'var(--t-panel-solid, var(--t-panel, rgba(255,255,255,0.92)))';
 const ROW_HOVER_BG = 'var(--t-panel-hover, rgba(15, 23, 42, 0.04))';
 const SUBTLE_BG = 'var(--t-bg-card, rgba(15, 23, 42, 0.04))';
+const SELECTED_BG = 'var(--t-input-bg, var(--t-bg-card))';
 const BORDER = 'var(--t-panel-border, rgba(15, 23, 42, 0.1))';
+const SELECTED_BORDER = 'var(--t-accent-border, var(--t-panel-border))';
 const TEXT = 'var(--t-text, #0f172a)';
 const MUTED = 'var(--t-text-muted, #64748b)';
 const FAINT = 'color-mix(in srgb, var(--t-text-muted, #64748b) 62%, transparent)';
@@ -437,10 +439,12 @@ function ThemeToggle({ paletteId, setPalette }: { paletteId: PaletteId; setPalet
               height: 20,
               paddingLeft: 7,
               paddingRight: 8,
-              border: 0,
+              borderWidth: 1,
+              borderStyle: 'solid',
+              borderColor: active ? SELECTED_BORDER : 'transparent',
               borderRadius: 6,
-              background: active ? PANEL_BG : 'transparent',
-              boxShadow: active ? '0 1px 2px rgba(15, 23, 42, 0.14)' : 'none',
+              background: active ? SELECTED_BG : 'transparent',
+              boxShadow: active ? 'var(--t-panel-shadow-soft, 0 1px 2px var(--t-shadow-color, transparent))' : 'none',
               color: active ? TEXT : MUTED,
               fontFamily: FONT,
               fontSize: 10.5,
@@ -568,6 +572,13 @@ export function SettingsQuickDrawer({
   }, [anchorRect]);
 
   const snapshot = usageState.snapshot;
+  const usageSummary = !auth.signedIn
+    ? 'Sign in to view usage'
+    : snapshot
+      ? formatGeneratedAt(snapshot.generatedAt)
+      : usageState.status === 'loading'
+        ? 'Syncing'
+        : 'Codex + Claude';
 
   if (!mounted || !open) return null;
 
@@ -621,7 +632,7 @@ export function SettingsQuickDrawer({
                 whiteSpace: 'nowrap',
               }}
             >
-              {snapshot ? formatGeneratedAt(snapshot.generatedAt) : usageState.status === 'loading' ? 'Syncing' : 'Codex + Claude'}
+              {usageSummary}
             </span>
             {usageOpen ? <ChevronDown size={12} color={MUTED} /> : <ChevronRight size={12} color={MUTED} />}
           </RowButton>
