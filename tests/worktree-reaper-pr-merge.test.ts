@@ -202,10 +202,12 @@ describe('worktree reaper PR merge reconciliation', () => {
     const terminalPath = join(worktreeRoot, 'packet-pkt-terminal-sweep');
     const unknownPath = join(worktreeRoot, 'packet-pkt-unknown-sweep');
     const contextPath = join(worktreeRoot, 'context');
+    const scratchPath = join(worktreeRoot, 'scratch-sweep');
     mkdirSync(activePath, { recursive: true });
     mkdirSync(terminalPath, { recursive: true });
     mkdirSync(unknownPath, { recursive: true });
     mkdirSync(contextPath, { recursive: true });
+    mkdirSync(scratchPath, { recursive: true });
 
     createLane({
       repoPath,
@@ -232,5 +234,6 @@ describe('worktree reaper PR merge reconciliation', () => {
     expect(existsSync(terminalPath)).toBe(false);
     expect(existsSync(unknownPath)).toBe(false);
     expect(existsSync(contextPath)).toBe(true);
+    expect(existsSync(scratchPath)).toBe(true);
   });
 });

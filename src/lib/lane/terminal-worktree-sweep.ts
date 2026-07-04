@@ -8,6 +8,7 @@ import { removeCortexWorktreePath } from './worktree-clone-removal';
 
 const WORKTREE_DIR_NAME = '.cortex-worktrees';
 const CONTEXT_WORKTREE_DIR_NAME = 'context';
+const PACKET_WORKTREE_PREFIX = 'packet-';
 
 export interface TerminalWorktreeSweepResult {
   scanned: number;
@@ -77,6 +78,7 @@ export async function sweepTerminalCortexWorktrees(repoPath: string): Promise<Te
     if (!entry.isDirectory()) continue;
     if (entry.name === CONTEXT_WORKTREE_DIR_NAME) continue;
     if (entry.name.startsWith('.')) continue;
+    if (!entry.name.startsWith(PACKET_WORKTREE_PREFIX)) continue;
     result.scanned += 1;
 
     const dirPath = path.join(worktreeRoot, entry.name);
