@@ -201,7 +201,6 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
   useEffect(() => {
     if (seeded.current || previews.length === 0) return;
     seeded.current = true;
-    hasStoredState.current = true;
     const initial: BrowserTab[] = previews.map(p => ({
       id: newTabId(),
       url: p.url || `http://localhost:${p.port}`,
@@ -210,6 +209,7 @@ export function O8BrowserPane({ previews = [], navigateToUrl, stateScopeKey, onA
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
+      hasStoredState.current = true;
       setTabs(initial);
       setActiveTabId(initial[0].id);
       setUrlInput(initial[0].url);
