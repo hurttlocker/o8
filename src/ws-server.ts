@@ -5354,6 +5354,17 @@ async function bootstrapWsServer() {
               if (probe.noChangesProduced) {
                 const packetId = lane.packetId?.trim();
                 const now = new Date().toISOString();
+                const { parkHuddleReadyZeroDiffLane } = await import('@/lib/orchestrator/huddle-zero-diff');
+                const huddlePark = await parkHuddleReadyZeroDiffLane(lane);
+                if (huddlePark.parked) {
+                  const label = packetId ? `Packet ${packetId}` : `Lane ${lane.id}`;
+                  const detail = `${label} completed its huddle turn with no changes; awaiting orchestrator alignment.`;
+                  console.warn(`[supervisor] ${detail}`);
+                  return {
+                    block: true,
+                    detail,
+                  };
+                }
                 const failedLane = setLaneStatus(lane.id, 'failed', 'system', 'zero_diff_failed');
 
                 if (packetId) {
