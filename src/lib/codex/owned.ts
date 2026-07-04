@@ -230,6 +230,16 @@ function toolOutputPreview(value: unknown) {
 // to o8-dispatched workers; the user's interactive Codex.app is untouched.
 const DISABLE_IMAGE_TOOL = ['-c', 'tools.image_generation=false'];
 
+// #1402 — dispatched workers run with the user's ~/.codex/config.toml IGNORED.
+// Inherited MCP servers were killing workers: a dead/auth-broken HTTP MCP entry
+// makes rmcp transport workers crash-loop at spawn (slow launches) and the
+// session-cleanup DELETE-404 signature preceded 6 silent worker deaths in one
+// night. Workers never need MCP — repo answers come from the `o8 ask` CLI and
+// reports go through `o8 packet report`. Everything a worker DOES need (model,
+// effort, sandbox, image-tool off) is passed by flag. The user's interactive
+// Codex and the codex orchestrator session are untouched.
+const IGNORE_USER_CONFIG = ['--ignore-user-config'];
+
 /**
  * Codex reasoning-effort flag. Emitted ONLY for an explicit tier — undefined /
  * 'adaptive' → [] so the launch stays at Codex's default (parity: unset effort
@@ -250,6 +260,7 @@ export function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: stri
     '-s',
     'danger-full-access',
     ...DISABLE_IMAGE_TOOL,
+    ...IGNORE_USER_CONFIG,
     '-C',
     ctx.cwd,
     // `ollama:<model>` / `lmstudio:<model>` → run this worker on a LOCAL model
@@ -271,6 +282,7 @@ function codexResumeArgs(ctx: { threadId: string; prompt: string; model?: string
     '-s',
     'danger-full-access',
     ...DISABLE_IMAGE_TOOL,
+    ...IGNORE_USER_CONFIG,
     ctx.prompt,
   ];
 }
