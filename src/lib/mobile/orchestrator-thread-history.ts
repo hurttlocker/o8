@@ -3,6 +3,7 @@ import { basename, join } from 'node:path';
 import { homedir } from 'node:os';
 import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileOrchestratorBackend, MobileOrchestratorThread } from '@/lib/mobile/types';
+import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 
 export const ORCHESTRATOR_HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 const MAX_THREADS = 20;
@@ -235,6 +236,8 @@ function projectThread(
   const fallbackTitle = firstUserMessage?.content
     ? firstUserMessage.content.slice(0, 60).replace(/\n/g, ' ') + (firstUserMessage.content.length > 60 ? '...' : '')
     : 'New chat';
+  const repoPath = typeof record.repoPath === 'string' ? record.repoPath : null;
+  const githubIdentity = resolveRepoGithubIdentity(repoPath, record.remoteUrl);
 
   return {
     id: tabId,
@@ -243,11 +246,13 @@ function projectThread(
     runtime: inferRuntime(effectiveModel(tabId, record)),
     status: messages.length === 0 ? 'idle' : lastMessage?.role === 'user' ? 'busy' : 'ready',
     messageCount: messages.length,
-    repoPath: typeof record.repoPath === 'string' ? record.repoPath : null,
+    repoPath,
     repoName: typeof record.repoName === 'string' && record.repoName.trim()
       ? record.repoName
-      : repoNameFromPath(typeof record.repoPath === 'string' ? record.repoPath : null),
+      : repoNameFromPath(repoPath),
     repoBranch: typeof record.repoBranch === 'string' ? record.repoBranch : null,
+    githubOwner: githubIdentity.githubOwner,
+    githubRepo: githubIdentity.githubRepo,
     backend: effectiveBackend(record),
     agent: normalizeAgent(record.agent),
     pinned: record.pinned === true,

@@ -14,6 +14,7 @@ import { performance } from 'node:perf_hooks';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
+import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
@@ -112,7 +113,13 @@ export async function GET(request: NextRequest) {
   const filePath = safePath(tabId);
   try {
     const data = readFileSync(filePath, 'utf-8');
-    return NextResponse.json(JSON.parse(data), { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    const parsed = JSON.parse(data) as Record<string, unknown>;
+    const githubIdentity = resolveRepoGithubIdentity(parsed.repoPath, parsed.remoteUrl);
+    return NextResponse.json({
+      ...parsed,
+      githubOwner: githubIdentity.githubOwner,
+      githubRepo: githubIdentity.githubRepo,
+    }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
   } catch {
     return NextResponse.json({
       messages: [],
@@ -124,6 +131,8 @@ export async function GET(request: NextRequest) {
       repoName: null,
       repoPath: null,
       repoBranch: null,
+      githubOwner: null,
+      githubRepo: null,
       remoteUrl: null,
       backend: null,
       agent: null,
