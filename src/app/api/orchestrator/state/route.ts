@@ -5,6 +5,7 @@ import {
   withLockedState,
 } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata } from '@/lib/orchestrator/dag';
+import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import type {
   OrchestratorMissionState,
@@ -27,6 +28,10 @@ export const dynamic = 'force-dynamic';
 // merge; keeping the HTTP path in lockstep means dispatch flows look
 // identical regardless of which surface launched the work.
 function enrichMissionWithLanes(mission: OrchestratorMissionState): OrchestratorMissionState {
+  // Merge policy (#1367) — this rebuild is the LAST shape the desktop provider
+  // sees; dropping the policy here left the chat banner rendering a doomed
+  // Approve & merge in PR-only mode (live-hit 2026-07-04).
+  const mergePolicy = currentLaneMergePolicy();
   const packets = mission.packets.map((packet) => {
     const lane = findLaneByPacket(packet.id);
     if (!lane) return packet;
@@ -43,6 +48,8 @@ function enrichMissionWithLanes(mission: OrchestratorMissionState): Orchestrator
         lastHeartbeatAt: packet.lane?.lastHeartbeatAt ?? null,
         lastEventAt: lane.lastEventAt,
         lastEventLabel: lane.lastEventLabel,
+        mergeMode: mergePolicy.mode,
+        mergeModeNote: mergePolicy.note,
       },
     };
   });
