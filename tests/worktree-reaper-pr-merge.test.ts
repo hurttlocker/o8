@@ -144,6 +144,35 @@ describe('worktree reaper PR merge reconciliation', () => {
     expect(event?.payload.match).toBe('prNumber');
   });
 
+  it('preserves dirty terminal work before deleting a PR-merged packet clone', async () => {
+    const repoPath = makeRepo();
+    const worktreePath = makePacketWorktree(repoPath, 'inline/pr-merged-dirty', 'packet-pkt-pr-merged-dirty');
+    writeFileSync(join(worktreePath, 'dirty.txt'), 'salvaged terminal work\n');
+    const lane = createLane({
+      repoPath,
+      branch: 'inline/pr-merged-dirty',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-pr-merged-dirty',
+      worktreePath,
+    });
+    markReviewing(lane.id, 304);
+    mirrorPullRequest({
+      number: 304,
+      headRefName: lane.branch,
+      state: 'closed',
+      closedAt: '2026-07-03T12:30:00.000Z',
+      mergedAt: '2026-07-03T12:30:00.000Z',
+    });
+
+    await runWorktreeReaperTick();
+
+    expect(getLane(lane.id)?.status).toBe('archived');
+    await waitForPathGone(worktreePath);
+    expect(git(repoPath, ['show-ref', '--verify', '--quiet', 'refs/heads/preserved/packet-pkt-pr-merged-dirty'])).toBe('');
+    expect(git(repoPath, ['show', 'preserved/packet-pkt-pr-merged-dirty:dirty.txt'])).toBe('salvaged terminal work\n');
+  });
+
   it('leaves a reviewing lane untouched when its stamped PR is closed but unmerged', async () => {
     const repoPath = makeRepo();
     const lane = createLane({
