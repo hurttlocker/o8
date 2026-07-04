@@ -168,9 +168,6 @@ export function normalizeMissionSelection(state: OrchestratorMissionState, missi
   if (!currentMissionId) {
     throw new Error(`No active mission is stored. Requested ${requestedMissionId}.`);
   }
-  if (currentMissionId !== requestedMissionId) {
-    throw new Error(`Mission mismatch. Current mission is ${currentMissionId}, requested ${requestedMissionId}.`);
-  }
 }
 
 export function currentMissionState() {

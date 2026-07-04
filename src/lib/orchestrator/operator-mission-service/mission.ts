@@ -1,6 +1,6 @@
 import { aggregateMissionCost } from '@/lib/orchestrator/cost-aggregator';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
-import { withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
 import { runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket } from '@/lib/lane/registry';
@@ -8,6 +8,7 @@ import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { listArtifacts, toArtifactRef } from '@/lib/artifacts/store';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import { archiveMissionsExcept, getMissionRecord, recordMission } from '@/lib/db/missions-store';
+import { readMissionRegistryEntry, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import {
   latestTranscriptEventAt,
   readSessionTranscriptEvents,
@@ -29,7 +30,6 @@ import {
   log,
   missionAgentKeys,
   normalizeLoadedIssue,
-  normalizeMissionSelection,
   slugify,
 } from './shared';
 import type {
@@ -308,7 +308,36 @@ async function logDispatchRoutingRecommendations(
 
 export async function dispatchMission(input: DispatchMissionInput) {
   const before = currentMissionState();
-  normalizeMissionSelection(before, input.missionId);
+  const requestedMissionId = input.missionId?.trim();
+  const currentMissionId = before.missionId?.trim() ?? '';
+
+  if (requestedMissionId && requestedMissionId !== currentMissionId) {
+    const { result, state: finalState } = await withMissionRegistryState(requestedMissionId, async (stored) => {
+      const registryBefore = reconcileOrchestratorControlPlaneState(stored);
+      for (const packet of registryBefore.packets) {
+        if (packet.queueState === 'held') packet.queueState = 'queued';
+      }
+      const afterDispatch = await runDispatchTick(registryBefore);
+      const beforeByPacketId = new Map(registryBefore.packets.map((packet) => [packet.id, packet] as const));
+      const dispatched = afterDispatch.packets.filter((packet) => {
+        const previous = beforeByPacketId.get(packet.id);
+        const hadLane = Boolean(previous?.lane?.laneId || previous?.lane?.sessionKey);
+        const hasLane = Boolean(packet.lane?.laneId || packet.lane?.sessionKey);
+        return !hadLane && hasLane;
+      }).length;
+      return { state: afterDispatch, result: dispatched };
+    });
+
+    const packetIds = new Set(finalState.packets.map((packet) => packet.id));
+    const dag = buildDagMetadata(finalState.packets);
+    log(`Dispatched mission ${finalState.missionId || requestedMissionId} with ${result} packet launches.`);
+
+    return {
+      dispatched: result,
+      waves: dag.totalWaves,
+      activeAgents: missionAgentKeys(packetIds),
+    };
+  }
 
   // Use locked state to prevent race with headless loop tick
   const { result, state: finalState } = await withLockedState(async (current) => {
@@ -519,22 +548,23 @@ function buildHistoricalMissionStatus(record: import('@/lib/db/missions-store').
 }
 
 export async function getMissionStatus(input: MissionStatusInput) {
-  const state = currentMissionState();
+  const currentState = currentMissionState();
   const requestedMissionId = input.missionId?.trim();
-  const currentMissionId = (state.missionId ?? '').trim();
+  const currentMissionId = (currentState.missionId ?? '').trim();
   const isCurrent = !requestedMissionId || requestedMissionId === currentMissionId;
+  let state = currentState;
 
-  // Historical mission path — the requested mission isn't the current one,
-  // but it may still be in the SQLite archive. Rebuild a lite snapshot from
-  // the mission record + live lanes table.
   if (!isCurrent) {
-    const record = getMissionRecord(requestedMissionId);
-    if (!record) {
-      // Preserve the legacy error so callers that depended on the throw
-      // still get a clear "no such mission" signal.
-      throw new Error(`Mission mismatch. Current mission is ${currentMissionId || '(none)'}, requested ${requestedMissionId}.`);
+    const registryEntry = readMissionRegistryEntry(requestedMissionId, { includeArchived: true });
+    if (registryEntry) {
+      state = reconcileOrchestratorControlPlaneState(registryEntry.mission);
+    } else {
+      const record = getMissionRecord(requestedMissionId);
+      if (!record) {
+        throw new Error(`Mission ${requestedMissionId} not found.`);
+      }
+      return buildHistoricalMissionStatus(record);
     }
-    return buildHistoricalMissionStatus(record);
   }
 
   const graph = buildDependencyGraph(state.packets);

@@ -9,7 +9,7 @@ import {
 import { fanOutComparisonPackets } from '@/lib/orchestrator/comparison-fanout';
 import { buildDagMetadata, hasLaneBinding } from '@/lib/orchestrator/dag';
 import { RUNTIME_PARALLEL_CAP, runDispatchTick, type DispatchLaunchBudget } from '@/lib/orchestrator/dispatch';
-import { hasRegistryPendingHeadlessWork, listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import { hasRegistryPendingHeadlessWork, listActiveMissionRegistryEntries, missionHasPendingHeadlessWork, persistMissionRegistryState, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
 import { normalizeOrchestratorMissionState } from '@/lib/orchestrator/store';
 import type { OrchestratorMissionState, OrchestratorRuntime } from '@/lib/orchestrator/types';
 import { resolveParallelCapSync } from '@/lib/operator/defaults';
@@ -250,20 +250,18 @@ async function runRegistryMissionTicks(
 ) {
   let launched = 0;
   for (const entry of listActiveMissionRegistryEntries(currentMissionId)) {
-    const withReleases = markReleasedPackets(entry.mission, releasedPacketIds);
-    const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
-    const fanned = fanOutComparisonPackets(reconciled);
-    if (fanned !== reconciled) {
-      persistMissionRegistryState(fanned);
-    }
-    const budget = buildRemainingLaunchBudget();
-    if (!missionHasPendingHeadlessWork(fanned) || budget.maxLaunches <= 0) {
-      persistMissionRegistryState(fanned);
-      continue;
-    }
-    const dispatched = await runDispatchTick(fanned, { launchBudget: budget });
-    launched += countLaunchedPackets(fanned, dispatched);
-    persistMissionRegistryState(dispatched);
+    const { result: entryLaunched } = await withMissionRegistryState(entry.id, async (fresh) => {
+      const withReleases = markReleasedPackets(fresh, releasedPacketIds);
+      const reconciled = reconcileOrchestratorControlPlaneState(withReleases);
+      const fanned = fanOutComparisonPackets(reconciled);
+      const budget = buildRemainingLaunchBudget();
+      if (!missionHasPendingHeadlessWork(fanned) || budget.maxLaunches <= 0) {
+        return { state: fanned, result: 0 };
+      }
+      const dispatched = await runDispatchTick(fanned, { launchBudget: budget });
+      return { state: dispatched, result: countLaunchedPackets(fanned, dispatched) };
+    });
+    launched += entryLaunched;
   }
   return launched;
 }
@@ -297,7 +295,7 @@ async function executeHeadlessSprintTick(): Promise<HeadlessSprintTickResult> {
     // consumed for good.
     Object.assign(current, dispatched);
     const mission = writeOrchestratorControlPlaneState(dispatched);
-    persistMissionRegistryState(mission);
+    await persistMissionRegistryState(mission);
     const dag = buildDagMetadata(mission.packets);
     const launched = countLaunchedPackets(reconciled, mission);
     const active = countActivePackets(mission);

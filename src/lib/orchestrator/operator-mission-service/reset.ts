@@ -3,6 +3,8 @@ import { currentMissionState, log } from './shared';
 import type { ResetPacketInput } from './types';
 import { interruptLaneSessions, archiveLaneSessions } from '@/lib/lane/reap-sessions';
 import { unregisterWatchedAgent } from '@/lib/supervisor/agent-supervisor';
+import { findMissionRegistryEntryByPacketId, withMissionRegistryState } from '@/lib/orchestrator/mission-registry';
+import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   const { archiveLane, listLanes, updateLane } = await import('@/lib/lane/registry');
@@ -132,10 +134,83 @@ async function resetPacketViaLaneFallback(input: ResetPacketInput) {
   };
 }
 
+function markPacketResetHeld(packet: OrchestratorPacket) {
+  // Reset packet to a CLEAN, NON-auto-dispatchable state.
+  // #23 — queueState is 'held' (NOT 'queued') so the supervisor's headless
+  // dispatch tick does NOT relaunch it on its own. reset is a CLEANUP, not a
+  // relaunch — the old reset->queued->supervisor-auto-dispatch "boomerang" spawned
+  // surprise agents (even surviving an app restart). An explicit dispatch_mission()
+  // promotes held->queued when the operator actually wants to re-launch.
+  // #455 — lane MUST be null, not a blank object. A truthy lane with empty laneId
+  // causes the reconciler to see "has lane but no domain match" → 'recovering',
+  // which races the next dispatch tick and traps the packet in a recovery loop.
+  packet.status = 'draft';
+  packet.queueState = 'held';
+  packet.releaseState = 'pending';
+  packet.blockedReason = null;
+  packet.lane = null;
+  packet.review = null;
+  packet.lastEventAt = null;
+  packet.lastEventLabel = null;
+  // #455 — Clear recovery counter so a manual reset gives fresh retry budget
+  packet.recoveryCount = 0;
+  packet.lastRecoveryAt = null;
+  // Operator reset also refreshes the typecheck auto-rerun budget (#1108) —
+  // this is the ONLY place it resets; rerun_with_feedback preserves it.
+  packet.typecheckAutoRetries = 0;
+  // Same for the self-review stall budget + the operator-Stop flag (2026-06-22):
+  // a reset gives a fresh stall budget and re-enables dispatch.
+  packet.stallRetries = 0;
+  packet.operatorStopped = false;
+}
+
+async function resetRegistryPacket(input: ResetPacketInput, missionId: string) {
+  let worktreePruned = false;
+  let branchDeleted = false;
+  try {
+    const laneReset = await resetPacketViaLaneFallback(input);
+    worktreePruned = laneReset.worktreePruned;
+    branchDeleted = laneReset.branchDeleted;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    if (!message.includes('no mission packet and no lane')) {
+      throw error;
+    }
+  }
+
+  const { result } = await withMissionRegistryState(missionId, (state) => {
+    const packet = state.packets.find((candidate) => candidate.id === input.packetId);
+    if (!packet) {
+      throw new Error(`Packet ${input.packetId} not found.`);
+    }
+    markPacketResetHeld(packet);
+    log(`Reset registry packet ${packet.referenceLabel} (${input.packetId}). Reason: ${input.reason ?? 'operator reset'}`);
+    return {
+      state,
+      result: {
+        reset: true,
+        packetId: input.packetId,
+        referenceLabel: packet.referenceLabel,
+        worktreePruned,
+        branchDeleted,
+        note: `Packet ${packet.referenceLabel} reset + held (will NOT auto-redispatch). Old lane archived.${worktreePruned ? ' Worktree pruned.' : ''}${branchDeleted ? ' Branch deleted.' : ''} Call dispatch_mission to re-launch.`,
+      },
+    };
+  });
+  return result;
+}
+
 export async function resetPacket(input: ResetPacketInput) {
   const state = currentMissionState();
   const packet = state.packets.find((candidate) => candidate.id === input.packetId);
   if (!packet) {
+    const registryEntry = findMissionRegistryEntryByPacketId(input.packetId, {
+      includeArchived: true,
+      excludeMissionId: state.missionId,
+    });
+    if (registryEntry) {
+      return resetRegistryPacket(input, registryEntry.id);
+    }
     return resetPacketViaLaneFallback(input);
   }
 
@@ -257,33 +332,7 @@ export async function resetPacket(input: ResetPacketInput) {
     }
   }
 
-  // Reset packet to a CLEAN, NON-auto-dispatchable state.
-  // #23 — queueState is 'held' (NOT 'queued') so the supervisor's headless
-  // dispatch tick does NOT relaunch it on its own. reset is a CLEANUP, not a
-  // relaunch — the old reset->queued->supervisor-auto-dispatch "boomerang" spawned
-  // surprise agents (even surviving an app restart). An explicit dispatch_mission()
-  // promotes held->queued when the operator actually wants to re-launch.
-  // #455 — lane MUST be null, not a blank object. A truthy lane with empty laneId
-  // causes the reconciler to see "has lane but no domain match" → 'recovering',
-  // which races the next dispatch tick and traps the packet in a recovery loop.
-  packet.status = 'draft';
-  packet.queueState = 'held';
-  packet.releaseState = 'pending';
-  packet.blockedReason = null;
-  packet.lane = null;
-  packet.review = null;
-  packet.lastEventAt = null;
-  packet.lastEventLabel = null;
-  // #455 — Clear recovery counter so a manual reset gives fresh retry budget
-  packet.recoveryCount = 0;
-  packet.lastRecoveryAt = null;
-  // Operator reset also refreshes the typecheck auto-rerun budget (#1108) —
-  // this is the ONLY place it resets; rerun_with_feedback preserves it.
-  packet.typecheckAutoRetries = 0;
-  // Same for the self-review stall budget + the operator-Stop flag (2026-06-22):
-  // a reset gives a fresh stall budget and re-enables dispatch.
-  packet.stallRetries = 0;
-  packet.operatorStopped = false;
+  markPacketResetHeld(packet);
 
   // Persist
   const { updateOrchestratorMissionState } = await import('@/lib/orchestrator/store');
