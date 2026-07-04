@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react';
 import { DoubleCheck } from 'iconoir-react';
 import { useTheme } from '@/lib/theme/context';
+import { cleanupOrphanedRoughdraftAnnotations } from '@/lib/o8md/cleanup';
 import { O8SpecEditor } from './O8SpecEditor';
 import { TitleBarButton } from '../title-bar/TitleBarButton';
 
@@ -205,8 +206,12 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded }: O8SpecPaneProps)
     })
       .then((res) => res.json())
       .then((data) => {
-        if (data?.ok) { setSavedAt(Date.now()); serverContentRef.current = next; }
-        else setError(data?.error || 'Save failed');
+        if (data?.ok) {
+          const saved = typeof data.content === 'string' ? data.content : next;
+          setSavedAt(Date.now());
+          serverContentRef.current = saved;
+          if (saved !== next) setContent(saved);
+        } else setError(data?.error || 'Save failed');
       })
       .catch((err) => {
         setError(err instanceof Error ? err.message : String(err));
@@ -217,11 +222,12 @@ export function O8SpecPane({ repoPath, toolbarSlot, embedded }: O8SpecPaneProps)
   }, [repoPath]);
 
   const handleChange = useCallback((next: string) => {
-    setContent(next);
+    const cleaned = cleanupOrphanedRoughdraftAnnotations(next).content;
+    setContent(cleaned);
     setSavePending(true);
     if (debounceRef.current) window.clearTimeout(debounceRef.current);
     debounceRef.current = window.setTimeout(() => {
-      persist(next);
+      persist(cleaned);
     }, SAVE_DEBOUNCE_MS) as unknown as number;
   }, [persist]);
 
