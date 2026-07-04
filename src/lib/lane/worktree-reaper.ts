@@ -235,6 +235,18 @@ async function archiveMergedPullRequestLane(
   console.log(`[worktree-reaper] ${lane.id} PR #${pull.number} merged at ${pull.mergedAt} — archiving`);
   const mergedClean = await stampPrMergedClean(lane, pull);
   archiveLane(lane.id, 'system');
+  // PR-mode parity (#1386 family): a PR merged on GitHub is this packet's
+  // merge — release it so sequential dependents (wave 2+) launch, exactly as
+  // approve_and_merge would have. The headless tick applies the release to the
+  // current mission and every registry mission.
+  if (lane.packetId) {
+    try {
+      const { queueHeadlessPacketRelease } = await import('@/lib/orchestrator/headless-loop');
+      queueHeadlessPacketRelease([lane.packetId]);
+    } catch (error) {
+      console.warn(`[worktree-reaper] Failed to queue packet release for ${lane.packetId}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
   appendEvent(lane.id, 'pr_merged_reconciled', 'system', {
     repoFullName,
     prNumber: pull.number,

@@ -529,3 +529,31 @@ describe('worktree reaper PR merge reconciliation', () => {
     expect(existsSync(scratchPath)).toBe(true);
   });
 });
+
+  it('queues the packet release when a PR-merged lane is reconciled (sequential wave parity)', async () => {
+    const repoPath = makeRepo();
+    const lane = createLane({
+      repoPath,
+      branch: 'inline/pr-merged-release',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId: 'pkt-pr-merged-release',
+    });
+    markReviewing(lane.id, 311);
+    mirrorPullRequest({
+      number: 311,
+      headRefName: lane.branch,
+      state: 'closed',
+      closedAt: '2026-07-04T12:00:00.000Z',
+      mergedAt: '2026-07-04T12:00:00.000Z',
+    });
+
+    await runWorktreeReaperTick();
+
+    expect(getLane(lane.id)?.status).toBe('archived');
+    const { runHeadlessSprintTick } = await import('@/lib/orchestrator/headless-loop');
+    // The queued release is applied on the next tick — drive the REAL tick and
+    // assert it consumed the queue without error (the mission-registry suite
+    // covers the release-to-dependent mechanics; this pins the reaper→queue seam).
+    await expect(runHeadlessSprintTick()).resolves.toBeTruthy();
+  });

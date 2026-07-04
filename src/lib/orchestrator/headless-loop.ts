@@ -54,6 +54,19 @@ function queueReleasedPackets(packetIds?: string[]) {
   }
 }
 
+/**
+ * Public enqueue for packet releases that happen OUTSIDE approve_and_merge —
+ * the PR-mode reconciler archives a lane when its PR merges on GitHub, but the
+ * packet's releaseState only ever flipped inside the merge path, so wave 2+ of
+ * a sequential mission blocked forever on "waiting to be explicitly released"
+ * (live-hit 2026-07-04, the #1389 wave itself; third member of the PR-mode
+ * bypass family on #1386). The next tick applies queued releases to the
+ * current mission AND every registry mission.
+ */
+export function queueHeadlessPacketRelease(packetIds: string[]) {
+  queueReleasedPackets(packetIds);
+}
+
 function drainReleasedPackets() {
   const packetIds = [...queuedReleasePacketIds];
   queuedReleasePacketIds.clear();
