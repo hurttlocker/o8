@@ -122,26 +122,28 @@ export function SupervisorInboxBadge() {
       ) : (
         <MailOpen width={13} height={13} color="currentColor" strokeWidth={2} />
       )}
-      <span
-        style={{
-          minWidth: 14,
-          height: 14,
-          paddingLeft: 4,
-          paddingRight: 4,
-          borderRadius: 7,
-          background: countBackground,
-          color: countColor,
-          fontSize: 9.5,
-          fontWeight: 400,
-          letterSpacing: '-0.2px',
-          lineHeight: 1,
-          display: 'inline-flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-        }}
-      >
-        {humanRequiredCount > 99 ? '99+' : humanRequiredCount}
-      </span>
+      {active ? (
+        <span
+          style={{
+            minWidth: 14,
+            height: 14,
+            paddingLeft: 4,
+            paddingRight: 4,
+            borderRadius: 7,
+            background: countBackground,
+            color: countColor,
+            fontSize: 9.5,
+            fontWeight: 400,
+            letterSpacing: '-0.2px',
+            lineHeight: 1,
+            display: 'inline-flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          {humanRequiredCount > 99 ? '99+' : humanRequiredCount}
+        </span>
+      ) : null}
     </button>
   );
 }
