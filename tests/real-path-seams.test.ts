@@ -32,20 +32,41 @@
  *      (fable) even for a frontier worker (codex) — through the real
  *      operator-defaults resolution, not resolveBrainEnabledWith in isolation.
  */
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
 
 import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
+
+const runtimeInventoryMock = vi.hoisted(() => ({
+  agents: [] as Array<{
+    sessionKey: string;
+    runtime: 'codex' | 'claude-code';
+    status: string;
+    currentTask?: string | null;
+    lastEventAt?: string | null;
+    runtimeSurface?: {
+      ownership?: 'provider' | 'discovered' | 'owned';
+      capabilities?: { sendInput?: boolean; interrupt?: boolean };
+      lifecycle?: { availability?: 'awaiting-thread' | 'running' | 'ready-for-resume' };
+    };
+  }>,
+}));
 
 vi.mock('@/lib/realtime/publisher', () => ({
   publishRealtimeMutation: vi.fn(async () => {}),
 }));
 
+vi.mock('@/lib/runtime/inventory', () => ({
+  getRuntimeInventorySnapshot: vi.fn(async () => ({ agents: runtimeInventoryMock.agents })),
+}));
+
 const dataDir = mkdtempSync(join(os.tmpdir(), 'o8-real-path-seams-'));
+const tempDirs: string[] = [];
 const WORKER_TOKEN = 'local-worker-token-seambeef0123456789abcd';
 const WS_TOKEN = 'operator-ws-token-seam-0123456789abcdef';
 writeFileSync(join(dataDir, 'worker-token'), `${WORKER_TOKEN}\n`, 'utf-8');
@@ -56,10 +77,18 @@ process.env.CORTEX_IDE_DATA_DIR = dataDir;
 const { buildPacketPrompt } = await import('@/lib/orchestrator/packet-prompt');
 const { addSessionRule } = await import('@/lib/db/session-rules-store');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
+const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
-const { createLane, findLaneByPacket } = await import('@/lib/lane/registry');
+const { createLane, findLaneByPacket, setLaneStatus } = await import('@/lib/lane/registry');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+
+afterEach(() => {
+  runtimeInventoryMock.agents = [];
+  for (const dir of tempDirs.splice(0)) {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 function packetFixture(overrides: Partial<OrchestratorPacket> = {}): OrchestratorPacket {
   return {
@@ -129,6 +158,9 @@ function operatorReq(url: string, body: unknown): NextRequest {
     headers: { host: 'localhost:3001' },
     body: JSON.stringify(body),
   });
+}
+function operatorGet(url: string): NextRequest {
+  return new NextRequest(url, { method: 'GET', headers: { host: 'localhost:3001' } });
 }
 
 describe('seam B — a dispatched worker approve_and_merge raises an operator card (CRIT-1/HIGH-4)', () => {
@@ -244,5 +276,106 @@ describe('seam D — a metered orchestrator (fable) puts the Brain in a frontier
       );
       expect(prompt).not.toContain('Engineering Brain available');
     });
+  });
+});
+
+// ── Seam E — reviewing projection consumes active-run liveness (#1366) ──────
+
+describe('seam E — review-ready projection is suppressed while owned Codex is still active', () => {
+  const url = 'http://localhost:3001/api/orchestrator/state';
+
+  it('real state GET maps a reviewing lane back to running when runtime truth says active owned run', async () => {
+    const packetId = 'pkt-seam-E-active-reviewing';
+    const surfaceId = 'codex-owned:seam-E-active';
+    const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-E-repo-'));
+    tempDirs.push(repoPath);
+
+    const lane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'inline/seam-e',
+      runtime: 'codex',
+      packetId,
+      sessionKey: surfaceId,
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
+
+    runtimeInventoryMock.agents = [{
+      sessionKey: surfaceId,
+      runtime: 'codex',
+      status: 'running',
+      currentTask: 'Editing files',
+      lastEventAt: new Date().toISOString(),
+      runtimeSurface: {
+        ownership: 'owned',
+        capabilities: { sendInput: false, interrupt: true },
+        lifecycle: { availability: 'running' },
+      },
+    }];
+
+    const seed = await (await stateRoute.GET(operatorGet(url))).json();
+    const current: OrchestratorMissionState = seed.mission ?? createEmptyOrchestratorMissionState();
+    const mission: OrchestratorMissionState = {
+      ...current,
+      packets: [
+        ...current.packets,
+        packetFixture({ id: packetId, status: 'awaiting_review', lane: null }),
+      ],
+    };
+    const postRes = await stateRoute.POST(operatorReq(url, { mission }));
+    expect(postRes.status).toBe(200);
+
+    const getRes = await stateRoute.GET(operatorGet(url));
+    expect(getRes.status).toBe(200);
+    const json = await getRes.json();
+    const packet = json.mission.packets.find((p: OrchestratorPacket) => p.id === packetId);
+
+    expect(packet).toBeTruthy();
+    expect(packet.status).toBe('running');
+    expect(packet.status).not.toBe('awaiting_review');
+  });
+});
+
+// ── Seam F — merge preview re-checks clean tree at read time (#1366/#1363) ───
+
+function git(cwd: string, args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+}
+
+function makeDirtyGitRepo(): string {
+  const repoPath = mkdtempSync(join(os.tmpdir(), 'o8-seam-F-repo-'));
+  tempDirs.push(repoPath);
+  git(repoPath, ['init', '-b', 'main']);
+  writeFileSync(join(repoPath, 'tracked.txt'), 'base\n');
+  git(repoPath, ['add', 'tracked.txt']);
+  git(repoPath, ['-c', 'user.name=o8-test', '-c', 'user.email=o8@example.test', 'commit', '-m', 'base']);
+  writeFileSync(join(repoPath, 'tracked.txt'), 'moving target\n');
+  return repoPath;
+}
+
+describe('seam F — merge preview blocks dirty review worktrees', () => {
+  it('real merge-preview route returns clean-worktree blocker for uncommitted writes after review', async () => {
+    const packetId = 'pkt-seam-F-dirty-preview';
+    const repoPath = makeDirtyGitRepo();
+    const lane = createLane({
+      repoPath,
+      worktreePath: repoPath,
+      branch: 'inline/seam-f',
+      baseBranch: 'main',
+      runtime: 'codex',
+      packetId,
+      sessionKey: 'codex-owned:seam-F-dirty',
+    });
+    setLaneStatus(lane.id, 'reviewing', 'system', 'review_ready');
+
+    const res = await mergePreviewRoute.GET(operatorGet(`http://localhost:3001/api/orchestrator/merge-preview?packetId=${packetId}`));
+    expect(res.status).toBe(200);
+    const preview = await res.json();
+
+    expect(preview.wouldMerge).toBe(false);
+    expect(preview.blockers).toContain('clean-worktree');
+    expect(preview.checks.some((check: { name: string; verdict: string }) =>
+      check.name === 'clean-worktree' && check.verdict === 'fail'
+    )).toBe(true);
   });
 });

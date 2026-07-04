@@ -73,6 +73,11 @@ export interface PaletteAgentSummary {
   };
   runtimeSurface?: {
     cwd?: string | null;
+    ownership?: 'provider' | 'discovered' | 'owned';
+    capabilities?: {
+      sendInput?: boolean;
+      interrupt?: boolean;
+    };
     lifecycle?: {
       availability?: string;
       summary?: string;

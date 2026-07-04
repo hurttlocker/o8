@@ -14,7 +14,7 @@
  */
 import { NextResponse, type NextRequest } from 'next/server';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
-import { runMergeGate, type MergeGateResult } from '@/lib/lane/merge-gate';
+import { buildPreviewForLane, type MergePreviewResult } from '@/lib/lane/preview-merge';
 import {
   derivePacketReviewState,
   type DeriveReviewStateMergeGate,
@@ -29,15 +29,6 @@ export const dynamic = 'force-dynamic';
 
 const LOG_PREFIX = '[review-state]';
 const JSON_HEADERS = { 'Cache-Control': 'no-store, max-age=0' };
-
-// Labels surfaced in the response `mergeGate.checks` field. Mirrors the
-// enforcement categories in `runMergeGate` so agents can reason about which
-// check class flagged them.
-const MERGE_GATE_CHECK_LABELS: Record<'security' | 'budget' | 'integrity', string> = {
-  security: 'security-patterns',
-  budget: 'diff-budget',
-  integrity: 'self-review-integrity',
-};
 
 function errorResponse(code: string, message: string, status = 500) {
   return NextResponse.json({ error: { code, message } }, { status, headers: JSON_HEADERS });
@@ -56,26 +47,12 @@ function toOrchestratorReview(review: {
   };
 }
 
-function toMergeGate(gate: MergeGateResult | null): DeriveReviewStateMergeGate | null {
-  if (!gate) return null;
-
-  // Build the check list from the categories that had findings, plus an
-  // "untracked-imports" pseudo-check that's always relevant.
-  const categories = new Set<string>();
-  for (const violation of gate.violations) {
-    const label = MERGE_GATE_CHECK_LABELS[violation.category];
-    if (label) categories.add(label);
-  }
-  // Always surface these as "ran" — even clean runs executed them.
-  categories.add('security-patterns');
-  categories.add('diff-budget');
-  categories.add('untracked-imports');
-  categories.add('self-review-integrity');
-
+function toMergeGate(preview: MergePreviewResult | null): DeriveReviewStateMergeGate | null {
+  if (!preview) return null;
   return {
-    verdict: gate.passed ? 'passing' : 'failing',
+    verdict: preview.wouldMerge ? 'passing' : 'failing',
     ts: new Date().toISOString(),
-    checks: [...categories].sort(),
+    checks: preview.checks.map((check) => check.name),
   };
 }
 
@@ -104,21 +81,25 @@ export async function GET(request: NextRequest) {
     }
     const packet = missionPacket ?? synthesizePacketFromLane(packetId, lane!);
 
-    // Merge gate is computed on-demand from the lane's diff. If the lane is
+    // Merge preview is computed on-demand from the lane's diff. If the lane is
     // gone (archived / never spawned) we can't run the gate — fall back to
-    // null and let the derivation treat it as unwired.
-    let gateResult: MergeGateResult | null = null;
+    // null and let the derivation treat it as unwired. This uses the same
+    // preview shape as the review card/CLI so dirty worktrees are re-checked at
+    // read time, not only when the review transition first fired.
+    let mergePreview: MergePreviewResult | null = null;
     if (lane) {
       try {
-        gateResult = runMergeGate(lane);
+        mergePreview = buildPreviewForLane(lane, packetId, {
+          orchestratorApproved: packet.review?.approved === true,
+        });
       } catch (error) {
-        console.warn(`${LOG_PREFIX} runMergeGate failed for packet ${packetId}:`, error);
-        gateResult = null;
+        console.warn(`${LOG_PREFIX} buildPreviewForLane failed for packet ${packetId}:`, error);
+        mergePreview = null;
       }
     }
 
     const orchestratorReview = toOrchestratorReview(packet.review ?? null);
-    const mergeGate = toMergeGate(gateResult);
+    const mergeGate = toMergeGate(mergePreview);
 
     const { state, stateChangedAt } = derivePacketReviewState({
       packet,
