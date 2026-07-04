@@ -2,7 +2,7 @@ import { aggregateMissionCost } from '@/lib/orchestrator/cost-aggregator';
 import { resolveWorkerRouting } from '@/lib/agents/routing';
 import { reconcileOrchestratorControlPlaneState, withLockedState, writeOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { buildDagMetadata, buildDependencyGraph } from '@/lib/orchestrator/dag';
-import { runDispatchTick } from '@/lib/orchestrator/dispatch';
+import { buildRemainingLaunchBudget, runDispatchTick } from '@/lib/orchestrator/dispatch';
 import { findLaneByPacket } from '@/lib/lane/registry';
 import { currentLaneMergePolicy } from '@/lib/lane/dogfood-guard';
 import { listArtifacts, toArtifactRef } from '@/lib/artifacts/store';
@@ -317,7 +317,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
       for (const packet of registryBefore.packets) {
         if (packet.queueState === 'held') packet.queueState = 'queued';
       }
-      const afterDispatch = await runDispatchTick(registryBefore);
+      const afterDispatch = await runDispatchTick(registryBefore, { launchBudget: buildRemainingLaunchBudget() });
       const beforeByPacketId = new Map(registryBefore.packets.map((packet) => [packet.id, packet] as const));
       const dispatched = afterDispatch.packets.filter((packet) => {
         const previous = beforeByPacketId.get(packet.id);
@@ -348,7 +348,7 @@ export async function dispatchMission(input: DispatchMissionInput) {
     for (const packet of current.packets) {
       if (packet.queueState === 'held') packet.queueState = 'queued';
     }
-    const afterDispatch = await runDispatchTick(current);
+    const afterDispatch = await runDispatchTick(current, { launchBudget: buildRemainingLaunchBudget() });
     // #1293 — make withLockedState's end-of-lock reconcile+write use the
     // post-dispatch state, not the unmutated pre-callback `current`. Without this
     // a best-of-N seed survives the dispatch (its candidate lanes don't map back

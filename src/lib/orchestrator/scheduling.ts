@@ -5,7 +5,7 @@ import { surfaceEdgeCases } from '@/lib/dispatch/edge-case-surfacer';
 import { computeReadBudget, resolveModelTier } from '@/lib/dispatch/read-budget';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import { dispatch as dispatchLaneCommand } from '@/lib/lane/commands';
-import { getLane, findLaneByPacket } from '@/lib/lane/registry';
+import { getLane, findLaneByPacket, listLanes } from '@/lib/lane/registry';
 import { salvagedWorkBlockReason } from '@/lib/supervisor/heal-guard';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { listSessionRuleTexts } from '@/lib/db/session-rules-store';
@@ -39,6 +39,22 @@ export const RUNTIME_PARALLEL_CAP: Partial<Record<OrchestratorRuntime, number>> 
 export interface DispatchLaunchBudget {
   maxLaunches: number;
   perRuntime?: Partial<Record<OrchestratorRuntime, number>>;
+}
+
+export function buildRemainingLaunchBudget(): DispatchLaunchBudget {
+  const parallelCap = resolveParallelCapSync();
+  const activeLanes = listLanes().filter((lane) => lane.status === 'launching' || lane.status === 'running');
+  const perRuntime: Partial<Record<OrchestratorRuntime, number>> = {};
+  for (const runtime of Object.keys(RUNTIME_PARALLEL_CAP) as OrchestratorRuntime[]) {
+    const cap = RUNTIME_PARALLEL_CAP[runtime];
+    if (cap === undefined) continue;
+    const active = activeLanes.filter((lane) => lane.runtime === runtime).length;
+    perRuntime[runtime] = Math.max(0, cap - active);
+  }
+  return {
+    maxLaunches: Math.max(0, parallelCap - activeLanes.length),
+    perRuntime,
+  };
 }
 
 const RECOVERY_COOLDOWN_MS = 60_000;
