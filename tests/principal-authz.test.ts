@@ -24,6 +24,7 @@ import { join } from 'node:path';
 
 import { describe, expect, it, vi } from 'vitest';
 import { NextRequest } from 'next/server';
+import type { OrchestratorMissionState, OrchestratorPacket } from '@/lib/orchestrator/types';
 
 // Realtime publisher fans out over WS + touches the network; stub it so the
 // approvals handler runs its GOVERNANCE logic without side effects.
@@ -50,6 +51,8 @@ const fileIo = await import('@/app/api/panel/file-io/route');
 const laneEvents = await import('@/app/api/lanes/[id]/events/route');
 const { createTestApproval, getApproval } = await import('@/lib/approvals/store');
 const { panelGateMiddleware } = await import('@/middleware');
+const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { writeOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
 
 type Principal = 'operator' | 'worker';
 
@@ -58,14 +61,50 @@ type Principal = 'operator' | 'worker';
  *  CLI actually calls the loopback API. */
 function req(
   url: string,
-  { principal, method = 'POST', body }: { principal: Principal; method?: string; body?: unknown },
+  { principal, method = 'POST', body, workerPacketId }: { principal: Principal; method?: string; body?: unknown; workerPacketId?: string },
 ): NextRequest {
   const headers: Record<string, string> = { host: 'localhost:3001' };
-  if (principal === 'worker') headers.authorization = `Bearer ${WORKER_TOKEN}`;
+  if (principal === 'worker') {
+    headers.authorization = `Bearer ${WORKER_TOKEN}`;
+    if (workerPacketId) headers['x-o8-worker-packet-id'] = workerPacketId;
+  }
   return new NextRequest(url, {
     method,
     headers,
     body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+function packetFixture(overrides: Partial<OrchestratorPacket> = {}): OrchestratorPacket {
+  return {
+    id: 'pkt-authz-session-rules',
+    referenceLabel: 'PKT-AUTHZ',
+    title: 'authz packet',
+    summary: 'test packet',
+    workspaceTargetPath: null,
+    branchTarget: 'issue/authz',
+    runtime: 'codex',
+    dependencyLabels: [],
+    dependencyPacketIds: [],
+    queueState: 'queued',
+    releaseState: 'pending',
+    status: 'running',
+    blockedReason: null,
+    lastEventAt: null,
+    lastEventLabel: null,
+    archivedAt: null,
+    review: null,
+    lane: null,
+    orchestratorThreadId: null,
+    ...overrides,
+  };
+}
+
+function writeMissionWithPackets(packets: OrchestratorPacket[]): OrchestratorMissionState {
+  return writeOrchestratorControlPlaneState({
+    ...createEmptyOrchestratorMissionState(),
+    missionId: 'mission-principal-authz',
+    packets,
   });
 }
 
@@ -151,9 +190,33 @@ describe('principal-authz — session rules writes are operator-only (#1329 HIGH
     expect(res.status).toBe(403);
   });
 
-  it('GET (read) is allowed for a worker — inheritance requires reading the rules', async () => {
-    const res = await sessionRules.GET(req(`${url}?threadId=t-1`, { principal: 'worker', method: 'GET' }));
+  it('GET: WORKER → 200 only for the thread that dispatched its packet', async () => {
+    writeMissionWithPackets([
+      packetFixture({ id: 'pkt-authz-owned-thread', orchestratorThreadId: 't-owned' }),
+    ]);
+    const res = await sessionRules.GET(req(`${url}?threadId=t-owned`, {
+      principal: 'worker',
+      method: 'GET',
+      workerPacketId: 'pkt-authz-owned-thread',
+    }));
     expect(res.status).toBe(200);
+  });
+
+  it('GET: WORKER naming another thread → 403', async () => {
+    writeMissionWithPackets([
+      packetFixture({ id: 'pkt-authz-other-thread', orchestratorThreadId: 't-owned' }),
+    ]);
+    const res = await sessionRules.GET(req(`${url}?threadId=t-stolen`, {
+      principal: 'worker',
+      method: 'GET',
+      workerPacketId: 'pkt-authz-other-thread',
+    }));
+    expect(res.status).toBe(403);
+  });
+
+  it('GET: WORKER without packet binding → 403', async () => {
+    const res = await sessionRules.GET(req(`${url}?threadId=t-1`, { principal: 'worker', method: 'GET' }));
+    expect(res.status).toBe(403);
   });
 });
 
