@@ -50,8 +50,8 @@ const BAR_GAP = 2.5;
 const INNER_W = BAR_COUNT * BAR_WIDTH + (BAR_COUNT - 1) * BAR_GAP; // 132.5
 const INNER_H = 24;
 const DOCK_WINDOW_WIDTH = 520;
-const DOCK_WINDOW_SIDE_MARGIN = 20;
-const LISTENING_CAPSULE_MAX_WIDTH = DOCK_WINDOW_WIDTH - DOCK_WINDOW_SIDE_MARGIN * 2 - 2;
+const DOCK_WINDOW_SIDE_MARGIN = 28;
+const LISTENING_CAPSULE_MAX_WIDTH = DOCK_WINDOW_WIDTH - DOCK_WINDOW_SIDE_MARGIN * 2;
 const DOCK_WINDOW_SAFE_MAX_WIDTH = `calc(100vw - ${DOCK_WINDOW_SIDE_MARGIN * 2}px)`;
 
 const WEIGHTS = (() => {
@@ -815,9 +815,8 @@ export function DockNotchSurface({
     // listening + thinking — the darkened brand capsule. Listening with a long
     // partial transcript grows wider so the words have room (Symon listening
     // footprint grows for words); idle/short stays at the 248 capsule.
-    // Listening grows wider for a long partial, with the final rendered capsule
-    // capped below 480px inside the 520px-wide dock window (DOCK_WIDTH in
-    // dock_window.rs), preserving the 20px side gutters after border rounding.
+    // Cap the final capsule against the dock window's real usable width so the
+    // OS window never supplies the visible clip during long partials.
     const listeningWide = mode === 'listening' && trimmedPartial.length > 0;
     const width = listeningWide
       ? Math.max(248, Math.min(LISTENING_CAPSULE_MAX_WIDTH, 200 + Math.min(280, trimmedPartial.length * 6)))
@@ -1340,6 +1339,7 @@ export function DockNotchSurface({
           gap: 10,
           width: '100%',
           maxWidth: '100%',
+          minWidth: 0,
           height: '100%',
           paddingLeft: 14,
           paddingRight: 14,
@@ -1347,7 +1347,7 @@ export function DockNotchSurface({
           overflow: 'hidden',
         }}
       >
-        <div style={{ width: INNER_W, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
+        <div style={{ width: INNER_W, maxWidth: INNER_W, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
           <NotchWaveCanvas listening levelRef={levelRef} />
         </div>
         {trimmedPartial ? (
@@ -1355,9 +1355,11 @@ export function DockNotchSurface({
             style={{
               flex: 1,
               minWidth: 0,
+              maxWidth: '100%',
+              display: 'block',
               fontSize: 12.5,
               fontWeight: 300,
-              letterSpacing: '-0.1px',
+              letterSpacing: 0,
               color: '#fff',
               textShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
               whiteSpace: 'nowrap',
@@ -1371,7 +1373,7 @@ export function DockNotchSurface({
             }}
             title={trimmedPartial}
           >
-            <span style={{ direction: 'ltr', unicodeBidi: 'isolate' }}>{trimmedPartial}</span>
+            {trimmedPartial}
           </span>
         ) : null}
       </div>

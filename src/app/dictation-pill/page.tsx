@@ -832,8 +832,8 @@ export default function DictationPillPage() {
         // Keep a small internal inset so the rounded top corners are visible
         // when the dock window is floating instead of flush to a screen notch.
         paddingTop: 8,
-        paddingLeft: 20,
-        paddingRight: 20,
+        paddingLeft: 28,
+        paddingRight: 28,
         boxSizing: 'border-box',
         background: 'transparent',
         // The React layer keeps the dead-zone tight: the wrapper ignores
