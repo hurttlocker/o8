@@ -99,6 +99,8 @@ base64 = "0.22"
 # components and stamps the local "current time" into its system prompt. chrono
 # (default `clock` feature) is the smallest robust way to do both.
 chrono = "0.4"
+tauri-plugin-clerk = "0.1.1"
+tauri-plugin-http = "2.5.9"
 
 # Shutdown safety net (issue #719). Both crates are already in the lock graph
 # transitively; promoting them to direct deps is zero binary cost. Used to

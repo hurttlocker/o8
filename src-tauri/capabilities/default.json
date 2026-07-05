@@ -27,6 +27,11 @@
     "store:default",
     "log:default",
     "updater:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "clerk:default",
+    {
+      "identifier": "http:default",
+      "allow": [{ "url": "https://clerk.o8.run/*" }]
+    }
   ]
 }
