@@ -23,6 +23,7 @@ import { execFileSync, execSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { homedir, userInfo } from 'node:os';
 import { join, resolve } from 'node:path';
+import { exitWhenBundleDeleted } from '@/lib/mcp/orphan-exit';
 import { O8WebviewClient } from '@/lib/mcp/o8-webview-client';
 import { O8_WEBVIEW_TOOLS, createO8WebviewToolHandlers } from '@/lib/mcp/o8-webview-tools';
 import {
@@ -802,6 +803,10 @@ const flagValue = (name: string): string | undefined => {
   return i >= 0 ? argv[i + 1] : undefined;
 };
 const transport = flagValue('--transport') ?? process.env.O8_MCP_TRANSPORT ?? 'stdio';
+
+// #1333 — exit clean if o8.app gets uninstalled while this externally-spawned
+// server is running, instead of orphaning and resurrecting ~/.o8.
+exitWhenBundleDeleted('o8-operator');
 
 if (transport === 'http') {
   const port = Number(flagValue('--port')) || Number(process.env.O8_MCP_PORT) || 18795;

@@ -16,6 +16,7 @@
 // process (launched via `tsx` on the TS source in dev) doesn't crash when a
 // shared library module transitively imports `server-only`. See the module's
 // header for the full rationale.
+import { exitWhenBundleDeleted } from '@/lib/mcp/orphan-exit';
 import './neutralize-server-only';
 
 import { createInterface } from 'node:readline';
@@ -1515,3 +1516,7 @@ rl.on('line', (line) => {
 });
 
 rl.on('close', () => process.exit(0));
+
+// #1333 — exit clean if o8.app gets uninstalled while this externally-spawned
+// server is running, instead of orphaning and resurrecting ~/.o8.
+exitWhenBundleDeleted('cortex-mcp');
