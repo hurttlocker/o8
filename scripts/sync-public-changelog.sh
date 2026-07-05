@@ -90,7 +90,7 @@ git log --since="$SINCE" --format="%as|%h|%s" --no-merges | while IFS='|' read -
   # backfill unmarked PR squash merges whose head branch was a packet branch
   # (issue/* / inline/*) — those merged through o8's dispatch loop too.
   via_o8=""
-  if echo "$msg" | grep -q '\[via-o8\]'; then
+  if echo "$msg" | grep -qE '\[via-o8\]\s*$'; then
     via_o8="yes"
     msg=$(echo "$msg" | sed -E 's/ *\[via-o8\] *//g')
   else
