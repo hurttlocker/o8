@@ -1,0 +1,13 @@
+diff --git a/node_modules/tauri-plugin-clerk/dist-js/index.js b/node_modules/tauri-plugin-clerk/dist-js/index.js
+index af96da2..e2152c0 100644
+--- a/node_modules/tauri-plugin-clerk/dist-js/index.js
++++ b/node_modules/tauri-plugin-clerk/dist-js/index.js
+@@ -74,7 +74,7 @@ const saveClientJWT = async (header) => {
+ //#endregion
+ //#region guest-js/patching.ts
+ const realFetch = globalThis.fetch;
+-const urlForRequestInput = (input) => typeof input === "string" ? new URL(input) : input instanceof URL ? input : new URL(input.url);
++const urlForRequestInput = (input) => typeof input === "string" ? new URL(input, typeof window !== "undefined" ? window.location.origin : undefined) : input instanceof URL ? input : new URL(input.url, typeof window !== "undefined" ? window.location.origin : undefined);
+ const runTauriFetch = async (input, init) => {
+ 	return await fetch(new Request(input, init));
+ };
