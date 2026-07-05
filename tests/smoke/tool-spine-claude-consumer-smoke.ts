@@ -19,20 +19,19 @@
  */
 
 import assert from 'node:assert';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { smokeDataDir } from './require-temp-data-dir';
 import { getMcpServersConfig } from '@/lib/lane/orchestrator-mcp-config';
 import { insertExternalMcpServer } from '@/lib/mcp/external-servers';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 
 function main(): void {
-  const dataDir = process.env.CORTEX_IDE_DATA_DIR;
-  assert(dataDir && existsSync(dataDir), 'CORTEX_IDE_DATA_DIR must be set to a temp dir');
-  writeFileSync(join(dataDir, 'ws-token'), 'consumer-smoke-fixed-token\n');
-  writeFileSync(join(dataDir, 'ws-port'), '3002\n');
+  writeFileSync(join(smokeDataDir, 'ws-token'), 'consumer-smoke-fixed-token\n');
+  writeFileSync(join(smokeDataDir, 'ws-port'), '3002\n');
 
   // Externals present — the path that drifts (ordering + passthrough through the envelope).
   insertExternalMcpServer({ name: 'zeta-stdio', transport: 'stdio', command: 'zeta', args: ['--x'], env: { K: 'v' }, enabled: true });

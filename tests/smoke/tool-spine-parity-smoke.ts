@@ -13,10 +13,11 @@
  */
 
 import assert from 'node:assert';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { smokeDataDir } from './require-temp-data-dir';
 import { getMcpServersConfig } from '@/lib/lane/orchestrator-mcp-config';
 import { externalServerToMcpConfig, insertExternalMcpServer, listEnabledExternalMcpServers } from '@/lib/mcp/external-servers';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
@@ -27,12 +28,9 @@ import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
 import { toGeminiSettings } from '@/lib/mcp/tool-spine/emit-gemini';
 
 function main(): void {
-  const dataDir = process.env.CORTEX_IDE_DATA_DIR;
-  assert(dataDir && existsSync(dataDir), 'CORTEX_IDE_DATA_DIR must be set to a temp dir');
-
   // Pin the env-derived values so the golden is deterministic.
-  writeFileSync(join(dataDir, 'ws-token'), 'test-ws-token-fixed\n');
-  writeFileSync(join(dataDir, 'ws-port'), '3002\n');
+  writeFileSync(join(smokeDataDir, 'ws-token'), 'test-ws-token-fixed\n');
+  writeFileSync(join(smokeDataDir, 'ws-port'), '3002\n');
 
   const repo = mkdtempSync(join(tmpdir(), 'tool-spine-repo-')); // non-git → slug ''
   const repoRoot = process.cwd();

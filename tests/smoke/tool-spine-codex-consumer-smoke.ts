@@ -16,10 +16,11 @@
  */
 
 import assert from 'node:assert';
-import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { smokeDataDir } from './require-temp-data-dir';
 import { getMcpServersConfig } from '@/lib/lane/orchestrator-mcp-config';
 import { mergeCodexMcpConfig } from '@/lib/lane/codex-orchestrator-session';
 import { insertExternalMcpServer } from '@/lib/mcp/external-servers';
@@ -39,10 +40,8 @@ const RETAINED_FIXTURE = [
 ].join('\n');
 
 function main(): void {
-  const dataDir = process.env.CORTEX_IDE_DATA_DIR;
-  assert(dataDir && existsSync(dataDir), 'CORTEX_IDE_DATA_DIR must be set to a temp dir');
-  writeFileSync(join(dataDir, 'ws-token'), 'codex-consumer-fixed-token\n');
-  writeFileSync(join(dataDir, 'ws-port'), '3002\n');
+  writeFileSync(join(smokeDataDir, 'ws-token'), 'codex-consumer-fixed-token\n');
+  writeFileSync(join(smokeDataDir, 'ws-port'), '3002\n');
 
   insertExternalMcpServer({ name: 'zeta-stdio', transport: 'stdio', command: 'zeta', args: ['--x'], env: { K: 'v' }, enabled: true });
   insertExternalMcpServer({ name: 'alpha-http', transport: 'http', command: 'https://a/mcp', url: 'https://a/mcp', oauthToken: 'tok123', enabled: true });
