@@ -238,7 +238,8 @@ export function panelGateMiddleware(req: NextRequest): NextResponse {
   }
 
   // DEFAULT-DENY. The matcher restricts this middleware to /api/*, so every
-  // remaining request is a state-touching API route. It passes ONLY from a
+  // remaining request is a state-touching API route (including app relaunch
+  // requests under /api/panel/app/*). It passes ONLY from a
   // loopback origin (socket truth — desktop app, MCP server, curl from
   // localhost) or with a valid ws/device token — never by omission. This closes
   // the fail-open + trailing-slash gate class (SECURITY_AUDIT_2026-07-02

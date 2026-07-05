@@ -188,6 +188,14 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
     update.orchestratorBackend = raw;
   }
 
+  if (body.autoApplyUpdates !== undefined) {
+    const raw = body.autoApplyUpdates;
+    if (raw !== 'off' && raw !== 'when-idle') {
+      throw new Error('autoApplyUpdates must be one of "off", "when-idle".');
+    }
+    update.autoApplyUpdates = raw;
+  }
+
   const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {
     if (!raw || typeof raw !== 'object') throw new Error(`${name} must be an object { runtime, model, effort }.`);
     const o = raw as Record<string, unknown>;
