@@ -17,6 +17,7 @@
 import type { OrchestratorEvent } from '@/lib/lane/orchestrator-stream-events';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
+import type { OrchestratorCrashSurvivalMeta } from '@/lib/lane/orchestrator-crash-survival';
 
 /**
  * The set of orchestrator backends. `hermes` drives Hermes via the generic ACP
@@ -71,6 +72,7 @@ export interface OrchestratorTurnOptions {
    * them for now.
    */
   attachments?: Array<{ dataUri: string; name?: string }>;
+  crashSurvival?: OrchestratorCrashSurvivalMeta;
 }
 
 /** Lightweight view of a backend's per-repo session. */
