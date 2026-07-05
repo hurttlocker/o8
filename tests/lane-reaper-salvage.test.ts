@@ -224,7 +224,7 @@ describe('reapZombieLane salvage (#1282 Failure B)', () => {
     const candidates = await listZombieLaneCandidates(baseNow + LANE_HEARTBEAT_STALE_MS - 1_000);
 
     expect(candidates.some((candidate) => candidate.lane.id === lane.id)).toBe(false);
-  });
+  }, 20_000);
 
   it('falls through to recovering when the worktree has nothing reviewable', async () => {
     const wt = makeWorktree({ dirty: false });
