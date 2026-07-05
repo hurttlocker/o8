@@ -49,6 +49,9 @@ const BAR_WIDTH = 2;
 const BAR_GAP = 2.5;
 const INNER_W = BAR_COUNT * BAR_WIDTH + (BAR_COUNT - 1) * BAR_GAP; // 132.5
 const INNER_H = 24;
+const DOCK_WINDOW_WIDTH = 520;
+const DOCK_WINDOW_SIDE_MARGIN = 20;
+const LISTENING_CAPSULE_MAX_WIDTH = DOCK_WINDOW_WIDTH - DOCK_WINDOW_SIDE_MARGIN * 2;
 
 const WEIGHTS = (() => {
   const out = new Array<number>(BAR_COUNT);
@@ -658,7 +661,7 @@ export function DockNotchSurface({
       return {
         width: 420,
         height: 96,
-        borderRadius: '0 0 24px 24px',
+        borderRadius: 24,
         background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 14px 32px rgba(40, 40, 80, 0.36)',
@@ -671,7 +674,7 @@ export function DockNotchSurface({
       return {
         width: 320,
         height: 64,
-        borderRadius: '0 0 24px 24px',
+        borderRadius: 24,
         background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.45)',
         boxShadow: '0 10px 26px rgba(40, 40, 80, 0.32), inset 0 0 0 1.5px rgba(255, 90, 31, 0.45)',
@@ -681,7 +684,7 @@ export function DockNotchSurface({
       return {
         width: 420,
         height: 56,
-        borderRadius: '0 0 22px 22px',
+        borderRadius: 22,
         background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
@@ -691,7 +694,7 @@ export function DockNotchSurface({
       return {
         width: 248,
         height: 40,
-        borderRadius: '0 0 20px 20px',
+        borderRadius: 20,
         background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
@@ -701,7 +704,7 @@ export function DockNotchSurface({
       return {
         width: 320,
         height: 44,
-        borderRadius: '0 0 20px 20px',
+        borderRadius: 20,
         background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
@@ -713,7 +716,7 @@ export function DockNotchSurface({
         return {
           width: 248,
           height: 40,
-          borderRadius: '0 0 20px 20px',
+          borderRadius: 20,
           background: capsuleBg, ...capsuleBlur,
           borderColor: 'rgba(255, 255, 255, 0.4)',
           boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
@@ -725,7 +728,7 @@ export function DockNotchSurface({
       return {
         width: 420,
         height: 380,
-        borderRadius: '0 0 26px 26px',
+        borderRadius: 26,
         // Darker base (0.62 → 0.74) so the answer text stays legible even if the
         // backdrop blur momentarily drops — the warm gradient otherwise shows
         // through bright and washes the white ink out ("frost goes away, hard to
@@ -752,7 +755,7 @@ export function DockNotchSurface({
       return {
         width: 280,
         height: 40,
-        borderRadius: '0 0 20px 20px',
+        borderRadius: 20,
         background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
@@ -767,7 +770,7 @@ export function DockNotchSurface({
       return {
         width: withWorkers ? 348 : 268,
         height: 40,
-        borderRadius: '0 0 20px 20px',
+        borderRadius: 20,
         background: capsuleBg, ...capsuleBlur,
         borderColor: 'rgba(255, 255, 255, 0.4)',
         boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
@@ -785,7 +788,7 @@ export function DockNotchSurface({
       return {
         width: 128,
         height: 16,
-        borderRadius: '0 0 14px 14px',
+        borderRadius: 14,
         background: idleBg,
         borderColor: 'rgba(255, 255, 255, 0.45)',
         boxShadow: '0 6px 20px rgba(0, 0, 0, 0.28), inset 0 -2px 6px rgba(120, 110, 160, 0.22)',
@@ -798,7 +801,7 @@ export function DockNotchSurface({
         // footprint; success/error use the wide 420 done capsule.
         width: 420,
         height: 44,
-        borderRadius: '0 0 20px 20px',
+        borderRadius: 20,
         background: isError
           ? 'linear-gradient(rgba(40, 12, 12, 0.55), rgba(40, 12, 12, 0.55)), linear-gradient(100deg, #ffb4b4 0%, #f7c2c2 46%, #f7d9bf 100%)'
           : capsuleBg,
@@ -811,17 +814,17 @@ export function DockNotchSurface({
     // listening + thinking — the darkened brand capsule. Listening with a long
     // partial transcript grows wider so the words have room (Symon listening
     // footprint grows for words); idle/short stays at the 248 capsule.
-    // Listening grows wider for a long partial — capped at 480 so it stays
-    // inside the 520px-wide dock window (DOCK_WIDTH in dock_window.rs) with
-    // margin on both sides.
+    // Listening grows wider for a long partial, with the final rendered capsule
+    // capped at 480px inside the 520px-wide dock window (DOCK_WIDTH in
+    // dock_window.rs), leaving 20px on both sides.
     const listeningWide = mode === 'listening' && trimmedPartial.length > 0;
     const width = listeningWide
-      ? Math.max(248, Math.min(480, 200 + Math.min(280, trimmedPartial.length * 6)))
+      ? Math.max(248, Math.min(LISTENING_CAPSULE_MAX_WIDTH, 200 + Math.min(280, trimmedPartial.length * 6)))
       : 248;
     return {
       width,
       height: 40,
-      borderRadius: '0 0 20px 20px',
+      borderRadius: 20,
       background: capsuleBg, ...capsuleBlur,
       borderColor: 'rgba(255, 255, 255, 0.4)',
       boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
@@ -1066,6 +1069,7 @@ export function DockNotchSurface({
           gap: 9,
           width: '100%',
           height: '100%',
+          boxSizing: 'border-box',
           paddingLeft: 14,
           paddingRight: 14,
           overflow: 'hidden',
@@ -1156,6 +1160,7 @@ export function DockNotchSurface({
           gap: 10,
           width: '100%',
           height: '100%',
+          boxSizing: 'border-box',
           paddingLeft: 14,
           paddingRight: 14,
           overflow: 'hidden',
@@ -1357,10 +1362,11 @@ export function DockNotchSurface({
               textOverflow: 'ellipsis',
               direction: 'rtl',
               textAlign: 'left',
+              unicodeBidi: 'isolate',
             }}
             title={trimmedPartial}
           >
-            <span style={{ direction: 'ltr', unicodeBidi: 'plaintext' } as React.CSSProperties}>{trimmedPartial}</span>
+            {trimmedPartial}
           </span>
         ) : null}
       </div>
@@ -1469,7 +1475,7 @@ export function DockNotchSurface({
         WebkitFontSmoothing: 'antialiased',
         borderStyle: 'solid',
         borderWidth: 1,
-        borderTopWidth: 0,
+        boxSizing: 'border-box',
         userSelect: 'none',
         ...geometry,
         transition:
