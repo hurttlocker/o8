@@ -72,3 +72,40 @@ single authorization. The device flow disappears.
 **Rollout order:** add `repo` scope in Clerk → add the Clerk-token reader +
 GitHub API client → switch the repo list/status/clone to it behind a flag →
 verify on a clean machine → drop the device flow + the onboarding repo step.
+
+## Hard-won traps — native desktop Clerk session (PROVEN WORKING 2026-07-05, v0.1.542)
+
+The full native path (sign-in click → browser → GitHub → o8:// ticket → native
+exchange → session persisted, avatar live without reload) was verified end-to-end
+on 2026-07-05. Getting there burned most of a day across two agents. The traps,
+so nobody pays for them twice:
+
+1. **WKWebView will not return cross-site cookies to 127.0.0.1** — a production
+   Clerk instance keeps its session in a cookie scoped to clerk.o8.run; the
+   standard flow flashes the session in and drops it. That's WHY native mode
+   (tauri-plugin-clerk: `standardBrowser:false`, FAPI routed through Rust,
+   session JWT in a Tauri store) exists. Don't retry the cookie flow on desktop.
+2. **tauri-plugin-clerk@0.1.1 fetch interceptor throws on relative URLs** — it
+   patches window.fetch and calls `new URL(input)` with no base, which kills
+   EVERY relative app fetch (blank sidebar, dead settings, dead queries; the
+   backend stays healthy). Patched in `patches/tauri-plugin-clerk+0.1.1.patch`
+   (origin base on both construction sites). Re-verify the patch when bumping
+   the plugin (#1436 tracks upstreaming).
+3. **Next's webpack cache treats node_modules as immutable** — patch-package
+   edits do NOT invalidate cached chunks, so a patched dependency can ship
+   UNPATCHED with an identical chunk hash (v0.1.540 did exactly this).
+   `scripts/bust-stale-patch-cache.mjs` (wired into `npm run build`) clears the
+   cache whenever patches/ is newer.
+4. **The o8:// callback was double-delivered** — the Rust shell both buffered
+   AND emitted the same URL, so the one-time Clerk ticket got exchanged twice
+   and burned ("sign in token has already been used") with zero UI feedback.
+   Fixed: single-path delivery in RunEvent::Opened (emit when the window
+   exists, buffer only cold-start) + a module-level consumed-ticket Set in
+   DesktopAuthCallbackHandler. Never exchange a ticket twice; never deliver
+   through two paths.
+5. **After finalize(), Clerk's React signals don't propagate without
+   navigation** — desktop has no post-sign-in redirect, so useUser() stays null
+   until reload unless you explicitly `setActive({session})` + `user.reload()`
+   (done in DesktopAuthCallbackHandler).
+6. **Auth failures were console-only** — the operator watched sign-in "do
+   nothing" and had no way to know why (#1437: visible sign-in error surface).
