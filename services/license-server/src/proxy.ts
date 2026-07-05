@@ -78,22 +78,37 @@ function geminiCostMicroUsd(promptTokens: number, completionTokens: number): num
  * recorder's bitrate. Amounts are tiny but no longer zero, so founders see them.
  * Env-tunable; the per-account daily cap is still the real guardrail.
  */
-const WHISPER_PRICE_PER_MIN_USD = envUsd('PROXY_WHISPER_PRICE_PER_MIN_USD', 0.0007); // ~$0.04/hr, whisper-large-v3-turbo
-const DICTATION_BITRATE_BYTES_PER_SEC = 2500; // ~20 kbps opus (browser MediaRecorder voice default)
+// Only the last-resort byte fallback needs a rate — the desktop records 16 kHz
+// mono 16-bit WAV = 32000 bytes/s. Per-minute price (~$0.0002/min, DeepInfra's
+// real whisper-large-v3-turbo rate) is only used if OpenRouter reports neither
+// cost nor seconds; env-tunable.
+const WHISPER_PRICE_PER_MIN_USD = envUsd('PROXY_WHISPER_PRICE_PER_MIN_USD', 0.0002);
+const DICTATION_BITRATE_BYTES_PER_SEC = 32000; // 16 kHz · mono · 16-bit WAV
 
-function transcribeCostMicroUsd(body: Record<string, unknown>): number {
-  // input_audio is either a bare base64 string OR an object { data, format }
-  // (the desktop Rust STT sends the object form) — handle both.
-  const ia = body.input_audio;
-  let b64 = '';
-  if (typeof ia === 'string') {
-    b64 = ia;
-  } else if (ia && typeof ia === 'object' && typeof (ia as { data?: unknown }).data === 'string') {
-    b64 = (ia as { data: string }).data;
+/**
+ * DEAD-ACCURATE transcribe cost. OpenRouter's audio/transcriptions response
+ * carries usage.cost (the EXACT charge) and usage.seconds (real duration), so we
+ * prefer those over any estimate. Order: exact cost → duration × rate → byte
+ * estimate (only if the provider reports nothing).
+ */
+function transcribeCost(json: Record<string, unknown>, body: Record<string, unknown>): number {
+  const usage = json.usage as { cost?: unknown; seconds?: unknown } | undefined;
+  if (usage && typeof usage.cost === 'number' && usage.cost > 0) {
+    return usdToMicro(usage.cost); // exact — what OpenRouter actually charged
   }
+  if (usage && typeof usage.seconds === 'number' && usage.seconds > 0) {
+    return usdToMicro((usage.seconds / 60) * WHISPER_PRICE_PER_MIN_USD);
+  }
+  // Last resort: input_audio is a bare base64 string OR { data, format }.
+  const ia = body.input_audio;
+  const b64 =
+    typeof ia === 'string'
+      ? ia
+      : ia && typeof ia === 'object' && typeof (ia as { data?: unknown }).data === 'string'
+        ? (ia as { data: string }).data
+        : '';
   if (!b64) return 0;
-  const bytes = Math.floor(b64.length * 0.75); // base64 → raw audio bytes
-  const seconds = bytes / DICTATION_BITRATE_BYTES_PER_SEC;
+  const seconds = Math.floor(b64.length * 0.75) / DICTATION_BITRATE_BYTES_PER_SEC;
   return usdToMicro((seconds / 60) * WHISPER_PRICE_PER_MIN_USD);
 }
 
@@ -473,6 +488,9 @@ export async function handleTranscribe(c: Context): Promise<Response> {
     return c.json({ error: 'invalid JSON body' }, 400);
   }
 
+  // Ask OpenRouter to report the call's usage.cost so we meter the EXACT charge.
+  body.usage = { include: true };
+
   let upstream: Response;
   try {
     upstream = await fetch(OPENROUTER_TRANSCRIBE_URL, {
@@ -493,6 +511,6 @@ export async function handleTranscribe(c: Context): Promise<Response> {
 
   const json = (await upstream.json()) as Record<string, unknown>;
   const model = typeof body.model === 'string' ? body.model : null;
-  await recordUsage({ sub, plan, kind: 'transcribe', model, costMicroUsd: transcribeCostMicroUsd(body) });
+  await recordUsage({ sub, plan, kind: 'transcribe', model, costMicroUsd: transcribeCost(json, body) });
   return c.json(json);
 }
