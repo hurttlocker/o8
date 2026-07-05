@@ -20,9 +20,15 @@ import {
   Sparkles,
 } from './lucide-shims';
 import { useO8Auth, type O8AuthState } from '@/components/auth/O8AuthProvider';
+import {
+  getDesktopAuthError,
+  subscribeDesktopAuthError,
+  type DesktopAuthError,
+} from '@/lib/auth/desktop-auth-error';
 import { useTheme } from '@/lib/theme/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import type { PaletteId } from '@/lib/theme/registry';
+import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
 
 const FONT = 'var(--font-sans-system)';
 const MONO = '"SF Mono", ui-monospace, "Cascadia Code", Menlo, monospace';
@@ -309,6 +315,14 @@ function separatorStyle(): CSSProperties {
  * Builds without a Clerk key keep the original local-profile header.
  */
 function AccountSection({ auth }: { auth: O8AuthState }) {
+  const [authError, setAuthError] = useState<DesktopAuthError | null>(() => getDesktopAuthError());
+
+  useEffect(() => {
+    return subscribeDesktopAuthError(() => {
+      setAuthError(getDesktopAuthError());
+    });
+  }, []);
+
   if (!auth.clerkEnabled) {
     return (
       <>
@@ -335,6 +349,7 @@ function AccountSection({ auth }: { auth: O8AuthState }) {
           <IconFrame><Github size={13} /></IconFrame>
           <span style={{ flex: 1, color: TEXT, fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px' }}>Sign in with GitHub</span>
         </RowButton>
+        {authError ? <SignInErrorCard key={authError.id} authError={authError} /> : null}
         <div style={separatorStyle()} />
       </>
     );
