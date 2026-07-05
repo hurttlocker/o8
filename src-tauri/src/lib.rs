@@ -5,6 +5,8 @@ mod dev_frontend;
 mod dictation_history;
 mod dock_window;
 mod fn_hotkey;
+#[cfg(target_os = "macos")]
+mod first_run_install;
 mod point_overlay;
 mod launch_updater;
 mod mac_perms;
@@ -1078,34 +1080,6 @@ fn load_ai_keys_from_login_shell() -> Vec<(String, String)> {
         }
     }
     Vec::new()
-}
-
-/// Warn (non-fatal) when o8 is running translocated / from a disk image instead
-/// of /Applications. macOS App Translocation runs quarantined apps from a
-/// randomized read-only path, which (a) keeps o8 out of the Accessibility list
-/// so dictation paste silently fails, and (b) blocks the auto-updater from
-/// replacing the app. The remedy is always "move o8 to /Applications".
-#[cfg(target_os = "macos")]
-fn warn_if_translocated() {
-    let exe = match std::env::current_exe() {
-        Ok(p) => p,
-        Err(_) => return,
-    };
-    let path = exe.to_string_lossy().to_string();
-    let translocated = path.contains("/AppTranslocation/");
-    let from_dmg = path.starts_with("/Volumes/");
-    if !translocated && !from_dmg {
-        return;
-    }
-    log::warn!(
-        "[translocation] o8 is running from a non-Applications location ({path}) — dictation paste, \
-         Accessibility, and auto-update will not work until o8 is moved to /Applications"
-    );
-    let msg = "o8 is running from a temporary copy, so dictation, permissions, and automatic updates won't work yet.\\n\\nQuit o8, drag it into your Applications folder, eject the disk image, then reopen o8 from Applications.";
-    let script = format!(
-        r#"display dialog "{msg}" with title "Move o8 to Applications" buttons {{"OK"}} default button "OK" with icon caution"#
-    );
-    let _ = Command::new("osascript").args(["-e", &script]).output();
 }
 
 /// Returns Some((major, raw_version)) on success, None on failure.
@@ -3943,7 +3917,7 @@ pub fn run() {
             // and auto-update silently break (#fresh-user). Off-thread so the
             // blocking osascript dialog doesn't delay window creation.
             #[cfg(target_os = "macos")]
-            std::thread::spawn(warn_if_translocated);
+            std::thread::spawn(first_run_install::offer_move_to_applications_if_needed);
             // ── System Tray (issue #731) ──
             // Menu items: Show / Quit.
             let show = MenuItem::with_id(app, "show", "Show o8", true, None::<&str>)?;
