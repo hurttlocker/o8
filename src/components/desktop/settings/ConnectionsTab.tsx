@@ -15,11 +15,11 @@ import { Smartphone } from '../lucide-shims';
 import {
   APP_FONT_STACK,
   RamsButton,
-  SectionLabel,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsGroup } from './grouped';
 import { PairedDevicesSection } from './PairedDevicesSection';
 
 export function ConnectionsTab() {
@@ -42,29 +42,29 @@ export function ConnectionsTab() {
         subtitle="Pair the o8 mobile app to approve, monitor, and steer your fleet from your phone."
       />
 
-      {/* 01 — PAIRING */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="01">PAIRING</SectionLabel>
-        <p style={{
-          fontSize: 13,
-          color: 'var(--t-text-secondary)',
-          lineHeight: 1.55,
-          maxWidth: 560,
-          margin: 0,
-          marginBottom: 16,
-        }}>
-          o8 mobile connects directly to this Mac over your local network. Open the pairing
-          code, then scan it with the o8 app — your phone and this Mac must be on the same
-          Wi-Fi network.
-        </p>
-        <RamsButton onClick={showPairingQr} icon={<Smartphone size={14} />}>
-          Show pairing QR
-        </RamsButton>
+      <section>
+        <SettingsGroup header="Pairing">
+          <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
+            <p style={{
+              fontSize: 13,
+              color: 'var(--t-text-secondary)',
+              lineHeight: 1.55,
+              maxWidth: 560,
+              margin: 0,
+              marginBottom: 16,
+            }}>
+              o8 mobile connects directly to this Mac over your local network. Open the pairing
+              code, then scan it with the o8 app — your phone and this Mac must be on the same
+              Wi-Fi network.
+            </p>
+            <RamsButton onClick={showPairingQr} icon={<Smartphone size={14} />}>
+              Show pairing QR
+            </RamsButton>
+          </div>
+        </SettingsGroup>
       </section>
 
-      {/* 02 — PAIRED DEVICES */}
-      <section>
-        <SectionLabel number="02">PAIRED DEVICES</SectionLabel>
+      <section style={{ marginTop: 28 }}>
         <PairedDevicesSection />
       </section>
     </div>
