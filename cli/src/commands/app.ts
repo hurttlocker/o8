@@ -25,6 +25,16 @@ export async function runApp(mode: OutputMode, subcommand: string | undefined, r
     );
   }
 
+  const unknown = rest.find((arg) => arg !== '--if-update-pending');
+  if (unknown) {
+    throw new CliError(
+      'unknown_app_restart_flag',
+      `Unknown app restart flag: ${unknown}`,
+      EXIT.INVALID_ARGS,
+      'Run `o8 app restart [--if-update-pending]`.',
+    );
+  }
+
   const ifUpdatePending = rest.includes('--if-update-pending');
   const cfg = resolveConfig();
   const res = await apiFetch<AppRestartResponse>(cfg, '/api/panel/app/relaunch', {

@@ -119,6 +119,7 @@ export function UpdateCard() {
   const autoApplyingRef = useRef(false);
   const lastOperatorInputRef = useRef(Date.now());
   const orchestratorStreamingRef = useRef(false);
+  const orchestratorBusyTabsRef = useRef<Map<string, boolean>>(new Map());
 
   useEffect(() => {
     updateRef.current = update;
@@ -264,16 +265,18 @@ export function UpdateCard() {
 
   useEffect(() => {
     const onRealtime = (event: Event) => {
-      const detail = (event as CustomEvent<{ data?: { status?: unknown }; event?: string }>).detail;
-      const data = detail?.data;
-      if (typeof data?.status === 'string') {
-        if (data.status === 'busy' || data.status === 'streaming') orchestratorStreamingRef.current = true;
-        if (data.status === 'ready' || data.status === 'idle' || data.status === 'dead') {
-          orchestratorStreamingRef.current = false;
+      const detail = (event as CustomEvent<{ tabId?: unknown; busy?: unknown }>).detail;
+      const busy = detail?.busy === true;
+      if (typeof detail?.tabId === 'string' && detail.tabId) {
+        if (busy) {
+          orchestratorBusyTabsRef.current.set(detail.tabId, true);
+        } else {
+          orchestratorBusyTabsRef.current.delete(detail.tabId);
         }
+        orchestratorStreamingRef.current = orchestratorBusyTabsRef.current.size > 0;
+      } else {
+        orchestratorStreamingRef.current = busy;
       }
-      if (detail?.event === 'done' || detail?.event === 'error') orchestratorStreamingRef.current = false;
-      if (detail?.event === 'output' || detail?.event === 'tool-use') orchestratorStreamingRef.current = true;
     };
     window.addEventListener('o8:orchestrator', onRealtime);
     return () => window.removeEventListener('o8:orchestrator', onRealtime);
@@ -351,7 +354,7 @@ export function UpdateCard() {
     borderRadius: 10,
     border: '1px solid var(--t-divider-subtle)',
     background: 'var(--t-bg-card, var(--t-panel-solid))',
-    boxShadow: '0 4px 14px rgba(15, 23, 42, 0.06)',
+    boxShadow: '0 4px 14px var(--t-shadow-subtle, transparent)',
     fontFamily: 'var(--font-sans-system)',
     color: 'var(--t-text)',
   };
@@ -376,7 +379,7 @@ export function UpdateCard() {
     lineHeight: 1,
     borderRadius: 6,
     border: '1px solid var(--t-brand-orange, #FF5A1F)',
-    background: installing ? 'transparent' : 'rgba(255, 90, 31, 0.08)',
+    background: installing ? 'transparent' : 'color-mix(in srgb, var(--t-brand-orange, #FF5A1F) 8%, transparent)',
     color: 'var(--t-brand-orange, #FF5A1F)',
     fontSize: 11,
     fontWeight: 400,
@@ -533,7 +536,7 @@ function SummarySkeleton() {
             height: 9,
             width: `${widthPct}%`,
             borderRadius: 4,
-            background: 'var(--t-input-bg, rgba(15, 23, 42, 0.06))',
+            background: 'var(--t-input-bg, var(--t-panel))',
             animation: 'o8-update-shimmer 1.6s ease-in-out infinite',
           }}
         />
