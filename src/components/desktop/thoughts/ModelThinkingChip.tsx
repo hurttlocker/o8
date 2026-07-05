@@ -155,7 +155,7 @@ export function ModelThinkingChip({
         }}
       >
         {compact ? null : (
-          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.1px' }}>
+          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontSize: 10.5, fontWeight: 300, letterSpacing: '0' }}>
             {modelLabel}
           </span>
         )}
@@ -192,7 +192,7 @@ export function ModelThinkingChip({
           {modelSwitchable ? (
             <>
               <div style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 2 }}>
-                <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Model</div>
+                <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Model</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {COMPOSER_MODEL_OPTIONS.map((option) => {
@@ -236,20 +236,20 @@ export function ModelThinkingChip({
                         if (!active) event.currentTarget.style.background = 'transparent';
                       }}
                     >
-                      <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{option.label}</span>
+                      <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{option.label}</span>
                       <span style={{ width: 6, height: 6, borderRadius: 999, background: active ? 'var(--t-accent)' : 'transparent', flexShrink: 0 }} />
                     </button>
                   );
                 })}
               </div>
               <div style={{ marginTop: 4, paddingLeft: 7, paddingRight: 7, paddingTop: 6, paddingBottom: 2, borderTop: '1px solid var(--t-divider-subtle)' }}>
-                <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
+                <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
               </div>
             </>
           ) : (
             <div style={{ paddingLeft: 7, paddingRight: 7, paddingTop: 2, paddingBottom: 6, borderBottom: '1px solid var(--t-divider-subtle)' }}>
-              <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', color: 'var(--t-text)', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</div>
-              <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', color: 'var(--t-text)', lineHeight: 1.25, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{modelLabel}</div>
+              <div style={{ marginTop: 2, fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>{effortSectionLabel}</div>
             </div>
           )}
           <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
@@ -291,8 +291,8 @@ export function ModelThinkingChip({
                   }}
                 >
                   <span style={{ display: 'inline-flex', alignItems: 'baseline', gap: 7, minWidth: 0 }}>
-                    <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.25 }}>{EFFORT_LABELS[option]}</span>
-                    <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '-0.2px', color: active ? 'var(--t-accent)' : 'var(--t-text-faint)', lineHeight: 1.25 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.25 }}>{EFFORT_LABELS[option]}</span>
+                    <span style={{ fontSize: 9, fontWeight: 300, letterSpacing: '0', color: active ? 'var(--t-accent)' : 'var(--t-text-faint)', lineHeight: 1.25 }}>
                       {option === 'adaptive' ? 'auto' : `${EFFORT_LEVEL[option]}/6`}
                     </span>
                   </span>
@@ -340,8 +340,8 @@ export function ModelThinkingChip({
               >
                 <SwarmGlyph size={13} color={ultraActive ? SWARM_ACCENT : 'var(--t-text-muted)'} />
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '-0.1px', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>Ultracode</span>
-                  <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '-0.4px', lineHeight: 1.25, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Claude + Codex swarm</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>Ultracode</span>
+                  <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.25, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Claude + Codex swarm</span>
                 </span>
                 <span style={{ width: 6, height: 6, borderRadius: 999, background: ultraActive ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
               </button>

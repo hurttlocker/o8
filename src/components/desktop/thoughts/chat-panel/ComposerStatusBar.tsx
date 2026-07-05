@@ -43,8 +43,8 @@ export function ComposerStatusBar({
     prevLatestUserMessageIdRef.current = latestUserMessageId;
     if (risingEdge || newUserMessage) {
       startedAtRef.current = Date.now();
-      setTurnLatched(true);
       const frame = window.requestAnimationFrame(() => {
+        setTurnLatched(true);
         setElapsed(0);
       });
       return () => window.cancelAnimationFrame(frame);
@@ -53,7 +53,8 @@ export function ComposerStatusBar({
 
   useEffect(() => {
     if (turnLatched && !awaitingReply && !displayWaiting && !hasRunningTools) {
-      setTurnLatched(false);
+      const frame = window.requestAnimationFrame(() => setTurnLatched(false));
+      return () => window.cancelAnimationFrame(frame);
     }
   }, [turnLatched, awaitingReply, displayWaiting, hasRunningTools]);
 
@@ -119,7 +120,7 @@ export function ComposerStatusBar({
         <span style={{
           fontSize: 11.5,
           fontWeight: 400,
-          letterSpacing: '-0.05px',
+          letterSpacing: '0',
           color: 'var(--t-text-faint)',
         }}>
           {`· ${runningTools.length} running`}
