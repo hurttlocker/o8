@@ -105,6 +105,36 @@ function defaultModelForBackend(
   return undefined;
 }
 
+export function resolveThreadRepoMetadata(input: {
+  tabId: unknown;
+  existingRepoPath?: string;
+  existingRepoName?: string;
+  existingRepoBranch?: string;
+  bodyRepoPath?: unknown;
+  bodyRepoName?: unknown;
+  bodyRepoBranch?: unknown;
+}) {
+  const stickyRepoPath = isThoughtsThread(input.tabId)
+    && typeof input.existingRepoPath === 'string'
+    && input.existingRepoPath.trim()
+    ? input.existingRepoPath
+    : undefined;
+
+  if (stickyRepoPath) {
+    return {
+      repoPath: stickyRepoPath,
+      repoName: input.existingRepoName,
+      repoBranch: input.existingRepoBranch,
+    };
+  }
+
+  return {
+    repoPath: input.bodyRepoPath ?? input.existingRepoPath,
+    repoName: input.bodyRepoName ?? input.existingRepoName,
+    repoBranch: input.bodyRepoBranch ?? input.existingRepoBranch,
+  };
+}
+
 export async function GET(request: NextRequest) {
   const startedAt = performance.now();
   const tabId = request.nextUrl.searchParams.get('tabId');
@@ -232,6 +262,15 @@ export async function POST(request: NextRequest) {
     ?? model
     ?? defaultModelForBackend(nextBackend)
     ?? (isThoughtsThread(body.tabId) && nextBackend !== 'openclaw' ? 'claude-code' : undefined);
+  const repoMetadata = resolveThreadRepoMetadata({
+    tabId: body.tabId,
+    existingRepoPath: repoPath,
+    existingRepoName: repoName,
+    existingRepoBranch: repoBranch,
+    bodyRepoPath: body.repoPath,
+    bodyRepoName: body.repoName,
+    bodyRepoBranch: body.repoBranch,
+  });
 
   writeFileSync(filePath, JSON.stringify({
     messages: finalMessages,
@@ -241,9 +280,9 @@ export async function POST(request: NextRequest) {
     pinned: body.pinned ?? pinned,
     title: body.title ?? title,
     planText: normalizePlanText(body.planText) ?? planText ?? extractedPlanText,
-    repoName: body.repoName ?? repoName,
-    repoPath: body.repoPath ?? repoPath,
-    repoBranch: body.repoBranch ?? repoBranch,
+    repoName: repoMetadata.repoName,
+    repoPath: repoMetadata.repoPath,
+    repoBranch: repoMetadata.repoBranch,
     remoteUrl: body.remoteUrl ?? remoteUrl ?? null,
     backend: nextBackend,
     agent: normalizeAgent(body.agent) ?? agent ?? null,
