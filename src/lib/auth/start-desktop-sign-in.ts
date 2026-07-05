@@ -10,6 +10,7 @@
  */
 
 import { openExternalUrl } from '@/lib/desktop/open-external';
+import { clearDesktopAuthError } from '@/lib/auth/desktop-auth-error';
 
 export const O8_SIGN_IN_URL =
   process.env.NEXT_PUBLIC_O8_SIGN_IN_URL || 'https://o8.run/desktop/sign-in';
@@ -29,6 +30,7 @@ function randomState(): string {
 
 export function startDesktopSignIn(): void {
   if (typeof window === 'undefined') return;
+  clearDesktopAuthError();
   const state = randomState();
   try {
     sessionStorage.setItem(O8_AUTH_STATE_KEY, state);
