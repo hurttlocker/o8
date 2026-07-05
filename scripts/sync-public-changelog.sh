@@ -86,9 +86,25 @@ git log --since="$SINCE" --format="%as|%h|%s" --no-merges | while IFS='|' read -
     -e 's/BYOK/bring-your-own/gi' \
     -e 's/tmux/terminal/gi')
 
+  # [via-o8] attribution: preserve an existing marker through the scrubs, and
+  # backfill unmarked PR squash merges whose head branch was a packet branch
+  # (issue/* / inline/*) — those merged through o8's dispatch loop too.
+  via_o8=""
+  if echo "$msg" | grep -q '\[via-o8\]'; then
+    via_o8="yes"
+    msg=$(echo "$msg" | sed -E 's/ *\[via-o8\] *//g')
+  else
+    pr_num=$(echo "$msg" | grep -oE '\(#[0-9]+\)\s*$' | grep -oE '[0-9]+' || true)
+    if [ -n "$pr_num" ]; then
+      head_ref=$(gh api "repos/hurttlocker/o8/pulls/$pr_num" --jq .head.ref 2>/dev/null || true)
+      case "$head_ref" in issue/*|inline/*) via_o8="yes";; esac
+    fi
+  fi
+
   msg=$(echo "$msg" | sed -E 's/ *\(#[0-9]+\)//g; s/ *#[0-9]+//g')
   msg=$(echo "$msg" | sed -E 's/ — .{40,}//g')
   msg=$(echo "$msg" | sed -E 's/ (of|for|via|from|with|in|the) *$//')
+  if [ -n "$via_o8" ]; then msg="$msg [via-o8]"; fi
 
   if [ "$date" != "$current_date" ]; then
     printf '\n## %s\n\n' "$date" >> "$OUT_CHANGELOG"
@@ -122,6 +138,7 @@ echo "[sync] Blocklist check passed"
   echo "| Metric | Value |"
   echo "|---|---|"
   echo "| Features shipped (180d) | $(git log --since='180 days ago' --format='%s' --no-merges | grep -cE '^(feat|perf|design)(\(.*\))?:' || echo 0) |"
+  echo "| Merged through o8 (180d) | $(git log --since='180 days ago' --format='%s' --no-merges | grep -c '\[via-o8\]' || echo 0) |"
   echo "| Days active | $(git log --format='%as' | sort -u | wc -l | tr -d ' ') |"
   echo "| This week | $(git log --since='7 days ago' --format='%s' --no-merges | grep -cE '^(feat|perf|design)(\(.*\))?:' || echo 0) features |"
   echo "| Today | $(git log --since='1 day ago' --format='%s' --no-merges | grep -cE '^(feat|perf|design)(\(.*\))?:' || echo 0) features |"

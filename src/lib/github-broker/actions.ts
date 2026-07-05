@@ -205,6 +205,7 @@ export async function commentOnGitHubPullRequest(repoFullName: string, prNumber:
 async function getGitHubPullRequestHeadRef(repoFullName: string, prNumber: number) {
   const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}`);
   const pull = await parseGitHubJson<{
+    title?: string | null;
     head?: {
       ref?: string | null;
       repo?: { full_name?: string | null } | null;
@@ -213,6 +214,7 @@ async function getGitHubPullRequestHeadRef(repoFullName: string, prNumber: numbe
   return {
     ref: pull.head?.ref ?? null,
     headRepoFullName: pull.head?.repo?.full_name ?? repoFullName,
+    title: pull.title ?? null,
   };
 }
 
@@ -222,10 +224,18 @@ export async function mergeGitHubPullRequest(
   options?: { deleteBranch?: boolean; mergeMethod?: 'squash' | 'merge' | 'rebase' },
 ) {
   const head = await getGitHubPullRequestHeadRef(repoFullName, prNumber);
+  const mergeMethod = options?.mergeMethod ?? 'squash';
+  // Squash merges through o8 stamp the [via-o8] attribution marker in the
+  // commit title — the public changelog sync forwards it and o8.run renders
+  // the "via o8" pill (product-builds-the-product proof). The worktree-side
+  // merge path stamps the same marker; PR-mode merges were the silent gap.
+  const commitTitle = mergeMethod === 'squash' && head.title && !head.title.includes('[via-o8]')
+    ? `${head.title} (#${prNumber}) [via-o8]`
+    : undefined;
   const { response } = await githubInstallationFetch(repoFullName, `/repos/${repoFullName}/pulls/${prNumber}/merge`, {
     method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ merge_method: options?.mergeMethod ?? 'squash' }),
+    body: JSON.stringify({ merge_method: mergeMethod, ...(commitTitle ? { commit_title: commitTitle } : {}) }),
   });
   const merged = await parseGitHubJson<{ merged?: boolean; sha?: string | null }>(response);
 
