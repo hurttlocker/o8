@@ -29,7 +29,7 @@ function dataDir(): string {
 
 /** Stable per-install id (the analytics account identity). Created once, then
  *  persisted to ~/.o8/install-id so re-issues map to the same account. */
-function getOrCreateInstallId(): string {
+export function getOrCreateInstallId(): string {
   const idPath = path.join(dataDir(), 'install-id');
   try {
     const existing = readFileSync(idPath, 'utf8').trim();
