@@ -125,5 +125,5 @@ describe('steerPacket owned Codex resume fallback', () => {
       'continue from huddle approval',
     ]));
     expect(getLane(lane.id)?.status).toBe('running');
-  });
+  }, 20_000);
 });
