@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 import { auth } from '@clerk/nextjs/server';
 
 import { proxyBaseUrl } from '@/lib/cortex/qa/llm/inference-route';
+import { getOrCreateInstallId } from '@/lib/entitlement/bootstrap';
 import { clearFounderRecord, writeFounderRecord } from '@/lib/entitlement/founder';
 import { verifyLicense, writeCachedEntitlement } from '@/lib/entitlement/license';
 import { getEntitlement } from '@/lib/entitlement/store';
@@ -52,6 +53,20 @@ export async function POST(request: Request) {
       sessionToken = request.headers.get('x-clerk-session-token')?.trim() || null;
     }
     if (!sessionToken) return NextResponse.json({ ok: false, reason: 'no_session' }, { status: 401 });
+
+    // Best-effort: link this install to the signed-in account so a person's
+    // devices + pre-sign-in usage roll into their ONE profile (beta analytics).
+    // Fire-and-forget — never blocks or fails the license sync.
+    try {
+      const installId = getOrCreateInstallId();
+      void fetch(`${proxyBaseUrl()}/account/link-install`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${sessionToken}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ installId }),
+      }).catch(() => {});
+    } catch {
+      /* install id unavailable — skip linking, never block the sync */
+    }
 
     const res = await fetch(`${proxyBaseUrl()}/account/license`, {
       method: 'POST',
