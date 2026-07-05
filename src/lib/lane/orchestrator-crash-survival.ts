@@ -1,0 +1,230 @@
+import { createHash, randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
+import { join, resolve } from 'node:path';
+import type { OrchestratorEvent } from './orchestrator-stream-events';
+
+export type CrashSurvivableOrchestratorBackend = 'claude' | 'codex';
+
+export interface OrchestratorTurnRecord {
+  id: string;
+  backend: CrashSurvivableOrchestratorBackend;
+  sessionName: string;
+  repoPath: string;
+  threadId: string | null;
+  pid: number;
+  stdoutPath: string;
+  stderrPath: string;
+  stdoutOffset?: number;
+  startedAt: number;
+  assistantMessageId?: string | null;
+  assistantStartedAtMs?: number | null;
+  model?: string | null;
+}
+
+export interface OrchestratorCrashSurvivalMeta {
+  backend: CrashSurvivableOrchestratorBackend;
+  threadId?: string | null;
+  assistantMessageId?: string | null;
+  assistantStartedAtMs?: number | null;
+  model?: string | null;
+}
+
+function rootDir(): string {
+  return join(
+    process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
+    'orchestrator-turns',
+  );
+}
+
+function disabledByEnv(value: string | undefined): boolean {
+  const raw = value?.trim().toLowerCase();
+  return raw === '0' || raw === 'false' || raw === 'off' || raw === 'no';
+}
+
+export function crashSurvivableOrchestratorEnabled(): boolean {
+  const raw = process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR;
+  if (raw === undefined || raw.trim() === '') return true;
+  return !disabledByEnv(raw);
+}
+
+function ensureRoot(): void {
+  mkdirSync(rootDir(), { recursive: true });
+}
+
+function safeName(value: string): string {
+  return value.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 140);
+}
+
+function recordPath(id: string): string {
+  return join(rootDir(), `${safeName(id)}.json`);
+}
+
+function repoHash(repoPath: string): string {
+  return createHash('sha256').update(resolve(repoPath)).digest('hex').slice(0, 8);
+}
+
+export function createOrchestratorTurnRecord(input: {
+  backend: CrashSurvivableOrchestratorBackend;
+  sessionName: string;
+  repoPath: string;
+  threadId?: string | null;
+  pid: number;
+  assistantMessageId?: string | null;
+  assistantStartedAtMs?: number | null;
+  model?: string | null;
+}): OrchestratorTurnRecord {
+  ensureRoot();
+  const id = `${input.backend}-${repoHash(input.repoPath)}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  const stdoutPath = join(rootDir(), `${safeName(id)}.jsonl`);
+  const stderrPath = join(rootDir(), `${safeName(id)}.stderr.log`);
+  writeFileSync(stdoutPath, '', 'utf8');
+  writeFileSync(stderrPath, '', 'utf8');
+  const record: OrchestratorTurnRecord = {
+    id,
+    backend: input.backend,
+    sessionName: input.sessionName,
+    repoPath: resolve(input.repoPath),
+    threadId: input.threadId ?? null,
+    pid: input.pid,
+    stdoutPath,
+    stderrPath,
+    startedAt: Date.now(),
+    assistantMessageId: input.assistantMessageId ?? null,
+    assistantStartedAtMs: input.assistantStartedAtMs ?? null,
+    model: input.model ?? null,
+  };
+  writeFileSync(recordPath(id), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  return record;
+}
+
+export function createOrchestratorTurnRecordForFiles(input: {
+  backend: CrashSurvivableOrchestratorBackend;
+  sessionName: string;
+  repoPath: string;
+  threadId?: string | null;
+  pid: number;
+  stdoutPath: string;
+  stderrPath: string;
+  stdoutOffset?: number;
+  assistantMessageId?: string | null;
+  assistantStartedAtMs?: number | null;
+  model?: string | null;
+}): OrchestratorTurnRecord {
+  ensureRoot();
+  const id = `${input.backend}-${repoHash(input.repoPath)}-${Date.now().toString(36)}-${randomUUID().slice(0, 8)}`;
+  const record: OrchestratorTurnRecord = {
+    id,
+    backend: input.backend,
+    sessionName: input.sessionName,
+    repoPath: resolve(input.repoPath),
+    threadId: input.threadId ?? null,
+    pid: input.pid,
+    stdoutPath: input.stdoutPath,
+    stderrPath: input.stderrPath,
+    stdoutOffset: input.stdoutOffset ?? 0,
+    startedAt: Date.now(),
+    assistantMessageId: input.assistantMessageId ?? null,
+    assistantStartedAtMs: input.assistantStartedAtMs ?? null,
+    model: input.model ?? null,
+  };
+  writeFileSync(recordPath(id), `${JSON.stringify(record, null, 2)}\n`, 'utf8');
+  return record;
+}
+
+export function updateOrchestratorTurnPid(record: OrchestratorTurnRecord, pid: number): OrchestratorTurnRecord {
+  const next = { ...record, pid };
+  writeFileSync(recordPath(record.id), `${JSON.stringify(next, null, 2)}\n`, 'utf8');
+  return next;
+}
+
+export function finishOrchestratorTurn(record?: OrchestratorTurnRecord | null): void {
+  if (!record) return;
+  rmSync(recordPath(record.id), { force: true });
+}
+
+export function listActiveOrchestratorTurns(): OrchestratorTurnRecord[] {
+  const dir = rootDir();
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter((file) => file.endsWith('.json'))
+    .flatMap((file) => {
+      try {
+        const parsed = JSON.parse(readFileSync(join(dir, file), 'utf8')) as OrchestratorTurnRecord;
+        return parsed?.id && parsed?.stdoutPath ? [parsed] : [];
+      } catch {
+        return [];
+      }
+    });
+}
+
+export function isPidAlive(pid?: number): boolean {
+  if (!pid) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export function readJsonlLines(filePath: string, fromOffset = 0): { lines: string[]; offset: number } {
+  if (!existsSync(filePath)) return { lines: [], offset: fromOffset };
+  const raw = readFileSync(filePath, 'utf8');
+  const slice = raw.slice(Math.max(0, fromOffset));
+  const lines = slice.split('\n').filter((line) => line.trim());
+  return { lines, offset: Buffer.byteLength(raw, 'utf8') };
+}
+
+export function openAppendFile(filePath: string): number {
+  ensureRoot();
+  return openSync(filePath, 'a');
+}
+
+export function tailJsonlFile(options: {
+  filePath: string;
+  fromOffset?: number;
+  alive: () => boolean;
+  onLine: (line: string) => boolean | void;
+  onEnd: () => void;
+  intervalMs?: number;
+}): () => void {
+  let offset = options.fromOffset ?? 0;
+  let stopped = false;
+  const intervalMs = options.intervalMs ?? 250;
+  const tick = () => {
+    if (stopped) return;
+    const next = readJsonlLines(options.filePath, offset);
+    offset = next.offset;
+    for (const line of next.lines) {
+      if (options.onLine(line) === false) {
+        stopped = true;
+        options.onEnd();
+        return;
+      }
+    }
+    if (!options.alive()) {
+      stopped = true;
+      options.onEnd();
+      return;
+    }
+    setTimeout(tick, intervalMs);
+  };
+  setTimeout(tick, 0);
+  return () => { stopped = true; };
+}
+
+export function fileSize(filePath: string): number {
+  try {
+    return statSync(filePath).size;
+  } catch {
+    return 0;
+  }
+}
+
+export function collectAssistantText(events: OrchestratorEvent[]): string {
+  return events
+    .filter((event): event is Extract<OrchestratorEvent, { type: 'text' }> => event.type === 'text')
+    .map((event) => event.text)
+    .join('');
+}

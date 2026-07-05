@@ -26,7 +26,7 @@
 import { createHash } from 'node:crypto';
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
-import { existsSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { closeSync, existsSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { listActiveLanesWithSessions } from '@/lib/lane/registry';
@@ -47,6 +47,21 @@ import { toClaudeJson } from '@/lib/mcp/tool-spine/emit-claude';
 import type { ToolProfile } from '@/lib/mcp/tool-spine/registry';
 import { fableEnvOverride, fableLockoutArgs } from '@/lib/lane/fable-profile';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
+import {
+  crashSurvivableOrchestratorEnabled,
+  createOrchestratorTurnRecord,
+  createOrchestratorTurnRecordForFiles,
+  fileSize,
+  finishOrchestratorTurn,
+  isPidAlive,
+  listActiveOrchestratorTurns,
+  openAppendFile,
+  readJsonlLines,
+  tailJsonlFile,
+  updateOrchestratorTurnPid,
+  type OrchestratorCrashSurvivalMeta,
+  type OrchestratorTurnRecord,
+} from './orchestrator-crash-survival';
 
 // ── Types ──
 
@@ -207,7 +222,89 @@ function buildRehydratedSession(repoPath: string, claudeSessionId: string, creat
   };
 }
 
-export async function rehydrateOrchestratorSessions(): Promise<void> {
+interface OrchestratorRehydrateOptions {
+  onReboundEvent?: (record: OrchestratorTurnRecord, event: OrchestratorEvent) => void;
+}
+
+function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord, options: OrchestratorRehydrateOptions): boolean {
+  if (record.backend !== 'claude') return false;
+  const sessionName = record.sessionName || orchestratorSessionName(record.repoPath, record.threadId);
+  let session = sessions.get(sessionName);
+  if (!session) {
+    session = {
+      sessionName,
+      repoPath: normalizeRepoPath(record.repoPath),
+      threadId: normalizeThreadId(record.threadId),
+      claudeSessionId: readOrchestratorBackendSessionId(normalizeThreadId(record.threadId), 'claude'),
+      status: 'busy',
+      proc: null,
+      createdAt: record.startedAt,
+    };
+    sessions.set(sessionName, session);
+  } else {
+    session.status = 'busy';
+  }
+
+  const w = getWarmState(sessionName);
+  const events: OrchestratorEvent[] = [];
+  let resolved = false;
+  const emit = (event: OrchestratorEvent) => {
+    events.push(event);
+    options.onReboundEvent?.(record, event);
+  };
+  const timeout = setTimeout(() => {}, PROCESS_TIMEOUT_MS);
+  const turn: OrchestratorActiveTurn = {
+    onEvent: emit,
+    captureEvent: emit,
+    resolve: () => { resolved = true; },
+    reject: () => {},
+    timeout,
+    abortSignal: null,
+    abortListener: null,
+    settled: false,
+    toolTracker: createToolCallTracker(),
+    turnSessionId: session.claudeSessionId,
+    cost: null,
+    lastAssistantText: '',
+    sawToolUseAfterText: false,
+    launchAgentCallCount: 0,
+    crashRecord: record,
+    stopCrashTail: null,
+  };
+  turn.captureEvent = (event) => {
+    emit(event);
+    if (event.type === 'text') turn.lastAssistantText += event.text;
+  };
+  w.activeTurn = turn;
+
+  const replay = readJsonlLines(record.stdoutPath, record.stdoutOffset ?? 0).lines;
+  for (const line of replay) {
+    if (!handleClaudeJsonLine(session, w, line)) break;
+  }
+
+  if (resolved || turn.settled) {
+    return true;
+  }
+
+  if (!isPidAlive(record.pid)) {
+    settleOrchestratorTurn(session, w, null);
+    return true;
+  }
+
+  turn.stopCrashTail = tailJsonlFile({
+    filePath: record.stdoutPath,
+    fromOffset: fileSize(record.stdoutPath),
+    alive: () => isPidAlive(record.pid) && !turn.settled,
+    onLine: (line) => handleClaudeJsonLine(session!, w, line),
+    onEnd: () => {
+      if (!turn.settled) settleOrchestratorTurn(session!, w, null);
+    },
+  });
+  console.log(`${LOG_PREFIX} Re-bound in-flight Claude orchestrator turn ${record.id} pid=${record.pid}`);
+  return true;
+}
+
+export async function rehydrateOrchestratorSessions(options: OrchestratorRehydrateOptions = {}): Promise<void> {
   if (startupRehydrationComplete) {
     return;
   }
@@ -217,6 +314,14 @@ export async function rehydrateOrchestratorSessions(): Promise<void> {
 
   startupRehydrationPromise = (async () => {
     const activeLanes = listActiveLanesWithSessions();
+    let reboundInflightTurns = 0;
+    for (const record of listActiveOrchestratorTurns()) {
+      try {
+        if (rehydrateInflightClaudeTurn(record, options)) reboundInflightTurns += 1;
+      } catch (error) {
+        console.warn(`${LOG_PREFIX} Failed to rehydrate in-flight turn ${record.id}: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
     if (activeLanes.length === 0) {
       startupRehydrationComplete = true;
       return;
@@ -288,7 +393,7 @@ export async function rehydrateOrchestratorSessions(): Promise<void> {
     }
 
     console.log(
-      `${LOG_PREFIX} Startup scan checked ${activeLanes.length} active lane${activeLanes.length === 1 ? '' : 's'} and restored ${rehydratedCount} orchestrator session${rehydratedCount === 1 ? '' : 's'}`,
+      `${LOG_PREFIX} Startup scan checked ${activeLanes.length} active lane${activeLanes.length === 1 ? '' : 's'}, restored ${rehydratedCount} orchestrator session${rehydratedCount === 1 ? '' : 's'}, re-bound ${reboundInflightTurns} in-flight turn${reboundInflightTurns === 1 ? '' : 's'}`,
     );
     startupRehydrationComplete = true;
   })()
@@ -466,6 +571,7 @@ export interface SendToOrchestratorOptions {
    * model actually SEES them (the wire used to drop these silently).
    */
   attachments?: Array<{ dataUri: string; name?: string }>;
+  crashSurvival?: OrchestratorCrashSurvivalMeta;
 }
 
 /** data:image/png;base64,xxxx → an Anthropic image content block. */
@@ -523,6 +629,8 @@ interface OrchestratorActiveTurn {
   lastAssistantText: string;
   sawToolUseAfterText: boolean;
   launchAgentCallCount: number;
+  crashRecord: OrchestratorTurnRecord | null;
+  stopCrashTail: (() => void) | null;
 }
 
 interface WarmState {
@@ -532,6 +640,8 @@ interface WarmState {
   stdoutLineBuffer: string;
   stderrBuffer: string;
   lastUsedAt: number;
+  crashStdoutPath: string | null;
+  crashStderrPath: string | null;
 }
 
 const warmStates = new Map<string, WarmState>();
@@ -539,7 +649,7 @@ const warmStates = new Map<string, WarmState>();
 export function getWarmState(sessionName: string): WarmState {
   let w = warmStates.get(sessionName);
   if (!w) {
-    w = { procConfig: null, activeTurn: null, idleTimer: null, stdoutLineBuffer: '', stderrBuffer: '', lastUsedAt: Date.now() };
+    w = { procConfig: null, activeTurn: null, idleTimer: null, stdoutLineBuffer: '', stderrBuffer: '', lastUsedAt: Date.now(), crashStdoutPath: null, crashStderrPath: null };
     warmStates.set(sessionName, w);
   }
   return w;
@@ -579,6 +689,8 @@ function killOrchestratorProc(session: OrchestratorSession, w: WarmState): void 
   const proc = session.proc;
   session.proc = null;
   w.procConfig = null;
+  w.crashStdoutPath = null;
+  w.crashStderrPath = null;
   session.status = 'dead';
   if (proc && proc.exitCode === null && proc.signalCode === null) {
     proc.kill('SIGTERM');
@@ -636,8 +748,13 @@ export function detectPermissionRequest(raw: Record<string, unknown>): boolean {
 function settleOrchestratorTurn(session: OrchestratorSession, w: WarmState, error: Error | null): void {
   const turn = w.activeTurn;
   if (!turn || turn.settled) return;
+  const hadCrashRecord = !!turn.crashRecord;
   turn.settled = true;
   clearTimeout(turn.timeout);
+  turn.stopCrashTail?.();
+  turn.stopCrashTail = null;
+  finishOrchestratorTurn(turn.crashRecord);
+  turn.crashRecord = null;
   if (turn.abortSignal && turn.abortListener) {
     turn.abortSignal.removeEventListener('abort', turn.abortListener);
     turn.abortListener = null;
@@ -661,11 +778,34 @@ function settleOrchestratorTurn(session: OrchestratorSession, w: WarmState, erro
   turn.onEvent({ type: 'done', sessionId: turn.turnSessionId, cost: turn.cost });
   if (error) turn.onEvent({ type: 'error', error: error.message });
 
-  if (session.proc && session.status !== 'dead') {
+  if ((session.proc || hadCrashRecord) && session.status !== 'dead') {
     session.status = 'ready';
     scheduleIdleReap(session, w);
   }
   turn.resolve();
+}
+
+function handleClaudeJsonLine(session: OrchestratorSession, w: WarmState, line: string): boolean {
+  if (!line.trim()) return true;
+  let raw: Record<string, unknown>;
+  try { raw = JSON.parse(line) as Record<string, unknown>; } catch { return true; }
+
+  // LOCKOUT auto-deny — a plan-mode proc that asks to escalate is killed.
+  if (w.procConfig?.permissionMode === 'plan' && detectPermissionRequest(raw)) {
+    console.warn(`[orchestrator-session] LOCKOUT auto-deny — plan-mode proc ${session.sessionName} emitted a permission request; killing (write blocked).`);
+    settleOrchestratorTurn(session, w, null); // proposal text already captured
+    killOrchestratorProc(session, w);
+    return false;
+  }
+
+  const turn = w.activeTurn;
+  if (!turn) return true; // stray output between turns
+  processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
+  if (raw.type === 'result') {
+    settleOrchestratorTurn(session, w, null);
+    return false;
+  }
+  return true;
 }
 
 export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: WarmState): void {
@@ -677,22 +817,7 @@ export function attachOrchestratorProcHandlers(session: OrchestratorSession, w: 
     const lines = w.stdoutLineBuffer.split('\n');
     w.stdoutLineBuffer = lines.pop() ?? '';
     for (const line of lines) {
-      if (!line.trim()) continue;
-      let raw: Record<string, unknown>;
-      try { raw = JSON.parse(line) as Record<string, unknown>; } catch { continue; }
-
-      // LOCKOUT auto-deny — a plan-mode proc that asks to escalate is killed.
-      if (w.procConfig?.permissionMode === 'plan' && detectPermissionRequest(raw)) {
-        console.warn(`[orchestrator-session] LOCKOUT auto-deny — plan-mode proc ${session.sessionName} emitted a permission request; killing (write blocked).`);
-        settleOrchestratorTurn(session, w, null); // proposal text already captured
-        killOrchestratorProc(session, w);
-        return;
-      }
-
-      const turn = w.activeTurn;
-      if (!turn) continue; // stray output between turns
-      processStreamEvent(raw, turn.captureEvent, (id) => { turn.turnSessionId = id; }, (c) => { turn.cost = c; }, turn.toolTracker);
-      if (raw.type === 'result') settleOrchestratorTurn(session, w, null);
+      if (!handleClaudeJsonLine(session, w, line)) return;
     }
   });
 
@@ -767,6 +892,22 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
   // #1066 billing guard — the orchestrator REPL must stay subscription-billed.
   assertNoPrintFlag(args, 'Orchestrator REPL session');
 
+  let crashRecord: OrchestratorTurnRecord | null = null;
+  let stdoutFd: number | null = null;
+  let stderrFd: number | null = null;
+  const crashEnabled = crashSurvivableOrchestratorEnabled();
+  if (crashEnabled) {
+    crashRecord = createOrchestratorTurnRecord({
+      backend: 'claude',
+      sessionName: session.sessionName,
+      repoPath: session.repoPath,
+      threadId: session.threadId,
+      pid: 0,
+    });
+    stdoutFd = openAppendFile(crashRecord.stdoutPath);
+    stderrFd = openAppendFile(crashRecord.stderrPath);
+  }
+
   const proc = spawn(CLAUDE_BIN, args, {
     cwd: session.repoPath,
     // BYO-key injection is Fable-scoped ONLY — never ambient process.env — so the
@@ -778,8 +919,20 @@ function spawnOrchestratorProc(session: OrchestratorSession, w: WarmState, confi
       O8_MANAGED_SESSION: '1',
       ...(isFable ? fableEnvOverride() : {}),
     },
-    stdio: ['pipe', 'pipe', 'pipe'],
+    detached: crashEnabled,
+    stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
+      ? ['pipe', stdoutFd, stderrFd]
+      : ['pipe', 'pipe', 'pipe'],
   });
+  if (stdoutFd !== null) closeSync(stdoutFd);
+  if (stderrFd !== null) closeSync(stderrFd);
+  if (crashEnabled) proc.unref();
+  if (crashRecord) {
+    const updated = updateOrchestratorTurnPid(crashRecord, proc.pid ?? 0);
+    w.crashStdoutPath = updated.stdoutPath;
+    w.crashStderrPath = updated.stderrPath;
+    finishOrchestratorTurn(updated);
+  }
   session.proc = proc;
   w.procConfig = config;
   w.stdoutLineBuffer = '';
@@ -894,6 +1047,23 @@ export async function sendToOrchestrator(
       return;
     }
 
+    const crashOffset = w.crashStdoutPath ? fileSize(w.crashStdoutPath) : 0;
+    const crashRecord = crashSurvivableOrchestratorEnabled() && w.crashStdoutPath && w.crashStderrPath && proc.pid
+      ? createOrchestratorTurnRecordForFiles({
+          backend: 'claude',
+          sessionName: session.sessionName,
+          repoPath: session.repoPath,
+          threadId: options.crashSurvival?.threadId ?? session.threadId,
+          pid: proc.pid,
+          stdoutPath: w.crashStdoutPath,
+          stderrPath: w.crashStderrPath,
+          stdoutOffset: crashOffset,
+          assistantMessageId: options.crashSurvival?.assistantMessageId ?? null,
+          assistantStartedAtMs: options.crashSurvival?.assistantStartedAtMs ?? null,
+          model,
+        })
+      : null;
+
     // #457 — Hang watchdog. Kills the resident proc (surfacing WHY) if the turn
     // never settles on a `result`.
     const timeout = setTimeout(() => {
@@ -922,6 +1092,8 @@ export async function sendToOrchestrator(
       lastAssistantText: '',
       sawToolUseAfterText: false,
       launchAgentCallCount: 0,
+      crashRecord,
+      stopCrashTail: null,
     };
     // Narrate-and-exit / false-dispatch telemetry state lives on the turn.
     turn.captureEvent = (e: OrchestratorEvent) => {
@@ -937,6 +1109,24 @@ export async function sendToOrchestrator(
       onEvent(e);
     };
     w.activeTurn = turn;
+    if (crashRecord) {
+      turn.stopCrashTail = tailJsonlFile({
+        filePath: crashRecord.stdoutPath,
+        fromOffset: crashOffset,
+        alive: () => !!session.proc && isPidAlive(crashRecord.pid) && !turn.settled,
+        onLine: (line) => handleClaudeJsonLine(session, w, line),
+        onEnd: () => {
+          if (!turn.settled) {
+            const stderr = existsSync(crashRecord.stderrPath)
+              ? (() => {
+                  try { return readFileSync(crashRecord.stderrPath, 'utf8').trim(); } catch { return ''; }
+                })()
+              : '';
+            settleOrchestratorTurn(session, w, stderr ? new Error(stderr.slice(0, 500)) : null);
+          }
+        },
+      });
+    }
 
     // #624 — User interrupt. Kills the resident proc (sacrificed for the
     // interrupt; the next turn spawns cold) and settles this turn.

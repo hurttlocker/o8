@@ -55,6 +55,18 @@ Dogfooded with `O8_CRASH_SURVIVABLE_WORKERS=1` (set via `launchctl setenv` so th
 
 **Remaining:** flip `crashSurvivableWorkersEnabled()` default ON (raw-terminal tab degrades to `.jsonl` tail for all workers — the accepted Option-B trade-off). The running app is already crash-survivable via the launchd env.
 
+## Status (2026-07-05): orchestrator subprocess survival started behind the flag
+
+Stage 4 now applies the same Option-B primitive to the built-in orchestrator
+subprocesses behind `O8_CRASH_SURVIVABLE_ORCHESTRATOR` (default on): Claude REPL
+and Codex exec spawn detached with stdout/stderr bound to durable files under
+`~/.o8/orchestrator-turns`. Boot scans active turn records, re-binds live PIDs,
+tails their JSONL, and clears dead records after replay.
+
+This does not change the worker-tier contract above; it closes the separate
+hot-reload gap where the orchestrator turn itself was parented to the app
+process instead of surviving like the worker it may have dispatched.
+
 ## Target model + stages (each tsc-clean + committable + a kill-test)
 
 Assumes the chosen detach mechanism from the fork; the stages are mechanism-agnostic except Stage 1.
