@@ -87,6 +87,37 @@ function laneRepoLabel(lane: Lane | undefined): string | undefined {
   return repoPath.split('/').filter(Boolean).pop();
 }
 
+function isHuddleLane(lane: Lane): boolean {
+  return lane.status === 'awaiting_orchestrator'
+    && (lane.lastEventLabel === 'huddle' || lane.lastEventLabel === 'huddle_ready');
+}
+
+function applyHuddleLaneStatus(agents: AgentSummary[]): AgentSummary[] {
+  let huddleBySessionKey: Map<string, Lane>;
+  try {
+    huddleBySessionKey = new Map(
+      listLanes()
+        .filter((lane) => lane.sessionKey && isHuddleLane(lane))
+        .map((lane) => [lane.sessionKey as string, lane]),
+    );
+  } catch {
+    return agents;
+  }
+  if (huddleBySessionKey.size === 0) return agents;
+
+  return agents.map((agent) => {
+    const lane = huddleBySessionKey.get(agent.sessionKey);
+    if (!lane) return agent;
+    return {
+      ...agent,
+      status: 'huddling',
+      currentTask: agent.currentTask || 'Huddling — awaiting orchestrator alignment',
+      alerts: Math.max(0, agent.alerts - Number(agent.status === 'failed' || agent.status === 'blocked')),
+      lastEventAt: lane.lastEventAt ? relativeAge(new Date(lane.lastEventAt)) : agent.lastEventAt,
+    };
+  });
+}
+
 function readAgentReportEvents(): EventItem[] {
   try {
     const lanesById = new Map(listLanes().map((lane) => [lane.id, lane]));
@@ -372,6 +403,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     new Set(agents.map((agent) => agent.sessionKey)),
   );
   agents.push(...fallbackAgents);
+  const visibleAgents = applyHuddleLaneStatus(agents);
 
   const liveSessionKeys = new Set(
     [...discovered, ...discoveredAll.filter(({ session }) => fallbackAgents.some((agent) => agent.sessionKey === session.sessionKey))]
@@ -393,11 +425,11 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       return true;
     })
     .map(mapIdeGhostRuntimeTabToAgent);
-  agents.push(...ghostAgents);
+  visibleAgents.push(...ghostAgents);
 
   const squads: SquadSummary[] = [];
   for (const runtime of runtimes) {
-    const members = agents.filter((agent) => agent.runtime === runtime.id);
+    const members = visibleAgents.filter((agent) => agent.runtime === runtime.id);
     if (members.length === 0) continue;
     squads.push({
       id: `squad-${runtime.id}`,
@@ -418,8 +450,8 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
   const agentReportEvents = readAgentReportEvents();
   const events: EventItem[] = [
     ...agentReportEvents,
-    ...agents
-    .filter((agent) => ['running', 'reviewing', 'failed', 'blocked', 'waiting'].includes(agent.status))
+    ...visibleAgents
+    .filter((agent) => ['running', 'huddling', 'reviewing', 'failed', 'blocked', 'waiting'].includes(agent.status))
     .slice(0, 8)
     .map((agent): EventItem => ({
       id: `evt-${agent.id}`,
@@ -436,9 +468,9 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
     })),
   ];
 
-  const primarySessionKey = agents.find((agent) => agent.isCurrentSession)?.sessionKey
-    ?? agents.find((agent) => agent.status === 'running')?.sessionKey
-    ?? agents[0]?.sessionKey;
+  const primarySessionKey = visibleAgents.find((agent) => agent.isCurrentSession)?.sessionKey
+    ?? visibleAgents.find((agent) => agent.status === 'running')?.sessionKey
+    ?? visibleAgents[0]?.sessionKey;
 
   return {
     generatedAt: new Date().toISOString(),
@@ -456,7 +488,7 @@ async function buildCliRuntimeSnapshot(): Promise<FleetSnapshot> {
       primarySessionKey,
     },
     squads,
-    agents,
+    agents: visibleAgents,
     events,
     artifacts: [],
   };

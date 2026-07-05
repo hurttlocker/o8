@@ -37,6 +37,7 @@ export interface PacketTranscriptReadback extends SessionTranscriptReadback {
 }
 
 type LaneSteerTranscriptEvent = Extract<TranscriptEvent, { type: 'steer' }>;
+type LaneHuddleTranscriptEvent = Extract<TranscriptEvent, { type: 'assistant' }>;
 
 function findPacket(packetId: string): OrchestratorPacket | null {
   try {
@@ -226,10 +227,30 @@ function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
     });
 }
 
+function laneHuddleEvents(laneId: string): LaneHuddleTranscriptEvent[] {
+  return getLaneEvents(laneId, 500)
+    .filter((event) => event.verb === 'agent_report' && event.payload.event === 'huddle')
+    .map((event, index) => {
+      const message = readTextPayload(event.payload, 'message') || 'Huddle plan posted.';
+      return {
+        seq: index + 1,
+        ts: event.timestamp,
+        type: 'assistant',
+        text: message,
+      };
+    });
+}
+
 function laneSteerEventsForSession(sessionKey: string): LaneSteerTranscriptEvent[] {
   if (!sessionKey) return [];
   const lane = listLanes().find((candidate) => candidate.sessionKey === sessionKey);
   return lane ? laneSteerEvents(lane.id) : [];
+}
+
+function laneHuddleEventsForSession(sessionKey: string): LaneHuddleTranscriptEvent[] {
+  if (!sessionKey) return [];
+  const lane = listLanes().find((candidate) => candidate.sessionKey === sessionKey);
+  return lane ? laneHuddleEvents(lane.id) : [];
 }
 
 function mergeTranscriptEvents(runtimeEvents: TranscriptEvent[], extraEvents: TranscriptEvent[]): TranscriptEvent[] {
@@ -250,6 +271,10 @@ export function readSessionSteerTranscriptEvents(sessionKey: string): LaneSteerT
   return laneSteerEventsForSession(sessionKey);
 }
 
+export function readSessionHuddleTranscriptEvents(sessionKey: string): LaneHuddleTranscriptEvent[] {
+  return laneHuddleEventsForSession(sessionKey);
+}
+
 export async function readSessionTranscriptEvents(sessionKey: string): Promise<SessionTranscriptReadback> {
   const resolved = await resolveRawJsonlForSession(sessionKey);
   if (resolved.unsupportedReason) {
@@ -266,7 +291,7 @@ export async function readSessionTranscriptEvents(sessionKey: string): Promise<S
     runtime: resolved.runtime,
     events: mergeTranscriptEvents(
       normalizeForRuntime(resolved.runtime, resolved.raw),
-      laneSteerEventsForSession(sessionKey),
+      [...laneHuddleEventsForSession(sessionKey), ...laneSteerEventsForSession(sessionKey)],
     ),
   };
 }
@@ -286,7 +311,9 @@ export async function readPacketTranscriptEvents(packetId: string): Promise<Pack
 
   const readback = await readSessionTranscriptEvents(sessionKey);
   const packetLane = listLanes().find((lane) => lane.packetId === packetId);
-  const packetEvents = packetLane && packetLane.sessionKey !== sessionKey ? laneSteerEvents(packetLane.id) : [];
+  const packetEvents = packetLane && packetLane.sessionKey !== sessionKey
+    ? [...laneHuddleEvents(packetLane.id), ...laneSteerEvents(packetLane.id)]
+    : [];
   return {
     packetId,
     ...readback,

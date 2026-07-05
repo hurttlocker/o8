@@ -32,6 +32,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { buildErrorPayload } from '@/lib/api/error-format';
 import { listRepos } from '@/lib/repos/registry';
+import { findLaneByPacket, getLaneEvents } from '@/lib/lane/registry';
 import type { MobileActivityEvent } from '@/lib/mobile/types';
 
 const execFileAsync = promisify(execFile);
@@ -195,14 +196,22 @@ async function collectPacketEvents(previewContext: PreviewContext): Promise<Mobi
 
     return packets
       .map((packet): MobileActivityEvent | null => {
+        const lane = findLaneByPacket(packet.id);
         const eventTime = packet.lastEventAt || packet.archivedAt;
         const timestamp = eventTime ? Date.parse(eventTime) : Number.NaN;
         if (!Number.isFinite(timestamp)) return null;
 
         const released = packet.releaseState === 'released' || packet.status === 'released';
+        const huddleLabel = packet.lastEventLabel === 'huddle'
+          || packet.lastEventLabel === 'huddle_ready'
+          || packet.lane?.lastEventLabel === 'huddle'
+          || packet.lane?.lastEventLabel === 'huddle_ready'
+          || (lane?.status === 'awaiting_orchestrator' && (lane.lastEventLabel === 'huddle' || lane.lastEventLabel === 'huddle_ready'));
         let kind: MobileActivityEvent['kind'];
         if (released || packet.status === 'archived') {
           kind = 'merge';
+        } else if (huddleLabel) {
+          kind = 'huddle';
         } else if (packet.status === 'failed' || packet.status === 'blocked') {
           kind = 'alert';
         } else if (packet.status === 'awaiting_review') {
@@ -223,6 +232,11 @@ async function collectPacketEvents(previewContext: PreviewContext): Promise<Mobi
         const branch = packet.branchTarget?.trim();
         const detail = packet.lastEventLabel?.trim()
           || (branch ? `${branch} → main` : undefined);
+        const huddlePlan = lane
+          ? [...getLaneEvents(lane.id, 100)].reverse().find((event) =>
+              event.verb === 'agent_report' && event.payload.event === 'huddle'
+            )?.payload.message
+          : undefined;
 
         const repo = packet.workspaceTargetPath
           ? path.basename(packet.workspaceTargetPath)
@@ -232,7 +246,8 @@ async function collectPacketEvents(previewContext: PreviewContext): Promise<Mobi
           id: `packet:${packet.id}`,
           kind,
           title: title.slice(0, 160),
-          detail,
+          detail: kind === 'huddle' ? 'Huddling — aligned its plan, awaiting orchestrator' : detail,
+          comments: typeof huddlePlan === 'string' && huddlePlan.trim() ? [huddlePlan.trim()] : undefined,
           repo,
           previewUrl: repo ? previewUrlForRepo(repo, previewContext) : undefined,
           timestamp,

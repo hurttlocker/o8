@@ -41,6 +41,7 @@ export function agentStatusToDotState(status?: string | null): AgentDotState {
     case 'recovering':
       return 'running';
     case 'reviewing':
+    case 'huddling':
     case 'waiting':
     case 'awaiting_input':
     case 'awaiting_human':

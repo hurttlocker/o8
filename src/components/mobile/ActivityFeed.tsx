@@ -117,7 +117,7 @@ function toneForAgent(agent: AgentSummary): ActivityTone {
   if (includesKeyword(taskText, ['test', 'jest', 'playwright', 'cypress', 'lint', 'typecheck', 'qa', 'spec'])) {
     return 'testing';
   }
-  if (agent.status === 'waiting' || agent.status === 'blocked' || agent.status === 'reviewing' || includesKeyword(taskText, ['think', 'plan', 'review'])) {
+  if (agent.status === 'huddling' || agent.status === 'waiting' || agent.status === 'blocked' || agent.status === 'reviewing' || includesKeyword(taskText, ['think', 'plan', 'review'])) {
     return 'thinking';
   }
 
