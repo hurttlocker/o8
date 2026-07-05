@@ -2,6 +2,8 @@ export const dynamic = 'force-dynamic';
 
 import { NextResponse } from 'next/server';
 import { access } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { performance } from 'node:perf_hooks';
 import {
   addRepo,
@@ -133,8 +135,45 @@ async function stopRepoBoundRuntimeSessions(repo: { localPath: string; remoteUrl
   };
 }
 
-export async function GET() {
+const execFileAsync = promisify(execFile);
+
+/** List the authenticated user's GitHub repositories via the `gh` CLI — the
+ *  app's GitHub auth source (see /api/panel/github-status, which reads
+ *  `gh auth status`). Returns the raw GitHub API shape (full_name, clone_url,
+ *  description, language, private, default_branch, …) that the onboarding repo
+ *  picker (OnboardingReposStep) renders + clones from. Without this, the route
+ *  fell through to the LOCAL registry (no `full_name`), so the picker rendered
+ *  blank rows. */
+async function listGithubRepos(limit: number): Promise<unknown[]> {
+  const perPage = Math.min(100, Math.max(1, Math.trunc(limit) || 50));
+  const { stdout } = await execFileAsync(
+    'gh',
+    ['api', `/user/repos?per_page=${perPage}&sort=updated&affiliation=owner,collaborator,organization_member`],
+    { timeout: 15_000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, GH_NO_UPDATE_NOTIFIER: '1' } },
+  );
+  const parsed = JSON.parse(stdout) as unknown;
+  return Array.isArray(parsed) ? parsed : [];
+}
+
+export async function GET(request: Request) {
   const startedAt = performance.now();
+  const params = new URL(request.url).searchParams;
+
+  // Onboarding repo picker asks for the user's GitHub repos (source=github);
+  // everything else wants the local repo registry.
+  if (params.get('source') === 'github') {
+    try {
+      const repos = await listGithubRepos(Number(params.get('limit')) || 50);
+      return NextResponse.json({ repos }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
+    } catch (error) {
+      console.error('[repos] github list failed', error);
+      return NextResponse.json(
+        { error: 'Couldn’t list your GitHub repositories. Make sure GitHub is connected on this machine, then retry.' },
+        { status: 502, headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } },
+      );
+    }
+  }
+
   try {
     const repos = await enrichRepoReadinessList(await listRepos());
     return NextResponse.json({ repos: await Promise.all(repos.map(appendExistence)) }, { headers: { 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` } });
