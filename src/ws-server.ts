@@ -1019,21 +1019,21 @@ function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: O
       wsMsg = JSON.stringify({
         channel: 'orchestrator',
         event: 'output',
-        data: { text: event.text, repoPath, threadId, thinking: false, backend },
+        data: { text: event.text, repoPath, threadId, thinking: false, backend, assistantMessageId },
       });
       break;
     case 'thinking':
       wsMsg = JSON.stringify({
         channel: 'orchestrator',
         event: 'output',
-        data: { text: event.text, repoPath, threadId, thinking: true, backend },
+        data: { text: event.text, repoPath, threadId, thinking: true, backend, assistantMessageId },
       });
       break;
     case 'tool_use':
       wsMsg = JSON.stringify({
         channel: 'orchestrator',
         event: 'tool-use',
-        data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend },
+        data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend, assistantMessageId },
       });
       break;
     case 'tool_result':
@@ -3175,7 +3175,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'output',
-            data: { text: event.text, repoPath, threadId, thinking: false, backend: backend.id, agent: agentTag },
+            data: { text: event.text, repoPath, threadId, thinking: false, backend: backend.id, agent: agentTag, assistantMessageId },
           });
           break;
 
@@ -3183,7 +3183,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'output',
-            data: { text: event.text, repoPath, threadId, thinking: true, backend: backend.id, agent: agentTag },
+            data: { text: event.text, repoPath, threadId, thinking: true, backend: backend.id, agent: agentTag, assistantMessageId },
           });
           break;
 
@@ -3191,7 +3191,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
           wsMsg = JSON.stringify({
             channel: 'orchestrator',
             event: 'tool-use',
-            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend: backend.id, agent: agentTag },
+            data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend: backend.id, agent: agentTag, assistantMessageId },
           });
           break;
 
