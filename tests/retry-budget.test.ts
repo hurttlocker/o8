@@ -42,6 +42,17 @@ describe('resetPacketFields (rerun_with_feedback)', () => {
     expect(packet.typecheckAutoRetries).toBe(1);
   });
 
+  it('preserves the spent budget across repeated rerun field resets', () => {
+    const packet = packetFixture({ typecheckAutoRetries: 1, recoveryCount: 3 });
+    resetPacketFields(packet);
+    packet.status = 'blocked';
+    packet.queueState = 'queued';
+    packet.recoveryCount = 2;
+    resetPacketFields(packet);
+    expect(packet.typecheckAutoRetries).toBe(1);
+    expect(packet.recoveryCount).toBe(0);
+  });
+
   it('still resets the packet to a clean dispatchable draft', () => {
     const packet = packetFixture();
     resetPacketFields(packet);
