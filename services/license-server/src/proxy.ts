@@ -41,7 +41,7 @@ function envUsd(name: string, fallback: number): number {
 }
 
 /** Per-account daily spend cap (micro-USD), keyed by plan. Provisional. */
-const DAILY_CAP_MICRO_USD: Record<Plan, number> = {
+export const DAILY_CAP_MICRO_USD: Record<Plan, number> = {
   free: usdToMicro(envUsd('PROXY_CAP_FREE_USD', 0.1)),
   pro: usdToMicro(envUsd('PROXY_CAP_PRO_USD', 0.5)),
   team: usdToMicro(envUsd('PROXY_CAP_TEAM_USD', 2.0)),
