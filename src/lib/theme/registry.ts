@@ -124,6 +124,12 @@ const LIGHT_BASE: Record<string, string> = {
     'linear-gradient(90deg, rgba(200, 146, 59, 0) 0%, rgba(200, 146, 59, 0.18) 46%, rgba(255, 255, 255, 0.36) 54%, rgba(200, 146, 59, 0.12) 100%)',
   // Borders / dividers / overlays — rgba over either surface mode reads fine
   '--t-border': 'rgba(15, 23, 42, 0.1)',
+  // Settings accent — deep editorial blue on light paper; the dark palette
+  // overrides with a lighter blue so selection lifts off the graphite.
+  '--t-settings-accent-strong': '#1D4ED8',
+  '--t-settings-accent-active-bg': 'rgba(29, 78, 216, 0.1)',
+  '--t-settings-accent-active-border': 'rgba(29, 78, 216, 0.32)',
+  '--t-settings-accent-glow': 'rgba(29, 78, 216, 0.28)',
   '--t-panel-border': 'rgba(15, 23, 42, 0.1)',
   '--t-panel-shadow': '0 24px 60px rgba(40, 30, 20, 0.12), 0 6px 16px rgba(40, 30, 20, 0.06)',
   '--t-panel-hover': 'rgba(15, 23, 42, 0.04)',
@@ -299,6 +305,12 @@ const DARK_BASE: Record<string, string> = {
   '--t-celebration-wash':
     'linear-gradient(90deg, rgba(241, 195, 106, 0) 0%, rgba(241, 195, 106, 0.2) 46%, rgba(255, 255, 255, 0.1) 54%, rgba(241, 195, 106, 0.14) 100%)',
   '--t-border': 'rgba(255, 255, 255, 0.08)',
+  // Settings accent — lighter blue than light-mode's #1D4ED8 so active states
+  // read clearly against graphite (operator feedback 2026-07-05).
+  '--t-settings-accent-strong': '#8FB4FF',
+  '--t-settings-accent-active-bg': 'rgba(143, 180, 255, 0.16)',
+  '--t-settings-accent-active-border': 'rgba(143, 180, 255, 0.42)',
+  '--t-settings-accent-glow': 'rgba(143, 180, 255, 0.3)',
   '--t-panel-border': 'rgba(255, 255, 255, 0.08)',
   '--t-panel-shadow': '0 24px 60px rgba(0, 0, 0, 0.36)',
   '--t-panel-hover': 'rgba(255, 255, 255, 0.06)',
