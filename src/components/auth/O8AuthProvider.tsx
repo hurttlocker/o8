@@ -92,7 +92,17 @@ function ClerkAuthBridge({ children }: { children: ReactNode }) {
     // Pull this account's license (Founding Operator / subscription) and cache
     // it locally so the plan flips without a reload. Best-effort + fail-soft;
     // on a non-free result we nudge EntitlementProvider to re-fetch live.
-    void fetch('/api/panel/entitlement/sync', { method: 'POST' })
+    // NATIVE-MODE SEAM (live-hit 2026-07-05): the desktop Clerk session lives in
+    // the Tauri store, NOT in cookies — server-side auth() sees nothing, so the
+    // client must forward its own short-lived session token. The license server
+    // verifies it against the Clerk JWKS either way; this header is just
+    // transport. Web/cookie mode keeps working without it.
+    void Promise.resolve(clerk.session?.getToken() ?? null)
+      .catch(() => null)
+      .then((sessionToken) => fetch('/api/panel/entitlement/sync', {
+        method: 'POST',
+        headers: sessionToken ? { 'x-clerk-session-token': sessionToken } : {},
+      }))
       .then((r) => (r.ok ? r.json() : null))
       .then((d: { ok?: boolean; plan?: string } | null) => {
         if (d?.ok && d.plan && d.plan !== 'free') {

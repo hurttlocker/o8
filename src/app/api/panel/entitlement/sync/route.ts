@@ -32,15 +32,26 @@ interface AccountLicenseResponse {
  * trust path as a manually-applied key. Loopback+token gated via '/api/panel/'
  * in src/middleware.ts. Never throws (repo rule).
  */
-export async function POST() {
+export async function POST(request: Request) {
   if (!CLERK_ENABLED) return NextResponse.json({ ok: false, reason: 'clerk_disabled' });
 
   try {
-    const { userId, getToken } = await auth();
-    if (!userId) return NextResponse.json({ ok: false, reason: 'no_session' }, { status: 401 });
-
-    const sessionToken = await getToken();
-    if (!sessionToken) return NextResponse.json({ ok: false, reason: 'no_token' }, { status: 401 });
+    // Two session transports (live-hit 2026-07-05): web/cookie mode surfaces the
+    // session to server-side auth(); the desktop NATIVE mode keeps it in the
+    // Tauri store, so the client forwards its short-lived token in a header.
+    // Either way the license server is the verifier (Clerk JWKS) — this route
+    // never trusts the token itself, it only forwards it.
+    let sessionToken: string | null = null;
+    try {
+      const { userId, getToken } = await auth();
+      if (userId) sessionToken = await getToken();
+    } catch {
+      /* no cookie session — fall through to the native-mode header */
+    }
+    if (!sessionToken) {
+      sessionToken = request.headers.get('x-clerk-session-token')?.trim() || null;
+    }
+    if (!sessionToken) return NextResponse.json({ ok: false, reason: 'no_session' }, { status: 401 });
 
     const res = await fetch(`${proxyBaseUrl()}/account/license`, {
       method: 'POST',
