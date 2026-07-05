@@ -829,10 +829,12 @@ export default function DictationPillPage() {
         display: 'flex',
         alignItems: 'flex-start',
         justifyContent: 'center',
-        // paddingTop 0 → the idle capsule's square top edge sits flush at the
-        // window top, which the Rust side anchors flush to the screen top edge
-        // (DOCK_TOP_INSET = 0). No gap above the capsule (Symon notch behavior).
-        paddingTop: 0,
+        // Keep a small internal inset so the rounded top corners are visible
+        // when the dock window is floating instead of flush to a screen notch.
+        paddingTop: 8,
+        paddingLeft: 20,
+        paddingRight: 20,
+        boxSizing: 'border-box',
         background: 'transparent',
         // The React layer keeps the dead-zone tight: the wrapper ignores
         // pointer events, only the pill itself (hideCancel = no buttons) sits

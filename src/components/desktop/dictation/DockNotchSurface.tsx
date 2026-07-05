@@ -20,8 +20,8 @@
  *
  * It is rendered ONLY by the always-on screen dock window (`/dictation-pill`),
  * which is top-center / level-25 / transparent. The window provides the
- * position; this surface hangs from the top (alignItems: flex-start, top edge
- * square). The in-window mic-button pill (`DictationPill`) is a separate
+ * position; this surface hangs from the top with a small route-level inset so
+ * rounded corners survive non-notch monitor layouts. The in-window mic-button pill (`DictationPill`) is a separate
  * component and is UNCHANGED.
  *
  * NOTE (operator directive): the literal color values below mirror Symon's
@@ -51,7 +51,7 @@ const INNER_W = BAR_COUNT * BAR_WIDTH + (BAR_COUNT - 1) * BAR_GAP; // 132.5
 const INNER_H = 24;
 const DOCK_WINDOW_WIDTH = 520;
 const DOCK_WINDOW_SIDE_MARGIN = 20;
-const LISTENING_CAPSULE_MAX_WIDTH = DOCK_WINDOW_WIDTH - DOCK_WINDOW_SIDE_MARGIN * 2;
+const LISTENING_CAPSULE_MAX_WIDTH = DOCK_WINDOW_WIDTH - DOCK_WINDOW_SIDE_MARGIN * 2 - 2;
 const DOCK_WINDOW_SAFE_MAX_WIDTH = `calc(100vw - ${DOCK_WINDOW_SIDE_MARGIN * 2}px)`;
 
 const WEIGHTS = (() => {
@@ -816,8 +816,8 @@ export function DockNotchSurface({
     // partial transcript grows wider so the words have room (Symon listening
     // footprint grows for words); idle/short stays at the 248 capsule.
     // Listening grows wider for a long partial, with the final rendered capsule
-    // capped at 480px inside the 520px-wide dock window (DOCK_WIDTH in
-    // dock_window.rs), leaving 20px on both sides.
+    // capped below 480px inside the 520px-wide dock window (DOCK_WIDTH in
+    // dock_window.rs), preserving the 20px side gutters after border rounding.
     const listeningWide = mode === 'listening' && trimmedPartial.length > 0;
     const width = listeningWide
       ? Math.max(248, Math.min(LISTENING_CAPSULE_MAX_WIDTH, 200 + Math.min(280, trimmedPartial.length * 6)))
@@ -1365,13 +1365,13 @@ export function DockNotchSurface({
               textOverflow: 'ellipsis',
               direction: 'rtl',
               textAlign: 'left',
-              unicodeBidi: 'isolate',
+              unicodeBidi: 'plaintext',
               WebkitMaskImage: 'linear-gradient(to right, transparent 0, #000 16px, #000 100%)',
               maskImage: 'linear-gradient(to right, transparent 0, #000 16px, #000 100%)',
             }}
             title={trimmedPartial}
           >
-            {trimmedPartial}
+            <span style={{ direction: 'ltr', unicodeBidi: 'isolate' }}>{trimmedPartial}</span>
           </span>
         ) : null}
       </div>
@@ -1481,7 +1481,7 @@ export function DockNotchSurface({
         borderStyle: 'solid',
         borderWidth: 1,
         boxSizing: 'border-box',
-        maxWidth: DOCK_WINDOW_SAFE_MAX_WIDTH,
+        maxWidth: `min(${LISTENING_CAPSULE_MAX_WIDTH}px, ${DOCK_WINDOW_SAFE_MAX_WIDTH})`,
         minWidth: 0,
         userSelect: 'none',
         ...geometry,
