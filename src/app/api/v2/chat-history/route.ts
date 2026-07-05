@@ -15,6 +15,7 @@ import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import { mergeChatMessages } from '@/lib/llm/merge-chat-messages';
 import { resolveRepoGithubIdentity } from '@/lib/repos/github-identity';
+import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
 
 const HISTORY_DIR = join(homedir(), '.o8', 'chat-history');
 
@@ -105,35 +106,6 @@ function defaultModelForBackend(
   return undefined;
 }
 
-export function resolveThreadRepoMetadata(input: {
-  tabId: unknown;
-  existingRepoPath?: string;
-  existingRepoName?: string;
-  existingRepoBranch?: string;
-  bodyRepoPath?: unknown;
-  bodyRepoName?: unknown;
-  bodyRepoBranch?: unknown;
-}) {
-  const stickyRepoPath = isThoughtsThread(input.tabId)
-    && typeof input.existingRepoPath === 'string'
-    && input.existingRepoPath.trim()
-    ? input.existingRepoPath
-    : undefined;
-
-  if (stickyRepoPath) {
-    return {
-      repoPath: stickyRepoPath,
-      repoName: input.existingRepoName,
-      repoBranch: input.existingRepoBranch,
-    };
-  }
-
-  return {
-    repoPath: input.bodyRepoPath ?? input.existingRepoPath,
-    repoName: input.bodyRepoName ?? input.existingRepoName,
-    repoBranch: input.bodyRepoBranch ?? input.existingRepoBranch,
-  };
-}
 
 export async function GET(request: NextRequest) {
   const startedAt = performance.now();

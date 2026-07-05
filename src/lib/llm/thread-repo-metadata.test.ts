@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { resolveThreadRepoMetadata } from './route';
+import { resolveThreadRepoMetadata } from '@/lib/llm/thread-repo-metadata';
 
 describe('resolveThreadRepoMetadata', () => {
   it('keeps existing thoughts thread repo scope when a later post sends another repo', () => {
