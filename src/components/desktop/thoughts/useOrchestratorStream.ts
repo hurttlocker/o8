@@ -7,7 +7,7 @@ import type {
 } from '@/lib/mobile/types';
 import { extractPlanFromTranscript } from '@/lib/llm/plan-extractor';
 import { isMeteredOrchestratorBackend } from '@/lib/lane/orchestrator-backends/billing';
-import { isOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
+import { isOrchestratorBackendId, type OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import {
   clearQueuedOrchestratorSessionPrelude,
   consumeOrchestratorSessionPrelude,
@@ -84,6 +84,7 @@ interface OrchestratorStreamResult {
 
 interface OrchestratorSendOptions {
   permissionMode?: OrchestratorPermissionMode;
+  backend?: OrchestratorBackendId;
   thinkingEffort?: ThinkingEffort;
   model?: string;
   /**
@@ -104,8 +105,9 @@ interface OrchestratorSendOptions {
   /**
    * Collide / MoA mode. When true, the turn routes to the `collide` backend:
    * Claude + Codex propose independently (read-only), Claude synthesizes + does
-   * the work. Sets `backend: 'collide'` on the outbound payload; the swarm hint
-   * is NOT applied (Collide is its own fusion). Mutually exclusive with swarm.
+   * the work. Forces `backend: 'collide'` on the outbound payload; the swarm
+   * hint is NOT applied (Collide is its own fusion). Mutually exclusive with
+   * swarm.
    */
   collide?: boolean;
   /**
@@ -848,6 +850,7 @@ export function useOrchestratorStream(
     const displayMessage = options?.displayMessage?.trim() || message;
     const localEntriesAfterUser = options?.localEntriesAfterUser ?? [];
     const collide = options?.collide === true;
+    const backend = collide ? 'collide' : options?.backend;
     // Collide is its own fusion — the swarm hint does not apply on a Collide turn.
     const swarm = options?.swarm === true && !collide;
 
@@ -954,8 +957,9 @@ export function useOrchestratorStream(
         permissionMode,
         ...(thinkingEffort && thinkingEffort !== 'adaptive' ? { thinkingEffort } : {}),
         model,
-        // Collide routes to the MoA backend; resolveMsgBackendId honors msg.backend.
-        ...(collide ? { backend: 'collide' } : {}),
+        // Per-turn backend override keeps the composer chip truthful even while
+        // the global operator default write is still settling.
+        ...(backend ? { backend } : {}),
         ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
       });
       const delivered = await deliverOrchestratorPayload({
