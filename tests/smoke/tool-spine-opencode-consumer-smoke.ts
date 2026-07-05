@@ -15,6 +15,7 @@ import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
+import './require-temp-data-dir';
 import { atomicWriteConfig, type ClaudeDesktopConfig } from '@/lib/mcp/claude-desktop-config-io';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { entriesForSurface, type ToolRegistry } from '@/lib/mcp/tool-spine/registry';

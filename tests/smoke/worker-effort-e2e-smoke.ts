@@ -11,6 +11,7 @@
 
 import assert from 'node:assert';
 
+import './require-temp-data-dir';
 import { createMission } from '@/lib/orchestrator/operator-mission-service';
 import { currentMissionState } from '@/lib/orchestrator/operator-mission-service/shared';
 import type { WorkerRouting } from '@/lib/orchestrator/types';

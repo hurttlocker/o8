@@ -9,6 +9,7 @@
 
 import assert from 'node:assert';
 
+import './require-temp-data-dir';
 import { enrollDevice, resolveDeviceByToken, listDevices, revokeDevice, hashToken, isTokenRevoked } from '@/lib/mobile/device-registry';
 
 function main(): void {

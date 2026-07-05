@@ -16,6 +16,7 @@ import { spawn } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import { join } from 'node:path';
 
+import './require-temp-data-dir';
 const SERVER = join(process.cwd(), 'src/lib/mcp/cortex-mcp-server.ts');
 const READONLY_EXPECTED = [
   'cortex_ask', 'cortex_read_packets', 'cortex_read_transcript', 'cortex_fleet_status',

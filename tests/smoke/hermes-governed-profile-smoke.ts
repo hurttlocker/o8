@@ -15,6 +15,7 @@ import { existsSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+import './require-temp-data-dir';
 import { governHermesProfile, isHermesProfileGoverned, parseDisabledFromToolsList, HERMES_DENIED_TOOLSETS } from '@/lib/lane/orchestrator-backends/hermes-profile';
 
 function resolveHermes(): string | null {

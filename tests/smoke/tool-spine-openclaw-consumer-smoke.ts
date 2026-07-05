@@ -18,6 +18,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import './require-temp-data-dir';
 import { buildGovernedO8Profile } from '@/lib/lane/orchestrator-backends/openclaw';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toOpenclawJson } from '@/lib/mcp/tool-spine/emit-openclaw';
