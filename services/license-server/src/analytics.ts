@@ -109,24 +109,37 @@ async function rows(query: ReturnType<typeof sql>): Promise<Array<Record<string,
 
 /** GET /admin/analytics — founder dashboard data. Admin guard is in index.ts. */
 export async function handleAnalytics(c: Context): Promise<Response> {
-  // Distinct accounts across BOTH sources (proxy spend ∪ product events), with
-  // first/last-seen so we can derive DAU/WAU/MAU + new-this-week.
+  // Drop dev/test/smoke noise from every metric — these synthetic subs
+  // (laptop-test, founder-test, install:smoke-*, smoke-gemini) are not real
+  // users and would inflate the counts we care about for beta.
+  const notDev = sql`sub not like '%smoke%' and sub not like '%laptop-test%' and sub not like '%founder-test%'`;
+
+  // Identity model (beta): a REAL USER is a signed-in GitHub/Clerk account
+  // (sub `user_*`). `install:*` is the pre-sign-in / not-yet-linked shadow of a
+  // download — everyone signs into GitHub to download, so their real identity is
+  // the account, and after sign-in all usage keys on `user_*`. Headline "users"
+  // therefore counts DISTINCT ACCOUNTS (a person with N installs is ONE user);
+  // installs/downloads are reported separately and never inflate it.
   const [userRow] = await rows(sql`
-    select
-      count(*)                                                          as total,
-      count(*) filter (where last_seen  >= now() - interval '1 day')   as active_1d,
-      count(*) filter (where last_seen  >= now() - interval '7 days')  as active_7d,
-      count(*) filter (where last_seen  >= now() - interval '30 days') as active_30d,
-      count(*) filter (where first_seen >= now() - interval '7 days')  as new_7d
-    from (
+    with acct as (
       select sub, min(created_at) as first_seen, max(created_at) as last_seen
       from (
         select sub, created_at from proxy_usage
         union all
         select sub, created_at from product_events
       ) s
+      where ${notDev}
       group by sub
-    ) a
+    )
+    select
+      count(*) filter (where sub like 'user_%')                                                as total,
+      count(*) filter (where sub like 'user_%' and last_seen  >= now() - interval '1 day')     as active_1d,
+      count(*) filter (where sub like 'user_%' and last_seen  >= now() - interval '7 days')    as active_7d,
+      count(*) filter (where sub like 'user_%' and last_seen  >= now() - interval '30 days')   as active_30d,
+      count(*) filter (where sub like 'user_%' and first_seen >= now() - interval '7 days')    as new_7d,
+      count(*) filter (where sub like 'install:%')                                             as installs,
+      count(*) filter (where sub like 'install:%' and last_seen >= now() - interval '7 days')  as installs_7d
+    from acct
   `);
 
   // Spend + call counts (proxy_usage is the COGS ledger).
@@ -138,21 +151,22 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       count(*)                                                                                  as calls_total,
       count(*) filter (where created_at >= date_trunc('day', now()))                            as calls_today
     from proxy_usage
+    where ${notDev}
   `);
 
   const byKind = (await rows(sql`
     select kind, count(*) as calls, coalesce(sum(cost_micro_usd), 0) as micro
-    from proxy_usage group by kind order by calls desc
+    from proxy_usage where ${notDev} group by kind order by calls desc
   `)).map((r) => ({ kind: str(r.kind), calls: num(r.calls), spendMicroUsd: num(r.micro) }));
 
   const byPlan = (await rows(sql`
     select plan, count(distinct sub) as accounts, coalesce(sum(cost_micro_usd), 0) as micro
-    from proxy_usage group by plan order by accounts desc
+    from proxy_usage where ${notDev} group by plan order by accounts desc
   `)).map((r) => ({ plan: str(r.plan), accounts: num(r.accounts), spendMicroUsd: num(r.micro) }));
 
   const topModels = (await rows(sql`
     select coalesce(model, '(unknown)') as model, count(*) as calls
-    from proxy_usage group by model order by calls desc limit 8
+    from proxy_usage where ${notDev} group by model order by calls desc limit 8
   `)).map((r) => ({ model: str(r.model), calls: num(r.calls) }));
 
   // Product events (coarse usage beyond raw inference).
@@ -161,10 +175,11 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       count(*)                                                       as total,
       count(*) filter (where created_at >= date_trunc('day', now())) as today
     from product_events
+    where ${notDev}
   `);
 
   const topEvents = (await rows(sql`
-    select event, count(*) as count from product_events group by event order by count desc limit 20
+    select event, count(*) as count from product_events where ${notDev} group by event order by count desc limit 20
   `)).map((r) => ({ event: str(r.event), count: num(r.count) }));
 
   // Top accounts by activity (calls + events), with spend + best tier seen.
@@ -186,6 +201,7 @@ export async function handleAnalytics(c: Context): Promise<Response> {
         union all
         select sub, created_at, 'e' as src from product_events
       ) u
+      where ${notDev}
       group by sub
     ) a
     left join (
@@ -213,6 +229,10 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       active7d: num(userRow?.active_7d),
       active30d: num(userRow?.active_30d),
       new7d: num(userRow?.new_7d),
+    },
+    installs: {
+      total: num(userRow?.installs),
+      active7d: num(userRow?.installs_7d),
     },
     spend: {
       totalMicroUsd: num(spendRow?.total_micro),
