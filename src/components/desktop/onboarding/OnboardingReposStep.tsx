@@ -310,7 +310,7 @@ export function OnboardingReposStep({
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}><circle cx="12" cy="12" r="10" /><path d="M12 16v-4M12 8h.01" /></svg>
                 <div style={{ fontSize: 12.5, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
                   {deviceFlowEnabled
-                    ? <>GitHub isn&rsquo;t connected on this machine yet &mdash; your o8 account sign-in doesn&rsquo;t grant repo access. Connect GitHub here, or add a folder from this Mac below.</>
+                    ? <>Give o8 access to your repositories to clone + manage them &mdash; this is separate from your o8 account sign-in. Connect your repos here, or add a folder from this Mac below.</>
                     : <>GitHub isn&rsquo;t connected on this machine yet &mdash; your o8 account sign-in doesn&rsquo;t grant repo access. Add a folder from this Mac below; you can connect GitHub later from the dashboard.</>}
                 </div>
               </div>
@@ -323,7 +323,7 @@ export function OnboardingReposStep({
                     style={{ ...secondaryButtonStyle(connecting), alignSelf: 'flex-start' }}
                   >
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.48v-1.7c-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.5-1.11-1.5-.91-.63.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.7 0 0 .84-.28 2.75 1.05a9.3 9.3 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.4.2 2.44.1 2.7.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9v2.82c0 .27.18.59.69.48A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z" /></svg>
-                    {connecting ? `Connecting…${githubFlow.userCode ? ` (${githubFlow.userCode})` : ''}` : 'Connect GitHub'}
+                    {connecting ? `Connecting…${githubFlow.userCode ? ` (${githubFlow.userCode})` : ''}` : 'Connect your GitHub repos'}
                   </button>
                   {githubFlow.stage === 'error' && githubFlow.error && (
                     <div style={{ fontSize: 11, color: 'var(--t-brand-red, #ef9a9a)' }}>{githubFlow.error}</div>
