@@ -484,6 +484,7 @@ function coerceStatus(status: AgentStatus, approvalStatus?: string): MobileLiveA
   if (status === 'failed' || status === 'blocked') return 'failed';
   if (status === 'completed') return 'merged';
   if (status === 'running') return 'running';
+  if (status === 'huddling') return 'queued';
   if (status === 'waiting') return 'queued';
   return 'idle';
 }

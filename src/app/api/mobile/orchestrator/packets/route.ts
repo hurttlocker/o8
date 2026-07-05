@@ -36,7 +36,7 @@ import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { promisify } from 'node:util';
 import { syncOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
-import { findLaneByPacket } from '@/lib/lane/registry';
+import { findLaneByPacket, getLaneEvents } from '@/lib/lane/registry';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 import type { Lane } from '@/lib/lane/types';
 import type { MobileOrchestratorAgent } from '@/lib/mobile/types';
@@ -78,8 +78,30 @@ function repoOwnsCandidate(repoPath: string, candidate: string | null | undefine
  * releaseState === 'released' wins over status (a released packet may still
  * carry a stale status), matching packetVisualState() in repo-focus/utils.ts.
  */
-function mapPacketStatus(packet: OrchestratorPacket): MobileOrchestratorAgent['status'] {
+function isHuddleLabel(value: string | null | undefined): boolean {
+  return value === 'huddle' || value === 'huddle_ready';
+}
+
+function isHuddlingPacket(packet: OrchestratorPacket, lane: Lane | null): boolean {
+  if (lane?.status === 'awaiting_orchestrator' && isHuddleLabel(lane.lastEventLabel)) return true;
+  return packet.status === 'blocked' && isHuddleLabel(packet.lastEventLabel ?? packet.lane?.lastEventLabel);
+}
+
+function latestHuddlePlan(lane: Lane | null): string | undefined {
+  if (!lane) return undefined;
+  const events = getLaneEvents(lane.id, 100);
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.verb !== 'agent_report' || event.payload.event !== 'huddle') continue;
+    const message = event.payload.message;
+    if (typeof message === 'string' && message.trim()) return message.trim();
+  }
+  return undefined;
+}
+
+function mapPacketStatus(packet: OrchestratorPacket, lane: Lane | null): MobileOrchestratorAgent['status'] {
   if (packet.releaseState === 'released' || packet.status === 'released') return 'merged';
+  if (isHuddlingPacket(packet, lane)) return 'huddling';
   switch (packet.status) {
     case 'archived':
       return 'merged';
@@ -218,11 +240,13 @@ export async function GET(req: NextRequest) {
           id: packet.id,
           title: packetTitle(packet),
           runtime: packetRuntime(packet, lane),
-          status: mapPacketStatus(packet),
+          status: mapPacketStatus(packet, lane),
           branch: lane?.branch ?? packet.branchTarget ?? '',
           filesChanged: diff.filesChanged,
           additions: diff.additions,
           deletions: diff.deletions,
+          huddlePlan: latestHuddlePlan(lane),
+          lastEventLabel: lane?.lastEventLabel ?? packet.lastEventLabel ?? packet.lane?.lastEventLabel ?? null,
           // Lane runtime session key only when the lane is live (findLaneByPacket
           // already excludes archived/completed/failed lanes). null otherwise.
           sessionKey: lane?.sessionKey ?? null,
