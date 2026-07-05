@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react';
 import { useSignIn, useClerk } from '@clerk/nextjs';
 
 import { O8_AUTH_STATE_KEY } from '@/lib/auth/start-desktop-sign-in';
+import { consumeDesktopAuthCallback } from '@/lib/auth/desktop-auth-callback';
 
 /**
  * Consumes the `o8://auth/callback?ticket=...&state=...` deep link that the Tauri
@@ -16,14 +17,6 @@ import { O8_AUTH_STATE_KEY } from '@/lib/auth/start-desktop-sign-in';
  * activates the session (which makes useUser() update; the bridge then provisions
  * the local user row). Mounted inside ClerkProvider; renders nothing.
  */
-// One-time Clerk tickets must never be exchanged twice: the Tauri shell's live
-// event and the cold-start buffer can BOTH deliver the same URL (belt-and-
-// suspenders with the Rust-side single-path fix), and a second exchange burns
-// the ticket with "sign in token has already been used" (live-hit 2026-07-05,
-// cost the operator a full sign-in attempt with zero visible feedback).
-// Module-level so remounts can't reset it.
-const consumedTickets = new Set<string>();
-
 export function DesktopAuthCallbackHandler() {
   const { signIn } = useSignIn();
   const clerk = useClerk();
@@ -44,70 +37,27 @@ export function DesktopAuthCallbackHandler() {
       const si = signInRef.current;
       if (!si) return;
 
-      let ticket: string | null = null;
-      let state: string | null = null;
-      try {
-        const u = new URL(raw);
-        if (u.protocol !== 'o8:' || u.host !== 'auth') return;
-        ticket = u.searchParams.get('ticket');
-        state = u.searchParams.get('state');
-      } catch {
-        return;
-      }
-      if (!ticket) return;
-      if (consumedTickets.has(ticket)) return;
-
-      // CSRF: the echoed state must match the nonce we stored at launch.
-      let expected: string | null = null;
-      try {
-        expected = sessionStorage.getItem(O8_AUTH_STATE_KEY);
-      } catch {
-        /* storage unavailable — skip the check rather than block sign-in */
-      }
-      if (expected && state !== expected) {
-        console.warn('[auth] callback state mismatch — ignoring');
-        return;
-      }
-
       processingRef.current = true;
-      consumedTickets.add(ticket);
       try {
-        const { error } = await si.ticket({ ticket });
-        if (error) {
-          console.error('[auth] ticket sign-in failed:', error);
-          return;
-        }
-        if (si.status === 'complete') {
-          const { error: finalizeError } = await si.finalize();
-          if (finalizeError) {
-            console.error('[auth] finalize failed:', finalizeError);
-            return;
-          }
-          // finalize() activates the session server-side, but in the desktop
-          // flow there's no post-sign-in navigation, so Clerk's React signals
-          // don't always propagate — useUser() stays null until a manual app
-          // reload, leaving the avatar + account info blank. Explicitly set the
-          // created session active (idempotent if finalize already did) and
-          // reload the user resource so useUser() — and every useO8Auth()
-          // consumer — populates live, no reload needed.
-          try {
-            if (si.createdSessionId) {
-              await clerkRef.current.setActive({ session: si.createdSessionId });
+        await consumeDesktopAuthCallback(raw, {
+          signIn: si,
+          clerk: clerkRef.current,
+          getExpectedState: () => {
+            // CSRF: the echoed state must match the nonce we stored at launch.
+            try {
+              return sessionStorage.getItem(O8_AUTH_STATE_KEY);
+            } catch {
+              return null;
             }
-            await clerkRef.current.user?.reload();
-          } catch (activateErr) {
-            console.error('[auth] post-finalize session activation failed:', activateErr);
-          }
-          try {
-            sessionStorage.removeItem(O8_AUTH_STATE_KEY);
-          } catch {
-            /* ignore */
-          }
-        } else {
-          console.warn('[auth] ticket sign-in incomplete:', si.status);
-        }
-      } catch (err) {
-        console.error('[auth] ticket exchange threw:', err);
+          },
+          clearExpectedState: () => {
+            try {
+              sessionStorage.removeItem(O8_AUTH_STATE_KEY);
+            } catch {
+              /* ignore */
+            }
+          },
+        });
       } finally {
         processingRef.current = false;
       }
