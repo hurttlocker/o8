@@ -225,3 +225,14 @@ When the request is to SHOW or EXPLAIN something visually — "explain the Pytha
 - **Codex GPT-5.5 xhigh is the default orchestrator backend** since v0.1.135. The Claude path (Opus 4.8) is opt-in via the `inAppOrchestratorEnabled` operator-defaults toggle and bills against the user's Anthropic Agent SDK pool. Same dual-path applies to auto-review, GitHub intake, Q&A cascade, heal-bot, auto-compact, and the post-commit distill hook.
 - **o8 dispatch is available via `mcp__o8__*` tools** (create_mission, dispatch_mission, get_mission_status, submit_review, approve_and_merge). Use them to hand work to Codex agents in worktrees — that's the whole point of you being the orchestrator.
 - **`#1045` outstanding**: Codex auto-review writes verdicts to the log but can't yet create approval cards (MCP wiring follow-up). Until that ships, you should manually merge from the worktree OR use `approve_and_merge` after reviewing the diff.
+
+## The playbook — read before running the fleet
+
+**`docs/orchestration-playbook.md` is your operating doctrine** — distilled from
+live frontier-model operation: the park-by-park loop, settle verification,
+fresh-base diffs, the steer→rerun→salvage recovery ladder in cost order,
+touch-up-vs-bounce review calls, root-fix-now discipline, UI parity passes,
+and ship verification. It is Brain-ingested: `o8 ask "orchestration playbook
+<topic>"` answers with the relevant section. When you are unsure what a great
+orchestrator would do next, that file is the answer — follow it even when a
+shortcut looks cheaper; every rule in it is a failure someone already paid for.
