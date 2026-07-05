@@ -4,17 +4,13 @@ import packageJson from '../../../../package.json';
 import { toast } from '@/components/shared/ConfirmToastHost';
 import {
   APP_FONT_STACK,
-  MONO_FONT_STACK,
-  RAMS_ACCENT,
-  RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  HairlineRule,
-  SectionLabel,
   TabBreadcrumb,
   TabHeading,
   normalizeVersion,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsGroup, SettingsRow } from './grouped';
 import { ReportIssueSection } from './ReportIssueSection';
 
 export function AboutTab() {
@@ -47,158 +43,74 @@ export function AboutTab() {
         subtitle="A precision instrument for autonomous engineering teams. Built with Next.js and Tauri."
       />
 
-      {/* 01 — VERSION */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="01">VERSION</SectionLabel>
-
-        <div style={{
-          paddingTop: 4,
-          paddingBottom: 20,
-          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-        }}>
-          <div style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 10,
-            fontWeight: 400,
-            letterSpacing: '0.22em',
-            textTransform: 'uppercase',
-            color: RAMS_INK_QUIET,
-            marginBottom: 10,
-          }}>
-            (version)
-          </div>
-          <div style={{
-            fontFamily: MONO_FONT_STACK,
-            fontSize: 32,
-            fontWeight: 300,
-            color: 'var(--t-text)',
-            letterSpacing: '0.02em',
-            lineHeight: 1,
-          }}>
-            {normalizeVersion(packageJson.version)}
-          </div>
-          <div style={{
-            marginTop: 10,
-            fontFamily: APP_FONT_STACK,
-            fontSize: 10,
-            fontWeight: 400,
-            letterSpacing: '0.16em',
-            textTransform: 'uppercase',
-            color: RAMS_INK_QUIET,
-          }}>
-            UPDATED {nowIso}
-          </div>
-          <div style={{
-            marginTop: 16,
-            display: 'flex',
-            gap: 28,
-            flexWrap: 'wrap',
-          }}>
-            <InfoField label="PLATFORM" value={platform} />
-            <InfoField label="MODE" value={isProduction ? 'production' : 'development'} />
-          </div>
-        </div>
+      <section>
+        <SettingsGroup header="Version">
+          <SettingsRow label="Version" value={normalizeVersion(packageJson.version)} divider />
+          <SettingsRow label="Platform" value={platform} divider />
+          <SettingsRow label="Mode" value={isProduction ? 'Production' : 'Development'} divider />
+          <SettingsRow label="Updated" value={nowIso} />
+        </SettingsGroup>
       </section>
 
-      {/* 02 — LINKS */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="02">LINKS</SectionLabel>
-        <div style={{
-          paddingTop: 4,
-          paddingBottom: 20,
-          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-        }}>
-          {[
-            { label: 'github', href: 'https://github.com/hurttlocker/o8' },
-            { label: 'docs', href: 'https://github.com/hurttlocker/o8/tree/main/docs' },
-            { label: 'releases', href: 'https://github.com/hurttlocker/o8/releases/latest' },
-          ].map((link) => (
-            <a
-              key={link.label}
-              href={link.href}
-              target="_blank"
-              rel="noreferrer"
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                minHeight: 44,
-                fontFamily: APP_FONT_STACK,
-                fontSize: 14,
-                fontWeight: 400,
-                color: RAMS_ACCENT,
-                textDecoration: 'underline',
-                textUnderlineOffset: 3,
-                textDecorationColor: RAMS_HAIRLINE_SOFT,
-                letterSpacing: '-0.01em',
-                width: 'fit-content',
-              }}
-            >
-              {link.label} ›
-            </a>
-          ))}
-        </div>
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="Links">
+          <SettingsRow
+            label="github"
+            onPress={() => window.open('https://github.com/hurttlocker/o8', '_blank', 'noopener,noreferrer')}
+            chevron
+            divider
+          />
+          <SettingsRow
+            label="docs"
+            onPress={() => window.open('https://github.com/hurttlocker/o8/tree/main/docs', '_blank', 'noopener,noreferrer')}
+            chevron
+            divider
+          />
+          <SettingsRow
+            label="releases"
+            onPress={() => window.open('https://github.com/hurttlocker/o8/releases/latest', '_blank', 'noopener,noreferrer')}
+            chevron
+          />
+        </SettingsGroup>
       </section>
 
       <ReportIssueSection number="03" />
 
-      {/* 04 — CREDITS */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="04">CREDITS</SectionLabel>
-        <div style={{
-          paddingTop: 4,
-          paddingBottom: 20,
-          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          fontSize: 13,
-          color: 'var(--t-text-secondary)',
-          lineHeight: 1.6,
-          maxWidth: 620,
-        }}>
-          o8 is built on Next.js 16, Tauri v2, and the runtime adapter system. It ships with the Codex, Claude Code, and Gemini adapters and the operator MCP server that lets Claude drive the webview. Design language is Dieter Rams × Swiss-Korean editorial — less, but better.
-        </div>
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="Credits">
+          <div style={{
+            paddingTop: 14,
+            paddingBottom: 14,
+            paddingLeft: 14,
+            paddingRight: 14,
+            fontSize: 13,
+            color: 'var(--t-text-secondary)',
+            lineHeight: 1.6,
+            maxWidth: 620,
+          }}>
+            o8 is built on Next.js 16, Tauri v2, and the runtime adapter system. It ships with the Codex, Claude Code, and Gemini adapters and the operator MCP server that lets Claude drive the webview. Design language is Dieter Rams × Swiss-Korean editorial — less, but better.
+          </div>
+        </SettingsGroup>
       </section>
 
-      {/* 05 — ONBOARDING (replay the intro; always available) */}
-      <section style={{ marginBottom: isProduction ? 0 : 32 }}>
-        <SectionLabel number="05">ONBOARDING</SectionLabel>
-        <div style={{
-          paddingTop: 4,
-          paddingBottom: 20,
-          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 12,
-          maxWidth: 620,
-        }}>
-          <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.6 }}>
-            Replay the welcome flow — the o8 intro, repos, runtimes, and the rest. Handy to revisit, or to walk a teammate through it.
-          </div>
-          <button
-            type="button"
-            onClick={() => { window.dispatchEvent(new CustomEvent('o8-trigger-onboarding')); }}
-            style={accentLinkStyle(false)}
-          >
-            Replay onboarding
-          </button>
-        </div>
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup header="Onboarding">
+          <SettingsRow
+            label="Replay onboarding"
+            subtitle="Replay the welcome flow — the o8 intro, repos, runtimes, and the rest. Handy to revisit, or to walk a teammate through it."
+            onPress={() => { window.dispatchEvent(new CustomEvent('o8-trigger-onboarding')); }}
+            chevron
+          />
+        </SettingsGroup>
       </section>
 
       {/* Developer tools (dev only) */}
       {!isProduction ? (
-        <section>
-          <SectionLabel number="06">DEVELOPER</SectionLabel>
-          <div style={{
-            paddingTop: 4,
-            paddingBottom: 4,
-            display: 'flex',
-            gap: 24,
-            flexWrap: 'wrap',
-          }}>
-            <button
-              type="button"
-              onClick={async () => {
+        <section style={{ marginTop: 28 }}>
+          <SettingsGroup header="Developer">
+            <SettingsRow
+              label="Reset + run onboarding"
+              onPress={async () => {
                 await fetch('/api/setup/config', {
                   method: 'POST',
                   headers: { 'Content-Type': 'application/json' },
@@ -206,35 +118,27 @@ export function AboutTab() {
                 });
                 window.location.href = '/dashboard';
               }}
-              style={accentLinkStyle(false)}
-            >
-              reset + run onboarding
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                window.dispatchEvent(new CustomEvent('o8-trigger-onboarding'));
-              }}
-              style={accentLinkStyle(false)}
-            >
-              preview onboarding
-            </button>
-            <button
-              type="button"
-              onClick={async () => {
+              chevron
+              divider
+            />
+            <SettingsRow
+              label="Preview onboarding"
+              onPress={() => { window.dispatchEvent(new CustomEvent('o8-trigger-onboarding')); }}
+              chevron
+              divider
+            />
+            <SettingsRow
+              label="View detection"
+              subtitle="Logs the setup/detect result to the console"
+              onPress={async () => {
                 const res = await fetch('/api/setup/detect');
                 const data = await res.json();
                 console.log('[setup/detect]', data);
                 toast('Detection result logged to the console.', 'info');
               }}
-              style={quietLinkStyle(false)}
-            >
-              view detection
-            </button>
-          </div>
-          <div style={{ marginTop: 20 }}>
-            <HairlineRule />
-          </div>
+              chevron
+            />
+          </SettingsGroup>
         </section>
       ) : null}
 
@@ -252,76 +156,4 @@ export function AboutTab() {
       </div>
     </div>
   );
-}
-
-function InfoField({ label, value }: { label: string; value: string }) {
-  return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-      <span style={{
-        fontFamily: APP_FONT_STACK,
-        fontSize: 10,
-        fontWeight: 400,
-        letterSpacing: '0.18em',
-        textTransform: 'uppercase',
-        color: RAMS_INK_QUIET,
-      }}>
-        {label}
-      </span>
-      <span style={{
-        fontSize: 13,
-        fontWeight: 400,
-        color: 'var(--t-text)',
-        letterSpacing: '-0.005em',
-      }}>
-        {value}
-      </span>
-    </div>
-  );
-}
-
-function accentLinkStyle(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    gap: 8,
-    minHeight: 32,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: disabled ? RAMS_HAIRLINE_SOFT : 'var(--t-settings-accent-active-border, rgba(29, 78, 216, 0.32))',
-    background: disabled ? 'transparent' : 'var(--t-settings-accent-active-bg, rgba(29, 78, 216, 0.1))',
-    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 12,
-    fontWeight: 400,
-    letterSpacing: '-0.01em',
-    textTransform: 'capitalize' as const,
-    cursor: disabled ? 'default' : 'pointer',
-    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-    opacity: disabled ? 0.6 : 1,
-  };
-}
-
-function quietLinkStyle(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    minHeight: 44,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 13,
-    fontWeight: 400,
-    color: 'var(--t-text-muted)',
-    background: 'transparent',
-    border: 'none',
-    borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-    paddingTop: 2,
-    paddingBottom: 2,
-    paddingLeft: 0,
-    paddingRight: 0,
-    cursor: disabled ? 'default' : 'pointer',
-    letterSpacing: '-0.005em',
-    opacity: disabled ? 0.6 : 1,
-  };
 }
