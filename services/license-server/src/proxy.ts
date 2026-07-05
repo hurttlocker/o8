@@ -71,6 +71,24 @@ function geminiCostMicroUsd(promptTokens: number, completionTokens: number): num
   return usdToMicro(usd);
 }
 
+/**
+ * OpenRouter's audio/transcriptions returns no cost field, so whisper spend must
+ * be ESTIMATED (it was hardcoded to $0 before, which hid dictation spend). Price
+ * per audio-MINUTE; duration derived from the input_audio byte size at the
+ * recorder's bitrate. Amounts are tiny but no longer zero, so founders see them.
+ * Env-tunable; the per-account daily cap is still the real guardrail.
+ */
+const WHISPER_PRICE_PER_MIN_USD = envUsd('PROXY_WHISPER_PRICE_PER_MIN_USD', 0.0007); // ~$0.04/hr, whisper-large-v3-turbo
+const DICTATION_BITRATE_BYTES_PER_SEC = 2500; // ~20 kbps opus (browser MediaRecorder voice default)
+
+function transcribeCostMicroUsd(body: Record<string, unknown>): number {
+  const b64 = typeof body.input_audio === 'string' ? body.input_audio : '';
+  if (!b64) return 0;
+  const bytes = Math.floor(b64.length * 0.75); // base64 → raw audio bytes
+  const seconds = bytes / DICTATION_BITRATE_BYTES_PER_SEC;
+  return usdToMicro((seconds / 60) * WHISPER_PRICE_PER_MIN_USD);
+}
+
 const OPENROUTER_URL = 'https://openrouter.ai/api/v1/chat/completions';
 const OPENROUTER_TRANSCRIBE_URL = 'https://openrouter.ai/api/v1/audio/transcriptions';
 
@@ -467,6 +485,6 @@ export async function handleTranscribe(c: Context): Promise<Response> {
 
   const json = (await upstream.json()) as Record<string, unknown>;
   const model = typeof body.model === 'string' ? body.model : null;
-  await recordUsage({ sub, plan, kind: 'transcribe', model, costMicroUsd: 0 });
+  await recordUsage({ sub, plan, kind: 'transcribe', model, costMicroUsd: transcribeCostMicroUsd(body) });
   return c.json(json);
 }
