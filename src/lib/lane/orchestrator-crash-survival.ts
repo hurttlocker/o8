@@ -15,6 +15,7 @@ export interface OrchestratorTurnRecord {
   pid: number;
   stdoutPath: string;
   stderrPath: string;
+  stdoutOffset?: number;
   startedAt: number;
   assistantMessageId?: string | null;
   assistantStartedAtMs?: number | null;
@@ -105,6 +106,7 @@ export function createOrchestratorTurnRecordForFiles(input: {
   pid: number;
   stdoutPath: string;
   stderrPath: string;
+  stdoutOffset?: number;
   assistantMessageId?: string | null;
   assistantStartedAtMs?: number | null;
   model?: string | null;
@@ -120,6 +122,7 @@ export function createOrchestratorTurnRecordForFiles(input: {
     pid: input.pid,
     stdoutPath: input.stdoutPath,
     stderrPath: input.stderrPath,
+    stdoutOffset: input.stdoutOffset ?? 0,
     startedAt: Date.now(),
     assistantMessageId: input.assistantMessageId ?? null,
     assistantStartedAtMs: input.assistantStartedAtMs ?? null,

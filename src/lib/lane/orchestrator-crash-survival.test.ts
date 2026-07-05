@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   crashSurvivableOrchestratorEnabled,
   createOrchestratorTurnRecord,
+  createOrchestratorTurnRecordForFiles,
   finishOrchestratorTurn,
   isPidAlive,
   listActiveOrchestratorTurns,
@@ -114,6 +115,37 @@ describe('orchestrator crash survival helpers', () => {
       { type: 'text', text: 'recovered text' },
       { type: 'done', sessionId: 'codex-thread-replay' },
     ]);
+    expect(listActiveOrchestratorTurns()).toHaveLength(0);
+  });
+
+  it('starts replay at the durable stdout offset', () => {
+    const stdoutPath = join(root, 'offset.jsonl');
+    const stderrPath = join(root, 'offset.stderr.log');
+    const previousTurn = `${JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'old text' } })}\n`;
+    writeFileSync(
+      stdoutPath,
+      previousTurn + `${JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'new text' } })}\n`,
+      'utf8',
+    );
+    writeFileSync(stderrPath, '', 'utf8');
+    createOrchestratorTurnRecordForFiles({
+      backend: 'codex',
+      sessionName: 'cortex-codex-orchestrator-offset',
+      repoPath: root,
+      pid: 0,
+      stdoutPath,
+      stderrPath,
+      stdoutOffset: Buffer.byteLength(previousTurn, 'utf8'),
+    });
+
+    const texts: string[] = [];
+    rehydrateCodexOrchestratorTurns({
+      onReboundEvent: (_record, event) => {
+        if (event.type === 'text') texts.push(event.text);
+      },
+    });
+
+    expect(texts).toEqual(['new text']);
     expect(listActiveOrchestratorTurns()).toHaveLength(0);
   });
 });

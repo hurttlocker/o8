@@ -56,6 +56,7 @@ import {
   isPidAlive,
   listActiveOrchestratorTurns,
   openAppendFile,
+  readJsonlLines,
   tailJsonlFile,
   updateOrchestratorTurnPid,
   type OrchestratorCrashSurvivalMeta,
@@ -276,9 +277,7 @@ function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord, options: Or
   };
   w.activeTurn = turn;
 
-  const replay = readFileSync(record.stdoutPath, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim());
+  const replay = readJsonlLines(record.stdoutPath, record.stdoutOffset ?? 0).lines;
   for (const line of replay) {
     if (!handleClaudeJsonLine(session, w, line)) break;
   }
@@ -1048,6 +1047,7 @@ export async function sendToOrchestrator(
       return;
     }
 
+    const crashOffset = w.crashStdoutPath ? fileSize(w.crashStdoutPath) : 0;
     const crashRecord = crashSurvivableOrchestratorEnabled() && w.crashStdoutPath && w.crashStderrPath && proc.pid
       ? createOrchestratorTurnRecordForFiles({
           backend: 'claude',
@@ -1057,12 +1057,12 @@ export async function sendToOrchestrator(
           pid: proc.pid,
           stdoutPath: w.crashStdoutPath,
           stderrPath: w.crashStderrPath,
+          stdoutOffset: crashOffset,
           assistantMessageId: options.crashSurvival?.assistantMessageId ?? null,
           assistantStartedAtMs: options.crashSurvival?.assistantStartedAtMs ?? null,
           model,
         })
       : null;
-    const crashOffset = crashRecord ? fileSize(crashRecord.stdoutPath) : 0;
 
     // #457 — Hang watchdog. Kills the resident proc (surfacing WHY) if the turn
     // never settles on a `result`.

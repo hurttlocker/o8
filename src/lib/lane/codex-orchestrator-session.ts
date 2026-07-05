@@ -46,6 +46,7 @@ import {
   isPidAlive,
   listActiveOrchestratorTurns,
   openAppendFile,
+  readJsonlLines,
   tailJsonlFile,
   updateOrchestratorTurnPid,
   type OrchestratorCrashSurvivalMeta,
@@ -333,9 +334,7 @@ export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydr
       emit({ type: 'done', sessionId: lineState.threadId, cost: lineState.cost });
       finishOrchestratorTurn(record);
     };
-    const replay = existsSync(record.stdoutPath)
-      ? readFileSync(record.stdoutPath, 'utf8').split('\n').filter((line) => line.trim())
-      : [];
+    const replay = readJsonlLines(record.stdoutPath, record.stdoutOffset ?? 0).lines;
     for (const line of replay) {
       handleLine(line);
     }
