@@ -23,6 +23,7 @@ export function exitWhenBundleDeleted(label: string): void {
 
   const timer = setInterval(() => {
     if (!existsSync(ownPath)) {
+      clearInterval(timer);
       console.error(`[${label}] bundle deleted (${ownPath}) — o8 was uninstalled; exiting so no orphan recreates ~/.o8`);
       process.exit(0);
     }

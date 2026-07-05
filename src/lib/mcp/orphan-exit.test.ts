@@ -9,6 +9,9 @@ vi.mock('node:fs', async (importOriginal) => ({
 import { exitWhenBundleDeleted } from './orphan-exit';
 
 afterEach(() => {
+  // Clear the armed interval while timers are still faked — a survivor firing
+  // mid-suite with the mock reset failed CI (logged during vitest teardown).
+  vi.clearAllTimers();
   vi.useRealTimers();
   existsSyncMock.mockReset();
   vi.restoreAllMocks();
