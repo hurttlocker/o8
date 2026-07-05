@@ -452,7 +452,7 @@ function ProjectContextSection({
               fontWeight: 400,
               letterSpacing: '-0.01em',
             }}
-            onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(29, 78, 216, 0.06)'; }}
+            onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-settings-accent-active-bg, rgba(29, 78, 216, 0.06))'; }}
             onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
           >
             {action}
