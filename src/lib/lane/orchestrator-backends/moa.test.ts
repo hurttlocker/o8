@@ -56,6 +56,8 @@ const isProposerCall = (c: MockCall) => Boolean(c.options?.threadId?.includes(':
 const isAggregatorCall = (c: MockCall) => c.options?.threadId === MAIN_THREAD;
 
 function setup(opts: {
+  config?: MoaConfig;
+  claudeEvents?: OrchestratorEvent[];
   claudeProposal?: string;
   codexEvents?: OrchestratorEvent[];
   aggregatorText?: string;
@@ -66,7 +68,9 @@ function setup(opts: {
   // Claude is BOTH a proposer (side-thread) and the aggregator (main thread) —
   // one backend, distinguished by threadId. That IS the structural independence.
   const claude = mockBackend('claude', claudeCalls, (call) =>
-    isProposerCall(call)
+    isProposerCall(call) && opts.claudeEvents
+      ? opts.claudeEvents
+      : isProposerCall(call)
       ? [{ type: 'text', text: opts.claudeProposal ?? 'CLAUDE_PROPOSAL' }, { type: 'done', sessionId: 'c1', cost: null }]
       : [{ type: 'text', text: opts.aggregatorText ?? 'SYNTHESIZED ANSWER' }, { type: 'done', sessionId: 'agg', cost: null }],
   );
@@ -75,7 +79,7 @@ function setup(opts: {
   );
 
   const deps: MoaDeps = { resolveBackend: (id) => (id === 'codex' ? codex : claude) };
-  const backend = makeMoaBackend(CONFIG, deps);
+  const backend = makeMoaBackend(opts.config ?? CONFIG, deps);
   return { backend, claudeCalls, codexCalls };
 }
 
@@ -182,6 +186,32 @@ describe('Collide fusion engine', () => {
     const agg = claudeCalls.find(isAggregatorCall)!;
     expect(agg.message).not.toContain('CODEX_WANTS_EXTERNAL'); // quarantined out of synthesis
     expect(claudeCalls.filter(isAggregatorCall)).toHaveLength(1);
+  });
+
+  it('(d4) Codex aggregation excludes a Claude proposer that attempts dispatch', async () => {
+    const events: OrchestratorEvent[] = [];
+    const codexAggregates: MoaConfig = {
+      ...CONFIG,
+      aggregator: { backend: 'codex', model: 'm-codex-agg' },
+    };
+    const { backend, codexCalls } = setup({
+      config: codexAggregates,
+      claudeEvents: [
+        { type: 'text', text: 'CLAUDE_WANTS_TO_DISPATCH' },
+        { type: 'tool_use', id: 't1', name: 'mcp__cortex__cortex_launch_agent', input: { task: 'go' } },
+      ],
+    });
+    await backend.sendTurn('/repo', 'build X', (e) => events.push(e), { threadId: MAIN_THREAD });
+
+    const breach = events.find((e) => e.type === 'collide_proposal' && e.breach) as
+      | Extract<OrchestratorEvent, { type: 'collide_proposal' }> | undefined;
+    expect(breach).toBeDefined();
+    expect(breach!.proposer).toBe('Claude');
+    expect(breach!.text).toBe('');
+    const agg = codexCalls.find(isAggregatorCall)!;
+    expect(agg.message).not.toContain('CLAUDE_WANTS_TO_DISPATCH');
+    expect(agg.message).toContain('excluded');
+    expect(codexCalls.filter(isAggregatorCall)).toHaveLength(1);
   });
 
   it('(e) proposers are independent — distinct side-thread ids (indexed by position), separate from main', async () => {

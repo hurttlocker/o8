@@ -11,6 +11,7 @@
 
 import type { OrchestratorBackendId } from './types';
 import type { MoaConfig, MoaParticipant } from './moa';
+import { resolveCollideAggregatorSync, type CollideAggregator } from '@/lib/operator/defaults';
 
 /** Default brain — Claude (opus, max) + Codex (gpt-5.5, xhigh) → Claude (opus, max). */
 export const DEFAULT_COLLIDE_CONFIG: MoaConfig = {
@@ -57,13 +58,22 @@ function parseAggregatorEnv(raw: string | undefined): MoaParticipant | null {
   }
 }
 
+function aggregatorFor(defaultSetting: CollideAggregator, activeBackend?: OrchestratorBackendId): MoaParticipant {
+  const backend = defaultSetting === 'auto'
+    ? activeBackend === 'codex' ? 'codex' : 'claude'
+    : defaultSetting;
+  const fallback = DEFAULT_COLLIDE_CONFIG.proposers.find((p) => p.backend === backend);
+  return fallback ?? { backend };
+}
+
 /**
  * Resolve the active Collide config. Pure-ish: reads env each call so an
  * override applies on the next turn. Always returns a valid config (falls back
  * to the code default piece-by-piece).
  */
-export function resolveCollideConfig(): MoaConfig {
+export function resolveCollideConfig(activeBackend?: OrchestratorBackendId): MoaConfig {
   const proposers = parseProposersEnv(process.env.O8_COLLIDE_PROPOSERS) ?? DEFAULT_COLLIDE_CONFIG.proposers;
-  const aggregator = parseAggregatorEnv(process.env.O8_COLLIDE_AGGREGATOR) ?? DEFAULT_COLLIDE_CONFIG.aggregator;
+  const aggregator = parseAggregatorEnv(process.env.O8_COLLIDE_AGGREGATOR)
+    ?? aggregatorFor(resolveCollideAggregatorSync(), activeBackend);
   return { id: 'collide', label: 'Collide', proposers, aggregator };
 }

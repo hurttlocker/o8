@@ -530,6 +530,8 @@ export function InputButtons({
           onEffortChange={onEffortChange}
           swarmEnabled={swarmEnabled}
           onSetSwarm={onSetSwarm}
+          collideEnabled={collideEnabled}
+          onSetCollide={onSetCollide}
         />
       ) : null}
 
@@ -603,41 +605,6 @@ export function InputButtons({
         <SessionRulesChip threadId={sessionRulesThreadId} repoPath={repoPath} />
       ) : null}
 
-      {/* Collide / MoA toggle — icon-only, sibling to the permission chip.
-          Active = accent-tinted; Claude + Codex collide, Claude synthesizes. */}
-      {onSetCollide ? (
-        <button
-          type="button"
-          onClick={() => onSetCollide(!collideEnabled)}
-          aria-label={`Collide (Claude + Codex)${collideEnabled ? ' — on' : ''}`}
-          aria-pressed={collideEnabled}
-          title={`Collide — Claude and Codex each take a pass independently, then Claude fuses the best of both into one answer. Two frontier models thinking together, on your own subscriptions. Sharper when the problem's worth it, a touch slower. Toggle per message.${collideEnabled ? ' (On — click to turn off.)' : ''}`}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            width: 24,
-            height: 24,
-            borderRadius: 6,
-            borderWidth: 0,
-            background: collideEnabled ? 'var(--t-accent-soft)' : 'transparent',
-            color: collideEnabled ? 'var(--t-accent)' : 'var(--t-text-faint)',
-            cursor: 'pointer',
-            transition: 'color 120ms, background 120ms',
-          }}
-          onMouseEnter={(event) => {
-            if (!collideEnabled) event.currentTarget.style.color = 'var(--t-text)';
-          }}
-          onMouseLeave={(event) => {
-            if (!collideEnabled) event.currentTarget.style.color = 'var(--t-text-faint)';
-          }}
-        >
-          <svg width={15} height={15} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.9" style={{ display: 'block', flexShrink: 0 }}>
-            <circle cx="9" cy="12" r="6" />
-            <circle cx="15" cy="12" r="6" />
-          </svg>
-        </button>
-      ) : null}
       </div>
 
       {/* Right action cluster — pinned, never shrinks or clips. */}

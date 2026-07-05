@@ -2854,6 +2854,9 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     : undefined;
 
   const backend = getOrchestratorBackend(resolveMsgBackendId(msg));
+  const collideBaseBackend = backend.id === 'collide' && isOrchestratorBackendId(msg.collideBaseBackend)
+    ? msg.collideBaseBackend
+    : undefined;
   const agentId = resolveMsgAgentId(msg, backend.id);
   const agentTag = agentId || undefined;
   const threadId = resolveMsgThreadId(msg);
@@ -2971,7 +2974,7 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     const sendTurn = (
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
-    ): Promise<void> => backend.sendTurn(repoPath, turnMessage, onEvent, { permissionMode, thinkingEffort, model, agent: agentTag, threadId, signal, ...(attachments?.length ? { attachments } : {}) });
+    ): Promise<void> => backend.sendTurn(repoPath, turnMessage, onEvent, { permissionMode, thinkingEffort, model, collideBaseBackend, agent: agentTag, threadId, signal, ...(attachments?.length ? { attachments } : {}) });
 
     // Ensure a subscription exists for the selected backend + agent.
     orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
