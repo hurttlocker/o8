@@ -32,6 +32,7 @@ type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 type WorkersUseBrain = 'off' | 'auto' | 'all';
 type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
 type AutoApplyUpdates = 'off' | 'when-idle';
+type CollideAggregator = 'auto' | 'claude' | 'codex';
 
 interface OperatorDefaults {
   parallelCap: number;
@@ -59,6 +60,7 @@ interface OperatorDefaults {
   targetingTriage: TargetingTierUI;
   targetingAction: TargetingTierUI;
   autoApplyUpdates: AutoApplyUpdates;
+  collideAggregator: CollideAggregator;
 }
 
 interface TargetingTierUI {
@@ -419,6 +421,7 @@ export function OperatorDefaultsTab() {
   const classAComposerEnv = sources?.classAComposer === 'env';
   const workersUseBrainEnv = sources?.workersUseBrain === 'env';
   const autoApplyUpdatesEnv = sources?.autoApplyUpdates === 'env';
+  const collideAggregatorEnv = sources?.collideAggregator === 'env';
 
   const envDisabledReason = 'Controlled by environment variable. Unset to manage from Settings.';
 
@@ -974,6 +977,28 @@ export function OperatorDefaultsTab() {
               ]}
               onChange={(next) => { void updateField('orchestratorBackend', next); }}
               disabled={sources?.orchestratorBackend === 'env' || busyField === 'orchestratorBackend'}
+            />
+          }
+        />
+        <Row
+          label="Collide aggregator"
+          description={values.collideAggregator === 'codex'
+            ? 'Codex decides: Claude and Codex propose independently, then Codex synthesizes and works on the main thread.'
+            : values.collideAggregator === 'claude'
+              ? 'Claude decides: Claude and Codex propose independently, then Claude synthesizes and works on the main thread.'
+              : 'Auto: follows the composer backend. Codex mode makes Codex decide; Claude models make Claude decide.'}
+          source={sources.collideAggregator}
+          disabledReason={collideAggregatorEnv ? envDisabledReason : undefined}
+          right={
+            <SegmentedControl<CollideAggregator>
+              value={values.collideAggregator}
+              options={[
+                { value: 'auto', label: 'Auto' },
+                { value: 'claude', label: 'Claude' },
+                { value: 'codex', label: 'Codex' },
+              ]}
+              onChange={(next) => { void updateField('collideAggregator', next); }}
+              disabled={collideAggregatorEnv || busyField === 'collideAggregator'}
             />
           }
         />

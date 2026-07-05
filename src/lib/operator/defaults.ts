@@ -121,6 +121,12 @@ export function isOrchestratorBackendSetting(value: unknown): value is Orchestra
     || value === 'hermes' || value === 'collide' || value === 'fable';
 }
 
+export type CollideAggregator = 'auto' | 'claude' | 'codex';
+
+export function isCollideAggregator(value: unknown): value is CollideAggregator {
+  return value === 'auto' || value === 'claude' || value === 'codex';
+}
+
 export interface OperatorDefaults {
   parallelCap: number;
   overlapGate: OverlapGateMode;
@@ -234,6 +240,8 @@ export interface OperatorDefaults {
   targetingAction: TargetingTier;
   /** Auto-apply downloaded desktop updates only under conservative idle gates. */
   autoApplyUpdates: AutoApplyUpdates;
+  /** Collide aggregator override. Auto follows the active composer backend. */
+  collideAggregator: CollideAggregator;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -281,6 +289,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   targetingTriage: { runtime: 'codex', model: '', effort: 'low' },
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
   autoApplyUpdates: 'off',
+  collideAggregator: 'auto',
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -471,6 +480,12 @@ function envOrchestratorBackend(): OrchestratorBackendSetting | null {
   return null;
 }
 
+function envCollideAggregator(): CollideAggregator | null {
+  const raw = process.env.O8_COLLIDE_AGGREGATOR_DEFAULT?.trim();
+  if (raw && isCollideAggregator(raw)) return raw;
+  return null;
+}
+
 function envAutoApplyUpdates(): AutoApplyUpdates | null {
   const raw = process.env.O8_AUTO_APPLY_UPDATES?.trim();
   if (raw === 'off' || raw === 'when-idle') return raw;
@@ -505,6 +520,7 @@ interface StoredOperatorDefaults {
   targetingTriage?: TargetingTier;
   targetingAction?: TargetingTier;
   autoApplyUpdates?: AutoApplyUpdates;
+  collideAggregator?: CollideAggregator;
 }
 
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
@@ -595,6 +611,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (stored.autoApplyUpdates === 'off' || stored.autoApplyUpdates === 'when-idle') {
     result.autoApplyUpdates = stored.autoApplyUpdates;
   }
+  if (isCollideAggregator(stored.collideAggregator)) {
+    result.collideAggregator = stored.collideAggregator;
+  }
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -628,6 +647,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envBrain = envWorkersUseBrain();
   const envOrchBackend = envOrchestratorBackend();
   const envApplyUpdates = envAutoApplyUpdates();
+  const envCollideAgg = envCollideAggregator();
   const envTriage = envTargetingTier('TRIAGE');
   const envAction = envTargetingTier('ACTION');
 
@@ -661,6 +681,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     targetingTriage: mergeTier(envTriage, fileValues.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage),
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
     autoApplyUpdates: envApplyUpdates ?? fileValues.autoApplyUpdates ?? OPERATOR_DEFAULTS_FALLBACK.autoApplyUpdates,
+    collideAggregator: envCollideAgg ?? fileValues.collideAggregator ?? OPERATOR_DEFAULTS_FALLBACK.collideAggregator,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -693,6 +714,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     targetingTriage: envTriage !== null ? 'env' : fileValues.targetingTriage !== undefined ? 'file' : 'default',
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
     autoApplyUpdates: envApplyUpdates !== null ? 'env' : fileValues.autoApplyUpdates !== undefined ? 'file' : 'default',
+    collideAggregator: envCollideAgg !== null ? 'env' : fileValues.collideAggregator !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -845,6 +867,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
     }
     stored.autoApplyUpdates = update.autoApplyUpdates;
   }
+  if (update.collideAggregator !== undefined) {
+    if (!isCollideAggregator(update.collideAggregator)) {
+      throw new Error('collideAggregator must be "auto", "claude", or "codex".');
+    }
+    stored.collideAggregator = update.collideAggregator;
+  }
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {
       throw new Error('targetingTriage must be { runtime: dispatch-runtime, model: string, effort: thinking-effort }.');
@@ -945,6 +973,10 @@ export function resolveWorkersUseBrainSync(): WorkersUseBrain {
  */
 export function resolveOrchestratorBackendSync(): OrchestratorBackendSetting {
   return getOperatorDefaultsSync().values.orchestratorBackend;
+}
+
+export function resolveCollideAggregatorSync(): CollideAggregator {
+  return getOperatorDefaultsSync().values.collideAggregator;
 }
 
 /** The Targeting Machine's cheap triage/rationale tier (env > file > fallback). */

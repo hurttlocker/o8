@@ -2,6 +2,7 @@ import { NextResponse } from 'next/server';
 
 import {
   getOperatorDefaults,
+  isCollideAggregator,
   isOrchestratorBackendSetting,
   updateOperatorDefaults,
   type OperatorDefaults,
@@ -194,6 +195,14 @@ function normalizeUpdate(body: Record<string, unknown>): Partial<OperatorDefault
       throw new Error('autoApplyUpdates must be one of "off", "when-idle".');
     }
     update.autoApplyUpdates = raw;
+  }
+
+  if (body.collideAggregator !== undefined) {
+    const raw = body.collideAggregator;
+    if (!isCollideAggregator(raw)) {
+      throw new Error('collideAggregator must be one of "auto", "claude", "codex".');
+    }
+    update.collideAggregator = raw;
   }
 
   const validateTier = (raw: unknown, name: string): OperatorDefaults['targetingTriage'] => {
