@@ -31,6 +31,7 @@ type DispatchRuntime = 'codex' | 'gemini' | 'opencode';
 type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 type WorkersUseBrain = 'off' | 'auto' | 'all';
 type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
+type AutoApplyUpdates = 'off' | 'when-idle';
 
 interface OperatorDefaults {
   parallelCap: number;
@@ -57,6 +58,7 @@ interface OperatorDefaults {
   orchestratorBackend: OrchestratorBackendSetting;
   targetingTriage: TargetingTierUI;
   targetingAction: TargetingTierUI;
+  autoApplyUpdates: AutoApplyUpdates;
 }
 
 interface TargetingTierUI {
@@ -416,6 +418,7 @@ export function OperatorDefaultsTab() {
   const runtimeEnv = sources?.defaultDispatchRuntime === 'env';
   const classAComposerEnv = sources?.classAComposer === 'env';
   const workersUseBrainEnv = sources?.workersUseBrain === 'env';
+  const autoApplyUpdatesEnv = sources?.autoApplyUpdates === 'env';
 
   const envDisabledReason = 'Controlled by environment variable. Unset to manage from Settings.';
 
@@ -643,6 +646,23 @@ export function OperatorDefaultsTab() {
               checked={values.supervisorAutoEscalate}
               disabled={supervisorEnv || busyField === 'supervisorAutoEscalate'}
               onChange={(next) => { void updateField('supervisorAutoEscalate', next); }}
+            />
+          }
+        />
+        <Row
+          label="Auto-apply updates"
+          description="Apply a downloaded desktop update automatically only after all lanes are idle and the operator has been inactive for five minutes."
+          source={sources.autoApplyUpdates}
+          disabledReason={autoApplyUpdatesEnv ? envDisabledReason : undefined}
+          right={
+            <SegmentedControl<AutoApplyUpdates>
+              value={values.autoApplyUpdates}
+              options={[
+                { value: 'off', label: 'Off' },
+                { value: 'when-idle', label: 'When idle' },
+              ]}
+              onChange={(next) => { void updateField('autoApplyUpdates', next); }}
+              disabled={autoApplyUpdatesEnv || busyField === 'autoApplyUpdates'}
             />
           }
         />
