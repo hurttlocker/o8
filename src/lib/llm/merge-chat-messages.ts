@@ -30,6 +30,22 @@ export interface ChatMessageLike {
   timestamp?: unknown;
 }
 
+function duplicateAdjacentMessage(left: ChatMessageLike, right: ChatMessageLike): boolean {
+  const leftRecord = left as Record<string, unknown>;
+  const rightRecord = right as Record<string, unknown>;
+  return typeof leftRecord.role === 'string' && leftRecord.role === rightRecord.role
+    && typeof leftRecord.content === 'string' && leftRecord.content === rightRecord.content;
+}
+
+function collapseAdjacentDuplicates<T extends ChatMessageLike>(messages: T[]): T[] {
+  const next: T[] = [];
+  for (const message of messages) {
+    if (next.length > 0 && duplicateAdjacentMessage(next[next.length - 1], message)) continue;
+    next.push(message);
+  }
+  return next.length === messages.length ? messages : next;
+}
+
 function timestampOf(message: ChatMessageLike): number | null {
   const value = message?.timestamp;
   if (typeof value === 'number' && Number.isFinite(value)) return value;
@@ -88,7 +104,7 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
   // to be pinned (the normal full-transcript POST) — return it untouched, no
   // reordering. If we pinned anything we must fall through to the sort so the
   // corrected timestamps actually reorder the thread.
-  if (preserved.length === 0 && !pinnedAny) return inboundList;
+  if (preserved.length === 0 && !pinnedAny) return collapseAdjacentDuplicates(inboundList);
 
   const concat: T[] = [...normalizedInbound, ...preserved];
   const decorated = concat.map((message, index) => ({ message, index, ts: timestampOf(message) }));
@@ -100,5 +116,5 @@ export function mergeChatMessages<T extends ChatMessageLike>(existing: T[], inbo
     else carry = entry.ts;
   }
   decorated.sort((a, b) => (a.ts! - b.ts!) || (a.index - b.index));
-  return decorated.map((entry) => entry.message);
+  return collapseAdjacentDuplicates(decorated.map((entry) => entry.message));
 }

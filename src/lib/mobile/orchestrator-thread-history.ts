@@ -398,6 +398,7 @@ export function appendMobileOrchestratorUserMessage(input: {
   repoPath: string;
   message: string;
   backend?: MobileOrchestratorBackend | null;
+  timestampMs?: number;
 }): MobileOrchestratorThread | null {
   const tabId = input.tabId;
   if (!tabId?.startsWith('thoughts-')) return null;
@@ -405,7 +406,10 @@ export function appendMobileOrchestratorUserMessage(input: {
   const content = input.message.trim();
   if (!content) return readProjectedThread(tabId);
 
-  const now = new Date();
+  const timestamp = typeof input.timestampMs === 'number' && Number.isFinite(input.timestampMs)
+    ? input.timestampMs
+    : Date.now();
+  const now = new Date(timestamp);
   const nowIso = now.toISOString();
   const existing = readHistoryRecord(tabId) ?? {
     messages: [],
@@ -434,7 +438,7 @@ export function appendMobileOrchestratorUserMessage(input: {
         id: `user-${now.getTime()}`,
         role: 'user',
         content,
-        timestamp: now.getTime(),
+        timestamp,
       },
     ];
 

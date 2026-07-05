@@ -99,6 +99,13 @@ describe('orchestrator socket — first-turn streaming race', () => {
     expect(h.currentAssistantRef.current?.chunks).toContain('tok');
   });
 
+  it('uses the server-persisted assistant id for streamed bubbles', () => {
+    const h = makeHarness({ status: 'busy', messages: [userMsg] });
+
+    h.fire({ channel: 'orchestrator', event: 'output', data: { text: 'tok', assistantMessageId: 'assistant-123' } });
+    expect(h.currentAssistantRef.current?.id).toBe('assistant-123');
+  });
+
   it('a tool-use event also promotes to busy instead of dropping the pill', () => {
     const h = makeHarness({ status: 'ready' });
 
