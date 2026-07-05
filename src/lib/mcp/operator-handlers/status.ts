@@ -155,6 +155,11 @@ export const STATUS_TOOLS: McpTool[] = [
           type: 'string',
           description: 'Orchestrator model id, e.g. "claude-opus-4-8" or "claude-sonnet-5". Non-empty string.',
         },
+        orchestratorBackend: {
+          type: 'string',
+          enum: ['auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable'],
+          description: 'Active in-app orchestrator backend. Use "codex" for Codex GPT-5.5, "claude" for Claude Code, or "auto" for legacy toggle resolution.',
+        },
         thinkingEffort: {
           type: 'string',
           enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
@@ -193,6 +198,7 @@ export const STATUS_TOOLS: McpTool[] = [
 
 const OPERATOR_DEFAULTS_KEYS = [
   'orchestratorModel',
+  'orchestratorBackend',
   'thinkingEffort',
   'overlapGate',
   'parallelCap',

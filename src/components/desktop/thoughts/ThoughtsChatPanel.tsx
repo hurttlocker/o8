@@ -89,6 +89,8 @@ import type {
 import {
   fetchThoughtsOperatorDefaults,
   THOUGHTS_OPERATOR_DEFAULTS_FALLBACK,
+  type ThoughtsOperatorDefaults,
+  type OrchestratorBackendSetting,
 } from './operator-defaults';
 import {
   mapHistoryMessagesToTranscript,
@@ -110,6 +112,23 @@ function isRuntimeSessionKey(sessionKey: string): boolean {
 function repoPathLabel(path: string | null | undefined): string | null {
   if (!path?.trim()) return null;
   return path.split('/').filter(Boolean).pop() ?? path;
+}
+
+function resolveActiveComposerBackend(defaults: {
+  orchestratorBackend: OrchestratorBackendSetting;
+  inAppOrchestratorEnabled: boolean;
+}): OrchestratorBackendSetting {
+  if (defaults.orchestratorBackend !== 'auto') return defaults.orchestratorBackend;
+  return defaults.inAppOrchestratorEnabled ? 'claude' : 'codex';
+}
+
+function formatComposerBackendLabel(backend: OrchestratorBackendSetting, model: string): string {
+  if (backend === 'codex') return 'Codex GPT-5.5';
+  if (backend === 'fable') return 'Fable 5';
+  if (backend === 'openclaw') return 'OpenClaw';
+  if (backend === 'hermes') return 'Hermes';
+  if (backend === 'collide') return 'Collide';
+  return formatModelLabel(model);
 }
 
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
@@ -319,6 +338,9 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   }, [handleSelectOrchestrationMode, open]);
 
   const [operatorDefaults, setOperatorDefaults] = useState(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK);
+  const [orchestratorBackend, setOrchestratorBackend] = useState<OrchestratorBackendSetting>(
+    () => resolveActiveComposerBackend(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK),
+  );
   const [adaptiveThinkingEnabled, setAdaptiveThinkingEnabled] = useState(
     () => resolveInitialOrchestratorThinkingPreferences(THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort).adaptiveThinkingEnabled,
   );
@@ -420,6 +442,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       const defaults = await fetchThoughtsOperatorDefaults(controller.signal);
       if (controller.signal.aborted) return;
       setOperatorDefaults(defaults);
+      setOrchestratorBackend(resolveActiveComposerBackend(defaults));
       if (thinkingPreferenceTouchedRef.current) return;
       const nextThinkingPreferences = resolveInitialOrchestratorThinkingPreferences(defaults.thinkingEffort);
       setAdaptiveThinkingEnabled(nextThinkingPreferences.adaptiveThinkingEnabled);
@@ -1895,6 +1918,29 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     writeStoredOrchestratorThinkingOverride(nextOverride);
   }, []);
 
+  const handleBackendChange = useCallback((next: OrchestratorBackendSetting) => {
+    setOrchestratorBackend(next);
+    void fetch('/api/panel/operator-defaults', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ orchestratorBackend: next }),
+    })
+      .then((response) => response.json().catch(() => null))
+      .then((payload: { values?: Partial<ThoughtsOperatorDefaults> } | null) => {
+        if (!payload?.values) return;
+        const defaults: ThoughtsOperatorDefaults = {
+          ...operatorDefaults,
+          ...payload.values,
+        };
+        setOperatorDefaults(defaults);
+        setOrchestratorBackend(resolveActiveComposerBackend(defaults));
+      })
+      .catch((error) => {
+        console.log('[thoughts] failed to persist orchestrator backend', error);
+        setOrchestratorBackend(resolveActiveComposerBackend(operatorDefaults));
+      });
+  }, [operatorDefaults]);
+
   const handleCopyMarkdown = useCallback(async (): Promise<boolean> => {
     if (displayMessages.length === 0) return false;
     if (!navigator.clipboard?.writeText) {
@@ -2089,12 +2135,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         onEditSteer={handleEditSteer}
         onEditingSteerChange={setEditingSteerId}
         onSlashCommand={handleSlashCommand}
-        modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? formatModelLabel(orchestratorModel) : activeTargetLabel}
-        modelId={orchestratorModel}
-        onModelChange={(model) => {
+        modelLabel={isChatMode ? selectedChatModel.label : isSingleMode ? activeTargetLabel : isOrchestratorMode ? formatComposerBackendLabel(orchestratorBackend, orchestratorModel) : activeTargetLabel}
+        modelId={isOrchestratorMode ? orchestratorModel : undefined}
+        onModelChange={isOrchestratorMode ? (model) => {
           setOrchestratorModel(model);
           writeStoredOrchestratorModel(resolvedRepoPath, model);
-        }}
+        } : undefined}
+        activeBackend={isOrchestratorMode ? orchestratorBackend : undefined}
+        onBackendChange={isOrchestratorMode ? handleBackendChange : undefined}
         effort={thinkingEffort}
         onEffortChange={handleEffortChange}
         adaptiveEnabled={adaptiveThinkingEnabled}

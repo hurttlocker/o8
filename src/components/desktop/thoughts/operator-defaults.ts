@@ -6,14 +6,25 @@ import { DEFAULT_ORCHESTRATOR_MODEL } from './use-orchestrator-stream/shared';
 interface OperatorDefaultsPayload {
   values?: {
     orchestratorModel?: unknown;
+    orchestratorBackend?: unknown;
+    inAppOrchestratorEnabled?: unknown;
     thinkingEffort?: unknown;
     experimentalOpencode?: unknown;
     experimentalGemini?: unknown;
   };
 }
 
+export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide' | 'fable';
+
+export function isThoughtsOrchestratorBackendSetting(value: unknown): value is OrchestratorBackendSetting {
+  return value === 'auto' || value === 'codex' || value === 'claude' || value === 'openclaw'
+    || value === 'hermes' || value === 'collide' || value === 'fable';
+}
+
 export interface ThoughtsOperatorDefaults {
   orchestratorModel: string;
+  orchestratorBackend: OrchestratorBackendSetting;
+  inAppOrchestratorEnabled: boolean;
   thinkingEffort: ThinkingEffort;
   experimentalOpencode: boolean;
   experimentalGemini: boolean;
@@ -21,6 +32,8 @@ export interface ThoughtsOperatorDefaults {
 
 export const THOUGHTS_OPERATOR_DEFAULTS_FALLBACK: ThoughtsOperatorDefaults = {
   orchestratorModel: DEFAULT_ORCHESTRATOR_MODEL,
+  orchestratorBackend: 'auto',
+  inAppOrchestratorEnabled: true,
   thinkingEffort: 'adaptive',
   experimentalOpencode: false,
   experimentalGemini: false,
@@ -46,6 +59,12 @@ function normalizeThoughtsOperatorDefaults(payload: OperatorDefaultsPayload | nu
   const orchestratorModel = typeof payload?.values?.orchestratorModel === 'string' && payload.values.orchestratorModel.trim()
     ? payload.values.orchestratorModel.trim()
     : THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.orchestratorModel;
+  const orchestratorBackend = isThoughtsOrchestratorBackendSetting(payload?.values?.orchestratorBackend)
+    ? payload.values.orchestratorBackend
+    : THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.orchestratorBackend;
+  const inAppOrchestratorEnabled = typeof payload?.values?.inAppOrchestratorEnabled === 'boolean'
+    ? payload.values.inAppOrchestratorEnabled
+    : THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled;
   const thinkingEffort = isThinkingEffort(payload?.values?.thinkingEffort)
     ? payload.values.thinkingEffort
     : THOUGHTS_OPERATOR_DEFAULTS_FALLBACK.thinkingEffort;
@@ -58,6 +77,8 @@ function normalizeThoughtsOperatorDefaults(payload: OperatorDefaultsPayload | nu
 
   return {
     orchestratorModel,
+    orchestratorBackend,
+    inAppOrchestratorEnabled,
     thinkingEffort,
     experimentalOpencode,
     experimentalGemini,

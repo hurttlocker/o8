@@ -1,0 +1,130 @@
+'use client';
+
+import { useEffect, useRef, useState } from 'react';
+import { AgentStatusDot } from '@/components/desktop/AgentStatusDot';
+import type { MobileTranscriptToolCall } from '@/lib/mobile/types';
+
+function formatElapsed(ms: number): string {
+  const total = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m.toString().padStart(1, '0')}:${s.toString().padStart(2, '0')}`;
+}
+
+export function ComposerStatusBar({
+  displayWaiting,
+  runningTools,
+  activeTargetLabel,
+  latestUserMessageId,
+  awaitingReply,
+}: {
+  displayWaiting: boolean;
+  runningTools: MobileTranscriptToolCall[];
+  activeTargetLabel: string;
+  latestUserMessageId: string | null;
+  awaitingReply: boolean;
+}) {
+  const startedAtRef = useRef<number | null>(null);
+  const [elapsed, setElapsed] = useState(0);
+  // Render-visible mirror of startedAtRef for AgentStatusDot's pulse->orbit
+  // switch. Synced from the same tick that drives `elapsed`.
+  const [turnStart, setTurnStart] = useState<number | null>(null);
+  const prevDisplayWaitingRef = useRef(displayWaiting);
+  const prevLatestUserMessageIdRef = useRef<string | null>(latestUserMessageId);
+  const hasRunningTools = runningTools.length > 0;
+  const [turnLatched, setTurnLatched] = useState(false);
+  const active = displayWaiting || hasRunningTools || turnLatched;
+
+  useEffect(() => {
+    const risingEdge = displayWaiting && !prevDisplayWaitingRef.current;
+    const newUserMessage = latestUserMessageId !== null
+      && latestUserMessageId !== prevLatestUserMessageIdRef.current;
+    prevDisplayWaitingRef.current = displayWaiting;
+    prevLatestUserMessageIdRef.current = latestUserMessageId;
+    if (risingEdge || newUserMessage) {
+      startedAtRef.current = Date.now();
+      setTurnLatched(true);
+      const frame = window.requestAnimationFrame(() => {
+        setElapsed(0);
+      });
+      return () => window.cancelAnimationFrame(frame);
+    }
+  }, [displayWaiting, latestUserMessageId]);
+
+  useEffect(() => {
+    if (turnLatched && !awaitingReply && !displayWaiting && !hasRunningTools) {
+      setTurnLatched(false);
+    }
+  }, [turnLatched, awaitingReply, displayWaiting, hasRunningTools]);
+
+  useEffect(() => {
+    if (!active) {
+      startedAtRef.current = null;
+      const frame = window.requestAnimationFrame(() => { setTurnStart(null); setElapsed(0); });
+      return () => window.cancelAnimationFrame(frame);
+    }
+    if (startedAtRef.current === null) {
+      startedAtRef.current = Date.now();
+    }
+    const tick = () => {
+      const anchor = startedAtRef.current;
+      setTurnStart(anchor);
+      setElapsed(anchor === null ? 0 : Date.now() - anchor);
+    };
+    const frame = window.requestAnimationFrame(tick);
+    const id = window.setInterval(tick, 1000);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.clearInterval(id);
+    };
+  }, [active]);
+
+  if (!active) return null;
+
+  const runningSummary = hasRunningTools
+    ? runningTools.slice(0, 2).map((t) => t.name).join(', ') + (runningTools.length > 2 ? ` +${runningTools.length - 2}` : '')
+    : null;
+
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-label={`${activeTargetLabel} working for ${formatElapsed(elapsed)}`}
+      title={runningSummary ? `Running ${runningSummary}` : undefined}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 7,
+        height: 22,
+        marginBottom: 8,
+        paddingTop: 0,
+        paddingRight: 0,
+        paddingBottom: 0,
+        paddingLeft: 2,
+        background: 'transparent',
+        border: 'none',
+      }}
+    >
+      <AgentStatusDot state="running" startedAt={turnStart} color="var(--t-text-muted)" />
+      <span style={{
+        fontSize: 11.5,
+        fontWeight: 500,
+        fontFamily: '"SF Mono", ui-monospace, monospace',
+        letterSpacing: '0',
+        color: 'var(--t-text-muted)',
+      }}>
+        {formatElapsed(elapsed)}
+      </span>
+      {hasRunningTools ? (
+        <span style={{
+          fontSize: 11.5,
+          fontWeight: 400,
+          letterSpacing: '-0.05px',
+          color: 'var(--t-text-faint)',
+        }}>
+          {`· ${runningTools.length} running`}
+        </span>
+      ) : null}
+    </div>
+  );
+}
