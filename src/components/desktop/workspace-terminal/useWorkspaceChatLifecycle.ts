@@ -49,6 +49,14 @@ export function useWorkspaceChatLifecycle({
   const laneRetired = useMemo(() => {
     if (tab.kind !== 'chat') return false;
     if (liveStatus === 'released' || liveStatus === 'archived') return true;
+    // A packet whose CURRENT lane is live must never read as retired just
+    // because an EARLIER lane for the same packet was archived (salvage /
+    // relaunch cycles leave dead ancestors behind). Live-hit 2026-07-05: a
+    // reviewing lane showed "Merged · read-only" — a governance-display lie
+    // that invites the operator to skip the review. Only consult the archived
+    // view when the packet has no active lane state.
+    const ACTIVE_STATUSES = new Set(['queued', 'launching', 'running', 'reviewing', 'recovering', 'blocked', 'awaiting_input', 'awaiting_orchestrator', 'awaiting_human']);
+    if (liveStatus && ACTIVE_STATUSES.has(liveStatus)) return false;
     const packetId = livePacket?.id ?? tab.orchestrationPacket?.packetId ?? null;
     if (packetId && archivedLaneView.packetIds.has(packetId)) return true;
     const candidateKeys = [tab.chatSessionKey, normalizedSessionKey, livePacket?.lane?.sessionKey];
