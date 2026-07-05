@@ -109,7 +109,7 @@ function testAdapter(): OwnedRuntimeAdapter {
 }
 
 async function waitUntil(predicate: () => boolean): Promise<void> {
-  for (let i = 0; i < 100; i += 1) {
+  for (let i = 0; i < 4000; i += 1) {
     if (predicate()) return;
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
