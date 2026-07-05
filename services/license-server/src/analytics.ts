@@ -195,41 +195,45 @@ export async function handleAnalytics(c: Context): Promise<Response> {
     select event, count(*) as count from product_events where ${notDev} group by event order by count desc limit 20
   `)).map((r) => ({ event: str(r.event), count: num(r.count) }));
 
-  // Top accounts by activity (calls + events), with spend + best tier seen.
+  // Top accounts — ONE row per real person: linked installs roll into their
+  // account (devices), and the founder's GitHub handle labels the row instead of
+  // a raw id. Unlinked installs stay as their own (anonymous) rows.
   const accounts = (await rows(sql`
+    with raw as (
+      select sub, created_at, 'p' as src, cost_micro_usd as cost from proxy_usage where ${notDev}
+      union all
+      select sub, created_at, 'e' as src, 0 as cost from product_events where ${notDev}
+    ),
+    res as (
+      select coalesce(l.clerk_user_id, r.sub) as ident, r.sub as raw_sub, r.created_at, r.src, r.cost
+      from raw r left join install_links l on l.install_sub = r.sub
+    ),
+    agg as (
+      select ident,
+             max(created_at)                                                as last_seen,
+             count(*) filter (where src = 'p')                              as calls,
+             count(*) filter (where src = 'e')                              as events,
+             coalesce(sum(cost), 0)                                         as spend_micro,
+             count(distinct raw_sub) filter (where raw_sub like 'install:%') as devices
+      from res group by ident
+    )
     select
-      a.sub,
-      a.last_seen,
-      a.calls,
-      a.events,
-      coalesce(p.micro, 0)                          as spend_micro,
-      coalesce(p.plan, e.plan, 'free')              as plan
-    from (
-      select sub,
-             max(created_at)                  as last_seen,
-             count(*) filter (where src = 'p') as calls,
-             count(*) filter (where src = 'e') as events
-      from (
-        select sub, created_at, 'p' as src from proxy_usage
-        union all
-        select sub, created_at, 'e' as src from product_events
-      ) u
-      where ${notDev}
-      group by sub
-    ) a
-    left join (
-      select sub, sum(cost_micro_usd) as micro, max(plan) as plan from proxy_usage group by sub
-    ) p on p.sub = a.sub
-    left join (
-      select sub, max(plan) as plan from product_events group by sub
-    ) e on e.sub = a.sub
+      a.ident, a.last_seen, a.calls, a.events, a.spend_micro, a.devices,
+      case when f.clerk_user_id is not null then 'founder' else coalesce(pl.plan, 'free') end as plan,
+      f.gh                       as github
+    from agg a
+    left join ( select sub, max(plan) as plan from proxy_usage group by sub ) pl on pl.sub = a.ident
+    left join ( select clerk_user_id, perks_json->>'displayName' as gh from founders where status = 'active' ) f
+      on f.clerk_user_id = a.ident
     order by (a.calls + a.events) desc
     limit 20
   `)).map((r) => ({
-    sub: str(r.sub),
+    sub: str(r.ident),
+    github: r.github ? str(r.github) : null,
     plan: str(r.plan),
     calls: num(r.calls),
     events: num(r.events),
+    devices: num(r.devices),
     spendMicroUsd: num(r.spend_micro),
     lastSeen: r.last_seen instanceof Date ? r.last_seen.toISOString() : str(r.last_seen),
   }));
