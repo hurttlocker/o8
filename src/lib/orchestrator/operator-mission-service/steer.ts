@@ -51,7 +51,7 @@ function stderrPathForStdout(stdoutPath: string): string {
     : `${stdoutPath}.stderr.log`;
 }
 
-async function readStartupFailureHead(surfaceId: string): Promise<string | null> {
+async function readStartupFailureHead(surfaceId: string, sinceMs: number): Promise<string | null> {
   if (!surfaceId.startsWith('codex-owned:')) return null;
   await new Promise((resolve) => setTimeout(resolve, STARTUP_FAILURE_PROBE_MS));
   const sources = await getOwnedCodexTelemetrySources(surfaceId);
@@ -61,7 +61,11 @@ async function readStartupFailureHead(surfaceId: string): Promise<string | null>
   const stderr = await readFile(stderrPathForStdout(stdoutPath), 'utf8').catch(() => '');
   const tail = await getOwnedCodexRuntimeTail(surfaceId).catch(() => null);
   const lifecycle = tail?.surface.lifecycle;
-  if (lifecycle?.lastRunMode === 'resume' && lifecycle.lastOutcome === 'failed') {
+  // Only a run STARTED BY THIS STEER counts — a previous resume's failure must
+  // not flag a fresh, healthy steer (caught by the #1415 regression test).
+  const lastRunStartedMs = lifecycle?.lastRunStartedAt ? Date.parse(lifecycle.lastRunStartedAt) : NaN;
+  const startedByThisSteer = Number.isFinite(lastRunStartedMs) && lastRunStartedMs >= sinceMs - 1_000;
+  if (startedByThisSteer && lifecycle?.lastRunMode === 'resume' && lifecycle.lastOutcome === 'failed') {
     return (stderr.trim() || lifecycle.summary || 'owned Codex resume exited non-zero')
       .replace(/\s+/g, ' ')
       .slice(0, 500);
@@ -98,6 +102,7 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
   }
 
   const steerSource = normalizeSource(source);
+  const steerStartedMs = Date.now();
   recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', {
     packetId,
     source: steerSource,
@@ -124,7 +129,7 @@ export async function steerPacket({ packetId, message, source }: SteerPacketInpu
     rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
   }
 
-  const startupFailure = await readStartupFailureHead(lane.sessionKey);
+  const startupFailure = await readStartupFailureHead(lane.sessionKey, steerStartedMs);
   if (startupFailure) {
     recordLaneEvent(lane.id, 'steer_failed', 'orchestrator', {
       packetId,
