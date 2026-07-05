@@ -33,10 +33,8 @@ export interface ChatMessageLike {
 function duplicateAdjacentMessage(left: ChatMessageLike, right: ChatMessageLike): boolean {
   const leftRecord = left as Record<string, unknown>;
   const rightRecord = right as Record<string, unknown>;
-  return typeof leftRecord.role === 'string'
-    && leftRecord.role === rightRecord.role
-    && typeof leftRecord.content === 'string'
-    && leftRecord.content === rightRecord.content;
+  return typeof leftRecord.role === 'string' && leftRecord.role === rightRecord.role
+    && typeof leftRecord.content === 'string' && leftRecord.content === rightRecord.content;
 }
 
 function collapseAdjacentDuplicates<T extends ChatMessageLike>(messages: T[]): T[] {
