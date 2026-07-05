@@ -62,12 +62,23 @@ const DEFAULT_EMBED_MODEL = 'gemini-embedding-001';
  */
 const GEMINI_IN_PRICE_PER_M_USD = envUsd('PROXY_GEMINI_IN_PER_M_USD', 0.3);
 const GEMINI_OUT_PRICE_PER_M_USD = envUsd('PROXY_GEMINI_OUT_PER_M_USD', 2.5);
+// Gemini 3 Flash (preview) is priced higher than 2.5-flash: $0.50/1M in, $3.00/1M out.
+const GEMINI3_IN_PRICE_PER_M_USD = envUsd('PROXY_GEMINI3_IN_PER_M_USD', 0.5);
+const GEMINI3_OUT_PRICE_PER_M_USD = envUsd('PROXY_GEMINI3_OUT_PER_M_USD', 3.0);
 const DEFAULT_GEMINI_MODEL = 'gemini-2.5-flash';
 
-/** Estimate a Gemini generateContent call's cost (micro-USD) from token counts. */
-function geminiCostMicroUsd(promptTokens: number, completionTokens: number): number {
-  const usd =
-    (promptTokens * GEMINI_IN_PRICE_PER_M_USD + completionTokens * GEMINI_OUT_PRICE_PER_M_USD) / 1_000_000;
+/** Per-1M-token prices for the served Gemini model (Google returns no cost field). */
+function geminiPricesFor(model: string): { inPerM: number; outPerM: number } {
+  if (/gemini-3/i.test(model)) {
+    return { inPerM: GEMINI3_IN_PRICE_PER_M_USD, outPerM: GEMINI3_OUT_PRICE_PER_M_USD };
+  }
+  return { inPerM: GEMINI_IN_PRICE_PER_M_USD, outPerM: GEMINI_OUT_PRICE_PER_M_USD };
+}
+
+/** Exact-token, model-accurate Gemini cost (micro-USD) — tokens from usageMetadata. */
+function geminiCostMicroUsd(promptTokens: number, completionTokens: number, model: string): number {
+  const { inPerM, outPerM } = geminiPricesFor(model);
+  const usd = (promptTokens * inPerM + completionTokens * outPerM) / 1_000_000;
   return usdToMicro(usd);
 }
 
@@ -454,7 +465,7 @@ export async function handleGeminiGenerate(c: Context): Promise<Response> {
     plan,
     kind: 'gemini',
     model,
-    costMicroUsd: geminiCostMicroUsd(promptTokens, completionTokens),
+    costMicroUsd: geminiCostMicroUsd(promptTokens, completionTokens, model),
     promptTokens,
     completionTokens,
   });
