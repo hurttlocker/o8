@@ -4,8 +4,6 @@ type FetchFn = typeof fetch;
 type FetchInput = Parameters<FetchFn>[0];
 type FetchInit = Parameters<FetchFn>[1];
 
-let warnedFallback = false;
-
 function resolveFetchUrl(input: FetchInput): URL | null {
   try {
     if (typeof input === 'string') {
@@ -47,19 +45,6 @@ export function isClerkBoundFetch(input: FetchInput, init?: FetchInit): boolean 
   );
 }
 
-function isLikelyNetworkError(error: unknown): boolean {
-  if (!(error instanceof Error)) return false;
-  if (error.name === 'AbortError') return true;
-  if (error instanceof TypeError && /fetch|network|load failed|cancel/i.test(error.message)) return true;
-  return false;
-}
-
-function warnNativeFallbackOnce(error: unknown) {
-  if (warnedFallback) return;
-  warnedFallback = true;
-  console.warn('[auth] native Clerk fetch wrapper failed for app traffic; falling back to native fetch', error);
-}
-
 export function installTauriClerkFetchGuard(nativeFetch: FetchFn): void {
   const pluginFetch = globalThis.fetch;
   if (pluginFetch === nativeFetch) return;
@@ -68,22 +53,14 @@ export function installTauriClerkFetchGuard(nativeFetch: FetchFn): void {
   const boundPluginFetch = pluginFetch.bind(globalThis);
 
   globalThis.fetch = (async (input: FetchInput, init?: FetchInit) => {
+    // Non-Clerk traffic NEVER touches the plugin wrapper — this is the whole
+    // guard. Clerk-bound traffic goes to the plugin and its errors propagate
+    // to clerk-js untouched; falling back to native fetch for Clerk traffic
+    // would silently reintroduce the WKWebView cookie problem native mode
+    // exists to solve.
     if (!isClerkBoundFetch(input, init)) {
       return boundNativeFetch(input, init);
     }
-
-    try {
-      return await boundPluginFetch(input, init);
-    } catch (error) {
-      if (!isLikelyNetworkError(error) && !isClerkBoundFetch(input, init)) {
-        warnNativeFallbackOnce(error);
-        return boundNativeFetch(input, init);
-      }
-      throw error;
-    }
+    return boundPluginFetch(input, init);
   }) as FetchFn;
-}
-
-export function resetTauriClerkFetchGuardForTests(): void {
-  warnedFallback = false;
 }

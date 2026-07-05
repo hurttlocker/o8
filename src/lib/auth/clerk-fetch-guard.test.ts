@@ -4,21 +4,18 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   installTauriClerkFetchGuard,
   isClerkBoundFetch,
-  resetTauriClerkFetchGuardForTests,
 } from './clerk-fetch-guard';
 
 describe('tauri Clerk fetch guard', () => {
   const originalFetch = globalThis.fetch;
 
   beforeEach(() => {
-    resetTauriClerkFetchGuardForTests();
     window.history.replaceState(null, '', '/dashboard');
   });
 
   afterEach(() => {
     globalThis.fetch = originalFetch;
     vi.restoreAllMocks();
-    resetTauriClerkFetchGuardForTests();
   });
 
   it('bypasses a throwing plugin interceptor for app API traffic', async () => {
