@@ -46,9 +46,14 @@ interface CreateOrchestratorMessageHandlerOptions {
   wsRef: RefLike<WebSocket | null>;
 }
 
-function createAssistantState(resetEpochRef: RefLike<number>): CurrentAssistantStreamState {
+function createAssistantState(
+  resetEpochRef: RefLike<number>,
+  assistantMessageId?: unknown,
+): CurrentAssistantStreamState {
   return {
-    id: `orch-assistant-${Date.now()}`,
+    id: typeof assistantMessageId === 'string' && assistantMessageId.trim()
+      ? assistantMessageId.trim()
+      : `assistant-${Date.now()}`,
     chunks: [],
     thinkingChunks: [],
     epoch: resetEpochRef.current,
@@ -154,7 +159,7 @@ export function createOrchestratorMessageHandler(
             options.statusRef.current = 'busy';
             options.setStatus('busy');
           }
-          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef);
+          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId);
         } else if (options.currentAssistantRef.current.epoch !== options.resetEpochRef.current) {
           options.currentAssistantRef.current = null;
           break;
@@ -236,7 +241,7 @@ export function createOrchestratorMessageHandler(
             options.statusRef.current = 'busy';
             options.setStatus('busy');
           }
-          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef);
+          options.currentAssistantRef.current = createAssistantState(options.resetEpochRef, msg.data?.assistantMessageId);
         }
 
         const current = options.currentAssistantRef.current;
