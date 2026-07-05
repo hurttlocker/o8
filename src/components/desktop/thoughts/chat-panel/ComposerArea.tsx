@@ -1,164 +1,17 @@
 'use client';
 
-import { forwardRef, useEffect, useMemo, useRef, useState } from 'react';
-import { AgentStatusDot } from '@/components/desktop/AgentStatusDot';
+import { forwardRef, useEffect, useMemo, useState } from 'react';
 import { InputButtons, type ThinkingEffort } from '../InputButtons';
+import type { OrchestratorBackendSetting } from '../operator-defaults';
 import { SlashCommandPicker } from './SlashCommandPicker';
 import { PendingSteerCard, type PendingSteer } from './PendingSteerCard';
+import { ComposerStatusBar } from './ComposerStatusBar';
 import type { ThoughtsChatPermissionMode } from './types';
 import type { MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import type { OrchestratorWorkspaceTarget } from '@/lib/orchestrator/types';
 import { getOrchestratorSlashCommandSuggestions, type OrchestratorSlashCommandDefinition } from '@/lib/slash-commands';
 import { MODE_ROUTING_SLASH_COMMANDS } from '@/lib/composer-mode-routing';
 import type { ThoughtsAttachedImage, ThoughtsComposerDragHandlers } from './useThoughtsComposerAttachments';
-
-function formatElapsed(ms: number): string {
-  const total = Math.max(0, Math.floor(ms / 1000));
-  const m = Math.floor(total / 60);
-  const s = total % 60;
-  return `${m.toString().padStart(1, '0')}:${s.toString().padStart(2, '0')}`;
-}
-
-function ComposerStatusBar({
-  displayWaiting,
-  runningTools,
-  activeTargetLabel,
-  latestUserMessageId,
-  awaitingReply,
-}: {
-  displayWaiting: boolean;
-  runningTools: MobileTranscriptToolCall[];
-  activeTargetLabel: string;
-  latestUserMessageId: string | null;
-  awaitingReply: boolean;
-}) {
-  const startedAtRef = useRef<number | null>(null);
-  const [elapsed, setElapsed] = useState(0);
-  // Render-visible mirror of startedAtRef for AgentStatusDot's pulse→orbit
-  // switch (refs can't be read during render). Synced from the same tick that
-  // drives `elapsed`, so it tracks the real turn-start without extra timers.
-  const [turnStart, setTurnStart] = useState<number | null>(null);
-  const prevDisplayWaitingRef = useRef(displayWaiting);
-  const prevLatestUserMessageIdRef = useRef<string | null>(latestUserMessageId);
-  const hasRunningTools = runningTools.length > 0;
-  // Turn-in-flight latch. orchStream.status flickers busy→ready→busy across a
-  // single turn (it drops to 'ready' for the whole "thinking" gap between
-  // accepting the send and the first streamed token), which made the indicator
-  // vanish mid-turn. Latch ON when a turn starts (a new user message, or
-  // displayWaiting rising on a tool-initiated cycle) and OFF only once the reply
-  // has landed AND streaming has settled — so the bar stays put for the whole
-  // turn. The rising-edge trigger means a reload whose last message is a user
-  // message does NOT light the bar. 2026-06-18.
-  const [turnLatched, setTurnLatched] = useState(false);
-  const active = displayWaiting || hasRunningTools || turnLatched;
-
-  // Reset the elapsed anchor on turn boundaries — either the user sent a new
-  // message (which includes steer messages fired while a previous turn is
-  // still running) or displayWaiting rose from false to true (fresh thinking
-  // starts). A single trigger doesn't cover both cases: a steer sent mid-turn
-  // never flips displayWaiting, and a fresh thinking cycle without a new user
-  // message (tool-initiated work) never bumps the user id.
-  useEffect(() => {
-    const risingEdge = displayWaiting && !prevDisplayWaitingRef.current;
-    const newUserMessage = latestUserMessageId !== null
-      && latestUserMessageId !== prevLatestUserMessageIdRef.current;
-    prevDisplayWaitingRef.current = displayWaiting;
-    prevLatestUserMessageIdRef.current = latestUserMessageId;
-    if (risingEdge || newUserMessage) {
-      startedAtRef.current = Date.now();
-      setTurnLatched(true);
-      const frame = window.requestAnimationFrame(() => {
-        setElapsed(0);
-      });
-      return () => window.cancelAnimationFrame(frame);
-    }
-  }, [displayWaiting, latestUserMessageId]);
-
-  // Release the latch once the turn is genuinely done: the reply (or an error
-  // note) has landed (awaitingReply false) AND we're no longer streaming
-  // (displayWaiting false) AND no tools are running. Until all three hold, the
-  // bar stays visible — bridging the thinking gap and any mid-turn flicker.
-  useEffect(() => {
-    if (turnLatched && !awaitingReply && !displayWaiting && !hasRunningTools) {
-      setTurnLatched(false);
-    }
-  }, [turnLatched, awaitingReply, displayWaiting, hasRunningTools]);
-
-  useEffect(() => {
-    if (!active) {
-      startedAtRef.current = null;
-      const frame = window.requestAnimationFrame(() => { setTurnStart(null); setElapsed(0); });
-      return () => window.cancelAnimationFrame(frame);
-    }
-    if (startedAtRef.current === null) {
-      startedAtRef.current = Date.now();
-    }
-    const tick = () => {
-      const anchor = startedAtRef.current;
-      setTurnStart(anchor);
-      setElapsed(anchor === null ? 0 : Date.now() - anchor);
-    };
-    const frame = window.requestAnimationFrame(tick);
-    const id = window.setInterval(tick, 1000);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.clearInterval(id);
-    };
-  }, [active]);
-
-  if (!active) return null;
-
-  const runningSummary = hasRunningTools
-    ? runningTools.slice(0, 2).map((t) => t.name).join(', ') + (runningTools.length > 2 ? ` +${runningTools.length - 2}` : '')
-    : null;
-
-  return (
-    <div
-      role="status"
-      aria-live="polite"
-      aria-label={`${activeTargetLabel} working for ${formatElapsed(elapsed)}`}
-      title={runningSummary ? `Running ${runningSummary}` : undefined}
-      style={{
-        display: 'inline-flex',
-        alignItems: 'center',
-        gap: 7,
-        height: 22,
-        marginBottom: 8,
-        paddingTop: 0,
-        paddingRight: 0,
-        paddingBottom: 0,
-        paddingLeft: 2,
-        background: 'transparent',
-        border: 'none',
-      }}
-    >
-      {/* Shared status vocabulary — accent pulse while working, flips to the
-          binary orbit once this turn crosses the long-running threshold (7 min).
-          startedAtRef holds the real turn-start (Date.now ms), so a genuinely
-          long orchestrator turn surfaces the orbit. */}
-      <AgentStatusDot state="running" startedAt={turnStart} color="var(--t-text-muted)" />
-      <span style={{
-        fontSize: 11.5,
-        fontWeight: 500,
-        fontFamily: '"SF Mono", ui-monospace, monospace',
-        letterSpacing: '0',
-        color: 'var(--t-text-muted)',
-      }}>
-        {formatElapsed(elapsed)}
-      </span>
-      {hasRunningTools ? (
-        <span style={{
-          fontSize: 11.5,
-          fontWeight: 400,
-          letterSpacing: '-0.05px',
-          color: 'var(--t-text-faint)',
-        }}>
-          {`· ${runningTools.length} running`}
-        </span>
-      ) : null}
-    </div>
-  );
-}
 
 interface ComposerAreaProps {
   input: string;
@@ -183,6 +36,8 @@ interface ComposerAreaProps {
   modelId?: string;
   /** Orchestrator-mode model switching from the composer chip. */
   onModelChange?: (model: string) => void;
+  activeBackend?: OrchestratorBackendSetting;
+  onBackendChange?: (backend: OrchestratorBackendSetting) => void;
   effort: ThinkingEffort;
   onEffortChange: (next: ThinkingEffort) => void;
   adaptiveEnabled: boolean;
@@ -237,7 +92,6 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   chatMessages,
   activeTargetLabel,
   targetAgentExists,
-  thoughtsBodyBackground,
   enhancing,
   preEnhanceInput,
   onEnhance,
@@ -248,6 +102,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
   modelLabel,
   modelId,
   onModelChange,
+  activeBackend,
+  onBackendChange,
   effort,
   onEffortChange,
   adaptiveEnabled,
@@ -822,6 +678,8 @@ export const ComposerArea = forwardRef<HTMLTextAreaElement, ComposerAreaProps>(f
             modelLabel={modelLabel}
             modelId={isOrchestratorMode ? modelId : undefined}
             onModelChange={isOrchestratorMode ? onModelChange : undefined}
+            activeBackend={isOrchestratorMode ? activeBackend : undefined}
+            onBackendChange={isOrchestratorMode ? onBackendChange : undefined}
             effort={effort}
             onEffortChange={onEffortChange}
             adaptiveEnabled={adaptiveEnabled}
