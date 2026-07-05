@@ -21,6 +21,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import './require-temp-data-dir';
 import { insertExternalMcpServer } from '@/lib/mcp/external-servers';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';

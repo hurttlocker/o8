@@ -6,6 +6,7 @@
 
 import assert from 'node:assert';
 
+import './require-temp-data-dir';
 import {
   createDiffComment,
   listDiffComments,
