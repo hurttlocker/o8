@@ -35,6 +35,7 @@ export async function POST(request: NextRequest) {
 
   const packetId = typeof record.packetId === 'string' ? record.packetId.trim() : '';
   const message = typeof record.message === 'string' ? record.message.trim() : '';
+  const source = typeof record.source === 'string' ? record.source.trim() : undefined;
   if (!packetId) {
     return operatorError('invalid_request', 'packetId is required.', 400);
   }
@@ -43,7 +44,7 @@ export async function POST(request: NextRequest) {
   }
 
   try {
-    const result = await steerPacket({ packetId, message });
+    const result = await steerPacket({ packetId, message, source });
     return operatorSuccess(result);
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'Unable to steer packet.';

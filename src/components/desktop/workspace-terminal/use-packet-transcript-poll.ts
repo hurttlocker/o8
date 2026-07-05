@@ -101,6 +101,15 @@ export function mapPacketTranscriptEntries(events: TranscriptEvent[]): MobileTra
       case 'assistant':
         flush(`pkt-${event.seq}`, event.text, event.ts);
         break;
+      case 'steer':
+        entries.push({
+          id: `pkt-steer-${event.seq}`,
+          role: 'user',
+          text: `${event.failed ? 'Steer failed to start' : event.source} · ${tsLabel(event.ts) ?? 'now'}\n\n${event.text}${event.note && event.note !== event.text ? `\n\n${event.note}` : ''}`,
+          timestamp: tsMs(event.ts),
+          timestampLabel: tsLabel(event.ts),
+        });
+        break;
       case 'error':
         flush(`pkt-${event.seq}`, `Error: ${event.message}`, event.ts);
         break;

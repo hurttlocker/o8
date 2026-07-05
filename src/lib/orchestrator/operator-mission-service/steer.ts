@@ -15,15 +15,17 @@
  */
 
 import { findLaneByPacket, setLaneStatus } from '@/lib/lane/registry';
+import { recordLaneEvent } from '@/lib/lane/events';
 import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
 import { findMissionRegistryEntryByPacketId } from '@/lib/orchestrator/mission-registry';
 import { performRuntimeAction } from '@/lib/runtime/actions';
 import { currentMissionState } from './shared';
-import { continueOwnedCodexSession, getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
+import { continueOwnedCodexSession, getOwnedCodexRuntimeTail, getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
 
 export interface SteerPacketInput {
   packetId: string;
   message: string;
+  source?: string;
 }
 
 export interface SteerPacketResult {
@@ -33,6 +35,39 @@ export interface SteerPacketResult {
 }
 
 const NO_STEERABLE_SESSION = 'Packet has no steerable session — use rerun_with_feedback instead.';
+const STARTUP_FAILURE_PROBE_MS = 2_000;
+
+function normalizeSource(source: string | undefined): string {
+  const normalized = source?.trim().toLowerCase();
+  if (normalized === 'operator' || normalized === 'heal-bot' || normalized === 'orchestrator') {
+    return normalized;
+  }
+  return 'orchestrator';
+}
+
+function stderrPathForStdout(stdoutPath: string): string {
+  return stdoutPath.endsWith('.jsonl')
+    ? stdoutPath.replace(/\.jsonl$/, '.stderr.log')
+    : `${stdoutPath}.stderr.log`;
+}
+
+async function readStartupFailureHead(surfaceId: string): Promise<string | null> {
+  if (!surfaceId.startsWith('codex-owned:')) return null;
+  await new Promise((resolve) => setTimeout(resolve, STARTUP_FAILURE_PROBE_MS));
+  const sources = await getOwnedCodexTelemetrySources(surfaceId);
+  const stdoutPath = sources?.stdoutPaths[sources.stdoutPaths.length - 1];
+  if (!stdoutPath) return null;
+  const { readFile } = await import('node:fs/promises');
+  const stderr = await readFile(stderrPathForStdout(stdoutPath), 'utf8').catch(() => '');
+  const tail = await getOwnedCodexRuntimeTail(surfaceId).catch(() => null);
+  const lifecycle = tail?.surface.lifecycle;
+  if (lifecycle?.lastRunMode === 'resume' && lifecycle.lastOutcome === 'failed') {
+    return (stderr.trim() || lifecycle.summary || 'owned Codex resume exited non-zero')
+      .replace(/\s+/g, ' ')
+      .slice(0, 500);
+  }
+  return null;
+}
 
 async function resumeExitedOwnedCodexSession(surfaceId: string, message: string) {
   if (!surfaceId.startsWith('codex-owned:')) {
@@ -47,7 +82,7 @@ async function resumeExitedOwnedCodexSession(surfaceId: string, message: string)
   return continueOwnedCodexSession(surfaceId, message);
 }
 
-export async function steerPacket({ packetId, message }: SteerPacketInput): Promise<SteerPacketResult> {
+export async function steerPacket({ packetId, message, source }: SteerPacketInput): Promise<SteerPacketResult> {
   const lane = findLaneByPacket(packetId);
   if (!lane?.sessionKey) {
     const current = currentMissionState();
@@ -62,17 +97,43 @@ export async function steerPacket({ packetId, message }: SteerPacketInput): Prom
     throw new Error(NO_STEERABLE_SESSION);
   }
 
-  const result = await performRuntimeAction({ action: 'steer', surfaceId: lane.sessionKey, message });
+  const steerSource = normalizeSource(source);
+  recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', {
+    packetId,
+    source: steerSource,
+    message,
+  });
+
+  const result = await performRuntimeAction({ action: 'steer', surfaceId: lane.sessionKey, message, auditSteer: false });
   if (!result.ok || result.status === 'unavailable') {
-    const resumed = await resumeExitedOwnedCodexSession(lane.sessionKey, message);
+    const canTryOwnedResumeFallback = lane.sessionKey.startsWith('codex-owned:')
+      && /cannot accept|not found|surface/i.test(result.note);
+    const resumed = canTryOwnedResumeFallback
+      ? await resumeExitedOwnedCodexSession(lane.sessionKey, message)
+      : null;
     if (!resumed?.ok) {
-      if (lane.sessionKey.startsWith('codex-owned:')) {
-        throw new Error(resumed?.note || NO_STEERABLE_SESSION);
-      }
+      recordLaneEvent(lane.id, 'steer_failed', 'orchestrator', {
+        packetId,
+        source: steerSource,
+        message,
+        note: resumed?.note || result.note || NO_STEERABLE_SESSION,
+      });
       throw new Error(resumed?.note || result.note || NO_STEERABLE_SESSION);
     }
   } else {
     rebindLaneSessionIfChanged(lane.id, lane.sessionKey, result.sessionKey, 'orchestrator');
+  }
+
+  const startupFailure = await readStartupFailureHead(lane.sessionKey);
+  if (startupFailure) {
+    recordLaneEvent(lane.id, 'steer_failed', 'orchestrator', {
+      packetId,
+      source: steerSource,
+      message,
+      note: 'Steer failed to start',
+      stderrHead: startupFailure,
+    });
+    throw new Error(`Steer failed to start: ${startupFailure}`);
   }
 
   const updated = setLaneStatus(lane.id, 'running', 'orchestrator', 'steered_packet');
