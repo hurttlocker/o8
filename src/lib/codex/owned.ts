@@ -272,15 +272,17 @@ export function codexLaunchArgs(ctx: { cwd: string; prompt: string; model?: stri
   ];
 }
 
-function codexResumeArgs(ctx: { threadId: string; prompt: string; model?: string }): string[] {
+export function codexResumeArgs(ctx: { threadId: string; prompt: string; model?: string }): string[] {
   return [
     'exec',
     'resume',
     ctx.threadId,
     '--json',
+    // NOTE: `codex exec resume` accepts --dangerously-bypass-approvals-and-sandbox
+    // but has NO `-s/--sandbox` flag (unlike `codex exec`) — passing `-s` makes the
+    // CLI exit 2 before the turn starts. Live-hit 2026-07-05: every steer-resume
+    // (#1415) failed silently until this was dropped.
     '--dangerously-bypass-approvals-and-sandbox',
-    '-s',
-    'danger-full-access',
     ...DISABLE_IMAGE_TOOL,
     ...IGNORE_USER_CONFIG,
     ctx.prompt,
