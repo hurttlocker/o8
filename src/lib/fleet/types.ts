@@ -3,6 +3,7 @@ import type { BrowserSurfaceSummary } from '@/lib/browser/types';
 export type AgentStatus =
   | 'idle'
   | 'running'
+  | 'huddling'
   | 'blocked'
   | 'waiting'
   | 'reviewing'
