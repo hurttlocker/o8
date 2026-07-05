@@ -79,6 +79,12 @@ export async function handleFoundingCheckout(
   const sessionId = session.id;
   const days = Math.max(1, env.FOUNDER_LICENSE_DAYS);
   const clerkUserId = clerkUserIdFromSession(session);
+  // GitHub handle for the public founders wall (@handle), passed in checkout
+  // metadata by o8-site. Stored in perks_json.displayName — never the email.
+  const githubUsername =
+    typeof session.metadata?.githubUsername === 'string' && session.metadata.githubUsername
+      ? session.metadata.githubUsername
+      : null;
 
   // Idempotent: Stripe retries the same session id. Re-mint only for an ACTIVE
   // founder; an over_cap / revoked row is recorded but never granted a token.
@@ -112,7 +118,9 @@ export async function handleFoundingCheckout(
           // HARD ceiling: past the cohort cap we record the purchase but do NOT
           // grant founder status (manual refund/honor decision downstream).
           status: withinCap ? 'active' : 'over_cap',
-          perksJson: withinCap ? founderTier(operatorNumber) : null,
+          perksJson: withinCap
+            ? { ...founderTier(operatorNumber), ...(githubUsername ? { displayName: githubUsername } : {}) }
+            : null,
           licenseMintedAt: withinCap ? new Date() : null,
           updatedAt: new Date(),
         })
