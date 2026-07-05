@@ -228,7 +228,10 @@ pub fn is_available() -> bool {
 
 pub fn is_config_available(config: &PolishModelConfig) -> bool {
     match config.provider {
-        PolishProvider::Gemini => crate::stt::keys::get_gemini_key().is_some(),
+        // Available when a Gemini key is configured (direct) OR an active o8 plan
+        // can serve it through the managed proxy — so a keyless founder still gets
+        // polish instead of it silently disabling. resolve_gemini() covers both.
+        PolishProvider::Gemini => crate::entitlement::resolve_gemini(&config.model).is_some(),
     }
 }
 
