@@ -301,7 +301,7 @@ export async function handleSteerPacket(args: Record<string, unknown>): Promise<
     // warm-session pool), not this MCP process's stale registry instance.
     const res = await apiFetch('/api/orchestrator/steer-packet', {
       method: 'POST',
-      body: JSON.stringify({ packetId, message }),
+      body: JSON.stringify({ packetId, message, source: 'orchestrator' }),
     }) as { ok?: boolean; result?: Record<string, unknown> };
     return jsonResult({ ok: true, ...(res.result ?? {}) });
   } catch (err) {

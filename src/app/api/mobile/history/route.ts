@@ -6,6 +6,7 @@ import { getOwnedOpencodeRuntimeTail } from '@/lib/opencode/owned';
 import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import '@/lib/runtimes'; // Ensure runtimes are registered
+import { readSessionSteerTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
 import { getRuntime } from '@/lib/runtimes/registry';
 
 export const runtime = 'nodejs';
@@ -39,6 +40,24 @@ function toolCallFromEntry(name: string, text: string): MobileTranscriptToolCall
     args: parseToolArgs(text),
     status: 'done',
   };
+}
+
+function appendSteerEntries(sessionKey: string, transcript: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
+  const steerEvents = readSessionSteerTranscriptEvents(sessionKey);
+  if (steerEvents.length === 0) return transcript;
+  const steerEntries = steerEvents.map((event) => {
+    const timestamp = new Date(event.ts);
+    const timestampMs = Number.isFinite(timestamp.getTime()) ? timestamp.getTime() : Date.now();
+    const timestampLabel = new Date(timestampMs).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return {
+      id: `steer-${event.seq}`,
+      role: 'user' as const,
+      text: `${event.failed ? 'Steer failed to start' : event.source} · ${timestampLabel}\n\n${event.text}${event.note && event.note !== event.text ? `\n\n${event.note}` : ''}`,
+      timestamp: timestampMs,
+      timestampLabel,
+    };
+  });
+  return [...transcript, ...steerEntries].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
 }
 
 export async function GET(request: NextRequest) {
@@ -124,7 +143,7 @@ export async function GET(request: NextRequest) {
         }
       }
 
-      const payload: MobileHistoryResponse = { sessionKey, transcript: chatTranscript };
+      const payload: MobileHistoryResponse = { sessionKey, transcript: appendSteerEntries(sessionKey, chatTranscript) };
       return NextResponse.json(payload, { headers: { 'Cache-Control': 'no-store, max-age=0' } });
     }
 
@@ -173,7 +192,7 @@ export async function GET(request: NextRequest) {
         seen.add(key);
         deduped.push(entry);
       }
-      const payload: MobileHistoryResponse = { sessionKey, transcript: deduped };
+      const payload: MobileHistoryResponse = { sessionKey, transcript: appendSteerEntries(sessionKey, deduped) };
       return NextResponse.json(payload, {
         headers: { 'Cache-Control': 'no-store, max-age=0' },
       });
@@ -212,7 +231,7 @@ export async function GET(request: NextRequest) {
           } : undefined,
         }));
         return NextResponse.json(
-          { sessionKey, transcript } satisfies MobileHistoryResponse,
+          { sessionKey, transcript: appendSteerEntries(sessionKey, transcript) } satisfies MobileHistoryResponse,
           { headers: { 'Cache-Control': 'no-store, max-age=0' } },
         );
       }

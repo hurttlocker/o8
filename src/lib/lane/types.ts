@@ -216,7 +216,11 @@ export type LaneEventVerb =
   // Session rules governed this packet at dispatch (#1329). Snapshot of the
   // exact operator session rules injected into the worker prompt, so review is
   // "what changed, under which constraints." Payload: { threadId, ruleCount, rules }
-  | 'rules_applied';
+  | 'rules_applied'
+  // Packet steer injected into an existing warm session. Payload: { packetId, source, message }
+  | 'steered_packet'
+  // Packet steer failed before a worker turn could start. Payload: { packetId, source, message, note, stderrHead? }
+  | 'steer_failed';
 
 export type AgentReportReason =
   | 'needs_clarification'
