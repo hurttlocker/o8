@@ -29,7 +29,10 @@ vi.mock('node:child_process', async (importOriginal) => {
   const actual = await importOriginal<typeof import('node:child_process')>();
   return {
     ...actual,
-    spawn: vi.fn(() => ({ pid: 424242, unref: vi.fn() })),
+    // A LIVE pid — the steer startup-failure probe (#1432) checks whether the
+    // resume run it spawned actually came alive; a fake dead pid reads as
+    // 'Steer failed to start'. The test process itself is the liveness stand-in.
+    spawn: vi.fn(() => ({ pid: process.pid, unref: vi.fn() })),
   };
 });
 
@@ -116,6 +119,7 @@ describe('steerPacket owned Codex resume fallback', () => {
       action: 'steer',
       surfaceId,
       message: 'continue from huddle approval',
+      auditSteer: false,
     });
     expect(spawn).toHaveBeenCalledTimes(1);
     expect(vi.mocked(spawn).mock.calls[0]?.[1]).toEqual(expect.arrayContaining([
