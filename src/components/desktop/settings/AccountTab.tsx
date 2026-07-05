@@ -20,12 +20,20 @@ import {
   RAMS_INK_QUIET,
   BracketLabel,
   RamsButton,
-  SectionLabel,
-  SettingsToggleButton,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsGroup, SettingsRow } from './grouped';
+
+// No "privacy/share" glyph exists in shared.tsx yet — minimal 16px stroke icon.
+function ShieldIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+  );
+}
 
 export function AccountTab() {
   const auth = useO8Auth();
@@ -42,7 +50,7 @@ export function AccountTab() {
   let body: ReactNode;
   if (!auth.clerkEnabled) {
     body = (
-      <div style={{ paddingTop: 16, borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+      <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
         <p style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.55, maxWidth: 560, margin: 0 }}>
           Sign-in isn’t configured in this build. o8 is running in local account-less mode — everything works with your
           own API keys. Hosted sign-in activates in a future release.
@@ -51,11 +59,13 @@ export function AccountTab() {
     );
   } else if (!auth.isLoaded) {
     body = (
-      <div style={{ paddingTop: 16, color: 'var(--t-text-muted)', fontSize: 13 }}>Checking session…</div>
+      <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14, color: 'var(--t-text-muted)', fontSize: 13 }}>
+        Checking session…
+      </div>
     );
   } else if (!auth.signedIn) {
     body = (
-      <div style={{ paddingTop: 16, borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+      <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
         <p style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.55, maxWidth: 560, margin: 0, marginBottom: 16 }}>
           You’re not signed in. Continue with GitHub to create or access your o8 account.
         </p>
@@ -66,8 +76,8 @@ export function AccountTab() {
     const user = auth.user;
     const displayName = user?.name || user?.email || 'Signed in';
     body = (
-      <div style={{ paddingTop: 16, borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 24 }}>
+      <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 16, flexWrap: 'wrap', marginBottom: 20 }}>
           {user?.avatarUrl ? (
             <div
               aria-hidden="true"
@@ -117,36 +127,24 @@ export function AccountTab() {
         subtitle="Sign in with GitHub to sync your identity across desktop and (soon) the web. Optional — o8 runs fully with your own API keys and no account; signing in unlocks managed tokens and Pro."
       />
       <section>
-        <SectionLabel number="01">IDENTITY</SectionLabel>
-        {body}
+        <SettingsGroup header="Identity">
+          {body}
+        </SettingsGroup>
       </section>
 
-      <section style={{ marginTop: 32 }}>
-        <SectionLabel number="02">PRIVACY</SectionLabel>
-        <div style={{
-          paddingTop: 16,
-          borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 20,
-        }}>
-          <div style={{ minWidth: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span style={{ fontSize: 14, fontWeight: 300, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-              Share usage data
-            </span>
-            <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5, maxWidth: 520 }}>
-              Coarse counts only — which features get used, and how often. Never your code, prompts, repo names, or file
-              contents. Helps us improve o8.
-            </span>
-          </div>
-          <div style={{ flexShrink: 0, paddingTop: 2 }}>
-            <SettingsToggleButton
-              checked={shareUsage}
-              onChange={(next) => { setShareUsage(next); setTelemetryOptOut(!next); }}
-            />
-          </div>
-        </div>
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Privacy"
+          footnote="Coarse counts only — which features get used, and how often. Never your code, prompts, repo names, or file contents."
+        >
+          <SettingsRow
+            icon={<ShieldIcon />}
+            label="Share usage data"
+            subtitle="Helps us improve o8"
+            checked={shareUsage}
+            onToggle={(next) => { setShareUsage(next); setTelemetryOptOut(!next); }}
+          />
+        </SettingsGroup>
       </section>
     </div>
   );
