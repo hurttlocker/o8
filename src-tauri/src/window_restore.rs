@@ -1,9 +1,17 @@
 use serde::Deserialize;
+use std::{
+    sync::atomic::{AtomicU64, Ordering},
+    time::Duration,
+};
 use tauri::{AppHandle, LogicalPosition, LogicalSize, Manager, WebviewWindow};
 
 const MIN_WIDTH: f64 = 400.0;
 const MIN_HEIGHT: f64 = 300.0;
 const MAX_WORK_AREA_RATIO: f64 = 0.8;
+const LAUNCH_CLAMP_DELAYS_MS: [u64; 3] = [75, 250, 750];
+const EVENT_CLAMP_DELAY_MS: u64 = 150;
+
+static EVENT_CLAMP_GENERATION: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Clone, Copy, Debug, Deserialize)]
 struct SavedWindowState {
@@ -93,6 +101,40 @@ pub(crate) fn clamp_main_window(app: &AppHandle, window: &WebviewWindow) {
     }
 }
 
+pub(crate) fn schedule_launch_clamps(app: &AppHandle) {
+    for delay_ms in LAUNCH_CLAMP_DELAYS_MS {
+        schedule_clamp_after(app.clone(), Duration::from_millis(delay_ms));
+    }
+}
+
+pub(crate) fn schedule_event_clamp(app: &AppHandle) {
+    let generation = EVENT_CLAMP_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
+    let app = app.clone();
+    std::thread::spawn(move || {
+        std::thread::sleep(Duration::from_millis(EVENT_CLAMP_DELAY_MS));
+        if EVENT_CLAMP_GENERATION.load(Ordering::Relaxed) != generation {
+            return;
+        }
+        run_clamp_on_main_thread(app);
+    });
+}
+
+fn schedule_clamp_after(app: AppHandle, delay: Duration) {
+    std::thread::spawn(move || {
+        std::thread::sleep(delay);
+        run_clamp_on_main_thread(app);
+    });
+}
+
+fn run_clamp_on_main_thread(app: AppHandle) {
+    let app_for_clamp = app.clone();
+    let _ = app.run_on_main_thread(move || {
+        if let Some(window) = app_for_clamp.get_webview_window("main") {
+            clamp_main_window(&app_for_clamp, &window);
+        }
+    });
+}
+
 fn read_saved_main_state(app: &AppHandle) -> Option<SavedWindowState> {
     let path = app
         .path()
@@ -113,7 +155,7 @@ fn target_monitor(
         .iter()
         .map(|monitor| (monitor, intersection_area(rect, monitor)))
         .max_by_key(|(_, area)| *area);
-    if let Some((monitor, area)) = best.filter(|(_, area)| *area > 0) {
+    if let Some((monitor, _area)) = best.filter(|(_, area)| *area > 0) {
         return (Some(monitor.clone()), false);
     }
 
