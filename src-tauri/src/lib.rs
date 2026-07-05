@@ -4191,7 +4191,7 @@ pub fn run() {
             // ── Window Close → Hide to Tray ──
             let app_handle = app.handle().clone();
             if let Some(window) = app.get_webview_window("main") {
-                window_restore::clamp_main_window(&app_handle, &window);
+                window_restore::schedule_launch_clamps(&app_handle);
 
                 #[cfg(target_os = "macos")]
                 if let Err(err) = apply_vibrancy(
@@ -4266,6 +4266,11 @@ pub fn run() {
                             }
                             _ => {}
                         },
+                        tauri::WindowEvent::Resized(_)
+                        | tauri::WindowEvent::Moved(_)
+                        | tauri::WindowEvent::ScaleFactorChanged { .. } => {
+                            window_restore::schedule_event_clamp(&app_handle);
+                        }
                         _ => {}
                     }
                 });
