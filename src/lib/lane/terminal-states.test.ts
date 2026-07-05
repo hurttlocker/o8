@@ -1,6 +1,17 @@
 import { describe, expect, it } from 'vitest';
 
+import { createLane, getLane, setLaneStatus } from './registry';
 import { TERMINAL_LANE_STATUSES, isRefusedTerminalTransition } from './terminal-states';
+import { dispatch } from './commands';
+
+function laneFixture(branch: string) {
+  return createLane({
+    repoPath: '/tmp/o8-terminal-state-test-repo',
+    branch,
+    baseBranch: 'main',
+    runtime: 'codex',
+  });
+}
 
 describe('isRefusedTerminalTransition', () => {
   it('refuses re-opening a terminal lane (the #531 supervisor race)', () => {
@@ -30,4 +41,47 @@ describe('isRefusedTerminalTransition', () => {
   it('terminal set stays exactly failed/completed/archived', () => {
     expect([...TERMINAL_LANE_STATUSES].sort()).toEqual(['archived', 'completed', 'failed']);
   });
+});
+
+describe('terminal lane status guard - real callers', () => {
+  it('refuses direct registry re-open writes after completion', () => {
+    const lane = laneFixture('inline/terminal-registry');
+    setLaneStatus(lane.id, 'completed', 'system', 'merged');
+
+    const attempted = setLaneStatus(lane.id, 'reviewing', 'system', 'merge_error');
+
+    expect(attempted?.status).toBe('completed');
+    expect(attempted?.lastEventLabel).toBe('merged');
+    expect(getLane(lane.id)?.status).toBe('completed');
+  });
+
+  it('refuses merge command fallback paths that try to re-open a completed lane', async () => {
+    const lane = laneFixture('inline/terminal-merge-command');
+    setLaneStatus(lane.id, 'completed', 'system', 'merged');
+
+    const result = await dispatch({
+      verb: 'merge',
+      laneId: lane.id,
+      actor: 'user',
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.note).toMatch(/No worktree to merge/);
+    expect(getLane(lane.id)?.status).toBe('completed');
+    expect(getLane(lane.id)?.lastEventLabel).toBe('merged');
+  }, 20_000);
+
+  it('allows archive as the only terminal successor through the command bus', async () => {
+    const lane = laneFixture('inline/terminal-archive-command');
+    setLaneStatus(lane.id, 'completed', 'system', 'merged');
+
+    const result = await dispatch({
+      verb: 'archive',
+      laneId: lane.id,
+      actor: 'user',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(getLane(lane.id)?.status).toBe('archived');
+  }, 20_000);
 });
