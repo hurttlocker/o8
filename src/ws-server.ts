@@ -86,6 +86,7 @@ import {
 } from './lib/lane/orchestrator-backends/registry';
 import { isMeteredOrchestratorBackend } from './lib/lane/orchestrator-backends/billing';
 import { isOrchestratorBackendId, type OrchestratorBackendId } from './lib/lane/orchestrator-backends/types';
+import type { OrchestratorTurnRecord } from './lib/lane/orchestrator-crash-survival';
 import type { OrchestratorEvent } from './lib/lane/orchestrator-stream-events';
 import {
   startSupervisorLoop,
@@ -957,6 +958,120 @@ function broadcastToOrchestratorSession(sessionName: string, rawMsg: string): vo
   if (sessionName.includes('openclaw')) {
     console.log(`[openclaw-diag] broadcast session=${sessionName} matchedSubs=${matched} delivered=${delivered} totalSubs=${orchestratorSubscriptions.size} msg=${outMsg.slice(0, 110)}`);
   }
+}
+
+const reboundOrchestratorRecords = new Set<string>();
+const reboundAssistantText = new Map<string, string>();
+
+function handleReboundOrchestratorEvent(record: OrchestratorTurnRecord, event: OrchestratorEvent): void {
+  const threadId = typeof record.threadId === 'string' && record.threadId.startsWith('thoughts-')
+    ? record.threadId
+    : null;
+  const sessionName = orchestratorRouteSessionName(record.sessionName, threadId);
+  const repoPath = record.repoPath;
+  const backend = record.backend;
+  const assistantMessageId = threadId
+    ? record.assistantMessageId || `assistant-${record.startedAt}`
+    : null;
+  const assistantStartedAtMs = record.assistantStartedAtMs ?? record.startedAt;
+
+  const persistAssistantText = (sessionId: string | null) => {
+    if (!threadId || !assistantMessageId) return;
+    const content = reboundAssistantText.get(record.id) ?? '';
+    if (!content) return;
+    try {
+      const updatedThread = upsertMobileOrchestratorAssistantMessage({
+        tabId: threadId,
+        repoPath,
+        messageId: assistantMessageId,
+        content,
+        backend,
+        sessionId,
+        model: record.model ?? null,
+        timestampMs: assistantStartedAtMs,
+      });
+      if (updatedThread) {
+        broadcast({
+          channel: 'orchestrator-threads',
+          event: 'upsert',
+          data: { thread: updatedThread },
+        });
+      }
+    } catch (err) {
+      console.warn('[orchestrator-rehydrate] failed to persist rebound assistant text', err);
+    }
+  };
+
+  if (!reboundOrchestratorRecords.has(record.id)) {
+    reboundOrchestratorRecords.add(record.id);
+    broadcastToOrchestratorSession(sessionName, JSON.stringify({
+      channel: 'orchestrator',
+      event: 'status',
+      data: { status: 'busy', repoPath, threadId, backend },
+    }));
+  }
+
+  let wsMsg: string | null = null;
+  switch (event.type) {
+    case 'text':
+      reboundAssistantText.set(record.id, `${reboundAssistantText.get(record.id) ?? ''}${event.text}`);
+      persistAssistantText(null);
+      wsMsg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'output',
+        data: { text: event.text, repoPath, threadId, thinking: false, backend },
+      });
+      break;
+    case 'thinking':
+      wsMsg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'output',
+        data: { text: event.text, repoPath, threadId, thinking: true, backend },
+      });
+      break;
+    case 'tool_use':
+      wsMsg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'tool-use',
+        data: { name: event.name, args: event.input, toolUseId: event.id ?? null, repoPath, threadId, backend },
+      });
+      break;
+    case 'tool_result':
+      wsMsg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'tool-result',
+        data: { name: event.name, args: event.input, output: event.output, toolUseId: event.id ?? null, repoPath, threadId, backend },
+      });
+      break;
+    case 'done':
+      if (threadId && event.sessionId) {
+        writeOrchestratorBackendSessionId(threadId, backend, event.sessionId);
+      }
+      persistAssistantText(event.sessionId ?? null);
+      wsMsg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'status',
+        data: { status: 'ready', repoPath, threadId, sessionId: event.sessionId, cost: event.cost, backend },
+      });
+      reboundAssistantText.delete(record.id);
+      reboundOrchestratorRecords.delete(record.id);
+      break;
+    case 'error':
+      persistAssistantText(null);
+      wsMsg = JSON.stringify({
+        channel: 'orchestrator',
+        event: 'error',
+        data: { error: event.error, repoPath, threadId, backend },
+      });
+      reboundAssistantText.delete(record.id);
+      reboundOrchestratorRecords.delete(record.id);
+      break;
+    case 'collide_phase':
+    case 'collide_proposal':
+      break;
+  }
+
+  if (wsMsg) broadcastToOrchestratorSession(sessionName, wsMsg);
 }
 
 // ── Agent Supervisor auto-message queue ──
@@ -5151,8 +5266,8 @@ async function bootstrapWsServer() {
   }
 
   try {
-    await rehydrateOrchestratorSessions();
-    const codexRebound = rehydrateCodexOrchestratorTurns();
+    await rehydrateOrchestratorSessions({ onReboundEvent: handleReboundOrchestratorEvent });
+    const codexRebound = rehydrateCodexOrchestratorTurns({ onReboundEvent: handleReboundOrchestratorEvent });
     if (codexRebound > 0) {
       console.log(`[orchestrator-rehydrate] Re-bound ${codexRebound} Codex orchestrator turn${codexRebound === 1 ? '' : 's'}`);
     }

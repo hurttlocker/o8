@@ -37,7 +37,7 @@ import { parseLocalModel } from '@/lib/codex/local-model';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
-import { handleCodexJsonLine, type ParsedCodexLine } from './codex-orchestrator-events';
+import { handleCodexJsonLine } from './codex-orchestrator-events';
 import {
   crashSurvivableOrchestratorEnabled,
   createOrchestratorTurnRecord,
@@ -294,7 +294,11 @@ export function ensureCodexOrchestratorSession(repoPath: string, threadId?: stri
   return session;
 }
 
-export function rehydrateCodexOrchestratorTurns(): number {
+interface CodexOrchestratorRehydrateOptions {
+  onReboundEvent?: (record: OrchestratorTurnRecord, event: OrchestratorEvent) => void;
+}
+
+export function rehydrateCodexOrchestratorTurns(options: CodexOrchestratorRehydrateOptions = {}): number {
   let count = 0;
   for (const record of listActiveOrchestratorTurns()) {
     if (record.backend !== 'codex') continue;
@@ -314,9 +318,29 @@ export function rehydrateCodexOrchestratorTurns(): number {
     } else {
       session.status = 'busy';
     }
-    if (!isPidAlive(record.pid)) {
-      session.status = 'ready';
+    const lineState = { cost: null as number | null, threadId: session.threadId };
+    const isLocalModel = typeof record.model === 'string' && !!parseLocalModel(record.model);
+    const emit = (event: OrchestratorEvent) => {
+      options.onReboundEvent?.(record, event);
+    };
+    const handleLine = (line: string) => {
+      handleCodexJsonLine(line, lineState, emit, { isLocalModel });
+      if (lineState.threadId) session!.threadId = lineState.threadId;
+    };
+    const finishRecord = () => {
+      if (lineState.threadId) session!.threadId = lineState.threadId;
+      session!.status = 'ready';
+      emit({ type: 'done', sessionId: lineState.threadId, cost: lineState.cost });
       finishOrchestratorTurn(record);
+    };
+    const replay = existsSync(record.stdoutPath)
+      ? readFileSync(record.stdoutPath, 'utf8').split('\n').filter((line) => line.trim())
+      : [];
+    for (const line of replay) {
+      handleLine(line);
+    }
+    if (!isPidAlive(record.pid)) {
+      finishRecord();
       count += 1;
       continue;
     }
@@ -324,19 +348,9 @@ export function rehydrateCodexOrchestratorTurns(): number {
       filePath: record.stdoutPath,
       fromOffset: fileSize(record.stdoutPath),
       alive: () => isPidAlive(record.pid),
-      onLine: (line) => {
-        try {
-          const parsed = JSON.parse(line) as ParsedCodexLine;
-          if (parsed.type === 'thread.started' && typeof parsed.thread_id === 'string') {
-            session!.threadId = parsed.thread_id;
-          }
-        } catch {
-          // ignore replay parse misses
-        }
-      },
+      onLine: handleLine,
       onEnd: () => {
-        session!.status = 'ready';
-        finishOrchestratorTurn(record);
+        finishRecord();
       },
     });
     count += 1;

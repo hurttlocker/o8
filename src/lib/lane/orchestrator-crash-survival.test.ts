@@ -11,6 +11,7 @@ import {
   listActiveOrchestratorTurns,
   readJsonlLines,
 } from './orchestrator-crash-survival';
+import { rehydrateCodexOrchestratorTurns } from './codex-orchestrator-session';
 
 describe('orchestrator crash survival helpers', () => {
   let root: string;
@@ -83,5 +84,36 @@ describe('orchestrator crash survival helpers', () => {
   it('checks pid liveness without throwing', () => {
     expect(isPidAlive(process.pid)).toBe(true);
     expect(isPidAlive(0)).toBe(false);
+  });
+
+  it('replays a dead codex turn record into rebound events', () => {
+    const record = createOrchestratorTurnRecord({
+      backend: 'codex',
+      sessionName: 'cortex-codex-orchestrator-replay',
+      repoPath: root,
+      threadId: 'thoughts-replay',
+      pid: 0,
+      assistantMessageId: 'assistant-replay',
+    });
+    writeFileSync(
+      record.stdoutPath,
+      [
+        JSON.stringify({ type: 'thread.started', thread_id: 'codex-thread-replay' }),
+        JSON.stringify({ type: 'event_msg', payload: { type: 'agent_message', message: 'recovered text' } }),
+      ].join('\n') + '\n',
+      'utf8',
+    );
+
+    const events: Array<{ type: string }> = [];
+    const count = rehydrateCodexOrchestratorTurns({
+      onReboundEvent: (_record, event) => { events.push(event); },
+    });
+
+    expect(count).toBe(1);
+    expect(events).toMatchObject([
+      { type: 'text', text: 'recovered text' },
+      { type: 'done', sessionId: 'codex-thread-replay' },
+    ]);
+    expect(listActiveOrchestratorTurns()).toHaveLength(0);
   });
 });

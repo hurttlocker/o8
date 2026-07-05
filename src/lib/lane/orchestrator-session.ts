@@ -221,7 +221,11 @@ function buildRehydratedSession(repoPath: string, claudeSessionId: string, creat
   };
 }
 
-function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord): boolean {
+interface OrchestratorRehydrateOptions {
+  onReboundEvent?: (record: OrchestratorTurnRecord, event: OrchestratorEvent) => void;
+}
+
+function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord, options: OrchestratorRehydrateOptions): boolean {
   if (record.backend !== 'claude') return false;
   const sessionName = record.sessionName || orchestratorSessionName(record.repoPath, record.threadId);
   let session = sessions.get(sessionName);
@@ -243,10 +247,14 @@ function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord): boolean {
   const w = getWarmState(sessionName);
   const events: OrchestratorEvent[] = [];
   let resolved = false;
+  const emit = (event: OrchestratorEvent) => {
+    events.push(event);
+    options.onReboundEvent?.(record, event);
+  };
   const timeout = setTimeout(() => {}, PROCESS_TIMEOUT_MS);
   const turn: OrchestratorActiveTurn = {
-    onEvent: (event) => { events.push(event); },
-    captureEvent: (event) => { events.push(event); },
+    onEvent: emit,
+    captureEvent: emit,
     resolve: () => { resolved = true; },
     reject: () => {},
     timeout,
@@ -263,7 +271,7 @@ function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord): boolean {
     stopCrashTail: null,
   };
   turn.captureEvent = (event) => {
-    events.push(event);
+    emit(event);
     if (event.type === 'text') turn.lastAssistantText += event.text;
   };
   w.activeTurn = turn;
@@ -297,7 +305,7 @@ function rehydrateInflightClaudeTurn(record: OrchestratorTurnRecord): boolean {
   return true;
 }
 
-export async function rehydrateOrchestratorSessions(): Promise<void> {
+export async function rehydrateOrchestratorSessions(options: OrchestratorRehydrateOptions = {}): Promise<void> {
   if (startupRehydrationComplete) {
     return;
   }
@@ -310,7 +318,7 @@ export async function rehydrateOrchestratorSessions(): Promise<void> {
     let reboundInflightTurns = 0;
     for (const record of listActiveOrchestratorTurns()) {
       try {
-        if (rehydrateInflightClaudeTurn(record)) reboundInflightTurns += 1;
+        if (rehydrateInflightClaudeTurn(record, options)) reboundInflightTurns += 1;
       } catch (error) {
         console.warn(`${LOG_PREFIX} Failed to rehydrate in-flight turn ${record.id}: ${error instanceof Error ? error.message : String(error)}`);
       }
