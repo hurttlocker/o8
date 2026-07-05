@@ -34,14 +34,21 @@ import {
   APP_FONT_STACK,
   RAMS_ACCENT,
   RAMS_INK_QUIET,
-  HairlineRule,
-  RamsButton,
-  SectionLabel,
-  SettingsToggleButton,
+  MicIcon,
+  SettingsSegmented,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsGroup, SettingsRow, RowDivider, ValuePill } from './grouped';
+import {
+  DEFAULT_DICTATION_INPUT_MODE,
+  readDictationInputMode,
+  subscribeDictationInputMode,
+  writeDictationInputMode,
+  type DictationInputMode,
+} from '@/lib/appearance/dictation-input-mode';
+import { useSyncExternalStore } from 'react';
 import { VoiceHistorySection } from './VoiceHistorySection';
 
 // macOS System Settings deep-links.
@@ -76,103 +83,71 @@ function DashGlyph() {
   );
 }
 
-// ── Permission status row ──
+// ── Permission state ──
 
 type PermState = 'granted' | 'denied' | 'unknown';
 
-function PermissionRow({
-  label,
-  detail,
-  state,
-  buttonLabel,
-  onOpen,
-}: {
-  label: string;
-  detail: string;
-  state: PermState;
-  buttonLabel: string;
-  onOpen: () => void;
-}) {
-  const statusText = state === 'granted' ? 'Granted' : state === 'denied' ? 'Needs grant' : 'Unknown';
-  const statusColor = state === 'granted' ? '#22c55e' : state === 'denied' ? '#d94f3a' : RAMS_INK_QUIET;
+function permGlyph(state: PermState) {
+  return state === 'granted' ? <CheckGlyph /> : state === 'denied' ? <XGlyph /> : <DashGlyph />;
+}
 
+function permPill(state: PermState) {
+  return state === 'granted'
+    ? <ValuePill tone="success">Granted</ValuePill>
+    : state === 'denied'
+      ? <ValuePill tone="destructive">Needs grant</ValuePill>
+      : <ValuePill>Unknown</ValuePill>;
+}
+
+// ── Small raw-SVG glyphs for row icon tiles ──
+
+function PowerIcon() {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        paddingTop: 12,
-        paddingBottom: 12,
-      }}
-    >
-      <span style={{ display: 'inline-flex', color: RAMS_INK_QUIET }}>
-        {state === 'granted' ? <CheckGlyph /> : state === 'denied' ? <XGlyph /> : <DashGlyph />}
-      </span>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-          {label}
-        </div>
-        <div style={{ fontSize: 12, fontWeight: 300, color: 'var(--t-text-faint)', lineHeight: 1.45, marginTop: 2 }}>
-          {detail}
-        </div>
-      </div>
-      <span
-        style={{
-          fontFamily: APP_FONT_STACK,
-          fontSize: 10,
-          fontWeight: 400,
-          letterSpacing: '0.08em',
-          textTransform: 'uppercase',
-          color: statusColor,
-          whiteSpace: 'nowrap',
-          flexShrink: 0,
-        }}
-      >
-        {statusText}
-      </span>
-      <RamsButton variant="ghost" onClick={onOpen}>{buttonLabel}</RamsButton>
-    </div>
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18.36 6.64a9 9 0 1 1-12.73 0" />
+      <line x1="12" y1="2" x2="12" y2="12" />
+    </svg>
   );
 }
 
-// ── Toggle row ──
-
-function ToggleRow({
-  label,
-  detail,
-  checked,
-  onChange,
-  disabled = false,
-}: {
-  label: string;
-  detail: string;
-  checked: boolean;
-  onChange: (next: boolean) => void;
-  disabled?: boolean;
-}) {
+function DockIcon() {
   return (
-    <div
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 18,
-        paddingTop: 12,
-        paddingBottom: 12,
-      }}
-    >
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.01em' }}>
-          {label}
-        </div>
-        <div style={{ fontSize: 12, fontWeight: 300, color: 'var(--t-text-faint)', lineHeight: 1.45, marginTop: 2, maxWidth: 520 }}>
-          {detail}
-        </div>
-      </div>
-      <SettingsToggleButton checked={checked} onChange={onChange} disabled={disabled} />
-    </div>
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="4" width="18" height="12" rx="2" />
+      <line x1="7" y1="20" x2="17" y2="20" />
+    </svg>
   );
 }
+
+function VolumeIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
+      <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
+    </svg>
+  );
+}
+
+function BellIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9" />
+      <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+    </svg>
+  );
+}
+
+function BrainGlyph() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M12 5a3 3 0 1 0-5.997.125 4 4 0 0 0-2.526 5.77 4 4 0 0 0 .556 6.588A4 4 0 1 0 12 18Z" />
+      <path d="M12 5a3 3 0 1 1 5.997.125 4 4 0 0 1 2.526 5.77 4 4 0 0 1-.556 6.588A4 4 0 1 1 12 18Z" />
+    </svg>
+  );
+}
+
+const noopSubscribe = () => () => {};
+const dictationModeFallback = (): DictationInputMode => DEFAULT_DICTATION_INPUT_MODE;
 
 const textareaStyle: CSSProperties = {
   width: '100%',
@@ -209,6 +184,11 @@ export function VoiceTab() {
   const [instructions, setInstructions] = useState('');
   // Two-tier brain escalation policy (~/.o8/agent_models.json via the router).
   const [escalation, setEscalation] = useState<'off' | 'auto' | 'deep'>('auto');
+  const dictationMode = useSyncExternalStore(
+    typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
+    typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
+    dictationModeFallback,
+  );
 
   const refreshPermissions = useCallback(async () => {
     if (!tauri) return;
@@ -319,48 +299,37 @@ export function VoiceTab() {
       ) : (
         <>
           <section>
-            <SectionLabel number="01">PERMISSIONS</SectionLabel>
-            <p
-              style={{
-                margin: 0,
-                marginTop: 4,
-                marginBottom: 6,
-                fontSize: 13,
-                lineHeight: 1.55,
-                color: 'var(--t-text-secondary)',
-                maxWidth: 620,
-              }}
+            <SettingsGroup
+              header="Permissions"
+              footnote="The global Fn hotkey needs two separate macOS grants — without Input Monitoring the key does nothing, with no error. Click a row to open the right System Settings pane; the status re-checks when you tab back."
             >
-              The global Fn hotkey needs two separate macOS grants. Without Input
-              Monitoring the key does nothing — with no error. Grant in System
-              Settings, then tab back here to re-check.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <PermissionRow
+              <SettingsRow
+                icon={permGlyph(accessibility)}
                 label="Accessibility"
-                detail="Lets o8 observe the focused window so dictation lands in the right app."
-                state={accessibility}
-                buttonLabel="Open Accessibility Settings"
-                onOpen={() => { void openSystemSettings(URL_ACCESSIBILITY); }}
+                subtitle="Lets o8 see the focused window so dictation lands in the right app"
+                accessory={permPill(accessibility)}
+                chevron
+                onPress={() => { void openSystemSettings(URL_ACCESSIBILITY); }}
+                divider
               />
-              <HairlineRule />
-              <PermissionRow
+              <SettingsRow
+                icon={permGlyph(inputMonitoring)}
                 label="Input Monitoring"
-                detail="Required for the Fn key tap to receive events. Separate from and stricter than Accessibility."
-                state={inputMonitoring}
-                buttonLabel="Open Input Monitoring Settings"
-                onOpen={() => { void openSystemSettings(URL_INPUT_MONITORING); }}
+                subtitle="Required for the Fn key to receive events — stricter than Accessibility"
+                accessory={permPill(inputMonitoring)}
+                chevron
+                onPress={() => { void openSystemSettings(URL_INPUT_MONITORING); }}
+                divider
               />
-              <HairlineRule />
-              <PermissionRow
+              <SettingsRow
+                icon={permGlyph(fnState)}
                 label="Fn key binding"
-                detail={'Set "Press 🌐 key to" → "Do Nothing" so Apple Dictation does not intercept Fn before o8.'}
-                state={fnState}
-                buttonLabel="Open Keyboard Settings"
-                onOpen={() => { void openSystemSettings(URL_KEYBOARD); }}
+                subtitle={'Set "Press 🌐 key to" → "Do Nothing" so Apple Dictation doesn\'t intercept'}
+                accessory={permPill(fnState)}
+                chevron
+                onPress={() => { void openSystemSettings(URL_KEYBOARD); }}
               />
-            </div>
+            </SettingsGroup>
 
             {fnHijacked ? (
               <div
@@ -386,103 +355,75 @@ export function VoiceTab() {
                 &ldquo;Press 🌐 key to&rdquo; to &ldquo;Do Nothing&rdquo;.
               </div>
             ) : null}
-
-            <div style={{ marginTop: 16 }}>
-              <RamsButton variant="ghost" onClick={() => { void refreshPermissions(); }}>
-                Re-check permissions
-              </RamsButton>
-            </div>
-
-            <div style={{ marginTop: 28 }}>
-              <HairlineRule />
-            </div>
           </section>
 
-          <section style={{ marginTop: 32 }}>
-            <SectionLabel number="02">BACKGROUND PRESENCE</SectionLabel>
-            <p
-              style={{
-                margin: 0,
-                marginTop: 4,
-                marginBottom: 10,
-                fontSize: 13,
-                lineHeight: 1.55,
-                color: 'var(--t-text-secondary)',
-                maxWidth: 620,
-              }}
+          <section style={{ marginTop: 28 }}>
+            <SettingsGroup
+              header="Background presence"
+              footnote="Keep o8 resident so the pill and Fn hotkey work without the window open. The menu-bar tray is always the way back."
             >
-              Keep o8 resident so the pill and Fn hotkey work without opening the
-              app. The menu-bar tray is always the way back to the window.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <ToggleRow
+              <SettingsRow
+                icon={<PowerIcon />}
                 label="Start o8 at login"
-                detail="Launch o8 automatically when you log in, so dictation is ready from the moment you sit down."
+                subtitle="Dictation ready from the moment you sit down"
                 checked={autostart}
-                onChange={handleAutostart}
+                onToggle={handleAutostart}
+                divider
               />
-              <HairlineRule />
-              <ToggleRow
-                label="Background mode — hide Dock icon, pill only"
-                detail="Run o8 as a pure menu-bar app: no Dock icon, just the dictation pill. Click the tray icon to bring the window — and the Dock icon — back."
+              <SettingsRow
+                icon={<DockIcon />}
+                label="Background mode"
+                subtitle="Hide the Dock icon — pure menu-bar app, pill only"
                 checked={bgMode}
-                onChange={handleBgMode}
+                onToggle={handleBgMode}
               />
-            </div>
+            </SettingsGroup>
           </section>
 
-          <section style={{ marginTop: 32 }}>
-            <SectionLabel number="03">FEEDBACK</SectionLabel>
-            <p
-              style={{
-                margin: 0,
-                marginTop: 4,
-                marginBottom: 10,
-                fontSize: 13,
-                lineHeight: 1.55,
-                color: 'var(--t-text-secondary)',
-                maxWidth: 620,
-              }}
+          <section style={{ marginTop: 28 }}>
+            <SettingsGroup
+              header="Dictation"
+              footnote="Tap: click the mic to start, click again to send. Hold: keep the mic (or Ctrl+Z) pressed while you speak. Audio dimming drops system volume to 20% while you hold Fn so the mic hears you over whatever's playing."
             >
-              How o8 responds while you dictate and while it speaks back.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column' }}>
-              <ToggleRow
+              <SettingsRow
+                icon={<MicIcon />}
+                label="Mic input"
+                subtitle="How the mic button next to Send behaves"
+                accessory={
+                  <SettingsSegmented
+                    value={dictationMode}
+                    onChange={(v) => writeDictationInputMode(v as DictationInputMode)}
+                    options={[
+                      { value: 'toggle', label: 'Tap' },
+                      { value: 'hold', label: 'Hold' },
+                    ]}
+                  />
+                }
+                divider
+              />
+              <SettingsRow
+                icon={<VolumeIcon />}
                 label="Dim other audio while dictating"
-                detail="Lower the system volume to 20% while you hold Fn, so the mic hears you over whatever's playing — including o8's own voice when you talk back mid-answer."
                 checked={ducking}
-                onChange={handleDucking}
+                onToggle={handleDucking}
+                divider
               />
-              <HairlineRule />
-              <ToggleRow
+              <SettingsRow
+                icon={<BellIcon />}
                 label="Sound cues"
-                detail="Short tones for listen start/stop, paste landed, and read-aloud start/finish."
+                subtitle="Tones for listen start/stop, paste landed, read-aloud"
                 checked={sounds}
-                onChange={handleSounds}
+                onToggle={handleSounds}
               />
-            </div>
+            </SettingsGroup>
           </section>
 
-          <section style={{ marginTop: 32 }}>
-            <SectionLabel number="04">POLISH</SectionLabel>
-            <p
-              style={{
-                margin: 0,
-                marginTop: 4,
-                marginBottom: 12,
-                fontSize: 13,
-                lineHeight: 1.55,
-                color: 'var(--t-text-secondary)',
-                maxWidth: 620,
-              }}
+          <section style={{ marginTop: 28 }}>
+            <SettingsGroup
+              header="Polish"
+              footnote="Both apply on the next dictation — no relaunch."
             >
-              Shape how o8 cleans up your dictation. Both apply on the next dictation — no relaunch.
-            </p>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 18, maxWidth: 620 }}>
-              <div>
+              <div style={{ paddingTop: 12, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.01em', marginBottom: 6 }}>
                   Custom dictionary
                 </div>
@@ -495,7 +436,8 @@ export function VoiceTab() {
                   style={textareaStyle}
                 />
               </div>
-              <div>
+              <RowDivider />
+              <div style={{ paddingTop: 12, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
                 <div style={{ fontSize: 13.5, fontWeight: 400, color: 'var(--t-text)', letterSpacing: '-0.01em', marginBottom: 6 }}>
                   Polish instructions
                 </div>
@@ -508,81 +450,31 @@ export function VoiceTab() {
                   style={textareaStyle}
                 />
               </div>
-            </div>
+            </SettingsGroup>
           </section>
 
-          <section style={{ marginTop: 32 }}>
-            <SectionLabel number="05">VOICE BRAIN</SectionLabel>
-            <p
-              style={{
-                margin: 0,
-                marginTop: 4,
-                marginBottom: 12,
-                fontSize: 13,
-                lineHeight: 1.55,
-                color: 'var(--t-text-secondary)',
-                maxWidth: 620,
-              }}
+          <section style={{ marginTop: 28 }}>
+            <SettingsGroup
+              header="Voice brain"
+              footnote="Auto hands heavy, multi-step requests to a deeper background brain — it answers you instantly, keeps working while you talk, then reports back. Deep also hands off medium tasks. Uses your Claude subscription."
             >
-              When a request is heavy or multi-step, o8 can hand it to a deeper background brain and answer you instantly — it keeps working while you talk, then reports back. Uses your Claude subscription.
-            </p>
-            <div style={{ display: 'flex', gap: 10, maxWidth: 620, flexWrap: 'wrap' }}>
-              {([
-                { value: 'off', label: 'Off', detail: 'o8 handles every request itself — no hand-off.' },
-                { value: 'auto', label: 'Auto', detail: 'Hand heavy, multi-step tasks to the background brain. Recommended.' },
-                { value: 'deep', label: 'Deep', detail: 'Also hand off medium tasks — lean on the deeper brain.' },
-              ] as const).map((opt) => {
-                const active = escalation === opt.value;
-                return (
-                  <button
-                    key={opt.value}
-                    type="button"
-                    onClick={() => handleEscalation(opt.value)}
-                    style={{
-                      flex: '1 1 0',
-                      minWidth: 168,
-                      textAlign: 'left',
-                      paddingTop: 12,
-                      paddingBottom: 12,
-                      paddingLeft: 14,
-                      paddingRight: 14,
-                      borderRadius: 12,
-                      border: `1px solid ${active ? RAMS_ACCENT : 'var(--t-border)'}`,
-                      background: 'var(--t-bg-card)',
-                      cursor: 'pointer',
-                      fontFamily: APP_FONT_STACK,
-                      transition: 'border-color 140ms ease',
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 5 }}>
-                      <span
-                        style={{
-                          width: 8,
-                          height: 8,
-                          borderRadius: '50%',
-                          background: active ? RAMS_ACCENT : 'var(--t-text-faint)',
-                          flexShrink: 0,
-                        }}
-                      />
-                      <span
-                        style={{
-                          fontSize: 12,
-                          fontWeight: 600,
-                          letterSpacing: '0.04em',
-                          textTransform: 'uppercase',
-                          color: 'var(--t-text)',
-                        }}
-                      >
-                        {opt.label}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: 12, lineHeight: 1.45, color: 'var(--t-text-secondary)' }}>
-                      {opt.detail}
-                    </div>
-                  </button>
-                );
-              })}
-            </div>
+              <SettingsRow
+                icon={<BrainGlyph />}
+                label="Escalation"
+                subtitle="When to hand a request to the deeper brain"
+                accessory={
+                  <SettingsSegmented
+                    value={escalation}
+                    onChange={(v) => handleEscalation(v as 'off' | 'auto' | 'deep')}
+                    options={[
+                      { value: 'off', label: 'Off' },
+                      { value: 'auto', label: 'Auto' },
+                      { value: 'deep', label: 'Deep' },
+                    ]}
+                  />
+                }
+              />
+            </SettingsGroup>
           </section>
 
           <VoiceHistorySection />

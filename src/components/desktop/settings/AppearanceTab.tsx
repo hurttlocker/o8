@@ -9,13 +9,6 @@ import {
   writeTimelineVisible,
 } from '@/lib/appearance/timeline';
 import {
-  DEFAULT_DICTATION_INPUT_MODE,
-  readDictationInputMode,
-  subscribeDictationInputMode,
-  writeDictationInputMode,
-  type DictationInputMode,
-} from '@/lib/appearance/dictation-input-mode';
-import {
   APP_FONT_STACK,
   RAMS_ACCENT,
   RAMS_HAIRLINE_SOFT,
@@ -23,7 +16,6 @@ import {
   RAMS_CONTROL_ACTIVE_BORDER,
   ActivityIcon,
   LayersIcon,
-  MicIcon,
   SettingsSegmented,
   TabBreadcrumb,
   TabHeading,
@@ -217,20 +209,6 @@ function useTimelineVisible(): [boolean, (next: boolean) => void] {
   return [visible, writeTimelineVisible];
 }
 
-// ── Dictation input mode toggle ───────────────────────────────────────────
-
-const dictationModeFallback = (): DictationInputMode => DEFAULT_DICTATION_INPUT_MODE;
-
-function useDictationInputMode(): [DictationInputMode, (next: DictationInputMode) => void] {
-  const mode = useSyncExternalStore(
-    typeof window !== 'undefined' ? subscribeDictationInputMode : noopSubscribe,
-    typeof window !== 'undefined' ? readDictationInputMode : dictationModeFallback,
-    dictationModeFallback,
-  );
-  return [mode, writeDictationInputMode];
-}
-
-
 // ── Appearance Tab ──────────────────────────────────────────────────────────
 
 export function AppearanceTab() {
@@ -242,7 +220,6 @@ export function AppearanceTab() {
     setReduceTransparency,
   } = useTheme();
   const [timelineVisible, setTimelineVisible] = useTimelineVisible();
-  const [dictationMode, setDictationMode] = useDictationInputMode();
 
   return (
     <div
@@ -309,28 +286,6 @@ export function AppearanceTab() {
         </SettingsGroup>
       </section>
 
-      <section style={{ marginTop: 28 }}>
-        <SettingsGroup
-          header="Dictation"
-          footnote="Tap: click the mic to start, click again to send. Hold: keep the mic (or Ctrl+Z) pressed while you speak, release to send. Ctrl+Z always behaves as hold."
-        >
-          <SettingsRow
-            icon={<MicIcon />}
-            label="Mic input"
-            subtitle="How the mic button next to Send behaves"
-            accessory={
-              <SettingsSegmented
-                value={dictationMode}
-                onChange={(v) => setDictationMode(v as DictationInputMode)}
-                options={[
-                  { value: 'toggle', label: 'Tap' },
-                  { value: 'hold', label: 'Hold' },
-                ]}
-              />
-            }
-          />
-        </SettingsGroup>
-      </section>
     </div>
   );
 }
