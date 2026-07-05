@@ -19,7 +19,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, readdirSync, statSync, rmSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, statSync, rmSync, readFileSync, mkdirSync, symlinkSync, cpSync } from 'node:fs';
 import { join } from 'node:path';
 
 const REQUIRED = ['APPLE_SIGNING_IDENTITY', 'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID'];
@@ -39,6 +39,7 @@ const APP = join(BUNDLE, 'macos/o8.app');
 const TAR = join(BUNDLE, 'macos/o8.app.tar.gz');
 const TAR_SIG = join(BUNDLE, 'macos/o8.app.tar.gz.sig');
 const DMG = join(BUNDLE, `dmg/o8_${version}_x64.dmg`);
+const DMG_STAGING = join(BUNDLE, 'dmg-staging');
 const ENTITLEMENTS = join(root, 'src-tauri/entitlements.plist');
 // Voice STT sidecar (lifted from aqua/Symon) ships as a Tauri externalBin in
 // Contents/MacOS/speech_recognizer. It needs its own entitlements (audio-input
@@ -209,14 +210,19 @@ execFileSync('cargo', ['tauri', 'signer', 'sign', TAR], {
 
 console.log('[sign-and-notarize] rebuilding DMG with stapled app');
 if (existsSync(DMG)) rmSync(DMG);
+if (existsSync(DMG_STAGING)) rmSync(DMG_STAGING, { recursive: true, force: true });
+mkdirSync(DMG_STAGING, { recursive: true });
+cpSync(APP, join(DMG_STAGING, 'o8.app'), { recursive: true, preserveTimestamps: true });
+symlinkSync('/Applications', join(DMG_STAGING, 'Applications'));
 execFileSync('hdiutil', [
   'create',
   '-volname', `o8 ${version}`,
-  '-srcfolder', APP,
+  '-srcfolder', DMG_STAGING,
   '-ov',
   '-format', 'UDZO',
   DMG,
 ], { stdio: 'inherit' });
+rmSync(DMG_STAGING, { recursive: true, force: true });
 
 console.log('[sign-and-notarize] signing DMG');
 execFileSync('codesign', [
