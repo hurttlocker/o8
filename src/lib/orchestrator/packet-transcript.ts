@@ -4,7 +4,7 @@ import path from 'node:path';
 import { getCodexRolloutPath } from '@/lib/codex/sessions';
 import { getOwnedCodexTelemetrySources } from '@/lib/codex/owned';
 import { getOwnedGeminiTelemetrySources } from '@/lib/gemini/owned';
-import { listLanes } from '@/lib/lane/registry';
+import { getLaneEvents, listLanes } from '@/lib/lane/registry';
 import { getOwnedOpencodeTelemetrySources } from '@/lib/opencode/owned';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
 import { normalizeCodexEvents, type TranscriptEvent } from '@/lib/orchestrator/transcript-normalizer';
@@ -35,6 +35,8 @@ export interface PacketTranscriptReadback extends SessionTranscriptReadback {
   packetId: string;
   note?: string;
 }
+
+type LaneSteerTranscriptEvent = Extract<TranscriptEvent, { type: 'steer' }>;
 
 function findPacket(packetId: string): OrchestratorPacket | null {
   try {
@@ -195,6 +197,59 @@ function normalizeForRuntime(runtime: TranscriptRuntime, raw: string): Transcrip
   }
 }
 
+function readTextPayload(payload: Record<string, unknown>, ...keys: string[]): string {
+  for (const key of keys) {
+    const value = payload[key];
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return '';
+}
+
+function laneSteerEvents(laneId: string): LaneSteerTranscriptEvent[] {
+  return getLaneEvents(laneId, 500)
+    .filter((event) => event.verb === 'steered_packet' || event.verb === 'steer_failed')
+    .map((event, index) => {
+      const source = readTextPayload(event.payload, 'source', 'actor') || event.actor || 'orchestrator';
+      const text = readTextPayload(event.payload, 'message', 'text');
+      const noteText = readTextPayload(event.payload, 'note', 'error');
+      const stderrHead = readTextPayload(event.payload, 'stderrHead');
+      const note = [noteText, stderrHead].filter(Boolean).join('\n');
+      return {
+        seq: index + 1,
+        ts: event.timestamp,
+        type: 'steer',
+        source,
+        text: text || note || 'Steer requested.',
+        failed: event.verb === 'steer_failed',
+        ...(note ? { note } : {}),
+      };
+    });
+}
+
+function laneSteerEventsForSession(sessionKey: string): LaneSteerTranscriptEvent[] {
+  if (!sessionKey) return [];
+  const lane = listLanes().find((candidate) => candidate.sessionKey === sessionKey);
+  return lane ? laneSteerEvents(lane.id) : [];
+}
+
+function mergeTranscriptEvents(runtimeEvents: TranscriptEvent[], extraEvents: TranscriptEvent[]): TranscriptEvent[] {
+  if (extraEvents.length === 0) return runtimeEvents;
+  const stamped = [...runtimeEvents, ...extraEvents]
+    .map((event, index) => ({ event, index }))
+    .sort((left, right) => {
+      const leftMs = new Date(left.event.ts).getTime();
+      const rightMs = new Date(right.event.ts).getTime();
+      const leftSafe = Number.isFinite(leftMs) ? leftMs : 0;
+      const rightSafe = Number.isFinite(rightMs) ? rightMs : 0;
+      return leftSafe - rightSafe || left.index - right.index;
+    });
+  return stamped.map(({ event }, index) => ({ ...event, seq: index + 1 }) as TranscriptEvent);
+}
+
+export function readSessionSteerTranscriptEvents(sessionKey: string): LaneSteerTranscriptEvent[] {
+  return laneSteerEventsForSession(sessionKey);
+}
+
 export async function readSessionTranscriptEvents(sessionKey: string): Promise<SessionTranscriptReadback> {
   const resolved = await resolveRawJsonlForSession(sessionKey);
   if (resolved.unsupportedReason) {
@@ -209,7 +264,10 @@ export async function readSessionTranscriptEvents(sessionKey: string): Promise<S
   return {
     sessionKey,
     runtime: resolved.runtime,
-    events: normalizeForRuntime(resolved.runtime, resolved.raw),
+    events: mergeTranscriptEvents(
+      normalizeForRuntime(resolved.runtime, resolved.raw),
+      laneSteerEventsForSession(sessionKey),
+    ),
   };
 }
 
@@ -227,7 +285,13 @@ export async function readPacketTranscriptEvents(packetId: string): Promise<Pack
   }
 
   const readback = await readSessionTranscriptEvents(sessionKey);
-  return { packetId, ...readback };
+  const packetLane = listLanes().find((lane) => lane.packetId === packetId);
+  const packetEvents = packetLane && packetLane.sessionKey !== sessionKey ? laneSteerEvents(packetLane.id) : [];
+  return {
+    packetId,
+    ...readback,
+    events: mergeTranscriptEvents(readback.events, packetEvents),
+  };
 }
 
 export function latestTranscriptEventAt(events: TranscriptEvent[]): string | null {

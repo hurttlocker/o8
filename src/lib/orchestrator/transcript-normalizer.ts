@@ -18,6 +18,7 @@ export type TranscriptEvent =
   | { seq: number; ts: string; type: 'tool_call'; tool: string; args: string; summary: string }
   | { seq: number; ts: string; type: 'tool_result'; tool: string; ok: boolean; summary: string }
   | { seq: number; ts: string; type: 'assistant'; text: string }
+  | { seq: number; ts: string; type: 'steer'; source: string; text: string; failed?: boolean; note?: string }
   | { seq: number; ts: string; type: 'error'; message: string }
   | { seq: number; ts: string; type: 'done'; exitCode: number };
 

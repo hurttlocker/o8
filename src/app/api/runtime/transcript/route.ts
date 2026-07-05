@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { performance } from 'node:perf_hooks';
+import { readSessionSteerTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
 import { readRuntimeTranscript } from '@/lib/runtime/transcript';
 
 export const runtime = 'nodejs';
@@ -35,6 +36,23 @@ export async function GET(request: NextRequest) {
         summary: entry.compaction.summary,
       } : undefined,
     }));
+    for (const event of readSessionSteerTranscriptEvents(sessionKey)) {
+      const timestamp = new Date(event.ts);
+      const timestampMs = Number.isFinite(timestamp.getTime()) ? timestamp.getTime() : Date.now();
+      const timestampLabel = new Date(timestampMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+      transcript.push({
+        id: `steer-${event.seq}`,
+        role: 'user',
+        text: `${event.failed ? 'Steer failed to start' : event.source} · ${timestampLabel}\n\n${event.text}${event.note && event.note !== event.text ? `\n\n${event.note}` : ''}`,
+        type: 'message',
+        timestamp: timestampMs,
+        timestampLabel,
+        toolName: undefined,
+        filePath: undefined,
+        compaction: undefined,
+      });
+    }
+    transcript.sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
     return NextResponse.json({ transcript }, {
       headers: { 'Cache-Control': 'no-store, max-age=0', 'Server-Timing': `total;dur=${Math.max(0, performance.now() - startedAt).toFixed(1)}` },
     });

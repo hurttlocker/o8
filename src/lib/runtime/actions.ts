@@ -1,4 +1,6 @@
 import type { AgentSummary } from '@/lib/fleet/types';
+import { recordLaneEvent } from '@/lib/lane/events';
+import { listLanes } from '@/lib/lane/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { markRepoOriginConfigured, markRepoOriginMissing } from '@/lib/repos/origin-readiness';
@@ -34,6 +36,8 @@ export interface RuntimeActionRequest {
     fileName: string;
     content: string;
   }>;
+  auditSteer?: boolean;
+  steerSource?: 'operator' | 'orchestrator' | 'heal-bot';
 }
 
 export interface RuntimeActionResult {
@@ -116,6 +120,23 @@ function fetchCooldownRetrySeconds(repoPath: string): number | null {
 
 function recordFetchUnreachable(repoPath: string): void {
   fetchUnreachableFailures.set(repoPath, Date.now());
+}
+
+function auditRuntimeSteer(payload: RuntimeActionRequest, sessionKey: string): void {
+  if (payload.auditSteer === false || (payload.action !== 'steer' && payload.action !== 'send_input')) return;
+  const message = payload.message?.trim();
+  if (!message) return;
+  try {
+    const lane = listLanes().find((candidate) => candidate.sessionKey === sessionKey && candidate.packetId);
+    if (!lane?.packetId) return;
+    recordLaneEvent(lane.id, 'steered_packet', 'orchestrator', {
+      packetId: lane.packetId,
+      source: payload.steerSource ?? 'operator',
+      message,
+    });
+  } catch {
+    // Runtime action delivery should not fail because lane audit storage is temporarily unavailable.
+  }
 }
 
 function clearFetchUnreachable(repoPath: string): void {
@@ -529,6 +550,7 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
   if (!runtimeSurface) {
     return actionUnavailable(payload, agent.sessionKey, agent.runtime, 'Runtime surface metadata is unavailable.');
   }
+  auditRuntimeSteer(payload, agent.sessionKey);
 
   switch (agent.runtime) {
     case 'codex': {
@@ -598,13 +620,13 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
         }
         const result = await continueOwnedCodexSession(runtimeSurface.id, message);
         return {
-          ok: true,
+          ok: result.ok,
           action: payload.action,
           surfaceId: runtimeSurface.id,
           sessionKey: runtimeSurface.id,
           runtime: agent.runtime,
           clientMutationId: payload.clientMutationId,
-          status: 'queued',
+          status: result.ok ? 'queued' : 'unavailable',
           note: result.note,
         };
       }
