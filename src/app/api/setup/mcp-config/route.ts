@@ -36,6 +36,8 @@ import { userInfo } from 'node:os';
 import { join } from 'node:path';
 import { execSync } from 'node:child_process';
 import { getApiBase, resolvePortInfo } from '@/lib/panel/api-port';
+import { getCliAccessStatus } from '@/lib/access-points/cli-status';
+import { getMcpSetupReadiness } from '@/lib/mcp/setup-readiness';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
 
@@ -78,11 +80,6 @@ function buildInstructions(): { claudeDesktop: string; claudeCode: string } {
 
 export async function GET() {
   try {
-    const mcpServers = toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, unknown>;
-    const server = mcpServers['o8'];
-    const codebaseMemory = mcpServers['codebase-memory'] ?? null;
-    const fullConfig = { mcpServers };
-
     const nodeBin = findCommand('node');
     const codexBin = findCommand('codex');
     const ghBin = findCommand('gh');
@@ -94,8 +91,18 @@ export async function GET() {
     const dbPath = join(dataDir, 'cortex-ide.db');
     const dbExists = existsSync(dbPath);
     const dbSize = dbExists ? statSync(dbPath).size : 0;
+    const mcpReady = getMcpSetupReadiness();
+    const mcpServers = mcpReady.ready
+      ? toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, unknown>
+      : {};
+    const server = mcpServers['o8'] ?? null;
+    const codebaseMemory = mcpServers['codebase-memory'] ?? null;
+    const fullConfig = { mcpServers };
 
     return NextResponse.json({
+      setupReady: mcpReady.ready,
+      setupBlockedReason: mcpReady.reason,
+      setupBlockedDetail: mcpReady.detail,
       server,
       codebaseMemory,
       fullConfig,
@@ -119,6 +126,7 @@ export async function GET() {
         webviewSocketPath,
         webviewToolsAvailable: existsSync(webviewSocketPath),
         codebaseMemoryAvailable: Boolean(codebaseMemory),
+        cli: getCliAccessStatus(),
       },
     });
   } catch (error) {

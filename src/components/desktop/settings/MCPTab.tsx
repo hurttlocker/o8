@@ -17,13 +17,12 @@ import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
   RAMS_ACCENT,
-  RAMS_CONTROL_BG,
-  RAMS_CONTROL_BORDER,
   RAMS_CONTROL_ACTIVE_BG,
   RAMS_CONTROL_ACTIVE_BORDER,
+  RAMS_CONTROL_BG,
+  RAMS_CONTROL_BORDER,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  BracketLabel,
   HairlineRule,
   SectionLabel,
   TabBreadcrumb,
@@ -32,6 +31,16 @@ import {
 } from './shared';
 import { ChevronDown, ChevronRight } from '../lucide-shims';
 import { ExternalMcpServersSection } from './mcp/ExternalMcpServersSection';
+import { AccessPointDiagnostics, type AccessPointDiagnosticsData } from './mcp/AccessPointDiagnostics';
+import {
+  ClaudeTargetRow,
+  ExternalClientRow,
+  type AnyTarget,
+  type ClaudeTargetStatus,
+  type ExternalTarget,
+  type ExternalTargetStatus,
+  type Target,
+} from './mcp/ClientRows';
 import { MONO_FONT } from './mcp/shared';
 
 interface McpServerConfig {
@@ -41,50 +50,17 @@ interface McpServerConfig {
 }
 
 interface McpConfigResponse {
-  server: McpServerConfig;
+  setupReady?: boolean;
+  setupBlockedDetail?: string | null;
+  server: McpServerConfig | null;
   fullConfig: { mcpServers: Record<string, McpServerConfig> };
   instructions: { claudeDesktop: string; claudeCode: string };
-  diagnostics: {
-    apiBase: string;
+  diagnostics: AccessPointDiagnosticsData & {
     apiPort?: number;
     wsPort?: number;
-    portSource?: 'env' | 'file' | 'default';
-    bundled: boolean;
     platform: string;
-    nodeInstalled: boolean;
-    nodeBin: string | null;
-    codexInstalled: boolean;
-    codexBin: string | null;
-    ghInstalled: boolean;
-    ghBin: string | null;
     dataDir: string;
-    dbExists: boolean;
-    dbSize: number;
-    webviewSocketPath: string;
-    webviewToolsAvailable: boolean;
   };
-}
-
-type Target = 'claude-desktop' | 'claude-code';
-type ExternalTarget = 'hermes' | 'openclaw';
-type AnyTarget = Target | ExternalTarget;
-
-interface ClaudeTargetStatus {
-  target: Target;
-  path: string;
-  fileExists: boolean;
-  alreadyRegistered: boolean;
-  alreadyUpToDate: boolean;
-  otherServers: string[];
-  size: number;
-}
-
-interface ExternalTargetStatus {
-  target: ExternalTarget;
-  installed: boolean;
-  cliPath: string | null;
-  registered: boolean;
-  hint?: string;
 }
 
 export function MCPTab() {
@@ -251,7 +227,7 @@ export function MCPTab() {
   }, [loadClaudeStatus]);
 
   const copyToClipboard = useCallback(async () => {
-    if (!data) return;
+    if (!data || data.setupReady === false) return;
     const text = JSON.stringify(data.fullConfig, null, 2);
     try {
       await navigator.clipboard.writeText(text);
@@ -299,7 +275,8 @@ export function MCPTab() {
 
   const configJson = JSON.stringify(data.fullConfig, null, 2);
   const d = data.diagnostics;
-  const ready = d.nodeInstalled;
+  const ready = d.cli.nodeResolvable;
+  const setupReady = data.setupReady !== false;
 
   return (
     <div style={{
@@ -361,6 +338,38 @@ export function MCPTab() {
         </div>
       ) : null}
 
+      {!setupReady ? (
+        <div style={{
+          marginBottom: 28,
+          paddingTop: 2,
+          paddingBottom: 2,
+        }}>
+          <div style={{
+            fontSize: 13,
+            fontWeight: 300,
+            color: 'var(--t-text)',
+            marginBottom: 4,
+            letterSpacing: '-0.005em',
+          }}>
+            <span style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 300,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: '#f59e0b',
+              marginRight: 8,
+            }}>
+              [wait]
+            </span>
+            MCP setup is still finishing
+          </div>
+          <div style={{ color: 'var(--t-text-secondary)', fontSize: 12, lineHeight: 1.55 }}>
+            {data.setupBlockedDetail ?? 'Finish first launch, then reconnect your MCP client.'}
+          </div>
+        </div>
+      ) : null}
+
       {/* 01 — CLAUDE DESKTOP */}
       <section style={{ marginBottom: 28 }}>
         <SectionLabel number="01">CLAUDE DESKTOP</SectionLabel>
@@ -368,7 +377,7 @@ export function MCPTab() {
           target="claude-desktop"
           status={desktopStatus}
           installing={installing === 'claude-desktop'}
-          disabled={!ready}
+          disabled={!ready || !setupReady}
           note={installNote?.target === 'claude-desktop' ? installNote : null}
           onInstall={() => { void installToClaude('claude-desktop'); }}
           onRemove={() => { void removeFromClaude('claude-desktop'); }}
@@ -383,7 +392,7 @@ export function MCPTab() {
           target="claude-code"
           status={codeStatus}
           installing={installing === 'claude-code'}
-          disabled={!ready}
+          disabled={!ready || !setupReady}
           note={installNote?.target === 'claude-code' ? installNote : null}
           onInstall={() => { void installToClaude('claude-code'); }}
           onRemove={() => { void removeFromClaude('claude-code'); }}
@@ -431,24 +440,7 @@ export function MCPTab() {
       <section style={{ marginBottom: 24 }}>
         <SectionLabel number="06">DIAGNOSTICS</SectionLabel>
         <Disclosure title="System details" subtitle="Show the runtime environment o8 is using.">
-          <div style={{
-            paddingTop: 8,
-            borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          }}>
-            <DiagnosticRow label="Backend" ok detail={`${d.apiBase}${d.portSource ? ` (${d.portSource === 'env' ? 'env var' : d.portSource === 'file' ? 'port file' : 'default'})` : ''}`} />
-            <DiagnosticRow label="Install mode" ok detail={d.bundled ? 'Packaged Tauri app' : 'Dev checkout'} />
-            <DiagnosticRow label="Node.js" ok={d.nodeInstalled} detail={d.nodeBin} />
-            <DiagnosticRow label="Codex CLI" ok={d.codexInstalled} detail={d.codexBin} />
-            <DiagnosticRow label="GitHub CLI" ok={d.ghInstalled} detail={d.ghBin} />
-            <DiagnosticRow label="Database" ok={d.dbExists} detail={d.dbExists ? `${(d.dbSize / 1024 / 1024).toFixed(1)} MB` : 'not initialized'} />
-            <DiagnosticRow
-              label="Webview tools"
-              ok={d.webviewToolsAvailable}
-              detail={d.webviewToolsAvailable
-                ? `Connected to ${d.webviewSocketPath}`
-                : 'Off — launch with --features dev-mcp-plugin'}
-            />
-          </div>
+          <AccessPointDiagnostics diagnostics={d} />
           {d.nodeInstalled && !d.codexInstalled ? (
             <div style={{
               marginTop: 14,
@@ -506,7 +498,7 @@ export function MCPTab() {
         </Disclosure>
 
         <div style={{ marginTop: 8 }}>
-          <Disclosure title="Manual config" subtitle="Prefer to edit the file yourself?">
+          <Disclosure title="Manual config" subtitle={setupReady ? 'Prefer to edit the file yourself?' : 'Config appears after first launch finishes.'}>
             <div style={{
               position: 'relative',
               border: `1px solid ${RAMS_HAIRLINE_SOFT}`,
@@ -517,6 +509,7 @@ export function MCPTab() {
               <button
                 type="button"
                 onClick={() => { void copyToClipboard(); }}
+                disabled={!setupReady}
                 style={{
                   position: 'absolute',
                   top: 8,
@@ -538,7 +531,8 @@ export function MCPTab() {
                   fontWeight: 400,
                   letterSpacing: '-0.01em',
                   textTransform: 'capitalize',
-                  cursor: 'pointer',
+                  cursor: setupReady ? 'pointer' : 'default',
+                  opacity: setupReady ? 1 : 0.55,
                   zIndex: 1,
                 }}
               >
@@ -620,332 +614,4 @@ function Disclosure({
       {open ? <div style={{ marginTop: 4 }}>{children}</div> : null}
     </div>
   );
-}
-
-// ── Claude target row ──
-
-function ClaudeTargetRow({
-  status,
-  installing,
-  disabled = false,
-  note,
-  onInstall,
-  onRemove,
-  restartHint,
-}: {
-  target: Target;
-  status: ClaudeTargetStatus | null;
-  installing: boolean;
-  disabled?: boolean;
-  note: { target: AnyTarget; message: string; ok: boolean } | null;
-  onInstall: () => void;
-  onRemove: () => void;
-  restartHint: string;
-}) {
-  const connected = Boolean(status?.alreadyUpToDate);
-  const needsUpdate = Boolean(status?.alreadyRegistered && !status?.alreadyUpToDate);
-
-  const statusLine = !status
-    ? 'Checking...'
-    : connected
-      ? 'Connected. o8 tools available in this client.'
-      : needsUpdate
-        ? 'Older o8 entry found. Update to the current config.'
-        : status.fileExists
-          ? `Ready to connect${status.otherServers.length > 0 ? ` (${status.otherServers.length} other server${status.otherServers.length === 1 ? '' : 's'} preserved)` : ''}.`
-          : 'Not connected yet.';
-
-  const primaryLabel = connected ? 'connected' : needsUpdate ? 'update' : 'install';
-  const primaryDisabled = disabled || installing || connected;
-
-  return (
-    <div style={{
-      paddingTop: 10,
-      paddingBottom: 16,
-      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-      opacity: disabled ? 0.55 : 1,
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: 20,
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
-            <BracketLabel tone={connected ? 'quiet' : 'accent'}>
-              {connected ? 'connected' : needsUpdate ? 'needs update' : 'not connected'}
-            </BracketLabel>
-          </div>
-          <div style={{
-            fontSize: 13,
-            color: 'var(--t-text-secondary)',
-            lineHeight: 1.55,
-          }}>
-            {statusLine}
-          </div>
-          {status?.path ? (
-            <div style={{
-              marginTop: 6,
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 11,
-              letterSpacing: '0.02em',
-              color: RAMS_INK_QUIET,
-              wordBreak: 'break-all',
-            }}>
-              {status.path}
-            </div>
-          ) : null}
-          {note ? (
-            <div style={{
-              marginTop: 8,
-              fontSize: 12,
-              lineHeight: 1.55,
-              color: note.ok ? '#15803d' : '#dc2626',
-            }}>
-              {note.ok ? `${note.message} ${restartHint}` : note.message}
-            </div>
-          ) : null}
-        </div>
-
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          {status?.alreadyRegistered ? (
-            <button
-              type="button"
-              onClick={onRemove}
-              disabled={installing || disabled}
-              style={quietActionStyle(installing || disabled)}
-            >
-              remove
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onInstall}
-            disabled={primaryDisabled}
-            style={accentActionStyle(primaryDisabled)}
-          >
-            {installing ? 'working...' : primaryLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ExternalClientRow({
-  target,
-  status,
-  installing,
-  disabled = false,
-  note,
-  onInstall,
-  onRemove,
-  restartHint,
-}: {
-  target: ExternalTarget;
-  status: ExternalTargetStatus | null;
-  installing: boolean;
-  disabled?: boolean;
-  note: { target: AnyTarget; message: string; ok: boolean } | null;
-  onInstall: () => void;
-  onRemove: () => void;
-  restartHint: string;
-}) {
-  const cliInstalled = Boolean(status?.installed);
-  const registered = Boolean(status?.registered);
-
-  const labelText = target === 'hermes' ? 'Hermes Agent' : 'OpenClaw';
-
-  const statusLine = !status
-    ? 'Checking...'
-    : !cliInstalled
-      ? `${labelText} CLI not found.`
-      : registered
-        ? `Connected. The o8 tools are wired into ${labelText}.`
-        : `Ready to connect. ${labelText} CLI detected.`;
-
-  const primaryLabel = registered ? 'connected' : 'install';
-  const primaryDisabled = disabled || installing || !cliInstalled || registered;
-
-  return (
-    <div style={{
-      paddingTop: 10,
-      paddingBottom: 16,
-      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-      opacity: disabled ? 0.55 : 1,
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: 20,
-        flexWrap: 'wrap',
-      }}>
-        <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
-            <BracketLabel tone={registered ? 'quiet' : cliInstalled ? 'accent' : 'quiet'}>
-              {!cliInstalled ? 'not installed' : registered ? 'connected' : 'not connected'}
-            </BracketLabel>
-          </div>
-          <div style={{
-            fontSize: 13,
-            color: 'var(--t-text-secondary)',
-            lineHeight: 1.55,
-          }}>
-            {statusLine}
-          </div>
-          {status?.cliPath ? (
-            <div style={{
-              marginTop: 6,
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 11,
-              letterSpacing: '0.02em',
-              color: RAMS_INK_QUIET,
-              wordBreak: 'break-all',
-            }}>
-              {status.cliPath}
-            </div>
-          ) : null}
-          {!cliInstalled && status?.hint ? (
-            <div style={{
-              marginTop: 8,
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 11,
-              color: 'var(--t-text-muted)',
-              lineHeight: 1.5,
-              wordBreak: 'break-all',
-            }}>
-              {status.hint}
-            </div>
-          ) : null}
-          {note ? (
-            <div style={{
-              marginTop: 8,
-              fontSize: 12,
-              lineHeight: 1.55,
-              color: note.ok ? '#15803d' : '#dc2626',
-            }}>
-              {note.ok ? `${note.message} ${restartHint}` : note.message}
-            </div>
-          ) : null}
-        </div>
-
-        <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-          {registered ? (
-            <button
-              type="button"
-              onClick={onRemove}
-              disabled={installing || disabled}
-              style={quietActionStyle(installing || disabled)}
-            >
-              remove
-            </button>
-          ) : null}
-          <button
-            type="button"
-            onClick={onInstall}
-            disabled={primaryDisabled}
-            style={accentActionStyle(primaryDisabled)}
-          >
-            {installing ? 'working...' : primaryLabel}
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function DiagnosticRow({ label, ok, detail }: { label: string; ok: boolean; detail?: string | null }) {
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 14,
-      paddingTop: 10,
-      paddingBottom: 10,
-      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-    }}>
-      <span style={{
-        width: 6,
-        height: 6,
-        borderRadius: 3,
-        background: ok ? '#22c55e' : '#ef4444',
-        flexShrink: 0,
-      }} />
-      <span style={{
-        fontFamily: APP_FONT_STACK,
-        fontSize: 11,
-        fontWeight: 400,
-        color: RAMS_INK_QUIET,
-        textTransform: 'uppercase',
-        letterSpacing: '0.14em',
-        minWidth: 130,
-      }}>
-        {label}
-      </span>
-      <span style={{
-        fontFamily: MONO_FONT_STACK,
-        fontSize: 12,
-        color: 'var(--t-text-secondary)',
-        overflow: 'hidden',
-        textOverflow: 'ellipsis',
-        whiteSpace: 'nowrap',
-        flex: 1,
-      }}>
-        {detail || (ok ? 'installed' : 'missing')}
-      </span>
-    </div>
-  );
-}
-
-function accentActionStyle(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 32,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: disabled ? RAMS_CONTROL_BORDER : RAMS_CONTROL_ACTIVE_BORDER,
-    background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 12,
-    fontWeight: 400,
-    letterSpacing: '-0.01em',
-    textTransform: 'capitalize',
-    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    cursor: disabled ? 'default' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
-    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-  };
-}
-
-function quietActionStyle(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 32,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: RAMS_CONTROL_BORDER,
-    background: disabled ? 'transparent' : RAMS_CONTROL_BG,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 12,
-    fontWeight: 400,
-    letterSpacing: '-0.01em',
-    textTransform: 'capitalize',
-    color: 'var(--t-text-muted)',
-    cursor: disabled ? 'default' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
-    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-  };
 }
