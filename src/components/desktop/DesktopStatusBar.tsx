@@ -29,6 +29,7 @@ import { useExperimentalCanvasFlag } from '@/lib/operator/use-experimental-canva
 import { Terminal as TablerTerminal } from './tabler-shims';
 import { CircleSpark, DoubleCheck, Folder, Internet } from 'iconoir-react';
 import { SettingsQuickDrawer } from './SettingsQuickDrawer';
+import { useEntitlement } from '@/lib/entitlement/context';
 import type { BottomPanelSurfaceKind } from './ContextualPanel';
 
 const COLLAPSED_LEFT_FOOTER_WIDTH = 34;
@@ -89,6 +90,7 @@ function DesktopStatusBarBase({
   onOpenMobilePairing,
   onPortPreview,
 }: DesktopStatusBarProps) {
+  const { founder } = useEntitlement();
   const settingsButtonRef = useRef<HTMLDivElement | null>(null);
   const [settingsDrawerOpen, setSettingsDrawerOpen] = useState(false);
   const [settingsAnchorRect, setSettingsAnchorRect] = useState<DOMRect | null>(null);
@@ -393,6 +395,7 @@ function DesktopStatusBarBase({
           gap: 6,
         }}
       >
+        {founder ? <FoundingStatusBadge operatorNumber={founder.operatorNumber} /> : null}
         {onOpenShortcuts ? <StatusShortcutsButton onClick={onOpenShortcuts} /> : null}
       </div>
     </div>
@@ -400,6 +403,55 @@ function DesktopStatusBarBase({
 }
 
 export const DesktopStatusBar = memo(DesktopStatusBarBase);
+
+/** Founding Operator mark — a hairline serial chip ("FOUNDING · 001") that sits
+ *  beside the ? in the status bar, shown only to founders. The one founding
+ *  orange (#ff5a1f, the founders-wall + edition color) marks the serial; the
+ *  label reads through the chrome-flipped ink token so it works light + dark. */
+const FOUNDER_ORANGE = '#ff5a1f';
+
+function FoundingStatusBadge({ operatorNumber }: { operatorNumber: number }) {
+  const serial = String(operatorNumber).padStart(3, '0');
+  return (
+    <div
+      title={`Founding Operator · No. ${serial}`}
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 5,
+        height: 22,
+        paddingLeft: 9,
+        paddingRight: 9,
+        borderRadius: 6,
+        background: 'rgba(255, 90, 31, 0.08)',
+        borderWidth: '0.5px',
+        borderStyle: 'solid',
+        borderColor: 'rgba(255, 90, 31, 0.24)',
+        fontFamily: 'var(--font-sans-system)',
+        fontSize: 10,
+        fontWeight: 500,
+        letterSpacing: '0.11em',
+        textTransform: 'uppercase',
+        color: 'var(--t-text-muted)',
+        userSelect: 'none',
+        whiteSpace: 'nowrap',
+        flexShrink: 0,
+      }}
+    >
+      <span>Founding</span>
+      <span style={{ color: 'var(--t-text-faint)', letterSpacing: 0 }}>·</span>
+      <span
+        style={{
+          color: FOUNDER_ORANGE,
+          letterSpacing: '0.04em',
+          fontVariantNumeric: 'tabular-nums',
+        }}
+      >
+        {serial}
+      </span>
+    </div>
+  );
+}
 
 const BOTTOM_PANEL_OPTIONS: Array<{
   id: BottomPanelSurfaceKind;
