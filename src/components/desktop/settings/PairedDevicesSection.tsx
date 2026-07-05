@@ -1,7 +1,7 @@
 'use client';
 
 /**
- * PairedDevicesSection — Settings → Mobile → 02 Paired devices (the competing platform #5).
+ * PairedDevicesSection — Settings → Mobile → Paired devices (the competing platform #5).
  *
  * Lists every device that enrolled a per-device token (GET /api/mobile/devices)
  * and lets the operator revoke any one (POST /api/mobile/devices/revoke). Revoke
@@ -12,12 +12,8 @@
  */
 
 import { useCallback, useEffect, useState } from 'react';
-import {
-  APP_FONT_STACK,
-  HairlineRule,
-  RamsButton,
-  RAMS_INK_QUIET,
-} from './shared';
+import { APP_FONT_STACK, RamsButton } from './shared';
+import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 
 interface MobileDevice {
   id: string;
@@ -49,95 +45,48 @@ function formatRelative(value: string | null): string {
   return new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
-function StatusPill({ revoked }: { revoked: boolean }) {
-  const tone = revoked
-    ? { bg: 'rgba(217, 79, 58, 0.10)', fg: '#b23a28' }
-    : { bg: 'rgba(34, 197, 94, 0.12)', fg: '#15803d' };
-  return (
-    <span style={{
-      fontFamily: APP_FONT_STACK,
-      fontSize: 9,
-      fontWeight: 400,
-      letterSpacing: '0.1em',
-      textTransform: 'uppercase',
-      color: tone.fg,
-      background: tone.bg,
-      paddingTop: 2,
-      paddingBottom: 2,
-      paddingLeft: 7,
-      paddingRight: 7,
-      borderRadius: 999,
-      flexShrink: 0,
-    }}>
-      {revoked ? 'Revoked' : 'Active'}
-    </span>
-  );
-}
-
-function DeviceRow({ device, onRevoke, busy }: {
+function DeviceRow({ device, onRevoke, busy, divider }: {
   device: MobileDevice;
   onRevoke: (id: string) => void;
   busy: boolean;
+  divider: boolean;
 }) {
   const [confirming, setConfirming] = useState(false);
   const revoked = Boolean(device.revokedAt);
-  return (
-    <div style={{
-      display: 'flex',
-      alignItems: 'center',
-      gap: 12,
-      paddingTop: 12,
-      paddingBottom: 12,
-      opacity: revoked ? 0.62 : 1,
-    }}>
-      <div style={{ flex: 1, minWidth: 0 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
-          <span style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 13.5,
-            fontWeight: 400,
-            color: 'var(--t-text)',
-            letterSpacing: '-0.01em',
-            whiteSpace: 'nowrap',
-            overflow: 'hidden',
-            textOverflow: 'ellipsis',
-          }}>
-            {device.deviceLabel?.trim() || 'Unnamed device'}
-          </span>
-          <StatusPill revoked={revoked} />
-        </div>
-        <div style={{
-          fontFamily: APP_FONT_STACK,
-          fontSize: 11,
-          fontWeight: 300,
-          color: 'var(--t-text-faint)',
-          letterSpacing: '-0.005em',
-          marginTop: 3,
-        }}>
-          {revoked
-            ? `Revoked ${formatRelative(device.revokedAt)} · paired ${formatRelative(device.createdAt)}`
-            : `Paired ${formatRelative(device.createdAt)} · last seen ${formatRelative(device.lastSeenAt)}`}
-        </div>
-      </div>
+  const subtitle = revoked
+    ? `Revoked ${formatRelative(device.revokedAt)} · paired ${formatRelative(device.createdAt)}`
+    : `Paired ${formatRelative(device.createdAt)} · last seen ${formatRelative(device.lastSeenAt)}`;
 
-      {revoked ? null : confirming ? (
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
-          <span style={{ fontFamily: APP_FONT_STACK, fontSize: 11.5, fontWeight: 300, color: 'var(--t-text-secondary)' }}>
-            Revoke this device?
-          </span>
-          <RamsButton variant="danger" busy={busy} onClick={() => onRevoke(device.id)}>
-            Revoke
-          </RamsButton>
-          <RamsButton variant="ghost" onClick={() => setConfirming(false)}>
-            Cancel
-          </RamsButton>
-        </div>
-      ) : (
-        <RamsButton variant="ghost" onClick={() => setConfirming(true)}>
-          Revoke
-        </RamsButton>
-      )}
+  const accessory = revoked ? (
+    <ValuePill tone="destructive">Revoked</ValuePill>
+  ) : confirming ? (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+      <span style={{ fontFamily: APP_FONT_STACK, fontSize: 11.5, fontWeight: 300, color: 'var(--t-text-secondary)' }}>
+        Revoke this device?
+      </span>
+      <RamsButton variant="danger" busy={busy} onClick={() => onRevoke(device.id)}>
+        Revoke
+      </RamsButton>
+      <RamsButton variant="ghost" onClick={() => setConfirming(false)}>
+        Cancel
+      </RamsButton>
     </div>
+  ) : (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+      <ValuePill tone="success">Active</ValuePill>
+      <RamsButton variant="ghost" onClick={() => setConfirming(true)}>
+        Revoke
+      </RamsButton>
+    </div>
+  );
+
+  return (
+    <SettingsRow
+      label={device.deviceLabel?.trim() || 'Unnamed device'}
+      subtitle={subtitle}
+      accessory={accessory}
+      divider={divider}
+    />
   );
 }
 
@@ -192,11 +141,16 @@ export function PairedDevicesSection() {
   );
 
   return (
-    <div>
+    <SettingsGroup
+      header="Paired devices"
+      footnote={devices && devices.length > 0 ? 'Revoking a device cuts its access immediately — it must re-pair to return.' : undefined}
+    >
       {devices === null ? (
-        quiet('Loading paired devices…')
+        <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
+          {quiet('Loading paired devices…')}
+        </div>
       ) : devices.length === 0 ? (
-        <div>
+        <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
           {quiet('No phones paired yet. Show the pairing QR above and scan it with the o8 app — each phone enrolls its own revocable key.')}
           {error ? (
             <p style={{ fontFamily: APP_FONT_STACK, fontSize: 11, fontWeight: 300, color: '#b23a28', marginTop: 8, marginBottom: 0 }}>
@@ -205,27 +159,28 @@ export function PairedDevicesSection() {
           ) : null}
         </div>
       ) : (
-        <div>
-          <HairlineRule />
-          {devices.map((device) => (
-            <div key={device.id}>
-              <DeviceRow device={device} onRevoke={revoke} busy={revokingId === device.id} />
-              <HairlineRule />
-            </div>
+        <>
+          {devices.map((device, i) => (
+            <DeviceRow
+              key={device.id}
+              device={device}
+              onRevoke={revoke}
+              busy={revokingId === device.id}
+              divider={i < devices.length - 1}
+            />
           ))}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 12, paddingTop: 12, paddingBottom: 12, paddingLeft: 14, paddingRight: 14 }}>
             <RamsButton variant="ghost" onClick={() => void load()}>Refresh</RamsButton>
-            <span style={{ fontFamily: APP_FONT_STACK, fontSize: 10.5, fontWeight: 300, color: RAMS_INK_QUIET, letterSpacing: '0.02em' }}>
-              Revoking a device cuts its access immediately — it must re-pair to return.
-            </span>
           </div>
           {error ? (
-            <p style={{ fontFamily: APP_FONT_STACK, fontSize: 11, fontWeight: 300, color: '#b23a28', marginTop: 10, marginBottom: 0 }}>
-              {error}
-            </p>
+            <div style={{ paddingLeft: 14, paddingRight: 14, paddingBottom: 12 }}>
+              <p style={{ fontFamily: APP_FONT_STACK, fontSize: 11, fontWeight: 300, color: '#b23a28', margin: 0 }}>
+                {error}
+              </p>
+            </div>
           ) : null}
-        </div>
+        </>
       )}
-    </div>
+    </SettingsGroup>
   );
 }
