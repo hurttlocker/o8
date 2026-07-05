@@ -3678,6 +3678,16 @@ pub fn run() {
         }
     }
 
+    // Clerk publishable key (PUBLIC — safe in source; also baked into the web
+    // bundle as NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY). The native-mode Clerk plugin
+    // needs it in Rust so clerk-js can hold the session via a Tauri store instead
+    // of a cross-site cookie WKWebView won't return (127.0.0.1 → clerk.o8.run).
+    // Sourced from the build env when present, else the o8.run production key.
+    const CLERK_PUBLISHABLE_KEY: &str = match option_env!("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY") {
+        Some(k) => k,
+        None => "pk_live_Y2xlcmsubzgucnVuJA",
+    };
+
     #[allow(unused_mut)] // `mut` is needed only when `dev-mcp-plugin` feature is enabled
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_log::Builder::default()
@@ -3687,6 +3697,16 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        // Native-mode Clerk session persistence (routes FAPI through Rust +
+        // stores the client JWT on disk) — the production-compatible desktop
+        // auth path. tauri-plugin-http is its request-routing dependency.
+        .plugin(tauri_plugin_http::init())
+        .plugin(
+            tauri_plugin_clerk::ClerkPluginBuilder::new()
+                .publishable_key(CLERK_PUBLISHABLE_KEY)
+                .with_tauri_store()
+                .build(),
+        )
         .plugin(tauri_plugin_updater::Builder::new().build())
         // Phase 4 (background presence): launch-at-login. LaunchAgent matches
         // the resident-hotkey-app pattern. Default ON is bootstrapped once from
