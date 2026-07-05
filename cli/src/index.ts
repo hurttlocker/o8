@@ -24,6 +24,7 @@ import { runCortexObserve } from './commands/cortex.js';
 import { runInbox } from './commands/inbox.js';
 import { runLaneTouches } from './commands/lane.js';
 import { runMission } from './commands/mission.js';
+import { runMcp } from './commands/mcp.js';
 import { runStatus } from './commands/status.js';
 import { runRun } from './commands/run.js';
 import { runVersion } from './commands/version.js';
@@ -113,7 +114,7 @@ usage: o8 <command> [subcommand] [flags]
 
 commands:
   version              CLI version + connected server version
-  doctor               verify port + token resolution, ping server
+  doctor               verify port + token resolution, ping server; --repair reinstalls the o8 CLI symlink
   status               snapshot: running packets, lanes, merges, approvals
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
@@ -132,6 +133,7 @@ commands:
   mission status       mission + packet state [--mission <id>] [--cost]
   mission wait         block until a packet hits a review/terminal state [--timeout --poll]
   mission tail         stream packet status transitions until terminal [--timeout --poll]
+  mcp install          install/print the o8 MCP config (--claude-code | --cursor | --print)
   inbox list           pending governance approvals (--all includes resolved)
   inbox approve <id>   approve a card → runs the deferred action (e.g. a held merge)
   inbox reject <id>    reject a pending approval
@@ -218,6 +220,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
     }
     case 'mission':
       return runMission(args.mode, secondary, args.rest);
+    case 'mcp':
+      return runMcp(args.mode, secondary, args.rest);
     case 'inbox':
       return runInbox(args.mode, secondary, args.rest);
     case 'task': {

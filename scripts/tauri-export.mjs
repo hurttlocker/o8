@@ -311,6 +311,7 @@ https.createServer = function (...args) {
   return stampClientAddr(origHttpsCreate.apply(this, args));
 };
 ${RELEASE_ENV_STANZA}
+process.env.O8_PACKAGED_APP = '1';
 require('./server-impl.js');
 `);
 console.log('📦 Wrote server.js wrapper (socket-addr stamping) + server-impl.js');
@@ -459,13 +460,15 @@ if (existsSync(DECOMPOSE_PROMPT_SRC)) {
 }
 
 // ── Build + bundle the agent-facing CLI ──
-// Builds cli/dist/o8.mjs via the package's own esbuild config, then copies it
-// into out/server/bin/o8. The Tauri sidecar symlinks /usr/local/bin/o8 → that
-// path on first launch so the user (and dispatched workers) have `o8` on PATH.
+// Builds cli/dist/o8.mjs via the package's own esbuild config, then writes a
+// shell wrapper at out/server/bin/o8. The wrapper uses O8_NODE_BIN when the app
+// injected it, then falls back to a login-shell lookup so Finder/minimal-PATH
+// sessions do not fail at `#!/usr/bin/env node`.
 const CLI_BUILD = join(root, 'cli', 'esbuild.config.mjs');
 const CLI_OUTPUT = join(root, 'cli', 'dist', 'o8.mjs');
 const CLI_BIN_DIR = join(server, 'bin');
 const CLI_BIN_DST = join(CLI_BIN_DIR, 'o8');
+const CLI_BUNDLE_DST = join(CLI_BIN_DIR, 'o8.mjs');
 if (existsSync(CLI_BUILD)) {
   console.log('   building cli bundle…');
   execSync(`node "${CLI_BUILD}"`, { stdio: 'inherit', cwd: join(root, 'cli') });
@@ -474,8 +477,22 @@ if (existsSync(CLI_BUILD)) {
     process.exit(1);
   }
   mkdirSync(CLI_BIN_DIR, { recursive: true });
-  cpSync(CLI_OUTPUT, CLI_BIN_DST);
+  cpSync(CLI_OUTPUT, CLI_BUNDLE_DST);
+  writeFileSync(CLI_BIN_DST, `#!/bin/sh
+set -eu
+DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+NODE_BIN="\${O8_NODE_BIN:-}"
+if [ -z "$NODE_BIN" ] || [ ! -x "$NODE_BIN" ]; then
+  NODE_BIN="$(zsh -l -c 'command -v node' 2>/dev/null || bash -l -c 'command -v node' 2>/dev/null || sh -lc 'command -v node' 2>/dev/null || true)"
+fi
+if [ -z "$NODE_BIN" ]; then
+  echo "o8: Node.js 22+ is required. Relaunch o8.app or install Node from https://nodejs.org." >&2
+  exit 127
+fi
+exec "$NODE_BIN" "$DIR/o8.mjs" "$@"
+`);
   execSync(`chmod +x "${CLI_BIN_DST}"`);
+  execSync(`chmod +x "${CLI_BUNDLE_DST}"`);
 } else {
   console.warn('⚠️  CLI build config missing — skipping `o8` cli bundle');
 }

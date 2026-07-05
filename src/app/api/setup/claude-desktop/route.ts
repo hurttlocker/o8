@@ -24,6 +24,7 @@ import { NextResponse } from 'next/server';
 import { existsSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { readClaudeConfig, atomicWriteConfig } from '@/lib/mcp/claude-desktop-config-io';
+import { getMcpSetupReadiness } from '@/lib/mcp/setup-readiness';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { entriesForSurface } from '@/lib/mcp/tool-spine/registry';
 import { toClaudeDesktopJson } from '@/lib/mcp/tool-spine/emit-claude-desktop';
@@ -79,7 +80,10 @@ export async function GET(request: Request) {
     const existingEntry = existingServers['o8'];
     const existingCodebaseMemoryEntry = existingServers['codebase-memory'];
 
-    const projected = toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, unknown>;
+    const mcpReady = getMcpSetupReadiness();
+    const projected = mcpReady.ready
+      ? toClaudeDesktopJson(buildToolRegistry(process.cwd()), {}).mcpServers as Record<string, unknown>
+      : {};
     const proposed = projected['o8'];
     const proposedCodebaseMemory = projected['codebase-memory'] ?? null;
 
@@ -105,7 +109,10 @@ export async function GET(request: Request) {
       path,
       fileExists,
       alreadyRegistered: Boolean(existingEntry),
-      alreadyUpToDate,
+      alreadyUpToDate: mcpReady.ready ? alreadyUpToDate : false,
+      setupReady: mcpReady.ready,
+      setupBlockedReason: mcpReady.reason,
+      setupBlockedDetail: mcpReady.detail,
       proposed,
       existingEntry: existingEntry ?? null,
       proposedCodebaseMemory,
@@ -131,6 +138,18 @@ export async function POST(request: Request) {
     const target = normalizeTarget(body.target);
     const remove = body.remove === true;
     const path = getTargetConfigPath(target);
+    const mcpReady = getMcpSetupReadiness();
+    if (!remove && !mcpReady.ready) {
+      return NextResponse.json(
+        {
+          ok: false,
+          error: 'MCP setup is not ready',
+          detail: mcpReady.detail,
+          setupBlockedReason: mcpReady.reason,
+        },
+        { status: 409 },
+      );
+    }
 
     const config = readClaudeConfig(path);
     if (!config.mcpServers || typeof config.mcpServers !== 'object') {
