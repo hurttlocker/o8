@@ -8,6 +8,7 @@
 import { apiFetch, CliError, EXIT } from '../api.js';
 import { resolveConfig } from '../config.js';
 import { printHumanHeading, printHumanKv, printJson, type OutputMode } from '../output.js';
+import { repairCliInstall, type CliInstallResult } from './install.js';
 
 interface ReapCandidate {
   lane: {
@@ -39,9 +40,11 @@ interface ReapResponse {
 function parseDoctorArgs(rest: string[]) {
   let reap = false;
   let force = false;
+  let repair = false;
   for (const tok of rest) {
     if (tok === '--reap') reap = true;
     else if (tok === '--force') force = true;
+    else if (tok === '--repair') repair = true;
     else {
       throw new CliError('invalid_args', `Unknown doctor flag: ${tok}`, EXIT.INVALID_ARGS);
     }
@@ -49,7 +52,7 @@ function parseDoctorArgs(rest: string[]) {
   if (force && !reap) {
     throw new CliError('invalid_args', '`o8 doctor --force` requires --reap.', EXIT.INVALID_ARGS);
   }
-  return { reap, force };
+  return { reap, force, repair };
 }
 
 export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<number> {
@@ -57,6 +60,31 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
   const cfg = resolveConfig();
   const findings: Array<{ level: 'info' | 'warn' | 'error'; code: string; message: string }> = [];
   let reapPayload: ReapResponse | null = null;
+  let repairPayload: CliInstallResult | null = null;
+
+  if (args.repair) {
+    repairPayload = repairCliInstall(process.argv[1] ?? '');
+    if (!repairPayload.installedAt) {
+      findings.push({
+        level: 'error',
+        code: 'cli_install_failed',
+        message: 'Could not install the o8 CLI symlink. See repair.candidates for details.',
+      });
+    } else if (!repairPayload.onPath) {
+      findings.push({
+        level: 'warn',
+        code: 'cli_not_on_path',
+        message: `o8 is installed at ${repairPayload.installedAt}, but that directory is not on PATH.`,
+      });
+    }
+    if (!repairPayload.nodeResolvable) {
+      findings.push({
+        level: 'error',
+        code: 'node_not_resolvable',
+        message: 'Node.js is not resolvable from this shell. Install Node 22 or relaunch o8 so O8_NODE_BIN can be injected.',
+      });
+    }
+  }
 
   let serverReachable = false;
   let serverPayload: Record<string, unknown> | null = null;
@@ -146,6 +174,7 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
       candidates: reapPayload.candidates,
       reaped: reapPayload.reaped ?? [],
     } : null,
+    repair: repairPayload,
     runtimes: runtimes.map((rt) => ({
       id: rt.id,
       name: rt.name,
@@ -165,6 +194,18 @@ export async function runDoctor(mode: OutputMode, rest: string[] = []): Promise<
       ['data dir', cfg.dataDir ?? '(none)'],
       ['reachable', serverReachable ? 'yes' : 'no'],
     ]);
+    if (repairPayload) {
+      printHumanHeading('cli repair');
+      printHumanKv([
+        ['source', repairPayload.source],
+        ['installed at', repairPayload.installedAt ?? '(not installed)'],
+        ['on PATH', repairPayload.onPath ? 'yes' : 'no'],
+        ['node', repairPayload.nodeBin ?? 'missing'],
+      ]);
+      for (const candidate of repairPayload.candidates) {
+        process.stdout.write(`  ${candidate.path}: ${candidate.status} — ${candidate.detail}\n`);
+      }
+    }
     if (runtimes.length > 0) {
       printHumanHeading('runtimes');
       for (const rt of runtimes) {
