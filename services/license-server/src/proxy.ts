@@ -82,7 +82,15 @@ const WHISPER_PRICE_PER_MIN_USD = envUsd('PROXY_WHISPER_PRICE_PER_MIN_USD', 0.00
 const DICTATION_BITRATE_BYTES_PER_SEC = 2500; // ~20 kbps opus (browser MediaRecorder voice default)
 
 function transcribeCostMicroUsd(body: Record<string, unknown>): number {
-  const b64 = typeof body.input_audio === 'string' ? body.input_audio : '';
+  // input_audio is either a bare base64 string OR an object { data, format }
+  // (the desktop Rust STT sends the object form) — handle both.
+  const ia = body.input_audio;
+  let b64 = '';
+  if (typeof ia === 'string') {
+    b64 = ia;
+  } else if (ia && typeof ia === 'object' && typeof (ia as { data?: unknown }).data === 'string') {
+    b64 = (ia as { data: string }).data;
+  }
   if (!b64) return 0;
   const bytes = Math.floor(b64.length * 0.75); // base64 → raw audio bytes
   const seconds = bytes / DICTATION_BITRATE_BYTES_PER_SEC;
