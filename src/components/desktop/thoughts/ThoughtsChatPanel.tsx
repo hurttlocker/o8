@@ -25,6 +25,7 @@ import type {
   OrchestratorRuntime,
   OrchestratorWorkspaceTarget,
 } from '@/lib/orchestrator/types';
+import type { OrchestratorBackendId } from '@/lib/lane/orchestrator-backends/types';
 import type { MobileTranscriptEntry } from '@/lib/mobile/types';
 import type { PendingSteer } from './chat-panel/PendingSteerCard';
 import { serializeThreadToMarkdown } from '@/lib/llm/export-thread';
@@ -129,6 +130,10 @@ function formatComposerBackendLabel(backend: OrchestratorBackendSetting, model: 
   if (backend === 'hermes') return 'Hermes';
   if (backend === 'collide') return 'Collide';
   return formatModelLabel(model);
+}
+
+function composerBackendTurnOverride(backend: OrchestratorBackendSetting): OrchestratorBackendId | undefined {
+  return backend === 'auto' ? undefined : backend;
 }
 
 export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
@@ -1419,6 +1424,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     const localEntriesAfterUser = request.commandEntry ? [request.commandEntry] : [];
     orchStream.send(request.prompt, {
       permissionMode,
+      backend: composerBackendTurnOverride(orchestratorBackend),
       thinkingEffort,
       model: orchestratorModel,
       displayMessage: request.displayMessage,
@@ -1426,7 +1432,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       swarm: swarmEnabled,
       collide: collideEnabled,
     });
-  }, [orchStream, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled, collideEnabled]);
+  }, [orchStream, orchestratorBackend, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled, collideEnabled]);
 
   const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
     if (!isOrchestratorMode || isChatMode) return false;
@@ -1520,6 +1526,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           latestInputRef.current = '';
           orchStream.send(body, {
             permissionMode,
+            backend: composerBackendTurnOverride(orchestratorBackend),
             thinkingEffort,
             model: orchestratorModel,
             swarm: swarmEnabled,
@@ -1657,6 +1664,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         : undefined;
       const orchOptions = {
         permissionMode,
+        backend: composerBackendTurnOverride(orchestratorBackend),
         thinkingEffort,
         model: orchestratorModel,
         swarm: swarmEnabled,
@@ -1723,7 +1731,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
+  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -1752,6 +1760,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           : undefined;
         orchStream.send(msg, {
           permissionMode,
+          backend: composerBackendTurnOverride(orchestratorBackend),
           thinkingEffort,
           model: orchestratorModel,
           swarm: swarmEnabled,
@@ -1766,7 +1775,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
-  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
+  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
   queuedSteerSendNowRef.current = sendNow;
 
   // ⌘⏎ steer handlers. enqueueSteer routes the typed input through the queue:
@@ -1925,7 +1934,13 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ orchestratorBackend: next }),
     })
-      .then((response) => response.json().catch(() => null))
+      .then(async (response) => {
+        const payload = await response.json().catch(() => null) as { values?: Partial<ThoughtsOperatorDefaults>; error?: string } | null;
+        if (!response.ok) {
+          throw new Error(payload?.error || 'Failed to persist orchestrator backend.');
+        }
+        return payload;
+      })
       .then((payload: { values?: Partial<ThoughtsOperatorDefaults> } | null) => {
         if (!payload?.values) return;
         const defaults: ThoughtsOperatorDefaults = {
