@@ -7,6 +7,7 @@ import path from 'node:path';
 
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
+import type { AutoApplyUpdates } from '@/lib/app-update/relaunch-state';
 
 const DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'gemini', 'opencode'];
 function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
@@ -231,6 +232,8 @@ export interface OperatorDefaults {
   targetingTriage: TargetingTier;
   /** Targeting Machine — the premium "point a real agent here" tier (default high). */
   targetingAction: TargetingTier;
+  /** Auto-apply downloaded desktop updates only under conservative idle gates. */
+  autoApplyUpdates: AutoApplyUpdates;
 }
 
 export interface OperatorDefaultsWithSources {
@@ -277,6 +280,7 @@ export const OPERATOR_DEFAULTS_FALLBACK: OperatorDefaults = {
   // operator can point triage at a cheaper runtime/model (gemini, a local model).
   targetingTriage: { runtime: 'codex', model: '', effort: 'low' },
   targetingAction: { runtime: 'codex', model: '', effort: 'high' },
+  autoApplyUpdates: 'off',
 };
 
 export const CLASS_A_COMPOSER_OPTIONS: Array<{ value: ClassAComposer; label: string; detail: string }> = [
@@ -467,6 +471,12 @@ function envOrchestratorBackend(): OrchestratorBackendSetting | null {
   return null;
 }
 
+function envAutoApplyUpdates(): AutoApplyUpdates | null {
+  const raw = process.env.O8_AUTO_APPLY_UPDATES?.trim();
+  if (raw === 'off' || raw === 'when-idle') return raw;
+  return null;
+}
+
 // ── File helpers ──
 
 interface StoredOperatorDefaults {
@@ -494,6 +504,7 @@ interface StoredOperatorDefaults {
   orchestratorBackend?: OrchestratorBackendSetting;
   targetingTriage?: TargetingTier;
   targetingAction?: TargetingTier;
+  autoApplyUpdates?: AutoApplyUpdates;
 }
 
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
@@ -581,6 +592,9 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   if (isOrchestratorBackendSetting(stored.orchestratorBackend)) {
     result.orchestratorBackend = stored.orchestratorBackend;
   }
+  if (stored.autoApplyUpdates === 'off' || stored.autoApplyUpdates === 'when-idle') {
+    result.autoApplyUpdates = stored.autoApplyUpdates;
+  }
   const storedTriage = coerceStoredTier(stored.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage);
   if (storedTriage) result.targetingTriage = storedTriage;
   const storedAction = coerceStoredTier(stored.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction);
@@ -613,6 +627,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envBrainCli = envBrainUseClaudeCli();
   const envBrain = envWorkersUseBrain();
   const envOrchBackend = envOrchestratorBackend();
+  const envApplyUpdates = envAutoApplyUpdates();
   const envTriage = envTargetingTier('TRIAGE');
   const envAction = envTargetingTier('ACTION');
 
@@ -645,6 +660,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     orchestratorBackend: envOrchBackend ?? fileValues.orchestratorBackend ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorBackend,
     targetingTriage: mergeTier(envTriage, fileValues.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage),
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
+    autoApplyUpdates: envApplyUpdates ?? fileValues.autoApplyUpdates ?? OPERATOR_DEFAULTS_FALLBACK.autoApplyUpdates,
   };
 
   const sources: Record<keyof OperatorDefaults, SettingSource> = {
@@ -676,6 +692,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     orchestratorBackend: envOrchBackend !== null ? 'env' : fileValues.orchestratorBackend !== undefined ? 'file' : 'default',
     targetingTriage: envTriage !== null ? 'env' : fileValues.targetingTriage !== undefined ? 'file' : 'default',
     targetingAction: envAction !== null ? 'env' : fileValues.targetingAction !== undefined ? 'file' : 'default',
+    autoApplyUpdates: envApplyUpdates !== null ? 'env' : fileValues.autoApplyUpdates !== undefined ? 'file' : 'default',
   };
 
   return { values: resolved, sources };
@@ -821,6 +838,12 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
       throw new Error('orchestratorBackend must be one of "auto", "codex", "claude", "openclaw", "hermes", "collide", "fable".');
     }
     stored.orchestratorBackend = update.orchestratorBackend;
+  }
+  if (update.autoApplyUpdates !== undefined) {
+    if (update.autoApplyUpdates !== 'off' && update.autoApplyUpdates !== 'when-idle') {
+      throw new Error('autoApplyUpdates must be "off" or "when-idle".');
+    }
+    stored.autoApplyUpdates = update.autoApplyUpdates;
   }
   if (update.targetingTriage !== undefined) {
     if (!isTargetingTier(update.targetingTriage)) {

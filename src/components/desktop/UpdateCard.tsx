@@ -19,10 +19,10 @@
  * second open is instant.
  */
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { isTauri } from '@/lib/tauri/bridge';
-import { openExternalUrl } from '@/lib/desktop/open-external';
+import { installUpdateAndRestart, RELEASE_URL } from '@/lib/app-update/client-restart';
 
 interface UpdateInfo {
   version: string;
@@ -38,7 +38,10 @@ const EXPANDED_KEY = 'o8:update-card:expanded';
 const SUMMARY_CACHE_KEY = 'o8:update-card:summary'; // per-version map
 const UPDATE_AVAILABLE_EVENT = 'o8://update-available';
 const UPDATE_CLEAR_EVENT = 'o8://update-clear';
-const RELEASE_URL = 'https://github.com/hurttlocker/o8/releases/latest';
+const AUTO_APPLY_IDLE_MS = 5 * 60 * 1000;
+const AUTO_APPLY_CHECK_MS = 60 * 1000;
+
+type AutoApplyUpdates = 'off' | 'when-idle';
 
 function readDismissedVersion() {
   if (typeof window === 'undefined') return null;
@@ -110,6 +113,21 @@ export function UpdateCard() {
   const [summary, setSummary] = useState<string | null>(null);
   const [summaryLoading, setSummaryLoading] = useState(false);
   const [summaryError, setSummaryError] = useState<string | null>(null);
+  const [autoApplyUpdates, setAutoApplyUpdates] = useState<AutoApplyUpdates>('off');
+  const updateRef = useRef<UpdateInfo | null>(null);
+  const installingRef = useRef(false);
+  const autoApplyingRef = useRef(false);
+  const lastOperatorInputRef = useRef(Date.now());
+  const orchestratorStreamingRef = useRef(false);
+  const orchestratorBusyTabsRef = useRef<Map<string, boolean>>(new Map());
+
+  useEffect(() => {
+    updateRef.current = update;
+  }, [update]);
+
+  useEffect(() => {
+    installingRef.current = installing;
+  }, [installing]);
 
   const handleDismiss = useCallback(() => {
     const version = update?.version ?? '';
@@ -149,6 +167,19 @@ export function UpdateCard() {
   }, []);
 
   useEffect(() => {
+    fetch('/api/panel/operator-defaults', { cache: 'no-store' })
+      .then(async (response) => {
+        if (!response.ok) return;
+        const payload = await response.json() as {
+          values?: { autoApplyUpdates?: AutoApplyUpdates };
+        };
+        const next = payload.values?.autoApplyUpdates;
+        if (next === 'when-idle' || next === 'off') setAutoApplyUpdates(next);
+      })
+      .catch(() => { /* default off */ });
+  }, []);
+
+  useEffect(() => {
     if (!isTauri()) return;
     let cancelled = false;
     let availableUnlisten: Promise<() => void> | null = null;
@@ -176,6 +207,14 @@ export function UpdateCard() {
     const interval = window.setInterval(() => void checkForUpdate(), UPDATE_CHECK_INTERVAL);
     return () => window.clearInterval(interval);
   }, [checkForUpdate]);
+
+  useEffect(() => {
+    fetch('/api/panel/app/update-state', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ updatePending: Boolean(update), version: update?.version ?? null }),
+    }).catch(() => { /* route is best-effort state for CLI --if-update-pending */ });
+  }, [update]);
 
   // Fetch summary when the card is expanded and we have a version. Cache
   // by version in localStorage so repeated opens are instant.
@@ -214,36 +253,91 @@ export function UpdateCard() {
   }, [expanded, update?.version]);
 
   const handleInstall = useCallback(async () => {
-    if (!isTauri()) {
-      openExternalUrl(update?.releaseUrl ?? RELEASE_URL);
-      return;
-    }
     try {
       setInstalling(true);
-      const { check } = await import('@tauri-apps/plugin-updater');
-      const result = await check();
-      if (result) {
-        await result.downloadAndInstall();
-        // Restart via our own command, NOT plugin-process relaunch: the plugin
-        // exits the old process without reaping the bundled Node children, so
-        // they kept holding the API/WS ports and the new instance came up
-        // "reconnecting" (zombie observed 2026-07-03). restart_app kills the
-        // tracked children first, then restarts. Fall back to plugin relaunch
-        // if the command is unavailable (older shell).
-        try {
-          const { invoke } = await import('@tauri-apps/api/core');
-          await invoke('restart_app');
-        } catch {
-          const { relaunch } = await import('@tauri-apps/plugin-process');
-          await relaunch();
-        }
-      }
+      await installUpdateAndRestart(updateRef.current?.releaseUrl ?? RELEASE_URL);
       setInstalling(false);
     } catch (err) {
       console.error('[update-card] install failed:', err);
       setInstalling(false);
     }
-  }, [update?.releaseUrl]);
+  }, []);
+
+  useEffect(() => {
+    const onRealtime = (event: Event) => {
+      const detail = (event as CustomEvent<{ tabId?: unknown; busy?: unknown }>).detail;
+      const busy = detail?.busy === true;
+      if (typeof detail?.tabId === 'string' && detail.tabId) {
+        if (busy) {
+          orchestratorBusyTabsRef.current.set(detail.tabId, true);
+        } else {
+          orchestratorBusyTabsRef.current.delete(detail.tabId);
+        }
+        orchestratorStreamingRef.current = orchestratorBusyTabsRef.current.size > 0;
+      } else {
+        orchestratorStreamingRef.current = busy;
+      }
+    };
+    window.addEventListener('o8:orchestrator', onRealtime);
+    return () => window.removeEventListener('o8:orchestrator', onRealtime);
+  }, []);
+
+  useEffect(() => {
+    const handler = () => { lastOperatorInputRef.current = Date.now(); };
+    const events = ['pointerdown', 'keydown', 'wheel', 'touchstart'] as const;
+    for (const event of events) window.addEventListener(event, handler, { passive: true });
+    return () => {
+      for (const event of events) window.removeEventListener(event, handler);
+    };
+  }, []);
+
+  useEffect(() => {
+    const onRealtime = (event: Event) => {
+      const detail = (event as CustomEvent<{
+        data?: {
+          events?: Array<{
+            data?: { mutation?: { action?: string; status?: string } };
+          }>;
+        };
+      }>).detail;
+      const requested = detail?.data?.events?.some((item) => {
+        const mutation = item.data?.mutation;
+        return mutation?.action === 'app-relaunch-requested' && mutation.status === 'queued';
+      });
+      if (requested) {
+        void handleInstall();
+      }
+    };
+    window.addEventListener('o8:realtime', onRealtime);
+    return () => window.removeEventListener('o8:realtime', onRealtime);
+  }, [handleInstall]);
+
+  useEffect(() => {
+    if (autoApplyUpdates !== 'when-idle') return;
+
+    async function maybeApplyWhenIdle() {
+      if (!updateRef.current || installingRef.current || autoApplyingRef.current) return;
+      if (Date.now() - lastOperatorInputRef.current < AUTO_APPLY_IDLE_MS) return;
+      if (orchestratorStreamingRef.current) return;
+
+      const response = await fetch('/api/lanes?active=true', { cache: 'no-store' }).catch(() => null);
+      if (!response?.ok) return;
+      const payload = await response.json().catch(() => null) as { lanes?: Array<{ status?: string }> } | null;
+      const lanes = Array.isArray(payload?.lanes) ? payload.lanes : [];
+      if (lanes.some((lane) => lane.status === 'running' || lane.status === 'launching')) return;
+
+      autoApplyingRef.current = true;
+      try {
+        await handleInstall();
+      } finally {
+        autoApplyingRef.current = false;
+      }
+    }
+
+    const interval = window.setInterval(() => void maybeApplyWhenIdle(), AUTO_APPLY_CHECK_MS);
+    void maybeApplyWhenIdle();
+    return () => window.clearInterval(interval);
+  }, [autoApplyUpdates, handleInstall]);
 
   if (!update) return null;
   if (dismissed && dismissed === update.version) return null;
@@ -260,7 +354,7 @@ export function UpdateCard() {
     borderRadius: 10,
     border: '1px solid var(--t-divider-subtle)',
     background: 'var(--t-bg-card, var(--t-panel-solid))',
-    boxShadow: '0 4px 14px rgba(15, 23, 42, 0.06)',
+    boxShadow: '0 4px 14px var(--t-shadow-subtle, transparent)',
     fontFamily: 'var(--font-sans-system)',
     color: 'var(--t-text)',
   };
@@ -285,7 +379,7 @@ export function UpdateCard() {
     lineHeight: 1,
     borderRadius: 6,
     border: '1px solid var(--t-brand-orange, #FF5A1F)',
-    background: installing ? 'transparent' : 'rgba(255, 90, 31, 0.08)',
+    background: installing ? 'transparent' : 'color-mix(in srgb, var(--t-brand-orange, #FF5A1F) 8%, transparent)',
     color: 'var(--t-brand-orange, #FF5A1F)',
     fontSize: 11,
     fontWeight: 400,
@@ -442,7 +536,7 @@ function SummarySkeleton() {
             height: 9,
             width: `${widthPct}%`,
             borderRadius: 4,
-            background: 'var(--t-input-bg, rgba(15, 23, 42, 0.06))',
+            background: 'var(--t-input-bg, var(--t-panel))',
             animation: 'o8-update-shimmer 1.6s ease-in-out infinite',
           }}
         />
