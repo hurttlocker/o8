@@ -14,10 +14,11 @@
  */
 
 import assert from 'node:assert';
-import { existsSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 
+import './require-temp-data-dir';
 import { atomicWriteConfig } from '@/lib/mcp/claude-desktop-config-io';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { entriesForSurface } from '@/lib/mcp/tool-spine/registry';

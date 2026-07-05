@@ -13,6 +13,7 @@
 
 import assert from 'node:assert';
 
+import './require-temp-data-dir';
 import { buildToolRegistry } from '@/lib/mcp/tool-spine/build';
 import { toClaudeServersMap } from '@/lib/mcp/tool-spine/emit-claude';
 import { toCodexServersMap } from '@/lib/mcp/tool-spine/emit-codex';

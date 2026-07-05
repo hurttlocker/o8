@@ -17,6 +17,7 @@
 
 import assert from 'node:assert';
 
+import './require-temp-data-dir';
 import { resolveOrchestratorBackendId } from '@/lib/lane/orchestrator-backends/registry';
 import { resolveInAppOrchestratorEnabledSync } from '@/lib/operator/defaults';
 
