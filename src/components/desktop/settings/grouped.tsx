@@ -115,14 +115,14 @@ function IconTile({ icon, destructive }: { icon: React.ReactNode; destructive?: 
   );
 }
 
-export function ValuePill({ children }: { children: React.ReactNode }) {
+export function ValuePill({ children, tone = 'default' }: { children: React.ReactNode; tone?: 'default' | 'success' | 'destructive' }) {
   return (
     <span style={{
       fontFamily: APP_FONT_STACK,
       fontSize: 11.5,
       fontWeight: 400,
-      color: 'var(--t-text-secondary)',
-      background: TILE_BG,
+      color: tone === 'destructive' ? DESTRUCTIVE : tone === 'success' ? '#1a7f4b' : 'var(--t-text-secondary)',
+      background: tone === 'destructive' ? TILE_BG_DESTRUCTIVE : tone === 'success' ? 'rgba(34, 197, 94, 0.14)' : TILE_BG,
       borderRadius: 999,
       paddingLeft: 10,
       paddingRight: 10,
