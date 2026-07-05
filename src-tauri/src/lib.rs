@@ -2253,7 +2253,7 @@ fn sanitize_window_state() {
 /// well-known bin directory. Best-effort — logs and returns on any error so a
 /// permission failure never blocks app startup.
 ///
-/// Priority: /usr/local/bin (Homebrew-style, most common) → ~/.local/bin.
+/// Priority: /opt/homebrew/bin on Apple Silicon → /usr/local/bin → ~/.local/bin.
 /// We refuse to clobber a non-symlink at the target. If an existing symlink
 /// points at any /Applications/o8.app path, we replace it (assume stale o8
 /// from a previous install).
@@ -2272,15 +2272,19 @@ fn ensure_cli_on_path(cli_source: &Path) {
         }
     };
 
-    let candidates: [std::path::PathBuf; 2] = [
-        std::path::PathBuf::from("/usr/local/bin/o8"),
-        home.join(".local").join("bin").join("o8"),
-    ];
+    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
+    if cfg!(target_arch = "aarch64") {
+        candidates.push(std::path::PathBuf::from("/opt/homebrew/bin/o8"));
+    }
+    candidates.push(std::path::PathBuf::from("/usr/local/bin/o8"));
+    candidates.push(home.join(".local").join("bin").join("o8"));
 
+    let mut failures: Vec<String> = Vec::new();
     for target in &candidates {
         if let Some(parent) = target.parent() {
             if !parent.exists() {
-                if std::fs::create_dir_all(parent).is_err() {
+                if let Err(err) = std::fs::create_dir_all(parent) {
+                    failures.push(format!("mkdir {} failed: {}", parent.display(), err));
                     continue;
                 }
             }
@@ -2292,6 +2296,8 @@ fn ensure_cli_on_path(cli_source: &Path) {
                     match std::fs::read_link(target) {
                         Ok(existing) if existing == cli_source => {
                             // Already pointing where we want — nothing to do.
+                            std::env::set_var("O8_CLI_INSTALL_PATH", target.to_string_lossy().to_string());
+                            std::env::set_var("O8_CLI_INSTALL_STATUS", "already-linked");
                             return;
                         }
                         Ok(existing) if existing.to_string_lossy().contains("/Applications/o8.app/") => {
@@ -2309,7 +2315,8 @@ fn ensure_cli_on_path(cli_source: &Path) {
                         }
                         Ok(_) => {
                             // User-owned symlink to something else — leave alone.
-                            return;
+                            failures.push(format!("{} points to a user-owned symlink", target.display()));
+                            continue;
                         }
                         Err(_) => {
                             let _ = std::fs::remove_file(target);
@@ -2317,8 +2324,10 @@ fn ensure_cli_on_path(cli_source: &Path) {
                     }
                 } else {
                     // Regular file or directory — never clobber.
-                    eprintln!("[cli-symlink] {} exists and is not a symlink — leaving alone", target.display());
-                    return;
+                    let message = format!("{} exists and is not a symlink", target.display());
+                    failures.push(message.clone());
+                    eprintln!("[cli-symlink] {} — leaving alone", message);
+                    continue;
                 }
             }
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
@@ -2326,6 +2335,7 @@ fn ensure_cli_on_path(cli_source: &Path) {
             }
             Err(err) => {
                 eprintln!("[cli-symlink] stat {} failed: {}", target.display(), err);
+                failures.push(format!("stat {} failed: {}", target.display(), err));
                 continue;
             }
         }
@@ -2333,13 +2343,18 @@ fn ensure_cli_on_path(cli_source: &Path) {
         match std::os::unix::fs::symlink(cli_source, target) {
             Ok(()) => {
                 eprintln!("[cli-symlink] linked {} -> {}", target.display(), cli_source.display());
+                std::env::set_var("O8_CLI_INSTALL_PATH", target.to_string_lossy().to_string());
+                std::env::set_var("O8_CLI_INSTALL_STATUS", "linked");
                 return;
             }
             Err(err) => {
                 eprintln!("[cli-symlink] {} failed: {}", target.display(), err);
+                failures.push(format!("{} failed: {}", target.display(), err));
             }
         }
     }
+    let detail = failures.join("; ");
+    std::env::set_var("O8_CLI_INSTALL_STATUS", format!("failed: {}", detail));
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -4501,6 +4516,7 @@ pub fn run() {
                     .env("PORT", api_port.to_string())
                     .env("HOSTNAME", "0.0.0.0")
                     .env("NODE_ENV", "production")
+                    .env("O8_PACKAGED_APP", "1")
                     .env("O8_NODE_BIN", &node_bin)
                     .env("O8_API_PORT", api_port.to_string())
                     .env("O8_WS_PORT", ws_port.to_string())
