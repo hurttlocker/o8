@@ -1,7 +1,8 @@
 'use client';
 
-import { createContext, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ClerkProvider, useUser, useClerk } from '@clerk/nextjs';
+import { initClerk } from 'tauri-plugin-clerk';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
@@ -145,8 +146,63 @@ export function O8AuthProvider({ children }: { children: ReactNode }) {
   if (!CLERK_ENABLED) {
     return <O8AuthContext.Provider value={DISABLED_STATE}>{children}</O8AuthContext.Provider>;
   }
+  return <ClerkSessionHost>{children}</ClerkSessionHost>;
+}
+
+type NativeClerk = Awaited<ReturnType<typeof initClerk>>;
+
+/**
+ * Picks the Clerk session engine per surface:
+ *  - Tauri desktop → NATIVE mode via tauri-plugin-clerk: clerk-js runs with
+ *    standardBrowser:false, routes the Frontend API through Rust, and persists
+ *    the session token to a Tauri store on disk. REQUIRED because a PRODUCTION
+ *    Clerk instance keeps its session in a cross-site cookie that macOS WKWebView
+ *    won't return to the 127.0.0.1 webview origin — so the standard cookie flow
+ *    flashes the session in then drops it. (Root-fixed 2026-07-05; see
+ *    docs/onboarding-auth-unification.md.)
+ *  - Web / mobile → standard cookie mode (same-origin with the real o8.run domain).
+ * Until the native engine resolves, the app boots account-less (DISABLED_STATE),
+ * never blocking startup.
+ */
+function ClerkSessionHost({ children }: { children: ReactNode }) {
+  const [engine, setEngine] = useState<NativeClerk | 'web' | null>(null);
+
+  useEffect(() => {
+    const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+    if (!isTauri) {
+      setEngine('web');
+      return;
+    }
+    let active = true;
+    initClerk()
+      .then((clerk) => {
+        if (active) setEngine(clerk);
+      })
+      .catch((err) => {
+        // Fail-soft: if the native engine can't init, fall back to cookie mode so
+        // the app still boots (sign-in just won't persist on desktop).
+        console.error('[auth] native Clerk init failed; using cookie mode', err);
+        if (active) setEngine('web');
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  if (engine === null) {
+    return <O8AuthContext.Provider value={DISABLED_STATE}>{children}</O8AuthContext.Provider>;
+  }
+
+  if (engine === 'web') {
+    return (
+      <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+        <ClerkAuthBridge>{children}</ClerkAuthBridge>
+      </ClerkProvider>
+    );
+  }
+
   return (
-    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY}>
+    <ClerkProvider publishableKey={CLERK_PUBLISHABLE_KEY} Clerk={engine}>
       <ClerkAuthBridge>{children}</ClerkAuthBridge>
     </ClerkProvider>
   );
