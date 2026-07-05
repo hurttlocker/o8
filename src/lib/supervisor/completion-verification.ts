@@ -161,7 +161,8 @@ export async function hasReviewableCompletionDiff(cwd: string, baseRef = 'main')
     });
     return false;
   } catch (error) {
-    const status = (error as { status?: number | null }).status;
+    const status = (error as { status?: number | string | null; code?: number | string | null }).status
+      ?? (error as { code?: number | string | null }).code;
     if (status === 1) {
       return true;
     }
@@ -174,7 +175,9 @@ export async function hasReviewableCompletionDiff(cwd: string, baseRef = 'main')
     });
     return false;
   } catch (error) {
-    return (error as { status?: number | null }).status === 1;
+    const status = (error as { status?: number | string | null; code?: number | string | null }).status
+      ?? (error as { code?: number | string | null }).code;
+    return status === 1;
   }
 }
 
