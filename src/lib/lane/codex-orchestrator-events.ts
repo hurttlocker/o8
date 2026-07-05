@@ -1,0 +1,151 @@
+import type { OrchestratorEvent } from './orchestrator-stream-events';
+
+export interface ParsedCodexLine {
+  type?: string;
+  thread_id?: string;
+  payload?: Record<string, unknown>;
+  item?: Record<string, unknown>;
+  usage?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number };
+}
+
+export interface CodexLineHandlerState {
+  threadId: string | null;
+  cost: number | null;
+}
+
+const GPT_5_5_INPUT_USD_PER_MILLION = 2.5;
+const GPT_5_5_CACHED_INPUT_USD_PER_MILLION = 0.25;
+const GPT_5_5_OUTPUT_USD_PER_MILLION = 15;
+
+function safeObject(value: unknown): Record<string, unknown> | undefined {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : undefined;
+}
+
+function computeUsdCost(usage: ParsedCodexLine['usage']): number | null {
+  if (!usage) return null;
+  const inputTokens = Math.max(0, (usage.input_tokens ?? 0) - (usage.cached_input_tokens ?? 0));
+  const cachedTokens = usage.cached_input_tokens ?? 0;
+  const outputTokens = usage.output_tokens ?? 0;
+  const total =
+    (inputTokens / 1_000_000) * GPT_5_5_INPUT_USD_PER_MILLION
+    + (cachedTokens / 1_000_000) * GPT_5_5_CACHED_INPUT_USD_PER_MILLION
+    + (outputTokens / 1_000_000) * GPT_5_5_OUTPUT_USD_PER_MILLION;
+  return Number.isFinite(total) && total > 0 ? total : null;
+}
+
+export function handleCodexJsonLine(
+  line: string,
+  state: CodexLineHandlerState,
+  onEvent: (event: OrchestratorEvent) => void,
+  options: { isLocalModel: boolean },
+): void {
+  if (!line.trim()) return;
+  try {
+    const parsed = JSON.parse(line) as ParsedCodexLine;
+    const type = String(parsed.type ?? '');
+    const payload = safeObject(parsed.payload);
+
+    if (type === 'thread.started' && typeof parsed.thread_id === 'string') {
+      state.threadId = parsed.thread_id;
+      return;
+    }
+
+    if (type === 'event_msg' && payload?.type === 'agent_message') {
+      const text = typeof payload.message === 'string' ? payload.message : '';
+      if (text) onEvent({ type: 'text', text });
+      return;
+    }
+
+    const item = safeObject(parsed.item);
+    if (type === 'item.completed' && item?.type === 'agent_message') {
+      const text = typeof item.text === 'string' ? item.text : '';
+      if (text) onEvent({ type: 'text', text });
+      return;
+    }
+
+    if (type === 'item.completed' && item?.type === 'tool_use') {
+      const name = typeof item.name === 'string' ? item.name : 'tool';
+      let input: unknown = {};
+      if (typeof item.arguments === 'string') {
+        try { input = JSON.parse(item.arguments); } catch { input = item.arguments; }
+      } else if (item.arguments && typeof item.arguments === 'object') {
+        input = item.arguments;
+      }
+      onEvent({ type: 'tool_use', id: typeof item.id === 'string' ? item.id : null, name, input });
+      return;
+    }
+
+    if (type === 'item.completed' && item?.type === 'command_execution') {
+      const cmd = typeof item.command === 'string'
+        ? item.command
+        : Array.isArray(item.command)
+          ? (item.command as string[]).join(' ')
+          : '';
+      const output = typeof item.output === 'string' ? item.output : '';
+      const callId = typeof item.id === 'string' ? item.id : null;
+      onEvent({ type: 'tool_use', id: callId, name: 'shell', input: { command: cmd } });
+      if (output) onEvent({ type: 'tool_result', id: callId, name: 'shell', output: output.slice(0, 4_000) });
+      return;
+    }
+
+    if (type === 'event_msg' && payload?.type === 'exec_command_begin') {
+      const command = typeof payload.command === 'string'
+        ? payload.command
+        : Array.isArray(payload.command)
+          ? (payload.command as string[]).join(' ')
+          : '';
+      onEvent({ type: 'tool_use', id: typeof payload.call_id === 'string' ? payload.call_id : null, name: 'shell', input: { command } });
+      return;
+    }
+
+    if (type === 'event_msg' && payload?.type === 'exec_command_end') {
+      const output = typeof payload.stdout === 'string'
+        ? payload.stdout
+        : typeof payload.output === 'string'
+          ? payload.output
+          : '';
+      onEvent({ type: 'tool_result', id: typeof payload.call_id === 'string' ? payload.call_id : null, name: 'shell', output: output.slice(0, 4_000) });
+      return;
+    }
+
+    if (type === 'response_item' && payload?.type === 'reasoning') {
+      const summary = typeof payload.summary === 'string'
+        ? payload.summary
+        : Array.isArray(payload.summary)
+          ? (payload.summary as string[]).join('\n')
+          : '';
+      if (summary) onEvent({ type: 'thinking', text: summary });
+      return;
+    }
+
+    if (type === 'response_item' && payload?.type === 'function_call') {
+      const name = typeof payload.name === 'string' ? payload.name : 'function';
+      let input: unknown = {};
+      if (typeof payload.arguments === 'string') {
+        try { input = JSON.parse(payload.arguments); } catch { input = payload.arguments; }
+      }
+      onEvent({ type: 'tool_use', id: typeof payload.call_id === 'string' ? payload.call_id : null, name, input });
+      return;
+    }
+
+    if (type === 'response_item' && payload?.type === 'function_call_output') {
+      const output = typeof payload.output === 'string' ? payload.output : '';
+      const shot = output.match(/\/tmp\/o8-screenshots\/[^\s"']+\.(?:png|jpe?g)/i);
+      onEvent({
+        type: 'tool_result',
+        id: typeof payload.call_id === 'string' ? payload.call_id : null,
+        name: typeof payload.name === 'string' ? payload.name : 'function',
+        output: shot ? shot[0] : output.slice(0, 4_000),
+      });
+      return;
+    }
+
+    if (type === 'turn.completed' && parsed.usage) {
+      state.cost = options.isLocalModel ? null : computeUsdCost(parsed.usage);
+    }
+  } catch {
+    // Codex can emit banner/info lines before JSON starts.
+  }
+}
