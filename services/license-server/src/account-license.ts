@@ -1,12 +1,51 @@
-import { and, eq, isNull } from 'drizzle-orm';
+import { and, eq, gte, isNull, sql } from 'drizzle-orm';
 import type { Context } from 'hono';
 
 import { db } from './db/client.js';
-import { founders, subscriptions } from './db/schema.js';
+import { founders, proxyUsage, subscriptions } from './db/schema.js';
 import { env } from './env.js';
 import { mintLicense, type Plan } from './mint.js';
+import { DAILY_CAP_MICRO_USD } from './proxy.js';
 import { verifyClerkSession } from './clerk-verify.js';
 import { founderTier } from './founding.js';
+
+/**
+ * Today's managed-Brain usage for one account (the plan-token `sub`, which is the
+ * Clerk user id). Drives the "Today on the Brain" fair-use meter on the web
+ * console — calls + spend vs the plan's daily ceiling. Best-effort: callers
+ * swallow errors so usage never blocks the license response.
+ */
+export type TodayUsage = {
+  callsToday: number;
+  spentMicroUsd: number;
+  capMicroUsd: number;
+  byKind: { kind: string; calls: number; spentMicroUsd: number }[];
+};
+
+async function todayUsage(sub: string, plan: Plan): Promise<TodayUsage> {
+  const startOfDay = new Date();
+  startOfDay.setHours(0, 0, 0, 0);
+  const rows = await db
+    .select({
+      kind: proxyUsage.kind,
+      calls: sql<string>`count(*)`,
+      spent: sql<string>`coalesce(sum(${proxyUsage.costMicroUsd}), 0)`,
+    })
+    .from(proxyUsage)
+    .where(and(eq(proxyUsage.sub, sub), gte(proxyUsage.createdAt, startOfDay)))
+    .groupBy(proxyUsage.kind);
+
+  let callsToday = 0;
+  let spentMicroUsd = 0;
+  const byKind = rows.map((r) => {
+    const calls = Number(r.calls);
+    const spent = Number(r.spent);
+    callsToday += calls;
+    spentMicroUsd += spent;
+    return { kind: r.kind, calls, spentMicroUsd: spent };
+  });
+  return { callsToday, spentMicroUsd, capMicroUsd: DAILY_CAP_MICRO_USD[plan], byKind };
+}
 
 /**
  * POST /account/license — return THIS signed-in user's license token.
@@ -41,7 +80,8 @@ export async function handleAccountLicense(c: Context): Promise<Response> {
       ? Math.max(1, Math.ceil((sub.currentPeriodEnd.getTime() - Date.now()) / 86_400_000))
       : 35;
     const license = await mintLicense({ plan: sub.plan as Plan, sub: clerkUserId, days });
-    return c.json({ license, plan: sub.plan, source: 'subscription' });
+    const usage = await todayUsage(clerkUserId, sub.plan as Plan).catch(() => null);
+    return c.json({ license, plan: sub.plan, source: 'subscription', usage });
   }
 
   // 2) Founding Operator purchase (one-time, ACTIVE only — over_cap rows never
@@ -64,11 +104,13 @@ export async function handleAccountLicense(c: Context): Promise<Response> {
       sub: clerkUserId,
       days: Math.max(1, env.FOUNDER_LICENSE_DAYS),
     });
+    const usage = await todayUsage(clerkUserId, 'founder').catch(() => null);
     return c.json({
       license,
       plan: 'founder',
       source: 'founding',
       founder: { operatorNumber: f.operatorNumber, tier: founderTier(f.operatorNumber).tier },
+      usage,
     });
   }
 
