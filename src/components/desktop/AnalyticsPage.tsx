@@ -31,7 +31,6 @@ import {
   TabHeading,
 } from './settings/shared';
 import { AnalyticsMoatSections, type AutonomyMetrics, type GovernanceMetrics } from './analytics/AnalyticsMoatSections';
-import { OperatorAnalyticsSection } from './analytics/OperatorAnalyticsSection';
 
 // ── Types ──
 
@@ -785,10 +784,9 @@ export const AnalyticsPage = memo(function AnalyticsPage({ embedded = false }: {
           </div>
         </div>
 
-        {/* Operator-only cross-user view (founder dashboard, epic #1249).
-            Renders nothing on a normal install — gated by the availability of
-            /api/operator/analytics (no token in env → hidden). */}
-        <OperatorAnalyticsSection />
+        {/* The cross-user admin/founder analytics (all accounts, sign-ins, spend)
+            moved off the desktop to the web console — admin-gated on o8.run.
+            This tab now shows only THIS install's own cost/autonomy/governance. */}
 
         {/* ── Loading / empty / data ── */}
 
