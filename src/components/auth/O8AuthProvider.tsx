@@ -5,6 +5,7 @@ import { ClerkProvider, useUser, useClerk } from '@clerk/nextjs';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
+import { installTauriClerkFetchGuard } from '@/lib/auth/clerk-fetch-guard';
 
 // The Clerk publishable key is app-wide and public, baked into the build at ship
 // time. When it's absent (fresh build with no Clerk app yet), Clerk is disabled
@@ -185,11 +186,13 @@ function ClerkSessionHost({ children }: { children: ReactNode }) {
       return;
     }
     let active = true;
+    const nativeFetch = globalThis.fetch;
     // Client-only dynamic import — the plugin touches Tauri globals, so it must
     // never load during Next's SSR/static export.
     import('tauri-plugin-clerk')
       .then((m) => m.initClerk())
       .then((clerk) => {
+        installTauriClerkFetchGuard(nativeFetch);
         if (active) setEngine(clerk);
       })
       .catch((err) => {
