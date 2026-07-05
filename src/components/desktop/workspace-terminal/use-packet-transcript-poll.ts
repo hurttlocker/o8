@@ -36,6 +36,16 @@ function releaseTranscriptFetchSlot(): void {
 }
 const TRANSCRIPT_TAIL_LIMIT = 200;
 
+export interface PacketTranscriptActivity {
+  label: string;
+  startedAt: string | number | null;
+}
+
+export interface PacketTranscriptPollResult {
+  entries: MobileTranscriptEntry[];
+  activity: PacketTranscriptActivity | null;
+}
+
 /**
  * #1293 — Pure map from the normalized packet transcript (`TranscriptEvent[]`,
  * produced server-side by the SAME `normalizeCodexEvents` the AgentsTab uses)
@@ -124,6 +134,25 @@ export function mapPacketTranscriptEntries(events: TranscriptEvent[]): MobileTra
   return entries;
 }
 
+function packetToolActivityLabel(event: Extract<TranscriptEvent, { type: 'tool_call' }>): string {
+  if (event.tool === 'exec_command') return 'Running terminal command…';
+  if (event.tool === 'read_file' || event.tool === 'Read') return 'Reading files…';
+  if (event.tool === 'list_files' || event.tool === 'Glob') return 'Listing files…';
+  if (event.tool === 'search_code' || event.tool === 'Grep') return 'Searching code…';
+  if (event.tool === 'search_web' || event.tool === 'WebSearch') return 'Searching web…';
+  if (event.tool === 'Edit' || event.tool === 'Write' || event.tool === 'NotebookEdit') return 'Editing files…';
+  return `Running ${event.tool}…`;
+}
+
+export function derivePacketTranscriptActivity(events: TranscriptEvent[]): PacketTranscriptActivity | null {
+  const latest = [...events].reverse().find((event) => event.type !== 'done');
+  if (!latest) return null;
+  if (latest.type === 'tool_call') return { label: packetToolActivityLabel(latest), startedAt: latest.ts };
+  if (latest.type === 'assistant' || latest.type === 'tool_result') return { label: 'Thinking…', startedAt: latest.ts };
+  if (latest.type === 'error') return { label: 'Recovering…', startedAt: latest.ts };
+  return null;
+}
+
 interface UsePacketTranscriptPollArgs {
   /**
    * ADDITIVE gate. Must be `true` ONLY when the sessionKey-keyed transcript
@@ -152,8 +181,9 @@ export function usePacketTranscriptPoll({
   packetIdHint,
   sessionKey,
   active,
-}: UsePacketTranscriptPollArgs): MobileTranscriptEntry[] {
+}: UsePacketTranscriptPollArgs): PacketTranscriptPollResult {
   const [packetEvents, setPacketEvents] = useState<MobileTranscriptEntry[]>([]);
+  const [packetActivity, setPacketActivity] = useState<PacketTranscriptActivity | null>(null);
   const hasEventsRef = useRef(false);
   const orchestratorData = useOrchestratorData();
 
@@ -171,6 +201,7 @@ export function usePacketTranscriptPoll({
   const packetId = livePacket?.id ?? packetIdHint;
   const status = livePacket?.status ?? null;
   const visiblePacketEvents = enabled && (packetId || sessionKey) ? packetEvents : [];
+  const visiblePacketActivity = enabled && (packetId || sessionKey) ? packetActivity : null;
 
   useEffect(() => {
     // sessionKey fallback — the tab always carries its lane sessionKey, but
@@ -213,6 +244,7 @@ export function usePacketTranscriptPoll({
         const mapped = mapPacketTranscriptEntries(payload.events);
         hasEventsRef.current = mapped.length > 0;
         setPacketEvents(mapped);
+        setPacketActivity(derivePacketTranscriptActivity(payload.events));
       } catch {
         /* best-effort — transient network error or abort */
       } finally {
@@ -237,5 +269,5 @@ export function usePacketTranscriptPoll({
     };
   }, [enabled, packetId, sessionKey, status, active]);
 
-  return visiblePacketEvents;
+  return { entries: visiblePacketEvents, activity: visiblePacketActivity };
 }

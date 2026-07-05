@@ -25,6 +25,7 @@ import { WorkspaceChatComposer } from '@/components/desktop/workspace-terminal/W
 import { ChatPacketStatusBanner } from '@/components/desktop/workspace-terminal/ChatPacketStatusBanner';
 import { ChatPacketReviewDiff } from '@/components/desktop/workspace-terminal/ChatPacketReviewDiff';
 import { PacketHeaderCard } from '@/components/desktop/workspace-terminal/PacketHeaderCard';
+import { PacketWorkingFooter } from '@/components/desktop/workspace-terminal/PacketWorkingFooter';
 import {
   WorkspaceRichChatEvents,
   stripWorkspaceRichRendererFallback,
@@ -373,27 +374,12 @@ function WorkspaceChatPaneBase({
                           );
                         })}
                         {stillWorking && !awaitingReview ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingTop: 8, paddingBottom: 4 }}>
-                            <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                              {[0, 1, 2].map((dot) => (
-                                <span
-                                  key={dot}
-                                  style={{
-                                    width: 5,
-                                    height: 5,
-                                    borderRadius: '50%',
-                                    background: '#22c55e',
-                                    opacity: 0.4,
-                                    animation: `o8ThinkPulse 1.4s ease-in-out ${dot * 0.2}s infinite`,
-                                  }}
-                                />
-                              ))}
-                            </div>
-                            <span style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: 'var(--font-sans-system)', fontWeight: 500 }}>
-                              {chat.runtimeLabel} working…
-                            </span>
-                            <style>{'@keyframes o8ThinkPulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.1); } }'}</style>
-                          </div>
+                          <PacketWorkingFooter
+                            status={liveStatus}
+                            runtimeLabel={chat.runtimeLabel}
+                            activity={chat.packetTranscriptActivity}
+                            fallbackStartedAt={livePacket?.lane?.lastEventAt ?? livePacket?.lastEventAt ?? null}
+                          />
                         ) : null}
                         <div style={{ display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'flex-start', paddingTop: 4 }}>
                           {reviewAffordances}
@@ -629,37 +615,12 @@ function WorkspaceChatPaneBase({
                 </div>
               ) : null}
               {!chat.agentRunning && chat.isRuntimeBound && chat.supervisorActive && chat.messages.length > 0 && !laneRetired ? (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
-                    paddingTop: 12,
-                    paddingRight: 16,
-                    paddingBottom: 12,
-                    paddingLeft: 16,
-                  }}
-                >
-                  <div style={{ display: 'flex', gap: 3, alignItems: 'center' }}>
-                    {[0, 1, 2].map((index) => (
-                      <span
-                        key={index}
-                        style={{
-                          width: 5,
-                          height: 5,
-                          borderRadius: '50%',
-                          background: '#22c55e',
-                          opacity: 0.4,
-                          animation: `o8ThinkPulse 1.4s ease-in-out ${index * 0.2}s infinite`,
-                        }}
-                      />
-                    ))}
-                  </div>
-                  <span style={{ fontSize: 11, color: 'var(--t-text-faint)', fontFamily: 'var(--font-sans-system)', fontWeight: 500 }}>
-                    Agent working...
-                  </span>
-                  <style>{'@keyframes o8ThinkPulse { 0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); } 40% { opacity: 1; transform: scale(1.1); } }'}</style>
-                </div>
+                <PacketWorkingFooter
+                  status={liveStatus}
+                  runtimeLabel={chat.runtimeLabel}
+                  activity={chat.packetTranscriptActivity}
+                  fallbackStartedAt={livePacket?.lane?.lastEventAt ?? livePacket?.lastEventAt ?? null}
+                />
               ) : null}
               {tab.orchestrationPacket && livePacket ? (
                 <ChatPacketStatusBanner

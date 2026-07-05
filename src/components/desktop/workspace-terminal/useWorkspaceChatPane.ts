@@ -2,18 +2,10 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { buildLinkedIssueContext } from '@/components/desktop/IssueLinkPicker';
-import {
-  CLAUDE_CLI_MODELS,
-  CODEX_CLI_MODELS,
-  GEMINI_CLI_MODELS,
-  getOpenCodeModels,
-} from '@/components/desktop/workspace-terminal/constants';
-import type {
-  TerminalTab,
-  WorkspaceCliModelOption,
-} from '@/components/desktop/workspace-terminal/types';
+import type { TerminalTab } from '@/components/desktop/workspace-terminal/types';
 import { mapWorkspaceTranscriptMessages } from '@/components/desktop/workspace-terminal/workspace-chat-message-mapper';
 import { usePacketTranscriptPoll } from '@/components/desktop/workspace-terminal/use-packet-transcript-poll';
+import { useWorkspaceChatModelOptions } from '@/components/desktop/workspace-terminal/useWorkspaceChatModelOptions';
 import {
   buildClaudePermissionDecisionMessage,
   coerceClaudeCodeChatEvent,
@@ -21,7 +13,6 @@ import {
   type ClaudePermissionDecision,
   type WorkspaceStreamEvent,
 } from '@/components/desktop/workspace-terminal/workspace-stream-events';
-import { getCachedOpenCodeProviders, loadOpenCodeProviders } from '@/lib/setup/detection-cache';
 import { getRuntimeCapability } from '@/lib/orchestrator/runtime-capabilities';
 import {
   buildQueuedContextCard,
@@ -67,7 +58,6 @@ export function useWorkspaceChatPane({
   const [draft, setDraft] = useState('');
   const [sending, setSending] = useState(false);
   const [agentRunning, setAgentRunning] = useState(false);
-  const [openCodeProviders, setOpenCodeProviders] = useState<string[]>(() => getCachedOpenCodeProviders());
   const [queuedContextCards, setQueuedContextCards] = useState<ReturnType<typeof buildQueuedContextCard>[]>([]);
   const [liveAssistantId, setLiveAssistantId] = useState<string | null>(null);
   const [streamingText, setStreamingText] = useState('');
@@ -92,7 +82,6 @@ export function useWorkspaceChatPane({
   const messagesRef = useRef<MobileTranscriptEntry[]>([]);
   const stickToBottomRef = useRef(true);
   const handledDraftInjectionRef = useRef<string | null>(null);
-  const openCodeProvidersLoadedRef = useRef(openCodeProviders.length > 0);
   const streamRequest = useActiveLongLivedRequest(active);
 
   const tabId = tab.id;
@@ -111,20 +100,7 @@ export function useWorkspaceChatPane({
     () => getRuntimeCapability(chatRuntime ?? 'codex').label,
     [chatRuntime],
   );
-  const availableModels = useMemo<WorkspaceCliModelOption[]>(
-    () => {
-      if (chatRuntime === 'claude-code') return CLAUDE_CLI_MODELS;
-      if (chatRuntime === 'gemini') return GEMINI_CLI_MODELS;
-      if (chatRuntime === 'opencode') return getOpenCodeModels(openCodeProviders);
-      return CODEX_CLI_MODELS;
-    },
-    [chatRuntime, openCodeProviders],
-  );
-  const selectedModel = useMemo(
-    () => availableModels.find((model) => model.id === tab.chatModel) ?? availableModels[0],
-    [availableModels, tab.chatModel],
-  );
-  const selectedModelLabel = selectedModel?.label;
+  const { availableModels, selectedModel, selectedModelLabel } = useWorkspaceChatModelOptions(chatRuntime, tab.chatModel);
   const isAgentTab = isAgentRuntimeTab(tab);
   const isRuntimeBound = Boolean(normalizedSessionKey && isAgentTab);
 
@@ -160,8 +136,8 @@ export function useWorkspaceChatPane({
     active,
   });
   const packetLlmMessages = useMemo(
-    () => mapWorkspaceTranscriptMessages(packetEvents, selectedModelLabel),
-    [packetEvents, selectedModelLabel],
+    () => mapWorkspaceTranscriptMessages(packetEvents.entries, selectedModelLabel),
+    [packetEvents.entries, selectedModelLabel],
   );
 
   const commitMessages = useCallback(
@@ -177,18 +153,6 @@ export function useWorkspaceChatPane({
     },
     [normalizedSessionKey, onUpdateMessages, tabId],
   );
-
-  useEffect(() => {
-    if (chatRuntime !== 'opencode' || openCodeProvidersLoadedRef.current) return;
-    openCodeProvidersLoadedRef.current = true;
-    let cancelled = false;
-    void loadOpenCodeProviders().then((providers) => {
-      if (!cancelled) setOpenCodeProviders(providers);
-    });
-    return () => {
-      cancelled = true;
-    };
-  }, [chatRuntime]);
 
   useEffect(() => {
     messagesRef.current = messages;
@@ -809,6 +773,7 @@ export function useWorkspaceChatPane({
     llmMessages,
     messages,
     packetLlmMessages,
+    packetTranscriptActivity: packetEvents.activity,
     normalizedSessionKey,
     queuedContextCards,
     runtimeLabel,
