@@ -4605,13 +4605,18 @@ pub fn run() {
                     .map(|url| url.as_str().to_string())
                     .collect();
                 if !auth_links.is_empty() {
-                    if let Ok(mut pending) = pending_auth_callbacks().lock() {
-                        pending.extend(auth_links.clone());
-                    }
+                    // Deliver through exactly ONE path. The ticket in the URL is a
+                    // one-time Clerk token: buffering AND emitting delivered the same
+                    // ticket twice, and the second exchange burned it with
+                    // "sign in token has already been used" (live-hit 2026-07-05).
+                    // Hot path (window exists) → emit only. Cold start → buffer only;
+                    // the dashboard drains it via take_pending_auth_callbacks on mount.
                     if let Some(window) = _app_handle.get_webview_window("main") {
                         let _ = window.emit("o8:auth-callback", &auth_links);
                         let _ = window.show();
                         let _ = window.set_focus();
+                    } else if let Ok(mut pending) = pending_auth_callbacks().lock() {
+                        pending.extend(auth_links.clone());
                     }
                 }
 
