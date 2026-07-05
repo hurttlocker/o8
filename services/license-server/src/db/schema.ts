@@ -173,3 +173,20 @@ export const productEvents = pgTable('product_events', {
 
 export type ProductEvent = typeof productEvents.$inferSelect;
 export type NewProductEvent = typeof productEvents.$inferInsert;
+
+/**
+ * install_links — maps a pre-sign-in install credential (sub `install:<id>`) to
+ * the GitHub/Clerk account that signed in on that machine. Written by
+ * POST /account/link-install on desktop sign-in. Lets analytics roll a person's
+ * devices + pre-sign-in usage into their ONE account profile (beta identity: a
+ * user is a GitHub account, installs are their devices).
+ */
+export const installLinks = pgTable('install_links', {
+  /** The install sub exactly as stored in proxy_usage/product_events: `install:<id>`. */
+  installSub: text('install_sub').primaryKey(),
+  /** Owning Clerk user id (also the `user_*` sub after sign-in). */
+  clerkUserId: text('clerk_user_id').notNull(),
+  linkedAt: timestamp('linked_at', { withTimezone: true }).notNull().defaultNow(),
+});
+
+export type InstallLink = typeof installLinks.$inferSelect;

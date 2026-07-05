@@ -15,6 +15,7 @@ import { handleEmbeddings, handleGeminiGenerate, handleInference, handleTranscri
 import { handleAnalytics, handleTelemetry } from './analytics.js';
 import { handleIssueFree } from './free-issue.js';
 import { handleAccountLicense } from './account-license.js';
+import { handleLinkInstall } from './account-link.js';
 
 const app = new Hono();
 
@@ -166,6 +167,7 @@ app.post('/issue-free', handleIssueFree);
 //    session token, verified server-side via JWKS; NO shared secret shipped in
 //    the app. 503 until CLERK_ISSUER is configured. ─────────────────────────
 app.post('/account/license', handleAccountLicense);
+app.post('/account/link-install', handleLinkInstall);
 
 // ── Manual issuance (ADMIN-guarded) — for testing before live Stripe ──────────
 app.post('/issue-entitlement', async (c) => {

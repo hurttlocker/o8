@@ -121,7 +121,7 @@ export async function handleAnalytics(c: Context): Promise<Response> {
   // therefore counts DISTINCT ACCOUNTS (a person with N installs is ONE user);
   // installs/downloads are reported separately and never inflate it.
   const [userRow] = await rows(sql`
-    with acct as (
+    with raw as (
       select sub, min(created_at) as first_seen, max(created_at) as last_seen
       from (
         select sub, created_at from proxy_usage
@@ -130,15 +130,28 @@ export async function handleAnalytics(c: Context): Promise<Response> {
       ) s
       where ${notDev}
       group by sub
+    ),
+    resolved as (
+      -- a linked install collapses onto its owning account; else it stays itself
+      select coalesce(l.clerk_user_id, r.sub) as ident, r.sub as raw_sub, r.first_seen, r.last_seen
+      from raw r left join install_links l on l.install_sub = r.sub
+    ),
+    acct as (
+      select ident,
+             min(first_seen) as first_seen,
+             max(last_seen)  as last_seen,
+             count(*) filter (where raw_sub like 'install:%') as devices
+      from resolved group by ident
     )
     select
-      count(*) filter (where sub like 'user_%')                                                as total,
-      count(*) filter (where sub like 'user_%' and last_seen  >= now() - interval '1 day')     as active_1d,
-      count(*) filter (where sub like 'user_%' and last_seen  >= now() - interval '7 days')    as active_7d,
-      count(*) filter (where sub like 'user_%' and last_seen  >= now() - interval '30 days')   as active_30d,
-      count(*) filter (where sub like 'user_%' and first_seen >= now() - interval '7 days')    as new_7d,
-      count(*) filter (where sub like 'install:%')                                             as installs,
-      count(*) filter (where sub like 'install:%' and last_seen >= now() - interval '7 days')  as installs_7d
+      count(*) filter (where ident like 'user_%')                                                as total,
+      count(*) filter (where ident like 'user_%' and last_seen  >= now() - interval '1 day')     as active_1d,
+      count(*) filter (where ident like 'user_%' and last_seen  >= now() - interval '7 days')    as active_7d,
+      count(*) filter (where ident like 'user_%' and last_seen  >= now() - interval '30 days')   as active_30d,
+      count(*) filter (where ident like 'user_%' and first_seen >= now() - interval '7 days')    as new_7d,
+      count(*) filter (where ident like 'install:%')                                             as installs,
+      count(*) filter (where ident like 'install:%' and last_seen >= now() - interval '7 days')  as installs_7d,
+      coalesce(sum(devices) filter (where ident like 'user_%'), 0)                               as linked_devices
     from acct
   `);
 
@@ -233,6 +246,7 @@ export async function handleAnalytics(c: Context): Promise<Response> {
     installs: {
       total: num(userRow?.installs),
       active7d: num(userRow?.installs_7d),
+      linkedDevices: num(userRow?.linked_devices),
     },
     spend: {
       totalMicroUsd: num(spendRow?.total_micro),
