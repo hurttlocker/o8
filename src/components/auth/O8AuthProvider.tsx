@@ -2,7 +2,6 @@
 
 import { createContext, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { ClerkProvider, useUser, useClerk } from '@clerk/nextjs';
-import { initClerk } from 'tauri-plugin-clerk';
 import { startDesktopSignIn } from '@/lib/auth/start-desktop-sign-in';
 import { DesktopAuthCallbackHandler } from '@/components/auth/DesktopAuthCallbackHandler';
 import { highResolutionAvatarUrl } from '@/lib/auth/avatar-url';
@@ -149,7 +148,9 @@ export function O8AuthProvider({ children }: { children: ReactNode }) {
   return <ClerkSessionHost>{children}</ClerkSessionHost>;
 }
 
-type NativeClerk = Awaited<ReturnType<typeof initClerk>>;
+// Type only — the runtime import is deferred into the effect below so Next's
+// static build never evaluates the plugin's Tauri APIs (no Tauri at build time).
+type NativeClerk = Awaited<ReturnType<(typeof import('tauri-plugin-clerk'))['initClerk']>>;
 
 /**
  * Picks the Clerk session engine per surface:
@@ -174,7 +175,10 @@ function ClerkSessionHost({ children }: { children: ReactNode }) {
       return;
     }
     let active = true;
-    initClerk()
+    // Client-only dynamic import — the plugin touches Tauri globals, so it must
+    // never load during Next's SSR/static export.
+    import('tauri-plugin-clerk')
+      .then((m) => m.initClerk())
       .then((clerk) => {
         if (active) setEngine(clerk);
       })
