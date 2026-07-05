@@ -17,6 +17,7 @@
  */
 
 import { runAsk } from './commands/ask.js';
+import { runApp } from './commands/app.js';
 import { runBrowser } from './commands/browser.js';
 import { runDoctor } from './commands/doctor.js';
 import { runCortexObserve } from './commands/cortex.js';
@@ -117,6 +118,7 @@ commands:
   run [--detach] <cmd> run a process in an o8-owned terminal the operator can watch
   run --list           list managed runs (running + recent, with exit codes)
   ask [--terse] "<question>"  ask the Engineering Brain about this repo (answer + cited sources)
+  app restart [--if-update-pending]  request an app restart; optionally no-op unless an update is pending
   browser open [url]   open a page — localhost rides o8's embedded browser, external URLs auto-route to headless Chrome (engine)
   browser read         page text + interactive elements (selectors)
   browser click <sel>  click an element (ghost cursor paints in the o8 UI)
@@ -202,6 +204,8 @@ async function dispatch(args: ParsedArgs): Promise<number> {
       // The question lands in `secondary` (first positional) when quoted, or
       // spreads across secondary + rest when unquoted — hand both to the parser.
       return runAsk(args.mode, secondary ? [secondary, ...args.rest] : args.rest);
+    case 'app':
+      return runApp(args.mode, secondary, args.rest);
     case 'browser':
       return runBrowser(args.mode, secondary, args.rest);
     case 'cortex': {

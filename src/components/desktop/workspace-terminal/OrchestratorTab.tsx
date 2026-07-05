@@ -340,6 +340,17 @@ function OrchestratorTabInner({
 
   useEffect(() => subscribeOrchestratorRuntimePreference(setPreferredRuntime), []);
 
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('o8:orchestrator', {
+      detail: { tabId, busy: active && chatChromeState.waitingForReply },
+    }));
+    return () => {
+      window.dispatchEvent(new CustomEvent('o8:orchestrator', {
+        detail: { tabId, busy: false },
+      }));
+    };
+  }, [active, chatChromeState.waitingForReply, tabId]);
+
   // Broadcast the chat-history thread id whenever it changes so the
   // dashboard's rename / archive / share menu can target the correct
   // file in ~/.o8/chat-history/. The workspace tab id (e.g.
@@ -1187,4 +1198,3 @@ function OrchestratorTabInner({
     </div>
   );
 }
-
