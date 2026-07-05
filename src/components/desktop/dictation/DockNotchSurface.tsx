@@ -52,6 +52,7 @@ const INNER_H = 24;
 const DOCK_WINDOW_WIDTH = 520;
 const DOCK_WINDOW_SIDE_MARGIN = 20;
 const LISTENING_CAPSULE_MAX_WIDTH = DOCK_WINDOW_WIDTH - DOCK_WINDOW_SIDE_MARGIN * 2;
+const DOCK_WINDOW_SAFE_MAX_WIDTH = `calc(100vw - ${DOCK_WINDOW_SIDE_MARGIN * 2}px)`;
 
 const WEIGHTS = (() => {
   const out = new Array<number>(BAR_COUNT);
@@ -1338,13 +1339,15 @@ export function DockNotchSurface({
           justifyContent: 'center',
           gap: 10,
           width: '100%',
+          maxWidth: '100%',
           height: '100%',
           paddingLeft: 14,
           paddingRight: 14,
+          boxSizing: 'border-box',
           overflow: 'hidden',
         }}
       >
-        <div style={{ width: INNER_W, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+        <div style={{ width: INNER_W, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
           <NotchWaveCanvas listening levelRef={levelRef} />
         </div>
         {trimmedPartial ? (
@@ -1363,6 +1366,8 @@ export function DockNotchSurface({
               direction: 'rtl',
               textAlign: 'left',
               unicodeBidi: 'isolate',
+              WebkitMaskImage: 'linear-gradient(to right, transparent 0, #000 16px, #000 100%)',
+              maskImage: 'linear-gradient(to right, transparent 0, #000 16px, #000 100%)',
             }}
             title={trimmedPartial}
           >
@@ -1476,6 +1481,8 @@ export function DockNotchSurface({
         borderStyle: 'solid',
         borderWidth: 1,
         boxSizing: 'border-box',
+        maxWidth: DOCK_WINDOW_SAFE_MAX_WIDTH,
+        minWidth: 0,
         userSelect: 'none',
         ...geometry,
         transition:
