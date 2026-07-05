@@ -27,16 +27,14 @@ import {
   RAMS_CONTROL_BG,
   RAMS_CONTROL_BORDER,
   RAMS_CONTROL_ACTIVE_BORDER,
-  RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   BracketLabel,
-  HairlineRule,
   RamsButton,
-  SectionLabel,
   TabBreadcrumb,
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
+import { SettingsGroup, SettingsRow, ValuePill } from './grouped';
 
 const UPGRADE_URL = 'https://o8.run/pricing';
 
@@ -111,58 +109,6 @@ function SoonGlyph() {
     <svg width={13} height={13} viewBox="0 0 24 24" fill="none" stroke={RAMS_INK_QUIET} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
       <circle cx="12" cy="12" r="9" />
     </svg>
-  );
-}
-
-function PlanRow({ label, detail, state, isLast }: {
-  label: string;
-  detail: string;
-  state: 'included' | 'soon';
-  isLast: boolean;
-}) {
-  const included = state === 'included';
-  return (
-    <div
-      style={{
-        paddingTop: 14,
-        paddingBottom: 14,
-        paddingLeft: 2,
-        paddingRight: 2,
-        borderBottom: isLast ? 'none' : `1px solid ${RAMS_HAIRLINE_SOFT}`,
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 20,
-      }}
-    >
-      <div style={{ minWidth: 0, flex: '1 1 auto', display: 'flex', flexDirection: 'column', gap: 4 }}>
-        <span style={{
-          fontSize: 14,
-          fontWeight: 300,
-          color: 'var(--t-text)',
-          letterSpacing: '-0.01em',
-          opacity: included ? 1 : 0.7,
-        }}>
-          {label}
-        </span>
-        <span style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
-          {detail}
-        </span>
-      </div>
-      <div style={{ flexShrink: 0, display: 'inline-flex', alignItems: 'center', gap: 8 }}>
-        {included ? <CheckGlyph /> : <SoonGlyph />}
-        <span style={{
-          fontFamily: APP_FONT_STACK,
-          fontSize: 10,
-          fontWeight: 400,
-          letterSpacing: '0.12em',
-          textTransform: 'uppercase',
-          color: included ? RAMS_ACCENT : RAMS_INK_QUIET,
-        }}>
-          {included ? 'Included' : 'Soon'}
-        </span>
-      </div>
-    </div>
   );
 }
 
@@ -301,208 +247,178 @@ export function BillingTab() {
         </div>
       ) : null}
 
-      {/* 01 — CURRENT PLAN */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="01">CURRENT PLAN</SectionLabel>
-        <div style={{
-          display: 'flex',
-          alignItems: 'flex-start',
-          justifyContent: 'space-between',
-          gap: 20,
-          paddingTop: 16,
-          paddingBottom: 20,
-          borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-          flexWrap: 'wrap',
-        }}>
-          <div style={{ minWidth: 0, flex: '1 1 320px', display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <span style={{
-                fontSize: 24,
-                fontWeight: 300,
-                color: 'var(--t-text)',
-                letterSpacing: '-0.03em',
-                lineHeight: 1,
-              }}>
-                {PLAN_LABELS[plan]}
-              </span>
-              <BracketLabel tone={isPaid ? 'accent' : 'quiet'}>{sourceLabel(source)}</BracketLabel>
-            </div>
-            <p style={{
-              fontSize: 13,
-              color: 'var(--t-text-secondary)',
-              lineHeight: 1.55,
-              margin: 0,
-              maxWidth: 520,
-            }}>
-              {PLAN_TAGLINES[plan]}
-            </p>
-            {envManaged ? (
-              <p style={{ fontSize: 11.5, color: RAMS_INK_QUIET, lineHeight: 1.5, marginTop: 2, marginBottom: 0 }}>
-                Plan is pinned by the{' '}
-                <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>O8_PLAN</span>{' '}
-                environment variable. Unset it to manage a license from here.
-              </p>
-            ) : null}
-          </div>
-          <div style={{ flexShrink: 0 }}>
-            {!isPaid ? (
-              <RamsButton
-                variant="ghost"
-                onClick={() => { window.open(UPGRADE_URL, '_blank', 'noopener,noreferrer'); }}
-              >
-                What&apos;s coming
-              </RamsButton>
-            ) : null}
-          </div>
-        </div>
-      </section>
-
-      {/* 02 — WHAT'S INCLUDED (everything; free) */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="02">WHAT&apos;S INCLUDED</SectionLabel>
-        <p style={{
-          fontSize: 13,
-          color: 'var(--t-text-secondary)',
-          lineHeight: 1.55,
-          maxWidth: 580,
-          margin: 0,
-          marginBottom: 12,
-        }}>
-          Everything in o8 is included on Free and runs on your own subscriptions — none of it is gated.
-        </p>
-        <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
-          {INCLUDED_ROWS.map((row, idx) => (
-            <PlanRow
-              key={row.label}
-              label={row.label}
-              detail={row.detail}
-              state="included"
-              isLast={idx === INCLUDED_ROWS.length - 1}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* 03 — PAID, COMING SOON (cost/reach add-ons) */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="03">PAID — COMING SOON</SectionLabel>
-        <p style={{
-          fontSize: 13,
-          color: 'var(--t-text-secondary)',
-          lineHeight: 1.55,
-          maxWidth: 580,
-          margin: 0,
-          marginBottom: 12,
-        }}>
-          A paid plan covers only what costs us to run on your behalf — hosted inference, off-network reach, and cloud compute. These are on the way; you&apos;ll activate them right here.
-        </p>
-        <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
-          {COMING_ROWS.map((row, idx) => (
-            <PlanRow
-              key={row.label}
-              label={row.label}
-              detail={row.detail}
-              state="soon"
-              isLast={idx === COMING_ROWS.length - 1}
-            />
-          ))}
-        </div>
-      </section>
-
-      {/* 04 — LICENSE KEY */}
-      <section style={{ marginBottom: 32 }}>
-        <SectionLabel number="04">LICENSE KEY</SectionLabel>
-        <p style={{
-          fontSize: 13,
-          color: 'var(--t-text-secondary)',
-          lineHeight: 1.55,
-          maxWidth: 580,
-          margin: 0,
-          marginBottom: 14,
-        }}>
-          Paste a signed license key or founding pass. It is verified offline and stored locally in{' '}
-          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>~/.o8/entitlement.json</span>.
-        </p>
-
-        <textarea
-          value={licenseInput}
-          onChange={(event) => setLicenseInput(event.target.value)}
-          placeholder="o8_live_..."
-          spellCheck={false}
-          rows={3}
-          disabled={envManaged || busy !== null}
-          style={{
-            width: '100%',
-            maxWidth: 640,
-            resize: 'vertical',
-            minHeight: 72,
-            paddingTop: 12,
-            paddingBottom: 12,
+      <section>
+        <SettingsGroup header="Current plan">
+          <div style={{
+            display: 'flex',
+            alignItems: 'flex-start',
+            justifyContent: 'space-between',
+            gap: 20,
+            paddingTop: 16,
+            paddingBottom: 16,
             paddingLeft: 14,
             paddingRight: 14,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: RAMS_CONTROL_BORDER,
-            borderRadius: 12,
-            background: RAMS_CONTROL_BG,
-            color: 'var(--t-text)',
-            fontFamily: MONO_FONT_STACK,
-            fontSize: 12,
-            lineHeight: 1.5,
-            letterSpacing: '0.01em',
-            outline: 'none',
-            opacity: envManaged ? 0.55 : 1,
-            cursor: envManaged ? 'not-allowed' : 'text',
-            transition: 'border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-          }}
-          onFocus={(event) => { event.currentTarget.style.borderColor = RAMS_CONTROL_ACTIVE_BORDER; }}
-          onBlur={(event) => { event.currentTarget.style.borderColor = RAMS_CONTROL_BORDER; }}
-        />
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
-          <RamsButton
-            variant="primary"
-            onClick={() => { void applyLicense(); }}
-            disabled={envManaged || !licenseInput.trim()}
-            busy={busy === 'apply'}
-          >
-            {busy === 'apply' ? 'Verifying...' : 'Apply license'}
-          </RamsButton>
-          <RamsButton
-            variant="ghost"
-            onClick={() => { void clearLicense(); }}
-            disabled={envManaged || (!isPaid && source !== 'file')}
-            busy={busy === 'clear'}
-          >
-            {busy === 'clear' ? 'Clearing...' : 'Clear license'}
-          </RamsButton>
-        </div>
+            flexWrap: 'wrap',
+          }}>
+            <div style={{ minWidth: 0, flex: '1 1 320px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+                <span style={{
+                  fontSize: 24,
+                  fontWeight: 300,
+                  color: 'var(--t-text)',
+                  letterSpacing: '-0.03em',
+                  lineHeight: 1,
+                }}>
+                  {PLAN_LABELS[plan]}
+                </span>
+                <BracketLabel tone={isPaid ? 'accent' : 'quiet'}>{sourceLabel(source)}</BracketLabel>
+              </div>
+              <p style={{
+                fontSize: 13,
+                color: 'var(--t-text-secondary)',
+                lineHeight: 1.55,
+                margin: 0,
+                maxWidth: 520,
+              }}>
+                {PLAN_TAGLINES[plan]}
+              </p>
+              {envManaged ? (
+                <p style={{ fontSize: 11.5, color: RAMS_INK_QUIET, lineHeight: 1.5, marginTop: 2, marginBottom: 0 }}>
+                  Plan is pinned by the{' '}
+                  <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>O8_PLAN</span>{' '}
+                  environment variable. Unset it to manage a license from here.
+                </p>
+              ) : null}
+            </div>
+            <div style={{ flexShrink: 0 }}>
+              {!isPaid ? (
+                <RamsButton
+                  variant="ghost"
+                  onClick={() => { window.open(UPGRADE_URL, '_blank', 'noopener,noreferrer'); }}
+                >
+                  What&apos;s coming
+                </RamsButton>
+              ) : null}
+            </div>
+          </div>
+        </SettingsGroup>
       </section>
 
-      {/* 05 — BILLING */}
-      <section>
-        <SectionLabel number="05">BILLING</SectionLabel>
-        <p style={{
-          fontSize: 13,
-          color: 'var(--t-text-secondary)',
-          lineHeight: 1.55,
-          maxWidth: 580,
-          margin: 0,
-          marginBottom: 14,
-        }}>
-          Paid plans aren&apos;t live yet — managed inference, off-network mobile, and cloud agents are coming. Self-serve checkout will open on{' '}
-          <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 12 }}>o8.run/pricing</span>.
-        </p>
-        <RamsButton
-          variant="ghost"
-          onClick={() => { window.open(UPGRADE_URL, '_blank', 'noopener,noreferrer'); }}
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="What's included"
+          footnote="Everything in o8 is included on Free and runs on your own subscriptions — none of it is gated."
         >
-          View pricing
-        </RamsButton>
-        <div style={{ marginTop: 18 }}>
-          <HairlineRule />
-        </div>
+          {INCLUDED_ROWS.map((row, idx) => (
+            <SettingsRow
+              key={row.label}
+              icon={<CheckGlyph />}
+              label={row.label}
+              subtitle={row.detail}
+              accessory={<ValuePill tone="success">Included</ValuePill>}
+              divider={idx < INCLUDED_ROWS.length - 1}
+            />
+          ))}
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Paid — coming soon"
+          footnote="A paid plan covers only what costs us to run on your behalf — hosted inference, off-network reach, and cloud compute. These are on the way; you'll activate them right here."
+        >
+          {COMING_ROWS.map((row, idx) => (
+            <SettingsRow
+              key={row.label}
+              icon={<SoonGlyph />}
+              label={row.label}
+              subtitle={row.detail}
+              accessory={<ValuePill>Soon</ValuePill>}
+              divider={idx < COMING_ROWS.length - 1}
+            />
+          ))}
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="License key"
+          footnote={<>Paste a signed license key or founding pass. It is verified offline and stored locally in{' '}
+            <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>~/.o8/entitlement.json</span>.</>}
+        >
+          <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
+            <textarea
+              value={licenseInput}
+              onChange={(event) => setLicenseInput(event.target.value)}
+              placeholder="o8_live_..."
+              spellCheck={false}
+              rows={3}
+              disabled={envManaged || busy !== null}
+              style={{
+                width: '100%',
+                maxWidth: 640,
+                resize: 'vertical',
+                minHeight: 72,
+                paddingTop: 12,
+                paddingBottom: 12,
+                paddingLeft: 14,
+                paddingRight: 14,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: RAMS_CONTROL_BORDER,
+                borderRadius: 12,
+                background: RAMS_CONTROL_BG,
+                color: 'var(--t-text)',
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 12,
+                lineHeight: 1.5,
+                letterSpacing: '0.01em',
+                outline: 'none',
+                opacity: envManaged ? 0.55 : 1,
+                cursor: envManaged ? 'not-allowed' : 'text',
+                transition: 'border-color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
+              }}
+              onFocus={(event) => { event.currentTarget.style.borderColor = RAMS_CONTROL_ACTIVE_BORDER; }}
+              onBlur={(event) => { event.currentTarget.style.borderColor = RAMS_CONTROL_BORDER; }}
+            />
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginTop: 14, flexWrap: 'wrap' }}>
+              <RamsButton
+                variant="primary"
+                onClick={() => { void applyLicense(); }}
+                disabled={envManaged || !licenseInput.trim()}
+                busy={busy === 'apply'}
+              >
+                {busy === 'apply' ? 'Verifying...' : 'Apply license'}
+              </RamsButton>
+              <RamsButton
+                variant="ghost"
+                onClick={() => { void clearLicense(); }}
+                disabled={envManaged || (!isPaid && source !== 'file')}
+                busy={busy === 'clear'}
+              >
+                {busy === 'clear' ? 'Clearing...' : 'Clear license'}
+              </RamsButton>
+            </div>
+          </div>
+        </SettingsGroup>
+      </section>
+
+      <section style={{ marginTop: 28 }}>
+        <SettingsGroup
+          header="Billing"
+          footnote={<>Paid plans aren&apos;t live yet — managed inference, off-network mobile, and cloud agents are coming. Self-serve checkout will open on{' '}
+            <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>o8.run/pricing</span>.</>}
+        >
+          <div style={{ paddingTop: 14, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
+            <RamsButton
+              variant="ghost"
+              onClick={() => { window.open(UPGRADE_URL, '_blank', 'noopener,noreferrer'); }}
+            >
+              View pricing
+            </RamsButton>
+          </div>
+        </SettingsGroup>
       </section>
     </div>
   );
