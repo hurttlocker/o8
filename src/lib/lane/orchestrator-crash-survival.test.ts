@@ -1,0 +1,87 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+
+import {
+  crashSurvivableOrchestratorEnabled,
+  createOrchestratorTurnRecord,
+  finishOrchestratorTurn,
+  isPidAlive,
+  listActiveOrchestratorTurns,
+  readJsonlLines,
+} from './orchestrator-crash-survival';
+
+describe('orchestrator crash survival helpers', () => {
+  let root: string;
+  let priorDataDir: string | undefined;
+  let priorFlag: string | undefined;
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'o8-orch-crash-'));
+    priorDataDir = process.env.CORTEX_IDE_DATA_DIR;
+    priorFlag = process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR;
+    process.env.CORTEX_IDE_DATA_DIR = root;
+    delete process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR;
+  });
+
+  afterEach(() => {
+    if (priorDataDir === undefined) delete process.env.CORTEX_IDE_DATA_DIR;
+    else process.env.CORTEX_IDE_DATA_DIR = priorDataDir;
+    if (priorFlag === undefined) delete process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR;
+    else process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = priorFlag;
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  it('defaults on and accepts the worker-style opt-out values', () => {
+    expect(crashSurvivableOrchestratorEnabled()).toBe(true);
+    process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '0';
+    expect(crashSurvivableOrchestratorEnabled()).toBe(false);
+    process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = 'false';
+    expect(crashSurvivableOrchestratorEnabled()).toBe(false);
+    process.env.O8_CRASH_SURVIVABLE_ORCHESTRATOR = '1';
+    expect(crashSurvivableOrchestratorEnabled()).toBe(true);
+  });
+
+  it('persists and clears active turn records', () => {
+    const record = createOrchestratorTurnRecord({
+      backend: 'codex',
+      sessionName: 'cortex-codex-orchestrator-test',
+      repoPath: root,
+      threadId: 'thoughts-test',
+      pid: process.pid,
+      assistantMessageId: 'assistant-1',
+    });
+
+    expect(listActiveOrchestratorTurns()).toHaveLength(1);
+    expect(listActiveOrchestratorTurns()[0]).toMatchObject({
+      id: record.id,
+      backend: 'codex',
+      assistantMessageId: 'assistant-1',
+    });
+
+    finishOrchestratorTurn(record);
+    expect(listActiveOrchestratorTurns()).toHaveLength(0);
+  });
+
+  it('reads jsonl lines from an offset', () => {
+    const record = createOrchestratorTurnRecord({
+      backend: 'claude',
+      sessionName: 'cortex-orchestrator-test',
+      repoPath: root,
+      pid: process.pid,
+    });
+    writeFileSync(record.stdoutPath, '{"type":"a"}\n', 'utf8');
+    const first = readJsonlLines(record.stdoutPath);
+    expect(first.lines).toEqual(['{"type":"a"}']);
+
+    writeFileSync(record.stdoutPath, '{"type":"a"}\n{"type":"b"}\n', 'utf8');
+    const second = readJsonlLines(record.stdoutPath, first.offset);
+    expect(second.lines).toEqual(['{"type":"b"}']);
+  });
+
+  it('checks pid liveness without throwing', () => {
+    expect(isPidAlive(process.pid)).toBe(true);
+    expect(isPidAlive(0)).toBe(false);
+  });
+});

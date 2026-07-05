@@ -78,6 +78,7 @@ import { orchestratorReplay } from './lib/orchestrator/replay-buffer';
 import {
   rehydrateOrchestratorSessions,
 } from './lib/lane/orchestrator-session';
+import { rehydrateCodexOrchestratorTurns } from './lib/lane/codex-orchestrator-session';
 import {
   getActiveOrchestratorBackend,
   getOrchestratorBackend,
@@ -2974,7 +2975,25 @@ async function handleOrchestratorSendMsg(client: ClientState, msg: Record<string
     const sendTurn = (
       onEvent: (event: OrchestratorEvent) => void,
       signal: AbortSignal,
-    ): Promise<void> => backend.sendTurn(repoPath, turnMessage, onEvent, { permissionMode, thinkingEffort, model, collideBaseBackend, agent: agentTag, threadId, signal, ...(attachments?.length ? { attachments } : {}) });
+    ): Promise<void> => backend.sendTurn(repoPath, turnMessage, onEvent, {
+      permissionMode,
+      thinkingEffort,
+      model,
+      collideBaseBackend,
+      agent: agentTag,
+      threadId,
+      signal,
+      ...((backend.id === 'claude' || backend.id === 'codex') ? {
+        crashSurvival: {
+          backend: backend.id,
+          threadId,
+          assistantMessageId,
+          assistantStartedAtMs,
+          model: model ?? null,
+        },
+      } : {}),
+      ...(attachments?.length ? { attachments } : {}),
+    });
 
     // Ensure a subscription exists for the selected backend + agent.
     orchestratorSubscriptions.set(orchestratorSubKey(client.id, backend.id, agentId), {
@@ -5133,6 +5152,10 @@ async function bootstrapWsServer() {
 
   try {
     await rehydrateOrchestratorSessions();
+    const codexRebound = rehydrateCodexOrchestratorTurns();
+    if (codexRebound > 0) {
+      console.log(`[orchestrator-rehydrate] Re-bound ${codexRebound} Codex orchestrator turn${codexRebound === 1 ? '' : 's'}`);
+    }
   } catch (error) {
     console.warn(
       `[orchestrator-rehydrate] WS startup rehydration failed: ${error instanceof Error ? error.message : String(error)}`,

@@ -20,7 +20,7 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmodSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { OrchestratorEvent } from './orchestrator-stream-events';
@@ -37,6 +37,20 @@ import { parseLocalModel } from '@/lib/codex/local-model';
 import { resolveDefaultDispatchModelSync } from '@/lib/operator/defaults';
 import { BRAIN_PROMPT_SECTION } from '@/lib/orchestrator/brain-access';
 import { buildOrchestratorSystemPrompt } from '@/lib/lane/orchestrator-system-prompt';
+import { handleCodexJsonLine, type ParsedCodexLine } from './codex-orchestrator-events';
+import {
+  crashSurvivableOrchestratorEnabled,
+  createOrchestratorTurnRecord,
+  fileSize,
+  finishOrchestratorTurn,
+  isPidAlive,
+  listActiveOrchestratorTurns,
+  openAppendFile,
+  tailJsonlFile,
+  updateOrchestratorTurnPid,
+  type OrchestratorCrashSurvivalMeta,
+  type OrchestratorTurnRecord,
+} from './orchestrator-crash-survival';
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -66,6 +80,7 @@ export interface SendToCodexOrchestratorOptions {
   thinkingEffort?: ThinkingEffort;
   model?: string;
   signal?: AbortSignal;
+  crashSurvival?: OrchestratorCrashSurvivalMeta;
 }
 
 // ── Constants ────────────────────────────────────────────────────────────────
@@ -90,13 +105,6 @@ const CODEX_ORCHESTRATOR_HOME_DIR = join(
   process.env.CORTEX_IDE_DATA_DIR || join(homedir(), '.o8'),
   'codex-orchestrator',
 );
-
-// gpt-5.5 pricing — matches the entry in codex-cost-parser.ts that we added in
-// v0.1.134. Duplicated here so we can report cost on `done` without a runtime
-// import cycle.
-const GPT_5_5_INPUT_USD_PER_MILLION = 2.5;
-const GPT_5_5_CACHED_INPUT_USD_PER_MILLION = 0.25;
-const GPT_5_5_OUTPUT_USD_PER_MILLION = 15;
 
 // ── Registry ─────────────────────────────────────────────────────────────────
 
@@ -286,6 +294,56 @@ export function ensureCodexOrchestratorSession(repoPath: string, threadId?: stri
   return session;
 }
 
+export function rehydrateCodexOrchestratorTurns(): number {
+  let count = 0;
+  for (const record of listActiveOrchestratorTurns()) {
+    if (record.backend !== 'codex') continue;
+    const sessionName = record.sessionName || codexOrchestratorSessionName(record.repoPath, record.threadId);
+    let session = sessions.get(sessionName);
+    if (!session) {
+      session = {
+        sessionName,
+        repoPath: normalizeRepoPath(record.repoPath),
+        historyThreadId: normalizeHistoryThreadId(record.threadId),
+        threadId: readOrchestratorBackendSessionId(normalizeHistoryThreadId(record.threadId), 'codex'),
+        status: 'busy',
+        proc: null,
+        createdAt: record.startedAt,
+      };
+      sessions.set(sessionName, session);
+    } else {
+      session.status = 'busy';
+    }
+    if (!isPidAlive(record.pid)) {
+      session.status = 'ready';
+      finishOrchestratorTurn(record);
+      count += 1;
+      continue;
+    }
+    tailJsonlFile({
+      filePath: record.stdoutPath,
+      fromOffset: fileSize(record.stdoutPath),
+      alive: () => isPidAlive(record.pid),
+      onLine: (line) => {
+        try {
+          const parsed = JSON.parse(line) as ParsedCodexLine;
+          if (parsed.type === 'thread.started' && typeof parsed.thread_id === 'string') {
+            session!.threadId = parsed.thread_id;
+          }
+        } catch {
+          // ignore replay parse misses
+        }
+      },
+      onEnd: () => {
+        session!.status = 'ready';
+        finishOrchestratorTurn(record);
+      },
+    });
+    count += 1;
+  }
+  return count;
+}
+
 // ── Permission mode mapping ──────────────────────────────────────────────────
 
 function sandboxFlagsForMode(mode: CodexOrchestratorPermissionMode): string[] {
@@ -367,32 +425,6 @@ export function buildCodexOrchestratorPrompt(repoPath: string, message: string):
 }
 
 // ── Event mapping (codex JSON → OrchestratorEvent) ───────────────────────────
-
-interface ParsedCodexLine {
-  type?: string;
-  thread_id?: string;
-  payload?: Record<string, unknown>;
-  item?: Record<string, unknown>;
-  usage?: { input_tokens?: number; cached_input_tokens?: number; output_tokens?: number };
-}
-
-function safeObject(value: unknown): Record<string, unknown> | undefined {
-  return value && typeof value === 'object' && !Array.isArray(value)
-    ? (value as Record<string, unknown>)
-    : undefined;
-}
-
-function computeUsdCost(usage: ParsedCodexLine['usage']): number | null {
-  if (!usage) return null;
-  const inputTokens = Math.max(0, (usage.input_tokens ?? 0) - (usage.cached_input_tokens ?? 0));
-  const cachedTokens = usage.cached_input_tokens ?? 0;
-  const outputTokens = usage.output_tokens ?? 0;
-  const total =
-    (inputTokens / 1_000_000) * GPT_5_5_INPUT_USD_PER_MILLION
-    + (cachedTokens / 1_000_000) * GPT_5_5_CACHED_INPUT_USD_PER_MILLION
-    + (outputTokens / 1_000_000) * GPT_5_5_OUTPUT_USD_PER_MILLION;
-  return Number.isFinite(total) && total > 0 ? total : null;
-}
 
 // ── Send message ─────────────────────────────────────────────────────────────
 
@@ -502,6 +534,25 @@ export async function sendToCodexOrchestrator(
       ];
 
   return new Promise<void>((promiseResolve, promiseReject) => {
+    let crashRecord: OrchestratorTurnRecord | null = null;
+    let stdoutFd: number | null = null;
+    let stderrFd: number | null = null;
+    const crashEnabled = crashSurvivableOrchestratorEnabled();
+    if (crashEnabled) {
+      crashRecord = createOrchestratorTurnRecord({
+        backend: 'codex',
+        sessionName: session.sessionName,
+        repoPath: session.repoPath,
+        threadId: options.crashSurvival?.threadId ?? session.historyThreadId,
+        pid: 0,
+        assistantMessageId: options.crashSurvival?.assistantMessageId ?? null,
+        assistantStartedAtMs: options.crashSurvival?.assistantStartedAtMs ?? null,
+        model,
+      });
+      stdoutFd = openAppendFile(crashRecord.stdoutPath);
+      stderrFd = openAppendFile(crashRecord.stderrPath);
+    }
+
     const proc = spawn(codexBin, args, {
       cwd: session.repoPath,
       env: {
@@ -511,8 +562,17 @@ export async function sendToCodexOrchestrator(
         O8_MANAGED_SESSION: '1',
         CODEX_HOME: codexHome,
       },
-      stdio: ['ignore', 'pipe', 'pipe'],
+      detached: crashEnabled,
+      stdio: crashEnabled && stdoutFd !== null && stderrFd !== null
+        ? ['ignore', stdoutFd, stderrFd]
+        : ['ignore', 'pipe', 'pipe'],
     });
+    if (stdoutFd !== null) closeSync(stdoutFd);
+    if (stderrFd !== null) closeSync(stderrFd);
+    if (crashEnabled) proc.unref();
+    if (crashRecord) {
+      crashRecord = updateOrchestratorTurnPid(crashRecord, proc.pid ?? 0);
+    }
     session.proc = proc;
 
     const processTimeout = setTimeout(() => {
@@ -555,8 +615,19 @@ export async function sendToCodexOrchestrator(
     };
 
     let lineBuffer = '';
-    let cost: number | null = null;
-    let threadId: string | null = session.threadId;
+    const lineState = { cost: null as number | null, threadId: session.threadId };
+    let stopCrashTail: (() => void) | null = null;
+    const handleCodexLine = (line: string) => handleCodexJsonLine(line, lineState, onEvent, { isLocalModel });
+
+    if (crashRecord) {
+      stopCrashTail = tailJsonlFile({
+        filePath: crashRecord.stdoutPath,
+        fromOffset: fileSize(crashRecord.stdoutPath),
+        alive: () => isPidAlive(crashRecord?.pid) && session.proc === proc,
+        onLine: handleCodexLine,
+        onEnd: () => {},
+      });
+    }
 
     proc.stdout?.on('data', (chunk: Buffer) => {
       lineBuffer += chunk.toString('utf-8');
@@ -564,159 +635,7 @@ export async function sendToCodexOrchestrator(
       lineBuffer = lines.pop() ?? '';
 
       for (const line of lines) {
-        if (!line.trim()) continue;
-        try {
-          const parsed = JSON.parse(line) as ParsedCodexLine;
-          const type = String(parsed.type ?? '');
-          const payload = safeObject(parsed.payload);
-
-          if (type === 'thread.started' && typeof parsed.thread_id === 'string') {
-            threadId = parsed.thread_id;
-            continue;
-          }
-
-          if (type === 'event_msg' && payload?.type === 'agent_message') {
-            const text =
-              typeof payload.message === 'string'
-                ? payload.message
-                : '';
-            if (text) onEvent({ type: 'text', text });
-            continue;
-          }
-
-          // Codex-cli 0.130.0 emits the assistant's reply as `item.completed`
-          // with `item.type='agent_message'` and the body on `item.text`.
-          // Older codex builds use the `event_msg` shape above; we accept both.
-          const item = safeObject(parsed.item);
-          if (type === 'item.completed' && item?.type === 'agent_message') {
-            const text = typeof item.text === 'string' ? item.text : '';
-            if (text) onEvent({ type: 'text', text });
-            continue;
-          }
-
-          if (type === 'item.completed' && item?.type === 'tool_use') {
-            const name = typeof item.name === 'string' ? item.name : 'tool';
-            let input: unknown = {};
-            if (typeof item.arguments === 'string') {
-              try {
-                input = JSON.parse(item.arguments);
-              } catch {
-                input = item.arguments;
-              }
-            } else if (item.arguments && typeof item.arguments === 'object') {
-              input = item.arguments;
-            }
-            onEvent({
-              type: 'tool_use',
-              id: typeof item.id === 'string' ? item.id : null,
-              name,
-              input,
-            });
-            continue;
-          }
-
-          if (type === 'item.completed' && item?.type === 'command_execution') {
-            const cmd =
-              typeof item.command === 'string'
-                ? item.command
-                : Array.isArray(item.command)
-                  ? (item.command as string[]).join(' ')
-                  : '';
-            const output = typeof item.output === 'string' ? item.output : '';
-            // Emit as a tool_use + tool_result pair so the UI renders the shell
-            // call exactly like the legacy exec_command_begin/end pair would.
-            const callId = typeof item.id === 'string' ? item.id : null;
-            onEvent({ type: 'tool_use', id: callId, name: 'shell', input: { command: cmd } });
-            if (output) {
-              onEvent({ type: 'tool_result', id: callId, name: 'shell', output: output.slice(0, 4_000) });
-            }
-            continue;
-          }
-
-          if (type === 'event_msg' && payload?.type === 'exec_command_begin') {
-            const command =
-              typeof payload.command === 'string'
-                ? payload.command
-                : Array.isArray(payload.command)
-                  ? (payload.command as string[]).join(' ')
-                  : '';
-            onEvent({
-              type: 'tool_use',
-              id: typeof payload.call_id === 'string' ? payload.call_id : null,
-              name: 'shell',
-              input: { command },
-            });
-            continue;
-          }
-
-          if (type === 'event_msg' && payload?.type === 'exec_command_end') {
-            const output =
-              typeof payload.stdout === 'string'
-                ? payload.stdout
-                : typeof payload.output === 'string'
-                  ? payload.output
-                  : '';
-            onEvent({
-              type: 'tool_result',
-              id: typeof payload.call_id === 'string' ? payload.call_id : null,
-              name: 'shell',
-              output: output.slice(0, 4_000),
-            });
-            continue;
-          }
-
-          if (type === 'response_item' && payload?.type === 'reasoning') {
-            const summary =
-              typeof payload.summary === 'string'
-                ? payload.summary
-                : Array.isArray(payload.summary)
-                  ? (payload.summary as string[]).join('\n')
-                  : '';
-            if (summary) onEvent({ type: 'thinking', text: summary });
-            continue;
-          }
-
-          if (type === 'response_item' && payload?.type === 'function_call') {
-            const name = typeof payload.name === 'string' ? payload.name : 'function';
-            let input: unknown = {};
-            if (typeof payload.arguments === 'string') {
-              try {
-                input = JSON.parse(payload.arguments);
-              } catch {
-                input = payload.arguments;
-              }
-            }
-            onEvent({
-              type: 'tool_use',
-              id: typeof payload.call_id === 'string' ? payload.call_id : null,
-              name,
-              input,
-            });
-            continue;
-          }
-
-          if (type === 'response_item' && payload?.type === 'function_call_output') {
-            const output = typeof payload.output === 'string' ? payload.output : '';
-            // A screenshot tool's base64 is swamped + truncated; surface the
-            // saved file path (o8_view_screenshot persists it) so the canvas can
-            // SHOW the capture via serve-image.
-            const shot = output.match(/\/tmp\/o8-screenshots\/[^\s"']+\.(?:png|jpe?g)/i);
-            onEvent({
-              type: 'tool_result',
-              id: typeof payload.call_id === 'string' ? payload.call_id : null,
-              name: typeof payload.name === 'string' ? payload.name : 'function',
-              output: shot ? shot[0] : output.slice(0, 4_000),
-            });
-            continue;
-          }
-
-          if (type === 'turn.completed' && parsed.usage) {
-            cost = isLocalModel ? null : computeUsdCost(parsed.usage);
-            continue;
-          }
-        } catch {
-          // Not JSON — ignore (codex sometimes emits banner/info lines pre-JSON)
-        }
+        handleCodexLine(line);
       }
     });
 
@@ -727,6 +646,8 @@ export async function sendToCodexOrchestrator(
 
     proc.on('error', (err) => {
       clearTimeout(processTimeout);
+      stopCrashTail?.();
+      finishOrchestratorTurn(crashRecord);
       detachUserAbortListener();
       session.status = 'dead';
       session.proc = null;
@@ -736,21 +657,16 @@ export async function sendToCodexOrchestrator(
 
     proc.on('close', (code) => {
       clearTimeout(processTimeout);
+      stopCrashTail?.();
+      finishOrchestratorTurn(crashRecord);
       detachUserAbortListener();
       session.proc = null;
 
       if (lineBuffer.trim()) {
-        try {
-          const parsed = JSON.parse(lineBuffer) as ParsedCodexLine;
-          if (parsed.type === 'turn.completed' && parsed.usage) {
-            cost = isLocalModel ? null : computeUsdCost(parsed.usage);
-          }
-        } catch {
-          // ignore
-        }
+        handleCodexLine(lineBuffer);
       }
 
-      if (threadId) session.threadId = threadId;
+      if (lineState.threadId) session.threadId = lineState.threadId;
       session.status = code === 0 ? 'ready' : 'dead';
 
       if (code !== 0) {
@@ -763,7 +679,7 @@ export async function sendToCodexOrchestrator(
         });
       }
 
-      onEvent({ type: 'done', sessionId: threadId, cost });
+      onEvent({ type: 'done', sessionId: lineState.threadId, cost: lineState.cost });
 
       promiseResolve();
     });
