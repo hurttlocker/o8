@@ -11,6 +11,7 @@ import type { ClaudeCodeStreamJsonChatEvent } from '@/lib/claude-code/stream-jso
 import type { CompactionTrigger } from '@/lib/runtimes/compaction-detector';
 
 export type MobileInboxItemKind = 'alert' | 'approval' | 'review' | 'run_watch';
+export type MobileAgentStatus = 'queued' | 'running' | 'huddling' | 'awaiting_review' | 'merged' | 'failed';
 
 export type MobileControlActionKind =
   | 'inspect'
@@ -43,6 +44,7 @@ export interface MobileInboxItem {
   severity: EventSeverity;
   title: string;
   detail: string;
+  agentStatus?: MobileAgentStatus;
   approvalId?: string;
   metadata?: Record<string, string>;
   sessionKey?: string;
@@ -364,7 +366,11 @@ export interface MobileOrchestratorAgent {
   title: string;
   runtime: MobileOrchestratorRuntime;
   /** Collapsed packet lifecycle — see mapPacketStatus in the route. */
-  status: 'queued' | 'running' | 'awaiting_review' | 'merged' | 'failed';
+  status: MobileAgentStatus;
+  /** Worker-posted huddle plan, when status === 'huddling'. */
+  huddlePlan?: string;
+  /** Latest lane/packet event label for additive mobile rendering. */
+  lastEventLabel?: string | null;
   /** Worktree branch the agent commits to. */
   branch: string;
   /** Diff stats for the agent's worktree (zeros for queued packets). */
@@ -389,9 +395,10 @@ export interface MobileActivityEvent {
    *   - `merge`           — a git merge commit (>1 parent) or a released packet.
    *   - `dispatched`      — a packet that is launching / running.
    *   - `awaiting_review` — a packet whose work is done and awaiting review.
+   *   - `huddle`          — a worker posted its huddle plan and is awaiting alignment.
    *   - `alert`           — a failed / blocked packet.
    */
-  kind: 'dispatched' | 'awaiting_review' | 'merge' | 'commit' | 'alert';
+  kind: 'dispatched' | 'huddle' | 'awaiting_review' | 'merge' | 'commit' | 'alert';
   /** Primary line — commit subject or packet title. */
   title: string;
   /** Secondary line, e.g. `"main · 9393504"` or `"agent/x → main"`. */

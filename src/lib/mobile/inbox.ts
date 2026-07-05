@@ -76,6 +76,7 @@ function approvalActions(approval: ApprovalRecord): MobileControlAction[] {
 }
 
 function alertSeverity(agent: AgentSummary): EventSeverity {
+  if (agent.status === 'huddling') return 'info';
   if (agent.status === 'blocked' || agent.status === 'failed') return 'critical';
   if (agent.alerts > 0 || agent.context.usedPercent >= 70) return 'warning';
   if (agent.isCurrentSession) return 'success';
@@ -94,12 +95,14 @@ function mobileSessionPriority(agent: AgentSummary) {
   const isOwnedCodex = agent.runtime === 'codex' && agent.runtimeSurface?.ownership === 'owned';
   if (agent.isCurrentSession) return 100;
   if (isOwnedCodex && agent.status === 'running') return 96;
+  if (isOwnedCodex && agent.status === 'huddling') return 93;
   if (isOwnedCodex && agent.status === 'failed') return 94;
   if (isOwnedCodex && agent.status === 'waiting') return 92;
   if (isOwnedCodex && agent.status === 'reviewing') return 90;
   if (isOwnedCodex) return 88;
   if (agent.approvalStatus === 'pending') return 82;
   if (agent.status === 'running') return 76;
+  if (agent.status === 'huddling') return 74;
   if (agent.status === 'blocked') return 72;
   if (agent.status === 'failed') return 70;
   if (agent.status === 'reviewing') return 64;
@@ -377,19 +380,22 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
   }
 
   const reportItems = fleet.events
-    .filter((event) => event.track === 'Agent reports' && (event.subLabel === 'blocked' || event.subLabel === 'question'))
+    .filter((event) => event.track === 'Agent reports' && (event.subLabel === 'blocked' || event.subLabel === 'question' || event.subLabel === 'huddle'))
     .slice(0, 3)
     .map((event): MobileInboxItem => {
       const linkedSession = orderedSessions.find((session) => session.sessionKey === event.agentId);
       const actions: MobileControlAction[] = linkedSession
         ? sessionActions(linkedSession)
         : [{ kind: 'open_desktop', label: 'Desktop ↗', href: '/', available: true }];
+      const isHuddle = event.subLabel === 'huddle';
       return {
         id: `agent-report:${event.id}`,
         kind: 'alert',
-        severity: event.severity,
-        title: `${event.title} • ${event.subLabel === 'question' ? 'Question' : 'Blocked'}`,
+        severity: isHuddle ? 'info' : event.severity,
+        title: `${event.title} • ${isHuddle ? 'Huddling' : event.subLabel === 'question' ? 'Question' : 'Blocked'}`,
         detail: event.detail,
+        agentStatus: isHuddle ? 'huddling' : undefined,
+        metadata: isHuddle ? { status: 'huddling' } : undefined,
         sessionKey: linkedSession?.sessionKey ?? event.agentId,
         timestampLabel: relativeMobileAge(event.timestamp),
         actions,
@@ -398,7 +404,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
   items.push(...reportItems);
 
   for (const agent of orderedSessions.filter((session) => session.sessionKey !== primarySession?.sessionKey)) {
-    if (!['running', 'reviewing', 'blocked', 'failed'].includes(agent.status) && agent.alerts === 0) {
+    if (!['running', 'huddling', 'reviewing', 'blocked', 'failed'].includes(agent.status) && agent.alerts === 0) {
       continue;
     }
 
@@ -408,6 +414,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
       severity: alertSeverity(agent),
       title: `${agent.name} • ${agent.surfaceLabel ?? agent.status}`,
       detail: `${agent.currentTask} • ${agent.lastEventAt}`,
+      agentStatus: agent.status === 'huddling' ? 'huddling' : undefined,
       sessionKey: agent.sessionKey,
       timestampLabel: agent.lastEventAt,
       actions: sessionActions(agent),
@@ -467,7 +474,7 @@ async function buildMobileInboxSnapshot(options: { fresh?: boolean } = {}): Prom
   const alerts = items.filter((item) => item.kind === 'alert' && item.severity !== 'info').length;
   const approvalCount = pendingApprovals.length;
   const reviewItems = items.filter((item) => item.kind === 'review').length;
-  const activeRuns = orderedSessions.filter((agent) => ['running', 'reviewing', 'blocked', 'waiting', 'failed'].includes(agent.status)).length;
+  const activeRuns = orderedSessions.filter((agent) => ['running', 'huddling', 'reviewing', 'blocked', 'waiting', 'failed'].includes(agent.status)).length;
 
   return {
     generatedAt: new Date().toISOString(),

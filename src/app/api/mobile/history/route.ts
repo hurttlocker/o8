@@ -6,7 +6,7 @@ import { getOwnedOpencodeRuntimeTail } from '@/lib/opencode/owned';
 import { loadMobileLlmChatHistory } from '@/lib/llm/mobile-llm-chat';
 import type { MobileHistoryResponse, MobileTranscriptEntry, MobileTranscriptToolCall } from '@/lib/mobile/types';
 import '@/lib/runtimes'; // Ensure runtimes are registered
-import { readSessionSteerTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
+import { readSessionHuddleTranscriptEvents, readSessionSteerTranscriptEvents } from '@/lib/orchestrator/packet-transcript';
 import { getRuntime } from '@/lib/runtimes/registry';
 
 export const runtime = 'nodejs';
@@ -44,7 +44,20 @@ function toolCallFromEntry(name: string, text: string): MobileTranscriptToolCall
 
 function appendSteerEntries(sessionKey: string, transcript: MobileTranscriptEntry[]): MobileTranscriptEntry[] {
   const steerEvents = readSessionSteerTranscriptEvents(sessionKey);
-  if (steerEvents.length === 0) return transcript;
+  const huddleEvents = readSessionHuddleTranscriptEvents(sessionKey);
+  if (steerEvents.length === 0 && huddleEvents.length === 0) return transcript;
+  const huddleEntries = huddleEvents.map((event) => {
+    const timestamp = new Date(event.ts);
+    const timestampMs = Number.isFinite(timestamp.getTime()) ? timestamp.getTime() : Date.now();
+    const timestampLabel = new Date(timestampMs).toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+    return {
+      id: `huddle-${event.seq}`,
+      role: 'assistant' as const,
+      text: `Huddling — plan posted\n\n${event.text}`,
+      timestamp: timestampMs,
+      timestampLabel,
+    };
+  });
   const steerEntries = steerEvents.map((event) => {
     const timestamp = new Date(event.ts);
     const timestampMs = Number.isFinite(timestamp.getTime()) ? timestamp.getTime() : Date.now();
@@ -57,7 +70,7 @@ function appendSteerEntries(sessionKey: string, transcript: MobileTranscriptEntr
       timestampLabel,
     };
   });
-  return [...transcript, ...steerEntries].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
+  return [...transcript, ...huddleEntries, ...steerEntries].sort((left, right) => (left.timestamp ?? 0) - (right.timestamp ?? 0));
 }
 
 export async function GET(request: NextRequest) {
