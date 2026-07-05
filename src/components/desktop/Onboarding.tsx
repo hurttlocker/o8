@@ -266,9 +266,6 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
           <OnboardingOpen
             onSetup={goNext}
             onFastLane={onComplete}
-            onSignIn={startGithubFlow}
-            signInEnabled={githubDeviceFlowEnabled}
-            githubFlow={githubFlow}
             onPrivacy={() => openExternalUrl('https://o8.run/privacy')}
           />
         ) : (
