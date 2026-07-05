@@ -88,6 +88,8 @@ export function ModelThinkingChip({
   onEffortChange,
   swarmEnabled = false,
   onSetSwarm,
+  collideEnabled = false,
+  onSetCollide,
   compact = false,
 }: {
   modelLabel: string;
@@ -100,6 +102,8 @@ export function ModelThinkingChip({
   onEffortChange?: (effort: ThinkingEffort) => void;
   swarmEnabled?: boolean;
   onSetSwarm?: (enabled: boolean) => void;
+  collideEnabled?: boolean;
+  onSetCollide?: (enabled: boolean) => void;
   compact?: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -109,13 +113,16 @@ export function ModelThinkingChip({
   const options = adaptiveEnabled ? EFFORT_OPTIONS : EFFORT_OPTIONS.filter((option) => option !== 'adaptive');
   const selectedLabel = EFFORT_LABELS[effort];
   const ultraActive = Boolean(swarmEnabled);
+  const collideActive = Boolean(collideEnabled);
   const modelSwitchable = Boolean(onModelChange || onBackendChange);
-  const canOpen = Boolean(onEffortChange || onSetSwarm || onModelChange || onBackendChange);
+  const canOpen = Boolean(onEffortChange || onSetSwarm || onSetCollide || onModelChange || onBackendChange);
   const showingAffordance = canOpen && (hovered || focused || open);
   const isCodexBackend = activeBackend === 'codex';
   const effortSectionLabel = isCodexBackend ? 'Reasoning' : 'Thinking';
   const effortTitle = isCodexBackend ? 'reasoning' : 'thinking';
   const normalizedModelId = modelId?.replace(/\[[^\]]*\]$/, '');
+  const decideLabel = isCodexBackend ? 'Codex decides' : 'Claude decides';
+  const modeLabel = collideActive ? 'Collide' : ultraActive ? 'Ultracode' : 'Solo';
 
   return (
     <>
@@ -128,7 +135,7 @@ export function ModelThinkingChip({
         onFocus={() => setFocused(true)}
         onBlur={() => setFocused(false)}
         disabled={!canOpen}
-        title={ultraActive ? `${modelLabel} · Ultracode (swarm) · ${effortTitle} ${selectedLabel}` : `${modelLabel} · ${effortTitle} ${selectedLabel}`}
+        title={`${modelLabel} · ${modeLabel} · ${effortTitle} ${selectedLabel}`}
         aria-haspopup="menu"
         aria-expanded={open}
         style={{
@@ -143,10 +150,10 @@ export function ModelThinkingChip({
           paddingLeft: canOpen ? 5 : 0,
           borderWidth: 1,
           borderStyle: 'solid',
-          borderColor: ultraActive ? `color-mix(in srgb, ${SWARM_ACCENT} 32%, transparent)` : showingAffordance ? 'var(--t-border)' : 'transparent',
+          borderColor: ultraActive || collideActive ? `color-mix(in srgb, ${SWARM_ACCENT} 32%, transparent)` : showingAffordance ? 'var(--t-border)' : 'transparent',
           borderRadius: 7,
-          background: ultraActive ? `color-mix(in srgb, ${SWARM_ACCENT} 8%, transparent)` : showingAffordance ? 'var(--t-hover)' : 'transparent',
-          color: ultraActive ? 'var(--t-text)' : showingAffordance ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
+          background: ultraActive || collideActive ? `color-mix(in srgb, ${SWARM_ACCENT} 8%, transparent)` : showingAffordance ? 'var(--t-hover)' : 'transparent',
+          color: ultraActive || collideActive ? 'var(--t-text)' : showingAffordance ? 'var(--t-text-muted)' : 'var(--t-text-faint)',
           cursor: canOpen ? 'pointer' : 'default',
           outline: focused && canOpen ? '2px solid var(--t-focus-ring)' : 'none',
           outlineOffset: 1,
@@ -159,7 +166,7 @@ export function ModelThinkingChip({
             {modelLabel}
           </span>
         )}
-        {ultraActive ? <SwarmGlyph size={11} /> : null}
+        {ultraActive || collideActive ? <SwarmGlyph size={11} /> : null}
         <ThinkingBars effort={effort} active={open || effort === 'max' || (isCodexBackend && effort === 'xhigh')} />
         <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" style={{ flexShrink: 0, opacity: canOpen ? 0.72 : 0 }}>
           <path d="m6 9 6 6 6-6" />
@@ -305,15 +312,63 @@ export function ModelThinkingChip({
             })}
           </div>
 
-          {onSetSwarm ? (
+          {onSetSwarm || onSetCollide ? (
             <div style={{ marginTop: 6, paddingTop: 6, borderTop: '1px solid var(--t-divider-subtle)', display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <div style={{ paddingLeft: 7, paddingRight: 7, paddingBottom: 2 }}>
+                <div style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', color: 'var(--t-text-faint)', lineHeight: 1.25 }}>Mode</div>
+              </div>
+              {[
+                { key: 'solo', order: 1, active: !ultraActive && !collideActive, label: 'Solo', detail: 'one orchestrator, works directly' },
+                { key: 'collide', order: 3, active: collideActive, label: 'Collide', detail: `Claude + Codex propose · ${decideLabel}` },
+              ].map((mode) => (
+                <button
+                  key={mode.key}
+                  type="button"
+                  role="menuitemradio"
+                  aria-checked={mode.active}
+                  onClick={() => {
+                    onSetSwarm?.(false);
+                    onSetCollide?.(mode.key === 'collide' ? !collideActive : false);
+                    setOpen(false);
+                  }}
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'auto minmax(0, 1fr) auto',
+                    alignItems: 'center',
+                    gap: 8,
+                    minHeight: 30,
+                    paddingTop: 4,
+                    paddingRight: 6,
+                    paddingBottom: 4,
+                    paddingLeft: 7,
+                    borderWidth: 0,
+                    borderRadius: 8,
+                    background: mode.active ? `color-mix(in srgb, ${SWARM_ACCENT} 10%, transparent)` : 'transparent',
+                    color: 'var(--t-text)',
+                    cursor: 'pointer',
+                    textAlign: 'left',
+                    fontFamily: 'var(--font-sans-system)',
+                    order: mode.order,
+                  }}
+                  onMouseEnter={(event) => { if (!mode.active) event.currentTarget.style.background = 'var(--t-hover)'; }}
+                  onMouseLeave={(event) => { if (!mode.active) event.currentTarget.style.background = 'transparent'; }}
+                >
+                  <SwarmGlyph size={13} color={mode.active ? SWARM_ACCENT : 'var(--t-text-muted)'} />
+                  <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: mode.active ? SWARM_ACCENT : 'var(--t-text)' }}>{mode.label}</span>
+                    <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.25, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{mode.detail}</span>
+                  </span>
+                  <span style={{ width: 6, height: 6, borderRadius: 999, background: mode.active ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
+                </button>
+              ))}
               <button
                 type="button"
                 role="menuitemradio"
                 aria-checked={ultraActive}
                 onClick={() => {
                   const next = !ultraActive;
-                  onSetSwarm(next);
+                  onSetSwarm?.(next);
+                  onSetCollide?.(false);
                   if (next) onEffortChange?.('xhigh');
                   setOpen(false);
                 }}
@@ -334,14 +389,15 @@ export function ModelThinkingChip({
                   cursor: 'pointer',
                   textAlign: 'left',
                   fontFamily: 'var(--font-sans-system)',
+                  order: 2,
                 }}
                 onMouseEnter={(event) => { if (!ultraActive) event.currentTarget.style.background = 'var(--t-hover)'; }}
                 onMouseLeave={(event) => { if (!ultraActive) event.currentTarget.style.background = 'transparent'; }}
               >
                 <SwarmGlyph size={13} color={ultraActive ? SWARM_ACCENT : 'var(--t-text-muted)'} />
                 <span style={{ display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 }}>
-                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>Ultracode</span>
-                  <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.25, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>Claude + Codex swarm</span>
+                  <span style={{ fontSize: 13.5, fontWeight: 300, letterSpacing: '0', lineHeight: 1.2, color: ultraActive ? SWARM_ACCENT : 'var(--t-text)' }}>Swarm (Ultracode)</span>
+                  <span style={{ fontSize: 9.5, fontWeight: 260, letterSpacing: '0', lineHeight: 1.25, color: 'var(--t-text-faint)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>sub-agents + Codex workers in parallel</span>
                 </span>
                 <span style={{ width: 6, height: 6, borderRadius: 999, background: ultraActive ? SWARM_ACCENT : 'transparent', flexShrink: 0 }} />
               </button>

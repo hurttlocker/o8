@@ -54,6 +54,8 @@ export interface OrchestratorTurnOptions {
   toolProfile?: ToolProfile;
   thinkingEffort?: ThinkingEffort;
   model?: string;
+  /** For a Collide turn, the composer backend selected before routing to `collide`. */
+  collideBaseBackend?: OrchestratorBackendId;
   /** UI/history thread id (thoughts-*), used to isolate backend session identity. */
   threadId?: string | null;
   /**
