@@ -28,12 +28,21 @@ type DispatchState = { status: 'busy' } | { status: 'done'; runtime: string; tie
 
 interface TargetsResponse {
   ok: boolean;
+  repoPath?: string;
   count?: number;
   scoredAt?: string;
   targets?: TargetRow[];
+  partial?: boolean;
   reason?: string;
   message?: string;
   error?: string;
+}
+
+interface TargetingProgress {
+  phase: 'starting' | 'collecting-signals' | 'scoring' | 'rationales' | 'caching' | 'complete' | 'error';
+  label: string;
+  filesScanned: number;
+  totalFiles: number | null;
 }
 
 const FLOATING_ASK_O8_RIGHT = 12;
@@ -64,8 +73,11 @@ function PipBar({ label, value }: { label: string; value: number }) {
 export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; active?: boolean }) {
   const [state, setState] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle');
   const [data, setData] = useState<TargetsResponse | null>(null);
+  const [progress, setProgress] = useState<TargetingProgress | null>(null);
   const [dispatched, setDispatched] = useState<Record<string, DispatchState>>({});
   const loadedRepoRef = useRef<string | null>(null);
+  const loadSeqRef = useRef(0);
+  const pollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const dispatch = useCallback(async (path: string) => {
     if (!repoPath) return;
@@ -88,16 +100,54 @@ export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; a
     }
   }, [repoPath]);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (restart = true) => {
     if (!repoPath) return;
+    const seq = loadSeqRef.current + 1;
+    loadSeqRef.current = seq;
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
     setState('loading');
+    setProgress({ phase: 'starting', label: restart ? 'Restarting scan' : 'Starting scan', filesScanned: 0, totalFiles: null });
     try {
-      const res = await fetch(`/api/panel/targets?repoPath=${encodeURIComponent(repoPath)}`);
-      const json = (await res.json()) as TargetsResponse;
-      setData(json);
-      setState(json.ok ? 'ready' : 'error');
+      const startRes = await fetch(`/api/panel/targets?repoPath=${encodeURIComponent(repoPath)}&mode=start`);
+      const startJson = (await startRes.json()) as TargetsResponse & { jobId?: string; progress?: TargetingProgress };
+      if (loadSeqRef.current !== seq) return;
+      if (!startJson.ok || !startJson.jobId) {
+        setData(startJson);
+        setProgress(null);
+        setState('error');
+        return;
+      }
+      if (startJson.progress) setProgress(startJson.progress);
+
+      const poll = async () => {
+        try {
+          const res = await fetch(`/api/panel/targets?repoPath=${encodeURIComponent(repoPath)}&jobId=${encodeURIComponent(startJson.jobId!)}`);
+          const json = (await res.json()) as TargetsResponse & { progress?: TargetingProgress };
+          if (loadSeqRef.current !== seq) return;
+          if (json.progress) setProgress(json.progress);
+          if (json.targets || json.error || json.message) setData(json);
+          if (!json.ok || json.progress?.phase === 'error') {
+            setState('error');
+            return;
+          }
+          if (json.progress?.phase === 'complete') {
+            setState('ready');
+            return;
+          }
+          setState('loading');
+          pollTimerRef.current = setTimeout(poll, 900);
+        } catch (err) {
+          if (loadSeqRef.current !== seq) return;
+          setData({ ok: false, error: err instanceof Error ? err.message : 'request failed' });
+          setState('error');
+        }
+      };
+
+      pollTimerRef.current = setTimeout(poll, 200);
     } catch (err) {
+      if (loadSeqRef.current !== seq) return;
       setData({ ok: false, error: err instanceof Error ? err.message : 'request failed' });
+      setProgress(null);
       setState('error');
     }
   }, [repoPath]);
@@ -107,11 +157,21 @@ export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; a
     if (!active || !repoPath) return;
     if (loadedRepoRef.current === repoPath) return;
     loadedRepoRef.current = repoPath;
-    void load();
+    void load(false);
   }, [active, repoPath, load]);
 
-  const targets = data?.targets ?? [];
+  useEffect(() => () => {
+    if (pollTimerRef.current) clearTimeout(pollTimerRef.current);
+  }, []);
+
+  const targets = data?.repoPath === repoPath ? data?.targets ?? [] : [];
   const scoredAt = data?.scoredAt ? new Date(data.scoredAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : null;
+  const progressFiles = progress?.totalFiles
+    ? `${progress.filesScanned}/${progress.totalFiles} files`
+    : progress && progress.filesScanned > 0 ? `${progress.filesScanned} files` : null;
+  const scanDetail = progress
+    ? `${progress.label}${progressFiles ? ` · ${progressFiles}` : ''}`
+    : 'Ranking files by impact × opportunity from the cached signals.';
 
   return (
     <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', background: 'var(--t-bg)' }}>
@@ -127,24 +187,26 @@ export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; a
         <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 1 }}>
           <span style={{ fontSize: 13, fontWeight: 400, letterSpacing: '-0.1px', color: 'var(--t-text)' }}>Targeting</span>
           <span style={{ fontSize: 10.5, fontWeight: 300, letterSpacing: '-0.05px', color: 'var(--t-text-faint)' }}>
-            {state === 'ready' && targets.length > 0
+            {state === 'loading'
+              ? scanDetail
+              : state === 'ready' && targets.length > 0
               ? `${targets.length} files ranked${scoredAt ? ` · ${scoredAt}` : ''} — point your agents here`
               : 'Where to point your agents'}
           </span>
         </div>
         <button
           type="button"
-          onClick={() => void load()}
-          disabled={!repoPath || state === 'loading'}
-          title="Re-run the triage"
+          onClick={() => void load(true)}
+          disabled={!repoPath}
+          title={state === 'loading' ? 'Restart the triage scan' : 'Re-run the triage'}
           style={{
             fontSize: 11, fontWeight: 400, color: state === 'loading' ? 'var(--t-text-muted)' : 'var(--t-text)',
             background: 'var(--t-input-bg)', borderWidth: 1, borderStyle: 'solid', borderColor: 'var(--t-divider-subtle)',
             borderRadius: 7, paddingTop: 4, paddingBottom: 4, paddingLeft: 10, paddingRight: 10,
-            cursor: repoPath && state !== 'loading' ? 'pointer' : 'default', flexShrink: 0,
+            cursor: repoPath ? 'pointer' : 'default', flexShrink: 0,
           }}
         >
-          {state === 'loading' ? 'Scanning…' : 'Re-scan'}
+          {state === 'loading' ? 'Restart scan' : 'Re-scan'}
         </button>
       </div>
 
@@ -153,7 +215,7 @@ export function TargetsPanel({ repoPath, active }: { repoPath?: string | null; a
         {!repoPath ? (
           <EmptyState title="No repo selected" detail="Select a repository to triage where your agents should aim." />
         ) : state === 'loading' && targets.length === 0 ? (
-          <EmptyState title="Scanning…" detail="Ranking files by impact × opportunity from the cached signals." />
+          <EmptyState title="Scanning…" detail={scanDetail} />
         ) : state === 'error' ? (
           <EmptyState title="Triage failed" detail={data?.error || 'Something went wrong scoring this repo.'} />
         ) : targets.length === 0 ? (
