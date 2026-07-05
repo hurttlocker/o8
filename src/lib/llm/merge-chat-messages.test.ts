@@ -80,4 +80,11 @@ describe('mergeChatMessages (#1282 transcript-loss)', () => {
     expect(merged.map((m) => m.id)).toEqual(['u1', 'a1']);
     expect(merged.find((m) => m.id === 'u1')?.timestamp).toBe(100);
   });
+
+  it('collapses adjacent same-role identical-content duplicates with different ids', () => {
+    const existing = [msg('u1', 'user', 100), msg('assistant-1', 'assistant', 110, { content: 'same' })];
+    const inbound = [msg('orch-assistant-1', 'assistant', 111, { content: 'same' })];
+    const merged = mergeChatMessages(existing, inbound);
+    expect(merged.map((m) => m.id)).toEqual(['u1', 'assistant-1']);
+  });
 });
