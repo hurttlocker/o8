@@ -291,7 +291,7 @@ async function runProposal(
  * injectable so the engine test can drive mock proposers + a mock aggregator.
  */
 export function makeMoaBackend(
-  configOrThunk: MoaConfig | (() => MoaConfig),
+  configOrThunk: MoaConfig | ((options?: OrchestratorTurnOptions) => MoaConfig),
   deps: MoaDeps = defaultDeps,
 ): OrchestratorBackend {
   const resolveConfig = typeof configOrThunk === 'function' ? configOrThunk : () => configOrThunk;
@@ -311,7 +311,7 @@ export function makeMoaBackend(
       return agg.ensureSession(repoPath, undefined, threadId);
     },
     async sendTurn(repoPath, message, onEvent, options?: OrchestratorTurnOptions): Promise<void> {
-      const config = resolveConfig();
+      const config = resolveConfig(options);
       const mainThreadId = options?.threadId ?? null;
       const signal = options?.signal;
 
@@ -381,4 +381,4 @@ export function makeMoaBackend(
 }
 
 /** The shipping Collide backend — config resolved lazily per turn from settings. */
-export const collideBackend: OrchestratorBackend = makeMoaBackend(() => resolveCollideConfig());
+export const collideBackend: OrchestratorBackend = makeMoaBackend((options) => resolveCollideConfig(options?.collideBaseBackend));

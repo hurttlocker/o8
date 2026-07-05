@@ -850,6 +850,7 @@ export function useOrchestratorStream(
     const displayMessage = options?.displayMessage?.trim() || message;
     const localEntriesAfterUser = options?.localEntriesAfterUser ?? [];
     const collide = options?.collide === true;
+    const collideBaseBackend = collide ? options?.backend : undefined;
     const backend = collide ? 'collide' : options?.backend;
     // Collide is its own fusion — the swarm hint does not apply on a Collide turn.
     const swarm = options?.swarm === true && !collide;
@@ -960,6 +961,7 @@ export function useOrchestratorStream(
         // Per-turn backend override keeps the composer chip truthful even while
         // the global operator default write is still settling.
         ...(backend ? { backend } : {}),
+        ...(collideBaseBackend ? { collideBaseBackend } : {}),
         ...(options?.attachments?.length ? { attachments: options.attachments } : {}),
       });
       const delivered = await deliverOrchestratorPayload({

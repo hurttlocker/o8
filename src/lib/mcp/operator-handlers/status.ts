@@ -160,6 +160,11 @@ export const STATUS_TOOLS: McpTool[] = [
           enum: ['auto', 'codex', 'claude', 'openclaw', 'hermes', 'collide', 'fable'],
           description: 'Active in-app orchestrator backend. Use "codex" for Codex GPT-5.5, "claude" for Claude Code, or "auto" for legacy toggle resolution.',
         },
+        collideAggregator: {
+          type: 'string',
+          enum: ['auto', 'claude', 'codex'],
+          description: 'Collide aggregator override. "auto" follows the active composer backend; "claude" or "codex" force the synthesizer.',
+        },
         thinkingEffort: {
           type: 'string',
           enum: ['adaptive', 'low', 'medium', 'high', 'max', 'xhigh'],
@@ -199,6 +204,7 @@ export const STATUS_TOOLS: McpTool[] = [
 const OPERATOR_DEFAULTS_KEYS = [
   'orchestratorModel',
   'orchestratorBackend',
+  'collideAggregator',
   'thinkingEffort',
   'overlapGate',
   'parallelCap',
