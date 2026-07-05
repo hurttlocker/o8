@@ -16,6 +16,14 @@ import { O8_AUTH_STATE_KEY } from '@/lib/auth/start-desktop-sign-in';
  * activates the session (which makes useUser() update; the bridge then provisions
  * the local user row). Mounted inside ClerkProvider; renders nothing.
  */
+// One-time Clerk tickets must never be exchanged twice: the Tauri shell's live
+// event and the cold-start buffer can BOTH deliver the same URL (belt-and-
+// suspenders with the Rust-side single-path fix), and a second exchange burns
+// the ticket with "sign in token has already been used" (live-hit 2026-07-05,
+// cost the operator a full sign-in attempt with zero visible feedback).
+// Module-level so remounts can't reset it.
+const consumedTickets = new Set<string>();
+
 export function DesktopAuthCallbackHandler() {
   const { signIn } = useSignIn();
   const clerk = useClerk();
@@ -47,6 +55,7 @@ export function DesktopAuthCallbackHandler() {
         return;
       }
       if (!ticket) return;
+      if (consumedTickets.has(ticket)) return;
 
       // CSRF: the echoed state must match the nonce we stored at launch.
       let expected: string | null = null;
@@ -61,6 +70,7 @@ export function DesktopAuthCallbackHandler() {
       }
 
       processingRef.current = true;
+      consumedTickets.add(ticket);
       try {
         const { error } = await si.ticket({ ticket });
         if (error) {
