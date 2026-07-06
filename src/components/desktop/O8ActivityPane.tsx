@@ -38,46 +38,19 @@ import {
 import { repoSlugFromRemote } from './canvas-utils';
 import { groupActivityByCommitSha } from './o8-activity-grouping';
 import { useOrchestratorData } from './orchestrator-data-context';
+import {
+  O8DirectiveProposalDrawer,
+  hydrateProposalPrefs,
+  markProposalsSeen,
+  PROPOSALS_OPEN_KEY,
+} from './o8-panel/O8DirectiveProposalDrawer';
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
 import { O8ScratchChat } from './o8-panel/workspace-rail/O8ScratchChat';
 import { PrPanel } from './pr-panel/PrPanel';
-import { DirectiveProposalRow } from './thoughts/DirectiveProposalRow';
 import { useDirectiveProposals } from './thoughts/mission-panel/useDirectiveProposals';
 import type { DirectiveProposalCandidate } from './thoughts/directive-proposal-types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
-
-const PROPOSALS_OPEN_KEY = 'o8:activity:proposals-open';
-const PROPOSALS_SEEN_KEY = 'o8:activity:proposals-seen';
-
-/** Operator-seen proposal ids. Persisted so the "new" emphasis clears across
- *  reloads once reviewed. Always read in an effect, never in render, to avoid
- *  an SSR/CSR hydration mismatch (see the MergePreviewCycler regression). */
-function readSeenProposalIds(): Set<string> {
-  try {
-    const raw = window.localStorage.getItem(PROPOSALS_SEEN_KEY);
-    if (!raw) return new Set();
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed)
-      ? new Set(parsed.filter((x): x is string => typeof x === 'string'))
-      : new Set();
-  } catch {
-    return new Set();
-  }
-}
-
-function markProposalsSeen(ids: string[]) {
-  if (ids.length === 0) return;
-  try {
-    const merged = readSeenProposalIds();
-    for (const id of ids) merged.add(id);
-    // Cap so the list can't grow unbounded as proposals churn over time.
-    const capped = Array.from(merged).slice(-200);
-    window.localStorage.setItem(PROPOSALS_SEEN_KEY, JSON.stringify(capped));
-  } catch {
-    // ignore
-  }
-}
 
 const FILTER_TABS_WITH_PACKETS = [
   ...FILTER_TABS,
@@ -132,6 +105,8 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   const [fallbackRepoOptions, setFallbackRepoOptions] = useState<string[]>([]);
   const [expandedKey, setExpandedKey] = useState<string | null>(null);
   const [proposalsOpen, setProposalsOpen] = useState(false);
+  const [dispatchHalted, setDispatchHalted] = useState(false);
+  const [haltBusy, setHaltBusy] = useState(false);
   // Frozen-per-mount set of proposal ids the operator had already seen.
   // Empty on the server / first paint (hydration-safe), filled in an effect.
   const [seenProposalSnapshot, setSeenProposalSnapshot] = useState<Set<string>>(() => new Set());
@@ -149,12 +124,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
   // hydrate-mismatch. Default = collapsed; the row is recommendations,
   // not pending tasks, so it shouldn't dominate the timeline visually.
   useEffect(() => {
-    try {
-      setProposalsOpen(window.localStorage.getItem(PROPOSALS_OPEN_KEY) === '1');
-      setSeenProposalSnapshot(readSeenProposalIds());
-    } catch {
-      // ignore
-    }
+    hydrateProposalPrefs(setProposalsOpen, setSeenProposalSnapshot);
   }, []);
   const handleToggleProposals = useCallback(() => {
     setProposalsOpen((prev) => {
@@ -163,6 +133,57 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       return next;
     });
   }, []);
+  const refreshDispatchHaltState = useCallback(async () => {
+    try {
+      const response = await fetch('/api/orchestrator/dispatch-halt', { cache: 'no-store' });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; result?: { halted?: boolean } } | null;
+      if (response.ok && payload?.ok) setDispatchHalted(payload.result?.halted === true);
+    } catch {
+      // ignore
+    }
+  }, []);
+  useEffect(() => {
+    void refreshDispatchHaltState();
+  }, [refreshDispatchHaltState]);
+  const handleDispatchHaltToggle = useCallback(async () => {
+    setHaltBusy(true);
+    try {
+      const response = await fetch('/api/orchestrator/dispatch-halt', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(dispatchHalted
+          ? { verb: 'resume' }
+          : { verb: 'halt', stopRunning: true, reason: 'Stopped from Activity header' }),
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean; result?: { halt?: { halted?: boolean } } } | null;
+      if (!response.ok || !payload?.ok) throw new Error('Dispatch halt update failed.');
+      setDispatchHalted(payload.result?.halt?.halted === true);
+      window.dispatchEvent(new Event('o8:lane-lifecycle'));
+    } catch (error) {
+      console.error('[o8-activity] dispatch halt failed:', error);
+    } finally {
+      setHaltBusy(false);
+    }
+  }, [dispatchHalted]);
+  const handleStopMission = useCallback(async () => {
+    const missionId = orchestratorData?.missionState?.missionId?.trim();
+    if (!missionId) return;
+    setHaltBusy(true);
+    try {
+      const response = await fetch('/api/orchestrator/stop-mission', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ missionId }),
+      });
+      const payload = await response.json().catch(() => null) as { ok?: boolean } | null;
+      if (!response.ok || !payload?.ok) throw new Error('Mission stop failed.');
+      window.dispatchEvent(new Event('o8:lane-lifecycle'));
+    } catch (error) {
+      console.error('[o8-activity] stop mission failed:', error);
+    } finally {
+      setHaltBusy(false);
+    }
+  }, [orchestratorData?.missionState?.missionId]);
   const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
   const mountedRef = useRef(true);
   const activityHydratedRef = useRef(false);
@@ -549,133 +570,16 @@ export const O8ActivityPane = memo(function O8ActivityPane({
         overflowY: 'auto',
         overflowX: 'hidden',
       }}>
-        {/* #746 / #9 — directive proposals pin above the timeline as
-            recommendations (system → operator), distinct from the feed.
-            Unseen ("new") proposals get accent emphasis + a one-time
-            auto-open; once reviewed they stay listed but read calmly. */}
-        {proposals.length > 0 ? (
-          <div style={{
-            paddingTop: 8,
-            paddingRight: 12,
-            paddingLeft: 12,
-            // Hairline under the collapsed drawer: its 9px-uppercase header
-            // shares the day-label voice, so without a boundary it reads as
-            // the section heading for the feed below it.
-            paddingBottom: 8,
-            borderBottom: '1px solid var(--t-divider-subtle, var(--t-divider))',
-            marginBottom: 2,
-          }}>
-            <button
-              type="button"
-              onClick={handleToggleProposals}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 8,
-                width: '100%',
-                paddingTop: 6,
-                paddingRight: 8,
-                paddingBottom: 6,
-                paddingLeft: 8,
-                borderRadius: 8,
-                borderWidth: 0,
-                background: unreadProposalCount > 0
-                  ? 'var(--t-accent-soft)'
-                  : proposalsOpen ? 'var(--t-hover)' : 'transparent',
-                cursor: 'pointer',
-                textAlign: 'left',
-                fontFamily: 'var(--font-sans-system)',
-                transition: 'background 120ms cubic-bezier(0.22, 1, 0.36, 1)',
-              }}
-              onMouseEnter={(e) => { if (unreadProposalCount === 0 && !proposalsOpen) e.currentTarget.style.background = 'var(--t-hover)'; }}
-              onMouseLeave={(e) => { if (unreadProposalCount === 0 && !proposalsOpen) e.currentTarget.style.background = 'transparent'; }}
-              aria-expanded={proposalsOpen}
-              title={proposalsOpen ? 'Hide proposed directives' : 'Show proposed directives'}
-            >
-              <span
-                style={{
-                  width: 10,
-                  height: 10,
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: unreadProposalCount > 0 ? 'var(--t-accent)' : 'var(--t-text-faint)',
-                  transition: 'transform 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-                  transform: proposalsOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                  flexShrink: 0,
-                }}
-              >
-                <svg width="7" height="7" viewBox="0 0 7 7" fill="currentColor"><path d="M1.5 0.5L5.5 3.5L1.5 6.5Z" /></svg>
-              </span>
-              <span
-                style={{
-                  fontSize: 9,
-                  fontWeight: 300,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                  color: unreadProposalCount > 0 ? 'var(--t-accent)' : 'var(--t-text-faint)',
-                  flex: 1,
-                  minWidth: 0,
-                }}
-              >
-                Proposed directives
-              </span>
-              {unreadProposalCount > 0 ? (
-                <span
-                  title="New proposals you haven't reviewed yet"
-                  style={{
-                    paddingTop: 1,
-                    paddingRight: 7,
-                    paddingBottom: 1,
-                    paddingLeft: 7,
-                    borderRadius: 999,
-                    background: 'var(--t-accent)',
-                    color: '#fff',
-                    fontSize: 9.5,
-                    fontWeight: 350,
-                    letterSpacing: '-0.1px',
-                    flexShrink: 0,
-                  }}
-                >
-                  {unreadProposalCount} new
-                </span>
-              ) : (
-                <span
-                  title="Surfaced when the same fix-pattern appears 3+ times in the last 14 days"
-                  style={{
-                    paddingTop: 1,
-                    paddingRight: 6,
-                    paddingBottom: 1,
-                    paddingLeft: 6,
-                    borderRadius: 999,
-                    background: 'var(--t-hover)',
-                    color: 'var(--t-text-faint)',
-                    fontSize: 9.5,
-                    fontWeight: 260,
-                    letterSpacing: '-0.4px',
-                    flexShrink: 0,
-                  }}
-                >
-                  {proposals.length}
-                </span>
-              )}
-            </button>
-            {proposalsOpen ? (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginTop: 4, marginBottom: 4 }}>
-                {proposals.map((proposal) => (
-                  <DirectiveProposalRow
-                    key={proposal.id}
-                    proposal={proposal}
-                    onAccept={handleAcceptProposal}
-                    onDismiss={handleDismissProposal}
-                    busy={pendingProposalId === proposal.id}
-                    isNew={newProposalIds.has(proposal.id)}
-                  />
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ) : null}
+        <O8DirectiveProposalDrawer
+          proposals={proposals}
+          proposalsOpen={proposalsOpen}
+          onToggleProposals={handleToggleProposals}
+          unreadProposalCount={unreadProposalCount}
+          pendingProposalId={pendingProposalId}
+          newProposalIds={newProposalIds}
+          onAccept={handleAcceptProposal}
+          onDismiss={handleDismissProposal}
+        />
         {loading ? (
           <div style={{
             paddingTop: 32,
