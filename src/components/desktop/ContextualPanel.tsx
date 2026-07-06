@@ -63,7 +63,7 @@ export interface ContextualPanelHandle {
   /** Open or focus one of the bottom panel's non-terminal utility surfaces. */
   openSurface: (surface: BottomPanelSurfaceKind) => void;
   /** Attach a live, read-only view of an o8-owned run session (`o8 run`). */
-  attachLiveAgentTerminal: (session: string) => void;
+  attachLiveAgentTerminal: (session: string, label?: string) => void;
 }
 
 export type BottomPanelSurfaceKind = 'files' | 'side-chat' | 'browser' | 'review' | 'terminal';
@@ -546,11 +546,17 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
         createBottomTab(CLI_AGENTS[0], command);
       },
       openSurface,
-      attachLiveAgentTerminal: (session: string) => {
+      attachLiveAgentTerminal: (session: string, label?: string) => {
         setAddMenuOpen(false);
         // Already showing this run? Just focus it.
         const existing = tabsRef.current.find((entry) => entry.kind === 'terminal' && entry.tmuxSession === session);
-        if (existing) { setActiveTabId(existing.id); return; }
+        if (existing) {
+          if (label && existing.label !== label) {
+            setTabs((prev) => prev.map((entry) => entry.id === existing.id ? { ...entry, label } : entry));
+          }
+          setActiveTabId(existing.id);
+          return;
+        }
         tabCountRef.current += 1;
         const now = Date.now();
         const shortId = session.startsWith('cortex-run-')
@@ -559,7 +565,7 @@ export const ContextualPanel = forwardRef<ContextualPanelHandle, ContextualPanel
         // Preset tmuxSession (non-null) → BottomXtermPanel auto-attaches on mount.
         const nextTab: ContextualPanelTab = {
           id: `bottom-agent-${tabCountRef.current}`,
-          label: `run·${shortId}`,
+          label: label ?? `run·${shortId}`,
           kind: 'terminal',
           tmuxSession: session,
           readOnly: true,

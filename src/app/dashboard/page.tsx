@@ -2847,7 +2847,7 @@ function DashboardInner() {
   }, [ensureTileKind, getPreferredContextualPanelHandle]);
 
   // ── Watch a live o8-owned run session (`o8 run`) in the bottom panel ──
-  const handleOpenAgentTerminal = useCallback((session: string) => {
+  const handleOpenAgentTerminal = useCallback((session: string, label?: string) => {
     if (!session) return;
     const tileId = ensureTileKind('contextual-panel', {
       direction: 'horizontal',
@@ -2857,7 +2857,7 @@ function DashboardInner() {
     const attach = (attempt = 0) => {
       const handle = getPreferredContextualPanelHandle(tileId);
       if (handle) {
-        handle.attachLiveAgentTerminal(session);
+        handle.attachLiveAgentTerminal(session, label);
         return;
       }
       if (attempt < 8) {
@@ -2870,8 +2870,8 @@ function DashboardInner() {
   // Footer agent chip → attach the o8 run's live terminal in the bottom panel.
   useEffect(() => {
     const handleOpenAgentTerminalEvent = (event: Event) => {
-      const detail = (event as CustomEvent<{ session?: string }>).detail;
-      if (detail?.session) handleOpenAgentTerminal(detail.session);
+      const detail = (event as CustomEvent<{ session?: string; label?: string }>).detail;
+      if (detail?.session) handleOpenAgentTerminal(detail.session, detail.label);
     };
     window.addEventListener('o8:open-agent-terminal', handleOpenAgentTerminalEvent);
     return () => window.removeEventListener('o8:open-agent-terminal', handleOpenAgentTerminalEvent);
