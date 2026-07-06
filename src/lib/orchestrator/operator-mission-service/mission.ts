@@ -174,6 +174,7 @@ export async function createMission(input: CreateMissionInput) {
       lane: null,
       workerIntent: packetRouting.workerIntent,
       workerRouting: packetRouting,
+      dispatchRuntimePin: packetRouting.requestedRuntime ?? packetRouting.selectedRuntime,
       prompt: [issue.title, packetSummary].map((part) => part.trim()).filter(Boolean).join('\n\n'),
       ...(learnedRules.length > 0 ? { learnedRules } : {}),
       ...(issueMeta ? { issue: issueMeta } : {}),
