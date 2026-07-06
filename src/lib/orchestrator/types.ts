@@ -255,6 +255,12 @@ export interface OrchestratorPacket {
    */
   workerRouting?: WorkerRouting;
   /**
+   * Runtime explicitly requested when this packet was created for dispatch.
+   * Unlike workerRouting.requestedRuntime, normalizePacket() must not backfill
+   * this from packet.runtime; boot recovery uses absence as "do not spawn".
+   */
+  dispatchRuntimePin?: OrchestratorRuntime | null;
+  /**
    * Originating orchestrator thread id (#1329). Stamped at mission creation
    * when the dispatch came from an orchestrator thread that has session rules.
    * `buildPacketPrompt` reads it to inherit that thread's "Operator session

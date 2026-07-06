@@ -363,6 +363,13 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     workerIntent,
     useBrain: typeof packet.useBrain === 'boolean' ? packet.useBrain : undefined,
     workerRouting,
+    // Nullable on purpose: an absent pin must stay null — normalizeRuntime()'s
+    // 'codex' default would re-manufacture the #1460 always-truthy boot pin.
+    dispatchRuntimePin:
+      typeof packet.dispatchRuntimePin === 'string'
+        && VALID_RUNTIMES.has(packet.dispatchRuntimePin as OrchestratorRuntime)
+        ? (packet.dispatchRuntimePin as OrchestratorRuntime)
+        : null,
     // #1329 — originating orchestrator thread id lives only on the packet; drop
     // it here and a rerun/re-read would silently sever session-rule inheritance.
     orchestratorThreadId: typeof packet.orchestratorThreadId === 'string' && packet.orchestratorThreadId.trim()
