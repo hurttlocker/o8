@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 
 import { createApproval } from '@/lib/approvals/store';
-import { listLanes, setLaneStatus } from '@/lib/lane/registry';
+import { getLaneEvents, listLanes, setLaneStatus } from '@/lib/lane/registry';
 import type { Lane, LaneRuntime, LaneStatus } from '@/lib/lane/types';
 import { getRuntime } from '@/lib/runtimes';
 import { crashSurvivableWorkersEnabled } from '@/lib/runtimes/shared/owned-session/crash-survival';
@@ -108,7 +108,7 @@ function getLocalBranchSetForRepo(repoPath: string): Set<string> | null {
 // branch deleted, but the lane work landed on tmp-* and never made it to main.
 // We look for a "Merge lane <branch>" commit on the base branch's recent history
 // — that's the verb=merge / bash-merge canonical pattern.
-function laneBranchWasMerged(repoPath: string, baseBranch: string, branch: string): boolean {
+function recentMergeSubjectMentionsBranch(repoPath: string, baseBranch: string, branch: string): boolean {
   try {
     const output = execFileSync(
       'git',
@@ -126,6 +126,55 @@ function laneBranchWasMerged(repoPath: string, baseBranch: string, branch: strin
   } catch {
     return false;
   }
+}
+
+function readRefSha(repoPath: string, ref: string): string | null {
+  try {
+    const output = execFileSync('git', ['rev-parse', '--verify', ref], {
+      cwd: repoPath,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 2_000,
+    }).trim();
+    return output || null;
+  } catch {
+    return null;
+  }
+}
+
+function isAncestorCommit(repoPath: string, ancestorSha: string, descendantRef: string): boolean {
+  try {
+    // Direction matters: the lane head must be the ancestor and the base ref
+    // must be the descendant. Swapping these args caused #1457-style lies.
+    execFileSync('git', ['merge-base', '--is-ancestor', ancestorSha, descendantRef], {
+      cwd: repoPath,
+      stdio: ['ignore', 'ignore', 'ignore'],
+      timeout: 2_000,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function latestRecordedMergeHeadSha(lane: Lane): string | null {
+  return getLaneEvents(lane.id)
+    .slice()
+    .reverse()
+    .map((event) => event.payload.laneHeadSha)
+    .find((sha): sha is string => typeof sha === 'string' && sha.trim().length > 0)
+    ?.trim() ?? null;
+}
+
+function laneMergeConfirmed(lane: Lane): boolean {
+  const laneHeadSha = readRefSha(lane.repoPath, lane.branch) ?? latestRecordedMergeHeadSha(lane);
+  if (laneHeadSha) {
+    return isAncestorCommit(lane.repoPath, laneHeadSha, lane.baseBranch);
+  }
+
+  // Legacy/manual lanes can lack durable head evidence. Keep the old subject
+  // scan as a last-resort fallback instead of returning false forever.
+  return recentMergeSubjectMentionsBranch(lane.repoPath, lane.baseBranch, lane.branch);
 }
 
 export function reconcileOrphanedWorktrees(): number {
@@ -156,16 +205,28 @@ export function reconcileOrphanedWorktrees(): number {
     const branches = branchSetsByRepo.get(lane.repoPath);
     if (!branches) continue; // probe failed — skip rather than false-positive
     if (branches.has(lane.branch)) continue;
-    if (!laneBranchWasMerged(lane.repoPath, lane.baseBranch, lane.branch)) continue;
+    if (!laneMergeConfirmed(lane)) continue;
     branchGone.push(lane);
   }
 
-  const candidates = [...worktreeGone, ...branchGone];
+  const confirmedWorktreeGone: Lane[] = [];
+  for (const lane of worktreeGone) {
+    if (laneMergeConfirmed(lane)) {
+      confirmedWorktreeGone.push(lane);
+      continue;
+    }
+    setLaneStatus(lane.id, 'awaiting_orchestrator', 'system', 'worktree_missing_unverified');
+    console.warn(
+      `[reconcile] Lane ${lane.id} (${lane.label || lane.branch}) worktree is gone but merge ancestry is unverified — left for operator review`,
+    );
+  }
+
+  const candidates = [...confirmedWorktreeGone, ...branchGone];
   if (candidates.length === 0) return 0;
 
   let reconciled = 0;
   const decompositionScans = new Map<string, LaneRuntime>();
-  const worktreeGoneIds = new Set(worktreeGone.map((lane) => lane.id));
+  const worktreeGoneIds = new Set(confirmedWorktreeGone.map((lane) => lane.id));
   for (const lane of candidates) {
     const reason = worktreeGoneIds.has(lane.id)
       ? 'worktree_missing_reconciled'

@@ -164,15 +164,21 @@ async function alreadyReleasedResultForPacket(
 }
 
 async function alreadyReleasedResultForPacketId(packetId: string, packets: OrchestratorPacket[]) {
-  const { findLatestLaneByPacket } = await loadLaneRegistry();
+  const { findLatestLaneByPacket, getLaneEvents } = await loadLaneRegistry();
   const lane = findLatestLaneByPacket(packetId);
   const packet = packets.find((candidate) => candidate.id === packetId);
   const packetResult = await alreadyReleasedResultForPacket(packet, lane);
   if (packetResult) return packetResult;
   if (await isTerminalReleaseLane(packetId) && lane?.repoPath) {
-    const { readGitHead } = await loadMergeTruth();
-    const mergeSha = await readGitHead(lane.repoPath);
-    return buildAlreadyReleasedResult(mergeSha);
+    const laneHeadSha = getLaneEvents(lane.id).slice().reverse()
+      .map((event) => event.payload.laneHeadSha)
+      .find((sha): sha is string => typeof sha === 'string' && sha.trim().length > 0)?.trim();
+    if (laneHeadSha) {
+      const { isAncestorCommit, readGitHead } = await loadMergeTruth();
+      if (await isAncestorCommit(lane.repoPath, laneHeadSha, 'HEAD')) {
+        return buildAlreadyReleasedResult(await readGitHead(lane.repoPath));
+      }
+    }
   }
   return null;
 }
@@ -606,11 +612,9 @@ async function approveAndMergeSinglePacket(input: ApproveAndMergeInput): Promise
   }
   if (latestMergeApproval?.status === 'approved' && (lane.status === 'completed' || lane.status === 'archived')) {
     const { syncOrchestratorControlPlaneState } = await loadControlPlane();
-    await syncOrchestratorControlPlaneState();
-    return {
-      merged: true,
-      note: `Packet ${packet.referenceLabel} was already merged after approval.`,
-    };
+    const synced = await syncOrchestratorControlPlaneState();
+    const releasedAfterSync = await alreadyReleasedResultForPacketId(packet.id, synced.packets);
+    if (releasedAfterSync) return releasedAfterSync;
   }
 
   const mergeActor = latestMergeApproval?.status === 'approved' ? 'user' : 'orchestrator';
