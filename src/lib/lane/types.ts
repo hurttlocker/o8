@@ -220,7 +220,10 @@ export type LaneEventVerb =
   // Packet steer injected into an existing warm session. Payload: { packetId, source, message }
   | 'steered_packet'
   // Packet steer failed before a worker turn could start. Payload: { packetId, source, message, note, stderrHead? }
-  | 'steer_failed';
+  | 'steer_failed'
+  // Silent-exit detector found that the lane worktree HEAD is already an
+  // ancestor of the refreshed base. Payload: { headSha, comparisonRef }
+  | 'silent_exit_already_merged';
 
 export type AgentReportReason =
   | 'needs_clarification'
