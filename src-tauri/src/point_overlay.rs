@@ -129,9 +129,30 @@ pub fn tag_to_string(t: &ParsedTag) -> String {
     match t.shape {
         Shape::Point if t.dwell => format!("[GUIDE:{},{}:{}]", c(t.x), c(t.y), t.label),
         Shape::Point => format!("[POINT:{},{}:{}]", c(t.x), c(t.y), t.label),
-        Shape::Rect => format!("[DRAW:rect:{},{},{},{}:{}]", c(t.x), c(t.y), c(t.x2), c(t.y2), t.label),
-        Shape::Arrow => format!("[DRAW:arrow:{},{},{},{}:{}]", c(t.x), c(t.y), c(t.x2), c(t.y2), t.label),
-        Shape::Line => format!("[DRAW:line:{},{},{},{}:{}]", c(t.x), c(t.y), c(t.x2), c(t.y2), t.label),
+        Shape::Rect => format!(
+            "[DRAW:rect:{},{},{},{}:{}]",
+            c(t.x),
+            c(t.y),
+            c(t.x2),
+            c(t.y2),
+            t.label
+        ),
+        Shape::Arrow => format!(
+            "[DRAW:arrow:{},{},{},{}:{}]",
+            c(t.x),
+            c(t.y),
+            c(t.x2),
+            c(t.y2),
+            t.label
+        ),
+        Shape::Line => format!(
+            "[DRAW:line:{},{},{},{}:{}]",
+            c(t.x),
+            c(t.y),
+            c(t.x2),
+            c(t.y2),
+            t.label
+        ),
         Shape::Text => format!("[DRAW:text:{},{}:{}]", c(t.x), c(t.y), t.label),
     }
 }
@@ -141,7 +162,9 @@ fn strip_screen_suffix(segments: &mut Vec<&str>) {
     if segments.len() > 2 {
         if let Some(last) = segments.last() {
             let l = last.trim().to_ascii_lowercase();
-            if l.strip_prefix("screen").is_some_and(|n| n.parse::<usize>().is_ok()) {
+            if l.strip_prefix("screen")
+                .is_some_and(|n| n.parse::<usize>().is_ok())
+            {
                 segments.pop();
             }
         }
@@ -164,7 +187,15 @@ fn parse_point_inner(inner: &str, dwell: bool) -> Option<ParsedTag> {
     if !x.is_finite() || !y.is_finite() {
         return None;
     }
-    Some(ParsedTag { x, y, x2: 0.0, y2: 0.0, label, dwell, shape: Shape::Point })
+    Some(ParsedTag {
+        x,
+        y,
+        x2: 0.0,
+        y2: 0.0,
+        label,
+        dwell,
+        shape: Shape::Point,
+    })
 }
 
 /// `rect|arrow:x1,y1,x2,y2:label` (optionally `...:screenN`) → a Rect/Arrow tag.
@@ -370,8 +401,7 @@ mod parse_tests {
 
     #[test]
     fn mixed_point_and_draw_in_order() {
-        let (clean, tags) =
-            parse_point_tags("First [POINT:1,2:a] then [DRAW:rect:5,6,7,8:b] done");
+        let (clean, tags) = parse_point_tags("First [POINT:1,2:a] then [DRAW:rect:5,6,7,8:b] done");
         assert_eq!(clean, "First then done");
         assert_eq!(tags.len(), 2);
         assert!(tags[0].shape == Shape::Point);
@@ -510,7 +540,12 @@ mod overlay {
         let dwell_targets: Vec<(f64, f64)> = points
             .iter()
             .filter(|p| p["dwell"].as_bool() == Some(true))
-            .map(|p| (p["x"].as_f64().unwrap_or(0.0), p["y"].as_f64().unwrap_or(0.0)))
+            .map(|p| {
+                (
+                    p["x"].as_f64().unwrap_or(0.0),
+                    p["y"].as_f64().unwrap_or(0.0),
+                )
+            })
             .collect();
 
         let gen = GENERATION.fetch_add(1, Ordering::SeqCst) + 1;
@@ -519,7 +554,9 @@ mod overlay {
         // and-forth of a lesson — each "go deeper" turn supersedes it and resets
         // this timer, so 2 min keeps the picture up between turns (#1251). GUIDE
         // dwells until the user acts (90s). Plain point/box tours fade fast.
-        let teaching = tags.iter().any(|t| matches!(t.shape, Shape::Line | Shape::Text));
+        let teaching = tags
+            .iter()
+            .any(|t| matches!(t.shape, Shape::Line | Shape::Text));
         let duration_ms: u64 = if !dwell_targets.is_empty() {
             90_000
         } else if teaching {
@@ -648,7 +685,8 @@ mod overlay {
         let _ = app.run_on_main_thread(move || {
             let _ = tx.send(build_window(&app2));
         });
-        rx.recv_timeout(std::time::Duration::from_secs(4)).unwrap_or(false)
+        rx.recv_timeout(std::time::Duration::from_secs(4))
+            .unwrap_or(false)
     }
 
     /// Build the transparent click-through window over the bundled `/point-overlay`
@@ -659,7 +697,10 @@ mod overlay {
 
         let base = match crate::dev_frontend::from_env() {
             Ok(Some(dev)) => dev.origin().to_string(),
-            _ => format!("http://127.0.0.1:{}", API_PORT.get().copied().unwrap_or(3001)),
+            _ => format!(
+                "http://127.0.0.1:{}",
+                API_PORT.get().copied().unwrap_or(3001)
+            ),
         };
         let url = format!("{base}/point-overlay");
         let parsed = match url.parse() {
@@ -670,19 +711,20 @@ mod overlay {
             }
         };
 
-        let window = WebviewWindowBuilder::new(app, super::POINT_LABEL, WebviewUrl::External(parsed))
-            .title("o8 pointer")
-            .inner_size(800.0, 600.0) // placeholder — sized to the monitor at show
-            .resizable(false)
-            .decorations(false)
-            .transparent(true)
-            .always_on_top(true)
-            .shadow(false)
-            .skip_taskbar(true)
-            .focused(false)
-            .visible(false)
-            .disable_drag_drop_handler()
-            .build();
+        let window =
+            WebviewWindowBuilder::new(app, super::POINT_LABEL, WebviewUrl::External(parsed))
+                .title("o8 pointer")
+                .inner_size(800.0, 600.0) // placeholder — sized to the monitor at show
+                .resizable(false)
+                .decorations(false)
+                .transparent(true)
+                .always_on_top(true)
+                .shadow(false)
+                .skip_taskbar(true)
+                .focused(false)
+                .visible(false)
+                .disable_drag_drop_handler()
+                .build();
 
         let window = match window {
             Ok(w) => w,

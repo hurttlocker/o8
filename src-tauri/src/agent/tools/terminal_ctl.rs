@@ -133,13 +133,19 @@ fn parse_token(id: &str) -> Result<Target, String> {
             .next()
             .and_then(|s| s.parse::<i64>().ok())
             .ok_or("malformed Terminal id — call term_list again")?;
-        let tab = parts.next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(1).max(1);
+        let tab = parts
+            .next()
+            .and_then(|s| s.parse::<i64>().ok())
+            .unwrap_or(1)
+            .max(1);
         Ok(Target::Terminal { win_id, tab })
     } else if let Some(rest) = id.strip_prefix("i:") {
         if rest.is_empty() {
             return Err("malformed iTerm id — call term_list again".into());
         }
-        Ok(Target::ITerm { guid: rest.to_string() })
+        Ok(Target::ITerm {
+            guid: rest.to_string(),
+        })
     } else {
         Err("unknown terminal id — call term_list to get a current one".into())
     }
@@ -157,7 +163,11 @@ fn token_arg(args: &Value) -> Result<Target, String> {
 /// `term_list`). Default 25 lines, cap 80; output capped at 6KB.
 pub async fn read(args: Value) -> Result<Value, String> {
     let target = token_arg(&args)?;
-    let lines = args.get("lines").and_then(|v| v.as_i64()).unwrap_or(25).clamp(1, 80);
+    let lines = args
+        .get("lines")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(25)
+        .clamp(1, 80);
 
     let body = match target {
         Target::Terminal { win_id, tab } => format!(
@@ -197,7 +207,12 @@ pub async fn read(args: Value) -> Result<Value, String> {
     let text = parsed
         .get("lines")
         .and_then(|v| v.as_array())
-        .map(|a| a.iter().filter_map(|l| l.as_str()).collect::<Vec<_>>().join("\n"))
+        .map(|a| {
+            a.iter()
+                .filter_map(|l| l.as_str())
+                .collect::<Vec<_>>()
+                .join("\n")
+        })
         .unwrap_or_default();
     Ok(json!({
         "title": parsed.get("title").and_then(|v| v.as_str()).unwrap_or(""),
@@ -210,13 +225,17 @@ pub async fn read(args: Value) -> Result<Value, String> {
 /// command + target by the time this runs.
 pub async fn send(args: Value) -> Result<Value, String> {
     let target = token_arg(&args)?;
-    let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let command = args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
     if command.is_empty() {
         return Err("term_send needs a non-empty 'command'".into());
     }
-    run_in_target(target, &js_str(command), true, "sent").await.map(|title| {
-        json!({ "sent": true, "command": command, "terminal": title })
-    })
+    run_in_target(target, &js_str(command), true, "sent")
+        .await
+        .map(|title| json!({ "sent": true, "command": command, "terminal": title }))
 }
 
 /// `term_interrupt` — deliver a real Ctrl+C to a terminal's tty (the brake).
@@ -235,7 +254,12 @@ pub async fn interrupt(args: Value) -> Result<Value, String> {
 /// selection (up / down).
 pub async fn key(args: Value) -> Result<Value, String> {
     let target = token_arg(&args)?;
-    let key = args.get("key").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+    let key = args
+        .get("key")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
     // `enter` is the submit newline; everything else is raw bytes WITHOUT an
     // added newline (Terminal's `do script` always appends one — harmless for
     // y/n/digit menus; iTerm honors newline:false exactly).
@@ -299,14 +323,26 @@ async fn run_in_target(
     let script = format!("{}{}", JS_PRELUDE, body);
     let out = run_osascript_jxa(&script).map_err(spoken_err)?;
     let parsed: Value = serde_json::from_str(&out).unwrap_or(json!({}));
-    Ok(parsed.get("title").and_then(|v| v.as_str()).unwrap_or("").to_string())
+    Ok(parsed
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string())
 }
 
 /// `term_new` — open a fresh terminal window, optionally cd somewhere and start
 /// a command. Prefers iTerm when it's running, else Terminal (always installed).
 pub async fn new(args: Value) -> Result<Value, String> {
-    let directory = args.get("directory").and_then(|v| v.as_str()).unwrap_or("").trim();
-    let command = args.get("command").and_then(|v| v.as_str()).unwrap_or("").trim();
+    let directory = args
+        .get("directory")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
+    let command = args
+        .get("command")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim();
 
     let mut line = String::new();
     if !directory.is_empty() {
@@ -375,7 +411,11 @@ pub fn watch(app: &tauri::AppHandle, args: Value) -> Result<Value, String> {
         .take(2)
         .collect::<Vec<_>>()
         .join(" — ");
-    let title = if title.is_empty() { "that".to_string() } else { title };
+    let title = if title.is_empty() {
+        "that".to_string()
+    } else {
+        title
+    };
     let count = crate::agent::term_watch::add(app, id.to_string(), title.clone());
     Ok(json!({
         "watching": title,

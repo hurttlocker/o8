@@ -8,11 +8,18 @@ use serde_json::{json, Value};
 /// o8's agent-output sandbox — mirrors `dictation_history::data_dir()`'s `~/.o8`.
 fn agent_output_dir() -> std::path::PathBuf {
     let home = std::env::var("HOME").unwrap_or_else(|_| ".".to_string());
-    std::path::PathBuf::from(home).join(".o8").join("agent-output")
+    std::path::PathBuf::from(home)
+        .join(".o8")
+        .join("agent-output")
 }
 
 pub async fn read_text(args: Value) -> Result<Value, String> {
-    let path_str = args.get("path").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let path_str = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if path_str.is_empty() {
         return Err("path is required".into());
     }
@@ -40,8 +47,17 @@ pub async fn read_text(args: Value) -> Result<Value, String> {
 }
 
 pub async fn write_text(args: Value) -> Result<Value, String> {
-    let path_str = args.get("path").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let content = args.get("content").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let path_str = args
+        .get("path")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let content = args
+        .get("content")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if path_str.is_empty() {
         return Err("path is required".into());
     }
@@ -130,7 +146,10 @@ mod write_text_sandbox_tests {
                 "content": "x"
             })))
             .unwrap_err();
-        assert!(err.contains("not permitted"), "traversal must be refused: {err}");
+        assert!(
+            err.contains("not permitted"),
+            "traversal must be refused: {err}"
+        );
 
         // 3. Outside the sandbox — refused lexically.
         let outside = fake_home.join("outside-dir").join("escape.txt");
@@ -140,7 +159,10 @@ mod write_text_sandbox_tests {
                 "content": "x"
             })))
             .unwrap_err();
-        assert!(err.contains("not permitted"), "outside write must be refused: {err}");
+        assert!(
+            err.contains("not permitted"),
+            "outside write must be refused: {err}"
+        );
 
         // 4. Symlink escape — lexically inside, resolves outside. The
         //    canonicalize containment check must catch it.
@@ -158,27 +180,37 @@ mod write_text_sandbox_tests {
                 "content": "x"
             })))
             .unwrap_err();
-        assert!(err.contains("not permitted"), "symlink escape must be refused: {err}");
-        assert!(!outside_dir.join("evil.txt").exists(), "no file may land outside the sandbox");
+        assert!(
+            err.contains("not permitted"),
+            "symlink escape must be refused: {err}"
+        );
+        assert!(
+            !outside_dir.join("evil.txt").exists(),
+            "no file may land outside the sandbox"
+        );
 
         let _ = std::fs::remove_dir_all(&fake_home);
     }
 }
 
 pub async fn spotlight(args: Value) -> Result<Value, String> {
-    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let query = args
+        .get("query")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if query.is_empty() {
         return Err("query is required".into());
     }
     let limit = args.get("limit").and_then(|v| v.as_u64()).unwrap_or(10) as usize;
 
     let q = query.clone();
-    let output = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("mdfind").arg(&q).output()
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking error: {e}"))?
-    .map_err(|e| format!("mdfind failed: {e}"))?;
+    let output =
+        tokio::task::spawn_blocking(move || std::process::Command::new("mdfind").arg(&q).output())
+            .await
+            .map_err(|e| format!("spawn_blocking error: {e}"))?
+            .map_err(|e| format!("mdfind failed: {e}"))?;
 
     if output.status.success() {
         let paths: Vec<Value> = String::from_utf8_lossy(&output.stdout)

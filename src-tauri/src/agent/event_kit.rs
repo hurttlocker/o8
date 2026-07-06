@@ -50,7 +50,9 @@ fn request_full_access(store: &EKEventStore) -> Result<bool, String> {
     let block_ptr = (&*block as *const block2::Block<dyn Fn(Bool, *mut NSError)>).cast_mut();
     unsafe { store.requestFullAccessToEventsWithCompletion(block_ptr) };
     rx.recv_timeout(std::time::Duration::from_secs(120))
-        .map_err(|_| "The Calendar permission dialog is still waiting — answer it and ask again.".to_string())
+        .map_err(|_| {
+            "The Calendar permission dialog is still waiting — answer it and ask again.".to_string()
+        })
 }
 
 /// Upcoming events in the next `days` days, soonest first, capped at 20.
@@ -76,8 +78,7 @@ pub fn list_events(days: i64, calendar_filter: &str) -> Result<Vec<EventRow>, St
 
         let start = NSDate::now();
         let end = NSDate::dateWithTimeIntervalSinceNow(days as f64 * 86_400.0);
-        let predicate =
-            store.predicateForEventsWithStartDate_endDate_calendars(&start, &end, None);
+        let predicate = store.predicateForEventsWithStartDate_endDate_calendars(&start, &end, None);
         let events = store.eventsMatchingPredicate(&predicate);
 
         let needle = calendar_filter.trim().to_lowercase();

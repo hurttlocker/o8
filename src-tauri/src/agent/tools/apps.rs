@@ -24,16 +24,22 @@ fn app_dirs() -> Vec<std::path::PathBuf> {
 fn installed_apps() -> Vec<String> {
     let mut names: Vec<String> = Vec::new();
     let mut collect = |dir: &std::path::Path, recurse: bool| {
-        let Ok(entries) = std::fs::read_dir(dir) else { return };
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
         for entry in entries.flatten() {
             let file_name = entry.file_name();
-            let Some(name) = file_name.to_str() else { continue };
+            let Some(name) = file_name.to_str() else {
+                continue;
+            };
             if let Some(stem) = name.strip_suffix(".app") {
                 if !stem.is_empty() {
                     names.push(stem.to_string());
                 }
             } else if recurse && entry.path().is_dir() && !name.starts_with('.') {
-                let Ok(inner) = std::fs::read_dir(entry.path()) else { continue };
+                let Ok(inner) = std::fs::read_dir(entry.path()) else {
+                    continue;
+                };
                 for e in inner.flatten() {
                     let f = e.file_name();
                     let Some(n) = f.to_str() else { continue };
@@ -86,7 +92,9 @@ fn match_app<'a>(query: &str, apps: &'a [String]) -> Vec<&'a String> {
             .then(x.1.len().cmp(&y.1.len()))
             .then(x.1.cmp(y.1))
     });
-    let Some(&(top, _)) = scored.first() else { return Vec::new() };
+    let Some(&(top, _)) = scored.first() else {
+        return Vec::new();
+    };
     scored
         .into_iter()
         .filter(|&(s, _)| s == top)
@@ -97,7 +105,10 @@ fn match_app<'a>(query: &str, apps: &'a [String]) -> Vec<&'a String> {
 /// Run `open -a <name>`. The name goes through argv (no shell) so it can't inject.
 async fn open_dash_a(app: String) -> Result<(), String> {
     let result = tokio::task::spawn_blocking(move || {
-        std::process::Command::new("open").arg("-a").arg(&app).output()
+        std::process::Command::new("open")
+            .arg("-a")
+            .arg(&app)
+            .output()
     })
     .await
     .map_err(|e| format!("spawn_blocking error: {e}"))?;
@@ -225,7 +236,10 @@ mod match_app_tests {
 
     #[test]
     fn ambiguous_returns_all_top_ties() {
-        let apps: Vec<String> = ["Slack One", "Slack Two"].iter().map(|s| s.to_string()).collect();
+        let apps: Vec<String> = ["Slack One", "Slack Two"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert_eq!(match_app("slack", &apps).len(), 2);
     }
 }

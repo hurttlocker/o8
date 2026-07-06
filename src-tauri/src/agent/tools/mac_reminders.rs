@@ -7,7 +7,11 @@ use super::{as_escape, date_setter_block, parse_due_components, run_applescript}
 use serde_json::{json, Value};
 
 pub async fn list(args: Value) -> Result<Value, String> {
-    let list_name = args.get("list_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let list_name = args
+        .get("list_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let include_completed = args
         .get("include_completed")
         .and_then(|v| v.as_bool())
@@ -60,12 +64,25 @@ pub async fn list(args: Value) -> Result<Value, String> {
 }
 
 pub async fn create(args: Value) -> Result<Value, String> {
-    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if title.is_empty() {
         return Err("title is required".into());
     }
-    let due_date = args.get("due_date").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let notes = args.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let due_date = args
+        .get("due_date")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let notes = args
+        .get("notes")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let list_name = args
         .get("list_name")
         .and_then(|v| v.as_str())
@@ -73,7 +90,10 @@ pub async fn create(args: Value) -> Result<Value, String> {
         .unwrap_or("Reminders")
         .to_string();
 
-    let due_date_line = match (!due_date.is_empty()).then(|| parse_due_components(&due_date)).flatten() {
+    let due_date_line = match (!due_date.is_empty())
+        .then(|| parse_due_components(&due_date))
+        .flatten()
+    {
         Some(comps) => format!(
             "{}set due date of newReminder to dueDate\n",
             date_setter_block("dueDate", comps)
@@ -111,24 +131,50 @@ pub async fn create(args: Value) -> Result<Value, String> {
 /// date, or rewrite the notes. Matches by EXACT name (the prompt teaches the
 /// model to list first); duplicates update the first match only.
 pub async fn update(args: Value) -> Result<Value, String> {
-    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if title.is_empty() {
         return Err("title is required — list the reminders first to get the exact name".into());
     }
-    let new_title = args.get("new_title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let new_due = args.get("new_due_date").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let new_notes = args.get("new_notes").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let new_title = args
+        .get("new_title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let new_due = args
+        .get("new_due_date")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let new_notes = args
+        .get("new_notes")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     if new_title.is_empty() && new_due.is_empty() && new_notes.is_empty() {
         return Err("nothing to change — give new_title, new_due_date, or new_notes".into());
     }
-    let list_name = args.get("list_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let list_name = args
+        .get("list_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let list_clause = if list_name.is_empty() {
         String::new()
     } else {
         format!("of list \"{}\"", as_escape(&list_name))
     };
 
-    let due_block = match (!new_due.is_empty()).then(|| parse_due_components(&new_due)).flatten() {
+    let due_block = match (!new_due.is_empty())
+        .then(|| parse_due_components(&new_due))
+        .flatten()
+    {
         Some(comps) => format!(
             "{}set due date of r to newDue\n",
             date_setter_block("newDue", comps)
@@ -172,11 +218,20 @@ pub async fn update(args: Value) -> Result<Value, String> {
 }
 
 pub async fn complete(args: Value) -> Result<Value, String> {
-    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if title.is_empty() {
         return Err("title is required".into());
     }
-    let list_name = args.get("list_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let list_name = args
+        .get("list_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let list_clause = if list_name.is_empty() {
         String::new()
     } else {

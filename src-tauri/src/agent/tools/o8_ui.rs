@@ -158,7 +158,9 @@ pub fn orchestrator_draft(app: &tauri::AppHandle, args: Value) -> Result<Value, 
         json!({ "surface": "orchestrator_draft", "text": message }),
     );
     log::info!("[symon-o8ui] orchestrator draft ({} chars)", message.len());
-    Ok(json!({ "drafted": true, "note": "The message is in the orchestrator composer — the user sends it." }))
+    Ok(
+        json!({ "drafted": true, "note": "The message is in the orchestrator composer — the user sends it." }),
+    )
 }
 
 /// Spoken URLs arrive bare ("anthropic.com") — give them a scheme.
@@ -177,7 +179,10 @@ mod tests {
     #[test]
     fn bare_hosts_get_https() {
         assert_eq!(normalize_url("anthropic.com"), "https://anthropic.com");
-        assert_eq!(normalize_url("http://localhost:3001"), "http://localhost:3001");
+        assert_eq!(
+            normalize_url("http://localhost:3001"),
+            "http://localhost:3001"
+        );
         assert_eq!(normalize_url("https://o8.run"), "https://o8.run");
     }
 

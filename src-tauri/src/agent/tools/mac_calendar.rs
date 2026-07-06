@@ -10,7 +10,11 @@ use super::{as_escape, date_setter_block, parse_due_components, run_applescript}
 use serde_json::{json, Value};
 
 pub async fn list_events(args: Value) -> Result<Value, String> {
-    let days = args.get("days_ahead").and_then(|v| v.as_i64()).unwrap_or(7).clamp(1, 90);
+    let days = args
+        .get("days_ahead")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(7)
+        .clamp(1, 90);
     let calendar_filter = args
         .get("calendar_name")
         .and_then(|v| v.as_str())
@@ -39,20 +43,41 @@ pub async fn list_events(args: Value) -> Result<Value, String> {
 }
 
 pub async fn create_event(args: Value) -> Result<Value, String> {
-    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let start = args.get("start_date").and_then(|v| v.as_str()).unwrap_or("");
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let start = args
+        .get("start_date")
+        .and_then(|v| v.as_str())
+        .unwrap_or("");
     let end = args.get("end_date").and_then(|v| v.as_str()).unwrap_or("");
     if title.is_empty() {
         return Err("title is required".into());
     }
     let start_comps = parse_due_components(start).ok_or("start_date must be ISO 8601")?;
     let end_comps = parse_due_components(end).ok_or("end_date must be ISO 8601")?;
-    let notes = args.get("notes").and_then(|v| v.as_str()).unwrap_or("").to_string();
-    let calendar_name = args.get("calendar_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let notes = args
+        .get("notes")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
+    let calendar_name = args
+        .get("calendar_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     // Recurrence — Calendar.app takes a raw RRULE string. Reminders.app's
     // dictionary has no recurrence at all, so repeating asks land HERE (the
     // system prompt routes them).
-    let repeat = args.get("repeat").and_then(|v| v.as_str()).unwrap_or("").trim().to_lowercase();
+    let repeat = args
+        .get("repeat")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_lowercase();
     let rrule = match repeat.as_str() {
         "" | "none" => None,
         "daily" => Some("FREQ=DAILY;INTERVAL=1"),
@@ -61,9 +86,11 @@ pub async fn create_event(args: Value) -> Result<Value, String> {
         "biweekly" => Some("FREQ=WEEKLY;INTERVAL=2"),
         "monthly" => Some("FREQ=MONTHLY;INTERVAL=1"),
         "yearly" => Some("FREQ=YEARLY;INTERVAL=1"),
-        other => return Err(format!(
+        other => {
+            return Err(format!(
             "unknown repeat '{other}' — use daily, weekdays, weekly, biweekly, monthly, or yearly"
-        )),
+        ))
+        }
     };
 
     let start_block = date_setter_block("startDate", start_comps);
@@ -79,7 +106,10 @@ pub async fn create_event(args: Value) -> Result<Value, String> {
          if targetCal is missing value then set targetCal to calendar 1\n"
             .to_string()
     } else {
-        format!("set targetCal to calendar \"{}\"\n", as_escape(&calendar_name))
+        format!(
+            "set targetCal to calendar \"{}\"\n",
+            as_escape(&calendar_name)
+        )
     };
 
     let title_esc = as_escape(&title);
@@ -103,7 +133,11 @@ pub async fn create_event(args: Value) -> Result<Value, String> {
         .await
         .map_err(|e| format!("spawn_blocking error: {e}"))??;
 
-    let repeats = if repeat.is_empty() { "no".to_string() } else { repeat };
+    let repeats = if repeat.is_empty() {
+        "no".to_string()
+    } else {
+        repeat
+    };
     Ok(json!({ "success": true, "title": title, "repeats": repeats }))
 }
 
@@ -112,24 +146,54 @@ pub async fn create_event(args: Value) -> Result<Value, String> {
 /// model to list first). Moving with only `new_start` preserves the event's
 /// duration — "push my 2pm to 3" keeps a 30-minute meeting 30 minutes.
 pub async fn update_event(args: Value) -> Result<Value, String> {
-    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if title.is_empty() {
         return Err("title is required — list the events first to get the exact title".into());
     }
-    let new_title = args.get("new_title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let new_start = args.get("new_start").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
-    let new_end = args.get("new_end").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let new_title = args
+        .get("new_title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let new_start = args
+        .get("new_start")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
+    let new_end = args
+        .get("new_end")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if new_title.is_empty() && new_start.is_empty() && new_end.is_empty() {
         return Err("nothing to change — give new_start, new_end, or new_title".into());
     }
-    let calendar_name = args.get("calendar_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let calendar_name = args
+        .get("calendar_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
 
-    let start_block = match (!new_start.is_empty()).then(|| parse_due_components(&new_start)).flatten() {
+    let start_block = match (!new_start.is_empty())
+        .then(|| parse_due_components(&new_start))
+        .flatten()
+    {
         Some(comps) => date_setter_block("newStart", comps),
         None if !new_start.is_empty() => return Err("new_start must be ISO 8601".into()),
         None => String::new(),
     };
-    let end_block = match (!new_end.is_empty()).then(|| parse_due_components(&new_end)).flatten() {
+    let end_block = match (!new_end.is_empty())
+        .then(|| parse_due_components(&new_end))
+        .flatten()
+    {
         Some(comps) => date_setter_block("newEnd", comps),
         None if !new_end.is_empty() => return Err("new_end must be ISO 8601".into()),
         None => String::new(),
@@ -205,11 +269,20 @@ pub async fn update_event(args: Value) -> Result<Value, String> {
 /// `enabled_tools()`; reachable only after a confirm-card approval once
 /// re-enabled). Scans all calendars, or one when `calendar_name` is given.
 pub async fn delete_event(args: Value) -> Result<Value, String> {
-    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let title = args
+        .get("title")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .trim()
+        .to_string();
     if title.is_empty() {
         return Err("title is required".into());
     }
-    let calendar_name = args.get("calendar_name").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let calendar_name = args
+        .get("calendar_name")
+        .and_then(|v| v.as_str())
+        .unwrap_or("")
+        .to_string();
     let title_esc = as_escape(&title);
     let cal_filter = as_escape(&calendar_name);
 

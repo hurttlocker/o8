@@ -26,7 +26,9 @@ fn urlenc(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => out.push(b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -75,8 +77,16 @@ async fn locate_by_ip(client: &reqwest::Client) -> Result<Location, String> {
                 return Ok(Location {
                     lat,
                     lon,
-                    label: v.get("city").and_then(|x| x.as_str()).unwrap_or("your area").to_string(),
-                    country: v.get("country_code").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+                    label: v
+                        .get("city")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("your area")
+                        .to_string(),
+                    country: v
+                        .get("country_code")
+                        .and_then(|x| x.as_str())
+                        .unwrap_or("")
+                        .to_string(),
                 });
             }
         }
@@ -96,8 +106,16 @@ async fn locate_by_ip(client: &reqwest::Client) -> Result<Location, String> {
     Ok(Location {
         lat,
         lon: v.get("lon").and_then(|x| x.as_f64()).unwrap_or(0.0),
-        label: v.get("city").and_then(|x| x.as_str()).unwrap_or("your area").to_string(),
-        country: v.get("countryCode").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        label: v
+            .get("city")
+            .and_then(|x| x.as_str())
+            .unwrap_or("your area")
+            .to_string(),
+        country: v
+            .get("countryCode")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
     })
 }
 
@@ -123,8 +141,16 @@ async fn locate_by_name(client: &reqwest::Client, place: &str) -> Result<Locatio
     Ok(Location {
         lat: hit.get("latitude").and_then(|x| x.as_f64()).unwrap_or(0.0),
         lon: hit.get("longitude").and_then(|x| x.as_f64()).unwrap_or(0.0),
-        label: hit.get("name").and_then(|x| x.as_str()).unwrap_or(place).to_string(),
-        country: hit.get("country_code").and_then(|x| x.as_str()).unwrap_or("").to_string(),
+        label: hit
+            .get("name")
+            .and_then(|x| x.as_str())
+            .unwrap_or(place)
+            .to_string(),
+        country: hit
+            .get("country_code")
+            .and_then(|x| x.as_str())
+            .unwrap_or("")
+            .to_string(),
     })
 }
 
@@ -172,7 +198,10 @@ pub async fn current(args: Value) -> Result<Value, String> {
             .cloned()
             .unwrap_or(Value::Null)
     };
-    let code = cur.get("weather_code").and_then(|x| x.as_i64()).unwrap_or(-1);
+    let code = cur
+        .get("weather_code")
+        .and_then(|x| x.as_i64())
+        .unwrap_or(-1);
     let day_code = first("weather_code").as_i64().unwrap_or(code);
     let deg = if fahrenheit { "°F" } else { "°C" };
 
