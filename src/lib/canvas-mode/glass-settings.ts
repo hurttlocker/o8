@@ -188,6 +188,22 @@ export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; va
   { id: 'frost', label: 'Frost', values: { frost: 48, tint: 0.62, ink: 0.96, vibrance: 1.7, veil: 0.5, material: 'sidebar', backdropFrost: 0, backdrop: 'none', chatFrost: 54, chatTint: 0.78, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.5, textShade: 0.04 } },
 ];
 
+/**
+ * The free-tier canvas looks (operator, 2026-07-06): free users get Paper
+ * only — it's the look where text reads right — in light or dark. Everything
+ * else (other looks, depth, dials, advanced) is founders territory.
+ */
+export function canvasFreeLook(tone: CanvasGlassSettings['tone']): CanvasGlassSettings {
+  const paper = CANVAS_GLASS_PRESETS.find((p) => p.id === 'paper')!.values;
+  if (tone === 'light') return { ...paper };
+  return {
+    ...paper,
+    tone: 'dark',
+    textShade: defaultTextShadeForTone('dark'),
+    veil: 0.3,
+  };
+}
+
 const STORAGE_KEY = 'o8:canvas-glass';
 const PERSONAL_KEY = 'o8:canvas-glass-personal';
 export const CANVAS_GLASS_CHANGED_EVENT = 'o8:canvas-glass-changed';
