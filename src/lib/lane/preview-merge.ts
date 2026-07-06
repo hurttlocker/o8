@@ -17,6 +17,7 @@ import { execFileSync } from 'node:child_process';
 import { findLatestLaneByPacket } from '@/lib/lane/registry';
 import type { Lane } from '@/lib/lane/types';
 import { readOrchestratorControlPlaneState } from '@/lib/orchestrator/control-plane';
+import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { runMergeGate, type MergeGateResult, type MergeViolation } from './merge-gate';
 
 // ── Public Types ──
@@ -47,6 +48,7 @@ export interface MergePreviewResult {
   /** Short category labels for every block-severity violation. */
   blockers: string[];
   branch: string | null;
+  diffBase?: PacketDiffBaseResolution;
   /** Populated when no lane is bound so the gate could not run. */
   unwired?: boolean;
 }
@@ -151,13 +153,13 @@ function readDirtyWorktreeDetail(cwd: string): string | null {
  * Callers already holding a `Lane` reference should use this path — it
  * avoids the extra `findLatestLaneByPacket` lookup.
  */
-export function buildPreviewForLane(
+export async function buildPreviewForLane(
   lane: Lane,
   packetId: string,
   options: MergePreviewOptions = {},
-): MergePreviewResult {
+): Promise<MergePreviewResult> {
   const orchestratorApproved = options.orchestratorApproved ?? hasApprovedOrchestratorReview(packetId);
-  const gateResult = runMergeGate(lane, undefined, orchestratorApproved);
+  const gateResult = await runMergeGate(lane, undefined, orchestratorApproved);
   const checks = buildCheckList(gateResult);
   const blockers = buildBlockerList(gateResult);
   const dirtyDetail = readDirtyWorktreeDetail(lane.worktreePath ?? lane.repoPath);
@@ -175,6 +177,7 @@ export function buildPreviewForLane(
     checks,
     blockers,
     branch: lane.branch ?? null,
+    diffBase: gateResult.diffBase,
   };
 }
 
@@ -183,7 +186,7 @@ export function buildPreviewForLane(
  * When the packet has no lane (archived / never spawned) returns a
  * deterministic "unwired" payload so callers can surface it cleanly.
  */
-export function previewPacketMerge(packetId: string): MergePreviewResult {
+export async function previewPacketMerge(packetId: string): Promise<MergePreviewResult> {
   const lane = findLatestLaneByPacket(packetId);
   if (!lane) {
     return {

@@ -1,13 +1,15 @@
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 
 import { scanRepo } from '@/lib/skeleton';
 import { runMergeGate } from './merge-gate';
 import type { Lane } from './types';
+
+const tempDirs: string[] = [];
 
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -15,6 +17,7 @@ function git(cwd: string, args: string[]): string {
 
 function initRepo(): string {
   const repoPath = mkdtempSync(join(tmpdir(), 'o8-merge-gate-repo-'));
+  tempDirs.push(repoPath);
   git(repoPath, ['init', '-q', '-b', 'main']);
   git(repoPath, ['config', 'user.email', 'test@o8.dev']);
   git(repoPath, ['config', 'user.name', 'o8 test']);
@@ -34,6 +37,42 @@ function initRepo(): string {
   git(repoPath, ['add', 'safe.ts']);
   git(repoPath, ['commit', '-q', '-m', 'base']);
   return repoPath;
+}
+
+function commitAll(cwd: string, message: string): string {
+  git(cwd, ['add', '-A']);
+  git(cwd, ['commit', '-q', '-m', message]);
+  return git(cwd, ['rev-parse', 'HEAD']);
+}
+
+function initOriginFixture() {
+  const root = mkdtempSync(join(tmpdir(), 'o8-merge-gate-origin-'));
+  tempDirs.push(root);
+  const origin = join(root, 'origin.git');
+  const seed = join(root, 'seed');
+  const packet = join(root, 'packet');
+  const upstream = join(root, 'upstream');
+
+  execFileSync('git', ['init', '--bare', origin], { stdio: 'pipe' });
+  execFileSync('git', ['clone', origin, seed], { stdio: 'pipe' });
+  git(seed, ['checkout', '-b', 'main']);
+  git(seed, ['config', 'user.email', 'test@o8.dev']);
+  git(seed, ['config', 'user.name', 'o8 test']);
+  writeFileSync(join(seed, 'safe.ts'), 'export const base = 1;\n');
+  commitAll(seed, 'base');
+  git(seed, ['push', '-u', 'origin', 'main']);
+
+  execFileSync('git', ['clone', origin, packet], { stdio: 'pipe' });
+  git(packet, ['checkout', 'main']);
+  git(packet, ['config', 'user.email', 'test@o8.dev']);
+  git(packet, ['config', 'user.name', 'o8 test']);
+
+  execFileSync('git', ['clone', origin, upstream], { stdio: 'pipe' });
+  git(upstream, ['checkout', 'main']);
+  git(upstream, ['config', 'user.email', 'test@o8.dev']);
+  git(upstream, ['config', 'user.name', 'o8 test']);
+
+  return { packet, upstream };
 }
 
 function laneFixture(repoPath: string): Lane {
@@ -61,6 +100,12 @@ function laneFixture(repoPath: string): Lane {
 }
 
 describe('merge gate governance invariants', () => {
+  afterEach(() => {
+    while (tempDirs.length > 0) {
+      rmSync(tempDirs.pop()!, { recursive: true, force: true });
+    }
+  });
+
   it('downgrades approved budget overruns while keeping security blocks hard-blocking', async () => {
     const repoPath = initRepo();
     await scanRepo({ repoPath, chunks: false });
@@ -89,7 +134,7 @@ describe('merge gate governance invariants', () => {
     git(repoPath, ['add', 'safe.ts']);
     git(repoPath, ['commit', '-q', '-m', 'feat: risky diff']);
 
-    const result = runMergeGate(laneFixture(repoPath), undefined, true);
+    const result = await runMergeGate(laneFixture(repoPath), undefined, true);
 
     expect(result.passed).toBe(false);
     expect(result.violations).toEqual(expect.arrayContaining([
@@ -108,7 +153,7 @@ describe('merge gate governance invariants', () => {
     ]));
   }, 20_000);
 
-  it('adds an integrity block when self-review claims passed:true despite blocking violations', () => {
+  it('adds an integrity block when self-review claims passed:true despite blocking violations', async () => {
     const repoPath = initRepo();
     git(repoPath, ['checkout', '-q', '-b', 'feature/merge-gate-test']);
     writeFileSync(join(repoPath, 'safe.ts'), [
@@ -119,7 +164,7 @@ describe('merge gate governance invariants', () => {
     git(repoPath, ['add', 'safe.ts']);
     git(repoPath, ['commit', '-q', '-m', 'feat: unsafe self review']);
 
-    const result = runMergeGate(laneFixture(repoPath), {
+    const result = await runMergeGate(laneFixture(repoPath), {
       passed: true,
       confidence: 'high',
       summary: 'looks good',
@@ -136,6 +181,65 @@ describe('merge gate governance invariants', () => {
         category: 'integrity',
         severity: 'block',
         label: 'Self-review integrity failure',
+      }),
+    ]));
+  }, 20_000);
+
+  it('diffs against refreshed origin merge-base instead of frozen local main', async () => {
+    const { packet, upstream } = initOriginFixture();
+    writeFileSync(join(upstream, 'upstream-risk.ts'), 'export const kill = () => process.exit(1);\n');
+    const upstreamSha = commitAll(upstream, 'feat: upstream risk');
+    git(upstream, ['push', 'origin', 'main']);
+
+    git(packet, ['fetch', 'origin', 'main', '--quiet']);
+    git(packet, ['checkout', '-q', '-b', 'feature/merge-gate-test', 'origin/main']);
+    writeFileSync(join(packet, 'packet.ts'), 'export const packet = 1;\n');
+    commitAll(packet, 'feat: packet change');
+    git(packet, ['update-ref', 'refs/heads/main', 'HEAD~2']);
+
+    const result = await runMergeGate(laneFixture(packet), undefined, false);
+
+    expect(result.passed).toBe(true);
+    expect(result.diffBase).toEqual(expect.objectContaining({
+      fetchedRemoteBase: true,
+      usedFallback: false,
+      comparisonRef: 'origin/main',
+      mergeBase: upstreamSha,
+    }));
+    expect(result.violations).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        category: 'security',
+        file: 'upstream-risk.ts',
+      }),
+    ]));
+  }, 20_000);
+
+  it('still blocks security patterns added by the packet itself', async () => {
+    const { packet, upstream } = initOriginFixture();
+    writeFileSync(join(upstream, 'upstream-safe.ts'), 'export const upstream = 1;\n');
+    commitAll(upstream, 'feat: upstream safe');
+    git(upstream, ['push', 'origin', 'main']);
+
+    git(packet, ['fetch', 'origin', 'main', '--quiet']);
+    git(packet, ['checkout', '-q', '-b', 'feature/merge-gate-test', 'origin/main']);
+    writeFileSync(join(packet, 'packet-risk.ts'), 'export const kill = () => process.exit(1);\n');
+    commitAll(packet, 'feat: packet risk');
+    git(packet, ['update-ref', 'refs/heads/main', 'HEAD~2']);
+
+    const result = await runMergeGate(laneFixture(packet), undefined, false);
+
+    expect(result.passed).toBe(false);
+    expect(result.diffBase).toEqual(expect.objectContaining({
+      fetchedRemoteBase: true,
+      usedFallback: false,
+      comparisonRef: 'origin/main',
+    }));
+    expect(result.violations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        category: 'security',
+        severity: 'block',
+        label: 'process.exit() — agent must not kill the process',
+        file: 'packet-risk.ts',
       }),
     ]));
   }, 20_000);

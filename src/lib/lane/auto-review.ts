@@ -521,7 +521,7 @@ async function performAutoReview(review: QueuedReview): Promise<void> {
 
   const depth = deriveReviewDepth(completionContext?.selfReview);
   const mechanicalChecks = runMechanicalChecks(lane);
-  const mergeGateResult = runMergeGate(lane, completionContext?.selfReview);
+  const mergeGateResult = await runMergeGate(lane, completionContext?.selfReview);
   const diffSummary = getDiffSummary(lane, depth);
   const reviewRisk = classifyReviewRisk(diffSummary.changedFiles, diffSummary.addedLines);
   let reviewScreenshot: LaneReviewScreenshotReference | null = null;

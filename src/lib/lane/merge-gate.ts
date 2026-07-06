@@ -18,6 +18,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
+import { resolvePacketDiffBase, type PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import { isSafeGitRef } from '@/lib/git/refs';
 import type { PacketSelfReview } from '@/lib/orchestrator/types';
 import { getAllCached } from '@/lib/skeleton';
@@ -86,6 +87,7 @@ export interface MergeViolation {
 export interface MergeGateResult {
   passed: boolean;
   violations: MergeViolation[];
+  diffBase?: PacketDiffBaseResolution;
 }
 
 interface AddedDiffLine {
@@ -110,7 +112,7 @@ const BRANCH_GATE_SCRIPT = `
   const rawSelfReview = process.env.${BRANCH_GATE_SELF_REVIEW_ENV};
   const selfReview = rawSelfReview ? JSON.parse(rawSelfReview) : undefined;
   const orchestratorApproved = process.env.${BRANCH_GATE_ORCHESTRATOR_APPROVED_ENV} === '1';
-  const result = api.runMergeGate(lane, selfReview, orchestratorApproved);
+  const result = await api.runMergeGate(lane, selfReview, orchestratorApproved);
   process.stdout.write('${BRANCH_GATE_JSON_MARKER}' + JSON.stringify(result));
 })().catch((error) => {
   console.error(error && error.stack ? error.stack : String(error));
@@ -153,6 +155,14 @@ function getAddedLines(cwd: string, baseBranch: string): AddedDiffLine[] {
   } catch {
     return [];
   }
+}
+
+function readHeadSha(cwd: string): string {
+  return execFileSync('git', ['rev-parse', 'HEAD'], {
+    cwd,
+    timeout: 5_000,
+    encoding: 'utf-8',
+  }).trim();
 }
 
 interface DiffNumstat {
@@ -230,7 +240,7 @@ function normalizeMergeViolation(value: unknown): MergeViolation | null {
 
 function normalizeMergeGateResult(value: unknown): MergeGateResult | null {
   if (!value || typeof value !== 'object') return null;
-  const result = value as { passed?: unknown; violations?: unknown };
+  const result = value as { passed?: unknown; violations?: unknown; diffBase?: unknown };
   if (typeof result.passed !== 'boolean' || !Array.isArray(result.violations)) return null;
 
   const violations = result.violations.map(normalizeMergeViolation);
@@ -239,6 +249,33 @@ function normalizeMergeGateResult(value: unknown): MergeGateResult | null {
   return {
     passed: result.passed,
     violations: violations as MergeViolation[],
+    diffBase: normalizePacketDiffBaseResolution(result.diffBase),
+  };
+}
+
+function normalizePacketDiffBaseResolution(value: unknown): PacketDiffBaseResolution | undefined {
+  if (!value || typeof value !== 'object') return undefined;
+  const entry = value as Partial<Record<keyof PacketDiffBaseResolution, unknown>>;
+  if (
+    typeof entry.baseBranch !== 'string'
+    || typeof entry.requestedRef !== 'string'
+    || typeof entry.comparisonRef !== 'string'
+    || (typeof entry.mergeBase !== 'string' && entry.mergeBase !== null)
+    || typeof entry.fetchedRemoteBase !== 'boolean'
+    || typeof entry.usedFallback !== 'boolean'
+    || (typeof entry.warning !== 'string' && entry.warning !== null)
+  ) {
+    return undefined;
+  }
+
+  return {
+    baseBranch: entry.baseBranch,
+    requestedRef: entry.requestedRef,
+    comparisonRef: entry.comparisonRef,
+    mergeBase: entry.mergeBase,
+    fetchedRemoteBase: entry.fetchedRemoteBase,
+    usedFallback: entry.usedFallback,
+    warning: entry.warning,
   };
 }
 
@@ -485,23 +522,27 @@ function checkSelfReviewIntegrity(
  * `warn` (the orchestrator has signed off on the diff). Security and
  * integrity violations stay block-level regardless. See F25 / #1001.
  */
-export function runMergeGate(
+export async function runMergeGate(
   lane: Lane,
   selfReview?: PacketSelfReview,
   orchestratorApproved = false,
-): MergeGateResult {
+): Promise<MergeGateResult> {
   const cwd = lane.worktreePath || lane.repoPath;
   const baseBranch = lane.baseBranch || 'main';
+  const headSha = readHeadSha(cwd);
+  const diffBase = await resolvePacketDiffBase(cwd, baseBranch, headSha);
+  const comparisonRef = diffBase.mergeBase ?? diffBase.comparisonRef;
 
-  if (shouldUseBranchMergeGate(cwd, baseBranch)) {
-    return runBranchMergeGate(lane, selfReview, orchestratorApproved, cwd);
+  if (shouldUseBranchMergeGate(cwd, comparisonRef)) {
+    const branchResult = runBranchMergeGate(lane, selfReview, orchestratorApproved, cwd);
+    return { ...branchResult, diffBase: branchResult.diffBase ?? diffBase };
   }
 
-  const addedLines = getAddedLines(cwd, baseBranch);
+  const addedLines = getAddedLines(cwd, comparisonRef);
   const securityViolations = checkSecurityPatterns(addedLines);
   const scopePartitionViolations = checkScopePartitionHeuristics(addedLines);
-  const budgetViolations = checkDiffBudgets(cwd, baseBranch, lane.repoPath, orchestratorApproved);
-  const importViolations = checkUntrackedImportViolations(cwd, baseBranch);
+  const budgetViolations = checkDiffBudgets(cwd, comparisonRef, lane.repoPath, orchestratorApproved);
+  const importViolations = checkUntrackedImportViolations(cwd, comparisonRef);
   const integrityViolations = checkSelfReviewIntegrity(
     selfReview,
     [...securityViolations, ...scopePartitionViolations, ...budgetViolations, ...importViolations],
@@ -522,7 +563,7 @@ export function runMergeGate(
     console.log(`[merge-gate] Lane ${lane.id}: ${blockCount} block, ${warnCount} warn`);
   }
 
-  return { passed: !hasBlocks, violations };
+  return { passed: !hasBlocks, violations, diffBase };
 }
 
 /**
@@ -556,8 +597,16 @@ export function formatMergeGateViolations(violations: MergeViolation[]): string 
  * Format merge gate results for inclusion in an orchestrator review prompt.
  */
 export function formatMergeGateForReview(result: MergeGateResult): string {
+  const diffBaseLines = result.diffBase
+    ? [
+        '',
+        `Diff base: ${result.diffBase.mergeBase ?? result.diffBase.comparisonRef} (fetchedRemoteBase:${result.diffBase.fetchedRemoteBase}, usedFallback:${result.diffBase.usedFallback})`,
+        ...(result.diffBase.warning ? [`Warning: ${result.diffBase.warning}`] : []),
+      ]
+    : [];
+
   if (result.violations.length === 0) {
-    return '## Merge gate\n\nAll checks passed. No violations detected.';
+    return ['## Merge gate', '', 'All checks passed. No violations detected.', ...diffBaseLines].join('\n');
   }
 
   const blocks = result.violations.filter((v) => v.severity === 'block');
@@ -567,6 +616,7 @@ export function formatMergeGateForReview(result: MergeGateResult): string {
     '## Merge gate (enforcement)',
     '',
     `${blocks.length} blocking violation(s), ${warns.length} warning(s).`,
+    ...diffBaseLines,
   ];
 
   if (blocks.length > 0) {
