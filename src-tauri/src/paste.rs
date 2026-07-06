@@ -969,7 +969,7 @@ pub fn paste_text(text: &str) -> bool {
     // restore the preserved real original, never Symon's output.
     let saved_clipboard = {
         let current = capture_clipboard_snapshot();
-        let mut guard = CLIPBOARD_GUARD.lock().unwrap();
+        let mut guard = CLIPBOARD_GUARD.lock().unwrap_or_else(|e| e.into_inner());
         if current.change_count != guard.last_injected {
             guard.user = Some(current.clone());
         }
@@ -984,7 +984,10 @@ pub fn paste_text(text: &str) -> bool {
             return false;
         }
     };
-    CLIPBOARD_GUARD.lock().unwrap().last_injected = injected_change_count;
+    CLIPBOARD_GUARD
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .last_injected = injected_change_count;
 
     // Accessibility gate: the synthetic Cmd+V below is a CGEvent the OS silently
     // ignores unless o8 is a trusted Accessibility client. When untrusted — e.g.
