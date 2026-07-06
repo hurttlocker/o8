@@ -41,7 +41,7 @@ describe('createOwnedSessionStore launch readiness gate', () => {
     priorBin = process.env.O8_TEST_BIN;
     process.env.O8_TEST_OWNED_ROOT = path.join(tempRoot, 'sessions');
     process.env.O8_TEST_BIN = process.execPath;
-    spawnMock.mockReturnValue({ pid: 42, unref: vi.fn() });
+    spawnMock.mockReturnValue({ pid: 42, unref: vi.fn(), once: vi.fn() });
     ensureDispatchBackendReadyMock.mockReset();
   });
 

@@ -13,7 +13,7 @@
  *   - Auto-retry once within 60s of a fresh failure when `autoRetry` is on.
  */
 
-import { spawn } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { closeSync, openSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -80,11 +80,13 @@ import type {
   OwnedSessionStore,
   OwnedTailEntry,
   OwnedTailGroup,
+  OwnedChildExitOutcome,
 } from './types';
 import { stageMissingCliRun } from './missing-cli';
 import { crashSurvivableWorkersEnabled } from './crash-survival';
 import { getOrCreateLocalWorkerToken } from '@/lib/auth/worker-token';
 import { ensureDispatchBackendReady } from '@/lib/runtimes/shared/dispatch-readiness';
+import { observeChildExit, readAbnormalStderrTail } from './exit-outcome';
 
 export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSessionStore {
   const runtimeId = adapter.runtimeId;
@@ -226,6 +228,45 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     // lives on stderr (TerminalQuotaError) while other runtimes may put it
     // on stdout.
     return `${stdoutRaw}\n${stderrRaw}`;
+  }
+
+  async function recordDetachedChildExit(
+    surfaceId: string,
+    runId: string,
+    stderrPath: string,
+    outcome: OwnedChildExitOutcome,
+  ) {
+    const stderrTail = await readAbnormalStderrTail(stderrPath, outcome);
+    const childExit = stderrTail ? { ...outcome, stderrTail } : outcome;
+
+    await withSurfaceLock(surfaceId, async () => {
+      const current = await findSession(surfaceId);
+      if (!current) return;
+      let dirty = false;
+      const finishedAt = nowIso();
+      const applyExit = (run: OwnedRunRecord): OwnedRunRecord => {
+        if (run.id !== runId) return run;
+        dirty = true;
+        return {
+          ...run,
+          childExit,
+          finishedAt: run.finishedAt ?? finishedAt,
+          outcome: run.outcome === 'interrupted'
+            ? 'interrupted'
+            : childExit.classification === 'clean-exit'
+              ? 'finished'
+              : 'failed',
+        };
+      };
+
+      current.recentRuns = current.recentRuns.map(applyExit);
+      if (current.activeRun?.id === runId) {
+        current.activeRun = undefined;
+        dirty = true;
+      }
+      if (dirty) await saveSession(current);
+    });
+    invalidateFleetCache();
   }
 
   async function emitRuntimeFallbackNotification(
@@ -503,6 +544,14 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     return `IDE-owned ${adapter.squadShortName} session is idle. ${session.latestSummary}`;
   }
 
+  function formatChildExit(outcome: OwnedChildExitOutcome | undefined) {
+    if (!outcome) return '';
+    const signal = outcome.signal ? ` signal ${outcome.signal}` : '';
+    const code = outcome.code === null ? '' : ` code ${outcome.code}`;
+    const stderrTail = outcome.stderrTail ? ` stderrTail=${compactText(outcome.stderrTail, 180)}` : '';
+    return ` • child ${outcome.classification}${code}${signal}${stderrTail}`;
+  }
+
   // ── Spawn / launch / resume / interrupt ────────────────────────────────────
 
   async function spawnOwnedRun(session: OwnedSessionRecord, prompt: string, mode: OwnedRunMode) {
@@ -562,6 +611,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     let pid = 0;
     let terminalSessionName: string | undefined;
     let detachMode: 'bridge' | 'detached' = 'bridge';
+    let detachedChild: ChildProcess | undefined;
+    let runPersisted = false;
+    let pendingDetachedExit: OwnedChildExitOutcome | undefined;
 
     const bridgeSessionName = tmuxSessionName(runtimeId, runId);
     const cliCmd = [binary, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
@@ -628,6 +680,16 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
               // FORCE_COLOR/NO_COLOR, matching the bridge path's semantics.
               env: { ...process.env, ...spawnEnv },
             });
+        detachedChild = child;
+        observeChildExit(child, (childExit) => {
+          if (!runPersisted) {
+            pendingDetachedExit = childExit;
+            return;
+          }
+          void recordDetachedChildExit(session.surfaceId, runId, stderrPath, childExit).catch((err) => {
+            console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${runId}:`, err);
+          });
+        });
         child.unref();
         pid = child.pid ?? 0;
         detachMode = 'detached';
@@ -657,6 +719,12 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     session.activeRun = run;
     session.recentRuns = [run, ...session.recentRuns].slice(0, 16);
     await saveSession(session);
+    runPersisted = true;
+    if (detachedChild && pendingDetachedExit) {
+      void recordDetachedChildExit(session.surfaceId, run.id, run.stderrPath, pendingDetachedExit).catch((err) => {
+        console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${run.id}:`, err);
+      });
+    }
     return run;
   }
 
@@ -941,6 +1009,7 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   }
 
   function buildReviewNotes(session: OwnedSessionRecord, dirty: boolean) {
+    const latest = latestRun(session);
     const notes = [
       'Current repo delta is shown live from git and is not yet isolated per run when multiple sessions touch the same repo.',
     ];
@@ -951,6 +1020,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
 
     if (!session.threadId) {
       notes.push(`This owned surface is still waiting for its first persistent ${adapter.squadShortName} thread id before resume becomes available.`);
+    }
+    if (latest?.childExit && latest.childExit.classification !== 'clean-exit') {
+      notes.push(`Worker child exit: ${latest.childExit.classification}; code=${latest.childExit.code ?? 'null'}; signal=${latest.childExit.signal ?? 'null'}${latest.childExit.stderrTail ? `; stderrTail=${compactText(latest.childExit.stderrTail, 500)}` : ''}.`);
     }
 
     return notes;
@@ -1128,15 +1200,20 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
         }
       : null;
 
-    const events: EventItem[] = agents.slice(0, 4).map((agent) => ({
-      id: `evt-${agent.id}`,
-      agentId: agent.id,
-      squadId: agent.squadId,
-      severity: agent.status === 'running' ? 'info' : agent.status === 'failed' ? 'critical' : agent.status === 'waiting' ? 'warning' : 'success',
-      title: `${agent.name} • ${agent.surfaceLabel}`,
-      detail: `${agent.currentTask}${agent.runtimeSurface?.lifecycle?.lastOutcome ? ` • last ${agent.runtimeSurface.lifecycle.lastOutcome}` : ''}${agent.runtimeSurface?.reviewContext?.repoSlug ? ` • ${agent.runtimeSurface.reviewContext.repoSlug}` : ''}`,
-      timestamp: agent.lastEventAt,
-    }));
+    const sessionBySurfaceId = new Map(sessions.map((session) => [session.surfaceId, session]));
+    const events: EventItem[] = agents.slice(0, 4).map((agent) => {
+      const eventSession = sessionBySurfaceId.get(agent.id);
+      const eventLastRun = eventSession ? latestRun(eventSession) : undefined;
+      return {
+        id: `evt-${agent.id}`,
+        agentId: agent.id,
+        squadId: agent.squadId,
+        severity: agent.status === 'running' ? 'info' : agent.status === 'failed' ? 'critical' : agent.status === 'waiting' ? 'warning' : 'success',
+        title: `${agent.name} • ${agent.surfaceLabel}`,
+        detail: `${agent.currentTask}${agent.runtimeSurface?.lifecycle?.lastOutcome ? ` • last ${agent.runtimeSurface.lifecycle.lastOutcome}` : ''}${formatChildExit(eventLastRun?.childExit)}${agent.runtimeSurface?.reviewContext?.repoSlug ? ` • ${agent.runtimeSurface.reviewContext.repoSlug}` : ''}`,
+        timestamp: agent.lastEventAt,
+      };
+    });
 
     const artifacts: ReviewArtifact[] = agents.slice(0, 3).map((agent) => ({
       kind: 'run_log',

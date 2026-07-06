@@ -32,7 +32,7 @@ vi.mock('node:child_process', async (importOriginal) => {
     // A LIVE pid — the steer startup-failure probe (#1432) checks whether the
     // resume run it spawned actually came alive; a fake dead pid reads as
     // 'Steer failed to start'. The test process itself is the liveness stand-in.
-    spawn: vi.fn(() => ({ pid: process.pid, unref: vi.fn() })),
+    spawn: vi.fn(() => ({ pid: process.pid, unref: vi.fn(), once: vi.fn() })),
   };
 });
 
