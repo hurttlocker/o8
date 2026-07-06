@@ -759,6 +759,7 @@ async function performWorktreeSideMergeInner(input: WorktreeSideMergeInput): Pro
 
     const { stdout: mergeShaStdout } = await git(lane.repoPath, ['rev-parse', 'HEAD'], { timeout: 5000 });
     const mergeSha = mergeShaStdout.trim();
+    appendEvent(command.laneId, 'merge', actor, { laneHeadSha: mergeSha, baseBranch: lane.baseBranch });
     let pushedToOrigin = false, pushError: string | undefined;
     try {
       await git(lane.repoPath, ['push', 'origin', lane.baseBranch], { timeout: 60_000 });
