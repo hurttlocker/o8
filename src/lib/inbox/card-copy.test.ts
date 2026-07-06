@@ -38,6 +38,8 @@ describe('composeSupervisorInboxCardCopy', () => {
     expect(copy.subline).toContain('inline-1');
     expect(copy.subline).toContain('.cortex-worktrees/packet-pkt-abc');
     expect(copy.subline).toContain('#1471');
+    // The actual failure text must survive — dropping it was a real regression (review catch).
+    expect(copy.subline).toContain('Command failed: npx tsc --noEmit');
   });
 
   it('covers packet_missing with an actionable sentence', () => {
