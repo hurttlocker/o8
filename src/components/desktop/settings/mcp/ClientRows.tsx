@@ -1,16 +1,10 @@
 import type React from 'react';
 import {
-  APP_FONT_STACK,
   MONO_FONT_STACK,
-  RAMS_ACCENT,
-  RAMS_CONTROL_ACTIVE_BG,
-  RAMS_CONTROL_ACTIVE_BORDER,
-  RAMS_CONTROL_BG,
-  RAMS_CONTROL_BORDER,
-  RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  BracketLabel,
+  RamsButton,
 } from '../shared';
+import { SettingsRow, ValuePill } from '../grouped';
 
 export type Target = 'claude-desktop' | 'claude-code';
 export type ExternalTarget = 'hermes' | 'openclaw';
@@ -37,6 +31,7 @@ export interface ExternalTargetStatus {
 }
 
 export function ClaudeTargetRow({
+  label,
   status,
   installing,
   disabled = false,
@@ -44,8 +39,10 @@ export function ClaudeTargetRow({
   onInstall,
   onRemove,
   restartHint,
+  divider = false,
 }: {
   target: Target;
+  label: string;
   status: ClaudeTargetStatus | null;
   installing: boolean;
   disabled?: boolean;
@@ -53,6 +50,7 @@ export function ClaudeTargetRow({
   onInstall: () => void;
   onRemove: () => void;
   restartHint: string;
+  divider?: boolean;
 }) {
   const connected = Boolean(status?.alreadyUpToDate);
   const needsUpdate = Boolean(status?.alreadyRegistered && !status?.alreadyUpToDate);
@@ -70,30 +68,31 @@ export function ClaudeTargetRow({
             ? `Ready to connect${status.otherServers.length > 0 ? ` (${status.otherServers.length} other server${status.otherServers.length === 1 ? '' : 's'} preserved)` : ''}.`
             : 'Not connected yet.';
 
-  const primaryLabel = connected ? 'connected' : needsUpdate ? 'update' : 'install';
+  const primaryLabel = connected ? 'Connected' : needsUpdate ? 'Update' : 'Install';
   const primaryDisabled = disabled || installing || connected || setupBlocked;
+  const pillTone = setupBlocked ? 'destructive' : connected ? 'success' : 'default';
+  const pillLabel = setupBlocked ? 'Not ready' : connected ? 'Connected' : needsUpdate ? 'Needs update' : 'Not connected';
 
   return (
-    <ClientRowShell disabled={disabled}>
-      <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
-          <BracketLabel tone={connected ? 'quiet' : 'accent'}>
-            {setupBlocked ? 'not ready' : connected ? 'connected' : needsUpdate ? 'needs update' : 'not connected'}
-          </BracketLabel>
+    <SettingsRow
+      label={label}
+      subtitle={<RowBody statusLine={statusLine} path={status?.path ?? null} note={note} restartHint={restartHint} />}
+      accessory={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <ValuePill tone={pillTone}>{pillLabel}</ValuePill>
+          {status?.alreadyRegistered ? (
+            <RamsButton variant="ghost" onClick={onRemove} disabled={installing || disabled}>
+              Remove
+            </RamsButton>
+          ) : null}
+          <RamsButton variant="primary" onClick={onInstall} disabled={primaryDisabled} busy={installing}>
+            {primaryLabel}
+          </RamsButton>
         </div>
-        <RowBody statusLine={statusLine} path={status?.path ?? null} note={note} restartHint={restartHint} />
-      </div>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        {status?.alreadyRegistered ? (
-          <button type="button" onClick={onRemove} disabled={installing || disabled} style={quietActionStyle(installing || disabled)}>
-            remove
-          </button>
-        ) : null}
-        <button type="button" onClick={onInstall} disabled={primaryDisabled} style={accentActionStyle(primaryDisabled)}>
-          {installing ? 'working...' : primaryLabel}
-        </button>
-      </div>
-    </ClientRowShell>
+      }
+      disabled={disabled}
+      divider={divider}
+    />
   );
 }
 
@@ -106,6 +105,7 @@ export function ExternalClientRow({
   onInstall,
   onRemove,
   restartHint,
+  divider = false,
 }: {
   target: ExternalTarget;
   status: ExternalTargetStatus | null;
@@ -115,6 +115,7 @@ export function ExternalClientRow({
   onInstall: () => void;
   onRemove: () => void;
   restartHint: string;
+  divider?: boolean;
 }) {
   const cliInstalled = Boolean(status?.installed);
   const registered = Boolean(status?.registered);
@@ -127,15 +128,13 @@ export function ExternalClientRow({
         ? `Connected. The o8 tools are wired into ${labelText}.`
         : `Ready to connect. ${labelText} CLI detected.`;
   const primaryDisabled = disabled || installing || !cliInstalled || registered;
+  const pillTone = registered ? 'success' : cliInstalled ? 'default' : 'destructive';
+  const pillLabel = !cliInstalled ? 'Not installed' : registered ? 'Connected' : 'Not connected';
 
   return (
-    <ClientRowShell disabled={disabled}>
-      <div style={{ flex: 1, minWidth: 0, maxWidth: 520 }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 4, flexWrap: 'wrap' }}>
-          <BracketLabel tone={registered ? 'quiet' : cliInstalled ? 'accent' : 'quiet'}>
-            {!cliInstalled ? 'not installed' : registered ? 'connected' : 'not connected'}
-          </BracketLabel>
-        </div>
+    <SettingsRow
+      label={labelText}
+      subtitle={
         <RowBody
           statusLine={statusLine}
           path={status?.cliPath ?? null}
@@ -143,39 +142,23 @@ export function ExternalClientRow({
           restartHint={restartHint}
           hint={!cliInstalled ? status?.hint : null}
         />
-      </div>
-      <div style={{ display: 'flex', gap: 16, alignItems: 'center', flexWrap: 'wrap' }}>
-        {registered ? (
-          <button type="button" onClick={onRemove} disabled={installing || disabled} style={quietActionStyle(installing || disabled)}>
-            remove
-          </button>
-        ) : null}
-        <button type="button" onClick={onInstall} disabled={primaryDisabled} style={accentActionStyle(primaryDisabled)}>
-          {installing ? 'working...' : registered ? 'connected' : 'install'}
-        </button>
-      </div>
-    </ClientRowShell>
-  );
-}
-
-function ClientRowShell({ disabled, children }: { disabled: boolean; children: React.ReactNode }) {
-  return (
-    <div style={{
-      paddingTop: 10,
-      paddingBottom: 16,
-      borderBottom: `1px solid ${RAMS_HAIRLINE_SOFT}`,
-      opacity: disabled ? 0.55 : 1,
-    }}>
-      <div style={{
-        display: 'flex',
-        alignItems: 'flex-start',
-        justifyContent: 'space-between',
-        gap: 20,
-        flexWrap: 'wrap',
-      }}>
-        {children}
-      </div>
-    </div>
+      }
+      accessory={
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }}>
+          <ValuePill tone={pillTone}>{pillLabel}</ValuePill>
+          {registered ? (
+            <RamsButton variant="ghost" onClick={onRemove} disabled={installing || disabled}>
+              Remove
+            </RamsButton>
+          ) : null}
+          <RamsButton variant="primary" onClick={onInstall} disabled={primaryDisabled} busy={installing}>
+            {registered ? 'Connected' : 'Install'}
+          </RamsButton>
+        </div>
+      }
+      disabled={disabled}
+      divider={divider}
+    />
   );
 }
 
@@ -194,14 +177,14 @@ function RowBody({
 }) {
   return (
     <>
-      <div style={{ fontSize: 13, color: 'var(--t-text-secondary)', lineHeight: 1.55 }}>
+      <div style={{ fontSize: 12, color: 'var(--t-text-secondary)', lineHeight: 1.5 }}>
         {statusLine}
       </div>
       {path ? (
         <div style={{
-          marginTop: 6,
+          marginTop: 4,
           fontFamily: MONO_FONT_STACK,
-          fontSize: 11,
+          fontSize: 10.5,
           letterSpacing: '0.02em',
           color: RAMS_INK_QUIET,
           wordBreak: 'break-all',
@@ -211,11 +194,11 @@ function RowBody({
       ) : null}
       {hint ? (
         <div style={{
-          marginTop: 8,
+          marginTop: 6,
           fontFamily: MONO_FONT_STACK,
-          fontSize: 11,
+          fontSize: 10.5,
           color: 'var(--t-text-muted)',
-          lineHeight: 1.5,
+          lineHeight: 1.4,
           wordBreak: 'break-all',
         }}>
           {hint}
@@ -223,9 +206,9 @@ function RowBody({
       ) : null}
       {note ? (
         <div style={{
-          marginTop: 8,
-          fontSize: 12,
-          lineHeight: 1.55,
+          marginTop: 6,
+          fontSize: 11.5,
+          lineHeight: 1.45,
           color: note.ok ? '#15803d' : '#dc2626',
         }}>
           {note.ok ? `${note.message} ${restartHint}` : note.message}
@@ -233,54 +216,4 @@ function RowBody({
       ) : null}
     </>
   );
-}
-
-function accentActionStyle(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 32,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: disabled ? RAMS_CONTROL_BORDER : RAMS_CONTROL_ACTIVE_BORDER,
-    background: disabled ? 'transparent' : RAMS_CONTROL_ACTIVE_BG,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 12,
-    fontWeight: 400,
-    letterSpacing: '-0.01em',
-    textTransform: 'capitalize',
-    color: disabled ? RAMS_INK_QUIET : RAMS_ACCENT,
-    cursor: disabled ? 'default' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
-    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-  };
-}
-
-function quietActionStyle(disabled: boolean): React.CSSProperties {
-  return {
-    display: 'inline-flex',
-    alignItems: 'center',
-    justifyContent: 'center',
-    minHeight: 32,
-    paddingLeft: 14,
-    paddingRight: 14,
-    borderRadius: 9,
-    borderWidth: 1,
-    borderStyle: 'solid',
-    borderColor: RAMS_CONTROL_BORDER,
-    background: disabled ? 'transparent' : RAMS_CONTROL_BG,
-    fontFamily: APP_FONT_STACK,
-    fontSize: 12,
-    fontWeight: 400,
-    letterSpacing: '-0.01em',
-    textTransform: 'capitalize',
-    color: 'var(--t-text-muted)',
-    cursor: disabled ? 'default' : 'pointer',
-    opacity: disabled ? 0.6 : 1,
-    transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), border-color 150ms cubic-bezier(0.22, 1, 0.36, 1), color 150ms cubic-bezier(0.22, 1, 0.36, 1)',
-  };
 }
