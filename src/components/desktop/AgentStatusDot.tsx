@@ -7,7 +7,7 @@
  *   - running → B pulse (accent) — or C binary orbit once the run has been
  *               active past LONG_RUNNING_MS (1 min). Dynamic: flips live.
  *   - review  → pulse in the review accent (awaiting you)
- *   - merged  → purple branch-merge glyph
+ *   - merged  → solid success dot
  *   - failed  → solid red dot
  *
  * `startedAt` is when the current run started working (any parseable timestamp
@@ -116,7 +116,15 @@ export function AgentStatusDot({
     return () => window.clearInterval(id);
   }, [running, startedAt]);
 
-  if (state === 'merged') return <MergedGlyph label={dotLabel} />;
+  if (state === 'merged') {
+    return (
+      <span
+        aria-label={dotLabel}
+        title={dotLabel}
+        style={{ display: 'inline-block', width: 7, height: 7, borderRadius: '50%', background: color ?? 'var(--t-success)', flexShrink: 0 }}
+      />
+    );
+  }
 
   if (state === 'failed') {
     return (
@@ -161,8 +169,6 @@ export function AgentStatusDot({
   return <span className="o8-static-ring" aria-label={dotLabel} title={dotLabel} style={{ width: 5, height: 5 }} />;
 }
 
-/** Purple branch-merge mark — static, breaks the gray rhythm without claiming
- *  attention. Kept identical to the legacy HistoryRows glyph. */
 function defaultDotLabel(state: AgentDotState): string {
   switch (state) {
     case 'running':
@@ -176,22 +182,4 @@ function defaultDotLabel(state: AgentDotState): string {
     default:
       return 'idle';
   }
-}
-
-function MergedGlyph({ label }: { label: string }) {
-  return (
-    <span
-      aria-label={label}
-      title={label}
-      style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', width: 9, height: 9, flexShrink: 0, color: '#8b5cf6' }}
-    >
-      <svg width="9" height="9" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-        <circle cx="3" cy="3" r="1.5" />
-        <circle cx="3" cy="9" r="1.5" />
-        <circle cx="9" cy="6" r="1.5" />
-        <path d="M3 4.5v3" />
-        <path d="M4.5 3c0 1.5 1.5 3 3 3" />
-      </svg>
-    </span>
-  );
 }

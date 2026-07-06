@@ -111,6 +111,7 @@ export function resetPacketFields(packet: OrchestratorPacket) {
   packet.status = 'draft';
   packet.queueState = 'queued';
   packet.releaseState = 'pending';
+  packet.releaseStatePayload = null;
   packet.blockedReason = null;
   packet.lane = null;
   packet.review = null;
