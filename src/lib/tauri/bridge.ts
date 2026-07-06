@@ -348,6 +348,16 @@ export async function openSystemSettings(target: string): Promise<void> {
   await invoke('open_system_settings', { target });
 }
 
+/**
+ * Open (or focus) Symon's standalone Voice settings window — the same
+ * `/voice-settings` glass window the dock's double-tap gesture opens. History,
+ * Polish, and voice-persona controls live there; this is the one entry point
+ * o8 Settings links out to instead of duplicating them.
+ */
+export async function openVoiceSettings(): Promise<void> {
+  await invoke('open_voice_settings');
+}
+
 // ── Background presence + autostart (P4) ──
 
 /** Whether "Launch at login" is currently registered. */
