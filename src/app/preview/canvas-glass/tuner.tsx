@@ -126,12 +126,12 @@ export function TunerPanel({
         ))}
       </div>
 
-      {/* Looks — curated full-combo presets, plus the operator's saved "Mine". */}
+      {/* Looks — curated full-combo presets, plus the operator's saved Custom. */}
       <span style={SECTION_LABEL}>Looks</span>
       <div style={{ display: 'flex', alignItems: 'center', flexWrap: 'wrap', gap: 5 }}>
         {personalDefault ? (
           <PresetPill
-            label="Mine"
+            label="Custom"
             active={settingsMatch(settings, personalDefault)}
             onClick={() => onChange({ ...personalDefault })}
           />
@@ -242,7 +242,7 @@ export function TunerPanel({
           onMouseEnter={(event) => { event.currentTarget.style.background = 'rgba(255,255,255,0.1)'; }}
           onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
         >
-          Save as my default
+          Save as Custom
         </button>
         <button
           type="button"
