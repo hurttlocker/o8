@@ -20,8 +20,8 @@ import {
   MONO_FONT_STACK,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  SectionLabel,
 } from './shared';
+import { GroupHeader, GroupFootnote } from './grouped';
 
 // ── Types ──
 
@@ -98,10 +98,18 @@ export function RecallHealthSection() {
   useEffect(() => { void load(); }, [load]);
 
   return (
-    <section style={{ marginTop: 32 }}>
-      <SectionLabel number="02">RECALL HEALTH</SectionLabel>
+    <div>
+      <GroupHeader>Recall health</GroupHeader>
 
-      <div style={{ borderTop: `1px solid ${RAMS_HAIRLINE_SOFT}` }}>
+      <div style={{
+        borderRadius: 14,
+        border: '1px solid var(--t-panel-border)',
+        background: 'var(--t-bg-card)',
+        overflow: 'hidden',
+        paddingLeft: 14,
+        paddingRight: 14,
+        paddingBottom: 4,
+      }}>
         <Row
           label="Outcomes count"
           value={data ? formatCount(data.outcomesCount) : (loading ? '…' : '—')}
@@ -158,49 +166,45 @@ export function RecallHealthSection() {
           hint={data ? data.notes[0] : undefined}
           dot={data ? dotColorForHealth(data.health) : RAMS_INK_QUIET}
         />
+
+        {data && data.timing.byLabel.length > 0 ? (
+          <div style={{ marginTop: 14, paddingBottom: 10 }}>
+            <ByLabelTable rows={data.timing.byLabel} />
+          </div>
+        ) : null}
+
+        {error ? (
+          <div style={{
+            paddingTop: 12,
+            paddingBottom: 12,
+            fontSize: 13,
+            color: 'var(--t-text)',
+            lineHeight: 1.55,
+          }}>
+            <span style={{
+              fontFamily: MONO_FONT_STACK,
+              fontSize: 11,
+              fontWeight: 300,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: '#ef4444',
+              marginRight: 8,
+            }}>
+              [error]
+            </span>
+            {error}
+          </div>
+        ) : null}
       </div>
 
-      {data && data.timing.byLabel.length > 0 ? (
-        <div style={{ marginTop: 18 }}>
-          <ByLabelTable rows={data.timing.byLabel} />
-        </div>
-      ) : null}
-
-      {error ? (
-        <div style={{
-          marginTop: 14,
-          fontSize: 13,
-          color: 'var(--t-text)',
-          lineHeight: 1.55,
-        }}>
-          <span style={{
-            fontFamily: MONO_FONT_STACK,
-            fontSize: 11,
-            fontWeight: 300,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-            color: '#ef4444',
-            marginRight: 8,
-          }}>
-            [error]
-          </span>
-          {error}
-        </div>
-      ) : null}
-
-      <div style={{
-        marginTop: 16,
-        fontSize: 12,
-        color: 'var(--t-text-secondary)',
-        lineHeight: 1.55,
-      }}>
+      <GroupFootnote>
         Read-only instrumentation. See{' '}
         <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>
           docs/substrate-eval-gate.md
         </span>{' '}
         for the threshold definitions and decision procedure.
-      </div>
-    </section>
+      </GroupFootnote>
+    </div>
   );
 }
 

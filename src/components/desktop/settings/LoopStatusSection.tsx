@@ -46,8 +46,8 @@ import {
   RAMS_ACCENT,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
-  SectionLabel,
 } from './shared';
+import { GroupHeader, GroupFootnote } from './grouped';
 
 // ── Types ──
 
@@ -110,7 +110,7 @@ function shortHash(hash: string) {
 
 // ── Component ──
 
-export function LoopStatusSection({ sectionNumber }: { sectionNumber: string }) {
+export function LoopStatusSection() {
   const [data, setData] = useState<LoopStatusData | null>(null);
   const [loading, setLoading] = useState(true);
   const [showMerges, setShowMerges] = useState(false);
@@ -166,59 +166,62 @@ export function LoopStatusSection({ sectionNumber }: { sectionNumber: string }) 
   const commits = data?.recentCommits ?? [];
 
   return (
-    <section style={{ marginTop: 32 }}>
-      <SectionLabel number={sectionNumber}>LOOP STATUS</SectionLabel>
-
-      {loading && !data ? (
-        <div style={{
-          paddingTop: 14,
-          paddingBottom: 14,
-          fontFamily: APP_FONT_STACK,
-          fontSize: 13,
-          color: RAMS_INK_QUIET,
-          lineHeight: 1.55,
-        }}>
-          Loading…
-        </div>
-      ) : null}
-
-      {!loading && !isActive ? (
-        <NoActiveLoop
-          openPrCount={openPrCount}
-          laneCount={lanes.length}
-          commits={commits}
-          showMerges={showMerges}
-          onToggleMerges={() => setShowMerges((v) => !v)}
-        />
-      ) : null}
-
-      {!loading && isActive ? (
-        <ActiveLoopRows
-          cron={cron}
-          lastFiredMs={lastFiredMs}
-          nextFireMs={nextFireMs}
-          lanes={lanes}
-          openPrCount={openPrCount}
-          commits={commits}
-          showMerges={showMerges}
-          onToggleMerges={() => setShowMerges((v) => !v)}
-        />
-      ) : null}
+    <div>
+      <GroupHeader>Loop status</GroupHeader>
 
       <div style={{
-        marginTop: 16,
-        fontFamily: APP_FONT_STACK,
-        fontSize: 12,
-        color: 'var(--t-text-secondary)',
-        lineHeight: 1.55,
+        borderRadius: 14,
+        border: '1px solid var(--t-panel-border)',
+        background: 'var(--t-bg-card)',
+        overflow: 'hidden',
+        paddingLeft: 14,
+        paddingRight: 14,
       }}>
+        {loading && !data ? (
+          <div style={{
+            paddingTop: 14,
+            paddingBottom: 14,
+            fontFamily: APP_FONT_STACK,
+            fontSize: 13,
+            color: RAMS_INK_QUIET,
+            lineHeight: 1.55,
+          }}>
+            Loading…
+          </div>
+        ) : null}
+
+        {!loading && !isActive ? (
+          <NoActiveLoop
+            openPrCount={openPrCount}
+            laneCount={lanes.length}
+            commits={commits}
+            showMerges={showMerges}
+            onToggleMerges={() => setShowMerges((v) => !v)}
+          />
+        ) : null}
+
+        {!loading && isActive ? (
+          <ActiveLoopRows
+            cron={cron}
+            lastFiredMs={lastFiredMs}
+            nextFireMs={nextFireMs}
+            lanes={lanes}
+            openPrCount={openPrCount}
+            commits={commits}
+            showMerges={showMerges}
+            onToggleMerges={() => setShowMerges((v) => !v)}
+          />
+        ) : null}
+      </div>
+
+      <GroupFootnote>
         Read-only. Loop is armed and disarmed via the cron tooling — this
         section never writes{' '}
         <span style={{ fontFamily: MONO_FONT_STACK, fontSize: 11 }}>
           ~/.o8/loop-cron-state.json
         </span>.
-      </div>
-    </section>
+      </GroupFootnote>
+    </div>
   );
 }
 
