@@ -35,8 +35,8 @@ pub fn tool_safety_class(tool_name: &str) -> SafetyClass {
         "mac_reminders_list" => SafetyClass::ReadOnly,
         "mac_reminders_create" => SafetyClass::Reversible,
         "mac_reminders_complete" => SafetyClass::Reversible,
-        "mac_reminders_update" => SafetyClass::Reversible,
-        "mac_calendar_update_event" => SafetyClass::Reversible,
+    "mac_reminders_update" => SafetyClass::Reversible,
+    "mac_calendar_update_event" => SafetyClass::Reversible,
         // Apps — launching/listing apps has no destructive side effect.
         "open_app" => SafetyClass::ReadOnly,
         "list_apps" => SafetyClass::ReadOnly,
@@ -201,30 +201,14 @@ pub fn reversible_silent_consent() -> bool {
 
 /// Tools that are NEVER run, regardless of confirmation (hard refuse).
 const NEVER_DO_TOOLS: &[&str] = &[
-    "bash",
-    "shell",
-    "exec",
-    "system",
-    "sudo",
-    "modify_keychain",
-    "change_password",
+    "bash", "shell", "exec", "system", "sudo", "modify_keychain", "change_password",
     "modify_sudoers",
 ];
 
 /// Protected paths the agent will never touch (filesystem tools, future).
 const NEVER_DO_PATHS: &[&str] = &[
-    "/etc/",
-    "/usr/",
-    "/bin/",
-    "/sbin/",
-    "/var/",
-    "/private/",
-    "/System/",
-    "/Library/Keychains/",
-    ".tauri",
-    ".env",
-    "credentials",
-    "secrets",
+    "/etc/", "/usr/", "/bin/", "/sbin/", "/var/", "/private/", "/System/",
+    "/Library/Keychains/", ".tauri", ".env", "credentials", "secrets",
 ];
 
 pub fn is_never_do_tool(tool_name: &str) -> bool {

@@ -14,11 +14,7 @@
 /// Returns whether it ran (to completion OR cancelled); `false` only if the
 /// process could not be spawned/waited. macOS only.
 #[cfg(target_os = "macos")]
-pub fn speak_with_say_cancellable(
-    text: &str,
-    speed: f32,
-    should_cancel: &dyn Fn() -> bool,
-) -> bool {
+pub fn speak_with_say_cancellable(text: &str, speed: f32, should_cancel: &dyn Fn() -> bool) -> bool {
     use std::time::Duration;
     let rate = (175.0 * speed.max(0.1)) as u32;
     let mut child = match std::process::Command::new("say")

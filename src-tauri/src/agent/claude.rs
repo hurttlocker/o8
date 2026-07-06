@@ -132,7 +132,8 @@ fn build_first_prompt(intent: &str, ctx: &TaskCtx) -> String {
         .into_iter()
         .filter(|t| t.get("name").and_then(|n| n.as_str()) != Some("escalate"))
         .collect();
-    let tools_json = serde_json::to_string_pretty(&tool_specs).unwrap_or_else(|_| "[]".to_string());
+    let tools_json =
+        serde_json::to_string_pretty(&tool_specs).unwrap_or_else(|_| "[]".to_string());
     s.push_str(PLANNER_CONTRACT);
     s.push_str(&format!("\n\nAVAILABLE TOOLS (JSON Schema):\n{tools_json}"));
     s.push_str(&format!("\n\nUser request: {intent}"));
@@ -283,9 +284,7 @@ impl ClaudeSession {
         };
         let frame = json!({ "type": "user", "message": { "role": "user", "content": content } });
         writeln!(self.stdin, "{frame}").map_err(|e| format!("claude stdin write: {e}"))?;
-        self.stdin
-            .flush()
-            .map_err(|e| format!("claude stdin flush: {e}"))?;
+        self.stdin.flush().map_err(|e| format!("claude stdin flush: {e}"))?;
 
         let mut answer = String::new();
         let mut got_result = false;
@@ -317,8 +316,7 @@ impl ClaudeSession {
                 // Fallback: if the `result` text is ever empty, the last assistant
                 // text block is the answer.
                 Some("assistant") => {
-                    if let Some(blocks) = ev.pointer("/message/content").and_then(|c| c.as_array())
-                    {
+                    if let Some(blocks) = ev.pointer("/message/content").and_then(|c| c.as_array()) {
                         for block in blocks {
                             if block.get("type").and_then(|t| t.as_str()) == Some("text") {
                                 if let Some(t) = block.get("text").and_then(|t| t.as_str()) {
@@ -362,41 +360,11 @@ it (and why) — not a success claim.";
 /// `screen::wants_screen`). Pure questions ("how many reminders") aren't here —
 /// those reliably call their tool already; the fabrication risk is on actions.
 const ACTION_CUES: &[&str] = &[
-    "create",
-    "add ",
-    "make ",
-    "set a",
-    "set up",
-    "set my",
-    "set the",
-    "schedule",
-    "remind ",
-    "delete",
-    "remove",
-    "clear ",
-    "complete",
-    "mark ",
-    "check off",
-    "finish",
-    "rename",
-    "reschedule",
-    "move ",
-    "update",
-    "change",
-    "edit ",
-    "send",
-    "draft",
-    "turn on",
-    "turn off",
-    "enable",
-    "disable",
-    "switch",
-    "toggle",
-    "open ",
-    "launch",
-    "run ",
-    "save ",
-    "write ",
+    "create", "add ", "make ", "set a", "set up", "set my", "set the", "schedule",
+    "remind ", "delete", "remove", "clear ", "complete", "mark ", "check off",
+    "finish", "rename", "reschedule", "move ", "update", "change", "edit ",
+    "send", "draft", "turn on", "turn off", "enable", "disable", "switch", "toggle",
+    "open ", "launch", "run ", "save ", "write ",
 ];
 
 /// Does the request ask Symon to take an ACTION (not just answer)? Gates the
@@ -407,9 +375,10 @@ const ACTION_CUES: &[&str] = &[
 fn looks_like_action_request(intent: &str) -> bool {
     let p = intent.trim().to_lowercase();
     const QUESTION_STARTS: &[&str] = &[
-        "how ", "how many", "how much", "what", "when ", "where", "who ", "whose", "why", "which",
-        "is ", "are ", "am ", "do ", "does ", "did ", "can ", "could ", "would ", "will ",
-        "should ", "have ", "has ", "was ", "were ", "tell me", "show me", "list ", "give me",
+        "how ", "how many", "how much", "what", "when ", "where", "who ", "whose",
+        "why", "which", "is ", "are ", "am ", "do ", "does ", "did ", "can ",
+        "could ", "would ", "will ", "should ", "have ", "has ", "was ", "were ",
+        "tell me", "show me", "list ", "give me",
     ];
     if p.contains('?') || QUESTION_STARTS.iter().any(|q| p.starts_with(q)) {
         return false;
@@ -426,26 +395,10 @@ fn say_is_question_or_refusal(say: &str) -> bool {
     }
     let s = say.to_lowercase();
     const NONCLAIM: &[&str] = &[
-        "can't",
-        "cannot",
-        "won't",
-        "will not",
-        "not going to",
-        "unable",
-        "not able",
-        "don't have",
-        "do not have",
-        "there's no",
-        "there is no",
-        "i need",
-        "need more",
-        "let me know",
-        "just say",
-        "which one",
-        "what would you like",
-        "didn't catch",
-        "not sure what",
-        "couldn't find",
+        "can't", "cannot", "won't", "will not", "not going to", "unable",
+        "not able", "don't have", "do not have", "there's no", "there is no",
+        "i need", "need more", "let me know", "just say", "which one",
+        "what would you like", "didn't catch", "not sure what", "couldn't find",
         "no developer mode",
     ];
     NONCLAIM.iter().any(|t| s.contains(t))
@@ -553,10 +506,7 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
             break;
         }
 
-        let Some(tool_name) = action
-            .get("tool")
-            .and_then(|t| t.as_str())
-            .map(|s| s.to_string())
+        let Some(tool_name) = action.get("tool").and_then(|t| t.as_str()).map(|s| s.to_string())
         else {
             // No tool, no done — treat any prose as the answer.
             result_text = raw.trim().to_string();
@@ -605,7 +555,8 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         // Feed ONLY the result back — the live session still holds the system
         // prompt, the tool schema, and every prior turn, so this is all the model
         // needs for the next action (no transcript re-send → smaller prefill).
-        let result_str = serde_json::to_string(&tool_result).unwrap_or_else(|_| "{}".to_string());
+        let result_str =
+            serde_json::to_string(&tool_result).unwrap_or_else(|_| "{}".to_string());
         next_message = format!(
             "[SYSTEM] You called `{tool_name}`. It returned:\n{result_str}\n\n\
              Now respond with your NEXT action as a single JSON object — a tool \
@@ -645,10 +596,8 @@ mod tests {
 
     #[test]
     fn extract_action_with_prose() {
-        let a = extract_action(
-            "Sure, here is my action:\n{\"tool\":\"o8_status\",\"args\":{}}\nLet me know!",
-        )
-        .unwrap();
+        let a = extract_action("Sure, here is my action:\n{\"tool\":\"o8_status\",\"args\":{}}\nLet me know!")
+            .unwrap();
         assert_eq!(a.get("tool").unwrap(), "o8_status");
     }
 
@@ -663,24 +612,19 @@ mod tests {
         // recover the FIRST action object (with its nested args braces intact),
         // not choke on the first..last span — otherwise the tool never dispatches
         // and the fabricated `say` is spoken as a silent false success.
-        let raw =
-            "{\"tool\": \"o8_ui_set\", \"args\": {\"key\": \"surface\", \"value\": \"solid\"}} \
+        let raw = "{\"tool\": \"o8_ui_set\", \"args\": {\"key\": \"surface\", \"value\": \"solid\"}} \
                    system{\"ok\": true, \"applied\": true, \"previous\": \"glass\"} \
                    assistant{\"done\": true, \"say\": \"Done — switched to solid.\"}";
         let a = extract_action(raw).unwrap();
         assert_eq!(a.get("tool").unwrap(), "o8_ui_set");
         assert_eq!(a.get("args").unwrap().get("key").unwrap(), "surface");
-        assert!(
-            a.get("done").is_none(),
-            "must take the first action, not the run-ahead done"
-        );
+        assert!(a.get("done").is_none(), "must take the first action, not the run-ahead done");
     }
 
     #[test]
     fn extract_action_ignores_brace_inside_string() {
         // A `}` inside a string value must not be mistaken for the object's close.
-        let a = extract_action("{\"tool\":\"mac_notes_create\",\"args\":{\"body\":\"a } brace\"}}")
-            .unwrap();
+        let a = extract_action("{\"tool\":\"mac_notes_create\",\"args\":{\"body\":\"a } brace\"}}").unwrap();
         assert_eq!(a.get("tool").unwrap(), "mac_notes_create");
         assert_eq!(a.get("args").unwrap().get("body").unwrap(), "a } brace");
     }
@@ -688,9 +632,7 @@ mod tests {
     #[test]
     fn action_request_detects_mutations_not_questions() {
         // Mutations / actions → gated for the anti-fabrication nudge.
-        assert!(looks_like_action_request(
-            "Create a reminder to call mom at 5"
-        ));
+        assert!(looks_like_action_request("Create a reminder to call mom at 5"));
         assert!(looks_like_action_request("switch to dark mode"));
         assert!(looks_like_action_request("delete that note"));
         assert!(looks_like_action_request("schedule a meeting tomorrow"));
@@ -710,9 +652,7 @@ mod tests {
         assert!(say_is_question_or_refusal("There's no developer mode."));
         assert!(say_is_question_or_refusal("Which one did you mean?"));
         // A bare success claim with no tool dispatched IS a fabrication → nudge.
-        assert!(!say_is_question_or_refusal(
-            "Done — I set it for tomorrow at 5 PM."
-        ));
+        assert!(!say_is_question_or_refusal("Done — I set it for tomorrow at 5 PM."));
         assert!(!say_is_question_or_refusal("All set, added to your list."));
     }
 }

@@ -104,25 +104,14 @@ pub async fn team_tell(args: Value) -> Result<Value, String> {
     if to.is_empty() || text.is_empty() {
         return Err("Tell whom what? Give the agent's name and a message — e.g. tell Nova to hold the ship.".to_string());
     }
-    let resp = o8_http::post_json(
-        "/api/team/tell",
-        json!({ "to": to, "text": text, "from": "Symon" }),
-    )
-    .await?;
+    let resp = o8_http::post_json("/api/team/tell", json!({ "to": to, "text": text, "from": "Symon" })).await?;
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(true) {
         let who = resp.get("to").and_then(|v| v.as_str()).unwrap_or(to);
         let repo = resp.get("repo").and_then(|v| v.as_str()).unwrap_or("");
-        let spoken = if repo.is_empty() {
-            format!("Sent to {who}.")
-        } else {
-            format!("Sent to {who} on {repo}.")
-        };
+        let spoken = if repo.is_empty() { format!("Sent to {who}.") } else { format!("Sent to {who} on {repo}.") };
         Ok(json!({ "ok": true, "delivered_to": who, "repo": repo, "spoken": spoken }))
     } else {
-        let err = resp
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("No agent by that name is running.");
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("No agent by that name is running.");
         Ok(json!({ "ok": false, "spoken": err }))
     }
 }
@@ -131,11 +120,7 @@ pub async fn team_tell(args: Value) -> Result<Value, String> {
 /// (oversight: "what are the agents saying to each other?"). Read-through.
 pub async fn team_inbox(_args: Value) -> Result<Value, String> {
     let resp = o8_http::get_json("/api/team/messages?limit=10").await?;
-    let messages = resp
-        .get("messages")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let messages = resp.get("messages").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     Ok(json!({ "count": messages.len(), "messages": messages }))
 }
 
@@ -171,10 +156,7 @@ pub async fn needs_me(_args: Value) -> Result<Value, String> {
 
     let mut cards: Vec<Value> = Vec::new();
     for a in &approvals {
-        let title = a
-            .get("title")
-            .and_then(|v| v.as_str())
-            .unwrap_or("Untitled");
+        let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled");
         let summary = a.get("summary").and_then(|v| v.as_str()).unwrap_or("");
         let mut card = json!({
             "title": title,
@@ -207,11 +189,7 @@ pub async fn needs_me(_args: Value) -> Result<Value, String> {
             continue;
         }
         let repo_path = lane.get("repoPath").and_then(|v| v.as_str()).unwrap_or("");
-        let repo = repo_path
-            .trim_end_matches('/')
-            .rsplit('/')
-            .next()
-            .unwrap_or("");
+        let repo = repo_path.trim_end_matches('/').rsplit('/').next().unwrap_or("");
         stuck.push(json!({
             "label": lane.get("label").and_then(|v| v.as_str()).unwrap_or("Untitled"),
             "status": status,
@@ -252,21 +230,9 @@ async fn resolve_pending_approval(which: &str) -> Result<(String, String), Strin
         .iter()
         .filter_map(|a| {
             let id = a.get("id").and_then(|v| v.as_str())?.to_string();
-            let title = a
-                .get("title")
-                .and_then(|v| v.as_str())
-                .unwrap_or("Untitled")
-                .to_string();
-            let summary = a
-                .get("summary")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_lowercase();
-            let agent = a
-                .get("agent")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_lowercase();
+            let title = a.get("title").and_then(|v| v.as_str()).unwrap_or("Untitled").to_string();
+            let summary = a.get("summary").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
+            let agent = a.get("agent").and_then(|v| v.as_str()).unwrap_or("").to_lowercase();
             Some((id, title, summary, agent))
         })
         .collect();
@@ -281,11 +247,7 @@ async fn resolve_pending_approval(which: &str) -> Result<(String, String), Strin
             let (id, title, _, _) = pending.into_iter().next().unwrap();
             return Ok((id, title));
         }
-        let titles: Vec<&str> = pending
-            .iter()
-            .take(3)
-            .map(|(_, t, _, _)| t.as_str())
-            .collect();
+        let titles: Vec<&str> = pending.iter().take(3).map(|(_, t, _, _)| t.as_str()).collect();
         return Err(format!(
             "There are {} pending approvals — say which one: {}.",
             pending.len(),
@@ -293,10 +255,7 @@ async fn resolve_pending_approval(which: &str) -> Result<(String, String), Strin
         ));
     }
 
-    if let Some((id, title, _, _)) = pending
-        .iter()
-        .find(|(_, t, _, _)| t.to_lowercase() == needle)
-    {
+    if let Some((id, title, _, _)) = pending.iter().find(|(_, t, _, _)| t.to_lowercase() == needle) {
         return Ok((id.clone(), title.clone()));
     }
 
@@ -317,22 +276,14 @@ async fn resolve_pending_approval(which: &str) -> Result<(String, String), Strin
             Ok((id.clone(), title.clone()))
         }
         0 => {
-            let titles: Vec<&str> = pending
-                .iter()
-                .take(3)
-                .map(|(_, t, _, _)| t.as_str())
-                .collect();
+            let titles: Vec<&str> = pending.iter().take(3).map(|(_, t, _, _)| t.as_str()).collect();
             Err(format!(
                 "Nothing pending matches '{which}'. The queue has: {}.",
                 titles.join("; ")
             ))
         }
         _ => {
-            let titles: Vec<&str> = matches
-                .iter()
-                .take(3)
-                .map(|(_, t, _, _)| t.as_str())
-                .collect();
+            let titles: Vec<&str> = matches.iter().take(3).map(|(_, t, _, _)| t.as_str()).collect();
             Err(format!(
                 "'{which}' matches more than one pending approval — say which: {}.",
                 titles.join("; ")
@@ -356,10 +307,7 @@ pub async fn approve_item(args: Value) -> Result<Value, String> {
     )
     .await?;
     if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
-        let err = resp
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("o8 returned an error");
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
         return Err(format!("Couldn't approve \u{201c}{title}\u{201d}: {err}"));
     }
 
@@ -388,10 +336,7 @@ pub async fn reject_item(args: Value) -> Result<Value, String> {
 
     let resp = o8_http::post_json("/api/panel/approvals", body).await?;
     if resp.get("ok").and_then(|v| v.as_bool()) != Some(true) {
-        let err = resp
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("o8 returned an error");
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
         return Err(format!("Couldn't reject \u{201c}{title}\u{201d}: {err}"));
     }
 
@@ -489,18 +434,8 @@ pub async fn ask(args: Value) -> Result<Value, String> {
 /// worker pre-approval. A misheard / unknown repo is a safe no-op error: nothing
 /// is dispatched until the repo resolves to a registered path.
 pub async fn dispatch(args: Value) -> Result<Value, String> {
-    let repo = args
-        .get("repo")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let task = args
-        .get("task")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let repo = args.get("repo").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let task = args.get("task").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if repo.is_empty() || task.is_empty() {
         return Err("o8_dispatch needs a 'repo' and a 'task'".into());
     }
@@ -528,10 +463,7 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
 
     if !ok {
         // 202 path: launch is queued behind a policy gate / approval card.
-        let approval = resp
-            .get("approvalId")
-            .and_then(|v| v.as_str())
-            .unwrap_or("");
+        let approval = resp.get("approvalId").and_then(|v| v.as_str()).unwrap_or("");
         return Ok(json!({
             "dispatched": false,
             "packet_id": packet_id,
@@ -557,11 +489,7 @@ pub async fn dispatch(args: Value) -> Result<Value, String> {
 /// approvals got resolved. The "what happened while I was gone?" answer —
 /// reads the same lanes + approvals stores the desktop renders, no new state.
 pub async fn recap(args: Value) -> Result<Value, String> {
-    let hours = args
-        .get("hours")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(8)
-        .clamp(1, 72);
+    let hours = args.get("hours").and_then(|v| v.as_i64()).unwrap_or(8).clamp(1, 72);
     let now_ms = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
@@ -628,9 +556,7 @@ pub async fn recap(args: Value) -> Result<Value, String> {
     let resolved: Vec<Value> = approvals
         .iter()
         .filter(|a| {
-            a.get("resolvedAt")
-                .and_then(|v| v.as_i64())
-                .is_some_and(|t| t >= cutoff_ms)
+            a.get("resolvedAt").and_then(|v| v.as_i64()).is_some_and(|t| t >= cutoff_ms)
         })
         .map(|a| {
             json!({
@@ -655,8 +581,7 @@ pub async fn recap(args: Value) -> Result<Value, String> {
         "approvals_resolved": resolved,
     });
     if quiet {
-        out["note"] =
-            json!("A quiet stretch — nothing finished, failed, or got resolved in that window.");
+        out["note"] = json!("A quiet stretch — nothing finished, failed, or got resolved in that window.");
     }
     Ok(out)
 }
@@ -809,10 +734,7 @@ async fn resolve_lane(which: &str) -> Result<(String, Option<String>, String), S
     let mut matches: Vec<&Value> = lanes
         .iter()
         .filter(|l| {
-            l.get("packetId")
-                .and_then(|v| v.as_str())
-                .map(|s| !s.is_empty())
-                .unwrap_or(false)
+            l.get("packetId").and_then(|v| v.as_str()).map(|s| !s.is_empty()).unwrap_or(false)
                 && l.get("status").and_then(|v| v.as_str()) != Some("archived")
                 && l.get("label")
                     .and_then(|v| v.as_str())
@@ -835,44 +757,23 @@ async fn resolve_lane(which: &str) -> Result<(String, Option<String>, String), S
     });
 
     match matches.len() {
-        0 => Err(format!(
-            "No packet matches '{which}'. Ask me what's shipping to hear the names."
-        )),
+        0 => Err(format!("No packet matches '{which}'. Ask me what's shipping to hear the names.")),
         1 => {
             let l = matches[0];
             Ok((
-                l.get("packetId")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("")
-                    .to_string(),
-                l.get("sessionKey")
-                    .and_then(|v| v.as_str())
-                    .map(|s| s.to_string()),
-                l.get("label")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("Untitled")
-                    .to_string(),
+                l.get("packetId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                l.get("sessionKey").and_then(|v| v.as_str()).map(|s| s.to_string()),
+                l.get("label").and_then(|v| v.as_str()).unwrap_or("Untitled").to_string(),
             ))
         }
         _ => {
             // Distinct labels → ambiguous; same label → take the newest.
-            let first_label = matches[0]
-                .get("label")
-                .and_then(|v| v.as_str())
-                .unwrap_or("");
-            if matches
-                .iter()
-                .all(|l| l.get("label").and_then(|v| v.as_str()) == Some(first_label))
-            {
+            let first_label = matches[0].get("label").and_then(|v| v.as_str()).unwrap_or("");
+            if matches.iter().all(|l| l.get("label").and_then(|v| v.as_str()) == Some(first_label)) {
                 let l = matches[0];
                 return Ok((
-                    l.get("packetId")
-                        .and_then(|v| v.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    l.get("sessionKey")
-                        .and_then(|v| v.as_str())
-                        .map(|s| s.to_string()),
+                    l.get("packetId").and_then(|v| v.as_str()).unwrap_or("").to_string(),
+                    l.get("sessionKey").and_then(|v| v.as_str()).map(|s| s.to_string()),
                     first_label.to_string(),
                 ));
             }
@@ -881,10 +782,7 @@ async fn resolve_lane(which: &str) -> Result<(String, Option<String>, String), S
                 .take(3)
                 .filter_map(|l| l.get("label").and_then(|v| v.as_str()))
                 .collect();
-            Err(format!(
-                "'{which}' matches more than one packet — say which: {}.",
-                names.join("; ")
-            ))
+            Err(format!("'{which}' matches more than one packet — say which: {}.", names.join("; ")))
         }
     }
 }
@@ -894,11 +792,7 @@ async fn resolve_lane(which: &str) -> Result<(String, Option<String>, String), S
 /// feedback. One verb for "tell the tooltip packet to also fix X".
 pub async fn packet_steer(args: Value) -> Result<Value, String> {
     let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
-    let message = args
-        .get("message")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim();
+    let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("").trim();
     if message.is_empty() {
         return Err("o8_packet_steer needs a 'message'".into());
     }
@@ -927,17 +821,10 @@ pub async fn packet_steer(args: Value) -> Result<Value, String> {
     )
     .await?;
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-        let err = resp
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("o8 returned an error");
-        return Err(format!(
-            "Couldn't reach the \u{201c}{label}\u{201d} worker: {err}"
-        ));
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
+        return Err(format!("Couldn't reach the \u{201c}{label}\u{201d} worker: {err}"));
     }
-    Ok(
-        json!({ "steered": true, "packet": label, "how": "fresh worker with the message as feedback" }),
-    )
+    Ok(json!({ "steered": true, "packet": label, "how": "fresh worker with the message as feedback" }))
 }
 
 /// `o8_agent_task` — address a WORKING agent by the memorable codename on its
@@ -948,11 +835,7 @@ pub async fn packet_steer(args: Value) -> Result<Value, String> {
 /// spoken outcome (steered / no-such-agent / ambiguous), so a clean message
 /// rides back for Symon to read instead of a raw HTTP error string.
 pub async fn agent_task(args: Value) -> Result<Value, String> {
-    let name = args
-        .get("name")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim();
+    let name = args.get("name").and_then(|v| v.as_str()).unwrap_or("").trim();
     let task = args
         .get("task")
         .and_then(|v| v.as_str())
@@ -991,9 +874,7 @@ pub async fn packet_rerun(args: Value) -> Result<Value, String> {
         .and_then(|v| v.as_str())
         .map(str::trim)
         .filter(|s| !s.is_empty())
-        .unwrap_or(
-            "Retry: the previous attempt did not land. Re-read the task and try again carefully.",
-        );
+        .unwrap_or("Retry: the previous attempt did not land. Re-read the task and try again carefully.");
     let (packet_id, _, label) = resolve_lane(which).await?;
 
     let resp = o8_http::post_json(
@@ -1002,10 +883,7 @@ pub async fn packet_rerun(args: Value) -> Result<Value, String> {
     )
     .await?;
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-        let err = resp
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("o8 returned an error");
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
         return Err(format!("Couldn't restart \u{201c}{label}\u{201d}: {err}"));
     }
     crate::agent::worker_pulse::nudge();
@@ -1019,19 +897,11 @@ pub async fn packet_rerun(args: Value) -> Result<Value, String> {
 /// Reuses the operator's reset-packet → dispatch flow.
 pub async fn packet_reset(args: Value) -> Result<Value, String> {
     let which = args.get("packet").and_then(|v| v.as_str()).unwrap_or("");
-    let keep_worktree = args
-        .get("keep_worktree")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let keep_worktree = args.get("keep_worktree").and_then(|v| v.as_bool()).unwrap_or(false);
     let (packet_id, _session, label) = resolve_lane(which).await?;
 
     let mut body = json!({ "packetId": packet_id, "clearWorktree": !keep_worktree });
-    if let Some(r) = args
-        .get("reason")
-        .and_then(|v| v.as_str())
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-    {
+    if let Some(r) = args.get("reason").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
         body["reason"] = json!(r);
     }
     // o8_http returns Err on a non-2xx, so a clean return means the lane was
@@ -1043,9 +913,7 @@ pub async fn packet_reset(args: Value) -> Result<Value, String> {
     // Relaunch via the standard reset → dispatch flow (mission-level dispatch
     // re-runs the now-pending packet). Best-effort — the archive already
     // succeeded, so report partial success if the relaunch hiccups.
-    let redispatched = o8_http::post_json("/api/orchestrator/dispatch", json!({}))
-        .await
-        .is_ok();
+    let redispatched = o8_http::post_json("/api/orchestrator/dispatch", json!({})).await.is_ok();
     crate::agent::worker_pulse::nudge();
 
     Ok(json!({
@@ -1085,18 +953,9 @@ pub async fn stop_agent(args: Value) -> Result<Value, String> {
             .map_err(|e| format!("Couldn't stop the agents: {e}"))?;
         crate::agent::worker_pulse::nudge();
         let result = resp.get("result").cloned().unwrap_or_else(|| json!({}));
-        let reaped = result
-            .get("interruptedSessions")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let archived = result
-            .get("archivedLanes")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
-        let packets = result
-            .get("stoppedPackets")
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0);
+        let reaped = result.get("interruptedSessions").and_then(|v| v.as_i64()).unwrap_or(0);
+        let archived = result.get("archivedLanes").and_then(|v| v.as_i64()).unwrap_or(0);
+        let packets = result.get("stoppedPackets").and_then(|v| v.as_i64()).unwrap_or(0);
         return Ok(json!({
             "ok": true,
             "scope": "all",
@@ -1117,10 +976,7 @@ pub async fn stop_agent(args: Value) -> Result<Value, String> {
     .map_err(|e| format!("Couldn't stop \u{201c}{label}\u{201d}: {e}"))?;
     crate::agent::worker_pulse::nudge();
     let result = resp.get("result").cloned().unwrap_or_else(|| json!({}));
-    let reaped = result
-        .get("interruptedSessions")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(0);
+    let reaped = result.get("interruptedSessions").and_then(|v| v.as_i64()).unwrap_or(0);
     Ok(json!({
         "ok": true,
         "packet": label,
@@ -1139,10 +995,8 @@ pub async fn packet_wait(args: Value) -> Result<Value, String> {
 
     let mut last = String::from("working");
     for _ in 0..6u32 {
-        if let Ok(resp) = o8_http::get_json(&format!(
-            "/api/orchestrator/review-state?packetId={packet_id}"
-        ))
-        .await
+        if let Ok(resp) =
+            o8_http::get_json(&format!("/api/orchestrator/review-state?packetId={packet_id}")).await
         {
             if let Some(state) = resp.get("state").and_then(|v| v.as_str()) {
                 last = state.to_string();
@@ -1176,11 +1030,7 @@ pub async fn resolve_repo_path(repo: &str) -> Result<String, String> {
         return Ok(repo.to_string());
     }
     let resp = o8_http::get_json("/api/panel/repos").await?;
-    let repos = resp
-        .get("repos")
-        .and_then(|v| v.as_array())
-        .cloned()
-        .unwrap_or_default();
+    let repos = resp.get("repos").and_then(|v| v.as_array()).cloned().unwrap_or_default();
     let needle = repo.to_lowercase();
 
     let mut fallback: Option<String> = None;
@@ -1214,9 +1064,7 @@ pub async fn add_repo(args: Value) -> Result<Value, String> {
         .trim()
         .to_string();
     if raw.is_empty() {
-        return Err(
-            "o8_add_repo needs the folder 'path' — find it with fs_spotlight first.".into(),
-        );
+        return Err("o8_add_repo needs the folder 'path' — find it with fs_spotlight first.".into());
     }
     let path = if raw == "~" || raw.starts_with("~/") {
         let home = std::env::var("HOME").unwrap_or_default();
@@ -1225,11 +1073,7 @@ pub async fn add_repo(args: Value) -> Result<Value, String> {
         raw
     };
 
-    let resp = o8_http::post_json(
-        "/api/panel/repos",
-        json!({ "action": "add", "localPath": path }),
-    )
-    .await?;
+    let resp = o8_http::post_json("/api/panel/repos", json!({ "action": "add", "localPath": path })).await?;
     if let Some(err) = resp.get("error").and_then(|v| v.as_str()) {
         return Err(format!("o8 couldn't add that repo: {err}"));
     }
@@ -1257,26 +1101,13 @@ pub async fn add_repo(args: Value) -> Result<Value, String> {
         .cloned()
         .unwrap_or_default();
     let needle = project.to_lowercase();
-    let name_of = |p: &Value| {
-        p.get("name")
-            .and_then(|n| n.as_str())
-            .unwrap_or("")
-            .to_string()
-    };
+    let name_of = |p: &Value| p.get("name").and_then(|n| n.as_str()).unwrap_or("").to_string();
     let hit = projects
         .iter()
         .find(|p| name_of(p).to_lowercase() == needle)
-        .or_else(|| {
-            projects
-                .iter()
-                .find(|p| name_of(p).to_lowercase().contains(&needle))
-        });
+        .or_else(|| projects.iter().find(|p| name_of(p).to_lowercase().contains(&needle)));
     let Some(hit) = hit else {
-        let names: Vec<String> = projects
-            .iter()
-            .map(|p| name_of(p))
-            .filter(|n| !n.is_empty())
-            .collect();
+        let names: Vec<String> = projects.iter().map(|p| name_of(p)).filter(|n| !n.is_empty()).collect();
         return Ok(json!({
             "added": true,
             "path": repo_path,
@@ -1288,20 +1119,12 @@ pub async fn add_repo(args: Value) -> Result<Value, String> {
         }));
     };
 
-    let project_id = hit
-        .get("id")
-        .and_then(|v| v.as_str())
-        .unwrap_or_default()
-        .to_string();
+    let project_id = hit.get("id").and_then(|v| v.as_str()).unwrap_or_default().to_string();
     let project_name = name_of(hit);
     let mut paths: Vec<String> = hit
         .get("repoPaths")
         .and_then(|v| v.as_array())
-        .map(|a| {
-            a.iter()
-                .filter_map(|x| x.as_str().map(String::from))
-                .collect()
-        })
+        .map(|a| a.iter().filter_map(|x| x.as_str().map(String::from)).collect())
         .unwrap_or_default();
     let target = repo_path.trim_end_matches('/');
     if !paths.iter().any(|x| x.trim_end_matches('/') == target) {
@@ -1497,11 +1320,7 @@ async fn browser_verb(verb: &str, inner: Value) -> Result<Value, String> {
 /// `o8_browser_read` — read what o8's browser is showing, or wait for an element
 /// to appear. ReadOnly: never changes the page, so it never shows a confirm card.
 pub async fn browser_read(args: Value) -> Result<Value, String> {
-    let verb = args
-        .get("verb")
-        .and_then(|v| v.as_str())
-        .unwrap_or("read")
-        .trim();
+    let verb = args.get("verb").and_then(|v| v.as_str()).unwrap_or("read").trim();
     match verb {
         "" | "read" => {
             let mut inner = json!({});
@@ -1526,12 +1345,7 @@ pub async fn browser_read(args: Value) -> Result<Value, String> {
             }))
         }
         "wait" => {
-            let selector = args
-                .get("selector")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let selector = args.get("selector").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
             if selector.is_empty() {
                 return Err("o8_browser_read verb 'wait' needs a 'selector'.".into());
             }
@@ -1550,19 +1364,13 @@ pub async fn browser_read(args: Value) -> Result<Value, String> {
             for attempt in 0..10u32 {
                 let resp = browser_verb("probe", inner.clone()).await?;
                 if resp.get("ok").and_then(|v| v.as_bool()) == Some(true) {
-                    return Ok(
-                        json!({ "ok": true, "found": true, "selector": selector, "attempts": attempt + 1 }),
-                    );
+                    return Ok(json!({ "ok": true, "found": true, "selector": selector, "attempts": attempt + 1 }));
                 }
                 tokio::time::sleep(std::time::Duration::from_millis(800)).await;
             }
-            Ok(
-                json!({ "ok": true, "found": false, "selector": selector, "note": "still not present after ~8s of waiting" }),
-            )
+            Ok(json!({ "ok": true, "found": false, "selector": selector, "note": "still not present after ~8s of waiting" }))
         }
-        other => Err(format!(
-            "o8_browser_read verb must be 'read' or 'wait' — got '{other}'."
-        )),
+        other => Err(format!("o8_browser_read verb must be 'read' or 'wait' — got '{other}'.")),
     }
 }
 
@@ -1570,19 +1378,10 @@ pub async fn browser_read(args: Value) -> Result<Value, String> {
 /// type into a field, or open a URL. Reversible: each action shows a confirm card
 /// (the page can be a real logged-in site), the same posture as term_send.
 pub async fn browser_act(args: Value) -> Result<Value, String> {
-    let verb = args
-        .get("verb")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim();
+    let verb = args.get("verb").and_then(|v| v.as_str()).unwrap_or("").trim();
     match verb {
         "click" => {
-            let selector = args
-                .get("selector")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let selector = args.get("selector").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
             if selector.is_empty() {
                 return Err("o8_browser_act verb 'click' needs a 'selector'.".into());
             }
@@ -1594,17 +1393,8 @@ pub async fn browser_act(args: Value) -> Result<Value, String> {
             }))
         }
         "type" => {
-            let selector = args
-                .get("selector")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            let text = args
-                .get("text")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            let selector = args.get("selector").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
             if selector.is_empty() {
                 return Err("o8_browser_act verb 'type' needs a 'selector'.".into());
             }
@@ -1620,21 +1410,14 @@ pub async fn browser_act(args: Value) -> Result<Value, String> {
             }))
         }
         "open" => {
-            let url = args
-                .get("url")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let url = args.get("url").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
             if url.is_empty() {
                 return Err("o8_browser_act verb 'open' needs a 'url'.".into());
             }
             let resp = browser_verb("open", json!({ "url": url })).await?;
             Ok(json!({ "ok": true, "opened": resp.get("url").cloned().unwrap_or(json!(url)) }))
         }
-        other => Err(format!(
-            "o8_browser_act verb must be 'click', 'type', or 'open' — got '{other}'."
-        )),
+        other => Err(format!("o8_browser_act verb must be 'click', 'type', or 'open' — got '{other}'.")),
     }
 }
 
@@ -1654,33 +1437,17 @@ pub async fn review_diff(args: Value) -> Result<Value, String> {
     // packet_id is a url-safe slug (pkt-…), so direct interpolation is safe.
     let diff = o8_http::get_json(&format!("/api/lanes/{packet_id}/diff?maxBytes=2000")).await?;
     if diff.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-        let note = diff
-            .get("note")
-            .and_then(|v| v.as_str())
-            .unwrap_or("no diff available");
-        return Err(format!(
-            "Couldn't read the diff for \u{201c}{label}\u{201d}: {note}"
-        ));
+        let note = diff.get("note").and_then(|v| v.as_str()).unwrap_or("no diff available");
+        return Err(format!("Couldn't read the diff for \u{201c}{label}\u{201d}: {note}"));
     }
-    let stat = diff
-        .get("stat")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let branch = diff
-        .get("branch")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let stat = diff.get("stat").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let branch = diff.get("branch").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
     // Review state — best-effort; the diffstat is the primary payload.
-    let state = o8_http::get_json(&format!(
-        "/api/orchestrator/review-state?packetId={packet_id}"
-    ))
-    .await
-    .ok()
-    .and_then(|r| r.get("state").and_then(|v| v.as_str()).map(str::to_string));
+    let state = o8_http::get_json(&format!("/api/orchestrator/review-state?packetId={packet_id}"))
+        .await
+        .ok()
+        .and_then(|r| r.get("state").and_then(|v| v.as_str()).map(str::to_string));
 
     Ok(json!({
         "ok": true,
@@ -1704,12 +1471,7 @@ pub async fn review_diff(args: Value) -> Result<Value, String> {
 /// uses — so the canvas is the stage the operator watches, and the agent's own
 /// mutations stay gated downstream by o8's review/approval pipeline.
 pub async fn delegate(args: Value) -> Result<Value, String> {
-    let task = args
-        .get("task")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let task = args.get("task").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if task.is_empty() {
         return Err("o8_delegate needs a 'task' — what should the agent do?".into());
     }
@@ -1718,10 +1480,7 @@ pub async fn delegate(args: Value) -> Result<Value, String> {
     // spoken-friendly error if the orchestrator isn't ready (no repo scoped /
     // busy / not connected).
     let resp = canvas_intent("send-prompt", json!({ "text": task })).await?;
-    let navigated = resp
-        .get("navigated")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(false);
+    let navigated = resp.get("navigated").and_then(|v| v.as_bool()).unwrap_or(false);
     Ok(json!({
         "ok": true,
         "delegated": true,
@@ -1740,9 +1499,7 @@ fn qenc(s: &str) -> String {
     let mut out = String::with_capacity(s.len() * 3);
     for b in s.bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
-                out.push(b as char)
-            }
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(b as char),
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -1767,10 +1524,7 @@ async fn resolve_spec_repo(args: &Value) -> Result<String, String> {
         .map(|arr| {
             arr.iter()
                 .filter_map(|r| {
-                    r.get("localPath")
-                        .and_then(|v| v.as_str())
-                        .filter(|s| !s.is_empty())
-                        .map(str::to_string)
+                    r.get("localPath").and_then(|v| v.as_str()).filter(|s| !s.is_empty()).map(str::to_string)
                 })
                 .collect()
         })
@@ -1784,10 +1538,7 @@ async fn resolve_spec_repo(args: &Value) -> Result<String, String> {
 
 fn spec_ok(resp: Value, done: &str) -> Result<Value, String> {
     if resp.get("ok").and_then(|v| v.as_bool()) == Some(false) {
-        let err = resp
-            .get("error")
-            .and_then(|v| v.as_str())
-            .unwrap_or("o8 returned an error");
+        let err = resp.get("error").and_then(|v| v.as_str()).unwrap_or("o8 returned an error");
         return Err(format!("Couldn't annotate the spec: {err}"));
     }
     Ok(json!({ "ok": true, "done": done }))
@@ -1799,89 +1550,42 @@ fn spec_ok(resp: Value, done: &str) -> Result<Value, String> {
 /// operator AUTHORS o8.md; voice only ANNOTATES (no overwrite verb). Thin call to
 /// /api/repo-spec, the same route the o8_spec_* MCP tools + the spec panel use.
 pub async fn spec_annotate(args: Value) -> Result<Value, String> {
-    let verb = args
-        .get("verb")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim();
+    let verb = args.get("verb").and_then(|v| v.as_str()).unwrap_or("").trim();
     let repo_path = resolve_spec_repo(&args).await?;
     let base = format!("/api/repo-spec?repoPath={}", qenc(&repo_path));
     match verb {
         "comment" => {
-            let body = args
-                .get("body")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
             if body.is_empty() {
-                return Err(
-                    "o8_spec_annotate verb 'comment' needs a 'body' — what's the comment?".into(),
-                );
+                return Err("o8_spec_annotate verb 'comment' needs a 'body' — what's the comment?".into());
             }
             let mut payload = json!({ "body": body, "author": "Symon" });
-            if let Some(a) = args
-                .get("anchor")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
+            if let Some(a) = args.get("anchor").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
                 payload["anchor"] = json!(a);
             }
-            spec_ok(
-                o8_http::post_json(&format!("{base}&action=comment"), payload).await?,
-                "commented on the spec",
-            )
+            spec_ok(o8_http::post_json(&format!("{base}&action=comment"), payload).await?, "commented on the spec")
         }
         "reply" => {
-            let parent = args
-                .get("parentId")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
-            let message = args
-                .get("message")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let parent = args.get("parentId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+            let message = args.get("message").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
             if parent.is_empty() || message.is_empty() {
                 return Err("o8_spec_annotate verb 'reply' needs 'parentId' and 'message'.".into());
             }
             let payload = json!({ "parentId": parent, "message": message, "author": "Symon" });
-            spec_ok(
-                o8_http::post_json(&format!("{base}&action=reply"), payload).await?,
-                "replied on the spec",
-            )
+            spec_ok(o8_http::post_json(&format!("{base}&action=reply"), payload).await?, "replied on the spec")
         }
         "resolve" => {
-            let target = args
-                .get("targetId")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .trim()
-                .to_string();
+            let target = args.get("targetId").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
             if target.is_empty() {
                 return Err("o8_spec_annotate verb 'resolve' needs a 'targetId'.".into());
             }
             let mut payload = json!({ "targetId": target });
-            if let Some(s) = args
-                .get("summary")
-                .and_then(|v| v.as_str())
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-            {
+            if let Some(s) = args.get("summary").and_then(|v| v.as_str()).map(str::trim).filter(|s| !s.is_empty()) {
                 payload["summary"] = json!(s);
             }
-            spec_ok(
-                o8_http::post_json(&format!("{base}&action=resolve"), payload).await?,
-                "resolved the spec item",
-            )
+            spec_ok(o8_http::post_json(&format!("{base}&action=resolve"), payload).await?, "resolved the spec item")
         }
-        other => Err(format!(
-            "o8_spec_annotate verb must be 'comment', 'reply', or 'resolve' — got '{other}'."
-        )),
+        other => Err(format!("o8_spec_annotate verb must be 'comment', 'reply', or 'resolve' — got '{other}'.")),
     }
 }
 
@@ -1899,15 +1603,9 @@ mod canvas_tests {
 
     #[test]
     fn ask_brain_carries_only_question() {
-        let body = canvas_intent_body(
-            "ask-brain",
-            &json!({ "question": "why the merge gate?", "text": "ignored" }),
-        );
+        let body = canvas_intent_body("ask-brain", &json!({ "question": "why the merge gate?", "text": "ignored" }));
         assert_eq!(body["args"]["question"], "why the merge gate?");
-        assert!(
-            body["args"].get("text").is_none(),
-            "unrelated keys must not leak through"
-        );
+        assert!(body["args"].get("text").is_none(), "unrelated keys must not leak through");
     }
 
     #[test]
@@ -1950,10 +1648,7 @@ mod canvas_tests {
         assert_eq!(body["args"]["task"], "the auth refactor");
         assert_eq!(body["args"]["count"], 2);
         assert_eq!(body["args"]["repo"], "o8");
-        assert!(
-            body["args"].get("text").is_none(),
-            "unrelated keys must not leak through"
-        );
+        assert!(body["args"].get("text").is_none(), "unrelated keys must not leak through");
     }
 
     #[test]
@@ -1968,17 +1663,10 @@ mod canvas_tests {
         let body = canvas_intent_body("grid", &json!({ "on": true, "text": "ignored" }));
         assert_eq!(body["verb"], "grid");
         assert_eq!(body["args"]["on"], true);
-        assert!(
-            body["args"].get("text").is_none(),
-            "unrelated keys must not leak through"
-        );
+        assert!(body["args"].get("text").is_none(), "unrelated keys must not leak through");
 
         let toggle = canvas_intent_body("grid", &json!({}));
-        assert_eq!(
-            toggle["args"],
-            json!({}),
-            "no `on` → empty args, page toggles"
-        );
+        assert_eq!(toggle["args"], json!({}), "no `on` → empty args, page toggles");
 
         assert!(CANVAS_VERBS.contains(&"grid"));
     }

@@ -4,20 +4,11 @@ use super::{as_escape, run_applescript};
 use serde_json::{json, Value};
 
 pub async fn search(args: Value) -> Result<Value, String> {
-    let query = args
-        .get("query")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if query.is_empty() {
         return Err("query is required".into());
     }
-    let limit = args
-        .get("limit")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(5)
-        .max(1);
+    let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(5).max(1);
     let query_esc = as_escape(&query);
 
     // NOTE: aqua used `min(200, …)` which is not a standard AppleScript
@@ -59,25 +50,12 @@ pub async fn search(args: Value) -> Result<Value, String> {
 }
 
 pub async fn create(args: Value) -> Result<Value, String> {
-    let title = args
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if title.is_empty() {
         return Err("title is required".into());
     }
-    let body = args
-        .get("body")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
-    let folder = args
-        .get("folder")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
+    let folder = args.get("folder").and_then(|v| v.as_str()).unwrap_or("").to_string();
 
     let folder_clause = if folder.is_empty() {
         String::new()
@@ -102,20 +80,11 @@ pub async fn create(args: Value) -> Result<Value, String> {
 }
 
 pub async fn append(args: Value) -> Result<Value, String> {
-    let title = args
-        .get("title")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let title = args.get("title").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if title.is_empty() {
         return Err("title is required".into());
     }
-    let text = args
-        .get("text")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let text = args.get("text").and_then(|v| v.as_str()).unwrap_or("").to_string();
     if text.is_empty() {
         return Err("text is required".into());
     }

@@ -33,11 +33,7 @@ pub async fn volume(args: Value) -> Result<Value, String> {
 
 fn volume_sync(args: Value) -> Result<Value, String> {
     let action = args.get("action").and_then(|v| v.as_str()).unwrap_or("get");
-    let step = args
-        .get("amount")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(15)
-        .clamp(1, 100);
+    let step = args.get("amount").and_then(|v| v.as_i64()).unwrap_or(15).clamp(1, 100);
     let (current, muted) = read_state()?;
 
     let target = match action {

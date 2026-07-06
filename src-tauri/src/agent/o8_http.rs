@@ -80,11 +80,7 @@ pub async fn post_json(path: &str, body: Value) -> Result<Value, String> {
 /// `/api/cortex/ask/answer` synthesizes with an LLM and regularly exceeds the
 /// default 20s (measured 24s on a trivial question; the MCP `cortex_ask`
 /// twin uses a 90s override for the same reason).
-pub async fn post_json_timeout(
-    path: &str,
-    body: Value,
-    timeout_secs: u64,
-) -> Result<Value, String> {
+pub async fn post_json_timeout(path: &str, body: Value, timeout_secs: u64) -> Result<Value, String> {
     let url = format!("{}{}", base(), path);
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(timeout_secs))

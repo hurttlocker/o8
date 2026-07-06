@@ -9,12 +9,7 @@ use super::{as_escape, run_applescript};
 use serde_json::{json, Value};
 
 pub async fn search(args: Value) -> Result<Value, String> {
-    let query = args
-        .get("query")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let query = args.get("query").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if query.is_empty() {
         return Err("query is required".into());
     }
@@ -24,11 +19,7 @@ pub async fn search(args: Value) -> Result<Value, String> {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("INBOX")
         .to_string();
-    let limit = args
-        .get("limit")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(10)
-        .max(1);
+    let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(10).max(1);
     let query = as_escape(&query);
     let mailbox = as_escape(&mailbox);
 
@@ -63,21 +54,10 @@ pub async fn read(args: Value) -> Result<Value, String> {
         .filter(|s| !s.trim().is_empty())
         .unwrap_or("INBOX")
         .to_string();
-    let unread_only = args
-        .get("unread_only")
-        .and_then(|v| v.as_bool())
-        .unwrap_or(true);
-    let limit = args
-        .get("limit")
-        .and_then(|v| v.as_i64())
-        .unwrap_or(5)
-        .max(1);
+    let unread_only = args.get("unread_only").and_then(|v| v.as_bool()).unwrap_or(true);
+    let limit = args.get("limit").and_then(|v| v.as_i64()).unwrap_or(5).max(1);
     let mailbox = as_escape(&mailbox);
-    let read_filter = if unread_only {
-        "whose read status is false"
-    } else {
-        ""
-    };
+    let read_filter = if unread_only { "whose read status is false" } else { "" };
 
     let script = format!(
         r#"
@@ -109,26 +89,12 @@ end tell
 }
 
 pub async fn draft(args: Value) -> Result<Value, String> {
-    let to = args
-        .get("to")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
-    let subject = args
-        .get("subject")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let to = args.get("to").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
+    let subject = args.get("subject").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if to.is_empty() || subject.is_empty() {
         return Err("to and subject are required".into());
     }
-    let body = args
-        .get("body")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .to_string();
+    let body = args.get("body").and_then(|v| v.as_str()).unwrap_or("").to_string();
     let to_esc = as_escape(&to);
     let subject_esc = as_escape(&subject);
     let body_esc = as_escape(&body);
@@ -158,12 +124,7 @@ end tell
 }
 
 pub async fn send_draft(args: Value) -> Result<Value, String> {
-    let subject = args
-        .get("subject")
-        .and_then(|v| v.as_str())
-        .unwrap_or("")
-        .trim()
-        .to_string();
+    let subject = args.get("subject").and_then(|v| v.as_str()).unwrap_or("").trim().to_string();
     if subject.is_empty() {
         return Err("subject is required".into());
     }

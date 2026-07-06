@@ -116,17 +116,9 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
         messages.push(message.clone());
 
         for call in &tool_calls {
-            let call_id = call
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            let call_id = call.get("id").and_then(|v| v.as_str()).unwrap_or("").to_string();
             let func = call.get("function").cloned().unwrap_or(json!({}));
-            let tool_name = func
-                .get("name")
-                .and_then(|v| v.as_str())
-                .unwrap_or("")
-                .to_string();
+            let tool_name = func.get("name").and_then(|v| v.as_str()).unwrap_or("").to_string();
             // OpenAI passes tool arguments as a JSON-encoded STRING.
             let tool_args: Value = func
                 .get("arguments")
@@ -139,20 +131,20 @@ pub async fn run_loop(model: &str, intent: &str, ctx: &TaskCtx) -> Result<LoopRe
                 json!({ "taskId": ctx.task_id, "kind": "tool_call", "tool": tool_name, "args": tool_args }),
             );
 
-            let tool_result: Value = if !super::confirm_if_needed(ctx, &tool_name, &tool_args).await
-            {
-                log::info!("[symon-agent] tool {tool_name} declined by user");
-                json!({ "error": "User declined this action", "declined_by_user": true })
-            } else {
-                super::maybe_speak_filler(&mut spoke_filler, &tool_name);
-                match tools::dispatch_tool_call(&tool_name, tool_args.clone(), ctx).await {
-                    Ok(output) => output,
-                    Err(e) => {
-                        log::warn!("[symon-agent] tool {tool_name} error: {e}");
-                        json!({ "error": e })
+            let tool_result: Value =
+                if !super::confirm_if_needed(ctx, &tool_name, &tool_args).await {
+                    log::info!("[symon-agent] tool {tool_name} declined by user");
+                    json!({ "error": "User declined this action", "declined_by_user": true })
+                } else {
+                    super::maybe_speak_filler(&mut spoke_filler, &tool_name);
+                    match tools::dispatch_tool_call(&tool_name, tool_args.clone(), ctx).await {
+                        Ok(output) => output,
+                        Err(e) => {
+                            log::warn!("[symon-agent] tool {tool_name} error: {e}");
+                            json!({ "error": e })
+                        }
                     }
-                }
-            };
+                };
             // Logged AFTER the result so the ledger records the outcome —
             // the glint derivation (remembered / recovered) reads `ok`.
             tool_call_log.push(json!({
