@@ -2,10 +2,12 @@ import type { AgentSummary } from '@/lib/fleet/types';
 import { recordLaneEvent } from '@/lib/lane/events';
 import { listLanes } from '@/lib/lane/registry';
 import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
-import { continueOwnedCodexSession, interruptOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
+import { continueOwnedCodexSession, setOwnedCodexReviewDisposition } from '@/lib/codex/owned';
 import { markRepoOriginConfigured, markRepoOriginMissing } from '@/lib/repos/origin-readiness';
 import { getRuntimeInventorySnapshot } from '@/lib/runtime/inventory';
 import { getRuntime, type RuntimeId } from '@/lib/runtimes';
+import { escalateInterruptOwnedSurface } from '@/lib/runtime/interrupt-escalation';
+import { performOwnedActionWithoutInventory } from '@/lib/runtime/owned-actions';
 import {
   buildProjectTaskBrief,
   getProjectContext,
@@ -542,6 +544,8 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
     agent = findRuntimeAgent(fresh, surfaceId);
   }
   if (!agent) {
+    const ownedResult = await performOwnedActionWithoutInventory(payload, surfaceId);
+    if (ownedResult) return ownedResult;
     // Fix #3: return structured error instead of throwing across the API boundary
     return actionUnavailable(payload, surfaceId, '', 'Runtime surface not found.');
   }
@@ -639,16 +643,19 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
             'No active IDE-owned Codex run is currently in flight, so there is nothing to interrupt.',
           );
         }
-        const result = await interruptOwnedCodexSession(runtimeSurface.id);
+        const result = await escalateInterruptOwnedSurface(runtimeSurface.id);
+        if (!result) {
+          return unavailable(agent, payload.action, 'Owned Codex interrupt target could not be resolved.');
+        }
         return {
-          ok: result.interrupted,
+          ok: result.confirmedDead,
           action: payload.action,
           surfaceId: runtimeSurface.id,
           runtime: agent.runtime,
           clientMutationId: payload.clientMutationId,
-          status: 'completed',
+          status: result.confirmedDead ? 'completed' : 'unavailable',
           note: result.note,
-          aborted: result.interrupted,
+          aborted: result.confirmedDead,
         };
       }
 
@@ -701,6 +708,8 @@ export async function performRuntimeAction(payload: RuntimeActionRequest): Promi
       }
 
       if (payload.action === 'stop' || payload.action === 'interrupt') {
+        const ownedResult = await performOwnedActionWithoutInventory(payload, runtimeSurface.id);
+        if (ownedResult) return ownedResult;
         if (!runtime.capabilities.interrupt) {
           return unavailable(agent, payload.action, `${agent.runtime} does not support interrupt.`);
         }

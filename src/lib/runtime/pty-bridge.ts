@@ -55,7 +55,7 @@ export async function isBridgeSessionAlive(sessionName: string): Promise<boolean
   }
 }
 
-export async function signalBridgeTerminalSession(sessionName: string, signal: 'SIGINT' | 'SIGTERM' = 'SIGTERM') {
+export async function signalBridgeTerminalSession(sessionName: string, signal: NodeJS.Signals = 'SIGTERM') {
   const response = await fetch(bridgeUrl('/terminal-signal'), {
     method: 'POST',
     headers: {

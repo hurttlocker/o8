@@ -24,6 +24,7 @@ import {
   setLaneStatus,
   attachSession,
   archiveLane,
+  appendEvent,
 } from '@/lib/lane/registry';
 import { parsePullRequestNumber } from '@/lib/lane/pr-number';
 import { rebindLaneSessionIfChanged } from '@/lib/lane/session-rebind';
@@ -539,15 +540,35 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
         }
       }
 
-      // 2) Interrupt the live session if one exists. Best-effort — the guard above
-      //    already halts the scheduler even when the process is already gone.
+      // 2) Interrupt the live session if one exists. Truthful status matters:
+      //    only show paused after the runtime confirms the worker is gone.
+      let stopOk = true;
+      let stopNote = 'No active session was attached.';
       if (lane.sessionKey) {
         try {
           const { performRuntimeAction } = await import('@/lib/runtime/actions');
-          await performRuntimeAction({ action: 'stop', surfaceId: lane.sessionKey });
+          const result = await performRuntimeAction({ action: 'stop', surfaceId: lane.sessionKey });
+          stopOk = result.ok || result.status === 'completed';
+          stopNote = result.note;
         } catch (err) {
-          console.warn('[lane] stop: interrupt failed (session may already be gone)', err);
+          stopOk = false;
+          stopNote = err instanceof Error ? err.message : 'Interrupt failed.';
         }
+      }
+
+      if (!stopOk) {
+        appendEvent(command.laneId, 'interrupt_failed', actor, {
+          packetId: lane.packetId,
+          sessionKey: lane.sessionKey,
+          note: stopNote,
+        });
+        setLaneStatus(command.laneId, 'running', actor, 'interrupt_failed');
+        return {
+          ok: false,
+          laneId: command.laneId,
+          note: `Stop guard is held, but the live worker did not exit: ${stopNote}`,
+          lane: getLane(command.laneId) ?? undefined,
+        };
       }
 
       setLaneStatus(command.laneId, 'paused', actor, 'operator_stopped');

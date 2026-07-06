@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { requirePanelAuth } from '@/lib/panel/auth';
 import { resolveRequestPrincipal } from '@/lib/auth/principal';
 import { steerPacket } from '@/lib/orchestrator/operator-mission-service';
+import { SteerPacketUnavailableError } from '@/lib/orchestrator/operator-mission-service/steer';
 import { asRecord, operatorError, operatorSuccess, parseJsonBody } from '../_utils';
 
 export const runtime = 'nodejs';
@@ -48,6 +49,9 @@ export async function POST(request: NextRequest) {
     return operatorSuccess(result);
   } catch (error) {
     const messageText = error instanceof Error ? error.message : 'Unable to steer packet.';
+    if (error instanceof SteerPacketUnavailableError) {
+      return operatorError(error.code, messageText, 409, error);
+    }
     return operatorError('steer_failed', messageText, 500, error);
   }
 }
