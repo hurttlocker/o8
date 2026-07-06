@@ -213,6 +213,9 @@ export type LaneEventVerb =
   // Review card invalidated because the worker resumed activity after review.
   // Payload: { reason, source, surfaceId, packetId, worktreePath }
   | 'review_invalidated'
+  // Review pin carried across a rebase because patch-id proved identical content.
+  // Payload: { from, to, patchId, packetId }
+  | 'review_carried_across_rebase'
   // Session rules governed this packet at dispatch (#1329). Snapshot of the
   // exact operator session rules injected into the worker prompt, so review is
   // "what changed, under which constraints." Payload: { threadId, ruleCount, rules }
@@ -254,6 +257,8 @@ export interface LaneCommandResult {
   approvalId?: string;
   /** Merge-specific — true only when `git push origin <baseBranch>` also succeeded */
   pushedToOrigin?: boolean;
+  /** Merge-specific — main checkout HEAD after a successful fast-forward */
+  mergeSha?: string;
   /** Merge-specific — captured when the push failed so the caller can surface it */
   pushError?: string;
   /** Merge-specific — expected worktree HEAD when optimistic locking rejects drift */
