@@ -17,9 +17,10 @@
 
 import { execFile } from 'node:child_process';
 import { stat } from 'node:fs';
-import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+
+import { ensureCliSymlink, wellKnownCliDirs } from './cli-locate';
 
 const execFileAsync = promisify(execFile);
 const statAsync = promisify(stat);
@@ -30,7 +31,7 @@ export interface ResolvedCli {
   /** Absolute path, symlinks resolved where possible. */
   path: string;
   /** Which strategy found this binary. */
-  source: 'env' | 'which' | 'login-shell' | 'npm-global' | 'asdf' | 'volta' | 'fnm' | 'brew' | 'default';
+  source: 'env' | 'which' | 'login-shell' | 'scan' | 'npm-global' | 'asdf' | 'volta' | 'fnm' | 'brew' | 'default';
   /** Parsed version string (if versionArgs were provided and succeeded). */
   version?: string;
   /** Unix timestamp (ms) when this result was resolved. */
@@ -215,18 +216,15 @@ async function probeVersion(
   }
 }
 
-/** Build the list of static fallback directories ordered by likelihood. */
+/**
+ * Static fallback directories, delegated to the shared cli-locate list so the
+ * onboarding detect route and dispatch-time resolution can never disagree
+ * about where CLIs live (the v0.1.548 "Claude not detected" class). Includes
+ * ~/.local/bin (Claude native installer), ~/.claude/local, bun/pnpm/deno, and
+ * per-version nvm/fnm bins that no login-shell probe reaches.
+ */
 function staticFallbackDirs(): Array<{ dir: string; source: ResolvedCli['source'] }> {
-  const home = os.homedir();
-  return [
-    { dir: path.join(home, '.npm-global', 'bin'), source: 'npm-global' },
-    { dir: path.join(home, '.asdf', 'shims'), source: 'asdf' },
-    { dir: path.join(home, '.volta', 'bin'), source: 'volta' },
-    { dir: path.join(home, '.fnm', 'aliases', 'default', 'bin'), source: 'fnm' },
-    { dir: '/opt/homebrew/bin', source: 'brew' },
-    { dir: '/usr/local/bin', source: 'default' },
-    { dir: '/usr/bin', source: 'default' },
-  ];
+  return wellKnownCliDirs().map((dir) => ({ dir, source: 'scan' as const }));
 }
 
 /**
@@ -383,6 +381,12 @@ export async function resolveCli(spec: CliResolverSpec): Promise<ResolvedCli> {
   // cache fill (10-minute TTL).
   const accept = (resolved: ResolvedCli): ResolvedCli => {
     warnOnVersionSkew(spec, resolved);
+    // Found outside the process PATH (login shell rc files, deep scan) →
+    // repair the PATH story: link into ~/.o8/bin so plain `which`, PTY
+    // terminals, and worker spawns find it too. Best-effort, never blocks.
+    if (resolved.source !== 'env' && resolved.source !== 'which') {
+      ensureCliSymlink(spec.binaryName, resolved.path);
+    }
     resolverCache.set(spec.runtimeId, { resolved, cachedAt: Date.now() });
     return resolved;
   };
