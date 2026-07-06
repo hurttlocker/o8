@@ -54,7 +54,7 @@ export function composeSupervisorInboxCardCopy(item: SupervisorInboxItem): Inbox
     case 'silent_exit_verification_failed':
       return {
         headline: 'The worker finished but o8 could not verify its work; review the diff and approve or retry.',
-        subline: supervisorMetadata(item, [verificationKind, worktree]),
+        subline: supervisorMetadata(item, [verificationKind, item.errorExcerpt, worktree]),
       };
     case 'silent_exit_no_work':
       return {
