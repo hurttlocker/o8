@@ -73,8 +73,8 @@ export async function POST(request: NextRequest) {
     return operatorError('invalid_request', 'issues must be a non-empty array.', 400);
   }
 
-  // When runtime is omitted, preserve the operator default as requested
-  // routing metadata. The worker-routing layer still launches Codex today.
+  // When runtime is omitted, preserve the effective operator default as
+  // requested routing metadata.
   const requestedRuntimeRaw = record.requestedRuntime ?? record.runtime;
   const requestedModel = record.requestedModel ?? record.model;
   const requestedRuntime = requestedRuntimeRaw === undefined || requestedRuntimeRaw === null || requestedRuntimeRaw === ''

@@ -79,12 +79,14 @@ const { addSessionRule } = await import('@/lib/db/session-rules-store');
 const mergeRoute = await import('@/app/api/orchestrator/merge/route');
 const mergePreviewRoute = await import('@/app/api/orchestrator/merge-preview/route');
 const stateRoute = await import('@/app/api/orchestrator/state/route');
+const createMissionRoute = await import('@/app/api/orchestrator/create-mission/route');
 const { createLane, findLaneByPacket, setLaneStatus } = await import('@/lib/lane/registry');
 const { listApprovalsForContext } = await import('@/lib/approvals/store');
 const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 
 afterEach(() => {
   runtimeInventoryMock.agents = [];
+  rmSync(join(dataDir, 'operator-defaults.json'), { force: true });
   for (const dir of tempDirs.splice(0)) {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -232,6 +234,37 @@ describe('seam C — typecheckAutoRetries survives the orchestrator-state persis
     // type-broken packet loops full workers forever — this asserts it persists.
     expect(packet).toBeTruthy();
     expect(packet.typecheckAutoRetries).toBe(2);
+  });
+});
+
+// ── Seam E — omitted mission runtime uses the effective paired default ──────
+
+describe('seam E — create-mission without a runtime uses the paired operator default', () => {
+  const url = 'http://localhost:3001/api/orchestrator/create-mission';
+
+  it('orchestratorBackend=codex + no explicit dispatch choice creates Claude Code packets', async () => {
+    writeFileSync(
+      join(dataDir, 'operator-defaults.json'),
+      `${JSON.stringify({ orchestratorBackend: 'codex', inAppOrchestratorEnabled: false }, null, 2)}\n`,
+      'utf-8',
+    );
+
+    const res = await createMissionRoute.POST(operatorReq(url, {
+      repoPath: process.cwd(),
+      issues: [{
+        number: 90_000_123,
+        title: 'dispatch paired default seam',
+        body: 'No runtime is specified by the caller.',
+        url: '',
+      }],
+    }));
+    expect(res.status).toBe(201);
+    const json = await res.json();
+    expect(json.ok).toBe(true);
+    const state = await (await stateRoute.GET(operatorGet('http://localhost:3001/api/orchestrator/state'))).json();
+    const packet = state.mission.packets.find((p: OrchestratorPacket) => p.id === json.result.packets[0].id);
+    expect(packet.runtime).toBe('claude-code');
+    expect(packet.workerRouting.selectedRuntime).toBe('claude-code');
   });
 });
 
