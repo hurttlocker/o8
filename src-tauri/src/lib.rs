@@ -3937,13 +3937,13 @@ fn set_canvas_material(app: tauri::AppHandle, material: String) -> Result<(), St
                     "hud" => M::HudWindow,
                     _ => M::HudWindow, // "default" and unknown ids → chrome material
                 };
-                // Canvas materials run Active so the glass stays vivid when the
-                // window loses focus; the chrome default keeps follows-window.
-                let state = if material == "default" {
-                    None
-                } else {
-                    Some(window_vibrancy::NSVisualEffectState::Active)
-                };
+                // ALWAYS Active — including "default". Boot applies the chrome
+                // HudWindow material with State::Active (#1267: stay glassy when
+                // the window loses key focus). `None` means follows-window, so
+                // restoring "default" on canvas exit downgraded the whole window
+                // to flatten-to-grey on blur for the rest of the session
+                // (operator-reported regression, 2026-07-06).
+                let state = Some(window_vibrancy::NSVisualEffectState::Active);
                 // Rounding is owned by the content-view clip (round_window_corners,
                 // applied at setup) which clips the effect view AND the webview
                 // together and tracks resize. Keep the effect view square (None)
