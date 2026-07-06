@@ -12,9 +12,13 @@ const EFFORT_LABELS: Record<ThinkingEffort, string> = {
   xhigh: 'xhigh',
 };
 
-const EFFORT_OPTIONS: ThinkingEffort[] = ['adaptive', 'low', 'medium', 'high', 'xhigh', 'max'];
+// Adaptive sits BETWEEN medium and high — that's the band it auto-picks in,
+// and its half-lit fourth bar reads the same way (operator, 2026-07-06).
+const EFFORT_OPTIONS: ThinkingEffort[] = ['low', 'medium', 'adaptive', 'high', 'xhigh', 'max'];
 const EFFORT_LEVEL: Record<ThinkingEffort, number> = {
-  adaptive: 2,
+  // Between medium (3) and high (4): adaptive auto-picks in that band, so its
+  // bars fill 3 solid + a half-lit fourth — reading as "between medium and high".
+  adaptive: 3.5,
   low: 1,
   medium: 3,
   high: 4,
@@ -47,7 +51,12 @@ function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; acti
   return (
     <span aria-hidden="true" style={{ display: 'inline-flex', alignItems: 'flex-end', gap: 1.25, width: 18, height: 9, flexShrink: 0 }}>
       {Array.from({ length: 6 }).map((_, index) => {
-        const filled = index < level;
+        const full = index < Math.floor(level);
+        // Fractional step (adaptive's 3.5): the boundary bar is half-lit, so
+        // adaptive reads as sitting between medium and high. Integer levels never
+        // trigger this, so every other option renders exactly as before.
+        const partial = !full && index < level;
+        const on = full || partial;
         return (
           <span
             key={index}
@@ -55,8 +64,8 @@ function ThinkingBars({ effort, active = false }: { effort: ThinkingEffort; acti
               width: 2,
               height: 2.25 + (index * 0.8),
               borderRadius: 999,
-              background: filled ? color : 'color-mix(in srgb, var(--t-text-faint) 22%, transparent)',
-              opacity: filled ? 1 : 0.7,
+              background: on ? color : 'color-mix(in srgb, var(--t-text-faint) 22%, transparent)',
+              opacity: full ? 1 : partial ? 0.5 : 0.7,
             }}
           />
         );
