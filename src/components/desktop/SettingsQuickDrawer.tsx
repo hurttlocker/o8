@@ -26,6 +26,7 @@ import {
   type DesktopAuthError,
 } from '@/lib/auth/desktop-auth-error';
 import { useTheme } from '@/lib/theme/context';
+import { useEntitlement } from '@/lib/entitlement/context';
 import { openExternalUrl } from '@/lib/desktop/open-external';
 import type { PaletteId } from '@/lib/theme/registry';
 import { SignInErrorCard } from '@/components/desktop/SignInErrorCard';
@@ -490,6 +491,10 @@ export function SettingsQuickDrawer({
   const [usageState, setUsageState] = useState<UsageState>({ status: 'idle', snapshot: null, error: null });
   const auth = useO8Auth();
   const { paletteId, setPalette } = useTheme();
+  // CLI token telemetry is Founders-mode content (epic #1450) — visibility
+  // only; the /api/panel/cli-usage route stays gated the same either way.
+  const { founder, plan } = useEntitlement();
+  const foundersMode = founder !== null || plan === 'founder';
   const [version, setVersion] = useState<string | null>(null);
   const [updateStatus, setUpdateStatus] = useState<'idle' | 'checking' | 'current' | 'available'>('idle');
 
@@ -629,6 +634,8 @@ export function SettingsQuickDrawer({
             <ThemeToggle paletteId={paletteId} setPalette={setPalette} />
           </div>
 
+          {foundersMode ? (
+            <>
           <div style={separatorStyle()} />
 
           <RowButton
@@ -704,6 +711,8 @@ export function SettingsQuickDrawer({
                 </div>
               ) : null}
             </div>
+          ) : null}
+            </>
           ) : null}
 
           <div style={separatorStyle()} />
