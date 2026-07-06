@@ -117,8 +117,33 @@ export interface CommitSummary {
   age: string;
 }
 
+export interface ActivityCiItem {
+  kind: 'ci';
+  id: number;
+  title: string;
+  status: string;
+  conclusion: string;
+  branch: string;
+  workflow: string;
+  age: string;
+  ts: number;
+  repo: string;
+  headSha?: string;
+}
+
+export interface ActivityCommitItem {
+  kind: 'commit';
+  hash: string;
+  message: string;
+  age: string;
+  ts: number;
+  repo?: string;
+  groupedCiRun?: ActivityCiItem;
+  groupedPushEvent?: EventEntry;
+}
+
 export type ActivityItem =
-  | { kind: 'commit'; hash: string; message: string; age: string; ts: number; repo?: string }
+  | ActivityCommitItem
   | { kind: 'event'; data: EventEntry; ts: number }
   | {
       kind: 'issue';
@@ -151,7 +176,7 @@ export type ActivityItem =
       checkSummary?: { passed: number; failed: number; pending: number };
       failingChecks?: string[];
     }
-  | { kind: 'ci'; id: number; title: string; status: string; conclusion: string; branch: string; workflow: string; age: string; ts: number; repo: string }
+  | ActivityCiItem
   | { kind: 'packet'; packet: OrchestratorPacket; ts: number; repo?: string };
 
 export type RepoTaskLaunchRequest =

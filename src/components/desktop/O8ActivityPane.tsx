@@ -36,6 +36,7 @@ import {
   type RepoActivityData,
 } from './o8-activity-helpers';
 import { repoSlugFromRemote } from './canvas-utils';
+import { groupActivityByCommitSha } from './o8-activity-grouping';
 import { useOrchestratorData } from './orchestrator-data-context';
 import { O8ActivityPacketRow } from './o8-panel/O8ActivityPacketRow';
 import { O8RepoSelector } from './o8-panel/O8RepoSelector';
@@ -82,6 +83,12 @@ const FILTER_TABS_WITH_PACKETS = [
   ...FILTER_TABS,
   { key: 'packet' as O8FeedFilter, label: 'Packets', icon: (c: string) => <IconZap size={11} color={c} /> },
 ];
+
+function activityItemMatchesFilter(item: ActivityItem, filter: O8FeedFilter) {
+  if (filter === 'all') return true;
+  if (filter === 'ci' && item.kind === 'commit' && item.groupedCiRun) return true;
+  return item.kind === filter;
+}
 
 /** Returns epoch milliseconds parsed from an optional ISO date string, or null when absent or unparseable. */
 function parseTs(value?: string | null): number | null {
@@ -367,8 +374,7 @@ export const O8ActivityPane = memo(function O8ActivityPane({
 
   // Build sorted timeline
   const allItems = useMemo<ActivityItem[]>(() => {
-    const timeline = [...data.commits, ...data.prs, ...data.issues, ...data.ciRuns, ...packetItems];
-    timeline.sort((a, b) => b.ts - a.ts);
+    const timeline = groupActivityByCommitSha([...data.commits, ...data.prs, ...data.issues, ...data.ciRuns, ...packetItems]);
     return timeline.slice(0, 50);
   }, [data, packetItems]);
 
@@ -376,13 +382,13 @@ export const O8ActivityPane = memo(function O8ActivityPane({
     const c: Record<O8FeedFilter, number> = { all: allItems.length, commit: 0, issue: 0, pr: 0, ci: 0, packet: 0 };
     for (const item of allItems) {
       if (item.kind in c) c[item.kind as O8FeedFilter]++;
+      if (item.kind === 'commit' && item.groupedCiRun) c.ci++;
     }
     return c;
   }, [allItems]);
 
   const filtered = useMemo(() => {
-    if (filter === 'all') return allItems;
-    return allItems.filter((item) => item.kind === filter);
+    return allItems.filter((item) => activityItemMatchesFilter(item, filter));
   }, [allItems, filter]);
 
   // Group by day

@@ -38,6 +38,7 @@ export async function fetchGitHubWorkflowRuns(repoFullName: string, limit = 15) 
       display_title?: string | null;
       event?: string | null;
       head_branch?: string | null;
+      head_sha?: string | null;
       status?: string | null;
       conclusion?: string | null;
       created_at?: string | null;
@@ -52,6 +53,7 @@ export async function fetchGitHubWorkflowRuns(repoFullName: string, limit = 15) 
     displayTitle: run.display_title ?? '',
     event: run.event ?? '',
     headBranch: run.head_branch ?? '',
+    headSha: run.head_sha ?? '',
     status: run.status ?? '',
     conclusion: run.conclusion ?? '',
     createdAt: run.created_at ?? '',
