@@ -1,5 +1,7 @@
 # Improvement plans — 2026-07-06 audit
 
+> **Execution record (same day):** 9 of 10 merged to main via o8 dispatch (Codex workers, refute-reviewed, ancestry-verified): 001, 003, 004, 005, 006, 007, 009, 010, plus 008. **002 parked unmerged** — two worker attempts produced speculative client patches without reproducing #1459; evidence posted on the issue; needs an interactive debugging session. Follow-ups filed: #1467 (wire isTerminalRuntimeStatus into pollers), #1456 stays open for the real Node-24 ABI fix (003 shipped the visible-error floor). Dogfood yield: #1463–#1466, #1468–#1470.
+
 Ranked output of a five-scout `/improve` sweep (bugs, perf, debt, tests, build-next) adjudicated by Fable 5. Each plan is self-contained: an executor should need nothing beyond the plan file. Every executed plan gets a `reviewer`-agent refute pass before it counts as done. Beta-gate context: the gate is a clean 3-concurrent-mission scoring day on 0.1.555 — plans 001–004 exist to make that day scoreable.
 
 | # | Plan | Theme | Impact | Effort | Executor |
