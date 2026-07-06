@@ -4940,6 +4940,9 @@ let diffDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 let reviewPollTimer: ReturnType<typeof setInterval> | null = null;
 const reviewTargetHashes = new Map<string, string>();
 const REVIEW_POLL_INTERVAL_MS = 10_000;
+const REVIEW_SCAN_CONCURRENCY = 3;
+let reviewRefreshInFlight = false;
+let reviewRefreshRerequest = false;
 
 type GitWorktreeRecord = {
   path: string;
@@ -5082,7 +5085,7 @@ async function getReviewWatchTargets() {
 }
 
 function broadcastDiffStats() {
-  if (clients.size === 0) return;
+  if (!hasReviewSubscribers()) return;
 
   execFile('sh', ['-c', 'git diff --shortstat origin/main..HEAD 2>/dev/null; git diff --shortstat 2>/dev/null'], {
     cwd: REPO_ROOT,
@@ -5111,7 +5114,7 @@ function broadcastDiffStats() {
 }
 
 async function broadcastReviewFileChanges() {
-  if (clients.size === 0) return;
+  if (!hasReviewSubscribers()) return;
 
   const targets = await getReviewWatchTargets();
   const liveTargetKeys = new Set(targets.map((target) => target.workspacePath));
@@ -5122,7 +5125,8 @@ async function broadcastReviewFileChanges() {
     }
   }
 
-  for (const target of targets) {
+  let nextIndex = 0;
+  const scanTarget = async (target: typeof targets[number]) => {
     try {
       const summary = await getLiveReviewChangeSet(target.workspacePath, target.repoPath, target.sessionKey);
       const hash = JSON.stringify(summary.changedFiles.map((file) => [
@@ -5133,7 +5137,7 @@ async function broadcastReviewFileChanges() {
       ]));
 
       if (reviewTargetHashes.get(target.workspacePath) === hash) {
-        continue;
+        return;
       }
       reviewTargetHashes.set(target.workspacePath, hash);
 
@@ -5171,16 +5175,51 @@ async function broadcastReviewFileChanges() {
     } catch {
       // Ignore transient git failures on disappearing worktrees
     }
+  };
+
+  const workers = Array.from({ length: Math.min(REVIEW_SCAN_CONCURRENCY, targets.length) }, async () => {
+    while (nextIndex < targets.length) {
+      const target = targets[nextIndex];
+      nextIndex += 1;
+      if (!target) continue;
+      await scanTarget(target);
+    }
+  });
+  await Promise.all(workers);
+}
+
+function hasReviewSubscribers() {
+  for (const client of clients.values()) {
+    if (client.ws.readyState !== WebSocket.OPEN) continue;
+    if (client.realtimeSubscriptions.some((subscription) => subscription.stream === 'global')) return true;
+  }
+  return false;
+}
+
+async function runCoalescedReviewRefresh() {
+  if (reviewRefreshInFlight) {
+    reviewRefreshRerequest = true;
+    return;
+  }
+  reviewRefreshInFlight = true;
+  try {
+    do {
+      reviewRefreshRerequest = false;
+      await broadcastReviewFileChanges();
+      broadcastDiffStats();
+      scheduleRealtimeRuntimeRefresh({ reason: 'review.refresh', fresh: true });
+      scheduleRealtimeMobileInboxRefresh(250, true);
+    } while (reviewRefreshRerequest);
+  } finally {
+    reviewRefreshInFlight = false;
   }
 }
 
 function scheduleReviewRefresh(delayMs = 500) {
   if (diffDebounceTimer) clearTimeout(diffDebounceTimer);
   diffDebounceTimer = setTimeout(() => {
-    void broadcastReviewFileChanges();
-    broadcastDiffStats();
-    scheduleRealtimeRuntimeRefresh({ reason: 'review.refresh', fresh: true });
-    scheduleRealtimeMobileInboxRefresh(250, true);
+    diffDebounceTimer = null;
+    void runCoalescedReviewRefresh();
   }, delayMs);
 }
 
@@ -5209,7 +5248,7 @@ if (existsSync(GIT_DIR)) {
 }
 
 reviewPollTimer = setInterval(() => {
-  void broadcastReviewFileChanges();
+  scheduleReviewRefresh(0);
 }, REVIEW_POLL_INTERVAL_MS);
 if (reviewPollTimer.unref) reviewPollTimer.unref();
 
