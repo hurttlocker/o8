@@ -9,8 +9,9 @@
 'use client';
 
 import { useEffect, useState } from 'react';
+import { MODEL_IDS } from '@/lib/models';
 
-const FALLBACK_MODEL = 'claude-opus-4-8';
+const FALLBACK_MODEL = MODEL_IDS.orchestratorDefault;
 
 let cached: string | null = null;
 

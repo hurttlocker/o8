@@ -28,7 +28,7 @@ use flac::{
 use prompt::{app_category, build_prompt, AppCategory};
 
 /// Use the full Flash model (supports audio + vision + text).
-pub const GEMINI_MODEL: &str = "gemini-3-flash-preview";
+pub const GEMINI_MODEL: &str = crate::models::GEMINI_3_FLASH_PREVIEW;
 
 /// Timeout — audio upload + inference takes longer than text-only.
 /// A 30-second dictation is ~960KB raw WAV, but we transcode to FLAC

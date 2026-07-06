@@ -6,9 +6,10 @@ import { existsSync, readFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import type { ChatHistoryMessage } from '@/lib/chat/types';
+import { MODEL_IDS } from '@/lib/models';
 
 export const FREE_CHAT_MODEL_ID = 'deepseek/deepseek-v3.2';
-export const PAID_CHAT_MODEL_ID = 'anthropic/claude-sonnet-5';
+export const PAID_CHAT_MODEL_ID = `anthropic/${MODEL_IDS.claudeQaDefault}`;
 export const CHAT_GATEWAY_PROVIDER = 'deepseek';
 
 const ENC_PREFIX = 'enc:' as const;

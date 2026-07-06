@@ -310,7 +310,7 @@ fn vision_model() -> String {
     if !configured.contains('/') && configured.starts_with("gemini") {
         configured
     } else {
-        "gemini-3-flash-preview".to_string()
+        crate::models::GEMINI_3_FLASH_PREVIEW.to_string()
     }
 }
 

@@ -11,8 +11,10 @@
  * import cycle through `orchestrator-session.ts`.
  */
 
+import { MODEL_IDS } from '@/lib/models';
+
 /** Default Fable model; env override `O8_FABLE_MODEL`. */
-export const DEFAULT_FABLE_MODEL = 'claude-fable-5';
+export const DEFAULT_FABLE_MODEL = MODEL_IDS.fableDefault;
 
 /**
  * Env var holding the operator's BYO Anthropic API key for Fable turns. Kept
