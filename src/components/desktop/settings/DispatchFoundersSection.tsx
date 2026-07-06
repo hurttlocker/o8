@@ -10,10 +10,15 @@
  * /api/panel/operator-defaults route regardless of what the UI shows.
  */
 
+import { useState } from 'react';
 import {
   MONO_FONT_STACK,
   SettingsSegmented,
 } from './shared';
+import {
+  readAdaptiveThinkingEnabled,
+  writeAdaptiveThinkingEnabled,
+} from '@/lib/orchestrator/thinking-preferences';
 import { SettingsGroup, SettingsRow } from './grouped';
 import { CanvasGlassTuner } from './CanvasGlassTuner';
 import { LocalModelsSection } from './LocalModelsSection';
@@ -116,6 +121,9 @@ function envLocked(sources: FoundersSectionProps['sources'], field: keyof Operat
 }
 
 export function DispatchFoundersSection({ values, sources, busyField, updateField }: FoundersSectionProps) {
+  // Client-side pref (localStorage via thinking-preferences.ts) — moved here
+  // from the env-gated API Keys tab where it was unreachable (#1450 IA pass).
+  const [adaptiveThinking, setAdaptiveThinking] = useState(() => readAdaptiveThinkingEnabled());
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
     envLocked(sources, field) ? ENV_LOCKED_REASON : normal;
 
@@ -206,6 +214,14 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
                 minWidth={140}
               />
             }
+            divider
+          />
+          <SettingsRow
+            icon={<GaugeIcon />}
+            label="Adaptive orchestrator thinking"
+            subtitle="New turns default to adaptive and can stream summarized reasoning"
+            checked={adaptiveThinking}
+            onToggle={(next) => { setAdaptiveThinking(next); writeAdaptiveThinkingEnabled(next); }}
             divider
           />
           <SettingsRow
