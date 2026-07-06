@@ -132,6 +132,15 @@ pub fn config_public() -> serde_json::Value {
             "elevenlabs_api_key",
             "google_tts_api_key",
         ] {
+            // Redacted presence flag: the settings UI shows "you have a key
+            // saved" without ever receiving the value. Emit `<key>_set` BEFORE
+            // removing the secret.
+            let is_set = obj
+                .get(secret)
+                .and_then(|v| v.as_str())
+                .map(|s| !s.trim().is_empty())
+                .unwrap_or(false);
+            obj.insert(format!("{secret}_set"), serde_json::Value::Bool(is_set));
             obj.remove(secret);
         }
     }

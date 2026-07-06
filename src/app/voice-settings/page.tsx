@@ -41,7 +41,7 @@ const TABS: { id: TabId; label: string; icon: IconComp }[] = [
   { id: 'history', label: 'History', icon: ICONS.clock },
   { id: 'stats', label: 'Stats', icon: ICONS.chartBar },
   { id: 'account', label: 'Account', icon: ICONS.user },
-  { id: 'founder', label: 'Founder', icon: ICONS.crown },
+  { id: 'founder', label: 'Voice', icon: ICONS.speakerHigh },
   { id: 'agent', label: 'Agent', icon: ICONS.robot },
   { id: 'report', label: 'Report Issue', icon: ICONS.warning },
 ];

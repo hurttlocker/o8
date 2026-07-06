@@ -29,8 +29,8 @@ const focusRing = (f: boolean): CSSProperties =>
   f ? { borderColor: ACCENT, boxShadow: `0 0 0 2px ${ACCENT_GLOW}`, background: GLASS_BG_HOVER } : {};
 
 const PROVIDER_OPTS = [
-  { value: 'elevenlabs', label: 'ElevenLabs' },
-  { value: 'google', label: 'Google Cloud' },
+  { value: 'google', label: 'Google Cloud — Default (free)' },
+  { value: 'elevenlabs', label: 'ElevenLabs — your key' },
   { value: 'say', label: 'System (macOS)' },
 ];
 const MODEL_OPTS = [
@@ -67,8 +67,13 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
   const [previewing, setPreviewing] = useState(false);
   const [newName, setNewName] = useState('');
   const [nameFocus, setNameFocus] = useState(false);
+  const [elevenKeyInput, setElevenKeyInput] = useState('');
+  const [elevenKeyFocus, setElevenKeyFocus] = useState(false);
 
-  const provider = prefStr(prefs, 'tts_provider', 'elevenlabs');
+  const provider = prefStr(prefs, 'tts_provider', 'google');
+  // The raw key is stripped from voice_prefs_get; the backend hands us a redacted
+  // `elevenlabs_api_key_set` bool so we can show "you have one" without the value.
+  const elevenKeySet = prefBool(prefs, 'elevenlabs_api_key_set', false);
   const voiceId = prefStr(prefs, 'elevenlabs_voice_id', '');
   const modelId = prefStr(prefs, 'elevenlabs_model_id', 'eleven_turbo_v2_5');
   const stability = prefNum(prefs, 'elevenlabs_stability', 0.5);
@@ -101,6 +106,16 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
   };
   const deletePreset = (id: string) => setPref('voice_library', library.filter((p) => p.id !== id));
 
+  // ElevenLabs key: persisted to dictation.json (`elevenlabs_api_key`), which is
+  // exactly where Rust resolves it (`stt::keys::get_elevenlabs_key`, env-first).
+  // Un-gated — anyone can add their own key here; no key = the Google default.
+  const saveElevenKey = () => {
+    const k = elevenKeyInput.trim();
+    if (!k) return;
+    setPref('elevenlabs_api_key', k);
+    setElevenKeyInput('');
+  };
+
   const onPreview = async () => {
     setPreviewing(true);
     await ttsSpeak('This is my ElevenLabs voice — tuned the way I like it.');
@@ -109,7 +124,7 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <PageHeader icon={ICONS.crown} title="Founder" />
+      <PageHeader icon={ICONS.speakerHigh} title="Voice" />
 
       {/* Voice library */}
       <SectionCard>
@@ -141,14 +156,35 @@ export default function FounderTab({ prefs, setPref }: TabProps) {
 
       <SectionCard>
         <SectionTitle icon={ICONS.speakerHigh}>Engine</SectionTitle>
-        <ControlRow label="TTS provider" detail="Which engine reads answers and selected text aloud.">
-          <Select value={provider} onChange={(v) => setPref('tts_provider', v)} options={PROVIDER_OPTS} width={200} />
+        <SectionHint>Google Cloud is the free default voice — everyone gets it, no key needed. Switch to ElevenLabs to use your own voice (add your key below), and switch back to the default anytime, even with your key saved.</SectionHint>
+        <ControlRow label="Voice engine" detail="Which engine reads answers and selected text aloud.">
+          <Select value={provider} onChange={(v) => setPref('tts_provider', v)} options={PROVIDER_OPTS} width={220} />
         </ControlRow>
       </SectionCard>
 
       <SectionCard>
         <SectionTitle icon={ICONS.sparkle}>ElevenLabs voice</SectionTitle>
-        <SectionHint>Tune the voice, then save it to your library above. The API key is set via env or dictation.json and never shown here.</SectionHint>
+        <SectionHint>Add your ElevenLabs key to speak with your own voice — no key just uses the free Google default. Stored in your local o8 config.</SectionHint>
+        <ControlRow
+          label="ElevenLabs API key"
+          detail={elevenKeySet ? 'Your key is saved — enter a new one to replace it.' : 'Bring your own key — billed to you by ElevenLabs. No key = the free Google default.'}
+        >
+          <input
+            type="password" value={elevenKeyInput} onChange={(e) => setElevenKeyInput(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); saveElevenKey(); } }}
+            onFocus={() => setElevenKeyFocus(true)} onBlur={() => setElevenKeyFocus(false)}
+            placeholder={elevenKeySet ? '•••• saved · enter a new key to replace' : 'your ElevenLabs key'}
+            style={{ ...INPUT_BASE, ...focusRing(elevenKeyFocus) }}
+          />
+        </ControlRow>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginTop: 2, marginBottom: 10 }}>
+          <AccentButton label={elevenKeySet ? 'Replace key' : 'Save key'} onClick={saveElevenKey} />
+          {elevenKeySet ? (
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: 5, fontSize: 12, color: OK_GREEN }}>
+              <Icon icon={ICONS.check} size={13} /> Key saved
+            </span>
+          ) : null}
+        </div>
         <ControlRow label="Voice ID" detail="The ElevenLabs voice to speak with.">
           <input
             value={voiceId} onChange={(e) => setPref('elevenlabs_voice_id', e.target.value)}
@@ -349,9 +385,12 @@ function VoiceCard({ preset, active, onUse, onDelete }: { preset: VoicePreset; a
         <button
           type="button" onClick={onUse}
           style={{
-            height: 26, paddingLeft: 12, paddingRight: 12, borderRadius: 8, cursor: 'pointer',
-            border: '1px solid rgba(90,132,255,0.30)', background: hover ? 'rgba(90,132,255,0.22)' : 'rgba(90,132,255,0.14)',
-            color: ACCENT_LIGHT, fontSize: 11.5, fontFamily: SF,
+            height: 26, paddingLeft: 14, paddingRight: 14, borderRadius: 7, cursor: 'pointer',
+            border: `1px solid ${hover ? 'rgba(90,132,255,0.45)' : GLASS_BORDER_SUBTLE}`,
+            background: hover ? 'rgba(90,132,255,0.16)' : 'transparent',
+            color: ACCENT_LIGHT, fontSize: 12, fontWeight: 500, fontFamily: SF,
+            transition: `background ${TRANS_FAST}, border-color ${TRANS_FAST}`,
+            display: 'inline-flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
           }}
         >Use</button>
       )}

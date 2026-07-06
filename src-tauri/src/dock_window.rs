@@ -337,21 +337,58 @@ fn order_front_nonactivating(window: &tauri::WebviewWindow) {
 /// no inset) so the idle capsule's square top edge meets the screen top edge.
 #[cfg(target_os = "macos")]
 fn reposition(window: &tauri::WebviewWindow) {
-    let monitor = window
-        .current_monitor()
-        .ok()
-        .flatten()
-        .or_else(|| window.primary_monitor().ok().flatten());
-    let Some(monitor) = monitor else {
-        return;
+    // Runs on the main thread: the notch read touches AppKit (NSScreen), and
+    // `reposition` can be reached off-main via the Fn-down re-assert.
+    let win = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        let monitor = win
+            .current_monitor()
+            .ok()
+            .flatten()
+            .or_else(|| win.primary_monitor().ok().flatten());
+        let Some(monitor) = monitor else {
+            return;
+        };
+        let scale = monitor.scale_factor();
+        let origin_x = monitor.position().x as f64 / scale;
+        let origin_y = monitor.position().y as f64 / scale;
+        let logical_w = monitor.size().width as f64 / scale;
+        // Notch-aware anchor. On notched MacBooks (2021+ Pro, 2022+ Air) the
+        // camera notch sits dead-center at the top — exactly where this pill
+        // anchors. `NSScreen.safeAreaInsets.top` is the notch height, and it is
+        // 0 on every non-notched display — so this offset is a NO-OP everywhere
+        // except notched machines, where it tucks the pill just below the notch
+        // (+ a small gap). Fail-safe: any read failure → 0 → flush-top as before.
+        let notch = notch_inset(&win);
+        let gap = if notch > 0.0 { 4.0 } else { 0.0 };
+        let x = origin_x + (logical_w - DOCK_WIDTH) / 2.0;
+        let y = origin_y + DOCK_TOP_INSET + notch + gap;
+        let _ = win.set_position(tauri::LogicalPosition::new(x, y));
+    });
+}
+
+/// Notch height for the window's current screen (macOS 12+ notched displays).
+/// Returns 0.0 on every non-notched Mac and on any failure. MUST be called on
+/// the main thread (AppKit).
+#[cfg(target_os = "macos")]
+fn notch_inset(window: &tauri::WebviewWindow) -> f64 {
+    use objc2_app_kit::NSWindow;
+    let Ok(ptr) = window.ns_window() else {
+        return 0.0;
     };
-    let scale = monitor.scale_factor();
-    let origin_x = monitor.position().x as f64 / scale;
-    let origin_y = monitor.position().y as f64 / scale;
-    let logical_w = monitor.size().width as f64 / scale;
-    let x = origin_x + (logical_w - DOCK_WIDTH) / 2.0;
-    let y = origin_y + DOCK_TOP_INSET;
-    let _ = window.set_position(tauri::LogicalPosition::new(x, y));
+    let ptr = ptr as *mut NSWindow;
+    if ptr.is_null() {
+        return 0.0;
+    }
+    // Safety: called on the main thread; Tauri guarantees a live NSWindow for
+    // the window's lifetime.
+    unsafe {
+        let ns_window = &*ptr;
+        match ns_window.screen() {
+            Some(screen) => screen.safeAreaInsets().top,
+            None => 0.0,
+        }
+    }
 }
 
 // ── Non-macOS no-ops ──
