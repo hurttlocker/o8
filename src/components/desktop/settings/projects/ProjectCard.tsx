@@ -1,31 +1,56 @@
 'use client';
 
 /**
- * ProjectCard — single project row with header, repo chips, edit/delete
- * actions, and an embedded ProjectForm when editing. Delete uses an inline
- * confirmation strip (no native confirm modal) to match the rest of the
- * approval-cards pattern.
+ * ProjectCard — one project as ONE dense inset-grouped card (#1450 redesign,
+ * operator 2026-07-06: the old four-sub-cards layout was "too spaced out").
+ * Title row with actions, then rows: instructions preview, one row per repo
+ * (role + main pills), locks (expands only when locks exist), files. Empty
+ * sections collapse to a single quiet row instead of an empty card. Delete
+ * keeps the inline confirmation strip; editing embeds ProjectForm.
  */
 
 import { RamsButton } from '../shared';
-import { SettingsRow } from '../grouped';
-import { useState, type ReactNode } from 'react';
+import { RowDivider, SettingsGroup, SettingsRow, ValuePill } from '../grouped';
+import { useState } from 'react';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
-  RAMS_ACCENT,
-  RAMS_HAIRLINE,
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   FolderGlyph,
   PlusGlyph,
-  RepoChip,
   type ProjectContextApiResponse,
   type ProjectLockView,
 } from './shared';
 import { ProjectForm, type FormState } from './ProjectForm';
 import type { ProjectWithRepos } from '@/lib/projects/types';
 import type { RepoRegistryEntry } from '@/lib/repos/types';
+
+function DocIcon() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+      <polyline points="14 2 14 8 20 8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="13" y2="17" />
+    </svg>
+  );
+}
+
+function LockGlyph() {
+  return (
+    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" style={{ display: 'block', flexShrink: 0 }}>
+      <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+      <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+    </svg>
+  );
+}
+
+/** One-line preview for row subtitles — first line, hard cap, ellipsis. */
+function oneLine(text: string, max = 96): string {
+  const first = text.split('\n').find((line) => line.trim().length > 0)?.trim() ?? '';
+  return first.length > max ? `${first.slice(0, max - 1)}…` : first;
+}
 
 export function ProjectCard({
   project,
@@ -66,6 +91,14 @@ export function ProjectCard({
   const [brief, setBrief] = useState<string | null>(null);
   const [briefLoading, setBriefLoading] = useState(false);
   const [briefError, setBriefError] = useState<string | null>(null);
+  const [locksOpen, setLocksOpen] = useState(false);
+
+  const staleCount = locks.filter((lock) => lock.stale).length;
+  const locksValue = locks.length === 0
+    ? 'None'
+    : staleCount > 0
+      ? `${locks.length} active · ${staleCount} stale`
+      : `${locks.length} active`;
 
   const toggleBrief = () => {
     const nextOpen = !briefOpen;
@@ -86,44 +119,37 @@ export function ProjectCard({
   };
 
   return (
-    <div
-      style={{
-        position: 'relative',
-        paddingTop: 18,
-        paddingRight: 20,
-        paddingBottom: 18,
-        paddingLeft: 20,
-        borderRadius: 12,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: RAMS_HAIRLINE_SOFT,
-        background: 'color-mix(in srgb, var(--t-panel-solid, #fff) 78%, transparent)',
+    <SettingsGroup>
+      {/* Title row */}
+      <div style={{
         display: 'flex',
-        flexDirection: 'column',
-        gap: 16,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'flex-start', gap: 12 }}>
+        alignItems: 'center',
+        gap: 12,
+        minHeight: 52,
+        paddingTop: 10,
+        paddingBottom: 10,
+        paddingLeft: 14,
+        paddingRight: 14,
+      }}>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{
+          <span style={{
             fontFamily: APP_FONT_STACK,
-            fontSize: 18,
-            fontWeight: 350,
+            fontSize: 14.5,
+            fontWeight: 500,
             color: 'var(--t-text)',
-            letterSpacing: '-0.02em',
-            lineHeight: 1.2,
+            letterSpacing: '-0.015em',
           }}>
             {project.name}
-          </div>
-          <div style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 11,
+          </span>
+          <span style={{
+            fontFamily: MONO_FONT_STACK,
+            fontSize: 10.5,
             color: RAMS_INK_QUIET,
-            marginTop: 4,
-            letterSpacing: '-0.01em',
+            marginLeft: 10,
+            letterSpacing: 0,
           }}>
             {project.slug}
-          </div>
+          </span>
         </div>
 
         {!isEditing ? (
@@ -159,302 +185,226 @@ export function ProjectCard({
           </div>
         ) : null}
       </div>
+      <RowDivider />
 
-      <ProjectContextSection
+      {/* Instructions */}
+      <SettingsRow
+        icon={<DocIcon />}
         label="Instructions"
-        action={!isEditing ? 'Edit' : undefined}
-        onAction={!isEditing ? onEdit : undefined}
-      >
-        {project.description ? (
-          <div style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 13,
-            color: 'var(--t-text-secondary)',
-            lineHeight: 1.55,
-            letterSpacing: '-0.005em',
-            whiteSpace: 'pre-wrap',
-          }}>
-            {project.description}
-          </div>
-        ) : (
-          <EmptyContextText>No instructions yet.</EmptyContextText>
-        )}
-      </ProjectContextSection>
+        subtitle={project.description
+          ? oneLine(project.description)
+          : 'None yet — add standing guidance for dispatched agents'}
+        onPress={!isEditing ? onEdit : undefined}
+        chevron={!isEditing}
+        divider
+      />
 
-      <ProjectContextSection
-        label="Repositories"
-        action={!isEditing ? 'Edit' : undefined}
-        onAction={!isEditing ? onEdit : undefined}
-      >
-        {project.repos.length > 0 ? (
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {project.repos.map((link) => (
-              <span key={link.repoId} style={{ display: 'inline-flex', alignItems: 'center', gap: 5 }}>
-                <RepoChip
-                  repoName={reposById.get(link.repoId)?.name ?? link.repoId}
-                  role={link.role}
-                  rolePopoverDisabled
-                />
-                {project.mainRepoId === link.repoId ? (
-                  <span style={{
-                    fontFamily: APP_FONT_STACK,
-                    fontSize: 9,
-                    fontWeight: 400,
-                    letterSpacing: '0.08em',
-                    textTransform: 'uppercase',
-                    color: '#1d4ed8',
-                  }}>
-                    main
-                  </span>
-                ) : null}
-              </span>
-            ))}
-          </div>
-        ) : (
-          <EmptyContextText>No repos linked yet.</EmptyContextText>
-        )}
-      </ProjectContextSection>
+      {/* Repositories — one row each */}
+      {project.repos.length > 0 ? (
+        project.repos.map((link, index) => {
+          const isMain = project.mainRepoId === link.repoId;
+          return (
+            <SettingsRow
+              key={link.repoId}
+              icon={<FolderGlyph size={15} />}
+              label={reposById.get(link.repoId)?.name ?? link.repoId}
+              accessory={
+                <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                  {isMain ? <ValuePill tone="success">Main</ValuePill> : null}
+                  <ValuePill>{link.role ? link.role : 'No role'}</ValuePill>
+                </span>
+              }
+              onPress={!isEditing ? onEdit : undefined}
+              chevron={!isEditing}
+              divider={index < project.repos.length - 1}
+            />
+          );
+        })
+      ) : (
+        <SettingsRow
+          icon={<FolderGlyph size={15} />}
+          label="Repositories"
+          subtitle="None linked yet"
+          onPress={!isEditing ? onEdit : undefined}
+          chevron={!isEditing}
+        />
+      )}
+      <RowDivider />
 
-      {briefOpen ? (
-        <ProjectContextSection label="Task brief">
-          {briefLoading ? (
-            <EmptyContextText>Loading brief...</EmptyContextText>
-          ) : briefError ? (
-            <div style={{
-              fontFamily: APP_FONT_STACK,
-              fontSize: 12.5,
-              color: '#b91c1c',
-              lineHeight: 1.45,
-            }}>
-              {briefError}
-            </div>
-          ) : (
-            <pre style={{
-              margin: 0,
-              maxHeight: 220,
-              overflow: 'auto',
-              whiteSpace: 'pre-wrap',
-              fontFamily: MONO_FONT_STACK,
-              fontSize: 10.5,
-              lineHeight: 1.55,
-              color: 'var(--t-text-secondary)',
-            }}>
-              {brief ?? 'No brief loaded.'}
-            </pre>
-          )}
-        </ProjectContextSection>
-      ) : null}
-
-      <ProjectContextSection label="Locks">
-        {locks.length > 0 ? (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            {locks.slice(0, 4).map((lock) => (
-              <div
-                key={lock.laneId}
-                style={{
-                  display: 'grid',
-                  gridTemplateColumns: 'minmax(0, 1fr) auto',
-                  gap: 10,
-                  alignItems: 'center',
-                  minHeight: 30,
-                  borderRadius: 7,
-                  borderWidth: 1,
-                  borderStyle: 'solid',
-                  borderColor: lock.stale ? 'rgba(245, 158, 11, 0.25)' : RAMS_HAIRLINE_SOFT,
-                  paddingTop: 6,
-                  paddingRight: 8,
-                  paddingBottom: 6,
-                  paddingLeft: 8,
-                  background: lock.stale ? 'rgba(245, 158, 11, 0.055)' : 'transparent',
-                }}
-              >
-                <div style={{ minWidth: 0 }}>
-                  <div style={{
-                    fontFamily: APP_FONT_STACK,
-                    fontSize: 12,
-                    fontWeight: 350,
-                    color: 'var(--t-text)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {lock.label}
-                  </div>
-                  <div style={{
-                    marginTop: 2,
-                    fontFamily: APP_FONT_STACK,
-                    fontSize: 10,
-                    letterSpacing: '-0.01em',
-                    color: RAMS_INK_QUIET,
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  }}>
-                    {lock.repoName} / {lock.runtime} / {lock.branch}
-                  </div>
+      {/* Locks — expands only when there are locks */}
+      <SettingsRow
+        icon={<LockGlyph />}
+        label="Locks"
+        value={locksValue}
+        pill={staleCount > 0}
+        onPress={locks.length > 0 ? () => setLocksOpen((v) => !v) : undefined}
+        chevron={locks.length > 0}
+        divider
+      />
+      {locksOpen && locks.length > 0 ? (
+        <div style={{ paddingLeft: 54, paddingRight: 14, paddingBottom: 10, display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {locks.slice(0, 4).map((lock) => (
+            <div
+              key={lock.laneId}
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'minmax(0, 1fr) auto',
+                gap: 10,
+                alignItems: 'center',
+                minHeight: 30,
+                borderRadius: 7,
+                borderWidth: 1,
+                borderStyle: 'solid',
+                borderColor: lock.stale ? 'rgba(245, 158, 11, 0.25)' : RAMS_HAIRLINE_SOFT,
+                paddingTop: 6,
+                paddingRight: 8,
+                paddingBottom: 6,
+                paddingLeft: 8,
+                background: lock.stale ? 'rgba(245, 158, 11, 0.055)' : 'transparent',
+              }}
+            >
+              <div style={{ minWidth: 0 }}>
+                <div style={{
+                  fontFamily: APP_FONT_STACK,
+                  fontSize: 12,
+                  fontWeight: 350,
+                  color: 'var(--t-text)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {lock.label}
                 </div>
-                <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
-                  <span style={{
-                    fontFamily: APP_FONT_STACK,
-                    fontSize: 9.5,
-                    fontWeight: 400,
-                    letterSpacing: '0.1em',
-                    textTransform: 'uppercase',
-                    color: lock.stale ? '#b45309' : RAMS_INK_QUIET,
-                  }}>
-                    {lock.stale ? 'stale' : lock.status}
-                  </span>
-                  {lock.stale || lock.status === 'failed' ? (
-                    <button
-                      type="button"
-                      onClick={() => onArchiveLock(lock.laneId)}
-                      disabled={archivingLaneId === lock.laneId}
-                      style={{
-                        borderWidth: 1,
-                        borderStyle: 'solid',
-                        borderColor: 'rgba(245, 158, 11, 0.24)',
-                        borderRadius: 5,
-                        background: 'transparent',
-                        color: '#b45309',
-                        cursor: archivingLaneId === lock.laneId ? 'default' : 'pointer',
-                        paddingTop: 3,
-                        paddingRight: 7,
-                        paddingBottom: 3,
-                        paddingLeft: 7,
-                        fontFamily: APP_FONT_STACK,
-                        fontSize: 11,
-                        fontWeight: 400,
-                        letterSpacing: '-0.01em',
-                        textTransform: 'capitalize',
-                        opacity: archivingLaneId === lock.laneId ? 0.55 : 1,
-                      }}
-                    >
-                      {archivingLaneId === lock.laneId ? 'archiving' : 'archive'}
-                    </button>
-                  ) : null}
+                <div style={{
+                  marginTop: 2,
+                  fontFamily: APP_FONT_STACK,
+                  fontSize: 10,
+                  letterSpacing: '-0.01em',
+                  color: RAMS_INK_QUIET,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                }}>
+                  {lock.repoName} / {lock.runtime} / {lock.branch}
                 </div>
               </div>
-            ))}
-            {locks.length > 4 ? (
-              <EmptyContextText>{locks.length - 4} more locks hidden.</EmptyContextText>
-            ) : null}
-          </div>
-        ) : (
-          <EmptyContextText>No active locks.</EmptyContextText>
-        )}
-      </ProjectContextSection>
-
-      <ProjectContextSection label="Files">
-        <SettingsRow
-          icon={<PlusGlyph size={12} />}
-          label="Add files"
-          value="Soon"
-          disabled
-        />
-      </ProjectContextSection>
-
-      {isEditing && formProps ? (
-        <ProjectForm
-          mode="edit"
-          initial={formProps.initial}
-          repos={formProps.repos}
-          busy={formProps.busy}
-          onCancel={formProps.onCancel}
-          onSubmit={formProps.onSubmit}
-        />
-      ) : null}
-    </div>
-  );
-}
-
-function ProjectContextSection({
-  label,
-  action,
-  onAction,
-  children,
-}: {
-  label: string;
-  action?: string;
-  onAction?: () => void;
-  children: ReactNode;
-}) {
-  return (
-    <section
-      style={{
-        borderRadius: 10,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: RAMS_HAIRLINE_SOFT,
-        paddingTop: 12,
-        paddingRight: 14,
-        paddingBottom: 12,
-        paddingLeft: 14,
-        display: 'flex',
-        flexDirection: 'column',
-        gap: 10,
-      }}
-    >
-      <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 7,
-            flex: 1,
-            minWidth: 0,
-            fontFamily: APP_FONT_STACK,
-            fontSize: 10,
-            fontWeight: 400,
-            letterSpacing: '0.14em',
-            textTransform: 'uppercase',
-            color: RAMS_INK_QUIET,
-          }}
-        >
-          <FolderGlyph size={11} />
-          {label}
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: 7 }}>
+                <span style={{
+                  fontFamily: APP_FONT_STACK,
+                  fontSize: 9.5,
+                  fontWeight: 400,
+                  letterSpacing: '0.1em',
+                  textTransform: 'uppercase',
+                  color: lock.stale ? '#b45309' : RAMS_INK_QUIET,
+                }}>
+                  {lock.stale ? 'stale' : lock.status}
+                </span>
+                {lock.stale || lock.status === 'failed' ? (
+                  <button
+                    type="button"
+                    onClick={() => onArchiveLock(lock.laneId)}
+                    disabled={archivingLaneId === lock.laneId}
+                    style={{
+                      borderWidth: 1,
+                      borderStyle: 'solid',
+                      borderColor: 'rgba(245, 158, 11, 0.24)',
+                      borderRadius: 5,
+                      background: 'transparent',
+                      color: '#b45309',
+                      cursor: archivingLaneId === lock.laneId ? 'default' : 'pointer',
+                      paddingTop: 3,
+                      paddingRight: 7,
+                      paddingBottom: 3,
+                      paddingLeft: 7,
+                      fontFamily: APP_FONT_STACK,
+                      fontSize: 11,
+                      fontWeight: 400,
+                      letterSpacing: '-0.01em',
+                      textTransform: 'capitalize',
+                      opacity: archivingLaneId === lock.laneId ? 0.55 : 1,
+                    }}
+                  >
+                    {archivingLaneId === lock.laneId ? 'archiving' : 'archive'}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ))}
+          {locks.length > 4 ? (
+            <div style={{ fontFamily: APP_FONT_STACK, fontSize: 11.5, color: RAMS_INK_QUIET }}>
+              {locks.length - 4} more locks hidden.
+            </div>
+          ) : null}
         </div>
-        {action && onAction ? (
-          <button
-            type="button"
-            onClick={onAction}
-            style={{
-              borderWidth: 1,
-              borderStyle: 'solid',
-              borderColor: RAMS_HAIRLINE,
-              borderRadius: 6,
-              background: 'transparent',
-              color: RAMS_ACCENT,
-              cursor: 'pointer',
-              paddingTop: 4,
-              paddingRight: 8,
-              paddingBottom: 4,
-              paddingLeft: 8,
-              fontFamily: APP_FONT_STACK,
-              fontSize: 11,
-              fontWeight: 400,
-              letterSpacing: '-0.01em',
-            }}
-            onMouseEnter={(event) => { event.currentTarget.style.background = 'var(--t-settings-accent-active-bg, rgba(29, 78, 216, 0.06))'; }}
-            onMouseLeave={(event) => { event.currentTarget.style.background = 'transparent'; }}
-          >
-            {action}
-          </button>
-        ) : null}
-      </div>
-      {children}
-    </section>
-  );
-}
+      ) : null}
 
-function EmptyContextText({ children }: { children: ReactNode }) {
-  return (
-    <div style={{
-      fontFamily: APP_FONT_STACK,
-      fontSize: 12.5,
-      color: RAMS_INK_QUIET,
-      lineHeight: 1.45,
-    }}>
-      {children}
-    </div>
+      {/* Files */}
+      <SettingsRow
+        icon={<PlusGlyph size={14} />}
+        label="Add files"
+        value="Soon"
+        pill
+        disabled
+      />
+
+      {/* Task brief preview */}
+      {briefOpen ? (
+        <>
+          <RowDivider />
+          <div style={{ paddingTop: 10, paddingBottom: 12, paddingLeft: 14, paddingRight: 14 }}>
+            <div style={{
+              fontFamily: APP_FONT_STACK,
+              fontSize: 10,
+              fontWeight: 400,
+              letterSpacing: '0.14em',
+              textTransform: 'uppercase',
+              color: RAMS_INK_QUIET,
+              marginBottom: 8,
+            }}>
+              Task brief
+            </div>
+            {briefLoading ? (
+              <div style={{ fontFamily: APP_FONT_STACK, fontSize: 12.5, color: RAMS_INK_QUIET }}>
+                Loading brief...
+              </div>
+            ) : briefError ? (
+              <div style={{ fontFamily: APP_FONT_STACK, fontSize: 12.5, color: '#b91c1c', lineHeight: 1.45 }}>
+                {briefError}
+              </div>
+            ) : (
+              <pre style={{
+                margin: 0,
+                maxHeight: 220,
+                overflow: 'auto',
+                whiteSpace: 'pre-wrap',
+                fontFamily: MONO_FONT_STACK,
+                fontSize: 10.5,
+                lineHeight: 1.55,
+                color: 'var(--t-text-secondary)',
+              }}>
+                {brief ?? 'No brief loaded.'}
+              </pre>
+            )}
+          </div>
+        </>
+      ) : null}
+
+      {/* Embedded edit form */}
+      {isEditing && formProps ? (
+        <>
+          <RowDivider />
+          <div style={{ paddingTop: 12, paddingBottom: 14, paddingLeft: 14, paddingRight: 14 }}>
+            <ProjectForm
+              mode="edit"
+              initial={formProps.initial}
+              repos={formProps.repos}
+              busy={formProps.busy}
+              onCancel={formProps.onCancel}
+              onSubmit={formProps.onSubmit}
+            />
+          </div>
+        </>
+      ) : null}
+    </SettingsGroup>
   );
 }
