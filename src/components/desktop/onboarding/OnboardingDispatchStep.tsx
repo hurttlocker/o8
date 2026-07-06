@@ -16,7 +16,7 @@
  * Extracted from Onboarding.tsx to keep that file under the 800-line ceiling.
  */
 
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useState } from 'react';
 import type { CSSProperties, ReactNode } from 'react';
 
 import {
@@ -33,6 +33,10 @@ export interface OnboardingRuntimeDetection {
   id: string;
   detected: boolean;
   version?: string;
+}
+
+function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
+  return value === 'codex' || value === 'claude-code' || value === 'gemini' || value === 'opencode';
 }
 
 function pickSmartDefault(runtimes: OnboardingRuntimeDetection[]): OrchestratorRuntime {
@@ -252,6 +256,7 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
 }) {
   const initialDefault = useMemo(() => pickSmartDefault(runtimes), [runtimes]);
   const [selected, setSelected] = useState<OrchestratorRuntime>(initialDefault);
+  const [userSelected, setUserSelected] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -260,6 +265,20 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
     for (const rt of runtimes) map.set(rt.id, rt);
     return map;
   }, [runtimes]);
+
+  useEffect(() => {
+    let alive = true;
+    fetch('/api/panel/operator-defaults', { cache: 'no-store' })
+      .then((res) => res.ok ? res.json() : null)
+      .then((payload: { values?: { defaultDispatchRuntime?: unknown } } | null) => {
+        const runtime = payload?.values?.defaultDispatchRuntime;
+        if (alive && !userSelected && isDispatchRuntime(runtime) && V1_DISPATCH_RUNTIMES.includes(runtime)) {
+          setSelected(runtime);
+        }
+      })
+      .catch(() => { /* Keep the local smart default if settings are unavailable. */ });
+    return () => { alive = false; };
+  }, [userSelected]);
 
   const handleContinue = useCallback(async () => {
     setSaving(true);
@@ -319,7 +338,10 @@ export const OnboardingDispatchStep = memo(function OnboardingDispatchStep({
               selected={selected === runtime}
               detected={det?.detected ?? false}
               version={det?.version}
-              onSelect={() => setSelected(runtime)}
+              onSelect={() => {
+                setUserSelected(true);
+                setSelected(runtime);
+              }}
             />
           );
         })}

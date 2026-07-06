@@ -26,6 +26,7 @@ import {
 } from './shared';
 import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './grouped';
 import { useEntitlement } from '@/lib/entitlement/context';
+import { resolveEffectiveDefaultOrchestratorBackend } from '@/lib/operator/dispatch-runtime-default';
 import { DispatchFoundersSection } from './DispatchFoundersSection';
 import {
   PickerMenu,
@@ -223,6 +224,18 @@ export function OperatorDefaultsTab() {
   const envLocked = (field: keyof OperatorDefaults) => sources[field] === 'env';
   const lockedSub = (field: keyof OperatorDefaults, normal: string) =>
     envLocked(field) ? ENV_LOCKED_REASON : normal;
+  const dispatchDefaultSubtitle = (() => {
+    if (envLocked('defaultDispatchRuntime')) return ENV_LOCKED_REASON;
+    if (sources.defaultDispatchRuntime !== 'default') {
+      return 'Used when you say "dispatch" without naming a runtime';
+    }
+    const backend = resolveEffectiveDefaultOrchestratorBackend({
+      orchestratorBackend: values.orchestratorBackend,
+      inAppOrchestratorEnabled: values.inAppOrchestratorEnabled,
+    });
+    const backendLabel = backend === 'claude' ? 'Claude' : backend === 'codex' ? 'Codex' : backend;
+    return `Paired opposite your orchestrator (${backendLabel}) — pick one to override`;
+  })();
 
   return (
     <div style={{
@@ -398,7 +411,7 @@ export function OperatorDefaultsTab() {
           <SettingsRow
             icon={<RocketIcon />}
             label="Default worker"
-            subtitle={lockedSub('defaultDispatchRuntime', 'Used when you say "dispatch" without naming a runtime')}
+            subtitle={dispatchDefaultSubtitle}
             accessory={
               <PickerMenu<DispatchRuntime>
                 value={values.defaultDispatchRuntime}

@@ -8,6 +8,9 @@ import path from 'node:path';
 import { isThinkingEffort, type ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type { OrchestratorRuntime } from '@/lib/orchestrator/types';
 import type { AutoApplyUpdates } from '@/lib/app-update/relaunch-state';
+import {
+  resolveDefaultDispatchRuntime as resolvePairedDefaultDispatchRuntime,
+} from './dispatch-runtime-default';
 
 const DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code', 'gemini', 'opencode'];
 function isDispatchRuntime(value: unknown): value is OrchestratorRuntime {
@@ -503,6 +506,7 @@ interface StoredOperatorDefaults {
   promptCachingEnabled?: boolean;
   orchestratorModel?: string;
   defaultDispatchRuntime?: OrchestratorRuntime;
+  defaultDispatchRuntimeExplicit?: boolean;
   defaultDispatchModel?: string;
   localInferenceBaseUrl?: string;
   localEmbedModel?: string;
@@ -523,6 +527,10 @@ interface StoredOperatorDefaults {
   collideAggregator?: CollideAggregator;
 }
 
+type FileOperatorDefaults = Partial<OperatorDefaults> & {
+  defaultDispatchRuntimeExplicit?: boolean;
+};
+
 function parseStoredDefaults(raw: string): StoredOperatorDefaults {
   try {
     const parsed = JSON.parse(raw);
@@ -539,8 +547,8 @@ function isMissingFile(error: unknown) {
   return (error as NodeJS.ErrnoException).code === 'ENOENT';
 }
 
-function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaults> {
-  const result: Partial<OperatorDefaults> = {};
+function resolveFromFile(stored: StoredOperatorDefaults): FileOperatorDefaults {
+  const result: FileOperatorDefaults = {};
   if (typeof stored.parallelCap === 'number' && Number.isFinite(stored.parallelCap) && stored.parallelCap > 0) {
     result.parallelCap = Math.max(1, Math.min(32, Math.floor(stored.parallelCap)));
   }
@@ -564,6 +572,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
   }
   if (isDispatchRuntime(stored.defaultDispatchRuntime)) {
     result.defaultDispatchRuntime = stored.defaultDispatchRuntime;
+    result.defaultDispatchRuntimeExplicit = stored.defaultDispatchRuntimeExplicit !== false;
   }
   if (typeof stored.defaultDispatchModel === 'string') {
     // Empty string is meaningful here ("unset → runtime default"), so accept it.
@@ -623,7 +632,7 @@ function resolveFromFile(stored: StoredOperatorDefaults): Partial<OperatorDefaul
 
 // ── Resolution ──
 
-function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefaultsWithSources {
+function resolveDefaults(fileValues: FileOperatorDefaults): OperatorDefaultsWithSources {
   const envCap = envParallelCap();
   const envGate = envOverlapGate();
   const envHeal = envHealBotEnabled();
@@ -650,6 +659,15 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
   const envCollideAgg = envCollideAggregator();
   const envTriage = envTargetingTier('TRIAGE');
   const envAction = envTargetingTier('ACTION');
+  const inAppOrchestratorEnabled =
+    envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled;
+  const orchestratorBackend =
+    envOrchBackend ?? fileValues.orchestratorBackend ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorBackend;
+  const defaultDispatchRuntime = resolvePairedDefaultDispatchRuntime({
+    explicitRuntime: envRuntime ?? (fileValues.defaultDispatchRuntimeExplicit ? fileValues.defaultDispatchRuntime : null),
+    orchestratorBackend,
+    inAppOrchestratorEnabled,
+  });
 
   const resolved: OperatorDefaults = {
     parallelCap: envCap ?? fileValues.parallelCap ?? OPERATOR_DEFAULTS_FALLBACK.parallelCap,
@@ -661,7 +679,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     promptCachingEnabled:
       envCache ?? fileValues.promptCachingEnabled ?? OPERATOR_DEFAULTS_FALLBACK.promptCachingEnabled,
     orchestratorModel: envModel ?? fileValues.orchestratorModel ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorModel,
-    defaultDispatchRuntime: envRuntime ?? fileValues.defaultDispatchRuntime ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchRuntime,
+    defaultDispatchRuntime,
     defaultDispatchModel: envDispatchModel ?? fileValues.defaultDispatchModel ?? OPERATOR_DEFAULTS_FALLBACK.defaultDispatchModel,
     localInferenceBaseUrl: envLocalBaseUrl ?? fileValues.localInferenceBaseUrl ?? OPERATOR_DEFAULTS_FALLBACK.localInferenceBaseUrl,
     localEmbedModel: envLocalEmbed ?? fileValues.localEmbedModel ?? OPERATOR_DEFAULTS_FALLBACK.localEmbedModel,
@@ -672,12 +690,11 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     experimentalCanvas: envCanvas ?? fileValues.experimentalCanvas ?? OPERATOR_DEFAULTS_FALLBACK.experimentalCanvas,
     nativeBrowserView: envNative ?? fileValues.nativeBrowserView ?? OPERATOR_DEFAULTS_FALLBACK.nativeBrowserView,
     classAComposer: envComposer ?? fileValues.classAComposer ?? OPERATOR_DEFAULTS_FALLBACK.classAComposer,
-    inAppOrchestratorEnabled:
-      envInApp ?? fileValues.inAppOrchestratorEnabled ?? OPERATOR_DEFAULTS_FALLBACK.inAppOrchestratorEnabled,
+    inAppOrchestratorEnabled,
     brainUseClaudeCli:
       envBrainCli ?? fileValues.brainUseClaudeCli ?? OPERATOR_DEFAULTS_FALLBACK.brainUseClaudeCli,
     workersUseBrain: envBrain ?? fileValues.workersUseBrain ?? OPERATOR_DEFAULTS_FALLBACK.workersUseBrain,
-    orchestratorBackend: envOrchBackend ?? fileValues.orchestratorBackend ?? OPERATOR_DEFAULTS_FALLBACK.orchestratorBackend,
+    orchestratorBackend,
     targetingTriage: mergeTier(envTriage, fileValues.targetingTriage, OPERATOR_DEFAULTS_FALLBACK.targetingTriage),
     targetingAction: mergeTier(envAction, fileValues.targetingAction, OPERATOR_DEFAULTS_FALLBACK.targetingAction),
     autoApplyUpdates: envApplyUpdates ?? fileValues.autoApplyUpdates ?? OPERATOR_DEFAULTS_FALLBACK.autoApplyUpdates,
@@ -694,7 +711,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
     promptCachingEnabled:
       envCache !== null ? 'env' : fileValues.promptCachingEnabled !== undefined ? 'file' : 'default',
     orchestratorModel: envModel !== null ? 'env' : fileValues.orchestratorModel !== undefined ? 'file' : 'default',
-    defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntime !== undefined ? 'file' : 'default',
+    defaultDispatchRuntime: envRuntime !== null ? 'env' : fileValues.defaultDispatchRuntimeExplicit ? 'file' : 'default',
     defaultDispatchModel: envDispatchModel !== null ? 'env' : fileValues.defaultDispatchModel !== undefined ? 'file' : 'default',
     localInferenceBaseUrl: envLocalBaseUrl !== null ? 'env' : fileValues.localInferenceBaseUrl !== undefined ? 'file' : 'default',
     localEmbedModel: envLocalEmbed !== null ? 'env' : fileValues.localEmbedModel !== undefined ? 'file' : 'default',
@@ -721,7 +738,7 @@ function resolveDefaults(fileValues: Partial<OperatorDefaults>): OperatorDefault
 }
 
 export async function getOperatorDefaults(): Promise<OperatorDefaultsWithSources> {
-  let fileValues: Partial<OperatorDefaults> = {};
+  let fileValues: FileOperatorDefaults = {};
   try {
     const raw = await readFile(getOperatorDefaultsPath(), 'utf8');
     fileValues = resolveFromFile(parseStoredDefaults(raw));
@@ -734,7 +751,7 @@ export async function getOperatorDefaults(): Promise<OperatorDefaultsWithSources
 }
 
 export function getOperatorDefaultsSync(): OperatorDefaultsWithSources {
-  let fileValues: Partial<OperatorDefaults> = {};
+  let fileValues: FileOperatorDefaults = {};
   try {
     const raw = readFileSync(getOperatorDefaultsPath(), 'utf8');
     fileValues = resolveFromFile(parseStoredDefaults(raw));
@@ -798,6 +815,7 @@ export async function updateOperatorDefaults(update: Partial<OperatorDefaults>):
       throw new Error('defaultDispatchRuntime must be one of "codex", "claude-code", "gemini", "opencode".');
     }
     stored.defaultDispatchRuntime = update.defaultDispatchRuntime;
+    stored.defaultDispatchRuntimeExplicit = true;
   }
   if (update.defaultDispatchModel !== undefined) {
     // Empty string clears it (back to the runtime default); any string is valid
