@@ -20,6 +20,7 @@ interface Lane {
   packetId: string | null;
   status: string;
   sessionKey?: string | null;
+  lastEventLabel?: string | null;
 }
 
 interface LaneCommandResult {
@@ -128,26 +129,28 @@ export async function runPacketStop(mode: OutputMode, rest: string[]): Promise<n
     body: { verb: 'stop', laneId: target.laneId },
   });
   const result = res.data;
-  if (!result?.ok) {
-    throw new CliError('packet_stop_failed', result?.note || 'Packet stop was rejected.', EXIT.CONFLICT);
-  }
+  const dead = confirmedDead(result);
 
   const payload = {
     schema: 'o8/cli/packet.stop/v1',
     packet: { id: target.packetId, laneId: target.laneId },
     result,
-    confirmedDead: confirmedDead(result),
+    confirmedDead: dead,
   };
   if (mode.human) {
     printHumanHeading('packet stop');
     printHumanKv([
       ['packet', target.packetId],
       ['lane', target.laneId],
-      ['confirmed dead', confirmedDead(result) === null ? '(not reported)' : confirmedDead(result) ? 'yes' : 'no'],
-      ['note', result.note],
+      ['ok', result?.ok ? 'yes' : 'no'],
+      ['confirmed dead', dead === null ? '(not reported)' : dead ? 'yes' : 'no'],
+      ['note', result?.note ?? 'Packet stop was rejected.'],
     ]);
   } else {
     printJson(payload);
+  }
+  if (!result?.ok) {
+    return EXIT.CONFLICT;
   }
   return 0;
 }
