@@ -22,6 +22,13 @@ export type OwnedRunOutcome = 'running' | 'finished' | 'interrupted' | 'failed';
 
 export type OwnedReviewDisposition = 'watching' | 'resolved';
 
+export interface OwnedChildExitOutcome {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  classification: 'clean-exit' | 'nonzero-exit' | 'signal-kill';
+  stderrTail?: string;
+}
+
 export interface OwnedRunRecord {
   id: string;
   mode: OwnedRunMode;
@@ -40,6 +47,7 @@ export interface OwnedRunRecord {
   // ws-server, today's default); 'detached' = setsid+unref child that outlives
   // both node processes, transcript streaming to stdoutPath.
   detachMode?: 'bridge' | 'detached';
+  childExit?: OwnedChildExitOutcome;
 }
 
 export interface OwnedSessionRecord {
