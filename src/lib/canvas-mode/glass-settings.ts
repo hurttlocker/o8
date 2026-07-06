@@ -101,7 +101,7 @@ export function defaultTextShadeForTone(tone: CanvasGlassSettings['tone']): numb
 // The default look is the operator's tuned LIGHT canvas (locked 2026-06-13):
 // a true white wash (veil 1), clear glass (tint 0), black text (textShade 1)
 // at 62% opacity on the Window material. Booting + Reset land here; flipping to
-// Dark (Appearance) or picking a Look reshapes it. The personal "Mine" slot is
+// Dark (Appearance) or picking a Look reshapes it. The personal "Custom" slot is
 // independent (PERSONAL_KEY), so making this the default never clobbers it.
 export const CANVAS_GLASS_DEFAULTS: CanvasGlassSettings = {
   frost: 64,
@@ -178,7 +178,7 @@ export const CANVAS_GLASS_MATERIALS: ReadonlyArray<{ id: string; label: string }
  */
 export const CANVAS_GLASS_PRESETS: ReadonlyArray<{ id: string; label: string; values: CanvasGlassSettings }> = [
   // o8 — the operator's signature look, shipped for everyone (the former "Mine").
-  // Dark HUD glass over the ember backdrop; the personal "Mine" slot stays free.
+  // Dark HUD glass over the ember backdrop; the personal "Custom" slot stays free.
   { id: 'o8', label: 'o8', values: { frost: 3, tint: 0, ink: 1, vibrance: 2.2, veil: 0.3, material: 'hud', backdropFrost: 0, backdrop: 'ember', chatFrost: 50, chatTint: 0, tone: 'dark', chatTone: 'match', dockTone: 'dark', dockTint: 0.92, textShade: 0.04 } },
   // Slate — the dark Siri reference; the default look.
   { id: 'siri', label: 'Slate', values: { frost: 26, tint: 0.42, ink: 0.92, vibrance: 1.6, veil: 0.3, material: 'popover', backdropFrost: 0, backdrop: 'none', chatFrost: 34, chatTint: 0.6, tone: 'dark', chatTone: 'match', dockTone: 'match', dockTint: 0.3, textShade: 0.04 } },
@@ -207,7 +207,7 @@ function normalizeForMaterial(settings: CanvasGlassSettings): CanvasGlassSetting
   return settings;
 }
 
-/** The operator's saved look — the "Mine" preset. Null until saved once. */
+/** The operator's saved look — the "Custom" preset. Null until saved once. */
 export function readPersonalDefault(): CanvasGlassSettings | null {
   if (typeof window === 'undefined') return null;
   try {

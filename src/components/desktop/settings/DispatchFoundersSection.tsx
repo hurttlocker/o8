@@ -3,7 +3,7 @@
 /**
  * DispatchFoundersSection — the Founders-mode half of the Dispatch tab
  * (epic #1450). Everything experimental, tier-tuning, or env-flavored lives
- * here: experimental runtime/surface flags (+ CanvasGlassTuner), model tiers,
+ * here: experimental runtime/surface flags, model tiers,
  * Brain routing knobs, and Local Models. Rendered by OperatorDefaultsTab ONLY
  * when the entitlement says founder — visibility gating only, never
  * capability: every write still goes through the same gated
@@ -22,7 +22,6 @@ import {
   writeAdaptiveThinkingEnabled,
 } from '@/lib/orchestrator/thinking-preferences';
 import { SettingsGroup, SettingsRow } from './grouped';
-import { CanvasGlassTuner } from './CanvasGlassTuner';
 import { LocalModelsSection } from './LocalModelsSection';
 import {
   PickerMenu,
@@ -178,13 +177,10 @@ export function DispatchFoundersSection({ values, sources, busyField, updateFiel
             checked={values.experimentalCanvas}
             disabled={envLocked(sources, 'experimentalCanvas') || busyField === 'experimentalCanvas'}
             onToggle={(next) => { updateField('experimentalCanvas', next); }}
-            divider={!values.experimentalCanvas}
+            divider
           />
-          {values.experimentalCanvas ? (
-            <div style={{ paddingLeft: 14, paddingRight: 14 }}>
-              <CanvasGlassTuner />
-            </div>
-          ) : null}
+          {/* Glass tuning lives INSIDE the canvas (its own Appearance panel) —
+              the inline settings copy was redundant (operator, 2026-07-06). */}
           <SettingsRow
             icon={<BrowserIcon />}
             label="Native browser-view"
