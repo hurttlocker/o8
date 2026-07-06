@@ -130,6 +130,10 @@ function StepIndicator({ steps, current }: { steps: OnboardingStep[]; current: O
 export const Onboarding = memo(function Onboarding({ onComplete, completionError }: { onComplete: () => void; completionError?: string | null }) {
   const [step, setStep] = useState<OnboardingStep>('open');
 
+  // "Get support" popover (bottom-left). Report-an-issue works during
+  // onboarding because ReportIssueHost is mounted in the same dashboard tree.
+  const [supportOpen, setSupportOpen] = useState(false);
+
   // GitHub sign-in (used by the open step)
   const [githubFlow, setGithubFlow] = useState<DeviceFlowState>({ stage: 'idle' });
   const [githubDeviceFlowEnabled, setGithubDeviceFlowEnabled] = useState(false);
@@ -472,10 +476,65 @@ export const Onboarding = memo(function Onboarding({ onComplete, completionError
         )}
       </div>
 
-      {/* Support link */}
-      <div style={{ position: 'fixed', bottom: 16, left: 24, display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: 'var(--t-text-faint)' }}>
-        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
-        Get support
+      {/* Support link — beta report 1523575745765703752: this was a dead div.
+          Now a popover: report an issue (opens the report modal with a window
+          capture attached) + docs. The report path is the direct support line. */}
+      <div style={{ position: 'fixed', bottom: 16, left: 24, zIndex: 40 }}>
+        {supportOpen && (
+          <div
+            style={{
+              position: 'absolute',
+              bottom: 34,
+              left: 0,
+              width: 264,
+              padding: 6,
+              borderRadius: 14,
+              background: 'var(--t-glass-muted-strong)',
+              backdropFilter: 'blur(16px)',
+              WebkitBackdropFilter: 'blur(16px)',
+              border: '1px solid var(--t-glass-border-strong)',
+              boxShadow: '0 12px 32px rgba(0,0,0,0.18)',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 2,
+            } as React.CSSProperties}
+          >
+            <button
+              type="button"
+              onClick={() => { setSupportOpen(false); window.dispatchEvent(new Event('o8:open-report')); }}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 10, width: '100%', border: 'none', background: 'transparent', borderRadius: 10, paddingTop: 9, paddingBottom: 9, paddingLeft: 10, paddingRight: 10, cursor: 'pointer', fontFamily: FONT, textAlign: 'left' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-glass-muted)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4Z"/></svg>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-text)' }}>Report an issue</span>
+                <span style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>Sends a note + screenshot straight to the team</span>
+              </span>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setSupportOpen(false); openExternalUrl('https://o8.run/docs'); }}
+              style={{ display: 'flex', alignItems: 'flex-start', gap: 10, width: '100%', border: 'none', background: 'transparent', borderRadius: 10, paddingTop: 9, paddingBottom: 9, paddingLeft: 10, paddingRight: 10, cursor: 'pointer', fontFamily: FONT, textAlign: 'left' }}
+              onMouseEnter={(e) => { e.currentTarget.style.background = 'var(--t-glass-muted)'; }}
+              onMouseLeave={(e) => { e.currentTarget.style.background = 'transparent'; }}
+            >
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="var(--t-text-secondary)" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ flexShrink: 0, marginTop: 1 }}><path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/></svg>
+              <span style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                <span style={{ fontSize: 12.5, fontWeight: 600, color: 'var(--t-text)' }}>Docs &amp; FAQ</span>
+                <span style={{ fontSize: 11, color: 'var(--t-text-muted)', lineHeight: 1.45 }}>Guides at o8.run/docs</span>
+              </span>
+            </button>
+          </div>
+        )}
+        <button
+          type="button"
+          onClick={() => setSupportOpen((v) => !v)}
+          style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, color: supportOpen ? 'var(--t-text-secondary)' : 'var(--t-text-faint)', border: 'none', background: 'transparent', cursor: 'pointer', fontFamily: FONT, padding: 0 }}
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+          Get support
+        </button>
       </div>
 
       <style dangerouslySetInnerHTML={{ __html: `
