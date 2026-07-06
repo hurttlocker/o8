@@ -25,7 +25,7 @@ export async function GET(request: NextRequest) {
   }
 
   try {
-    const preview = previewPacketMerge(packetId);
+    const preview = await previewPacketMerge(packetId);
     return NextResponse.json(preview);
   } catch (error) {
     const message = error instanceof Error ? error.message : 'merge preview failed';

@@ -291,7 +291,7 @@ async function withGateVerdict(
 
   let preview: MergePreviewResult;
   try {
-    preview = buildPreviewForLane(lane, packetId, { orchestratorApproved });
+    preview = await buildPreviewForLane(lane, packetId, { orchestratorApproved });
   } catch (error) {
     console.warn(`${'[mcp-operator]'} gate verdict decoration failed for packet ${packetId}:`, error);
     return result;

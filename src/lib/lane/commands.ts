@@ -848,7 +848,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
       // through — the gate downgrades budget violations to warn so a
       // human-in-the-loop refactor with intentional large deletions can
       // land. Security + integrity always stay block-level. See F25 / #1001.
-      const gateResult = runMergeGate(lane, undefined, command.orchestratorReviewed === true);
+      const gateResult = await runMergeGate(lane, undefined, command.orchestratorReviewed === true);
       if (!gateResult.passed && actor !== 'user') {
         const blockCount = gateResult.violations.filter((v) => v.severity === 'block').length;
         return createLaneActionApproval(lane, actor, {
@@ -862,7 +862,7 @@ export async function dispatch(command: LaneCommand): Promise<LaneCommandResult>
           risk: 'high',
           policyRuleId: 'merge-gate-violation',
           note: 'Merge gate enforcement: human review required.',
-          gateResult: { passed: gateResult.passed, violations: gateResult.violations },
+          gateResult: { passed: gateResult.passed, violations: gateResult.violations, diffBase: gateResult.diffBase },
         });
       }
 

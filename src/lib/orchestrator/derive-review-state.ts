@@ -8,6 +8,7 @@
  * (the API route, UI, tests) pass in already-loaded state.
  */
 import type { Lane } from '@/lib/lane/types';
+import type { PacketDiffBaseResolution } from '@/lib/diff/base-resolution';
 import type { OrchestratorPacket } from '@/lib/orchestrator/types';
 
 export type PacketReviewState =
@@ -27,6 +28,7 @@ export interface DeriveReviewStateMergeGate {
   verdict: 'passing' | 'failing';
   ts: string;
   checks: string[];
+  diffBase?: PacketDiffBaseResolution;
 }
 
 export interface DeriveReviewStateInput {

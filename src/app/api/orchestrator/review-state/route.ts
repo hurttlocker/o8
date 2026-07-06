@@ -53,6 +53,7 @@ function toMergeGate(preview: MergePreviewResult | null): DeriveReviewStateMerge
     verdict: preview.wouldMerge ? 'passing' : 'failing',
     ts: new Date().toISOString(),
     checks: preview.checks.map((check) => check.name),
+    diffBase: preview.diffBase,
   };
 }
 
@@ -89,7 +90,7 @@ export async function GET(request: NextRequest) {
     let mergePreview: MergePreviewResult | null = null;
     if (lane) {
       try {
-        mergePreview = buildPreviewForLane(lane, packetId, {
+        mergePreview = await buildPreviewForLane(lane, packetId, {
           orchestratorApproved: packet.review?.approved === true,
         });
       } catch (error) {
