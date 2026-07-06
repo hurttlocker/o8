@@ -85,7 +85,10 @@ export function useWorkspaceChatPane({
   const streamRequest = useActiveLongLivedRequest(active);
 
   const tabId = tab.id;
-  const chatRuntime = tab.chatRuntime as 'codex' | 'claude-code' | 'gemini' | 'opencode' | undefined;
+  const chatRuntime = (
+    tab.orchestrationPacket?.runtime
+    ?? tab.chatRuntime
+  ) as 'codex' | 'claude-code' | 'gemini' | 'opencode' | undefined;
   const chatSessionKey = tab.chatSessionKey;
   const linkedIssue = tab.linkedIssue ?? null;
   const normalizedSessionKey = useMemo(

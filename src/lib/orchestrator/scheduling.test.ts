@@ -26,7 +26,7 @@ vi.mock('@/lib/runtime/actions', () => ({
 }));
 
 const { createLane, setLaneStatus } = await import('@/lib/lane/registry');
-const { createEmptyOrchestratorMissionState } = await import('@/lib/orchestrator/store');
+const { createEmptyOrchestratorMissionState, normalizeOrchestratorMissionState } = await import('@/lib/orchestrator/store');
 const { hasReviewableCompletionDiff } = await import('@/lib/supervisor/completion-verification');
 const {
   MAX_PARALLEL_DISPATCHES,
@@ -261,6 +261,11 @@ describe('dispatch scheduling caps and waves', () => {
 });
 
 describe('boot recovery launch guard (#1460)', () => {
+  beforeEach(() => {
+    launchMock.calls.length = 0;
+    vi.stubGlobal('fetch', vi.fn(async () => new Response('{}', { status: 200 })));
+  });
+
   const guardedPacket = (overrides: Partial<OrchestratorPacket> = {}) =>
     packetFixture('/tmp/o8-boot-guard', 'boot-guard', {
       status: 'queued',
@@ -294,6 +299,39 @@ describe('boot recovery launch guard (#1460)', () => {
       pinnedRuntime: null,
     })).toBe('runtime is not pinned');
   });
+
+  it('does not treat normalized selectedRuntime as an explicit boot pin', () => {
+    expect(getBootRecoveryLaunchBlocker({
+      missionLive: true,
+      packet: guardedPacket({
+        runtime: 'claude-code',
+        dispatchRuntimePin: null,
+      }),
+      pinnedRuntime: null,
+    })).toBe('runtime is not pinned');
+  });
+
+  it('blocks a normalized queued never-launched claude-code packet through the real dispatch tick', async () => {
+    const repoPath = makeRepo();
+    const stalePacket = packetFixture(repoPath, 'boot-never-launched', {
+      runtime: 'claude-code',
+      workerRouting: undefined,
+      dispatchRuntimePin: undefined,
+    });
+    const normalized = normalizeOrchestratorMissionState(missionFixture(repoPath, [stalePacket]));
+
+    expect(normalized.packets[0].workerRouting?.requestedRuntime).toBe('claude-code');
+    expect(normalized.packets[0].dispatchRuntimePin).toBeNull();
+
+    const next = await runDispatchTick(normalized, {
+      launchBudget: { maxLaunches: 1 },
+      enforceBootRecoveryGuard: true,
+    });
+
+    expect(launchMock.calls).toHaveLength(0);
+    expect(next.packets[0].status).toBe('queued');
+    expect(next.packets[0].dispatchRuntimePin).toBeNull();
+  }, 20_000);
 
   it('skips review states that no longer expect a worker', () => {
     expect(getBootRecoveryLaunchBlocker({
