@@ -348,8 +348,6 @@ This is the backbone for the mission dispatch flow (`create_mission` → `dispat
 | POST | `/api/projects/dismissed-suggestions` | Dismiss a suggestion by fingerprint. |
 | GET | `/api/projects/locks?projectId=...` | List project locks (lane-scoped concurrency control). |
 | POST | `/api/projects/locks/[laneId]` | Lock action — currently only `archive_stale` is supported. |
-| POST | `/api/projects/suggest?force=1` | Stage-2 project suggestion endpoint (cached, `force=1` bypasses, #899). |
-| POST | `/api/projects/suggest/dismiss` | Dismiss an AI suggestion by id with optional reason (#899). |
 
 ### `/api/repo-spec/*` — Per-repo `o8.md` spec file (gated)
 
