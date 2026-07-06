@@ -8,6 +8,7 @@
  */
 
 import { RamsButton } from '../shared';
+import { SettingsRow } from '../grouped';
 import { useState, type ReactNode } from 'react';
 import {
   APP_FONT_STACK,
@@ -344,31 +345,12 @@ export function ProjectCard({
       </ProjectContextSection>
 
       <ProjectContextSection label="Files">
-        <div style={{
-          minHeight: 48,
-          borderRadius: 12,
-          borderWidth: 1,
-          borderStyle: 'dashed',
-          borderColor: RAMS_HAIRLINE_SOFT,
-          color: RAMS_INK_QUIET,
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: 8,
-          fontFamily: APP_FONT_STACK,
-          fontSize: 12.5,
-        }}>
-          <PlusGlyph size={11} />
-          Add files
-          <span style={{
-            fontFamily: APP_FONT_STACK,
-            fontSize: 9,
-            letterSpacing: '0.12em',
-            textTransform: 'uppercase',
-          }}>
-            soon
-          </span>
-        </div>
+        <SettingsRow
+          icon={<PlusGlyph size={12} />}
+          label="Add files"
+          value="Soon"
+          disabled
+        />
       </ProjectContextSection>
 
       {isEditing && formProps ? (

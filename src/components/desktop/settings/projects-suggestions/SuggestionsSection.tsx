@@ -25,8 +25,8 @@ import {
   RAMS_HAIRLINE_SOFT,
   RAMS_INK_QUIET,
   RamsButton,
-  SectionLabel,
 } from '../shared';
+import { GroupHeader } from '../grouped';
 
 // Mirrors the public type from src/lib/projects/suggest.ts. Kept inline so
 // this component has zero server-only imports.
@@ -210,7 +210,7 @@ export function SuggestionsSection({
 
   return (
     <section style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
-      <SectionLabel number="01">AI suggestions</SectionLabel>
+      <GroupHeader>AI suggestions</GroupHeader>
 
       <p style={{
         fontFamily: APP_FONT_STACK,
