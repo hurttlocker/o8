@@ -108,15 +108,6 @@ function PowerIcon() {
   );
 }
 
-function DockIcon() {
-  return (
-    <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
-      <rect x="3" y="4" width="18" height="12" rx="2" />
-      <line x1="7" y1="20" x2="17" y2="20" />
-    </svg>
-  );
-}
-
 function SparkleIcon() {
   return (
     <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" style={{ display: 'block', flexShrink: 0 }}>
@@ -145,7 +136,6 @@ export function VoiceTab() {
   // null = unread; number = AppleFnUsageType (0 = Do Nothing, the value we want).
   const [fnUsage, setFnUsage] = useState<number | null | undefined>(undefined);
   const [autostart, setAutostart] = useState(false);
-  const [bgMode, setBgMode] = useState(false);
   // Two-tier brain escalation policy (~/.o8/agent_models.json via the router).
   const [escalation, setEscalation] = useState<'off' | 'auto' | 'deep'>('auto');
   const dictationMode = useSyncExternalStore(
@@ -175,7 +165,9 @@ export function VoiceTab() {
       agentGetEscalation().catch(() => 'auto'),
     ]);
     setAutostart(auto);
-    setBgMode(bg);
+    // Background mode was retired from the UI (operator, 2026-07-06) — self-heal
+    // any stuck-on state so nobody is left with a hidden Dock icon and no way back.
+    if (bg) void backgroundModeSet(false);
     if (esc === 'off' || esc === 'auto' || esc === 'deep') setEscalation(esc);
   }, [tauri, refreshPermissions]);
 
@@ -195,21 +187,22 @@ export function VoiceTab() {
     void autostartSet(next).then(setAutostart);
   }, []);
 
-  const handleBgMode = useCallback((next: boolean) => {
-    setBgMode(next);
-    void backgroundModeSet(next).then(setBgMode);
-  }, []);
-
   const handleEscalation = useCallback((next: 'off' | 'auto' | 'deep') => {
     setEscalation(next);
     void agentSetEscalation(next);
   }, []);
 
-  // Fn hijack present when AppleFnUsageType is unset (treated as 3 = Start
-  // Dictation) or set to anything other than 0 = Do Nothing.
-  const fnHijacked = fnUsage !== undefined && fnUsage !== 0;
-  // For the permission row, "granted" only when explicitly set to 0.
-  const fnState: PermState = fnUsage === undefined ? 'unknown' : fnUsage === 0 ? 'granted' : 'denied';
+  // Only an EXPLICIT non-zero AppleFnUsageType means Apple Dictation owns the
+  // key. Unset (null) is machine-dependent — on machines where the tap works
+  // fine with the key absent, treating unset as broken is a false negative
+  // (operator hit this 2026-07-06). Unset renders quiet/neutral, never red.
+  const fnHijacked = typeof fnUsage === 'number' && fnUsage !== 0;
+  const fnState: PermState = fnUsage === 0 ? 'granted' : fnHijacked ? 'denied' : 'unknown';
+  const fnPill = fnUsage === 0
+    ? <ValuePill tone="success">Do Nothing</ValuePill>
+    : fnHijacked
+      ? <ValuePill tone="destructive">Needs change</ValuePill>
+      : <ValuePill>Not set</ValuePill>;
 
   return (
     <div
@@ -260,8 +253,10 @@ export function VoiceTab() {
               <SettingsRow
                 icon={permGlyph(fnState)}
                 label="Fn key binding"
-                subtitle={'Set "Press 🌐 key to" → "Do Nothing" so Apple Dictation doesn\'t intercept'}
-                accessory={permPill(fnState)}
+                subtitle={fnHijacked
+                  ? 'Set "Press 🌐 key to" → "Do Nothing" so Apple Dictation doesn\'t intercept'
+                  : '"Press 🌐 key to" in Keyboard Settings — only change if Fn dictation misfires'}
+                accessory={fnPill}
                 chevron
                 onPress={() => { void openSystemSettings(URL_KEYBOARD); }}
               />
@@ -304,14 +299,6 @@ export function VoiceTab() {
                 subtitle="Dictation ready from the moment you sit down"
                 checked={autostart}
                 onToggle={handleAutostart}
-                divider
-              />
-              <SettingsRow
-                icon={<DockIcon />}
-                label="Background mode"
-                subtitle="Hide the Dock icon — pure menu-bar app, pill only"
-                checked={bgMode}
-                onToggle={handleBgMode}
               />
             </SettingsGroup>
           </section>
