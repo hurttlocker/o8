@@ -38,12 +38,12 @@ const FONT_FAMILY = 'var(--font-sans-system)';
 
 function chipLabel(mode: OrchestrationMode, runtime: OrchestratorRuntime): string {
   if (mode === 'fleet') return 'Fleet orchestration';
-  if (mode === 'single') return 'Single agent';
+  if (mode === 'single') return 'Solo';
   // Legacy 'chat' literal — should never render here under the new
   // gating, but if it does (stale tab record), fall back to the
   // runtime label so we never paint a bare 'Chat' inside an
   // orchestrator-kind tab.
-  if (mode === 'chat') return 'Single agent';
+  if (mode === 'chat') return 'Solo';
   return runtime.charAt(0).toUpperCase() + runtime.slice(1);
 }
 
@@ -154,8 +154,8 @@ export function ModeChip({
           />
           <PopoverRow
             active={selectedMode === 'single'}
-            title="Single agent"
-            detail="Talk to the orchestrator solo · no dispatch."
+            title="Solo"
+            detail="The orchestrator works alone · no dispatch."
             onClick={handlePickSingle}
             glyph={<SingleGlyph />}
           />
