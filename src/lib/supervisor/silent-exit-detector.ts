@@ -50,6 +50,7 @@ import {
   autoCommitCompletionWorktree,
   runCompletionVerification,
 } from '@/lib/supervisor/completion-verification';
+import { resolvePacketDiffBase } from '@/lib/diff/base-resolution';
 import {
   enqueueSupervisorInboxItem,
   type SupervisorInboxKind,
@@ -154,6 +155,8 @@ interface WorktreeState {
   diffStat: string;
   lastCommit: string;
 }
+
+type MergedWorkCheck = { alreadyMerged: boolean; headSha: string | null; comparisonRef: string | null; warning: string | null };
 
 /**
  * Per-runtime liveness probe. Returns true when we are confident the session
@@ -262,6 +265,70 @@ async function readLastCommit(cwd: string): Promise<string> {
   }
 }
 
+async function readHeadSha(cwd: string): Promise<string | null> {
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['rev-parse', 'HEAD'],
+      { cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
+    );
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function isAncestor(cwd: string, ancestor: string, ref: string): Promise<boolean> {
+  try {
+    await execFileAsync(
+      'git',
+      ['merge-base', '--is-ancestor', ancestor, ref],
+      { cwd, timeout: GIT_COMMAND_TIMEOUT_MS, maxBuffer: GIT_COMMAND_MAX_BUFFER },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function checkAlreadyMergedWork(cwd: string, baseBranch: string): Promise<MergedWorkCheck> {
+  const headSha = await readHeadSha(cwd);
+  if (!headSha) {
+    return {
+      alreadyMerged: false,
+      headSha: null,
+      comparisonRef: null,
+      warning: 'Could not resolve worktree HEAD before silent-exit merge ancestry check.',
+    };
+  }
+
+  try {
+    const base = await resolvePacketDiffBase(cwd, baseBranch, headSha);
+    if (base.usedFallback) {
+      return {
+        alreadyMerged: false,
+        headSha,
+        comparisonRef: base.comparisonRef,
+        warning: base.warning ?? `Could not refresh ${base.requestedRef}; promoted using local ${base.comparisonRef}.`,
+      };
+    }
+    return {
+      alreadyMerged: await isAncestor(cwd, headSha, base.comparisonRef),
+      headSha,
+      comparisonRef: base.comparisonRef,
+      warning: null,
+    };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      alreadyMerged: false,
+      headSha,
+      comparisonRef: null,
+      warning: `Silent-exit merge ancestry check failed: ${message}`,
+    };
+  }
+}
+
 async function collectWorktreeState(cwd: string, baseBranch: string): Promise<WorktreeState> {
   const [porcelain, commitsAhead, diffStat, lastCommit] = await Promise.all([
     readPorcelain(cwd),
@@ -301,6 +368,28 @@ function buildInboxPayload(
     note,
     retryError: null,
   };
+}
+
+function appendAncestryWarning(
+  payload: SupervisorInboxPayload,
+  check: MergedWorkCheck,
+): SupervisorInboxPayload {
+  if (!check.warning) return payload;
+  const nextPayload = { ...payload };
+  const fields = nextPayload as SupervisorInboxPayload & Record<string, unknown>;
+  fields.silentExitBaseWarning = check.warning;
+  fields.comparisonRef = check.comparisonRef;
+  fields.headSha = check.headSha;
+  return nextPayload;
+}
+
+async function markAlreadyMergedWork(lane: Lane, check: MergedWorkCheck): Promise<void> {
+  setLaneStatus(lane.id, 'completed', 'system', 'silent_exit_already_merged');
+  const { appendEvent } = await import('@/lib/lane/registry');
+  appendEvent(lane.id, 'silent_exit_already_merged', 'system', {
+    headSha: check.headSha,
+    comparisonRef: check.comparisonRef,
+  });
 }
 
 function enqueueSilentExitInbox(
@@ -373,15 +462,24 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
       return true;
     }
 
-    setLaneStatus(lane.id, 'reviewing', 'system', 'silent_exit_work_present');
     const postState = await collectWorktreeState(cwd, lane.baseBranch);
+    const mergedCheck = await checkAlreadyMergedWork(cwd, lane.baseBranch);
+    if (mergedCheck.alreadyMerged) {
+      await markAlreadyMergedWork(lane, mergedCheck);
+      return true;
+    }
+
+    setLaneStatus(lane.id, 'reviewing', 'system', 'silent_exit_work_present');
     enqueueSilentExitInbox(
       lane,
       'silent_exit_but_work_present',
-      buildInboxPayload(
-        lane,
-        postState,
-        'Session exited silently before reporting completion, but work was salvaged and typecheck + rule-check passed. Lane moved to reviewing.',
+      appendAncestryWarning(
+        buildInboxPayload(
+          lane,
+          postState,
+          'Session exited silently before reporting completion, but work was salvaged and typecheck + rule-check passed. Lane moved to reviewing.',
+        ),
+        mergedCheck,
       ),
     );
     return true;
@@ -411,14 +509,23 @@ async function triageSilentExit(lane: Lane): Promise<boolean> {
   // Clean worktree, has commits — normal completion never fired, but the
   // work is safely in the branch. Promote to review so the orchestrator
   // loop can pick it up.
+  const mergedCheck = await checkAlreadyMergedWork(cwd, lane.baseBranch);
+  if (mergedCheck.alreadyMerged) {
+    await markAlreadyMergedWork(lane, mergedCheck);
+    return true;
+  }
+
   setLaneStatus(lane.id, 'reviewing', 'system', 'silent_exit_work_present');
   enqueueSilentExitInbox(
     lane,
     'silent_exit_but_work_present',
-    buildInboxPayload(
-      lane,
-      state,
-      `Session exited silently, but ${state.commitsAhead} commit(s) are already pushed to the lane branch. Promoted to reviewing.`,
+    appendAncestryWarning(
+      buildInboxPayload(
+        lane,
+        state,
+        `Session exited silently, but ${state.commitsAhead} commit(s) are already pushed to the lane branch. Promoted to reviewing.`,
+      ),
+      mergedCheck,
     ),
   );
   return true;
