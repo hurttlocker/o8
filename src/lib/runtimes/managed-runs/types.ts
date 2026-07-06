@@ -25,6 +25,8 @@ export interface ManagedRunRecord {
   session: string;
   /** the command line the agent asked to run (display only) */
   command: string;
+  /** optional human display title supplied by the launcher */
+  title?: string | null;
   /** working directory the command runs in (used to cross-ref lsof ports) */
   cwd: string;
   /** repo slug if known (resolved by the ports route, optional here) */
