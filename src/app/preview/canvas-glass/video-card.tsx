@@ -152,7 +152,7 @@ export function VideoGlassCard({
             onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
             onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
           >
-            ✕
+            <span aria-hidden style={{ pointerEvents: 'none' }}>✕</span>
           </button>
         ) : null}
       </div>

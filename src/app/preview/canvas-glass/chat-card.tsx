@@ -244,7 +244,7 @@ export function ChatGlassCard({
                 onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
                 onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
               >
-                <svg style={{ width: CHROME.iconSize, height: CHROME.iconSize, flexShrink: 0 }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <svg style={{ width: CHROME.iconSize, height: CHROME.iconSize, flexShrink: 0, pointerEvents: 'none' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                   <path d="M3 5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" /><path d="M15 3v18" />
                 </svg>
               </button>
@@ -257,7 +257,7 @@ export function ChatGlassCard({
                 onMouseEnter={(event) => { event.currentTarget.style.color = 'var(--cnv-ink)'; }}
                 onMouseLeave={(event) => { event.currentTarget.style.color = 'var(--cnv-ink-muted)'; }}
               >
-                ✕
+                <span aria-hidden style={{ pointerEvents: 'none' }}>✕</span>
               </button>
             </div>
           </div>
