@@ -165,6 +165,11 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       setHaltBusy(false);
     }
   }, [dispatchHalted]);
+  const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
+  const mountedRef = useRef(true);
+  const activityHydratedRef = useRef(false);
+  const orchestratorData = useOrchestratorData();
+  const missionPackets = orchestratorData?.missionState?.packets;
   const handleStopMission = useCallback(async () => {
     const missionId = orchestratorData?.missionState?.missionId?.trim();
     if (!missionId) return;
@@ -184,11 +189,6 @@ export const O8ActivityPane = memo(function O8ActivityPane({
       setHaltBusy(false);
     }
   }, [orchestratorData?.missionState?.missionId]);
-  const { prDetails, ciDetails, fetchForItem } = useExpandDetails();
-  const mountedRef = useRef(true);
-  const activityHydratedRef = useRef(false);
-  const orchestratorData = useOrchestratorData();
-  const missionPackets = orchestratorData?.missionState?.packets;
 
   // #746 — directive proposals are surfaced above the timeline as
   // recommendations. Accept routes through OrchestratorDataContext so the
