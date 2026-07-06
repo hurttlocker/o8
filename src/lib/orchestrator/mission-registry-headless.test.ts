@@ -217,6 +217,49 @@ describe('headless mission registry dispatch', () => {
     expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
   }, 20_000);
 
+  it('rerun_with_feedback clears released truth before relaunching a registry packet', async () => {
+    const repoPath = createTempRepo();
+    stubMissionApiFetch();
+    const first = await createInlineMission('registry released rerun A', repoPath);
+    const second = await createInlineMission('registry released rerun B', repoPath);
+
+    const packetId = first.packets[0]?.id;
+    expect(packetId).toBeTruthy();
+    const { withMissionRegistryState, readMissionRegistryEntry } = await import('@/lib/orchestrator/mission-registry');
+    await withMissionRegistryState(first.missionId, (current) => {
+      const packet = current.packets.find((candidate) => candidate.id === packetId);
+      expect(packet).toBeTruthy();
+      packet!.status = 'released';
+      packet!.queueState = 'held';
+      packet!.releaseState = 'released';
+      packet!.releaseStatePayload = {
+        mergeCommit: 'abc123',
+        releasedAt: '2026-07-06T12:00:00.000Z',
+        source: 'test',
+      };
+      packet!.lastEventLabel = 'headless_released';
+      return { state: current, result: null };
+    });
+
+    const { handleRerunWithFeedback } = await import('@/lib/mcp/operator-handlers/mission');
+    const result = parseJsonResult<{ dispatched?: boolean; referenceLabel?: string }>(await handleRerunWithFeedback({
+      packetId: packetId!,
+      feedback: 'rerun the released packet',
+    }));
+
+    const packet = readMissionRegistryEntry(first.missionId, { includeArchived: true })?.mission.packets
+      .find((candidate) => candidate.id === packetId);
+    const { readOrchestratorControlPlaneState } = await import('@/lib/orchestrator/control-plane');
+
+    expect(result.dispatched).toBe(true);
+    expect(packet?.releaseState).toBe('pending');
+    expect(packet?.releaseStatePayload).toBeNull();
+    expect(packet?.status).toBe('launching');
+    expect(packet?.queueState).toBe('queued');
+    expect(packet?.lastEventLabel).not.toBe('headless_released');
+    expect(readOrchestratorControlPlaneState().missionId).toBe(second.missionId);
+  }, 20_000);
+
   it('returns a clean unknown-packet error through the retry MCP handler', async () => {
     stubMissionApiFetch();
     const { handleRetryPacket } = await import('@/lib/mcp/operator-handlers/mission');
