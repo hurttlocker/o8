@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import type { SupervisorInboxItem } from '@/lib/supervisor/inbox';
+import { composeSupervisorInboxCardCopy } from '@/lib/inbox/card-copy';
 import { AlertCircle, Archive, ExternalLink, RefreshCw } from '../../../lucide-shims';
 import { formatElapsed } from '../../utils';
 import { FLAT_HOVER_SURFACE } from './constants';
@@ -101,7 +102,7 @@ export function SupervisorIncidentRow({
   const [hovered, setHovered] = useState(false);
   const tone = supervisorStatusTone(item.status);
   const repoName = baseName(item.repoPath) || 'repo';
-  const title = item.packetTitle ?? item.packetReferenceLabel ?? supervisorKindLabel(item.kind);
+  const copy = composeSupervisorInboxCardCopy(item);
   const verificationKind = typeof item.payload.verificationKind === 'string'
     ? item.payload.verificationKind
     : null;
@@ -154,7 +155,7 @@ export function SupervisorIncidentRow({
             whiteSpace: 'nowrap',
           }}
         >
-          {title}
+          {copy.headline}
         </span>
         <span
           style={{
@@ -168,7 +169,7 @@ export function SupervisorIncidentRow({
             whiteSpace: 'nowrap',
           }}
         >
-          {metaParts.join(' - ')}
+          {copy.subline || metaParts.join(' - ')}
           {verificationKind ? ` - ${verificationKind}` : ''}
           {item.repeatCount > 1 ? ` - x${item.repeatCount}` : ''}
         </span>
