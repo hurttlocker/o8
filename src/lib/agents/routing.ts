@@ -95,6 +95,15 @@ function normalizeModel(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
+function resolveOperatorDefaultRuntime(): OrchestratorRuntime {
+  try {
+    const { resolveDefaultDispatchRuntimeSync } = require('@/lib/operator/defaults') as typeof import('@/lib/operator/defaults');
+    return resolveDefaultDispatchRuntimeSync();
+  } catch {
+    return PRODUCTION_AGENT_RUNTIME;
+  }
+}
+
 function routingConfidence(intent: WorkerIntent): WorkerRoutingConfidence {
   if (intent === 'light_worker' || intent === 'diagnostic') return 'high';
   if (intent === 'reviewer' || intent === 'orchestrator') return 'medium';
@@ -122,11 +131,14 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
   const requestedEffort = normalizeEffort(input.requestedEffort);
 
   // Honor a requested runtime when the capability map marks it dispatchable.
-  // Anything else falls back to Codex.
+  // Anything else falls back to the effective operator default.
   const dispatchable = listDispatchableRuntimes({ includeExperimental: true });
+  const fallbackRuntime = resolveOperatorDefaultRuntime();
   const selectedRuntime = requestedRuntime && dispatchable.includes(requestedRuntime)
     ? requestedRuntime
-    : PRODUCTION_AGENT_RUNTIME;
+    : dispatchable.includes(fallbackRuntime)
+      ? fallbackRuntime
+      : PRODUCTION_AGENT_RUNTIME;
   const selectedProvider = providerForRuntime(selectedRuntime);
 
   // A requested model is honored only when it targets the runtime we actually

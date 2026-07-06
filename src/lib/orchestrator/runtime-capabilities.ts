@@ -131,4 +131,4 @@ export function getRuntimeCapability(runtime: OrchestratorRuntime): Orchestrator
 }
 
 /** Runtimes that ship in the v1 dispatch picker. Keep this narrow. */
-export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex'];
+export const V1_DISPATCH_RUNTIMES: OrchestratorRuntime[] = ['codex', 'claude-code'];

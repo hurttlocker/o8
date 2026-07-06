@@ -21,7 +21,7 @@ export type OverlapGateMode = 'advisory' | 'strict';
 export type ThinkingEffort = 'adaptive' | 'low' | 'medium' | 'high' | 'max' | 'xhigh';
 export type SettingSource = 'env' | 'file' | 'default';
 
-export type DispatchRuntime = 'codex' | 'gemini' | 'opencode';
+export type DispatchRuntime = 'codex' | 'claude-code' | 'gemini' | 'opencode';
 export type ClassAComposer = 'auto' | 'haiku-cli' | 'sonnet-cli' | 'fastest';
 export type WorkersUseBrain = 'off' | 'auto' | 'all';
 export type OrchestratorBackendSetting = 'auto' | 'codex' | 'claude' | 'openclaw' | 'hermes' | 'collide';
@@ -91,6 +91,7 @@ export const ORCHESTRATOR_MODEL_OPTIONS: Array<{ value: string; label: string }>
 
 export const DISPATCH_RUNTIME_OPTIONS: Array<{ value: DispatchRuntime; label: string; detail: string }> = [
   { value: 'codex', label: 'Codex', detail: 'OpenAI CLI — the default workhorse.' },
+  { value: 'claude-code', label: 'Claude Code', detail: 'Anthropic CLI — pairs opposite Codex orchestration.' },
   { value: 'gemini', label: 'Gemini', detail: 'Google Gemini 3 Pro CLI — fastest for parallel fan-out.' },
   { value: 'opencode', label: 'opencode', detail: 'OSS CLI — routes through your configured provider keys.' },
 ];

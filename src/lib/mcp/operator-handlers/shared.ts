@@ -222,8 +222,7 @@ export function optionalString(args: Record<string, unknown>, key: string) {
 
 export function parseMissionRuntime(value: unknown): OrchestratorRuntime {
   if (value === undefined || value === null || value === '') {
-    // Preserve the operator's configured runtime as a requested-routing hint.
-    // Production spawn still resolves to Codex in the worker-routing layer.
+    // Preserve the effective operator default as a requested-routing hint.
     try {
       const { resolveDefaultDispatchRuntimeSync } = require('@/lib/operator/defaults') as typeof import('@/lib/operator/defaults');
       return resolveDefaultDispatchRuntimeSync();
