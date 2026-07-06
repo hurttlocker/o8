@@ -36,6 +36,7 @@ describe('Claude Code dispatch spawn', () => {
   let priorClaudeBin: string | undefined;
 
   beforeEach(() => {
+    vi.resetModules();
     tempRoot = mkdtempSync(path.join(os.homedir(), '.o8-claude-dispatch-'));
     repoPath = path.join(tempRoot, 'repo');
     execFileSync('git', ['init', '-q', repoPath]);
@@ -97,5 +98,61 @@ describe('Claude Code dispatch spawn', () => {
       expect.stringContaining('implement the packet'),
       'utf8',
     );
+  }, 20_000);
+
+  it('passes the requested Claude model and effort to the stream-json launch argv', async () => {
+    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const result = await claudeCodeRuntime.launch({
+      cwd: repoPath,
+      prompt: 'implement the packet',
+      model: 'claude-opus-4-8',
+      effort: 'high',
+      laneId: 'lane-claude',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    const [, args] = spawnMock.mock.calls[0]!;
+    const argv = process.platform === 'win32' ? args : args.slice(2);
+    expect(argv).toEqual([
+      process.execPath,
+      '--input-format',
+      'stream-json',
+      '--output-format',
+      'stream-json',
+      '--verbose',
+      '--permission-mode',
+      'bypassPermissions',
+      '--include-partial-messages',
+      '--model',
+      'claude-opus-4-8',
+      '--effort',
+      'high',
+    ]);
+    expect(argv).not.toContain('-p');
+    expect(argv).not.toContain('--print');
+  }, 20_000);
+
+  it('omits the Claude effort flag for adaptive effort', async () => {
+    const { claudeCodeRuntime } = await import('@/lib/runtimes/claude-code');
+    const result = await claudeCodeRuntime.launch({
+      cwd: repoPath,
+      prompt: 'implement the packet',
+      model: 'claude-opus-4-8',
+      effort: 'adaptive',
+      laneId: 'lane-claude',
+    });
+
+    expect(result.ok).toBe(true);
+    expect(spawnMock).toHaveBeenCalledTimes(1);
+
+    const [, args] = spawnMock.mock.calls[0]!;
+    const argv = process.platform === 'win32' ? args : args.slice(2);
+    expect(argv).toContain('--model');
+    expect(argv).toContain('claude-opus-4-8');
+    expect(argv).not.toContain('--effort');
+    expect(argv).not.toContain('-p');
+    expect(argv).not.toContain('--print');
   }, 20_000);
 });

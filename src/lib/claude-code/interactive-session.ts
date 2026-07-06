@@ -8,6 +8,7 @@ import {
   createClaudeCodeStreamJsonParser,
 } from './stream-json-parser';
 import { assertNoPrintFlag } from './assert-no-print-flag';
+import type { ThinkingEffort } from '@/lib/orchestrator/thinking-effort';
 import type {
   ClaudeCodeStreamJsonParser,
   ClaudeCodeStreamJsonParserEvent,
@@ -133,6 +134,7 @@ export function buildClaudeStreamJsonArgs(
   model: string | null,
   permissionMode: ClaudeCodePermissionMode,
   resumeSessionId?: string | null,
+  effort?: ThinkingEffort,
 ): string[] {
   const args = [
     '--input-format',
@@ -147,6 +149,10 @@ export function buildClaudeStreamJsonArgs(
 
   if (model) {
     args.push('--model', model);
+  }
+
+  if (effort && effort !== 'adaptive') {
+    args.push('--effort', effort);
   }
 
   const normalizedResumeSessionId = normalizeResumeSessionId(resumeSessionId);
