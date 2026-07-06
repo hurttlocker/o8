@@ -95,6 +95,14 @@ export function invalidateOwnedClaudeCodeFleetCache(): void {
   claudeCodeOwnedStore.invalidateFleetCache();
 }
 
+export async function archiveOwnedClaudeCodeSession(surfaceId: string) {
+  return claudeCodeOwnedStore.archiveSession(surfaceId);
+}
+
+export async function getOwnedClaudeCodeTelemetrySources(surfaceId: string) {
+  return claudeCodeOwnedStore.getTelemetrySources(surfaceId);
+}
+
 export async function launchOwnedClaudeCodeSession(request: {
   cwd: string;
   prompt: string;

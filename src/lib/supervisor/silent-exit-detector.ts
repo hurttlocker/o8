@@ -167,6 +167,7 @@ async function probeSessionAlive(lane: Lane): Promise<boolean | undefined> {
 
   if (
     sessionKey.startsWith('codex-owned:')
+    || sessionKey.startsWith('claude-code-owned:')
     || sessionKey.startsWith('gemini-owned:')
     || sessionKey.startsWith('opencode-owned:')
   ) {
@@ -465,6 +466,9 @@ async function archiveTerminallyDeadLanes(now: number): Promise<void> {
       if (key?.startsWith('codex-owned:')) {
         const { archiveOwnedCodexSession } = await import('@/lib/codex/owned');
         await archiveOwnedCodexSession(key).catch(() => {});
+      } else if (key?.startsWith('claude-code-owned:')) {
+        const { archiveOwnedClaudeCodeSession } = await import('@/lib/claude-code/owned');
+        await archiveOwnedClaudeCodeSession(key).catch(() => {});
       }
       console.log(`[silent-exit] Auto-archived stale dead lane ${lane.id} (${lane.lastEventLabel})`);
     } catch (error) {

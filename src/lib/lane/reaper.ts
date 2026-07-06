@@ -184,6 +184,9 @@ async function probeLaneOwner(lane: Lane): Promise<LaneOwnerProbe> {
   if (sessionKey.startsWith('codex-owned:')) {
     return probeOwnedSession(sessionKey, lane);
   }
+  if (sessionKey.startsWith('claude-code-owned:')) {
+    return probeOwnedSession(sessionKey, lane);
+  }
   if (sessionKey.startsWith('gemini-owned:')) {
     return probeOwnedSession(sessionKey, lane);
   }

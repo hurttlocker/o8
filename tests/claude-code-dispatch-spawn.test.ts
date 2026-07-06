@@ -47,6 +47,7 @@ describe('Claude Code dispatch spawn', () => {
       pid: 42,
       stdin: { end: vi.fn() },
       unref: vi.fn(),
+      once: vi.fn(),
     });
     ensureDispatchBackendReadyMock.mockClear();
   });

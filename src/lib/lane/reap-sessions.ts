@@ -76,6 +76,9 @@ export async function archiveLaneSessions(lanes: Lane[]): Promise<number> {
       if (target.sessionKey.startsWith('codex-owned:')) {
         const { archiveOwnedCodexSession } = await import('@/lib/codex/owned');
         await archiveOwnedCodexSession(target.sessionKey);
+      } else if (target.sessionKey.startsWith('claude-code-owned:')) {
+        const { archiveOwnedClaudeCodeSession } = await import('@/lib/claude-code/owned');
+        await archiveOwnedClaudeCodeSession(target.sessionKey);
       } else if (target.sessionKey.startsWith('gemini-owned:')) {
         const { archiveOwnedGeminiSession } = await import('@/lib/gemini/owned');
         await archiveOwnedGeminiSession(target.sessionKey);
