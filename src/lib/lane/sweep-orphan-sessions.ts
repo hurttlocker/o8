@@ -26,6 +26,10 @@ export async function sweepOrphanedOwnedSessions(): Promise<number> {
       sweeps.push(sweepOrphanedCodexSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS));
     } catch { /* runtime module unavailable — skip */ }
     try {
+      const { sweepOrphanedClaudeCodeSessions } = await import('@/lib/claude-code/owned');
+      sweeps.push(sweepOrphanedClaudeCodeSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS));
+    } catch { /* runtime module unavailable — skip */ }
+    try {
       const { sweepOrphanedGeminiSessions } = await import('@/lib/gemini/owned');
       sweeps.push(sweepOrphanedGeminiSessions(activeSurfaceIds, IN_FLIGHT_GUARD_MS));
     } catch { /* skip */ }

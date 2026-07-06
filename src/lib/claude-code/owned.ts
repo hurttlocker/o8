@@ -100,6 +100,10 @@ export async function archiveOwnedClaudeCodeSession(surfaceId: string) {
   return claudeCodeOwnedStore.archiveSession(surfaceId);
 }
 
+export async function sweepOrphanedClaudeCodeSessions(activeSurfaceIds: Set<string>, maxAgeMs: number) {
+  return claudeCodeOwnedStore.sweepOrphanedSessions(activeSurfaceIds, maxAgeMs);
+}
+
 export async function getOwnedClaudeCodeTelemetrySources(surfaceId: string) {
   return claudeCodeOwnedStore.getTelemetrySources(surfaceId);
 }
