@@ -35,6 +35,32 @@ export type LaneStatus =
   | 'completed'       // done and merged
   | 'archived';       // no longer active
 
+export const LANE_STATUSES = [
+  'idle',
+  'launching',
+  'running',
+  'paused',
+  'awaiting_input',
+  'awaiting_orchestrator',
+  'recovering',
+  'reviewing',
+  'merging',
+  'failed',
+  'completed',
+  'archived',
+] as const satisfies readonly LaneStatus[];
+
+const TERMINAL_STATUS_VALUES = new Set<string>([
+  'reviewing',
+  'failed',
+  'completed',
+  'archived',
+]);
+
+export function isTerminalStatus(status: string | null | undefined): boolean {
+  return Boolean(status && (TERMINAL_STATUS_VALUES.has(status) || status.startsWith('silent_exit_')));
+}
+
 /**
  * Managed = IDE spawned it, full control (steer, interrupt, review).
  * Attached = discovered existing session, inspect + capability-gated.
