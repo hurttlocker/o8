@@ -31,7 +31,6 @@ import {
 } from '@/components/desktop/workspace-terminal/orchestrator-thread-restore';
 import {
   OrchestratorEmptyState,
-  OrchestratorComposerBelow,
   timeOfDayGreeting,
   type WorktreeMode,
   type OrchestratorEmptyKind,
@@ -910,6 +909,7 @@ function OrchestratorTabInner({
         worktreeMode={worktreeMode}
         onWorktreeModeChange={setWorktreeMode}
         branch={branchLabel}
+        onBranchChange={setPickedBranch}
         kind={emptyKind}
         kindLocked={emptyKindLocked}
         onKindChange={handleEmptyKindChange}
@@ -1007,21 +1007,6 @@ function OrchestratorTabInner({
       onSetCollide={handleSetCollide}
       repoLabel={repoLabel}
       emptyStateOverride={emptyOrShimmerNode}
-      composerBelowSlot={(
-        <OrchestratorComposerBelow
-          worktreeMode={worktreeMode}
-          onWorktreeModeChange={setWorktreeMode}
-          branch={branchLabel}
-          repoPath={effectiveRepoPath}
-          onBranchChange={setPickedBranch}
-          onActionClick={handleQuickAction}
-          repoLabel={projectLabel}
-          workspaceTargets={data?.workspaceTargets ?? []}
-          onSelectProject={handleEmptySelectProject}
-          onAddProject={handleEmptyAddProject}
-          onWorkWithoutProject={handleEmptyWorkWithoutProject}
-        />
-      )}
       showInlineExport={false}
       lockedMode={lockedMode}
       initialMode={initialMode}
