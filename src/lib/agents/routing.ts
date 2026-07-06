@@ -95,15 +95,6 @@ function normalizeModel(value: unknown): string | null {
   return typeof value === 'string' && value.trim() ? value.trim() : null;
 }
 
-function resolveOperatorDefaultRuntime(): OrchestratorRuntime {
-  try {
-    const { resolveDefaultDispatchRuntimeSync } = require('@/lib/operator/defaults') as typeof import('@/lib/operator/defaults');
-    return resolveDefaultDispatchRuntimeSync();
-  } catch {
-    return PRODUCTION_AGENT_RUNTIME;
-  }
-}
-
 function routingConfidence(intent: WorkerIntent): WorkerRoutingConfidence {
   if (intent === 'light_worker' || intent === 'diagnostic') return 'high';
   if (intent === 'reviewer' || intent === 'orchestrator') return 'medium';
@@ -131,14 +122,16 @@ export function resolveWorkerRouting(input: ResolveWorkerRoutingInput = {}): Wor
   const requestedEffort = normalizeEffort(input.requestedEffort);
 
   // Honor a requested runtime when the capability map marks it dispatchable.
-  // Anything else falls back to the effective operator default.
+  // Anything else falls back to Codex. The paired operator default (opposite-
+  // frontier rule) is resolved by the SERVER entry points (create-mission /
+  // spawn-prompt routes, parseMissionRuntime) and arrives here as
+  // requestedRuntime — this module is client-bundled via the dashboard, so it
+  // must never require the server-only operator defaults itself (broke the
+  // 0.1.553 next build).
   const dispatchable = listDispatchableRuntimes({ includeExperimental: true });
-  const fallbackRuntime = resolveOperatorDefaultRuntime();
   const selectedRuntime = requestedRuntime && dispatchable.includes(requestedRuntime)
     ? requestedRuntime
-    : dispatchable.includes(fallbackRuntime)
-      ? fallbackRuntime
-      : PRODUCTION_AGENT_RUNTIME;
+    : PRODUCTION_AGENT_RUNTIME;
   const selectedProvider = providerForRuntime(selectedRuntime);
 
   // A requested model is honored only when it targets the runtime we actually
