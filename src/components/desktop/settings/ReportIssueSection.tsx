@@ -5,10 +5,10 @@ import {
   APP_FONT_STACK,
   RAMS_ACCENT,
   RAMS_INK_QUIET,
-  CornerBrackets,
   RamsButton,
-  SectionLabel,
+  SettingsSegmented,
 } from './shared';
+import { SettingsGroup } from './grouped';
 
 type ReportCategory = 'bug' | 'request';
 type ReportState = 'idle' | 'sending' | 'sent' | 'error';
@@ -27,7 +27,7 @@ interface AttachedImage {
   size: number;
 }
 
-export function ReportIssueSection({ number }: { number: string }) {
+export function ReportIssueSection() {
   const [category, setCategory] = useState<ReportCategory>('bug');
   const [message, setMessage] = useState('');
   const [image, setImage] = useState<AttachedImage | null>(null);
@@ -141,84 +141,32 @@ export function ReportIssueSection({ number }: { number: string }) {
   }, [category, trimmedMessage, image]);
 
   return (
-    <section style={{ marginBottom: 32 }}>
-      <SectionLabel number={number}>REPORT AN ISSUE</SectionLabel>
-
-      <div style={{
-        position: 'relative',
-        paddingTop: 18,
-        paddingRight: 18,
-        paddingBottom: 18,
-        paddingLeft: 18,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: 'var(--t-divider-subtle)',
-        borderRadius: 4,
-        background: 'var(--t-bg-card)',
-      }}>
-        <CornerBrackets armLength={9} inset={5} />
-
+    <section style={{ marginTop: 28, marginBottom: 4 }}>
+      <SettingsGroup
+        header="Report an issue"
+        footnote="One-way — we read every report but won't reply here."
+      >
         <div style={{
           display: 'flex',
           flexDirection: 'column',
-          gap: 18,
+          gap: 16,
           maxWidth: 680,
+          paddingTop: 14,
+          paddingBottom: 14,
+          paddingLeft: 14,
+          paddingRight: 14,
         }}>
-          <div>
-            <h2 style={{
-              margin: 0,
-              marginBottom: 8,
-              fontFamily: APP_FONT_STACK,
-              fontSize: 18,
-              fontWeight: 300,
-              letterSpacing: '-0.02em',
-              lineHeight: 1.2,
-              color: 'var(--t-text)',
-            }}>
-              Report an issue
-            </h2>
-            <p style={{
-              margin: 0,
-              fontFamily: APP_FONT_STACK,
-              fontSize: 13,
-              fontWeight: 300,
-              letterSpacing: '-0.005em',
-              lineHeight: 1.5,
-              color: 'var(--t-text-muted)',
-            }}>
-              Send a bug or request to the o8 team. One-way — we read every report but won&apos;t reply here.
-            </p>
-          </div>
-
-          <div style={{
-            display: 'inline-grid',
-            gridTemplateColumns: '1fr 1fr',
-            width: 220,
-            padding: 3,
-            gap: 3,
-            borderWidth: 1,
-            borderStyle: 'solid',
-            borderColor: 'var(--t-divider-subtle)',
-            borderRadius: 9,
-            background: 'var(--t-input-bg)',
-          }}>
-            <CategoryButton
-              active={category === 'bug'}
-              label="Bug"
-              onClick={() => {
-                setCategory('bug');
-                if (state === 'sent') setState('idle');
-              }}
-            />
-            <CategoryButton
-              active={category === 'request'}
-              label="Request"
-              onClick={() => {
-                setCategory('request');
-                if (state === 'sent') setState('idle');
-              }}
-            />
-          </div>
+          <SettingsSegmented
+            value={category}
+            onChange={(v) => {
+              setCategory(v as ReportCategory);
+              if (state === 'sent') setState('idle');
+            }}
+            options={[
+              { value: 'bug', label: 'Bug' },
+              { value: 'request', label: 'Request' },
+            ]}
+          />
 
           <label style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
             <span style={{
@@ -425,43 +373,8 @@ export function ReportIssueSection({ number }: { number: string }) {
             </div>
           ) : null}
         </div>
-      </div>
+      </SettingsGroup>
     </section>
-  );
-}
-
-function CategoryButton({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      style={{
-        minHeight: 32,
-        borderRadius: 7,
-        borderWidth: 1,
-        borderStyle: 'solid',
-        borderColor: active ? 'var(--t-panel-border)' : 'transparent',
-        background: active ? 'var(--t-bg-card)' : 'transparent',
-        color: active ? RAMS_ACCENT : 'var(--t-text-muted)',
-        cursor: 'pointer',
-        fontFamily: APP_FONT_STACK,
-        fontSize: 12,
-        fontWeight: 400,
-        letterSpacing: '-0.01em',
-        transition: 'background 150ms cubic-bezier(0.22, 1, 0.36, 1), color 120ms, border-color 120ms',
-      }}
-    >
-      {label}
-    </button>
   );
 }
 
