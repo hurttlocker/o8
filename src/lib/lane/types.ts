@@ -35,30 +35,32 @@ export type LaneStatus =
   | 'completed'       // done and merged
   | 'archived';       // no longer active
 
-export const LANE_STATUSES = [
-  'idle',
-  'launching',
-  'running',
-  'paused',
-  'awaiting_input',
-  'awaiting_orchestrator',
-  'recovering',
-  'reviewing',
-  'merging',
-  'failed',
-  'completed',
-  'archived',
-] as const satisfies readonly LaneStatus[];
+const LANE_STATUS_RECORD = {
+  idle: true,
+  launching: true,
+  running: true,
+  paused: true,
+  awaiting_input: true,
+  awaiting_orchestrator: true,
+  recovering: true,
+  reviewing: true,
+  merging: true,
+  failed: true,
+  completed: true,
+  archived: true,
+} satisfies Record<LaneStatus, true>;
 
-const TERMINAL_STATUS_VALUES = new Set<string>([
+export const LANE_STATUSES = Object.keys(LANE_STATUS_RECORD) as LaneStatus[];
+
+const TERMINAL_LANE_STATUS_VALUES = new Set<LaneStatus>([
   'reviewing',
   'failed',
   'completed',
   'archived',
 ]);
 
-export function isTerminalStatus(status: string | null | undefined): boolean {
-  return Boolean(status && (TERMINAL_STATUS_VALUES.has(status) || status.startsWith('silent_exit_')));
+export function isTerminalLaneStatus(status: LaneStatus | null | undefined): boolean {
+  return Boolean(status && TERMINAL_LANE_STATUS_VALUES.has(status));
 }
 
 /**
