@@ -93,13 +93,19 @@ function WorkspaceTerminalPanelsBase({
     <div style={{ flex: 1, position: 'relative', overflow: 'hidden', background: 'var(--t-chat-surface-bg, var(--t-panel))' }}>
       {visibleTabs.map((tab) => (
         tab.kind === 'orchestrator' ? (
+          // NEVER hard-lock an orchestrator-kind tab (no lockedMode here).
+          // Deriving lockedMode from a persisted mode:'single' made single a
+          // one-way door — the chooser hides and every switch-back path
+          // no-ops, so the tab is stuck as Codex forever (operator hit this
+          // 2026-07-06). Dedicated single-runtime tabs are kind:'chat' below;
+          // an orchestrator tab starts in its persisted mode but stays
+          // switchable.
           <Suspense key={tab.id} fallback={null}>
             <LazyOrchestratorTab
               tabId={tab.id}
               active={tab.id === effectiveActiveTabId}
               repoPath={tab.repo?.localPath ?? null}
               repoLabel={tab.repo?.name ?? null}
-              lockedMode={tab.mode === 'single' ? 'single' : undefined}
               initialMode={tab.mode}
               initialSingleRuntime={tab.singleRuntime}
               initialChatModelId={tab.chatModelId}

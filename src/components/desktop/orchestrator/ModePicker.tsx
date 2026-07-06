@@ -7,9 +7,9 @@
  *   - LEFT  — "Fleet orchestration" — Claude orchestrates Codex +
  *             Gemini + opencode in parallel waves. Tagged with the
  *             resolved orchestrator model (operator default).
- *   - RIGHT — "Single runtime" — collapsible runtime sub-picker
- *             (Codex / Gemini / opencode / Claude Code). Dispatches one
- *             agent without orchestration overhead.
+ *   - MID   — "Solo" — the SAME orchestrator brain, forbidden from
+ *             dispatching for the turn (works the repo itself). Never
+ *             swaps the composer to a raw CLI session.
  *
  * Selected card has a subtle orange border (one orange accent rule).
  * Default = Fleet on first dispatch, last-used after that. Persisted
@@ -19,10 +19,8 @@
  * is honored — no card mount animation when set.
  */
 
-import { memo, useCallback, useMemo, useState } from 'react';
+import { memo, useCallback } from 'react';
 import type { OrchestrationMode, OrchestratorRuntime } from '@/lib/orchestrator/types';
-import { useExperimentalOpencodeFlag } from '@/lib/operator/use-experimental-opencode';
-import { useExperimentalGeminiFlag } from '@/lib/operator/use-experimental-gemini';
 import { useExperimentalChatFlag } from '@/lib/operator/use-experimental-chat';
 import { useOrchestratorModel } from '@/lib/operator/use-orchestrator-model';
 import { formatModelLabel } from '@/lib/format';
@@ -48,61 +46,34 @@ interface ModePickerProps {
   onSpawnChatTab?: () => void;
 }
 
-const SINGLE_RUNTIMES: Array<{ id: OrchestratorRuntime; label: string }> = [
-  { id: 'codex', label: 'Codex' },
-  { id: 'gemini', label: 'Gemini' },
-  { id: 'opencode', label: 'opencode' },
-  { id: 'claude-code', label: 'Claude Code' },
-];
-
 function ModePickerBase({
   visible,
   selectedMode,
   onSelectMode,
-  selectedSingleRuntime,
-  onSelectSingleRuntime,
-  onSpawnSingleTab,
   onSpawnChatTab,
 }: ModePickerProps) {
-  const opencodeEnabled = useExperimentalOpencodeFlag();
-  const geminiEnabled = useExperimentalGeminiFlag();
   const chatEnabled = useExperimentalChatFlag();
   const orchestratorModel = useOrchestratorModel();
-  const visibleRuntimes = useMemo(
-    () => SINGLE_RUNTIMES.filter((r) =>
-      (r.id !== 'opencode' || opencodeEnabled) && (r.id !== 'gemini' || geminiEnabled),
-    ),
-    [opencodeEnabled, geminiEnabled],
-  );
-  // Single still has a sub-drawer (operator picks the runtime). Chat
-  // spawns immediately — the spawned tab carries its own model picker.
-  const [singleOpen, setSingleOpen] = useState(false);
 
   const handleClickFleet = useCallback(() => {
     onSelectMode('fleet');
-    setSingleOpen(false);
   }, [onSelectMode]);
 
+  // Solo (operator, 2026-07-06): selecting it keeps the SAME orchestrator
+  // brain and simply forbids dispatch — it must never swap the composer to a
+  // raw single-runtime CLI session (the stuck-on-Codex trap). Dedicated CLI
+  // tabs still exist via the new-tab drawer and slash commands (/codex ...).
   const handleClickSingle = useCallback(() => {
-    setSingleOpen((prev) => !prev);
-  }, []);
+    onSelectMode('single');
+  }, [onSelectMode]);
 
   const handleClickChat = useCallback(() => {
     if (onSpawnChatTab) {
       onSpawnChatTab();
-      setSingleOpen(false);
     } else {
       onSelectMode('chat');
     }
   }, [onSelectMode, onSpawnChatTab]);
-
-  const handlePickSingleRuntime = useCallback((runtime: OrchestratorRuntime) => {
-    onSelectSingleRuntime(runtime);
-    if (onSpawnSingleTab) {
-      onSpawnSingleTab(runtime);
-      setSingleOpen(false);
-    }
-  }, [onSelectSingleRuntime, onSpawnSingleTab]);
 
   if (!visible) return null;
 
@@ -127,64 +98,14 @@ function ModePickerBase({
         onClick={handleClickFleet}
         glyph={<FleetGlyph />}
       />
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-        <ModeCard
-          active={selectedMode === 'single'}
-          title="Single runtime"
-          copy={onSpawnSingleTab
-            ? 'Pick a runtime to open a new tab — no orchestration overhead.'
-            : 'Dispatches one agent without orchestration overhead.'}
-          tag={`using ${SINGLE_RUNTIMES.find((r) => r.id === selectedSingleRuntime)?.label ?? selectedSingleRuntime}`}
-          onClick={handleClickSingle}
-          glyph={<SingleGlyph />}
-        />
-        {singleOpen ? (
-          <div
-            style={{
-              display: 'flex',
-              flexWrap: 'wrap',
-              gap: 4,
-              paddingTop: 4,
-              paddingRight: 4,
-              paddingBottom: 4,
-              paddingLeft: 4,
-            }}
-          >
-            {visibleRuntimes.map((runtime) => {
-              const selected = runtime.id === selectedSingleRuntime;
-              return (
-                <button
-                  key={runtime.id}
-                  type="button"
-                  onClick={() => handlePickSingleRuntime(runtime.id)}
-                  aria-pressed={selected}
-                  style={{
-                    height: 22,
-                    paddingTop: 0,
-                    paddingRight: 8,
-                    paddingBottom: 0,
-                    paddingLeft: 8,
-                    borderRadius: 6,
-                    borderWidth: 1,
-                    borderStyle: 'solid',
-                    borderColor: selected ? 'var(--t-accent-border)' : 'var(--t-border)',
-                    background: selected ? 'var(--t-accent-soft)' : 'transparent',
-                    color: selected ? 'var(--t-accent)' : 'var(--t-text-muted)',
-                    fontSize: 9,
-                    fontWeight: 700,
-                    textTransform: 'uppercase',
-                    letterSpacing: '0.06em',
-                    cursor: 'pointer',
-                    fontFamily: 'var(--font-sans-system)',
-                  }}
-                >
-                  {runtime.label}
-                </button>
-              );
-            })}
-          </div>
-        ) : null}
-      </div>
+      <ModeCard
+        active={selectedMode === 'single'}
+        title="Solo"
+        copy="The orchestrator works the repo itself — no workers dispatched."
+        tag={`using Claude ${formatModelLabel(orchestratorModel)}`}
+        onClick={handleClickSingle}
+        glyph={<SingleGlyph />}
+      />
       {chatEnabled ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           <ModeCard

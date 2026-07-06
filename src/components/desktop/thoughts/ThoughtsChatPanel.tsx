@@ -410,7 +410,14 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
   // Index of the attachment currently open in the screenshot annotator (or null).
   const [annotatingIndex, setAnnotatingIndex] = useState<number | null>(null);
 
-  const isSingleMode = orchestrationMode === 'single';
+  // 'single' means two different things by tab kind (operator, 2026-07-06):
+  // on a LOCKED tab (kind:'chat', dedicated CLI session) it is the classic
+  // single-runtime composer; on an unlocked ORCHESTRATOR tab it is SOLO —
+  // the same Claude orchestrator, just forbidden from dispatching this turn.
+  // Picking Single must never silently swap the orchestrator for a raw Codex
+  // session (that was the stuck-on-Codex trap).
+  const isSingleMode = lockedMode === 'single';
+  const soloOrchestrator = orchestrationMode === 'single' && lockedMode !== 'single';
   const isChatMode = orchestrationMode === 'chat';
   const isOrchestratorMode = !isSingleMode && !isChatMode && (targetAgentKey === '__claude__' || !sessionTargets.some((s) => s.key === targetAgentKey));
 
@@ -1429,10 +1436,11 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       model: orchestratorModel,
       displayMessage: request.displayMessage,
       localEntriesAfterUser,
-      swarm: swarmEnabled,
+      swarm: swarmEnabled && !soloOrchestrator,
+      solo: soloOrchestrator,
       collide: collideEnabled,
     });
-  }, [orchStream, orchestratorBackend, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled, collideEnabled]);
+  }, [orchStream, orchestratorBackend, orchestratorModel, permissionMode, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled]);
 
   const runLocalOrchestratorSlash = useCallback(async (rawInput: string) => {
     if (!isOrchestratorMode || isChatMode) return false;
@@ -1529,7 +1537,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
             backend: composerBackendTurnOverride(orchestratorBackend),
             thinkingEffort,
             model: orchestratorModel,
-            swarm: swarmEnabled,
+            swarm: swarmEnabled && !soloOrchestrator,
+      solo: soloOrchestrator,
             collide: collideEnabled,
             ...(attachments ? { attachments } : {}),
           });
@@ -1667,7 +1676,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
         backend: composerBackendTurnOverride(orchestratorBackend),
         thinkingEffort,
         model: orchestratorModel,
-        swarm: swarmEnabled,
+        swarm: swarmEnabled && !soloOrchestrator,
+      solo: soloOrchestrator,
         collide: collideEnabled,
         ...(attachments ? { attachments } : {}),
       };
@@ -1731,7 +1741,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
       ]);
       setWaitingForReply(false);
     }
-  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
+  }, [attachedImages, captureServerSnapshot, chatMessages, chatOpenrouterModel, chatStreamRequest, clearAttachments, ensureSingleRuntimeSession, input, isChatMode, isOrchestratorMode, isSingleMode, lockedMode, onSpawnChatTab, onSpawnSingleTab, orchStream, orchestratorBackend, orchestratorModel, permissionMode, resolvedRepoPath, runLocalOrchestratorSlash, selectedChatModel, singleRuntime, startPolling, startPollingForSession, targetAgent, targetSessionKey, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
 
   const sendNow = useCallback((text?: string) => {
     const msg = (typeof text === 'string' ? text : latestInputRef.current).trim();
@@ -1763,7 +1773,8 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
           backend: composerBackendTurnOverride(orchestratorBackend),
           thinkingEffort,
           model: orchestratorModel,
-          swarm: swarmEnabled,
+          swarm: swarmEnabled && !soloOrchestrator,
+      solo: soloOrchestrator,
           collide: collideEnabled,
           ...(attachments ? { attachments } : {}),
         });
@@ -1775,7 +1786,7 @@ export const ThoughtsChatPanel = forwardRef<ThoughtsChatPanelHandle, {
     setInput(msg);
     latestInputRef.current = msg;
     setTimeout(() => { void handleTaskSend(msg); }, 0);
-  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, collideEnabled, waitingForReply]);
+  }, [attachedImages, clearAttachments, handleTaskSend, isChatMode, isOrchestratorMode, orchStream, orchestratorBackend, orchestratorModel, permissionMode, runLocalOrchestratorSlash, thinkingEffort, swarmEnabled, soloOrchestrator, collideEnabled, waitingForReply]);
   queuedSteerSendNowRef.current = sendNow;
 
   // ⌘⏎ steer handlers. enqueueSteer routes the typed input through the queue:
