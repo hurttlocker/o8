@@ -204,19 +204,56 @@ export function NativeBrowserSurface({ url, agentGlow }: NativeBrowserSurfacePro
       }
       return false;
     };
-    const inset = 6;
-    // 3×3 grid (was center + 4 corners): popovers that overlap only an edge —
-    // the repo drawer, the context meter — slipped between the 5 points and
-    // the window kept painting over them (operator, 2026-07-06).
-    const xs = [r.left + inset, r.left + r.width / 2, r.right - inset];
-    const ys = [r.top + inset, r.top + r.height / 2, r.bottom - inset];
-    const pts: Array<[number, number]> = xs.flatMap((x) => ys.map((y) => [x, y] as [number, number]));
+    // PORTAL RECT SWEEP (root fix, operator 2026-07-06). Point sampling kept
+    // missing popovers whose overlap band dodged the probe grid (the context
+    // meter cut a vertical strip between all three left-column probes). Every
+    // o8 popover/menu portals into <body> with position:fixed, so instead of
+    // guessing points we intersect each portal's PAINTED rect with the browser
+    // rect exactly. A portal wrapper is often a transparent full-screen
+    // click-catcher — when it doesn't paint, we look for its first painted
+    // descendant and use THAT rect (bounded walk).
+    const intersects = (a: DOMRect): boolean => {
+      const ox = Math.min(a.right, r.right) - Math.max(a.left, r.left);
+      const oy = Math.min(a.bottom, r.bottom) - Math.max(a.top, r.top);
+      return ox > 12 && oy > 12;
+    };
+    const paintedRectIntersects = (root: Element): boolean => {
+      if (root === el || el.contains(root) || root.contains(el)) return false;
+      if (root.getAttribute('data-design-mode-overlay') === 'true') return false;
+      const queue: Element[] = [root];
+      let budget = 40;
+      while (queue.length && budget-- > 0) {
+        const n = queue.shift()!;
+        const nr = n.getBoundingClientRect();
+        if (nr.width < 2 || nr.height < 2) continue;
+        if (paintsVisibly(n)) return intersects(nr);
+        queue.push(...Array.from(n.children));
+      }
+      return false;
+    };
     let occluded = false;
-    for (const [px, py] of pts) {
-      const top = document.elementsFromPoint(px, py)[0];
-      if (top && top !== el && !el.contains(top) && !top.contains(el) && paintsVisibly(top)) {
-        occluded = true;
-        break;
+    for (const child of Array.from(document.body.children)) {
+      // Skip the app root (huge, always paints) — in-app surfaces are handled
+      // by the forced-occlusion channel; this sweep is for portaled overlays.
+      if (child.contains(el)) continue;
+      if (child.tagName === 'SCRIPT' || child.tagName === 'STYLE') continue;
+      if (paintedRectIntersects(child)) { occluded = true; break; }
+    }
+    // Fallback point grid for anything exotic that neither portals nor goes
+    // through the forced channel.
+    if (!occluded) {
+      const inset = 6;
+      const xs = [r.left + inset, r.left + r.width / 2, r.right - inset];
+      const ys = [r.top + inset, r.top + r.height / 2, r.bottom - inset];
+      for (const px of xs) {
+        for (const py of ys) {
+          const top = document.elementsFromPoint(px, py)[0];
+          if (top && top !== el && !el.contains(top) && !top.contains(el) && paintsVisibly(top)) {
+            occluded = true;
+            break;
+          }
+        }
+        if (occluded) break;
       }
     }
     setOccluded(occluded);
