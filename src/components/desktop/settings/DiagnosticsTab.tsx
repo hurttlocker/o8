@@ -77,8 +77,13 @@ function toolStatusLine(tool: DiagnosticTool): string {
 // ── Diagnostics Tab ──
 
 export function DiagnosticsTab() {
-  const { founder, plan } = useEntitlement();
-  const foundersMode = founder !== null || plan === 'founder';
+  const { founder } = useEntitlement();
+  // INTERNAL instrumentation, not a founders perk (operator, 2026-07-06):
+  // substrate-health reds and loop state are repair signals for the team, not
+  // something any customer — founder included — should be reading into.
+  // Gated to Founding Operator #1 (the builder) until a proper internal-role
+  // flag exists. Dev builds always show it.
+  const internalMode = founder?.operatorNumber === 1 || process.env.NODE_ENV !== 'production';
   const [tools, setTools] = useState<DiagnosticTool[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -404,9 +409,9 @@ export function DiagnosticsTab() {
       </section>
 
       {/* Builder instrumentation — Brain recall latency, autonomous-loop state,
-          and the golden-demo runner. A regular user can't act on any of it, so
-          it rides behind Founders mode (visibility only, #1450). */}
-      {foundersMode ? (
+          and the golden-demo runner. Internal-only: repair signals for the
+          team, never customer-facing (not even founders). */}
+      {internalMode ? (
         <>
           <div style={{
             marginTop: 40,
@@ -424,7 +429,7 @@ export function DiagnosticsTab() {
               textTransform: 'uppercase',
               color: RAMS_ACCENT,
             }}>
-              Founders
+              Internal
             </span>
             <div style={{ flex: 1, height: 1, background: 'var(--t-divider, rgba(17,17,17,0.06))' }} />
             <span style={{

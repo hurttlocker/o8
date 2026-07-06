@@ -2,6 +2,7 @@
 
 import { useSyncExternalStore } from 'react';
 import { useTheme, type ReduceTransparency } from '@/lib/theme/context';
+import { useEntitlement } from '@/lib/entitlement/context';
 import type { ThemePalette } from '@/lib/theme/registry';
 import {
   readTimelineVisible,
@@ -21,7 +22,7 @@ import {
   TabHeading,
   SETTINGS_CONTENT_MAX_WIDTH,
 } from './shared';
-import { GroupHeader, SettingsGroup, SettingsRow } from './grouped';
+import { GroupFootnote, GroupHeader, SettingsGroup, SettingsRow } from './grouped';
 
 // ── Palette Preview Card ────────────────────────────────────────────────────
 
@@ -220,6 +221,11 @@ export function AppearanceTab() {
     setReduceTransparency,
   } = useTheme();
   const [timelineVisible, setTimelineVisible] = useTimelineVisible();
+  const { founder, plan } = useEntitlement();
+  const foundersMode = founder !== null || plan === 'founder';
+  // Free keeps the core o8 theme (light/dark); founders-flagged palettes are
+  // founders-only, with more shipping founders-first (#1450).
+  const visiblePalettes = palettes.filter((p) => !p.foundersOnly || foundersMode);
 
   return (
     <div
@@ -242,7 +248,7 @@ export function AppearanceTab() {
         <GroupHeader>Palette</GroupHeader>
 
         <div style={{ display: 'flex', gap: 18, marginTop: 4, flexWrap: 'wrap' }}>
-          {palettes.map((p) => (
+          {visiblePalettes.map((p) => (
             <PalettePreviewCard
               key={p.id}
               palette={p}
@@ -251,6 +257,9 @@ export function AppearanceTab() {
             />
           ))}
         </div>
+        {foundersMode ? (
+          <GroupFootnote>More founders themes are on the way — they land here first.</GroupFootnote>
+        ) : null}
 
       </section>
 

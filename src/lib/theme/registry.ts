@@ -35,6 +35,9 @@ export interface ThemePalette {
   id: PaletteId;
   name: string;
   colorScheme: 'light' | 'dark';
+  /** Founders-only palette — hidden from the free picker (#1450). The core
+   * light/dark pair ("the o8 theme") stays free; extra themes ship founders-first. */
+  foundersOnly?: boolean;
   /** Hint shown in the picker preview for each surface mode. */
   preview: ThemePreview;
   /** Tokens that don't change with surface mode. */
