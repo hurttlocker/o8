@@ -101,6 +101,10 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
   const launchGroupLabel = adapter.launchGroupLabel ?? 'Launch turn';
   const resumeGroupLabel = adapter.resumeGroupLabel ?? 'Resume turn';
 
+  function quoteShellArg(value: string): string {
+    return `'${value.replace(/'/g, "'\\''")}'`;
+  }
+
   // Per-store fleet cache + inflight dedupe. Codex and Gemini each get their own.
   let fleetCache: { value: OwnedFleetAdditions; cachedAt: number } | null = null;
   let fleetInflight: Promise<OwnedFleetAdditions> | null = null;
@@ -562,8 +566,10 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     const stderrPath = path.join(session.sessionDir, RUNS_DIR, `${runId}.stderr.log`);
 
     let args: string[];
+    let stdinPayload: string | null = null;
     if (mode === 'launch') {
       args = adapter.launchArgs({ cwd: session.repoPath, prompt, model: session.model, effort: session.effort });
+      stdinPayload = adapter.launchStdin?.({ cwd: session.repoPath, prompt, model: session.model, effort: session.effort }) ?? null;
     } else {
       const built = adapter.resumeArgs({ threadId: session.threadId ?? '', prompt, model: session.model });
       if (!built) {
@@ -616,8 +622,8 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
     let pendingDetachedExit: OwnedChildExitOutcome | undefined;
 
     const bridgeSessionName = tmuxSessionName(runtimeId, runId);
-    const cliCmd = [binary, ...args].map((a) => `'${a.replace(/'/g, "'\\''")}'`).join(' ');
-    const shellCmd = `${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
+    const cliCmd = [binary, ...args].map(quoteShellArg).join(' ');
+    const shellCmd = `${stdinPayload ? `printf %s ${quoteShellArg(stdinPayload)} | ` : ''}${cliCmd} | tee '${stdoutPath}' 2>'${stderrPath}'`;
 
     // Adapter-supplied env augmentation. Returned keys override anything
     // already in the parent process env on the spawned child.
@@ -669,13 +675,13 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
           ? spawn(binary, args, {
               cwd: session.repoPath,
               detached: true,
-              stdio: ['ignore', stdoutFd, stderrFd],
+              stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
               env: { ...process.env, ...spawnEnv },
             })
           : spawn('nice', ['-n', '10', binary, ...args], {
               cwd: session.repoPath,
               detached: true,
-              stdio: ['ignore', stdoutFd, stderrFd],
+              stdio: [stdinPayload ? 'pipe' : 'ignore', stdoutFd, stderrFd],
               // Detached fallback inherits process.env then layers adapter env +
               // FORCE_COLOR/NO_COLOR, matching the bridge path's semantics.
               env: { ...process.env, ...spawnEnv },
@@ -690,6 +696,9 @@ export function createOwnedSessionStore(adapter: OwnedRuntimeAdapter): OwnedSess
             console.warn(`[owned-store] ${runtimeId} child-exit recording failed for ${runId}:`, err);
           });
         });
+        if (stdinPayload && child.stdin) {
+          child.stdin.end(stdinPayload, 'utf8');
+        }
         child.unref();
         pid = child.pid ?? 0;
         detachMode = 'detached';

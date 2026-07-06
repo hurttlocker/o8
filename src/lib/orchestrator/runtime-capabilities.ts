@@ -48,17 +48,16 @@ export const ORCHESTRATOR_RUNTIMES: Record<OrchestratorRuntime, OrchestratorRunt
   'claude-code': {
     label: 'Claude Code',
     shortLabel: 'Claude',
-    // dispatchable=false: the orchestrator no longer dispatches claude-code
-    // packets (decision locked 2026-04-28, issue #650). The adapter still
-    // ships for read-only discovery of user-spawned terminal sessions.
-    // Native Claude sub-agents stay available via the Agent tool inline.
-    dispatchable: false,
+    // #1407 (2026-07-06): operator reversed the old #650 lock. Frontier
+    // runtimes orchestrate and work; Claude workers must use interactive
+    // stream-json spawn only so they stay sub-billed, never Agent SDK --print.
+    dispatchable: true,
     requiresModel: false,
     defaultModel: 'claude-sonnet-4-5',
     accentColor: '#e07a3a', // orange — matches existing claude-code tone in display.ts
     binaryName: 'claude',
     tier: 'frontier',
-    description: 'Anthropic Claude Code CLI — read-only inventory only. Use Codex / Gemini / opencode for dispatch.',
+    description: 'Anthropic Claude Code CLI worker via interactive stream-json. Full-access permission mode, sub-billed; never --print.',
   },
   gemini: {
     label: 'Gemini',
