@@ -16,7 +16,7 @@ export interface PendingOrchestratorSend {
   clientMessageId: string;
   deliveredAt: number;
   originalText: string;
-  timeoutId: number;
+  timeoutId: ReturnType<typeof setTimeout>;
   failureEntryId: string;
 }
 
@@ -76,7 +76,7 @@ export function appendOrchestratorDeliveryFailureEntry(
 }
 
 function clearPendingOrchestratorSend(pending: PendingOrchestratorSend): void {
-  window.clearTimeout(pending.timeoutId);
+  clearTimeout(pending.timeoutId);
 }
 
 export function armOrchestratorSendWatchdog({
@@ -91,7 +91,7 @@ export function armOrchestratorSendWatchdog({
 }: ArmOrchestratorSendWatchdogOptions): void {
   if (pendingRef.current) clearPendingOrchestratorSend(pendingRef.current);
   const failureEntryId = `orch-delivery-error-${clientMessageId}`;
-  const timeoutId = window.setTimeout(() => {
+  const timeoutId = setTimeout(() => {
     const pending = pendingRef.current;
     if (!pending || pending.clientMessageId !== clientMessageId) return;
     pendingRef.current = null;
@@ -163,7 +163,7 @@ export async function deliverOrchestratorPayload({
       if (settled) return;
       settled = true;
       if (interval !== null) window.clearInterval(interval);
-      if (timeout !== null) window.clearTimeout(timeout);
+      if (timeout !== null) clearTimeout(timeout);
       resolve(delivered);
     };
 
