@@ -8,6 +8,7 @@ import dynamic from 'next/dynamic';
 import { loader } from '@monaco-editor/react';
 import { useTheme } from '@/lib/theme/context';
 import { renderDiffLines } from './diff-utils';
+import { MODEL_IDS } from '@/lib/models';
 
 const MonacoEditor = dynamic(() => import('@/lib/monaco-polyfills').then(() =>
   import('@monaco-editor/react').then((mod) => mod.default)
@@ -296,9 +297,9 @@ export const FileViewer = memo(function FileViewer({ filePath, workspace }: { fi
 
   // Agent model mapping
   const agentModels: Record<string, { provider: string; model: string }> = {
-    flash: { provider: 'google', model: 'gemini-2.5-flash' },
-    sonnet: { provider: 'anthropic', model: 'claude-sonnet-5' },
-    opus: { provider: 'anthropic', model: 'claude-opus-4-8' },
+    flash: { provider: 'google', model: MODEL_IDS.mobileGeminiDefault },
+    sonnet: { provider: 'anthropic', model: MODEL_IDS.claudeWorkerDefault },
+    opus: { provider: 'anthropic', model: MODEL_IDS.orchestratorDefault },
   };
 
   // Handle inline edit submission
