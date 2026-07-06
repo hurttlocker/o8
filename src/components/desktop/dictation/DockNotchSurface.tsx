@@ -554,7 +554,7 @@ export function DockNotchSurface({
   realtimeVoice = 'off',
   onStopRealtime,
 }: DockNotchSurfaceProps) {
-  const { state, audioLevel, partialTranscript, error, pastedText } = snapshot;
+  const { state, audioLevel, error, pastedText } = snapshot;
   const dictationMode = modeFor(state);
   // The speaking capsule shows when TTS is playing/paused AND no dictation is
   // active. The TTS engine drives the dock purely via `o8:tts-state` (it no
@@ -621,14 +621,14 @@ export function DockNotchSurface({
   // event. Also reads the Theme-tab glass sliders ('o8:vs-glass') so the dock
   // glass pushes with the SAME Frost / Saturation / Brightness knobs as the
   // settings shell — null until the user tunes (falls back to the dock default).
-  const [dockTheme, setDockTheme] = useState<'symon' | 'glass'>('symon');
+  // The dock is ALWAYS glass now — the Symon multicolor dock theme is retired
+  // (operator, 2026-07-05). We still read the glass Frost/Sat/Brightness sliders.
   const [tunedBlur, setTunedBlur] = useState<React.CSSProperties | null>(null);
   // Hover on the "Working…" capsule swaps it to a "Stop" affordance.
   const [workingHover, setWorkingHover] = useState(false);
   useEffect(() => {
     const read = () => {
       try {
-        setDockTheme(localStorage.getItem('o8:dock-theme') === 'glass' ? 'glass' : 'symon');
         const raw = localStorage.getItem('o8:vs-glass');
         if (raw) {
           const c = JSON.parse(raw);
@@ -646,12 +646,10 @@ export function DockNotchSurface({
     window.addEventListener('storage', read);
     return () => window.removeEventListener('storage', read);
   }, []);
-  const glassDock = dockTheme === 'glass';
+  const glassDock = true; // dock is always glass — Symon color retired
   const idleBg = glassDock ? GLASS_IDLE : SYMON_IDLE_GRADIENT;
   const capsuleBg = glassDock ? GLASS_CAPSULE_BG : SYMON_CAPSULE_BG;
   const capsuleBlur: React.CSSProperties = glassDock ? (tunedBlur ?? GLASS_BLUR) : {};
-
-  const trimmedPartial = partialTranscript.trim();
 
   // ── Per-mode geometry (verbatim Symon NotchSurface dimensions) ──
   // idle: 128×16 sliver. listening/thinking: 248×40 capsule. done: 420×44 wide.
@@ -817,14 +815,18 @@ export function DockNotchSurface({
     // footprint grows for words); idle/short stays at the 248 capsule.
     // Cap the final capsule against the dock window's real usable width so the
     // OS window never supplies the visible clip during long partials.
-    const listeningWide = mode === 'listening' && trimmedPartial.length > 0;
-    const width = listeningWide
-      ? Math.max(248, Math.min(LISTENING_CAPSULE_MAX_WIDTH, 200 + Math.min(280, trimmedPartial.length * 6)))
-      : 248;
+    // Voice-reactive listening capsule. We DON'T render live words (Apple's
+    // partial stream is unreliable — froze on stale fragments). Instead the
+    // capsule GLOWS with the voice: a soft cool halo + brighter rim that swell
+    // with the live audio level, so the user sees their words are going through.
+    // Clean fixed size — the GLOW breathes, not the geometry.
+    // No glow — the reactive waveform is feedback enough (and a glow on a pill at
+    // the screen's top edge always fights the window rect). Clean glass capsule
+    // with the standard soft depth shadow that every other dock mode uses.
     return {
-      width,
-      height: 40,
-      borderRadius: 20,
+      width: 236,
+      height: 44,
+      borderRadius: 22,
       background: capsuleBg, ...capsuleBlur,
       borderColor: 'rgba(255, 255, 255, 0.4)',
       boxShadow: '0 8px 22px rgba(40, 40, 80, 0.3)',
@@ -1330,16 +1332,16 @@ export function DockNotchSurface({
       </div>
     );
   } else if (mode === 'listening') {
+    // Just the voice waveform, centered — the capsule's glow (driven by the
+    // audio level) is the "your words are going through" feedback. No live
+    // transcript words (the partial stream is unreliable).
     body = (
       <div
         style={{
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
-          gap: 10,
           width: '100%',
-          maxWidth: '100%',
-          minWidth: 0,
           height: '100%',
           paddingLeft: 14,
           paddingRight: 14,
@@ -1350,32 +1352,6 @@ export function DockNotchSurface({
         <div style={{ width: INNER_W, maxWidth: INNER_W, height: 22, display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0, overflow: 'hidden' }}>
           <NotchWaveCanvas listening levelRef={levelRef} />
         </div>
-        {trimmedPartial ? (
-          <span
-            style={{
-              flex: 1,
-              minWidth: 0,
-              maxWidth: '100%',
-              display: 'block',
-              fontSize: 12.5,
-              fontWeight: 300,
-              letterSpacing: 0,
-              color: '#fff',
-              textShadow: '0 1px 6px rgba(0, 0, 0, 0.35)',
-              whiteSpace: 'nowrap',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              direction: 'rtl',
-              textAlign: 'left',
-              unicodeBidi: 'plaintext',
-              WebkitMaskImage: 'linear-gradient(to right, transparent 0, #000 16px, #000 100%)',
-              maskImage: 'linear-gradient(to right, transparent 0, #000 16px, #000 100%)',
-            }}
-            title={trimmedPartial}
-          >
-            {trimmedPartial}
-          </span>
-        ) : null}
       </div>
     );
   } else if (mode === 'thinking') {
@@ -1492,7 +1468,8 @@ export function DockNotchSurface({
           + ' height 0.5s cubic-bezier(0.22, 1, 0.36, 1),'
           + ' border-radius 0.46s cubic-bezier(0.22, 1, 0.36, 1),'
           + ' background 0.4s ease,'
-          + ' box-shadow 0.4s ease',
+          + ' border-color 0.12s ease,'
+          + ' box-shadow 0.12s ease',
       } as React.CSSProperties}
     >
       {body}
