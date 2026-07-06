@@ -235,9 +235,20 @@ export async function apiFetch<T = unknown>(
     );
   }
   if (!res.ok) {
+    // Surface the server's error body — a bare "HTTP 500" hides the typed
+    // reason the route already returned (#1464 was diagnosed blind because
+    // of this branch).
+    let detail = '';
+    try {
+      const json = await res.json() as { error?: string | { message?: string }; note?: string; message?: string };
+      const errorText = typeof json.error === 'string' ? json.error : json.error?.message;
+      detail = json.note || json.message || errorText || '';
+    } catch {
+      /* ignore */
+    }
     throw new CliError(
       'http_error',
-      `HTTP ${res.status} from ${path}`,
+      `HTTP ${res.status} from ${path}${detail ? `: ${detail}` : ''}`,
       EXIT.INVALID_ARGS,
     );
   }
