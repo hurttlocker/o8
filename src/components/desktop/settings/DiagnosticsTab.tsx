@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback } from 'react';
 import {
   APP_FONT_STACK,
   MONO_FONT_STACK,
+  RAMS_ACCENT,
   RAMS_INK_QUIET,
   BracketLabel,
   RamsButton,
@@ -24,6 +25,7 @@ import {
   type FactoryResetResult,
   type FactoryResetStage,
 } from './DiagnosticsResetModals';
+import { useEntitlement } from '@/lib/entitlement/context';
 
 // ── Types ──
 
@@ -75,6 +77,8 @@ function toolStatusLine(tool: DiagnosticTool): string {
 // ── Diagnostics Tab ──
 
 export function DiagnosticsTab() {
+  const { founder, plan } = useEntitlement();
+  const foundersMode = founder !== null || plan === 'founder';
   const [tools, setTools] = useState<DiagnosticTool[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -253,16 +257,6 @@ export function DiagnosticsTab() {
         </SettingsGroup>
       </section>
 
-      {/* Recall health (#749 substrate eval gate) */}
-      <section style={{ marginTop: 28 }}>
-        <RecallHealthSection />
-      </section>
-
-      {/* Loop status (#796 in-app dogfood-loop visibility) */}
-      <section style={{ marginTop: 28 }}>
-        <LoopStatusSection />
-      </section>
-
       {/* Maintenance */}
       <section style={{ marginTop: 28 }}>
         <SettingsGroup
@@ -409,10 +403,62 @@ export function DiagnosticsTab() {
         </SettingsGroup>
       </section>
 
-      {/* Demo sequence (#800 in-app golden-path runner) */}
-      <section style={{ marginTop: 28 }}>
-        <DemoRunSection />
-      </section>
+      {/* Builder instrumentation — Brain recall latency, autonomous-loop state,
+          and the golden-demo runner. A regular user can't act on any of it, so
+          it rides behind Founders mode (visibility only, #1450). */}
+      {foundersMode ? (
+        <>
+          <div style={{
+            marginTop: 40,
+            marginBottom: 12,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 10,
+            maxWidth: 620,
+          }}>
+            <span style={{
+              fontFamily: APP_FONT_STACK,
+              fontSize: 10,
+              fontWeight: 400,
+              letterSpacing: '0.2em',
+              textTransform: 'uppercase',
+              color: RAMS_ACCENT,
+            }}>
+              Founders
+            </span>
+            <div style={{ flex: 1, height: 1, background: 'var(--t-divider, rgba(17,17,17,0.06))' }} />
+            <span style={{
+              fontFamily: APP_FONT_STACK,
+              fontSize: 10,
+              fontWeight: 400,
+              letterSpacing: '0.12em',
+              textTransform: 'uppercase',
+              color: RAMS_INK_QUIET,
+            }}>
+              Instrumentation
+            </span>
+          </div>
+
+          {/* Constrained to the same 620 rhythm as every group above — these
+              cards previously spanned the full content width and read detached. */}
+          <div style={{ maxWidth: 620 }}>
+            {/* Recall health (#749 substrate eval gate) */}
+            <section style={{ marginTop: 20 }}>
+              <RecallHealthSection />
+            </section>
+
+            {/* Loop status (#796 in-app dogfood-loop visibility) */}
+            <section style={{ marginTop: 28 }}>
+              <LoopStatusSection />
+            </section>
+
+            {/* Demo sequence (#800 in-app golden-path runner) */}
+            <section style={{ marginTop: 28 }}>
+              <DemoRunSection />
+            </section>
+          </div>
+        </>
+      ) : null}
 
       {/* Two-step confirmation modal */}
       {resetStage === 'confirm' || resetStage === 'busy' || resetStage === 'error' ? (
