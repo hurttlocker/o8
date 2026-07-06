@@ -357,7 +357,11 @@ function normalizePacket(raw: unknown, index: number, existing: Array<Pick<Orche
     assignedModel: typeof packet.assignedModel === 'string' && packet.assignedModel.trim()
       ? packet.assignedModel.trim()
       : null,
+    predictedFiles: Array.isArray(packet.predictedFiles)
+      ? packet.predictedFiles.map((file) => String(file).trim()).filter(Boolean).slice(0, 64)
+      : undefined,
     workerIntent,
+    useBrain: typeof packet.useBrain === 'boolean' ? packet.useBrain : undefined,
     workerRouting,
     // #1329 — originating orchestrator thread id lives only on the packet; drop
     // it here and a rerun/re-read would silently sever session-rule inheritance.
