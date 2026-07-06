@@ -74,6 +74,14 @@ async function stopPacketViaLaneCommand(packet: OrchestratorPacket): Promise<Sto
     };
   }
   if (!laneId) {
+    if (packet.queueState === 'queued' && !packet.lane) {
+      return {
+        packetId: packet.id,
+        status: 'stopped',
+        laneId: null,
+        note: 'Queued packet held before any lane launched.',
+      };
+    }
     return {
       packetId: packet.id,
       status: 'stop-failed',
